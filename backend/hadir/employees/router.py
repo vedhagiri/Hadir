@@ -31,6 +31,8 @@ from hadir.db import get_engine
 from hadir.employees import excel as excel_io
 from hadir.employees import photos as photos_io
 from hadir.employees import repository as repo
+from hadir.identification import enrollment as id_enrollment
+from hadir.identification.matcher import matcher_cache
 from hadir.employees.schemas import (
     EmployeeCreateIn,
     EmployeeListOut,
@@ -615,6 +617,17 @@ async def bulk_ingest_photos_endpoint(
                 photo_id=photo_id,
             )
         )
+        # Best-effort enrollment — failures here don't fail the upload.
+        # ``enroll_photo`` itself invalidates the matcher cache for the
+        # affected employee on success.
+        try:
+            id_enrollment.enroll_photo(engine, scope, photo_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "enrollment after bulk upload failed for photo %s: %s",
+                photo_id,
+                type(exc).__name__,
+            )
 
     return PhotoIngestResult(accepted=accepted, rejected=rejected)
 
@@ -701,6 +714,14 @@ async def upload_photos_endpoint(
                 photo_id=photo_id,
             )
         )
+        try:
+            id_enrollment.enroll_photo(engine, scope, photo_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "enrollment after drawer upload failed for photo %s: %s",
+                photo_id,
+                type(exc).__name__,
+            )
 
     return PhotoIngestResult(accepted=accepted, rejected=rejected)
 
@@ -789,5 +810,8 @@ def delete_photo_endpoint(
         )
 
     _drop_file(row.file_path)
+    # Invalidate the matcher cache so we don't keep matching against a
+    # deleted embedding.
+    matcher_cache.invalidate_employee(employee_id)
     response.status_code = status.HTTP_204_NO_CONTENT
     return response

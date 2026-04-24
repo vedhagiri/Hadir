@@ -24,6 +24,7 @@ from hadir.cameras.router import router as cameras_router
 from hadir.capture import capture_manager
 from hadir.config import get_settings
 from hadir.employees import router as employees_router
+from hadir.identification.router import router as identification_router
 
 
 def _configure_logging() -> None:
@@ -50,6 +51,30 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
     limiter = get_rate_limiter()
     limiter.start()
+
+    # Kick off enrollment backfill in a daemon thread so the HTTP server
+    # comes up immediately even when there are many photos to embed.
+    # Failures here (no InsightFace, no photos) log and die silently —
+    # the matcher cache loads lazily on first use either way.
+    import threading as _threading
+
+    from hadir.db import make_engine as _make_engine
+    from hadir.identification import enrollment as _enrollment
+    from hadir.tenants.scope import TenantScope as _TenantScope
+
+    def _run_backfill() -> None:
+        try:
+            scope = _TenantScope(tenant_id=get_settings().default_tenant_id)
+            _enrollment.enroll_missing(_make_engine(), scope)
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger(__name__).warning(
+                "identification backfill failed: %s", type(exc).__name__
+            )
+
+    _threading.Thread(
+        target=_run_backfill, name="enroll-backfill", daemon=True
+    ).start()
+
     capture_manager.start()
     try:
         yield
@@ -83,6 +108,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(employees_router)
     app.include_router(cameras_router)
+    app.include_router(identification_router)
 
     logging.getLogger(__name__).info(
         "Hadir backend started (env=%s, tenant_mode=%s)", settings.env, settings.tenant_mode

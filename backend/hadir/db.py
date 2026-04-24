@@ -336,6 +336,9 @@ employee_photos = Table(
         nullable=False,
         server_default=func.now(),
     ),
+    # Fernet-encrypted 512-float-32 embedding from InsightFace buffalo_l
+    # recognition. Null until enrollment runs (lazy; P9).
+    Column("embedding", LargeBinary, nullable=True),
     CheckConstraint(
         "angle IN ('front','left','right','other')", name="ck_employee_photos_angle"
     ),

@@ -18,6 +18,10 @@ from sqlalchemy.engine import Engine
 from hadir.auth.passwords import hash_password
 from hadir.auth.ratelimit import reset_rate_limiter
 from hadir.capture import capture_manager as _capture_manager
+from hadir.capture.analyzer import (
+    clear_analyzer_factory as _clear_analyzer_factory,
+    set_analyzer_factory as _set_analyzer_factory,
+)
 from hadir.db import (
     audit_log,
     cameras,
@@ -49,6 +53,34 @@ def _reset_rate_limiter() -> Iterator[None]:
     reset_rate_limiter()
     yield
     reset_rate_limiter()
+
+
+class _NoopAnalyzer:
+    """Session-wide stub so tests never load InsightFace.
+
+    ``detect`` returns no faces and ``embed_crop`` returns None. The
+    P6 photo upload path and the P9 lifespan backfill both call
+    ``get_analyzer()`` — this keeps the suite under a few seconds
+    instead of pulling a 250 MB model and running recognition on
+    every test photo.
+    """
+
+    def detect(self, _frame) -> list:  # type: ignore[no-untyped-def]
+        return []
+
+    def embed_crop(self, _crop):  # type: ignore[no-untyped-def]
+        return None
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _neutralise_analyzer() -> Iterator[None]:
+    """Replace the production analyzer factory with a no-op for the session."""
+
+    _set_analyzer_factory(lambda: _NoopAnalyzer())
+    try:
+        yield
+    finally:
+        _clear_analyzer_factory()
 
 
 @pytest.fixture(autouse=True, scope="session")

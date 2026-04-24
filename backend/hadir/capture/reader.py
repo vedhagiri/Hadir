@@ -192,7 +192,10 @@ class CaptureWorker:
                         matches = self._tracker.update(
                             [d.bbox for d in detections], now
                         )
-                        for match in matches:
+                        # Tracker returns matches in the same order as the
+                        # input list so we can pair each detection with
+                        # its match and carry the embedding through.
+                        for det, match in zip(detections, matches):
                             if not match.is_new:
                                 continue
                             try:
@@ -203,6 +206,7 @@ class CaptureWorker:
                                     frame_bgr=frame,
                                     bbox=match.bbox,
                                     track_id=match.track_id,
+                                    embedding=det.embedding,
                                 )
                             except Exception as exc:  # noqa: BLE001
                                 logger.warning(

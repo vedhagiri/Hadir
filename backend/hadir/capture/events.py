@@ -22,12 +22,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
 from sqlalchemy import func, insert, update
 from sqlalchemy.engine import Engine
 
 from hadir.config import get_settings
 from hadir.db import camera_health_snapshots, cameras, detection_events
 from hadir.employees.photos import encrypt_bytes
+from hadir.identification.embeddings import encrypt_embedding
+from hadir.identification.matcher import matcher_cache
 from hadir.tenants.scope import TenantScope
 
 logger = logging.getLogger(__name__)
@@ -74,12 +77,18 @@ def emit_detection_event(
     frame_bgr,  # type: ignore[no-untyped-def]
     bbox,
     track_id: str,
+    embedding: Optional[np.ndarray] = None,
     captured_at: Optional[datetime] = None,
 ) -> Optional[int]:
     """Write the encrypted crop + insert the event row. Returns the new id.
 
     ``frame_bgr`` is an OpenCV BGR numpy array (from ``cv2.VideoCapture.read``).
     ``bbox`` is a ``tracker.Bbox`` whose fields are JSON-serialisable.
+    ``embedding`` (optional) is the detection's L2-normalised vector from
+    InsightFace recognition; when provided we Fernet-encrypt + persist it
+    and run the matcher to backfill ``employee_id`` + ``confidence`` on
+    the same INSERT. The matcher threshold is hard — below threshold,
+    ``employee_id`` stays NULL (pilot-plan red line).
     """
 
     captured_at = captured_at or datetime.now(tz=timezone.utc)
@@ -96,6 +105,19 @@ def emit_detection_event(
     file_path = directory / f"{uuid.uuid4().hex}.jpg"
     file_path.write_bytes(encrypt_bytes(jpeg))
 
+    encrypted_embedding: Optional[bytes] = None
+    employee_id: Optional[int] = None
+    confidence: Optional[float] = None
+    if embedding is not None and embedding.size > 0:
+        try:
+            encrypted_embedding = encrypt_embedding(embedding)
+        except (RuntimeError, ValueError) as exc:
+            logger.debug("skipping embedding encryption: %s", exc)
+        match = matcher_cache.match(scope, embedding)
+        if match is not None:
+            employee_id = match.employee_id
+            confidence = match.score
+
     with engine.begin() as conn:
         new_id = conn.execute(
             insert(detection_events)
@@ -105,9 +127,9 @@ def emit_detection_event(
                 captured_at=captured_at,
                 bbox={"x": bbox.x, "y": bbox.y, "w": bbox.w, "h": bbox.h},
                 face_crop_path=str(file_path),
-                embedding=None,
-                employee_id=None,
-                confidence=None,
+                embedding=encrypted_embedding,
+                employee_id=employee_id,
+                confidence=confidence,
                 track_id=track_id,
             )
             .returning(detection_events.c.id)

@@ -12,8 +12,8 @@ The pilot is a 5-day single-tenant demo on a corporate LAN; v1.0 is the
 multi-tenant SaaS-capable product 8–10 weeks after pilot signoff.
 
 ## Status
-**Pilot prompts currently complete: P1–P8.**
-Next: P9 — Face identification (InsightFace embeddings + matching).
+**Pilot prompts currently complete: P1–P9.**
+Next: P10 — Attendance engine, one Fixed policy, 15-minute scheduler.
 Wait for the user before starting it.
 
 What P1 built:
@@ -232,6 +232,59 @@ What P8 built:
   plaintext RTSP URL and no injected credential string appears in the
   backend logs (`grep -cE "rtsp://[^\" ]*:[^@]*@" = 0`,
   `grep -cE "fake_user|fake_pw" = 0`).
+
+What P9 built:
+- Alembic migration `0005_photo_embeddings` adds
+  `employee_photos.embedding BYTEA NULL` — Fernet-encrypted 512-float32
+  InsightFace buffalo_l recognition vectors.
+- `hadir/capture/analyzer.py` no longer restricts to detection-only;
+  recognition is loaded and `Detection.embedding` is populated on
+  every detected face.
+- `hadir/identification/` package: `embeddings.py` (Fernet-encrypt
+  vectors, with a shape-check guardrail), `enrollment.py`
+  (`compute_embedding_for_file`, `enroll_photo`,
+  `enroll_missing`, `clear_all_embeddings`, `reembed_all`),
+  `matcher.py` (in-memory `MatcherCache` singleton with per-employee
+  invalidation, cosine similarity, mean-of-top-k per employee, hard
+  threshold), `router.py` (`POST /api/identification/reembed`,
+  Admin-only, audit-logged as `identification.reembedded`).
+- Capture path: `events.emit_detection_event` now accepts the
+  detection's embedding, encrypts it, asks the matcher for a match,
+  and persists `embedding` + `employee_id` + `confidence` on the same
+  INSERT. Matcher DEBUG-logs the top-3 scored employees per call for
+  pilot threshold tuning.
+- Trigger hooks: the P6 photo routes call `enroll_photo` on upload
+  and `matcher_cache.invalidate_employee` on delete; the FastAPI
+  lifespan kicks off `enroll_missing` on a daemon thread so startup
+  isn't blocked.
+- New env var: `HADIR_MATCH_THRESHOLD` (default 0.45). The threshold
+  is hard — below it, the matcher refuses to assign an employee.
+- Pytest coverage: +9 new tests (65 total). Synthetic-vector matcher
+  tests cover the Fernet embedding round-trip, happy-path match,
+  below-threshold rejection, multi-angle mean-of-top-k, per-employee
+  cache invalidation, and the threshold-hard guarantee.
+- **Test speed guard**: `conftest.py` installs a session-wide
+  `_NoopAnalyzer` so photo uploads and lifespan backfill never load
+  InsightFace. A first pass without this stub pulled the 250 MB model
+  during tests and took 7 minutes; with it the full suite runs in
+  ~3 seconds.
+- **Live smoke** (via `backend/scripts/p9_smoke.py`): seeded two
+  employees with synthetic enrolled embeddings, called
+  `emit_detection_event` with Alice's probe vector → the
+  `detection_events` row came back with Alice's `employee_id` and
+  `confidence=1.0000`, embedding ciphertext starts with `gAAAA…`; a
+  stranger's orthogonal probe → `employee_id=None, confidence=None`
+  (threshold held). `POST /api/identification/reembed` returns
+  `{enrolled: 0, skipped: 0, errors: 0}` on an empty tenant and
+  writes an `identification.reembedded` audit row.
+
+**Reminder for the real-camera smoke**: the pilot plan asks for a
+"you walk past the camera → your employee_id appears with
+confidence > 0.5" validation. That requires re-adding the test
+camera (it was wiped by pytest's `clean_cameras` fixture) and
+uploading a reference photo of you. Once the photo uploads, the P6
+route enrolls it synchronously, the matcher cache reloads that
+employee, and the next detection event will carry the match.
 
 ## Tech stack (summary)
 - **Backend:** Python 3.11, FastAPI, Uvicorn, SQLAlchemy 2.x Core, Pydantic

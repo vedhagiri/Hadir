@@ -1,11 +1,14 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-P1 + P2 + P3 + P5 + P6 + P7 complete. **P8 complete**: per-camera
-background capture workers (4 fps, reconnect-with-backoff), IoU
-tracker, detection_events emitted one-per-track-entry, Fernet-encrypted
-crops under `/data/faces/captures/`, per-minute camera_health_snapshots.
-Capture manager hot-reloads on camera CRUD. P9 next — wait for the user.
+P1 + P2 + P3 + P5 + P6 + P7 + P8 complete. **P9 complete**: InsightFace
+``buffalo_l`` recognition enabled; per-photo Fernet-encrypted 512-D
+embeddings; in-memory matcher cache with per-employee invalidation;
+cosine-similarity matching with a **hard** threshold
+(``HADIR_MATCH_THRESHOLD``, default 0.45) and DEBUG top-3 logging;
+``POST /api/identification/reembed`` for tenant-wide rebuild;
+``detection_events`` rows now carry the encrypted embedding +
+employee_id + confidence on the same insert. P10 next.
 
 ## Stack
 - Python 3.11
@@ -74,10 +77,16 @@ backend/
     capture/                   # P8
       __init__.py              # exports the capture_manager singleton
       tracker.py               # pure IoU tracker: match detections to tracks, drop idle tracks
-      analyzer.py              # Analyzer protocol + InsightFace buffalo_l wrapper + test stub hook
-      events.py                # emit_detection_event: encrypt crop + DB insert; write_health_snapshot
+      analyzer.py              # Analyzer protocol + InsightFace buffalo_l wrapper (P9: recognition on) + test stub hook
+      events.py                # emit_detection_event: encrypt crop + P9 matcher call + DB insert; health snapshot
       reader.py                # CaptureWorker: 4 fps read loop + reconnect backoff + per-minute health flush
       manager.py               # CaptureManager singleton + on_camera_created/updated/deleted hooks
+    identification/            # P9
+      __init__.py              # exports matcher_cache + router
+      embeddings.py            # Fernet encrypt/decrypt for 512-D float32 vectors
+      enrollment.py            # compute_embedding_for_file, enroll_photo, enroll_missing, reembed_all
+      matcher.py               # MatcherCache singleton (in-memory, per-employee invalidation, cosine + top-k)
+      router.py                # POST /api/identification/reembed
   scripts/
     __init__.py
     seed_admin.py              # python -m scripts.seed_admin
@@ -90,6 +99,7 @@ backend/
     test_cameras.py            # 10 tests — P7 coverage (CRUD, encryption, host parse, preview stub, 403)
     test_tracker.py            #  8 tests — P8 IoU tracker pure logic
     test_capture.py            #  5 tests — P8 worker + manager (scripted feed, stub analyzer)
+    test_identification.py     #  9 tests — P9 matcher (Fernet round-trip, happy/below-threshold, multi-angle top-k, cache invalidation)
 ```
 
 ## Schema map (P2)
@@ -390,6 +400,56 @@ with stubbed analyzers and scripted ``VideoCapture`` feeds — the suite
 runs without OpenCV touching a real camera or InsightFace loading the
 buffalo_l model.
 
+## Identification (P9)
+Every ``employee_photos`` row gets a Fernet-encrypted
+``embedding BYTEA`` (512 × float32, L2-normalised) computed from the
+decrypted reference photo via InsightFace ``buffalo_l`` recognition.
+
+Trigger points:
+
+- **On photo upload** (P6 ingest, both drawer and bulk paths) — the
+  employees router calls ``id_enrollment.enroll_photo`` right after
+  the DB row is created. Failure is non-fatal; the row just stays
+  embedding-less until ``/reembed`` retries.
+- **On photo delete** — the employees router calls
+  ``matcher_cache.invalidate_employee`` before returning 204 so we
+  don't keep matching against a stale vector.
+- **On startup** — the FastAPI lifespan kicks off
+  ``enroll_missing`` on a daemon thread so the HTTP server comes up
+  immediately.
+- **On demand** — ``POST /api/identification/reembed`` (Admin only)
+  clears every embedding for the tenant and recomputes from scratch.
+  Audits as ``identification.reembedded`` with enrolled/skipped/errors.
+
+**Matching** (``hadir.identification.matcher``):
+
+- ``MatcherCache`` singleton holds ``{tenant_id → {employee_id →
+  stacked (N, 512) ndarray}}`` in memory. Loads lazily on first
+  ``match()`` call; per-employee invalidation only reloads the
+  affected entry.
+- For each detection embedding, we compute the cosine similarity
+  against every enrolled angle vector, then for each employee take
+  the **mean of the top-k** (k=1 for pilot — i.e. "best angle wins").
+  The employee with the highest per-employee score takes the row,
+  **only if** the score is at or above ``HADIR_MATCH_THRESHOLD``.
+- Threshold is **hard, not advisory** (PROJECT_CONTEXT §12 /
+  pilot-plan red line). Below threshold → ``employee_id`` stays NULL
+  and the detection is marked unidentified.
+- At DEBUG, the matcher logs the top-3 scored employees per event so
+  operators can eyeball the score distribution during pilot tuning.
+
+**Event-row update**: ``emit_detection_event`` now accepts an optional
+``embedding`` kwarg. When present we Fernet-encrypt it, call the
+matcher, and persist ``embedding`` + ``employee_id`` + ``confidence``
+on the same ``INSERT`` — no subsequent UPDATE pass is needed.
+
+**Test isolation**: ``tests/conftest.py`` installs a
+``_NoopAnalyzer`` as the session-wide analyzer factory. Photo-upload
+and lifespan-backfill paths call ``get_analyzer().embed_crop`` →
+returns ``None`` → enrollment marks the photo as skipped. The suite
+runs in ~3 seconds without touching InsightFace or the ~250 MB
+``buffalo_l`` model.
+
 ## Pilot prompt currently active
-P8 — done. Next: **P9 — Face identification (InsightFace embeddings +
-matching).** Wait for the user before starting P9.
+P9 — done. Next: **P10 — Attendance engine, one Fixed policy,
+15-minute scheduler.** Wait for the user before starting P10.

@@ -78,6 +78,12 @@ class Settings(BaseSettings):
     # ``hadir.employees.photos``.
     faces_storage_path: str = "/data/faces"
 
+    # --- Face identification (P9) ------------------------------------------
+    # Cosine-similarity cutoff. Below this, the matcher refuses to set
+    # an ``employee_id`` on the detection event — the threshold is
+    # hard, not advisory (pilot-plan red line).
+    match_threshold: float = 0.45
+
 
 def get_settings() -> Settings:
     """Return a fresh Settings instance.

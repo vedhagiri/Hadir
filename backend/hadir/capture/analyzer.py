@@ -1,10 +1,9 @@
-"""Face detection wrapper.
+"""Face detection + recognition wrapper.
 
-Pilot uses InsightFace ``buffalo_l`` with only the detection module
-loaded — embeddings wait for P9. The model files auto-download to
-``~/.insightface/models`` on first use; docker-compose mounts a named
-volume there so the download is a one-time cost across container
-restarts.
+P8 loaded InsightFace ``buffalo_l`` with detection only. P9 flips the
+recognition module on so each detected face comes back with a
+512-float-32 L2-normalised embedding — the matcher consumes these to
+find the best-matching enrolled employee.
 
 We hide InsightFace behind an ``Analyzer`` protocol so tests can swap
 in a ``StubAnalyzer`` without dragging in the 250 MB model.
@@ -17,6 +16,8 @@ import threading
 from dataclasses import dataclass
 from typing import Optional, Protocol
 
+import numpy as np
+
 from hadir.capture.tracker import Bbox
 
 logger = logging.getLogger(__name__)
@@ -28,10 +29,13 @@ class Detection:
 
     bbox: Bbox
     det_score: float
+    # L2-normalised 512-float-32 embedding from buffalo_l recognition.
+    # Optional because tests + the on-demand preview don't need it.
+    embedding: Optional[np.ndarray] = None
 
 
 class Analyzer(Protocol):
-    """What the capture worker needs from a detector.
+    """What the capture worker needs from a detector + recognizer.
 
     ``detect`` must be thread-safe (workers call it from their own
     threads). The real InsightFace detector is safe after ``prepare()``.
@@ -40,19 +44,29 @@ class Analyzer(Protocol):
     def detect(self, frame_bgr) -> list[Detection]:  # type: ignore[no-untyped-def]
         ...
 
+    def embed_crop(self, crop_bgr) -> Optional[np.ndarray]:  # type: ignore[no-untyped-def]
+        """Compute an embedding for a single face crop (already cropped).
+
+        Used by the enrollment path — we read an encrypted reference
+        photo, decrypt, decode, pass the whole image in, and take the
+        first returned embedding. Returns ``None`` if no face is
+        detected in the crop.
+        """
+
 
 # --- Production InsightFace analyzer ---------------------------------------
 
 _insightface_lock = threading.Lock()
-_insightface_app = None  # lazy, shared across workers
+_insightface_app = None  # lazy, shared across workers + enrollment
 
 
 def _get_insightface_app():  # type: ignore[no-untyped-def]
     """Build (or return the cached) ``FaceAnalysis`` instance.
 
-    Detection only — we pass ``allowed_modules=['detection']`` so the
-    recognition (embedding) model never loads. P9 will reconfigure this
-    to include recognition.
+    Detection **and** recognition — we drop the P8 ``allowed_modules``
+    restriction so ``face.normed_embedding`` is populated on every hit.
+    Model files download once to ``/root/.insightface`` (a named volume)
+    so restarts don't pay the 250 MB cost.
     """
 
     global _insightface_app
@@ -66,14 +80,13 @@ def _get_insightface_app():  # type: ignore[no-untyped-def]
 
         app = FaceAnalysis(
             name="buffalo_l",
-            allowed_modules=["detection"],
+            # No allowed_modules → detection + recognition both loaded.
             providers=["CPUExecutionProvider"],
         )
-        # det_size: 640x640 is InsightFace's standard; adequate for LAN
-        # cameras at 720p–1080p. ctx_id=-1 forces CPU.
+        # det_size: 640x640 is InsightFace's standard; ctx_id=-1 = CPU.
         app.prepare(ctx_id=-1, det_size=(640, 640))
         _insightface_app = app
-        logger.info("InsightFace buffalo_l detection ready (CPU)")
+        logger.info("InsightFace buffalo_l detection+recognition ready (CPU)")
         return app
 
 
@@ -85,20 +98,38 @@ class InsightFaceAnalyzer:
         faces = app.get(frame_bgr)
         out: list[Detection] = []
         for f in faces:
-            # ``bbox`` is a numpy array [x1, y1, x2, y2] in image coords.
             x1, y1, x2, y2 = f.bbox.astype(int).tolist()
             x = max(0, x1)
             y = max(0, y1)
             w = max(0, x2 - x1)
             h = max(0, y2 - y1)
-            out.append(Detection(bbox=Bbox(x=x, y=y, w=w, h=h), det_score=float(f.det_score)))
+            # ``normed_embedding`` is produced by the recognition head and
+            # is already L2-normalised to unit length. Fall back to None
+            # defensively in case a future InsightFace version changes the
+            # attribute layout.
+            emb = getattr(f, "normed_embedding", None)
+            if emb is not None:
+                emb = np.asarray(emb, dtype=np.float32)
+            out.append(
+                Detection(
+                    bbox=Bbox(x=x, y=y, w=w, h=h),
+                    det_score=float(f.det_score),
+                    embedding=emb,
+                )
+            )
         return out
+
+    def embed_crop(self, crop_bgr) -> Optional[np.ndarray]:  # type: ignore[no-untyped-def]
+        faces = self.detect(crop_bgr)
+        # Take the most confident face in the crop. Reference photos are
+        # framed on a single person so this is robust in practice.
+        if not faces:
+            return None
+        faces = sorted(faces, key=lambda f: f.det_score, reverse=True)
+        return faces[0].embedding
 
 
 # --- Test-stub hook --------------------------------------------------------
-# The capture manager consults ``get_analyzer()`` when spawning a worker.
-# Pytest replaces the factory with a stub so the suite never loads
-# InsightFace.
 
 _analyzer_factory: Optional[callable] = None  # type: ignore[type-arg]
 
