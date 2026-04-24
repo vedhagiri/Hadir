@@ -1,0 +1,276 @@
+/* Enhancements v2 styles — pipeline, walkthrough, toast, mgr drawer */
+
+/* Toast */
+.toast {
+  position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%) translateY(20px);
+  background: var(--text);
+  color: var(--bg);
+  padding: 10px 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+  display: flex; align-items: center; gap: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 99999;
+  pointer-events: none;
+}
+.toast.in { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast svg { color: var(--accent); }
+
+/* Excel icon uses fileText — good */
+
+/* Pipeline explainer (horizontal, small) */
+.pipeline-explainer {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 16px;
+  overflow-x: auto;
+}
+.pipe-step {
+  display: flex; align-items: center; gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+.pipe-icon {
+  width: 40px; height: 40px; border-radius: 10px;
+  background: var(--accent-soft); color: var(--accent-text);
+  display: grid; place-items: center;
+  flex-shrink: 0;
+}
+.pipe-title { font-size: 12.5px; font-weight: 600; color: var(--text); letter-spacing: -0.01em; }
+.pipe-sub { font-size: 11.5px; color: var(--text-tertiary); margin-top: 1px; line-height: 1.4; }
+.pipe-arrow {
+  display: grid; place-items: center;
+  padding: 0 10px;
+  color: var(--border-strong);
+  flex-shrink: 0;
+}
+
+/* Big pipeline (full page) */
+.pipeline-big {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+}
+.pb-step {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 22px;
+  position: relative;
+  min-height: 240px;
+}
+.pb-num {
+  position: absolute; top: 14px; right: 14px;
+  font-family: 'Instrument Serif', serif;
+  font-size: 48px;
+  line-height: 1;
+  color: var(--border-strong);
+  font-style: italic;
+}
+.pb-icon {
+  width: 48px; height: 48px; border-radius: 12px;
+  display: grid; place-items: center;
+  margin-bottom: 14px;
+}
+.pb-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 6px 0;
+  font-family: 'Instrument Serif', serif;
+  font-style: italic;
+  font-weight: 400;
+}
+.pb-text {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  margin: 0 0 12px 0;
+}
+.pb-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Walkthrough row */
+.walkthrough {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr auto 1fr auto 1fr;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+}
+.walk-cell {
+  display: flex; flex-direction: column; gap: 8px;
+  min-width: 0;
+}
+.walk-arrow {
+  color: var(--text-tertiary);
+}
+.walk-caption {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  line-height: 1.4;
+}
+.walk-compare {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 14px;
+  background: var(--bg-sunken);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+.walk-face {
+  width: 60px; height: 60px;
+  border-radius: 10px;
+  overflow: hidden;
+  position: relative;
+}
+.walk-face .walk-label {
+  position: absolute; bottom: 2px; left: 2px;
+  background: rgba(0,0,0,0.55); color: white;
+  font-size: 9px; padding: 1px 5px; border-radius: 3px;
+  font-family: 'JetBrains Mono', monospace;
+  text-transform: uppercase;
+}
+.walk-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-sunken);
+  border-radius: 6px;
+  font-size: 12px;
+}
+.walk-xlsx {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+}
+.xlsx-head {
+  padding: 4px 8px;
+  background: oklch(0.96 0.05 155);
+  color: oklch(0.35 0.12 155);
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+}
+[data-theme="dark"] .xlsx-head {
+  background: oklch(0.25 0.08 155);
+  color: oklch(0.82 0.12 155);
+}
+.xlsx-row {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 0.9fr 0.8fr;
+  gap: 4px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+.xlsx-row:last-child { border-bottom: none; }
+
+/* Camera stage (reused small) */
+.cam-stage.sm {
+  height: 110px;
+  border-radius: 8px;
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, oklch(0.2 0.02 240), oklch(0.12 0.02 240));
+  border: 1px solid var(--border);
+}
+.cam-stage.sm .cam-bg {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(circle at 30% 40%, oklch(0.4 0.08 250 / 0.4), transparent 50%),
+    radial-gradient(circle at 70% 60%, oklch(0.4 0.06 280 / 0.3), transparent 50%);
+}
+.cam-stage.sm .cam-label {
+  position: absolute; top: 6px; left: 6px;
+  background: rgba(0,0,0,0.5);
+  color: white;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: flex; align-items: center; gap: 5px;
+}
+.cam-stage.sm .cam-label.rec::before {
+  content: '';
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #ef4444;
+  animation: cam-pulse 1.2s infinite;
+}
+@keyframes cam-pulse { 50% { opacity: 0.3; } }
+
+/* Manager assign drawer */
+.mgr-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  width: 100%;
+  text-align: left;
+}
+.mgr-item:hover { background: var(--bg-sunken); }
+.mgr-item.active {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+}
+.count-pill {
+  background: var(--accent);
+  color: white;
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 10px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.dept-assign {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  background: var(--bg-elevated);
+}
+.dept-assign:hover { border-color: var(--border-strong); }
+.dept-assign.on {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+}
+.dept-assign input { margin-top: 3px; accent-color: var(--accent); }
+.dept-assign svg { color: var(--accent-text); flex-shrink: 0; margin-top: 2px; }
+
+/* Chip soft */
+.chip-soft {
+  background: var(--bg-sunken);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+/* StatBlock (reuse) */
+.grid-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+@media (max-width: 900px) {
+  .grid-5 { grid-template-columns: repeat(2, 1fr); }
+  .pipeline-big { grid-template-columns: 1fr 1fr; }
+  .walkthrough { grid-template-columns: 1fr; }
+  .walk-arrow { transform: rotate(90deg); justify-self: center; }
+  .pipeline-explainer { flex-direction: column; }
+  .pipe-arrow { transform: rotate(90deg); padding: 4px 0; }
+}
+
+/* Excel-ish icon color accent — use var(--success-text) on download buttons */
+.btn-primary svg { color: currentColor; }

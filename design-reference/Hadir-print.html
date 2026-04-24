@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=1280" />
+  <title>Hadir — Print</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    html, body { background: #e5e7eb; }
+    body { margin: 0; padding: 24px 0; }
+
+    .print-page {
+      width: 1280px;
+      height: 800px;
+      margin: 0 auto 24px auto;
+      background: var(--bg);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+      overflow: hidden;
+      position: relative;
+      break-inside: avoid;
+      break-after: page;
+      page-break-after: always;
+    }
+    .print-page:last-child { break-after: auto; page-break-after: auto; }
+
+    .print-label {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      padding: 6px 16px;
+      background: rgba(0,0,0,0.75);
+      color: white;
+      font: 500 11px/1 'Inter', sans-serif;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      z-index: 1000;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .print-label .tag { opacity: 0.7; font-weight: 400; }
+
+    /* the app markup inside each page — fill the frame */
+    .print-page .app {
+      height: 100%;
+      display: grid;
+      grid-template-columns: 240px 1fr;
+    }
+    .print-page .main { min-height: 0; height: 100%; display: flex; flex-direction: column; }
+    .print-page .content { flex: 1; min-height: 0; overflow: hidden; }
+
+    /* cover page */
+    .cover {
+      width: 1280px; height: 800px;
+      margin: 0 auto 24px auto;
+      background: linear-gradient(155deg, oklch(0.52 0.09 195), oklch(0.38 0.1 220));
+      color: white;
+      padding: 64px;
+      box-sizing: border-box;
+      position: relative; overflow: hidden;
+      display: flex; flex-direction: column; justify-content: space-between;
+      break-after: page;
+      page-break-after: always;
+    }
+    .cover::before {
+      content: ''; position: absolute; inset: 0;
+      background: radial-gradient(rgba(255,255,255,0.08) 1px, transparent 1px);
+      background-size: 24px 24px;
+    }
+    .cover > * { position: relative; }
+    .cover .mark {
+      width: 56px; height: 56px; border-radius: 14px;
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.25);
+      display: flex; align-items: center; justify-content: center;
+      font: 500 32px/1 'Instrument Serif', serif;
+    }
+    .cover h1 { font: 500 84px/1.02 'Instrument Serif', serif; letter-spacing: -0.03em; margin: 0; max-width: 900px; }
+    .cover .sub { font-size: 18px; margin-top: 18px; opacity: 0.82; max-width: 700px; line-height: 1.55; }
+    .cover .meta { display: flex; justify-content: space-between; font-size: 13px; opacity: 0.8; }
+    .cover .chips { display: flex; gap: 10px; margin-top: 28px; flex-wrap: wrap; }
+    .cover .chips span { padding: 6px 14px; border-radius: 999px; background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2); font-size: 12px; }
+    .cover .contents { margin-top: 44px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px 32px; font-size: 13px; max-width: 900px; }
+    .cover .contents .num { opacity: 0.5; margin-right: 10px; font-variant-numeric: tabular-nums; }
+
+    /* drawer overlays for record/request pages: show the drawer over a dimmed dashboard */
+    .drawer-stage { position: relative; width: 100%; height: 100%; }
+    .drawer-stage .scrim { position: absolute; inset: 0; background: rgba(0,0,0,0.32); z-index: 50; }
+
+    @media print {
+      @page { size: 1280px 800px; margin: 0; }
+      html, body { background: white; padding: 0; }
+      .print-page, .cover { margin: 0; box-shadow: none; }
+      .print-label { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- cover -->
+  <div class="cover">
+    <div>
+      <div class="mark">ح</div>
+      <div style="margin-top:28px; font-size:13px; letter-spacing:0.18em; text-transform:uppercase; opacity:0.75;">Product Prototype · April 2026</div>
+    </div>
+    <div>
+      <h1>Hadir.<br/>Presence, not&nbsp;paperwork.</h1>
+      <div class="sub">Camera-based attendance for Omran. Face identification, shift policies, approvals and reports — running quietly in the background.</div>
+      <div class="chips">
+        <span>Entra ID SSO</span><span>Oman PDPL</span><span>On-prem · Ubuntu</span><span>Arabic-ready</span><span>106 employees · 8 cameras</span>
+      </div>
+      <div class="contents">
+        <div><span class="num">01</span>Login · SSO</div>
+        <div><span class="num">02</span>HR Dashboard</div>
+        <div><span class="num">03</span>Admin Dashboard</div>
+        <div><span class="num">04</span>Manager Dashboard</div>
+        <div><span class="num">05</span>Employee Today</div>
+        <div><span class="num">06</span>Live Capture</div>
+        <div><span class="num">07</span>Employees</div>
+        <div><span class="num">08</span>Enrollment</div>
+        <div><span class="num">09</span>Shift Policies</div>
+        <div><span class="num">10</span>Approvals</div>
+        <div><span class="num">11</span>Reports</div>
+        <div><span class="num">12</span>My Attendance</div>
+        <div><span class="num">13</span>Attendance Detail</div>
+        <div><span class="num">14</span>Approval Detail</div>
+      </div>
+    </div>
+    <div class="meta">
+      <span>Muscat Tech Solutions · prepared for Omran</span>
+      <span style="font-family: 'JetBrains Mono', monospace;">v1.0 · build 417</span>
+    </div>
+  </div>
+
+  <!-- hidden target (unused — app.jsx not loaded here) -->
+  <div id="root" style="display:none"></div>
+
+  <div id="pages"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <script type="text/babel" src="icons.jsx"></script>
+  <script type="text/babel" src="data.jsx"></script>
+  <script type="text/babel" src="ui.jsx"></script>
+  <script type="text/babel" src="shell.jsx"></script>
+  <script type="text/babel" src="dashboards.jsx"></script>
+  <script type="text/babel" src="employee.jsx"></script>
+  <script type="text/babel" src="pages.jsx"></script>
+
+  <script type="text/babel">
+    // Set up theme vars like App does, once
+    (function applyTheme(){
+      const h = 195; // teal
+      const root = document.documentElement;
+      root.setAttribute('data-theme', 'light');
+      root.setAttribute('data-density', 'comfortable');
+      root.setAttribute('dir', 'ltr');
+      root.style.setProperty('--accent', `oklch(0.52 0.09 ${h})`);
+      root.style.setProperty('--accent-hover', `oklch(0.46 0.09 ${h})`);
+      root.style.setProperty('--accent-soft', `oklch(0.96 0.02 ${h})`);
+      root.style.setProperty('--accent-border', `oklch(0.85 0.05 ${h})`);
+      root.style.setProperty('--accent-text', `oklch(0.38 0.09 ${h})`);
+    })();
+
+    const { Sidebar, Topbar } = window.Shell;
+    const { HRDashboard, AdminDashboard, ManagerDashboard } = window.Dashboards;
+    const { EmployeeDashboard } = window.Employee;
+    const { LiveCapture, ApprovalsPage, RequestDrawer, RecordDrawer, PoliciesPage, EnrollmentPage, ReportsPage, EmployeesPage } = window.Pages;
+
+    const noop = () => {};
+
+    // A frame that mimics the live app (sidebar + topbar + content) for a specific role/page
+    function Frame({ role, page, children }) {
+      return (
+        <div className="app">
+          <Sidebar role={role} setRole={noop} page={page} setPage={noop} />
+          <div className="main">
+            <Topbar page={page} role={role} rtl={false} setRtl={noop} theme="light" setTheme={noop} onOpenNew={noop} />
+            <div className="content">
+              <div className="content-wrap">{children}</div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Login mirror — we replicate the login visual from app.jsx without needing state
+    function LoginMirror() {
+      return (
+        <div style={{ height: '100%', display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
+          <div style={{ background: 'var(--bg)', display: 'flex', flexDirection: 'column', padding: '48px 64px' }}>
+            <div className="flex items-center gap-2">
+              <div className="brand-mark" style={{ width: 30, height: 30, borderRadius: 8 }}>ح</div>
+              <div style={{ fontSize: 17, fontWeight: 600, letterSpacing: '-0.01em' }}>Hadir</div>
+            </div>
+            <div style={{ margin: 'auto 0', maxWidth: 400 }}>
+              <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 500, fontSize: 38, letterSpacing: '-0.02em', lineHeight: 1.1, margin: 0 }}>Welcome back.</h1>
+              <p style={{ color: 'var(--text-secondary)', fontSize: 14, marginTop: 10, lineHeight: 1.5 }}>Sign in with your Omran account to access attendance, approvals and reports.</p>
+              <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', padding: '10px 16px', marginTop: 24, fontSize: 13 }}>
+                <svg width="16" height="16" viewBox="0 0 21 21"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg>
+                Continue with Microsoft Entra ID
+              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '24px 0', color: 'var(--text-tertiary)', fontSize: 11 }}>
+                <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />OR<div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+              </div>
+              <div className="field" style={{ marginBottom: 10 }}>
+                <label className="field-label">Work email</label>
+                <input className="input" defaultValue="aisha.habsi@omran.om" readOnly />
+              </div>
+              <div className="field">
+                <label className="field-label">Password</label>
+                <input className="input" type="password" defaultValue="••••••••••" readOnly />
+              </div>
+              <button className="btn" style={{ width: '100%', justifyContent: 'center', marginTop: 14, padding: '8px 16px' }}>Sign in with password</button>
+              <div className="text-xs text-dim" style={{ marginTop: 16, textAlign: 'center' }}>Email/password login is for dev only. Admin may disable in production.</div>
+            </div>
+            <div className="text-xs text-dim" style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>© 2026 Muscat Tech Solutions · prepared for Omran</span>
+              <span className="mono">v1.0 · build 417</span>
+            </div>
+          </div>
+          <div style={{ background: 'linear-gradient(180deg, oklch(0.52 0.09 195), oklch(0.38 0.1 220))', position: 'relative', overflow: 'hidden' }}>
+            <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(circle at 30% 40%, rgba(255,255,255,0.15), transparent 55%)' }} />
+            <div style={{ position: 'absolute', inset: 0, backgroundImage: 'radial-gradient(rgba(255,255,255,0.08) 1px, transparent 1px)', backgroundSize: '20px 20px' }} />
+            <div style={{ position: 'absolute', bottom: 48, left: 48, right: 48, color: 'white' }}>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: 32, fontWeight: 500, letterSpacing: '-0.02em', lineHeight: 1.15 }}>Presence, not paperwork.</div>
+              <div style={{ fontSize: 13.5, marginTop: 12, opacity: 0.85, lineHeight: 1.55, maxWidth: 420 }}>Camera-based attendance for Omran. Face identification, shift policies, approvals and reports — running quietly in the background.</div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 20 }}>
+                {['Entra ID SSO', 'Oman PDPL', 'On-prem · Ubuntu', 'Arabic-ready'].map(t => (
+                  <span key={t} style={{ padding: '4px 10px', borderRadius: 999, background: 'rgba(255,255,255,0.12)', color: 'white', fontSize: 11, border: '1px solid rgba(255,255,255,0.2)' }}>{t}</span>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Drawer overlay on top of a dim dashboard backdrop
+    function DrawerFrame({ role, page, backdrop, drawer }) {
+      return (
+        <div className="drawer-stage">
+          <div style={{ width: '100%', height: '100%', filter: 'blur(0px)' }}>
+            <Frame role={role} page={page}>{backdrop}</Frame>
+          </div>
+          <div className="scrim" />
+          {drawer}
+        </div>
+      );
+    }
+
+    const sample = window.APP_DATA.EMPLOYEES[0];
+    const sampleDay = null; // lets the drawer use its default selected day
+    const sampleRequest = window.APP_DATA.APPROVAL_REQUESTS[1];
+
+    const pages = [
+      { label: '01 · Login / Entra ID SSO', role: 'HR', full: true, el: <LoginMirror /> },
+      { label: '02 · HR Dashboard', role: 'HR', page: 'dashboard', el: <HRDashboard hideFaces={false} onOpenRequest={noop} onOpenRecord={noop} /> },
+      { label: '03 · Admin Dashboard — system health & cameras', role: 'Admin', page: 'dashboard', el: <AdminDashboard hideFaces={false} /> },
+      { label: '04 · Manager Dashboard — team today', role: 'Manager', page: 'dashboard', el: <ManagerDashboard hideFaces={false} onOpenRecord={noop} /> },
+      { label: '05 · Employee — today', role: 'Employee', page: 'dashboard', el: <EmployeeDashboard hideFaces={false} onOpenRecord={noop} /> },
+      { label: '06 · Live Capture — event feed', role: 'Admin', page: 'live', el: <LiveCapture hideFaces={false} /> },
+      { label: '07 · Employees directory', role: 'HR', page: 'employees', el: <EmployeesPage hideFaces={false} onOpenRecord={noop} /> },
+      { label: '08 · Enrollment — Excel import + photo ingest', role: 'HR', page: 'enrollment', el: <EnrollmentPage hideFaces={false} /> },
+      { label: '09 · Shift Policies — Fixed / Flex / Ramadan', role: 'HR', page: 'policies', el: <PoliciesPage hideFaces={false} /> },
+      { label: '10 · Approvals', role: 'HR', page: 'approvals', el: <ApprovalsPage role="HR" hideFaces={false} onOpenRequest={noop} /> },
+      { label: '11 · Reports & scheduled delivery', role: 'HR', page: 'reports', el: <ReportsPage /> },
+      { label: '12 · My Attendance (Employee)', role: 'Employee', page: 'my-attendance', el: <EmployeeDashboard hideFaces={false} onOpenRecord={noop} /> },
+      { label: '13 · Attendance Detail — face evidence', role: 'HR', page: 'employees', drawer: true,
+        backdrop: <EmployeesPage hideFaces={false} onOpenRecord={noop} />,
+        drawerEl: <RecordDrawer record={{ person: sample, day: sampleDay }} onClose={noop} hideFaces={false} /> },
+      { label: '14 · Approval Detail — manager → HR', role: 'HR', page: 'approvals', drawer: true,
+        backdrop: <ApprovalsPage role="HR" hideFaces={false} onOpenRequest={noop} />,
+        drawerEl: <RequestDrawer request={sampleRequest} onClose={noop} hideFaces={false} /> },
+    ];
+
+    const Root = () => (
+      <>
+        {pages.map((p, i) => (
+          <div className="print-page" key={i}>
+            <div className="print-label"><span>{p.label}</span><span className="tag">Hadir · {p.role}</span></div>
+            {p.drawer
+              ? <DrawerFrame role={p.role} page={p.page} backdrop={p.backdrop} drawer={p.drawerEl} />
+              : (p.full ? p.el : <Frame role={p.role} page={p.page}>{p.el}</Frame>)}
+          </div>
+        ))}
+      </>
+    );
+
+    ReactDOM.createRoot(document.getElementById('pages')).render(<Root />);
+
+    // Auto-print once everything is settled
+    (async () => {
+      try { await document.fonts.ready; } catch (e) {}
+      // Wait for the React tree to commit
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      // Extra buffer for chart SVGs / layout
+      await new Promise(r => setTimeout(r, 800));
+      window.print();
+    })();
+  </script>
+</body>
+</html>

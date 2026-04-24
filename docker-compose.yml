@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: hadir
+      POSTGRES_PASSWORD: hadir
+      POSTGRES_DB: hadir
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hadir -d hadir"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build:
+      context: ./backend
+    env_file:
+      - ./.env
+    environment:
+      # Compose-side defaults so the service still boots when .env is missing
+      # values; .env wins when present.
+      HADIR_DATABASE_URL: ${HADIR_DATABASE_URL:-postgresql+psycopg://hadir:hadir@postgres:5432/hadir}
+      HADIR_TENANT_MODE: ${HADIR_TENANT_MODE:-single}
+      HADIR_ENV: ${HADIR_ENV:-dev}
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      # Inside the compose network the backend is reachable by service name.
+      VITE_BACKEND_URL: http://backend:8000
+    volumes:
+      - ./frontend:/app
+      # Named volume keeps the Linux-built node_modules separate from the
+      # macOS-built one on the host bind mount.
+      - frontend_node_modules:/app/node_modules
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  frontend_node_modules:
