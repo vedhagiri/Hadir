@@ -12,8 +12,8 @@ The pilot is a 5-day single-tenant demo on a corporate LAN; v1.0 is the
 multi-tenant SaaS-capable product 8–10 weeks after pilot signoff.
 
 ## Status
-**Pilot prompt currently active: P1 — Repo scaffold and skeleton apps (DONE).**
-Next: P2 — Database schema, migrations, multi-tenant plumbing. Wait for the
+**Pilot prompts currently complete: P1 + P2.**
+Next: P3 — Local auth, server-side sessions, role guards. Wait for the
 user before starting it.
 
 What P1 built:
@@ -32,6 +32,27 @@ What P1 built:
 - `.env.example` at repo root and per service; `.gitignore` covers Python,
   Node, env files, runtime data dirs
 
+What P2 built:
+- Alembic wired with a single initial migration (`0001_initial`) creating
+  schema `main` + the `citext` extension
+- Eight tables in `main`: `tenants`, `users`, `roles`, `user_roles`,
+  `departments`, `user_departments`, `user_sessions`, `audit_log`. Every
+  tenant-scoped table carries `tenant_id NOT NULL` with a FK to `tenants.id`
+- Two Postgres cluster roles — `hadir_admin` (owner, full CRUD) and
+  `hadir_app` (app runtime; INSERT+SELECT only on `audit_log`, full CRUD
+  elsewhere). Append-only enforcement is at the DB grant level, verified
+  by attempting UPDATE/DELETE/TRUNCATE and receiving "permission denied"
+- Seed data: tenant `(1, 'Omran')`; four roles (Admin/HR/Manager/Employee)
+  for tenant 1
+- `hadir/tenants/scope.py` — `TenantScope` dataclass + `get_tenant_scope`
+  FastAPI dependency. Resolution: session → `HADIR_DEFAULT_TENANT_ID` (1)
+- `backend/scripts/seed_admin.py` — CLI/env-driven admin seeder using
+  Argon2; idempotent; never logs the password
+- Backend container entrypoint runs `alembic upgrade head` before
+  launching Uvicorn
+- New env vars: `HADIR_ADMIN_DATABASE_URL`, `HADIR_APP_DB_PASSWORD`,
+  `HADIR_ADMIN_DB_PASSWORD`
+
 ## Tech stack (summary)
 - **Backend:** Python 3.11, FastAPI, Uvicorn, SQLAlchemy 2.x Core, Pydantic
   v2, Argon2-cffi, python-dotenv. Postgres 15.
@@ -47,12 +68,21 @@ hadir/
   backend/                  # Python service — see backend/CLAUDE.md
     pyproject.toml
     Dockerfile
+    entrypoint.sh           # alembic upgrade head; exec uvicorn
+    alembic.ini
+    alembic/
+      env.py
+      versions/
+        0001_initial.py     # schema, citext, DB roles, grants, seed
     .env.example
     hadir/
       __init__.py
       main.py               # FastAPI app + create_app()
       config.py             # Pydantic Settings (HADIR_* env vars)
-      db.py                 # SQLAlchemy engine factory
+      db.py                 # metadata (schema=main) + all 8 tables + engines
+      tenants/              # TenantScope + get_tenant_scope
+    scripts/
+      seed_admin.py         # python -m scripts.seed_admin
     tests/                  # pytest suite (P3+)
   frontend/                 # Vite + React app — see frontend/CLAUDE.md
     package.json
@@ -88,13 +118,23 @@ hadir/
 2. **Bring up the stack:**
    ```sh
    docker compose up --build
+   # Backend entrypoint runs `alembic upgrade head` before Uvicorn, so
+   # schema `main`, DB roles, and seed data (tenant + roles) exist after
+   # the first healthy boot.
    ```
-3. **Verify:**
+3. **Seed the pilot admin:**
+   ```sh
+   docker compose exec -e HADIR_SEED_PASSWORD='pick-something-real' backend \
+     python -m scripts.seed_admin --email admin@pilot.hadir --full-name "Pilot Admin"
+   ```
+4. **Verify:**
    - Backend health: `curl http://localhost:8000/api/health` → `{"status":"ok"}`
    - Frontend: open `http://localhost:5173` → renders "Hadir" on the
      warm-neutral background using the display serif
-   - Postgres: reachable on `localhost:5432` as `hadir/hadir/hadir`
-4. **Stop:** `docker compose down`. Add `-v` to also drop the postgres
+   - Postgres (admin): reachable on `localhost:5432` as `hadir/hadir/hadir`
+   - Postgres (app): `hadir_app/hadir_app` — has INSERT+SELECT only on
+     `main.audit_log`; UPDATE/DELETE/TRUNCATE are rejected
+5. **Stop:** `docker compose down`. Add `-v` to also drop the postgres
    volume (do this only when you want a clean DB).
 
 ## Red lines (PROJECT_CONTEXT §12 + pilot-plan §"Red lines")

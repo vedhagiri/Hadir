@@ -21,9 +21,21 @@ services:
     env_file:
       - ./.env
     environment:
-      # Compose-side defaults so the service still boots when .env is missing
-      # values; .env wins when present.
-      HADIR_DATABASE_URL: ${HADIR_DATABASE_URL:-postgresql+psycopg://hadir:hadir@postgres:5432/hadir}
+      # App-runtime URL (hadir_app role, limited grants) — this is what
+      # FastAPI connects with at request time.
+      HADIR_DATABASE_URL: ${HADIR_DATABASE_URL:-postgresql+psycopg://hadir_app:hadir_app@postgres:5432/hadir}
+      # Admin URL (hadir_admin role, full grants) — used only by Alembic
+      # and the seed scripts. In dev we connect as the POSTGRES_USER ('hadir',
+      # which owns the database) until the first migration creates
+      # hadir_admin; subsequent runs could switch to hadir_admin, but there
+      # is no behavioural difference and staying on 'hadir' avoids a
+      # chicken-and-egg bootstrap.
+      HADIR_ADMIN_DATABASE_URL: ${HADIR_ADMIN_DATABASE_URL:-postgresql+psycopg://hadir:hadir@postgres:5432/hadir}
+      # Role passwords used by the initial migration to CREATE ROLE. The
+      # defaults match the URLs above so a fresh `docker compose up` just
+      # works without any .env editing.
+      HADIR_APP_DB_PASSWORD: ${HADIR_APP_DB_PASSWORD:-hadir_app}
+      HADIR_ADMIN_DB_PASSWORD: ${HADIR_ADMIN_DB_PASSWORD:-hadir_admin}
       HADIR_TENANT_MODE: ${HADIR_TENANT_MODE:-single}
       HADIR_ENV: ${HADIR_ENV:-dev}
     volumes:

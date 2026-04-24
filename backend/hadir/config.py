@@ -29,15 +29,28 @@ class Settings(BaseSettings):
     env: Literal["dev", "staging", "production"] = "dev"
     tenant_mode: Literal["single", "multi"] = "single"
 
+    # Two connection URLs — the app runs as `hadir_app` (limited grants,
+    # insert/select only on audit_log) and migrations/admin scripts run as
+    # `hadir_admin` (full owner rights). See backend/CLAUDE.md "Database
+    # roles and grants" for the policy this enforces.
     database_url: str = Field(
+        default="postgresql+psycopg://hadir_app:hadir_app@postgres:5432/hadir",
+        description="App-runtime SQLAlchemy URL. Pilot schema is `main`.",
+    )
+    admin_database_url: str = Field(
         default="postgresql+psycopg://hadir:hadir@postgres:5432/hadir",
-        description="SQLAlchemy URL for Postgres. In single-tenant mode the schema is `main`.",
+        description="Admin URL used by Alembic and seed scripts. Owner account.",
     )
 
     # Secrets — required in non-dev. Defaults are obvious placeholders so a
     # missing value blows up loudly rather than silently using a real-looking key.
     session_secret: str = Field(default="dev-session-secret-change-me")
     fernet_key: str = Field(default="dev-fernet-key-change-me")
+
+    # Tenant default for the pilot. Set to 1 because the initial migration
+    # seeds tenant id=1 ('Omran'). In multi-tenant mode (v1.0) this default
+    # goes away and tenant is derived from the session or request host.
+    default_tenant_id: int = 1
 
 
 def get_settings() -> Settings:

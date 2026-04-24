@@ -18,7 +18,12 @@ RUN pip install --upgrade pip \
     && pip install ".[dev]"
 
 COPY hadir ./hadir
+COPY alembic ./alembic
+COPY alembic.ini ./alembic.ini
+COPY scripts ./scripts
+COPY entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
 
 EXPOSE 8000
 
-CMD ["uvicorn", "hadir.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["./entrypoint.sh"]
