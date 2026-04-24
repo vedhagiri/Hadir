@@ -1,29 +1,36 @@
-// P1 placeholder. Routes, AuthProvider, shell etc. land in P3 / P4.
-// We keep the DOM minimal so the warm-neutral background and the display
-// serif from styles.css are visible — that's the only assertion P1 needs.
+// Top-level route tree. Two top-level paths: /login (public) and /*
+// (authenticated shell). The authenticated subtree registers one route
+// per NAV id across every role — so deep-linking to ``/cameras`` works
+// for an Admin and returns a 403-equivalent-from-UI experience (just a
+// placeholder for now) for other roles. The backend remains the source
+// of truth for authorisation; the sidebar only hides links.
+
+import { Navigate, Route, Routes } from "react-router-dom";
+
+import { LoginPage } from "./auth/LoginPage";
+import { ProtectedRoute } from "./auth/ProtectedRoute";
+import { Placeholder } from "./pages/Placeholder";
+import { Layout } from "./shell/Layout";
+import { ALL_PAGE_IDS } from "./shell/nav";
+
 export function App() {
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "var(--bg)",
-        color: "var(--text)",
-      }}
-    >
-      <h1
-        style={{
-          fontFamily: "var(--font-display)",
-          fontSize: "96px",
-          fontWeight: 400,
-          letterSpacing: "-0.02em",
-          margin: 0,
-        }}
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route
+        path="/"
+        element={
+          <ProtectedRoute>
+            <Layout />
+          </ProtectedRoute>
+        }
       >
-        Hadir
-      </h1>
-    </main>
+        <Route index element={<Navigate to="/dashboard" replace />} />
+        {ALL_PAGE_IDS.map((id) => (
+          <Route key={id} path={id} element={<Placeholder pageId={id} />} />
+        ))}
+        <Route path="*" element={<Placeholder pageId="dashboard" />} />
+      </Route>
+    </Routes>
   );
 }

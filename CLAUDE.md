@@ -12,9 +12,9 @@ The pilot is a 5-day single-tenant demo on a corporate LAN; v1.0 is the
 multi-tenant SaaS-capable product 8–10 weeks after pilot signoff.
 
 ## Status
-**Pilot prompts currently complete: P1 + P2 + P3.**
-Next: P4 — Frontend shell, login page, role-aware navigation. Wait for
-the user before starting it.
+**Pilot prompts currently complete: P1 + P2 + P3 + P4.**
+Next: P5 — Employees backend + Excel import/export. Wait for the user
+before starting it.
 
 What P1 built:
 - Monorepo layout per PROJECT_CONTEXT §7
@@ -74,6 +74,28 @@ What P3 built:
 - New env vars: `HADIR_SESSION_IDLE_MINUTES`, `HADIR_SESSION_COOKIE_NAME`,
   `HADIR_SESSION_COOKIE_SECURE`, `HADIR_LOGIN_MAX_ATTEMPTS`,
   `HADIR_LOGIN_RATE_LIMIT_RESET_MINUTES`
+
+What P4 built:
+- `src/api/client.ts` — fetch wrapper with `ApiError`; same-origin
+  credentials so `hadir_session` flows through the Vite proxy
+- `src/auth/` — `AuthProvider` (TanStack Query `useMe`/`useLogin`/
+  `useLogout`), `ProtectedRoute` (redirect to /login on 401),
+  `LoginPage` (RHF + Zod, email+password only, surfaces 401/429 distinctly)
+- `src/shell/` — typed `Icon` component (verbatim port of
+  `design/icons.jsx`), `nav.ts` (literal port of `NAV` + `CRUMBS`),
+  `Sidebar` (role-aware nav + brand + static identity footer),
+  `Topbar` (breadcrumbs + role badge + logout), `Layout` (composes all)
+- `src/pages/Placeholder.tsx` — generic scaffold page, mapped per NAV id
+  to "Coming in P<N>" or "Deferred to v1.0"
+- 23 routes (one per unique NAV id across all roles) plus `/login`,
+  `/` → `/dashboard`, and a catch-all
+- `src/main.tsx` — now wraps the tree in `QueryClientProvider` +
+  `BrowserRouter`; CSS import order unchanged
+- Vite proxy changed from `/api` (prefix) to `^/api/` (regex) so routes
+  like `/api-docs` stay client-side SPA routes rather than 404ing against
+  the backend
+- No Tailwind, no CSS-in-JS, no component library added. Only the
+  already-installed P1 deps are used.
 
 ## Tech stack (summary)
 - **Backend:** Python 3.11, FastAPI, Uvicorn, SQLAlchemy 2.x Core, Pydantic

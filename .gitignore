@@ -28,6 +28,7 @@ build/
 # Node / Vite
 node_modules/
 frontend/dist/
+frontend/*.tsbuildinfo
 .vite/
 *.log
 npm-debug.log*

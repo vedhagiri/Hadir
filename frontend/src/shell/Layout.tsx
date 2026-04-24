@@ -1,0 +1,37 @@
+// The authenticated shell: sidebar + topbar + scrolling content area with
+// the 1320px max-width wrapper from the design system. Route content is
+// rendered through <Outlet/>.
+
+import { Outlet, useLocation } from "react-router-dom";
+
+import { useMe } from "../auth/AuthProvider";
+import { primaryRole } from "../types";
+import { Sidebar } from "./Sidebar";
+import { Topbar } from "./Topbar";
+
+export function Layout() {
+  const { data: me } = useMe();
+  const location = useLocation();
+
+  // ProtectedRoute guarantees ``me`` exists before we get here; this
+  // narrowing keeps the rest of the component honest against TS strict.
+  if (!me) return null;
+
+  const role = primaryRole(me.roles);
+  // Route path is always ``/<pageId>`` in P4 (no nested routes yet).
+  const pageId = location.pathname.replace(/^\//, "") || "dashboard";
+
+  return (
+    <div className="app">
+      <Sidebar role={role} me={me} />
+      <div className="main">
+        <Topbar pageId={pageId} role={role} me={me} />
+        <div className="content">
+          <div className="content-wrap">
+            <Outlet />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

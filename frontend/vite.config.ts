@@ -14,7 +14,9 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
-      "/api": {
+      // Regex (leading ^) so `/api-docs`, `/api-something-else` are handled
+      // by the SPA instead of being proxied to the backend as 404s.
+      "^/api/": {
         target: backendTarget,
         changeOrigin: true,
       },
