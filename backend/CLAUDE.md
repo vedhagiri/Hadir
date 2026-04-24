@@ -1,11 +1,10 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-P1 + P2 + P3 complete. **P5 complete**: employees + employee_photos
-tables (photos schema-only, files come in P6); Admin-only CRUD +
-paginated text search + Excel import/export via openpyxl; audit rows
-on every create/update/import/export/soft-delete. 3 seed departments
-(ENG/OPS/ADM). P6 next — wait for the user.
+P1 + P2 + P3 + P5 complete. **P6 complete**: photo ingestion
+endpoints (per-employee drawer upload + folder-dump bulk), Fernet
+encryption at rest under `/data/faces`, auth-gated decrypt endpoint,
+per-ingest and per-rejection audit rows. P7 next — wait for the user.
 
 ## Stack
 - Python 3.11
@@ -19,6 +18,7 @@ on every create/update/import/export/soft-delete. 3 seed departments
 - email-validator for Pydantic `EmailStr`
 - openpyxl for XLSX import/export (P5)
 - python-multipart for FastAPI `UploadFile` handling (P5)
+- cryptography.Fernet for encrypted-at-rest face photos (P6)
 - psycopg 3 (binary) for Postgres
 - Dev tooling: ruff, black, mypy (strict), pytest + httpx + pytest-asyncio
 
@@ -50,12 +50,13 @@ backend/
     tenants/
       __init__.py
       scope.py                 # TenantScope + get_tenant_scope FastAPI dep
-    employees/                 # P5
+    employees/                 # P5 + P6
       __init__.py
       schemas.py               # Pydantic request/response models
       repository.py            # tenant-scoped SQL (list/get/create/update/soft-delete/export)
       excel.py                 # openpyxl parse_import() + build_export()
-      router.py                # /api/employees/{list, create, {id}, import, export}
+      photos.py                # Fernet write/read + filename parser + photo-row helpers
+      router.py                # /api/employees/... including /photos endpoints
   scripts/
     __init__.py
     seed_admin.py              # python -m scripts.seed_admin
@@ -64,6 +65,7 @@ backend/
     conftest.py                # admin/employee user + clean_employees fixtures
     test_auth.py               # 13 tests — P3 coverage
     test_employees.py          #  5 tests — P5 coverage
+    test_photos.py             #  6 tests — P6 coverage (Fernet-at-rest, bulk, drawer, 403)
 ```
 
 ## Schema map (P2)
@@ -247,6 +249,43 @@ PDPL right-to-erasure request flow (v1.0) and must route through the
 audit log with operator justification. Soft-delete sets
 `status='inactive'` and hides the row from default list/search.
 
+## Photos (P6)
+All photo endpoints are Admin-only and audit-logged. Endpoints live
+under the same `/api/employees` prefix:
+
+| Method + Path                                      | Purpose                                                  | Audit                                 |
+| -------------------------------------------------- | -------------------------------------------------------- | ------------------------------------- |
+| `POST /api/employees/{id}/photos`                  | Drawer upload — multiple files, one `angle` form field   | `photo.ingested` per file             |
+| `POST /api/employees/photos/bulk`                  | Folder dump — angle inferred from filename convention    | `photo.ingested` + `photo.rejected`   |
+| `GET  /api/employees/{id}/photos`                  | List photos (id, angle, employee_id) for the employee    | —                                     |
+| `GET  /api/employees/{id}/photos/{photo_id}/image` | Decrypt + stream the JPEG (auth-gated)                   | `photo.viewed`                        |
+| `DELETE /api/employees/{id}/photos/{photo_id}`     | Drop DB row + best-effort remove encrypted file on disk  | `photo.deleted`                       |
+
+**Filename convention** (PROJECT_CONTEXT §3) recognised by the bulk
+endpoint:
+```
+OM0097.jpg          → front (unlabelled defaults to front)
+OM0097_front.jpg    → front
+OM0097_left.jpg     → left
+OM0097_right.jpg    → right
+OM0097_other.jpg    → other
+```
+An unmatched `employee_code` is a **rejection**, never an auto-create.
+Both rejections and accepts go to the audit log.
+
+**Encryption at rest**: photo bytes are encrypted with Fernet
+(`HADIR_FERNET_KEY`) before being written to
+`/data/faces/{tenant_id}/{employee_code}/{angle}/{uuid}.jpg`. Opening
+the file in an image viewer produces garbage — by design. The path
+itself is not sensitive and is stored plaintext in
+`employee_photos.file_path`. Pilot: all admin-ingested photos are
+considered approved (`approved_by_user_id` = ingesting admin); the
+self-upload + approval-queue workflow is deferred per
+PROJECT_CONTEXT §8.
+
+**No embeddings yet** — the `embedding` column doesn't exist on
+`employee_photos` until P9 adds it via Alembic.
+
 ## Pilot prompt currently active
-P5 — done. Next: **P6 — Employees frontend + photo ingestion.** Wait
-for the user before starting P6.
+P6 — done. Next: **P7 — Cameras CRUD, encrypted RTSP, on-demand
+live preview.** Wait for the user before starting P7.

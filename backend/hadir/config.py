@@ -72,6 +72,12 @@ class Settings(BaseSettings):
     login_max_attempts: int = 10
     login_rate_limit_reset_minutes: int = 10
 
+    # --- Face photo storage (P6) -------------------------------------------
+    # Root directory for employee reference photos and (P8) capture crops.
+    # Files are Fernet-encrypted before they touch disk — see
+    # ``hadir.employees.photos``.
+    faces_storage_path: str = "/data/faces"
+
 
 def get_settings() -> Settings:
     """Return a fresh Settings instance.

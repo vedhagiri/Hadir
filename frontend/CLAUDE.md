@@ -1,11 +1,12 @@
 # Hadir frontend — Claude Code notes
 
 ## Status
-P1 complete (scaffold + design CSS imported). **P4 complete**: AuthProvider
-via TanStack Query, login page (RHF + Zod), authenticated shell with
-sidebar + topbar + breadcrumbs, role-aware navigation ported literally
-from the design archive, 23 placeholder pages for every NAV route. P5+
-replaces the placeholders with real features.
+P1 + P4 complete. **P6 complete**: `/employees` route now renders a
+real list page with search + department filter + include-inactive
+toggle, an Excel import modal (drag-and-drop or file picker) that
+stays open until acknowledged, and a right-sliding detail drawer with
+a photo gallery (auth-gated decrypt endpoint) + multi-file drop zone.
+Other 22 placeholder routes unchanged; P7+ replaces them.
 
 ## Stack
 - Vite 5 + React 18
@@ -48,6 +49,13 @@ frontend/
       Layout.tsx          # composes sidebar + topbar + <Outlet/>
     pages/
       Placeholder.tsx     # "Coming in P<N>" scaffolds
+    features/
+      employees/          # P6
+        types.ts          # wire types mirroring hadir/employees/schemas.py
+        hooks.ts          # TanStack Query hooks: list/detail/photos + mutations
+        EmployeesPage.tsx # ported from design/pages.jsx::EmployeesPage
+        ImportModal.tsx   # Excel import flow with per-row results
+        EmployeeDrawer.tsx # right-sliding detail drawer + photo drop zone
     styles/               # design CSS, copied verbatim — DO NOT EDIT
       styles.css
       styles-enhancements.css
@@ -98,5 +106,5 @@ identity card with a TODO comment pointing at the deferred switcher.
 - `docker compose exec frontend npm run dev` — Vite hot-reloads on save.
 
 ## Pilot prompt currently active
-P4 — done. Next: **P5 — Employees backend + Excel import/export.** Wait
-for the user before starting P5.
+P6 — done. Next: **P7 — Cameras CRUD, encrypted RTSP, on-demand live
+preview.** Wait for the user before starting P7.

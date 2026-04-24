@@ -9,6 +9,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 
 import { LoginPage } from "./auth/LoginPage";
 import { ProtectedRoute } from "./auth/ProtectedRoute";
+import { EmployeesPage } from "./features/employees/EmployeesPage";
 import { Placeholder } from "./pages/Placeholder";
 import { Layout } from "./shell/Layout";
 import { ALL_PAGE_IDS } from "./shell/nav";
@@ -26,7 +27,8 @@ export function App() {
         }
       >
         <Route index element={<Navigate to="/dashboard" replace />} />
-        {ALL_PAGE_IDS.map((id) => (
+        <Route path="employees" element={<EmployeesPage />} />
+        {ALL_PAGE_IDS.filter((id) => id !== "employees").map((id) => (
           <Route key={id} path={id} element={<Placeholder pageId={id} />} />
         ))}
         <Route path="*" element={<Placeholder pageId="dashboard" />} />

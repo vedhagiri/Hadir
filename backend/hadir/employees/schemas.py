@@ -73,3 +73,33 @@ class ImportResult(BaseModel):
     created: int
     updated: int
     errors: list[ImportError]
+
+
+# --- Photos (P6) -----------------------------------------------------------
+
+
+class PhotoOut(BaseModel):
+    id: int
+    employee_id: int
+    angle: Literal["front", "left", "right", "other"]
+
+
+class PhotoListOut(BaseModel):
+    items: list[PhotoOut]
+
+
+class PhotoIngestAccepted(BaseModel):
+    filename: str
+    employee_code: str
+    angle: Literal["front", "left", "right", "other"]
+    photo_id: int
+
+
+class PhotoIngestRejected(BaseModel):
+    filename: str
+    reason: str
+
+
+class PhotoIngestResult(BaseModel):
+    accepted: list[PhotoIngestAccepted]
+    rejected: list[PhotoIngestRejected]

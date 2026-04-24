@@ -12,9 +12,9 @@ The pilot is a 5-day single-tenant demo on a corporate LAN; v1.0 is the
 multi-tenant SaaS-capable product 8–10 weeks after pilot signoff.
 
 ## Status
-**Pilot prompts currently complete: P1 + P2 + P3 + P4 + P5.**
-Next: P6 — Employees frontend + photo ingestion. Wait for the user
-before starting it.
+**Pilot prompts currently complete: P1 + P2 + P3 + P4 + P5 + P6.**
+Next: P7 — Cameras CRUD, encrypted RTSP, on-demand live preview. Wait
+for the user before starting it.
 
 What P1 built:
 - Monorepo layout per PROJECT_CONTEXT §7
@@ -115,6 +115,32 @@ What P5 built:
   re-import → update, export round-trip column + inactive inclusion,
   search hits across code/name/email/department, soft-delete hide +
   include_inactive, 403 for Employee role
+
+What P6 built:
+- Backend photo endpoints (all Admin-only, all audited): drawer-style
+  upload `POST /api/employees/{id}/photos`, folder-dump bulk ingest
+  `POST /api/employees/photos/bulk` (filename → employee_code + angle),
+  decrypt stream `GET /api/employees/{id}/photos/{photo_id}/image`,
+  list `GET /api/employees/{id}/photos`, hard delete per photo.
+- Encrypted-at-rest: bytes Fernet-encrypted using `HADIR_FERNET_KEY`
+  before writing to `/data/faces/{tenant}/{code}/{angle}/{uuid}.jpg`.
+  Inspected on disk: files start with `674141` (Fernet base64url
+  'gAA…'), **not** the JPEG magic `ffd8ff`.
+- Never auto-creates employees — unknown `employee_code` in a bulk
+  upload is rejected + audit-logged as `photo.rejected`.
+- Audit actions: `photo.ingested`, `photo.rejected`, `photo.viewed`,
+  `photo.deleted`.
+- New dep: `cryptography` (Fernet). New named volume `faces_data`
+  mounted at `/data` on the backend service.
+- Frontend `/employees` page now renders real data: search,
+  department filter, include-inactive toggle, photo-count pills,
+  Export link, Import modal (drag-and-drop `.xlsx` + per-row error
+  results), detail drawer with profile + photo gallery (live images
+  via the decrypt endpoint) + multi-file drop zone with an angle
+  selector.
+- Pytest coverage: +6 new tests (24 total) covering filename
+  convention, auto-create refusal, Fernet-on-disk, decrypt
+  round-trip, drawer photo-count update, 403 for Employee.
 
 ## Tech stack (summary)
 - **Backend:** Python 3.11, FastAPI, Uvicorn, SQLAlchemy 2.x Core, Pydantic

@@ -18,7 +18,8 @@ export class ApiError extends Error {
 
 export interface ApiRequest {
   method?: "GET" | "POST" | "PATCH" | "DELETE";
-  // Serialised with JSON.stringify unless a string is passed in directly.
+  // JSON by default. Pass a FormData to send multipart (the browser then
+  // sets its own multipart boundary header — we don't touch Content-Type).
   body?: unknown;
   signal?: AbortSignal;
 }
@@ -32,8 +33,12 @@ export async function api<T>(path: string, init: ApiRequest = {}): Promise<T> {
     credentials: "same-origin",
   };
   if (body !== undefined) {
-    headers["Content-Type"] = "application/json";
-    request.body = typeof body === "string" ? body : JSON.stringify(body);
+    if (body instanceof FormData) {
+      request.body = body;
+    } else {
+      headers["Content-Type"] = "application/json";
+      request.body = typeof body === "string" ? body : JSON.stringify(body);
+    }
   }
   if (signal) {
     request.signal = signal;

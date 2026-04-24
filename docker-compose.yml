@@ -40,6 +40,10 @@ services:
       HADIR_ENV: ${HADIR_ENV:-dev}
     volumes:
       - ./backend:/app
+      # Encrypted employee photos (P6) and capture crops (P8) land under
+      # /data/faces. Kept on a named volume so photos survive
+      # `docker compose down` but reset on `down -v`.
+      - faces_data:/data
     ports:
       - "8000:8000"
     depends_on:
@@ -65,3 +69,4 @@ services:
 volumes:
   postgres_data:
   frontend_node_modules:
+  faces_data:

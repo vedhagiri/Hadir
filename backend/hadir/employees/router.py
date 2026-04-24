@@ -15,6 +15,7 @@ from fastapi import (
     APIRouter,
     Depends,
     File,
+    Form,
     HTTPException,
     Query,
     Response,
@@ -28,6 +29,7 @@ from hadir.auth.audit import write_audit
 from hadir.auth.dependencies import CurrentUser, require_role
 from hadir.db import get_engine
 from hadir.employees import excel as excel_io
+from hadir.employees import photos as photos_io
 from hadir.employees import repository as repo
 from hadir.employees.schemas import (
     EmployeeCreateIn,
@@ -36,6 +38,11 @@ from hadir.employees.schemas import (
     EmployeePatchIn,
     ImportError as ImportErrorSchema,
     ImportResult,
+    PhotoIngestAccepted,
+    PhotoIngestRejected,
+    PhotoIngestResult,
+    PhotoListOut,
+    PhotoOut,
 )
 from hadir.tenants.scope import TenantScope
 
@@ -472,3 +479,315 @@ async def import_employees_endpoint(
 
 class _RowError(Exception):
     """Internal signal used by the import loop to hand a message back to the caller."""
+
+
+# ---------------------------------------------------------------------------
+# Photo ingestion (P6)
+# ---------------------------------------------------------------------------
+# The `/photos/bulk` route is registered BEFORE the
+# `/{employee_id}/photos*` routes so FastAPI's matcher picks the static
+# path first; it also uses the `photos_io` module for Fernet + disk I/O.
+
+
+def _drop_file(path_str: str) -> None:
+    """Remove a stored photo from disk, swallowing "already gone" errors."""
+
+    from pathlib import Path
+
+    try:
+        Path(path_str).unlink(missing_ok=True)
+    except OSError as exc:
+        logger.warning("could not remove photo file %s: %s", path_str, exc)
+
+
+@router.post("/photos/bulk", response_model=PhotoIngestResult)
+async def bulk_ingest_photos_endpoint(
+    user: Annotated[CurrentUser, ADMIN],
+    files: list[UploadFile] = File(...),
+) -> PhotoIngestResult:
+    """Folder-dump ingest — filenames encode the ``employee_code`` and angle.
+
+    PROJECT_CONTEXT §3 convention:
+      - ``OM0097.jpg`` → angle=front
+      - ``OM0097_front.jpg`` / ``_left.jpg`` / ``_right.jpg`` / ``_other.jpg``
+
+    An unmatched ``employee_code`` is a **rejection**, never an
+    auto-create. Rejections are audited so operators can reconcile.
+    """
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    engine = get_engine()
+
+    accepted: list[PhotoIngestAccepted] = []
+    rejected: list[PhotoIngestRejected] = []
+
+    for upload in files:
+        raw_name = upload.filename or ""
+        parsed = photos_io.parse_filename(raw_name)
+        if parsed is None:
+            rejected.append(
+                PhotoIngestRejected(
+                    filename=raw_name,
+                    reason=(
+                        "filename does not match OM0097[_front|_left|_right|_other].jpg"
+                    ),
+                )
+            )
+            with engine.begin() as conn:
+                write_audit(
+                    conn,
+                    tenant_id=scope.tenant_id,
+                    actor_user_id=user.id,
+                    action="photo.rejected",
+                    entity_type="photo",
+                    after={"filename": raw_name, "reason": "bad_filename"},
+                )
+            continue
+
+        data = await upload.read()
+
+        with engine.begin() as conn:
+            emp = repo.get_employee_by_code(conn, scope, parsed.employee_code)
+
+        if emp is None:
+            rejected.append(
+                PhotoIngestRejected(
+                    filename=raw_name,
+                    reason=f"unknown employee_code '{parsed.employee_code}'",
+                )
+            )
+            with engine.begin() as conn:
+                write_audit(
+                    conn,
+                    tenant_id=scope.tenant_id,
+                    actor_user_id=user.id,
+                    action="photo.rejected",
+                    entity_type="photo",
+                    after={
+                        "filename": raw_name,
+                        "employee_code": parsed.employee_code,
+                        "reason": "unknown_employee",
+                    },
+                )
+            continue
+
+        try:
+            file_path = photos_io.write_encrypted(
+                scope.tenant_id, emp.employee_code, parsed.angle, data
+            )
+        except Exception as exc:
+            logger.warning("photo write failed for %s: %s", raw_name, exc)
+            rejected.append(
+                PhotoIngestRejected(filename=raw_name, reason="could not store file")
+            )
+            continue
+
+        with engine.begin() as conn:
+            photo_id = photos_io.create_photo_row(
+                conn,
+                scope,
+                employee_id=emp.id,
+                angle=parsed.angle,
+                file_path=file_path,
+                approved_by_user_id=user.id,
+            )
+            write_audit(
+                conn,
+                tenant_id=scope.tenant_id,
+                actor_user_id=user.id,
+                action="photo.ingested",
+                entity_type="photo",
+                entity_id=str(photo_id),
+                after={
+                    "employee_id": emp.id,
+                    "employee_code": emp.employee_code,
+                    "angle": parsed.angle,
+                    "source": "bulk",
+                    "filename": raw_name,
+                },
+            )
+
+        accepted.append(
+            PhotoIngestAccepted(
+                filename=raw_name,
+                employee_code=emp.employee_code,
+                angle=parsed.angle,  # type: ignore[arg-type]
+                photo_id=photo_id,
+            )
+        )
+
+    return PhotoIngestResult(accepted=accepted, rejected=rejected)
+
+
+@router.post("/{employee_id}/photos", response_model=PhotoIngestResult)
+async def upload_photos_endpoint(
+    employee_id: int,
+    user: Annotated[CurrentUser, ADMIN],
+    files: list[UploadFile] = File(...),
+    angle: Annotated[str, Form()] = photos_io.DEFAULT_ANGLE,
+) -> PhotoIngestResult:
+    """Upload one or more images against a specific employee.
+
+    ``angle`` is a single form field applied to every file in this
+    request (drawer UX — the operator picks the angle once). For
+    mixed-angle folder dumps use ``/api/employees/photos/bulk`` instead.
+    """
+
+    if angle not in photos_io.ALLOWED_ANGLES:
+        raise HTTPException(
+            status_code=400, detail=f"invalid angle '{angle}'"
+        )
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    engine = get_engine()
+
+    with engine.begin() as conn:
+        emp = repo.get_employee(conn, scope, employee_id)
+
+    if emp is None:
+        raise HTTPException(status_code=404, detail="employee not found")
+
+    accepted: list[PhotoIngestAccepted] = []
+    rejected: list[PhotoIngestRejected] = []
+
+    for upload in files:
+        raw_name = upload.filename or "upload.jpg"
+        data = await upload.read()
+        if not data:
+            rejected.append(PhotoIngestRejected(filename=raw_name, reason="empty file"))
+            continue
+
+        try:
+            file_path = photos_io.write_encrypted(
+                scope.tenant_id, emp.employee_code, angle, data
+            )
+        except Exception as exc:
+            logger.warning("photo write failed for %s: %s", raw_name, exc)
+            rejected.append(
+                PhotoIngestRejected(filename=raw_name, reason="could not store file")
+            )
+            continue
+
+        with engine.begin() as conn:
+            photo_id = photos_io.create_photo_row(
+                conn,
+                scope,
+                employee_id=emp.id,
+                angle=angle,
+                file_path=file_path,
+                approved_by_user_id=user.id,
+            )
+            write_audit(
+                conn,
+                tenant_id=scope.tenant_id,
+                actor_user_id=user.id,
+                action="photo.ingested",
+                entity_type="photo",
+                entity_id=str(photo_id),
+                after={
+                    "employee_id": emp.id,
+                    "employee_code": emp.employee_code,
+                    "angle": angle,
+                    "source": "drawer",
+                    "filename": raw_name,
+                },
+            )
+
+        accepted.append(
+            PhotoIngestAccepted(
+                filename=raw_name,
+                employee_code=emp.employee_code,
+                angle=angle,  # type: ignore[arg-type]
+                photo_id=photo_id,
+            )
+        )
+
+    return PhotoIngestResult(accepted=accepted, rejected=rejected)
+
+
+@router.get("/{employee_id}/photos", response_model=PhotoListOut)
+def list_photos_endpoint(
+    employee_id: int,
+    user: Annotated[CurrentUser, ADMIN],
+) -> PhotoListOut:
+    scope = TenantScope(tenant_id=user.tenant_id)
+    with get_engine().begin() as conn:
+        emp = repo.get_employee(conn, scope, employee_id)
+        if emp is None:
+            raise HTTPException(status_code=404, detail="employee not found")
+        rows = photos_io.list_photos_for_employee(conn, scope, employee_id)
+    return PhotoListOut(
+        items=[
+            PhotoOut(id=r.id, employee_id=r.employee_id, angle=r.angle)  # type: ignore[arg-type]
+            for r in rows
+        ]
+    )
+
+
+@router.get("/{employee_id}/photos/{photo_id}/image")
+def get_photo_image_endpoint(
+    employee_id: int,
+    photo_id: int,
+    user: Annotated[CurrentUser, ADMIN],
+) -> Response:
+    """Decrypt and stream the stored image bytes (auth-gated, audited)."""
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    with get_engine().begin() as conn:
+        row = photos_io.get_photo(
+            conn, scope, photo_id=photo_id, employee_id=employee_id
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail="photo not found")
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="photo.viewed",
+            entity_type="photo",
+            entity_id=str(photo_id),
+            after={"employee_id": employee_id, "angle": row.angle},
+        )
+
+    try:
+        plain = photos_io.read_decrypted(row.file_path)
+    except (FileNotFoundError, RuntimeError) as exc:
+        logger.warning("photo read failed for id=%s: %s", photo_id, exc)
+        raise HTTPException(status_code=500, detail="could not read photo") from exc
+
+    return Response(content=plain, media_type="image/jpeg")
+
+
+@router.delete(
+    "/{employee_id}/photos/{photo_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+def delete_photo_endpoint(
+    employee_id: int,
+    photo_id: int,
+    user: Annotated[CurrentUser, ADMIN],
+    response: Response,
+) -> Response:
+    """Remove the DB row and best-effort delete the encrypted file on disk."""
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    with get_engine().begin() as conn:
+        row = photos_io.get_photo(
+            conn, scope, photo_id=photo_id, employee_id=employee_id
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail="photo not found")
+        photos_io.delete_photo_row(conn, scope, photo_id=photo_id)
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="photo.deleted",
+            entity_type="photo",
+            entity_id=str(photo_id),
+            before={"angle": row.angle, "file_path": row.file_path},
+            after={"employee_id": employee_id},
+        )
+
+    _drop_file(row.file_path)
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response
