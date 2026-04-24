@@ -24,8 +24,11 @@ from sqlalchemy import (
     Column,
     DateTime,
     Engine,
+    Float,
     ForeignKey,
+    Index,
     Integer,
+    LargeBinary,
     MetaData,
     String,
     Table,
@@ -374,6 +377,105 @@ cameras = Table(
         server_default="0",
     ),
     UniqueConstraint("tenant_id", "name", name="uq_cameras_tenant_name"),
+)
+
+
+# --- Capture (P8) -----------------------------------------------------------
+# detection_events: one row per *track entry* (not per frame), so the table
+# doesn't explode. P9 fills in ``embedding`` + ``employee_id`` + ``confidence``
+# once identification is wired up.
+detection_events = Table(
+    "detection_events",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey(f"{SCHEMA}.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "camera_id",
+        Integer,
+        ForeignKey(f"{SCHEMA}.cameras.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "captured_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    # Bounding box in image pixel coordinates: {"x": int, "y": int, "w": int, "h": int}.
+    Column("bbox", JSONB, nullable=False),
+    Column("face_crop_path", Text, nullable=False),
+    # P9 fills these.
+    Column("embedding", LargeBinary, nullable=True),
+    Column(
+        "employee_id",
+        Integer,
+        ForeignKey(f"{SCHEMA}.employees.id", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    Column("confidence", Float, nullable=True),
+    Column("track_id", Text, nullable=False),
+    Index(
+        "ix_detection_events_tenant_captured_at",
+        "tenant_id",
+        "captured_at",
+    ),
+    Index(
+        "ix_detection_events_tenant_camera_captured",
+        "tenant_id",
+        "camera_id",
+        "captured_at",
+    ),
+    Index(
+        "ix_detection_events_tenant_employee_captured",
+        "tenant_id",
+        "employee_id",
+        "captured_at",
+    ),
+)
+
+
+# Retention: 30 days (PROJECT_CONTEXT §3). A cleanup job lands later;
+# the rows themselves are defined here so the app can insert from day one.
+camera_health_snapshots = Table(
+    "camera_health_snapshots",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey(f"{SCHEMA}.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "camera_id",
+        Integer,
+        ForeignKey(f"{SCHEMA}.cameras.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "captured_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    Column("frames_last_minute", Integer, nullable=False, server_default="0"),
+    Column("reachable", Boolean, nullable=False),
+    Column("note", Text, nullable=True),
+    Index(
+        "ix_camera_health_tenant_camera_captured",
+        "tenant_id",
+        "camera_id",
+        "captured_at",
+    ),
 )
 
 

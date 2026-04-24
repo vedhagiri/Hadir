@@ -1,10 +1,11 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-P1 + P2 + P3 + P5 + P6 complete. **P7 complete**: cameras CRUD with
-Fernet-encrypted RTSP URLs at rest, host-only responses/audits/logs,
-on-demand single-frame preview via OpenCV with a 5-second hard timeout
-and thread-guarded release. P8 next — wait for the user.
+P1 + P2 + P3 + P5 + P6 + P7 complete. **P8 complete**: per-camera
+background capture workers (4 fps, reconnect-with-backoff), IoU
+tracker, detection_events emitted one-per-track-entry, Fernet-encrypted
+crops under `/data/faces/captures/`, per-minute camera_health_snapshots.
+Capture manager hot-reloads on camera CRUD. P9 next — wait for the user.
 
 ## Stack
 - Python 3.11
@@ -22,6 +23,10 @@ and thread-guarded release. P8 next — wait for the user.
   credentials (P7)
 - opencv-python-headless + numpy for the RTSP single-frame grab (P7)
   and the capture pipeline (P8)
+- insightface (+ onnxruntime CPU) for buffalo_l face detection in P8
+  (recognition module skipped until P9). Model files auto-download to
+  `/root/.insightface` (mounted as a named volume so they survive
+  container restarts).
 - psycopg 3 (binary) for Postgres
 - Dev tooling: ruff, black, mypy (strict), pytest + httpx + pytest-asyncio
 
@@ -61,11 +66,18 @@ backend/
       photos.py                # Fernet write/read + filename parser + photo-row helpers
       router.py                # /api/employees/... including /photos endpoints
     cameras/                   # P7
-      __init__.py
+      __init__.py              # intentionally does NOT re-export router (P8 broke the cycle)
       schemas.py               # CameraCreateIn, CameraPatchIn, CameraOut (no rtsp_url outbound)
       repository.py            # tenant-scoped SQL; decrypt-to-parse-host for row views
       rtsp.py                  # Fernet encrypt/decrypt + rtsp_host() + thread-guarded preview grab
-      router.py                # /api/cameras/... including /preview
+      router.py                # /api/cameras/... including /preview (notifies capture_manager on CRUD)
+    capture/                   # P8
+      __init__.py              # exports the capture_manager singleton
+      tracker.py               # pure IoU tracker: match detections to tracks, drop idle tracks
+      analyzer.py              # Analyzer protocol + InsightFace buffalo_l wrapper + test stub hook
+      events.py                # emit_detection_event: encrypt crop + DB insert; write_health_snapshot
+      reader.py                # CaptureWorker: 4 fps read loop + reconnect backoff + per-minute health flush
+      manager.py               # CaptureManager singleton + on_camera_created/updated/deleted hooks
   scripts/
     __init__.py
     seed_admin.py              # python -m scripts.seed_admin
@@ -76,6 +88,8 @@ backend/
     test_employees.py          #  5 tests — P5 coverage
     test_photos.py             #  6 tests — P6 coverage (Fernet-at-rest, bulk, drawer, 403)
     test_cameras.py            # 10 tests — P7 coverage (CRUD, encryption, host parse, preview stub, 403)
+    test_tracker.py            #  8 tests — P8 IoU tracker pure logic
+    test_capture.py            #  5 tests — P8 worker + manager (scripted feed, stub analyzer)
 ```
 
 ## Schema map (P2)
@@ -319,6 +333,63 @@ pipeline (P8) reuses ``rtsp.decrypt_url`` + ``rtsp.rtsp_host`` from
 this module and runs its own long-lived reader — the preview never
 shares a stream handle with the background workers.
 
+## Capture pipeline (P8)
+One background worker thread per enabled camera. Spawned by the
+``capture_manager`` singleton on FastAPI lifespan startup; hot-reloaded
+when the P7 router processes a camera create / update / delete.
+
+**Worker loop** (``hadir/capture/reader.py``):
+
+1. ``cv2.VideoCapture(plain_url)``; on failure record a health snapshot
+   with ``reachable=false`` + exponential backoff and retry.
+2. Read frames at ``target_fps=4`` (configurable). Each frame goes
+   through ``analyzer.detect`` → ``IoUTracker.update``.
+3. **One ``detection_events`` row per track entry**, not per frame.
+   The tracker flags ``is_new=True`` on the first frame of a track;
+   every continuation frame returns the same ``track_id`` with
+   ``is_new=False`` and is intentionally ignored. This is what keeps
+   the events table bounded regardless of dwell time.
+4. On emit: crop the frame to the bbox → JPEG-encode → Fernet-encrypt
+   → write to
+   ``/data/faces/captures/{tenant_id}/{camera_id}/{YYYY-MM-DD}/{uuid}.jpg`` →
+   insert the ``detection_events`` row. P9 backfills the embedding /
+   employee_id / confidence columns.
+5. Every 60 s, write one ``camera_health_snapshots`` row with
+   ``frames_last_minute`` and ``reachable=true`` and bump
+   ``cameras.last_seen_at``.
+
+**Durability contract**: the on-disk crop write happens before the DB
+insert, and both complete before the worker advances to the next
+detection. If the process crashes between write and insert we leak an
+unreferenced file (acceptable pilot trade-off); once the row is
+committed the event survives a restart. On-disk crops are always
+Fernet-encrypted — opening one with an image viewer produces garbage.
+
+**Plaintext URL lifecycle**: the decrypted URL exists only on the
+worker's stack frame. On rotate/delete the manager stops the worker
+(which drops its reference) and spawns a new one with the freshly
+decrypted new URL. No log line, audit row, or exception message ever
+carries it.
+
+**Hot-reload**: ``capture_manager.on_camera_created/updated/deleted``
+are called by the P7 router. ``on_camera_updated`` always stops the
+old worker and re-reads the DB row, so credential rotations and
+enabled-flag toggles take effect immediately without polling.
+
+**Config knobs** (see ``ReaderConfig`` in ``reader.py``):
+``target_fps`` (4), ``iou_threshold`` (0.3), ``track_idle_timeout_s``
+(3), ``reconnect_backoff_initial_s`` (1), ``reconnect_backoff_max_s``
+(30), ``health_interval_s`` (60). All overridable from
+``capture_manager.start(config=…)``.
+
+**Test isolation**: ``tests/conftest.py`` installs an autouse
+session-scoped fixture that neutralises ``capture_manager.start/stop``,
+so ``TestClient(app)`` entering the lifespan doesn't try to spawn real
+workers. The P8 tests instantiate their own ``CaptureManager`` objects
+with stubbed analyzers and scripted ``VideoCapture`` feeds — the suite
+runs without OpenCV touching a real camera or InsightFace loading the
+buffalo_l model.
+
 ## Pilot prompt currently active
-P7 — done. Next: **P8 — Background capture pipeline + IoU tracker +
-detection events.** Wait for the user before starting P8.
+P8 — done. Next: **P9 — Face identification (InsightFace embeddings +
+matching).** Wait for the user before starting P9.

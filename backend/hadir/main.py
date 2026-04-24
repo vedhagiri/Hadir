@@ -20,7 +20,8 @@ from fastapi import FastAPI
 from hadir import __version__
 from hadir.auth import get_rate_limiter
 from hadir.auth import router as auth_router
-from hadir.cameras import router as cameras_router
+from hadir.cameras.router import router as cameras_router
+from hadir.capture import capture_manager
 from hadir.config import get_settings
 from hadir.employees import router as employees_router
 
@@ -49,9 +50,13 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
     limiter = get_rate_limiter()
     limiter.start()
+    capture_manager.start()
     try:
         yield
     finally:
+        # Stop capture first so workers don't try to write after the
+        # engine pool starts draining.
+        capture_manager.stop()
         limiter.stop()
 
 

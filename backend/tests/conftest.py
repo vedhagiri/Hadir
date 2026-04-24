@@ -17,6 +17,7 @@ from sqlalchemy.engine import Engine
 
 from hadir.auth.passwords import hash_password
 from hadir.auth.ratelimit import reset_rate_limiter
+from hadir.capture import capture_manager as _capture_manager
 from hadir.db import (
     audit_log,
     cameras,
@@ -48,6 +49,30 @@ def _reset_rate_limiter() -> Iterator[None]:
     reset_rate_limiter()
     yield
     reset_rate_limiter()
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _neutralise_capture_manager() -> Iterator[None]:
+    """Prevent the singleton capture manager from spawning real workers.
+
+    TestClient(app) enters the FastAPI lifespan for every test, which
+    would otherwise call ``capture_manager.start()`` — that iterates the
+    cameras table and spins up OpenCV VideoCapture threads. We don't
+    want test runs touching real RTSP endpoints or the InsightFace
+    model, so we stub both start and stop while the session is active.
+    The dedicated tests in test_capture.py instantiate their own
+    ``CaptureManager`` objects and are unaffected.
+    """
+
+    original_start = _capture_manager.start
+    original_stop = _capture_manager.stop
+    _capture_manager.start = lambda **_kw: None  # type: ignore[assignment]
+    _capture_manager.stop = lambda: None  # type: ignore[assignment]
+    try:
+        yield
+    finally:
+        _capture_manager.start = original_start  # type: ignore[assignment]
+        _capture_manager.stop = original_stop  # type: ignore[assignment]
 
 
 def _create_user(

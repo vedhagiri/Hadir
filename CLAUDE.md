@@ -12,9 +12,9 @@ The pilot is a 5-day single-tenant demo on a corporate LAN; v1.0 is the
 multi-tenant SaaS-capable product 8–10 weeks after pilot signoff.
 
 ## Status
-**Pilot prompts currently complete: P1 + P2 + P3 + P4 + P5 + P6 + P7.**
-Next: P8 — Background capture pipeline + IoU tracker + detection
-events. Wait for the user before starting it.
+**Pilot prompts currently complete: P1–P8.**
+Next: P9 — Face identification (InsightFace embeddings + matching).
+Wait for the user before starting it.
 
 What P1 built:
 - Monorepo layout per PROJECT_CONTEXT §7
@@ -180,6 +180,58 @@ What P7 built:
   `docker compose logs backend | grep -E "rtsp://[^\" ]*:[^@]*@"`
   returns **0 lines**; neither the plain password nor the username
   appears anywhere in logs, responses, or audit payloads.
+
+What P8 built:
+- Alembic migration `0004_capture` creates `detection_events` (id,
+  tenant_id, camera_id, captured_at, bbox JSONB, face_crop_path,
+  embedding BYTEA nullable, employee_id nullable, confidence float
+  nullable, track_id) and `camera_health_snapshots` (one row per
+  minute per camera, with `frames_last_minute` + `reachable` + optional
+  `note`). Indexes on `(tenant_id, captured_at)` plus camera + employee
+  partitioned variants for P11/P12.
+- `hadir/capture/` package: pure IoU tracker (threshold 0.3, idle
+  timeout 3s, greedy association with no double-claim), InsightFace
+  `buffalo_l` detection wrapper (recognition skipped; lazy-imported so
+  tests don't trigger the 250 MB model download), event emitter that
+  Fernet-encrypts + writes face crops under
+  `/data/faces/captures/{tenant}/{camera}/{YYYY-MM-DD}/{uuid}.jpg`,
+  per-camera reader with reconnect backoff + 4 fps throttle, and a
+  `CaptureManager` singleton that supervises one worker per enabled
+  camera.
+- **One detection_events row per track entry**, not per frame — the
+  reader only emits when the tracker returns `is_new=True`. A face
+  standing in frame for 30 seconds at 4 fps generates 1 event, not 120.
+- **Hot reload**: the P7 cameras router now calls
+  `capture_manager.on_camera_{created,updated,deleted}` so credential
+  rotations and enabled toggles take effect immediately — no polling.
+- **Durability**: encrypted crop is written to disk *before* the DB
+  insert, and both commit before the worker moves to the next
+  detection. A crash mid-write leaks an unreferenced file; a committed
+  row survives restart.
+- **New deps**: `insightface==0.7.3`, `onnxruntime==1.19.2`. New named
+  volume `insightface_models` mounted at `/root/.insightface` so the
+  buffalo_l model downloads once and persists across restarts.
+- **Test isolation**: `tests/conftest.py` neutralises the capture
+  manager's start/stop for the test session (autouse fixture) so
+  `TestClient(app)` entering the FastAPI lifespan never spawns real
+  workers. P8's own tests inject a scripted `VideoCapture` and a
+  stub analyzer — the suite never touches OpenCV network code or the
+  InsightFace model.
+- **Pytest coverage**: +13 new (47 total) — 8 tracker unit tests
+  (IoU math, new/continued tracks, idle expiry, no double-claim) and
+  5 integration tests covering: worker emits one event per new track,
+  on-disk crops are Fernet-encrypted not JPEG, manager spawns + tears
+  down on camera CRUD hot-reload, health snapshot written before
+  worker exit, and a shape check against the pilot-plan's
+  `SELECT COUNT(*) FROM detection_events WHERE captured_at > now() -
+  interval '5 minutes'` verification query.
+- **Live smoke**: `POST /api/cameras` with an intentionally-dead host
+  → capture manager logs `capture worker started for camera id=…
+  host=…` immediately; within 4 s a `camera_health_snapshots` row
+  lands with `reachable=f` and note `could not open stream`; no
+  plaintext RTSP URL and no injected credential string appears in the
+  backend logs (`grep -cE "rtsp://[^\" ]*:[^@]*@" = 0`,
+  `grep -cE "fake_user|fake_pw" = 0`).
 
 ## Tech stack (summary)
 - **Backend:** Python 3.11, FastAPI, Uvicorn, SQLAlchemy 2.x Core, Pydantic

@@ -44,6 +44,10 @@ services:
       # /data/faces. Kept on a named volume so photos survive
       # `docker compose down` but reset on `down -v`.
       - faces_data:/data
+      # InsightFace model cache (~250 MB buffalo_l). The library
+      # downloads to $HOME/.insightface on first use; keeping it on a
+      # named volume avoids re-downloading on every container restart.
+      - insightface_models:/root/.insightface
     ports:
       - "8000:8000"
     depends_on:
@@ -70,3 +74,4 @@ volumes:
   postgres_data:
   frontend_node_modules:
   faces_data:
+  insightface_models:

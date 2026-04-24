@@ -20,6 +20,8 @@ dependencies = [
     "cryptography==43.0.1",
     "opencv-python-headless==4.10.0.84",
     "numpy==1.26.4",
+    "insightface==0.7.3",
+    "onnxruntime==1.19.2",
 ]
 
 [project.optional-dependencies]
