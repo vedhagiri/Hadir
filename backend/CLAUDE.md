@@ -1,8 +1,10 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-P1 complete. **P2 complete**: Alembic + initial schema + multi-tenant plumbing
-+ DB role split + seed admin script. P3 next — wait for the user.
+P1 + P2 complete. **P3 complete**: local email+password auth, server-side
+sessions in `main.user_sessions`, role guards, per-(email, IP) login
+rate-limiter with APScheduler reset, audit writes on login/logout/expiry.
+P4 next — wait for the user.
 
 ## Stack
 - Python 3.11
@@ -10,8 +12,10 @@ P1 complete. **P2 complete**: Alembic + initial schema + multi-tenant plumbing
 - SQLAlchemy 2.x **Core** (not ORM) — table defs live in `hadir/db.py`
 - Alembic 1.13 migrations — single initial revision `0001_initial`
 - Pydantic v2 + pydantic-settings (`hadir/config.py`, env prefix `HADIR_`)
-- Argon2-cffi for password hashing (used by `scripts/seed_admin.py`; full
-  auth in P3)
+- Argon2-cffi for password hashing (P3 auth, seed admin script)
+- APScheduler for in-process background jobs (P3 rate-limit reset; P8/P10
+  will schedule capture supervision + attendance recompute)
+- email-validator for Pydantic `EmailStr`
 - psycopg 3 (binary) for Postgres
 - Dev tooling: ruff, black, mypy (strict), pytest + httpx + pytest-asyncio
 
@@ -29,16 +33,27 @@ backend/
       0001_initial.py          # schema, citext, DB roles, grants, seed
   hadir/
     __init__.py
-    main.py                    # FastAPI app factory + /api/health
-    config.py                  # Settings (HADIR_* env vars, dual DB URLs)
+    main.py                    # FastAPI app factory + /api/health + lifespan
+    config.py                  # Settings (HADIR_* env vars, dual DB URLs, P3 knobs)
     db.py                      # metadata (schema=main) + all 8 tables + engine factories
+    auth/                      # P3
+      __init__.py              # re-exports CurrentUser, router, guards
+      passwords.py             # argon2id hash/verify
+      sessions.py              # user_sessions CRUD + sliding expiry helpers
+      audit.py                 # write_audit() — INSERT only
+      ratelimit.py             # in-memory (email, IP) counter + APScheduler
+      dependencies.py          # current_user, require_role, require_any_role, require_department
+      router.py                # /api/auth/{login,logout,me}
     tenants/
       __init__.py
       scope.py                 # TenantScope + get_tenant_scope FastAPI dep
   scripts/
     __init__.py
     seed_admin.py              # python -m scripts.seed_admin
-  tests/                       # P3+
+  tests/
+    __init__.py
+    conftest.py                # admin/employee user fixtures via admin engine
+    test_auth.py               # 13 tests — P3 coverage
 ```
 
 ## Schema map (P2)
@@ -132,6 +147,62 @@ not a shortcut.
 - Auth/repository layers (P3+) pass `TenantScope` explicitly. No reaching
   into `request.state` from deep code paths.
 
+## Auth (P3)
+Endpoints:
+- `POST /api/auth/login` — body `{email, password}`. 200 sets the
+  `hadir_session` cookie (`HttpOnly`, `SameSite=Lax`, `Secure=False` in
+  dev, `Path=/`, `Max-Age=HADIR_SESSION_IDLE_MINUTES * 60`). 401 on bad
+  credentials. 429 when rate-limited.
+- `POST /api/auth/logout` — 204, deletes the session row and clears the
+  cookie. Requires an authenticated session.
+- `GET  /api/auth/me` — returns `{id, email, full_name, roles[], departments[]}`.
+
+Sessions: stored in `main.user_sessions`; ID is `secrets.token_urlsafe(48)`.
+Sliding expiry — every authenticated request bumps `expires_at` by
+`HADIR_SESSION_IDLE_MINUTES` (default 60) and refreshes the cookie Max-Age.
+Expired sessions are deleted and audited as `auth.session.expired`. Never
+use JWT here.
+
+Dependencies (in `hadir.auth`):
+- `current_user` — resolves the session, refreshes expiry, sets
+  `request.state.tenant_id`, returns `CurrentUser`. 401 on missing /
+  invalid / expired / inactive.
+- `require_role("Admin")`, `require_any_role("Admin", "HR")` — 403 guards
+  that compose on `current_user`.
+- `require_department` — reads the path param `department_id`. Admin/HR
+  bypass; everyone else must be a member.
+
+Audit actions emitted by this module (all INSERT only, via
+`hadir_app` — see "Database roles and grants"):
+- `auth.login.success`   (entity=user)
+- `auth.login.failure`   (entity=user; records `email_attempted`, `reason`
+  in `{unknown_email, wrong_password, inactive_user}`, `attempts`, `ip`)
+- `auth.login.rate_limited` (entity=user, entity_id null)
+- `auth.logout`          (entity=session)
+- `auth.session.expired` (entity=session)
+
+**Red line reinforcement:** the plain password never appears in an audit
+row, a log line, an exception message, or a response body. If you ever
+see it somewhere, that's a bug — fix it, don't justify it.
+
+## Rate limiter (pilot-grade)
+In-memory `(email_lower, ip) -> count`, max attempts
+`HADIR_LOGIN_MAX_ATTEMPTS` (default 10), reset every
+`HADIR_LOGIN_RATE_LIMIT_RESET_MINUTES` (default 10) by an APScheduler job
+started via the FastAPI lifespan. On successful login the counter for
+that key is cleared. This is a pilot-only placeholder — it has no
+cross-process coordination and forgets on restart. **v1.0 must replace it
+with a Redis-backed bucket before going to production.**
+
+## Testing
+Tests run inside the backend container against the compose Postgres:
+```
+docker compose exec backend pytest -q
+```
+Fixtures create/delete test users via the admin engine, so `audit_log`
+rows created during a test can be cleaned up (the app role cannot DELETE
+from the audit log — that's the point of P2).
+
 ## Pilot prompt currently active
-P2 — done. Next: **P3 — Local auth, server-side sessions, role guards.**
-Wait for the user before starting P3.
+P3 — done. Next: **P4 — Frontend shell, login page, role-aware navigation.**
+Wait for the user before starting P4.

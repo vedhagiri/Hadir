@@ -52,6 +52,26 @@ class Settings(BaseSettings):
     # goes away and tenant is derived from the session or request host.
     default_tenant_id: int = 1
 
+    # --- Session cookie + sliding expiry (P3) ------------------------------
+    # Idle timeout in minutes. Every authenticated request extends the
+    # session's ``expires_at`` by this amount; it never becomes an absolute
+    # session lifetime (per PROJECT_CONTEXT the pilot prioritises convenience
+    # over belt-and-braces security).
+    session_idle_minutes: int = 60
+    # Cookie name. Kept stable so an operator can invalidate all pilot
+    # sessions by renaming it in config + bouncing the service.
+    session_cookie_name: str = "hadir_session"
+    # HTTPS is out of scope for the pilot (PROJECT_CONTEXT §8 — deferred);
+    # flip this to ``True`` the moment we wire TLS in v1.0.
+    session_cookie_secure: bool = False
+
+    # --- Login rate limit (P3) ---------------------------------------------
+    # Pilot-grade in-memory counter, keyed by (email, client IP), reset on
+    # a 10-minute schedule by APScheduler. Any real deployment should
+    # replace this with a distributed store (Redis) before going live.
+    login_max_attempts: int = 10
+    login_rate_limit_reset_minutes: int = 10
+
 
 def get_settings() -> Settings:
     """Return a fresh Settings instance.

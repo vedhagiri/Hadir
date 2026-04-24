@@ -283,3 +283,26 @@ def make_admin_engine() -> Engine:
 
     settings = get_settings()
     return create_engine(settings.admin_database_url, pool_pre_ping=True, future=True)
+
+
+# Process-wide runtime engine. Lazily created so tests that override the
+# database URL before first access get a correctly-configured pool.
+_engine: Engine | None = None
+
+
+def get_engine() -> Engine:
+    """Return the cached app-runtime engine, creating it on first call."""
+
+    global _engine
+    if _engine is None:
+        _engine = make_engine()
+    return _engine
+
+
+def reset_engine() -> None:
+    """Drop the cached engine. Test-only utility."""
+
+    global _engine
+    if _engine is not None:
+        _engine.dispose()
+    _engine = None

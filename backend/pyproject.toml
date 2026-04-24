@@ -13,6 +13,8 @@ dependencies = [
     "argon2-cffi==23.1.0",
     "python-dotenv==1.0.1",
     "alembic==1.13.3",
+    "apscheduler==3.10.4",
+    "email-validator==2.2.0",
 ]
 
 [project.optional-dependencies]

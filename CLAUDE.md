@@ -12,9 +12,9 @@ The pilot is a 5-day single-tenant demo on a corporate LAN; v1.0 is the
 multi-tenant SaaS-capable product 8–10 weeks after pilot signoff.
 
 ## Status
-**Pilot prompts currently complete: P1 + P2.**
-Next: P3 — Local auth, server-side sessions, role guards. Wait for the
-user before starting it.
+**Pilot prompts currently complete: P1 + P2 + P3.**
+Next: P4 — Frontend shell, login page, role-aware navigation. Wait for
+the user before starting it.
 
 What P1 built:
 - Monorepo layout per PROJECT_CONTEXT §7
@@ -52,6 +52,28 @@ What P2 built:
   launching Uvicorn
 - New env vars: `HADIR_ADMIN_DATABASE_URL`, `HADIR_APP_DB_PASSWORD`,
   `HADIR_ADMIN_DB_PASSWORD`
+
+What P3 built:
+- `hadir/auth/` package — argon2id passwords, server-side sessions in
+  `main.user_sessions`, append-only audit writer, in-memory rate limiter
+  (APScheduler reset every 10 min), FastAPI deps and router
+- Endpoints `/api/auth/login`, `/api/auth/logout`, `/api/auth/me`
+- Session cookie `hadir_session`: HttpOnly, SameSite=Lax, Secure=False in
+  dev, Path=/, Max-Age from `HADIR_SESSION_IDLE_MINUTES` (default 60)
+- Sliding expiry — every authenticated request refreshes `expires_at`
+  and cookie Max-Age
+- Dependencies: `current_user`, `require_role`, `require_any_role`,
+  `require_department`; `current_user` also sets `request.state.tenant_id`
+  so the P2 tenant scope dependency picks it up
+- Audit actions: `auth.login.success`, `auth.login.failure`,
+  `auth.login.rate_limited`, `auth.logout`, `auth.session.expired` —
+  all INSERT-only via hadir_app
+- pytest suite (13 tests): happy path, wrong password, unknown email,
+  case-insensitive email, expired session, logout, role guard allow/deny
+  for Admin/Employee on role + any_role + department deps
+- New env vars: `HADIR_SESSION_IDLE_MINUTES`, `HADIR_SESSION_COOKIE_NAME`,
+  `HADIR_SESSION_COOKIE_SECURE`, `HADIR_LOGIN_MAX_ATTEMPTS`,
+  `HADIR_LOGIN_RATE_LIMIT_RESET_MINUTES`
 
 ## Tech stack (summary)
 - **Backend:** Python 3.11, FastAPI, Uvicorn, SQLAlchemy 2.x Core, Pydantic
