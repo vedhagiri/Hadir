@@ -339,6 +339,44 @@ employee_photos = Table(
 )
 
 
+# --- Cameras (P7) -----------------------------------------------------------
+
+cameras = Table(
+    "cameras",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey(f"{SCHEMA}.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column("name", Text, nullable=False),
+    Column("location", Text, nullable=False, server_default=""),
+    # Fernet-encrypted text token. The plain URL (with credentials) lives
+    # NOWHERE else — not in logs, API responses, audit rows, or error
+    # messages. Decrypt happens only when a request needs to hit the
+    # camera (preview now; capture pipeline in P8).
+    Column("rtsp_url_encrypted", Text, nullable=False),
+    Column("enabled", Boolean, nullable=False, server_default="true"),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    Column("last_seen_at", DateTime(timezone=True), nullable=True),
+    Column(
+        "images_captured_24h",
+        Integer,
+        nullable=False,
+        server_default="0",
+    ),
+    UniqueConstraint("tenant_id", "name", name="uq_cameras_tenant_name"),
+)
+
+
 # --- Engines ----------------------------------------------------------------
 
 

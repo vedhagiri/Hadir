@@ -1,10 +1,10 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-P1 + P2 + P3 + P5 complete. **P6 complete**: photo ingestion
-endpoints (per-employee drawer upload + folder-dump bulk), Fernet
-encryption at rest under `/data/faces`, auth-gated decrypt endpoint,
-per-ingest and per-rejection audit rows. P7 next — wait for the user.
+P1 + P2 + P3 + P5 + P6 complete. **P7 complete**: cameras CRUD with
+Fernet-encrypted RTSP URLs at rest, host-only responses/audits/logs,
+on-demand single-frame preview via OpenCV with a 5-second hard timeout
+and thread-guarded release. P8 next — wait for the user.
 
 ## Stack
 - Python 3.11
@@ -18,7 +18,10 @@ per-ingest and per-rejection audit rows. P7 next — wait for the user.
 - email-validator for Pydantic `EmailStr`
 - openpyxl for XLSX import/export (P5)
 - python-multipart for FastAPI `UploadFile` handling (P5)
-- cryptography.Fernet for encrypted-at-rest face photos (P6)
+- cryptography.Fernet for encrypted-at-rest face photos (P6) and RTSP
+  credentials (P7)
+- opencv-python-headless + numpy for the RTSP single-frame grab (P7)
+  and the capture pipeline (P8)
 - psycopg 3 (binary) for Postgres
 - Dev tooling: ruff, black, mypy (strict), pytest + httpx + pytest-asyncio
 
@@ -57,6 +60,12 @@ backend/
       excel.py                 # openpyxl parse_import() + build_export()
       photos.py                # Fernet write/read + filename parser + photo-row helpers
       router.py                # /api/employees/... including /photos endpoints
+    cameras/                   # P7
+      __init__.py
+      schemas.py               # CameraCreateIn, CameraPatchIn, CameraOut (no rtsp_url outbound)
+      repository.py            # tenant-scoped SQL; decrypt-to-parse-host for row views
+      rtsp.py                  # Fernet encrypt/decrypt + rtsp_host() + thread-guarded preview grab
+      router.py                # /api/cameras/... including /preview
   scripts/
     __init__.py
     seed_admin.py              # python -m scripts.seed_admin
@@ -66,6 +75,7 @@ backend/
     test_auth.py               # 13 tests — P3 coverage
     test_employees.py          #  5 tests — P5 coverage
     test_photos.py             #  6 tests — P6 coverage (Fernet-at-rest, bulk, drawer, 403)
+    test_cameras.py            # 10 tests — P7 coverage (CRUD, encryption, host parse, preview stub, 403)
 ```
 
 ## Schema map (P2)
@@ -286,6 +296,29 @@ PROJECT_CONTEXT §8.
 **No embeddings yet** — the `embedding` column doesn't exist on
 `employee_photos` until P9 adds it via Alembic.
 
+## Cameras (P7)
+All endpoints Admin-only. Every audit row and log line uses
+``rtsp_host`` at most — the plaintext URL only ever exists inside a
+decrypt-to-use block (encrypt on write; decrypt to hit the camera;
+discard). If you see a full ``rtsp://user:pass@…`` anywhere outside
+``rtsp.py``, that is a bug — fix it, don't justify it.
+
+| Method + Path                         | Purpose                                           | Audit                                   |
+| ------------------------------------- | ------------------------------------------------- | --------------------------------------- |
+| `GET  /api/cameras`                   | List; returns ``rtsp_host`` only (never the URL)  | —                                       |
+| `POST /api/cameras`                   | Create; Fernet-encrypts the URL before insert     | `camera.created` (after.rtsp_host only) |
+| `PATCH /api/cameras/{id}`             | Partial edit; omitted ``rtsp_url`` keeps cipher   | `camera.updated` (before/after rtsp_host + `rtsp_url_rotated` flag if host unchanged) |
+| `DELETE /api/cameras/{id}`            | Hard delete                                       | `camera.deleted`                        |
+| `GET  /api/cameras/{id}/preview`      | Single JPEG frame; 5-second hard timeout; closes  | `camera.previewed` (rtsp_host only)     |
+
+The preview path runs the OpenCV grab on a throwaway worker thread
+inside a ``concurrent.futures`` 5-second wall clock. On timeout or
+unreachable host it returns **504** with a host-safe detail string
+(``"preview timed out"`` / ``"could not open stream"``). The capture
+pipeline (P8) reuses ``rtsp.decrypt_url`` + ``rtsp.rtsp_host`` from
+this module and runs its own long-lived reader — the preview never
+shares a stream handle with the background workers.
+
 ## Pilot prompt currently active
-P6 — done. Next: **P7 — Cameras CRUD, encrypted RTSP, on-demand
-live preview.** Wait for the user before starting P7.
+P7 — done. Next: **P8 — Background capture pipeline + IoU tracker +
+detection events.** Wait for the user before starting P8.

@@ -12,9 +12,9 @@ The pilot is a 5-day single-tenant demo on a corporate LAN; v1.0 is the
 multi-tenant SaaS-capable product 8–10 weeks after pilot signoff.
 
 ## Status
-**Pilot prompts currently complete: P1 + P2 + P3 + P4 + P5 + P6.**
-Next: P7 — Cameras CRUD, encrypted RTSP, on-demand live preview. Wait
-for the user before starting it.
+**Pilot prompts currently complete: P1 + P2 + P3 + P4 + P5 + P6 + P7.**
+Next: P8 — Background capture pipeline + IoU tracker + detection
+events. Wait for the user before starting it.
 
 What P1 built:
 - Monorepo layout per PROJECT_CONTEXT §7
@@ -141,6 +141,45 @@ What P6 built:
 - Pytest coverage: +6 new tests (24 total) covering filename
   convention, auto-create refusal, Fernet-on-disk, decrypt
   round-trip, drawer photo-count update, 403 for Employee.
+
+What P7 built:
+- Alembic migration `0003_cameras` creates the `cameras` table
+  (id, tenant_id, name, location, rtsp_url_encrypted, enabled,
+  created_at, last_seen_at, images_captured_24h) owned by hadir_admin
+  with full CRUD granted to hadir_app. Unique on `(tenant_id, name)`.
+- `hadir/cameras/` package: Fernet encrypt/decrypt of the RTSP URL
+  (same `HADIR_FERNET_KEY` as photos), host-only parser that strips
+  userinfo, thread-guarded single-frame grab via OpenCV
+  (`opencv-python-headless`) with a 5-second hard wall-clock timeout.
+- Endpoints (all Admin-only, audit-logged):
+  - `GET /api/cameras` — host-only response
+  - `POST /api/cameras` — encrypts URL before insert
+  - `PATCH /api/cameras/{id}` — omitted `rtsp_url` leaves cipher
+    untouched; when rotated on same host, audit flags
+    `rtsp_url_rotated: true`
+  - `DELETE /api/cameras/{id}`
+  - `GET /api/cameras/{id}/preview` — opens → one frame → closes;
+    504 on timeout/unreachable, with host-safe detail string
+- Audit actions: `camera.created`, `camera.updated`, `camera.deleted`,
+  `camera.previewed`. Every audit `before`/`after` payload carries
+  `rtsp_host` only — never the plaintext URL.
+- Frontend: `/cameras` route now renders a real page with per-row
+  Preview / Edit / Delete, an Add/Edit drawer whose RTSP field shows
+  `***` on edit and only sends a new URL when the user actually types
+  one, and a preview modal that fetches via blob URL and offers a
+  Refresh button (revokes URL on unmount).
+- New deps: `opencv-python-headless`, `numpy`. Backend image grew
+  accordingly.
+- Pytest coverage: +10 new tests (34 total) covering host parser,
+  encrypt/decrypt round-trip, CRUD surface (ciphertext in DB, host
+  only in responses), PATCH-without-url preserves cipher,
+  PATCH-with-url rotates cipher, audit never carries plain URL,
+  preview stub returns canned JPEG, preview 504 on timeout, 403 for
+  Employee.
+- Red-line check on the live stack: after full CRUD + rotation, a
+  `docker compose logs backend | grep -E "rtsp://[^\" ]*:[^@]*@"`
+  returns **0 lines**; neither the plain password nor the username
+  appears anywhere in logs, responses, or audit payloads.
 
 ## Tech stack (summary)
 - **Backend:** Python 3.11, FastAPI, Uvicorn, SQLAlchemy 2.x Core, Pydantic

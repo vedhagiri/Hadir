@@ -20,6 +20,7 @@ from fastapi import FastAPI
 from hadir import __version__
 from hadir.auth import get_rate_limiter
 from hadir.auth import router as auth_router
+from hadir.cameras import router as cameras_router
 from hadir.config import get_settings
 from hadir.employees import router as employees_router
 
@@ -76,6 +77,7 @@ def create_app() -> FastAPI:
 
     app.include_router(auth_router)
     app.include_router(employees_router)
+    app.include_router(cameras_router)
 
     logging.getLogger(__name__).info(
         "Hadir backend started (env=%s, tenant_mode=%s)", settings.env, settings.tenant_mode

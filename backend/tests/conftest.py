@@ -19,6 +19,7 @@ from hadir.auth.passwords import hash_password
 from hadir.auth.ratelimit import reset_rate_limiter
 from hadir.db import (
     audit_log,
+    cameras,
     departments,
     employee_photos,
     employees,
@@ -137,6 +138,17 @@ def client() -> Iterator[TestClient]:
 
     with TestClient(app) as tc:
         yield tc
+
+
+@pytest.fixture
+def clean_cameras(admin_engine: Engine) -> Iterator[None]:
+    """Wipe the cameras table before and after each test."""
+
+    with admin_engine.begin() as conn:
+        conn.execute(delete(cameras))
+    yield
+    with admin_engine.begin() as conn:
+        conn.execute(delete(cameras))
 
 
 @pytest.fixture

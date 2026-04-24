@@ -1,12 +1,11 @@
 # Hadir frontend — Claude Code notes
 
 ## Status
-P1 + P4 complete. **P6 complete**: `/employees` route now renders a
-real list page with search + department filter + include-inactive
-toggle, an Excel import modal (drag-and-drop or file picker) that
-stays open until acknowledged, and a right-sliding detail drawer with
-a photo gallery (auth-gated decrypt endpoint) + multi-file drop zone.
-Other 22 placeholder routes unchanged; P7+ replaces them.
+P1 + P4 + P6 complete. **P7 complete**: `/cameras` route renders a
+real list page with per-row Preview / Edit / Delete, an Add/Edit
+drawer whose RTSP field shows `***` on edit (stored credential kept
+when blank), and a preview modal that fetches a single frame and
+offers a Refresh button. 21 placeholder routes remain for P8+.
 
 ## Stack
 - Vite 5 + React 18
@@ -56,6 +55,12 @@ frontend/
         EmployeesPage.tsx # ported from design/pages.jsx::EmployeesPage
         ImportModal.tsx   # Excel import flow with per-row results
         EmployeeDrawer.tsx # right-sliding detail drawer + photo drop zone
+      cameras/            # P7
+        types.ts          # Camera/CameraCreateInput/CameraPatchInput (rtsp_url inbound only)
+        hooks.ts          # useCameras / useCreateCamera / usePatchCamera / useDeleteCamera
+        CamerasPage.tsx   # list with Preview/Edit/Delete per row
+        CameraDrawer.tsx  # Add/Edit drawer; RTSP field is *** placeholder on edit
+        PreviewModal.tsx  # single-frame fetch + Refresh; revokes blob URLs on unmount
     styles/               # design CSS, copied verbatim — DO NOT EDIT
       styles.css
       styles-enhancements.css
@@ -106,5 +111,5 @@ identity card with a TODO comment pointing at the deferred switcher.
 - `docker compose exec frontend npm run dev` — Vite hot-reloads on save.
 
 ## Pilot prompt currently active
-P6 — done. Next: **P7 — Cameras CRUD, encrypted RTSP, on-demand live
-preview.** Wait for the user before starting P7.
+P7 — done. Next: **P8 — Background capture pipeline + IoU tracker +
+detection events.** Wait for the user before starting P8.
