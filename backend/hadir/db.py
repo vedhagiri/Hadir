@@ -259,6 +259,86 @@ audit_log = Table(
 )
 
 
+# --- Employees (P5) ---------------------------------------------------------
+
+employees = Table(
+    "employees",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey(f"{SCHEMA}.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    # Employee code is the business id (e.g. 'OM0097'). Case-sensitive here;
+    # normalisation happens at the API layer.
+    Column("employee_code", Text, nullable=False),
+    Column("full_name", Text, nullable=False),
+    Column("email", Text, nullable=True),
+    Column(
+        "department_id",
+        Integer,
+        ForeignKey(f"{SCHEMA}.departments.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    # Soft-delete flag. 'inactive' hides the row from every default list;
+    # hard-delete is reserved for the PDPL right-to-erasure flow (v1.0).
+    Column("status", Text, nullable=False, server_default="active"),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    UniqueConstraint("tenant_id", "employee_code", name="uq_employees_tenant_code"),
+    CheckConstraint("status IN ('active','inactive')", name="ck_employees_status"),
+)
+
+
+# Photos land in P6; this table exists in P5 so the FK target is stable and
+# the upcoming file-write path has somewhere to store metadata.
+employee_photos = Table(
+    "employee_photos",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey(f"{SCHEMA}.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "employee_id",
+        Integer,
+        ForeignKey(f"{SCHEMA}.employees.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column("angle", Text, nullable=False, server_default="front"),
+    Column("file_path", Text, nullable=False),
+    Column(
+        "approved_by_user_id",
+        Integer,
+        ForeignKey(f"{SCHEMA}.users.id", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    Column("approved_at", DateTime(timezone=True), nullable=True),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    CheckConstraint(
+        "angle IN ('front','left','right','other')", name="ck_employee_photos_angle"
+    ),
+)
+
+
 # --- Engines ----------------------------------------------------------------
 
 

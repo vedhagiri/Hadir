@@ -1,0 +1,264 @@
+"""Database access for employees — all queries tenant-scoped.
+
+Every function in this module takes a ``TenantScope`` (from
+``hadir.tenants.scope``) and uses ``scope.tenant_id`` in its WHERE clause.
+That's the single chokepoint: if you add a new query and forget the
+filter, v1.0's multi-tenant cut-over will leak data across customers.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Optional
+
+from sqlalchemy import and_, func, insert, or_, select, update
+from sqlalchemy.engine import Connection
+
+from hadir.db import departments, employee_photos, employees
+from hadir.tenants.scope import TenantScope
+
+
+@dataclass(frozen=True, slots=True)
+class EmployeeRow:
+    """Joined shape used by list + detail endpoints."""
+
+    id: int
+    employee_code: str
+    full_name: str
+    email: Optional[str]
+    department_id: int
+    department_code: str
+    department_name: str
+    status: str
+    photo_count: int
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class DepartmentRow:
+    id: int
+    code: str
+    name: str
+
+
+def _photo_count_subquery():
+    """Scalar-correlated photo count used by list/get queries."""
+
+    return (
+        select(func.count(employee_photos.c.id))
+        .where(
+            employee_photos.c.tenant_id == employees.c.tenant_id,
+            employee_photos.c.employee_id == employees.c.id,
+        )
+        .correlate(employees)
+        .scalar_subquery()
+    )
+
+
+def _employee_select(scope: TenantScope):
+    photo_count = _photo_count_subquery().label("photo_count")
+    return (
+        select(
+            employees.c.id,
+            employees.c.employee_code,
+            employees.c.full_name,
+            employees.c.email,
+            employees.c.department_id,
+            departments.c.code.label("department_code"),
+            departments.c.name.label("department_name"),
+            employees.c.status,
+            photo_count,
+            employees.c.created_at,
+        )
+        .select_from(
+            employees.join(
+                departments,
+                and_(
+                    departments.c.id == employees.c.department_id,
+                    departments.c.tenant_id == employees.c.tenant_id,
+                ),
+            )
+        )
+        .where(employees.c.tenant_id == scope.tenant_id)
+    )
+
+
+def _row_to_employee(row) -> EmployeeRow:
+    return EmployeeRow(
+        id=int(row.id),
+        employee_code=str(row.employee_code),
+        full_name=str(row.full_name),
+        email=row.email,
+        department_id=int(row.department_id),
+        department_code=str(row.department_code),
+        department_name=str(row.department_name),
+        status=str(row.status),
+        photo_count=int(row.photo_count),
+        created_at=row.created_at,
+    )
+
+
+# --- Departments ------------------------------------------------------------
+
+
+def get_department_by_code(
+    conn: Connection, scope: TenantScope, code: str
+) -> Optional[DepartmentRow]:
+    row = conn.execute(
+        select(departments.c.id, departments.c.code, departments.c.name).where(
+            departments.c.tenant_id == scope.tenant_id, departments.c.code == code
+        )
+    ).first()
+    if row is None:
+        return None
+    return DepartmentRow(id=int(row.id), code=str(row.code), name=str(row.name))
+
+
+def get_department_by_id(
+    conn: Connection, scope: TenantScope, department_id: int
+) -> Optional[DepartmentRow]:
+    row = conn.execute(
+        select(departments.c.id, departments.c.code, departments.c.name).where(
+            departments.c.tenant_id == scope.tenant_id,
+            departments.c.id == department_id,
+        )
+    ).first()
+    if row is None:
+        return None
+    return DepartmentRow(id=int(row.id), code=str(row.code), name=str(row.name))
+
+
+# --- Employees --------------------------------------------------------------
+
+
+def list_employees(
+    conn: Connection,
+    scope: TenantScope,
+    *,
+    q: Optional[str] = None,
+    department_id: Optional[int] = None,
+    include_inactive: bool = False,
+    page: int = 1,
+    page_size: int = 50,
+) -> tuple[list[EmployeeRow], int]:
+    """Return a page of employees and the total count matching the filters."""
+
+    page = max(1, page)
+    page_size = max(1, min(page_size, 200))
+
+    base = _employee_select(scope)
+    if not include_inactive:
+        base = base.where(employees.c.status == "active")
+    if department_id is not None:
+        base = base.where(employees.c.department_id == department_id)
+    if q:
+        needle = f"%{q.strip().lower()}%"
+        base = base.where(
+            or_(
+                func.lower(employees.c.employee_code).like(needle),
+                func.lower(employees.c.full_name).like(needle),
+                func.lower(employees.c.email).like(needle),
+                func.lower(departments.c.code).like(needle),
+                func.lower(departments.c.name).like(needle),
+            )
+        )
+
+    # Count before applying limit/offset.
+    count_stmt = select(func.count()).select_from(base.subquery())
+    total = int(conn.execute(count_stmt).scalar_one())
+
+    rows = conn.execute(
+        base.order_by(employees.c.employee_code.asc())
+        .limit(page_size)
+        .offset((page - 1) * page_size)
+    ).all()
+    return [_row_to_employee(r) for r in rows], total
+
+
+def get_employee(
+    conn: Connection, scope: TenantScope, employee_id: int
+) -> Optional[EmployeeRow]:
+    row = conn.execute(
+        _employee_select(scope).where(employees.c.id == employee_id)
+    ).first()
+    return _row_to_employee(row) if row is not None else None
+
+
+def get_employee_by_code(
+    conn: Connection, scope: TenantScope, code: str
+) -> Optional[EmployeeRow]:
+    row = conn.execute(
+        _employee_select(scope).where(employees.c.employee_code == code)
+    ).first()
+    return _row_to_employee(row) if row is not None else None
+
+
+def create_employee(
+    conn: Connection,
+    scope: TenantScope,
+    *,
+    employee_code: str,
+    full_name: str,
+    email: Optional[str],
+    department_id: int,
+    status: str = "active",
+) -> int:
+    new_id = conn.execute(
+        insert(employees)
+        .values(
+            tenant_id=scope.tenant_id,
+            employee_code=employee_code,
+            full_name=full_name,
+            email=email,
+            department_id=department_id,
+            status=status,
+        )
+        .returning(employees.c.id)
+    ).scalar_one()
+    return int(new_id)
+
+
+def update_employee(
+    conn: Connection,
+    scope: TenantScope,
+    employee_id: int,
+    *,
+    values: dict[str, object],
+) -> None:
+    """Partial update. ``values`` is pre-filtered to valid columns by caller."""
+
+    if not values:
+        return
+    conn.execute(
+        update(employees)
+        .where(
+            employees.c.id == employee_id,
+            employees.c.tenant_id == scope.tenant_id,
+        )
+        .values(**values)
+    )
+
+
+def soft_delete_employee(
+    conn: Connection, scope: TenantScope, employee_id: int
+) -> None:
+    """Set ``status='inactive'``. Hard delete is the PDPL-only path."""
+
+    conn.execute(
+        update(employees)
+        .where(
+            employees.c.id == employee_id,
+            employees.c.tenant_id == scope.tenant_id,
+        )
+        .values(status="inactive")
+    )
+
+
+def list_all_for_export(conn: Connection, scope: TenantScope) -> list[EmployeeRow]:
+    """Full tenant dump, including inactive rows, for the Excel export."""
+
+    rows = conn.execute(
+        _employee_select(scope).order_by(employees.c.employee_code.asc())
+    ).all()
+    return [_row_to_employee(r) for r in rows]

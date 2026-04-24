@@ -19,6 +19,9 @@ from hadir.auth.passwords import hash_password
 from hadir.auth.ratelimit import reset_rate_limiter
 from hadir.db import (
     audit_log,
+    departments,
+    employee_photos,
+    employees,
     make_admin_engine,
     roles,
     user_roles,
@@ -134,6 +137,37 @@ def client() -> Iterator[TestClient]:
 
     with TestClient(app) as tc:
         yield tc
+
+
+@pytest.fixture
+def clean_employees(admin_engine: Engine) -> Iterator[None]:
+    """Wipe the employees + photos tables before and after each test.
+
+    Employees tests manipulate these tables directly or through the API,
+    and we don't want one test's leftover rows colouring another's
+    search / count assertions.
+    """
+
+    with admin_engine.begin() as conn:
+        conn.execute(delete(employee_photos))
+        conn.execute(delete(employees))
+    yield
+    with admin_engine.begin() as conn:
+        conn.execute(delete(employee_photos))
+        conn.execute(delete(employees))
+
+
+def department_id_by_code(engine: Engine, code: str) -> int:
+    """Helper for tests: resolve a seeded department id by its code."""
+
+    with engine.begin() as conn:
+        row = conn.execute(
+            select(departments.c.id).where(
+                departments.c.tenant_id == TENANT_ID, departments.c.code == code
+            )
+        ).first()
+    assert row is not None, f"seed department {code!r} missing"
+    return int(row[0])
 
 
 def audit_rows_for_user(engine: Engine, user_id: int) -> list[dict]:

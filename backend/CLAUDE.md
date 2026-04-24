@@ -1,10 +1,11 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-P1 + P2 complete. **P3 complete**: local email+password auth, server-side
-sessions in `main.user_sessions`, role guards, per-(email, IP) login
-rate-limiter with APScheduler reset, audit writes on login/logout/expiry.
-P4 next — wait for the user.
+P1 + P2 + P3 complete. **P5 complete**: employees + employee_photos
+tables (photos schema-only, files come in P6); Admin-only CRUD +
+paginated text search + Excel import/export via openpyxl; audit rows
+on every create/update/import/export/soft-delete. 3 seed departments
+(ENG/OPS/ADM). P6 next — wait for the user.
 
 ## Stack
 - Python 3.11
@@ -16,6 +17,8 @@ P4 next — wait for the user.
 - APScheduler for in-process background jobs (P3 rate-limit reset; P8/P10
   will schedule capture supervision + attendance recompute)
 - email-validator for Pydantic `EmailStr`
+- openpyxl for XLSX import/export (P5)
+- python-multipart for FastAPI `UploadFile` handling (P5)
 - psycopg 3 (binary) for Postgres
 - Dev tooling: ruff, black, mypy (strict), pytest + httpx + pytest-asyncio
 
@@ -47,13 +50,20 @@ backend/
     tenants/
       __init__.py
       scope.py                 # TenantScope + get_tenant_scope FastAPI dep
+    employees/                 # P5
+      __init__.py
+      schemas.py               # Pydantic request/response models
+      repository.py            # tenant-scoped SQL (list/get/create/update/soft-delete/export)
+      excel.py                 # openpyxl parse_import() + build_export()
+      router.py                # /api/employees/{list, create, {id}, import, export}
   scripts/
     __init__.py
     seed_admin.py              # python -m scripts.seed_admin
   tests/
     __init__.py
-    conftest.py                # admin/employee user fixtures via admin engine
+    conftest.py                # admin/employee user + clean_employees fixtures
     test_auth.py               # 13 tests — P3 coverage
+    test_employees.py          #  5 tests — P5 coverage
 ```
 
 ## Schema map (P2)
@@ -203,6 +213,40 @@ Fixtures create/delete test users via the admin engine, so `audit_log`
 rows created during a test can be cleaned up (the app role cannot DELETE
 from the audit log — that's the point of P2).
 
+## Employees (P5)
+All endpoints are **Admin-only** in the pilot (v1.0 opens HR read
+access). Every call writes one or more audit rows via the append-only
+``write_audit`` helper.
+
+| Method + Path                    | Purpose                                       | Audit actions                          |
+| -------------------------------- | --------------------------------------------- | -------------------------------------- |
+| `GET  /api/employees`            | Paginated list, text search on code/name/email/department, `department_id` filter, `include_inactive` toggle | — (reads) |
+| `POST /api/employees`            | Create one                                    | `employee.created`                     |
+| `GET  /api/employees/{id}`       | Detail (returns inactive rows too)            | —                                      |
+| `PATCH /api/employees/{id}`      | Partial edit                                  | `employee.updated` with before+after   |
+| `DELETE /api/employees/{id}`     | Soft delete (sets `status='inactive'`)        | `employee.soft_deleted`                |
+| `POST /api/employees/import`     | Multipart XLSX upsert by `employee_code`      | `employee.created`/`employee.updated` per row + one `employee.imported` summary |
+| `GET  /api/employees/export`     | Streams XLSX (includes inactive + photo_count)| `employee.exported`                    |
+
+**Import contract**: XLSX headers (case + space insensitive):
+`employee_code`, `full_name`, `email`, `department_code`. Upsert by
+`employee_code` within the tenant. Unknown `department_code` and
+within-file duplicate `employee_code` produce per-row errors; the rest
+of the file commits normally. The response shape is
+`{created, updated, errors: [{row, message}]}` where `row` is the
+**Excel row number** (1-indexed; data starts at row 2). Per-row
+transactions so a row's DB failure doesn't roll back earlier rows' audit
+writes.
+
+**Export contract**: XLSX with columns
+`employee_code, full_name, email, department_code, status, photo_count`.
+Includes inactive rows so an operator can reconcile historical data.
+
+**Hard delete is deliberately not exposed.** It will arrive with the
+PDPL right-to-erasure request flow (v1.0) and must route through the
+audit log with operator justification. Soft-delete sets
+`status='inactive'` and hides the row from default list/search.
+
 ## Pilot prompt currently active
-P3 — done. Next: **P4 — Frontend shell, login page, role-aware navigation.**
-Wait for the user before starting P4.
+P5 — done. Next: **P6 — Employees frontend + photo ingestion.** Wait
+for the user before starting P6.

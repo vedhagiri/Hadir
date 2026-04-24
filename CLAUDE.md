@@ -12,8 +12,8 @@ The pilot is a 5-day single-tenant demo on a corporate LAN; v1.0 is the
 multi-tenant SaaS-capable product 8–10 weeks after pilot signoff.
 
 ## Status
-**Pilot prompts currently complete: P1 + P2 + P3 + P4.**
-Next: P5 — Employees backend + Excel import/export. Wait for the user
+**Pilot prompts currently complete: P1 + P2 + P3 + P4 + P5.**
+Next: P6 — Employees frontend + photo ingestion. Wait for the user
 before starting it.
 
 What P1 built:
@@ -96,6 +96,25 @@ What P4 built:
   the backend
 - No Tailwind, no CSS-in-JS, no component library added. Only the
   already-installed P1 deps are used.
+
+What P5 built:
+- Alembic migration `0002_employees`: `employees` + `employee_photos`
+  (photos schema-only in P5; file ingestion + Fernet encryption land in
+  P6). Three seed departments (ENG/OPS/ADM). Ownership + grants parity
+  with P2 tables.
+- `hadir/employees/` package: tenant-scoped repository, openpyxl-backed
+  parse_import/build_export, Pydantic schemas, Admin-only router
+- Endpoints: `GET/POST /api/employees`, `GET/PATCH/DELETE /api/employees/{id}`,
+  `POST /api/employees/import`, `GET /api/employees/export`
+- Audit actions: `employee.created`, `employee.updated` (with before/after),
+  `employee.soft_deleted`, `employee.imported` (summary row with counts
+  per import), `employee.exported`
+- New deps: `openpyxl`, `python-multipart`
+- Pytest coverage extended (18 tests total; 5 new for P5): 5-row import
+  with the pilot-plan test matrix (3 valid / 1 bad dept / 1 duplicate),
+  re-import → update, export round-trip column + inactive inclusion,
+  search hits across code/name/email/department, soft-delete hide +
+  include_inactive, 403 for Employee role
 
 ## Tech stack (summary)
 - **Backend:** Python 3.11, FastAPI, Uvicorn, SQLAlchemy 2.x Core, Pydantic
