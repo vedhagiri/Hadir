@@ -69,10 +69,23 @@ class ImportError(BaseModel):
     message: str
 
 
+class ImportWarning(BaseModel):
+    """One non-fatal note about an Excel import row.
+
+    P12: unknown custom-field column codes and per-row coercion failures
+    surface here instead of aborting the row. The row's standard
+    columns still import; the bad cell is just skipped.
+    """
+
+    row: int
+    message: str
+
+
 class ImportResult(BaseModel):
     created: int
     updated: int
     errors: list[ImportError]
+    warnings: list[ImportWarning] = []
 
 
 # --- Photos (P6) -----------------------------------------------------------

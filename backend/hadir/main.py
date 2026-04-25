@@ -31,6 +31,7 @@ from hadir.branding.router import (
 from hadir.cameras.router import router as cameras_router
 from hadir.capture import capture_manager
 from hadir.config import get_settings
+from hadir.custom_fields import router as custom_fields_router
 from hadir.detection_events.router import router as detection_events_router
 from hadir.employees import router as employees_router
 from hadir.identification.router import router as identification_router
@@ -148,6 +149,7 @@ def create_app() -> FastAPI:
     app.include_router(manager_assignments_router)
     app.include_router(policies_router)
     app.include_router(leave_calendar_router)
+    app.include_router(custom_fields_router)
 
     # Dev-only test endpoints — used by the Playwright smoke test in
     # frontend/tests/. Mounted ONLY when HADIR_ENV=dev so a production

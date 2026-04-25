@@ -11,6 +11,7 @@
 import { useEffect, useState } from "react";
 
 import { ApiError } from "../api/client";
+import { SettingsTabs } from "../settings/SettingsTabs";
 import { useMyOidcConfig, usePutMyOidcConfig } from "./hooks";
 
 export function AuthenticationPage() {
@@ -74,6 +75,7 @@ export function AuthenticationPage() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <SettingsTabs />
       <header>
         <h1
           style={{

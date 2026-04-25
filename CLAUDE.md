@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11.**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12.**
 
 > **Tenant isolation is a P0 blocker.** The suites
 > `backend/tests/test_multi_tenant_isolation.py` (the P1 canary) and
@@ -177,8 +177,41 @@ To return to v1.0 work: `git checkout main`.
   Policies page segments into Standard / Ramadan / Custom tables;
   the form gains a date-range picker (Ramadan + Custom) and an
   inner_type dropdown (Custom).
+- **P11** — Leaves + holidays + tenant settings. Migration 0014
+  adds `leave_types`, `holidays`, `approved_leaves`,
+  `tenant_settings` (weekend_days JSONB + timezone) and
+  `attendance_records.leave_type_id`. Engine takes
+  `LeaveRecord` / `HolidayRecord` / `weekend_days` and stays pure;
+  approved leave clears absent + surfaces type, holiday/weekend with
+  events routes the entire total to overtime, holiday-on-weekend
+  collapses to a single overtime treatment. **Per-tenant timezone**
+  is the load-bearing red line — `load_tenant_settings(conn, scope)`
+  + `local_tz_for(settings)` replaces the server-scoped
+  `HADIR_LOCAL_TIMEZONE` on the hot path; legacy `local_tz()`
+  remains only as a fallback. Admin/HR CRUD on `/api/leave-types`,
+  `/api/holidays` (+ .xlsx import), `/api/approved-leaves`,
+  `/api/tenant-settings`. Frontend Leave & Calendar page at
+  `/leave-policy` (three tabs + tenant settings panel).
+- **P12** — Custom fields editor. Migration 0015 adds two new
+  per-tenant tables — `custom_fields` (id, tenant_id, name, code,
+  type ['text','number','date','select'], options JSONB nullable,
+  required, display_order) + `custom_field_values` (id, tenant_id,
+  employee_id, field_id, value text). The values table is the
+  single source of truth — never free-form JSON on the employee
+  row, the load-bearing P12 red line. Admin-only CRUD on
+  `/api/custom-fields` (+ POST `/reorder`); Admin/HR
+  GET/PATCH on `/api/employees/{id}/custom-fields` with per-type
+  coercion (text/number/date/select). Employee Excel **export**
+  appends one column per defined field (using its `code` as the
+  header); **import** accepts those same columns by code — unknown
+  columns produce row warnings (not errors), the standard columns
+  still import. Frontend Settings → Custom Fields page at
+  `/settings/custom-fields` (drag-handle reorder via native HTML5,
+  inline edit, delete-confirmation modal that warns about value
+  cascade). Employee detail drawer renders custom fields below the
+  standard fact grid with typed inline inputs.
 
-Next: **P11** per `v1.0-phase-plan.md`. Wait for the user before
+Next: **P13** per `v1.0-phase-plan.md`. Wait for the user before
 starting. Per-phase records: `docs/phases/P*.md`.
 
 ---

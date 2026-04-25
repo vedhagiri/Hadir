@@ -2,6 +2,7 @@
 // renders the shared form, and applies the preview to the live document
 // so the Admin sees their shell update as they pick.
 
+import { SettingsTabs } from "../settings/SettingsTabs";
 import { BrandingForm } from "./BrandingForm";
 import {
   useDeleteMyLogo,
@@ -25,6 +26,7 @@ export function BrandingPage() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <SettingsTabs />
       <header>
         <h1
           style={{

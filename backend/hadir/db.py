@@ -499,6 +499,99 @@ tenant_settings = Table(
 )
 
 
+# --- Custom fields (P12) ---------------------------------------------------
+# Admin-defined extra columns for the employee record. Field definitions
+# live in ``custom_fields``; per-employee values live in
+# ``custom_field_values`` as text (typed on read). Storing values in a
+# separate table — never as free-form JSON on ``employees`` — is the P12
+# red line: the value table is the single source of truth, and a
+# field-rename / field-delete is a focused mutation rather than a
+# whole-employee patch.
+
+custom_fields = Table(
+    "custom_fields",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column("name", Text, nullable=False),
+    Column("code", Text, nullable=False),
+    Column("type", Text, nullable=False),
+    Column("options", JSONB, nullable=True),
+    Column("required", Boolean, nullable=False, server_default="false"),
+    Column("display_order", Integer, nullable=False, server_default="0"),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    UniqueConstraint(
+        "tenant_id", "code", name="uq_custom_fields_tenant_code"
+    ),
+    CheckConstraint(
+        "type IN ('text','number','date','select')",
+        name="ck_custom_fields_type",
+    ),
+    CheckConstraint(
+        "(type <> 'select') OR (options IS NOT NULL)",
+        name="ck_custom_fields_select_options",
+    ),
+)
+
+
+custom_field_values = Table(
+    "custom_field_values",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "employee_id",
+        Integer,
+        ForeignKey("employees.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "field_id",
+        Integer,
+        ForeignKey("custom_fields.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column("value", Text, nullable=False, server_default=""),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    UniqueConstraint(
+        "tenant_id",
+        "employee_id",
+        "field_id",
+        name="uq_custom_field_values_tenant_emp_field",
+    ),
+)
+
+
 # --- Per-tenant OIDC config (P6) -------------------------------------------
 # One row per tenant. ``client_secret_encrypted`` is Fernet-encrypted
 # with ``HADIR_AUTH_FERNET_KEY`` (separate from the photo/RTSP key —

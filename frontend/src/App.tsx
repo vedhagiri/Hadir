@@ -11,6 +11,7 @@ import { LoginPage } from "./auth/LoginPage";
 import { ProtectedRoute } from "./auth/ProtectedRoute";
 import { AuthenticationPage } from "./auth-oidc/AuthenticationPage";
 import { BrandingPage } from "./branding/BrandingPage";
+import { CustomFieldsPage } from "./custom-fields/CustomFieldsPage";
 import { AuditLogPage } from "./features/audit-log/AuditLogPage";
 import { DailyAttendancePage } from "./features/attendance/DailyAttendancePage";
 import { MyAttendancePage } from "./features/attendance/MyAttendancePage";
@@ -77,6 +78,7 @@ export function App() {
         <Route path="settings" element={<Navigate to="/settings/branding" replace />} />
         <Route path="settings/branding" element={<BrandingPage />} />
         <Route path="settings/authentication" element={<AuthenticationPage />} />
+        <Route path="settings/custom-fields" element={<CustomFieldsPage />} />
         {ALL_PAGE_IDS.filter(
           (id) =>
             id !== "dashboard" &&

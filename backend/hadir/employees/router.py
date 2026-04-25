@@ -27,6 +27,7 @@ from sqlalchemy.engine import Connection
 
 from hadir.auth.audit import write_audit
 from hadir.auth.dependencies import CurrentUser, require_role
+from hadir.custom_fields import repository as cf_repo
 from hadir.db import get_engine
 from hadir.employees import excel as excel_io
 from hadir.employees import photos as photos_io
@@ -40,6 +41,7 @@ from hadir.employees.schemas import (
     EmployeePatchIn,
     ImportError as ImportErrorSchema,
     ImportResult,
+    ImportWarning as ImportWarningSchema,
     PhotoIngestAccepted,
     PhotoIngestRejected,
     PhotoIngestResult,
@@ -141,16 +143,30 @@ def export_employees_endpoint(user: Annotated[CurrentUser, ADMIN]) -> StreamingR
     scope = TenantScope(tenant_id=user.tenant_id)
     with get_engine().begin() as conn:
         rows = repo.list_all_for_export(conn, scope)
+        # P12: append one column per defined custom field, in
+        # display_order. Empty cells where the employee has no value.
+        custom_fields = cf_repo.list_fields(conn, scope)
+        custom_codes = tuple(f.code for f in custom_fields)
+        values_by_employee = cf_repo.values_for_employees(
+            conn, scope, [r.id for r in rows]
+        )
         write_audit(
             conn,
             tenant_id=scope.tenant_id,
             actor_user_id=user.id,
             action="employee.exported",
             entity_type="employee",
-            after={"count": len(rows)},
+            after={
+                "count": len(rows),
+                "custom_field_codes": list(custom_codes),
+            },
         )
 
-    buf = excel_io.build_export(rows)
+    buf = excel_io.build_export(
+        rows,
+        custom_field_codes=custom_codes,
+        values_by_employee=values_by_employee,
+    )
     return StreamingResponse(
         buf,
         media_type=(
@@ -339,12 +355,20 @@ async def import_employees_endpoint(
     created = 0
     updated = 0
     errors: list[ImportErrorSchema] = []
+    warnings: list[ImportWarningSchema] = []
     seen_codes: set[str] = set()
 
     try:
         rows = list(excel_io.parse_import(BytesIO(data)))
     except excel_io.ImportParseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # P12: snapshot custom-field defs once. Unknown header codes turn
+    # into row warnings; known codes coerce per type and upsert.
+    with engine.begin() as conn:
+        custom_field_defs = {
+            f.code: f for f in cf_repo.list_fields(conn, scope)
+        }
 
     for row in rows:
         # Basic per-row validation first so we don't waste a transaction.
@@ -416,6 +440,7 @@ async def import_employees_endpoint(
                         },
                     )
                     created += 1
+                    target_employee_id = new_id
                 else:
                     repo.update_employee(
                         conn,
@@ -447,6 +472,49 @@ async def import_employees_endpoint(
                         },
                     )
                     updated += 1
+                    target_employee_id = existing.id
+
+                # P12: apply custom-field values from the row. Unknown
+                # codes are warnings (operator left a stale column),
+                # coerce failures are warnings (the standard columns
+                # already imported, the bad cell is just skipped).
+                for raw_code, raw_value in row.custom_values.items():
+                    field_def = custom_field_defs.get(raw_code)
+                    if field_def is None:
+                        warnings.append(
+                            ImportWarningSchema(
+                                row=row.excel_row,
+                                message=(
+                                    f"unknown custom field column "
+                                    f"{raw_code!r} — value ignored"
+                                ),
+                            )
+                        )
+                        continue
+                    try:
+                        stored = cf_repo.coerce_for_store(field_def, raw_value)
+                    except cf_repo.CoerceError as exc:
+                        warnings.append(
+                            ImportWarningSchema(
+                                row=row.excel_row, message=str(exc)
+                            )
+                        )
+                        continue
+                    if stored == "":
+                        cf_repo.clear_value(
+                            conn,
+                            scope,
+                            employee_id=target_employee_id,
+                            field_id=field_def.id,
+                        )
+                    else:
+                        cf_repo.upsert_value(
+                            conn,
+                            scope,
+                            employee_id=target_employee_id,
+                            field_id=field_def.id,
+                            value=stored,
+                        )
         except _RowError as exc:
             errors.append(ImportErrorSchema(row=row.excel_row, message=str(exc)))
         except Exception as exc:  # noqa: BLE001
@@ -472,11 +540,14 @@ async def import_employees_endpoint(
                 "created": created,
                 "updated": updated,
                 "errors": len(errors),
+                "warnings": len(warnings),
                 "filename": file.filename,
             },
         )
 
-    return ImportResult(created=created, updated=updated, errors=errors)
+    return ImportResult(
+        created=created, updated=updated, errors=errors, warnings=warnings
+    )
 
 
 class _RowError(Exception):

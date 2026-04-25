@@ -6,6 +6,7 @@
 
 import { useCallback, useState } from "react";
 
+import { EmployeeCustomFieldsSection } from "../../custom-fields/EmployeeCustomFieldsSection";
 import { Icon } from "../../shell/Icon";
 import {
   useDeletePhoto,
@@ -127,6 +128,10 @@ export function EmployeeDrawer({ employeeId, onClose }: Props) {
                   value={new Date(emp.created_at).toLocaleString()}
                 />
               </div>
+
+              {/* Custom fields (P12) */}
+              <SectionLabel>Custom fields</SectionLabel>
+              <EmployeeCustomFieldsSection employeeId={employeeId} />
 
               {/* Photo gallery */}
               <SectionLabel>Reference photos</SectionLabel>

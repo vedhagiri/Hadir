@@ -8,11 +8,18 @@ canonical ``employee_code`` column.
 Row numbers reported in errors are **Excel row numbers** (1-indexed,
 header is row 1, first data row is row 2). That's what a human opening
 the file in Excel will see.
+
+P12 wires custom fields into both directions: the export appends one
+column per defined field (using its ``code`` as the header), and the
+import accepts those same columns to populate ``custom_field_values``.
+Unknown extra columns produce **row warnings**, not row errors —
+operator forgot to delete a leftover column, the rest of the file
+should still import.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import BytesIO
 from typing import Iterator, Optional
 
@@ -36,6 +43,12 @@ EXPORT_COLUMNS: tuple[str, ...] = (
     "photo_count",
 )
 
+# Headers we recognise as part of the employee row itself — anything else
+# is treated as a candidate custom-field code on import.
+_KNOWN_HEADERS: frozenset[str] = frozenset(
+    {*REQUIRED_COLUMNS, "status", "photo_count"}
+)
+
 
 class ImportParseError(Exception):
     """Raised when the file itself is invalid (missing headers, not XLSX)."""
@@ -50,6 +63,11 @@ class ImportRow:
     full_name: str
     email: Optional[str]
     department_code: str
+    # ``custom_values`` keys are the **raw** header strings as they
+    # appeared in the spreadsheet (already lower-snake-cased). The
+    # router decides which match a known custom-field code, which
+    # produce warnings, and how to coerce per type.
+    custom_values: dict[str, str] = field(default_factory=dict)
 
 
 def _normalise_header(raw: object) -> str:
@@ -98,6 +116,21 @@ def parse_import(stream: BytesIO) -> Iterator[ImportRow]:
             )
 
         idx = {name: headers.index(name) for name in REQUIRED_COLUMNS}
+        # Index every non-required, non-blank column too — these are the
+        # custom-field candidates.
+        custom_idx: dict[str, int] = {}
+        for pos, header in enumerate(headers):
+            if not header:
+                continue
+            if header in _KNOWN_HEADERS:
+                continue
+            if header in custom_idx:
+                # Duplicate header — keep the first; the parser doesn't
+                # have a per-row error channel for this and the operator
+                # will see the warning channel via the unknown-code path
+                # if applicable.
+                continue
+            custom_idx[header] = pos
 
         for excel_row, row in enumerate(
             ws.iter_rows(min_row=2, values_only=True), start=2
@@ -112,37 +145,73 @@ def parse_import(stream: BytesIO) -> Iterator[ImportRow]:
             email_raw = _cell_str(row[idx["email"]]) if idx["email"] < len(row) else ""
             dept_code = _cell_str(row[idx["department_code"]]) if idx["department_code"] < len(row) else ""
 
+            cv: dict[str, str] = {}
+            for header, pos in custom_idx.items():
+                if pos >= len(row):
+                    continue
+                # Preserve the raw cell value via str/strip — date/number
+                # cells come through as Python types and the router
+                # coerces them via the field's declared type.
+                value = row[pos]
+                if value is None:
+                    continue
+                if hasattr(value, "isoformat"):
+                    text = value.isoformat()
+                else:
+                    text = _cell_str(value)
+                if text:
+                    cv[header] = text
+
             yield ImportRow(
                 excel_row=excel_row,
                 employee_code=code,
                 full_name=name,
                 email=email_raw or None,
                 department_code=dept_code,
+                custom_values=cv,
             )
     finally:
         wb.close()
 
 
-def build_export(rows: list[EmployeeRow]) -> BytesIO:
-    """Produce an XLSX in-memory with the EXPORT_COLUMNS header + one row each."""
+def build_export(
+    rows: list[EmployeeRow],
+    *,
+    custom_field_codes: tuple[str, ...] = (),
+    values_by_employee: Optional[dict[int, dict[str, str]]] = None,
+) -> BytesIO:
+    """Produce an XLSX in-memory.
+
+    The base columns from the pilot stay first; ``custom_field_codes`` is
+    appended in the order returned by the custom-fields repository
+    (``display_order`` ascending). Cells lookup against
+    ``values_by_employee[employee_id][code]`` — missing entries become
+    empty cells.
+    """
+
+    values_by_employee = values_by_employee or {}
 
     wb = Workbook()
     ws = wb.active
     assert ws is not None  # openpyxl always returns an active sheet on a fresh WB
     ws.title = "Employees"
 
-    ws.append(list(EXPORT_COLUMNS))
+    headers = list(EXPORT_COLUMNS) + list(custom_field_codes)
+    ws.append(headers)
     for row in rows:
-        ws.append(
-            [
-                row.employee_code,
-                row.full_name,
-                row.email or "",
-                row.department_code,
-                row.status,
-                row.photo_count,
-            ]
-        )
+        base = [
+            row.employee_code,
+            row.full_name,
+            row.email or "",
+            row.department_code,
+            row.status,
+            row.photo_count,
+        ]
+        custom_cells = [
+            values_by_employee.get(row.id, {}).get(code, "")
+            for code in custom_field_codes
+        ]
+        ws.append(base + custom_cells)
 
     buf = BytesIO()
     wb.save(buf)

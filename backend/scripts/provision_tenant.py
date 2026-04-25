@@ -110,6 +110,8 @@ _APP_CRUD_TABLES = (
     "holidays",
     "approved_leaves",
     "tenant_settings",
+    "custom_fields",
+    "custom_field_values",
 )
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
