@@ -12,9 +12,9 @@ The pilot is a 5-day single-tenant demo on a corporate LAN; v1.0 is the
 multi-tenant SaaS-capable product 8–10 weeks after pilot signoff.
 
 ## Status
-**Pilot prompts currently complete: P1–P9.**
-Next: P10 — Attendance engine, one Fixed policy, 15-minute scheduler.
-Wait for the user before starting it.
+**Pilot prompts currently complete: P1–P10.**
+Next: P11 — Camera Logs page + System page + Audit Log UI. Wait for
+the user before starting it.
 
 What P1 built:
 - Monorepo layout per PROJECT_CONTEXT §7
@@ -285,6 +285,55 @@ camera (it was wiped by pytest's `clean_cameras` fixture) and
 uploading a reference photo of you. Once the photo uploads, the P6
 route enrolls it synchronously, the matcher cache reloads that
 employee, and the next detection event will carry the match.
+
+What P10 built:
+- Alembic migration `0006_attendance` adds `shift_policies` and
+  `attendance_records`. The pilot's one Fixed policy (07:30–15:30,
+  grace 15 min, required 8 h) is seeded for tenant 1 with
+  `active_from = CURRENT_DATE`. Indexes on `(tenant_id, date)` plus
+  the unique constraint `(tenant_id, employee_id, date)` so the
+  scheduler upsert is single-row.
+- `hadir/attendance/engine.py` — **pure** computation. ``compute()``
+  takes employee_id, the_date, ShiftPolicy, events, leaves, holidays
+  and returns an ``AttendanceRecord`` value object. No DB, no
+  network — the v1.0 multi-policy engine plugs in additively.
+- `hadir/attendance/repository.py` — tenant-scoped DB layer. Loads
+  the active policy for a date, converts UTC `detection_events`
+  timestamps to `HADIR_LOCAL_TIMEZONE` (default `Asia/Muscat`)
+  before handing to the engine, and persists via
+  Postgres `ON CONFLICT (tenant_id, employee_id, date)` upsert.
+- `hadir/attendance/scheduler.py` — APScheduler interval job every
+  `HADIR_ATTENDANCE_RECOMPUTE_MINUTES` (default 15). On `start()`
+  fires an immediate seed so a fresh boot has rows ready before any
+  HTTP request arrives. Pilot does not recompute historical days.
+- `GET /api/attendance?date=&department_id=` — role-scoped list.
+  Admin/HR see everything; Manager auto-scoped to their
+  department(s) and forbidden from cross-department filtering;
+  Employee sees only their own row (matched by lower-cased email
+  until v1.0 adds an explicit user↔employee join table).
+- Migration safety: my first draft inlined the JSON literal into a
+  raw `INSERT`; SQLAlchemy's pyformat paramstyle then read `:15`
+  inside `"grace_minutes":15` as a bind marker. Fixed by using
+  `sa.text(...).bindparams(config=json.dumps(...))`.
+- New env vars: `HADIR_LOCAL_TIMEZONE` (default `Asia/Muscat`),
+  `HADIR_ATTENDANCE_RECOMPUTE_MINUTES` (default 15).
+- Pytest coverage: +12 new tests (now 68 total). The engine suite
+  exercises absent (with and without leave), single-event in-time,
+  on-time-no-flags, late at and one minute past grace, early-out
+  before and exactly at end-minus-grace, short-hours, overtime,
+  out-of-order events, and a determinism check.
+- `conftest.py` autouse fixture neutralises
+  `attendance_scheduler.start/stop` so `TestClient(app)` lifespan
+  entries don't spawn 15-minute APScheduler threads.
+- **Live smoke** via `backend/scripts/p10_smoke.py`: seeded one
+  employee + 3 detection events at 07:28 / 12:05 / 15:34 local;
+  `recompute_today` upserted 1 row with `in=07:28:42 out=15:34:12
+  total_minutes=486 late=False early_out=False short_hours=False
+  overtime=6`. Then I shifted the last event to 15:10 and
+  re-recomputed: same DB row id (upsert), `out_time=15:10:00`,
+  `early_out=True`, `short_hours=True`. `GET /api/attendance` via
+  curl returned the row with the joined employee + department +
+  policy fields exactly as the frontend will consume them.
 
 ## Tech stack (summary)
 - **Backend:** Python 3.11, FastAPI, Uvicorn, SQLAlchemy 2.x Core, Pydantic

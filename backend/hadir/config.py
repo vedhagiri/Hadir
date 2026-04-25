@@ -84,6 +84,14 @@ class Settings(BaseSettings):
     # hard, not advisory (pilot-plan red line).
     match_threshold: float = 0.45
 
+    # --- Attendance (P10) --------------------------------------------------
+    # IANA timezone used to convert detection timestamps to wall-clock
+    # local time for comparison against a shift policy's ``start``/``end``
+    # fields. Default matches Omran in Oman.
+    local_timezone: str = "Asia/Muscat"
+    # Scheduler cadence for recomputing today's attendance_records rows.
+    attendance_recompute_minutes: int = 15
+
 
 def get_settings() -> Settings:
     """Return a fresh Settings instance.

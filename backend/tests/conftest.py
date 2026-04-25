@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, insert, select
 from sqlalchemy.engine import Engine
 
+from hadir.attendance import attendance_scheduler as _attendance_scheduler
 from hadir.auth.passwords import hash_password
 from hadir.auth.ratelimit import reset_rate_limiter
 from hadir.capture import capture_manager as _capture_manager
@@ -81,6 +82,23 @@ def _neutralise_analyzer() -> Iterator[None]:
         yield
     finally:
         _clear_analyzer_factory()
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _neutralise_attendance_scheduler() -> Iterator[None]:
+    """TestClient(app) enters lifespan per test, which would otherwise
+    start the 15-minute recompute job. Stub start/stop so the session's
+    many lifespan entries don't spawn real APScheduler threads."""
+
+    original_start = _attendance_scheduler.start
+    original_stop = _attendance_scheduler.stop
+    _attendance_scheduler.start = lambda: None  # type: ignore[assignment]
+    _attendance_scheduler.stop = lambda: None  # type: ignore[assignment]
+    try:
+        yield
+    finally:
+        _attendance_scheduler.start = original_start  # type: ignore[assignment]
+        _attendance_scheduler.stop = original_stop  # type: ignore[assignment]
 
 
 @pytest.fixture(autouse=True, scope="session")

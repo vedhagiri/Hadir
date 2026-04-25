@@ -18,6 +18,8 @@ from typing import AsyncIterator
 from fastapi import FastAPI
 
 from hadir import __version__
+from hadir.attendance import attendance_scheduler
+from hadir.attendance.router import router as attendance_router
 from hadir.auth import get_rate_limiter
 from hadir.auth import router as auth_router
 from hadir.cameras.router import router as cameras_router
@@ -76,12 +78,14 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     ).start()
 
     capture_manager.start()
+    attendance_scheduler.start()
     try:
         yield
     finally:
         # Stop capture first so workers don't try to write after the
         # engine pool starts draining.
         capture_manager.stop()
+        attendance_scheduler.stop()
         limiter.stop()
 
 
@@ -109,6 +113,7 @@ def create_app() -> FastAPI:
     app.include_router(employees_router)
     app.include_router(cameras_router)
     app.include_router(identification_router)
+    app.include_router(attendance_router)
 
     logging.getLogger(__name__).info(
         "Hadir backend started (env=%s, tenant_mode=%s)", settings.env, settings.tenant_mode

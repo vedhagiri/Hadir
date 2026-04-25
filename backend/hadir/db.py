@@ -22,6 +22,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Column,
+    Date,
     DateTime,
     Engine,
     Float,
@@ -33,6 +34,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    Time,
     UniqueConstraint,
     create_engine,
     func,
@@ -478,6 +480,88 @@ camera_health_snapshots = Table(
         "tenant_id",
         "camera_id",
         "captured_at",
+    ),
+)
+
+
+# --- Attendance (P10) -------------------------------------------------------
+
+shift_policies = Table(
+    "shift_policies",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey(f"{SCHEMA}.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column("name", Text, nullable=False),
+    Column("type", Text, nullable=False),
+    # Pilot stores a narrow blob: {"start":"07:30","end":"15:30",
+    # "grace_minutes":15,"required_hours":8}. v1.0 extends this as each
+    # policy type grows its own fields.
+    Column("config", JSONB, nullable=False),
+    Column("active_from", Date, nullable=False),
+    Column("active_until", Date, nullable=True),
+    CheckConstraint(
+        "type IN ('Fixed','Flex','Ramadan','Custom')",
+        name="ck_shift_policies_type",
+    ),
+)
+
+
+# attendance_records: one row per (employee_id, date) in the tenant.
+# Refreshed every 15 minutes by the scheduler while ``date`` equals today;
+# rows for past days are treated as frozen by the pilot (v1.0 adds a late-
+# recompute flow).
+attendance_records = Table(
+    "attendance_records",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey(f"{SCHEMA}.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "employee_id",
+        Integer,
+        ForeignKey(f"{SCHEMA}.employees.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column("date", Date, nullable=False),
+    Column("in_time", Time, nullable=True),
+    Column("out_time", Time, nullable=True),
+    Column("total_minutes", Integer, nullable=True),
+    Column(
+        "policy_id",
+        Integer,
+        ForeignKey(f"{SCHEMA}.shift_policies.id", ondelete="RESTRICT"),
+        nullable=False,
+    ),
+    Column("late", Boolean, nullable=False, server_default="false"),
+    Column("early_out", Boolean, nullable=False, server_default="false"),
+    Column("short_hours", Boolean, nullable=False, server_default="false"),
+    Column("absent", Boolean, nullable=False, server_default="false"),
+    Column("overtime_minutes", Integer, nullable=False, server_default="0"),
+    Column(
+        "computed_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    UniqueConstraint(
+        "tenant_id", "employee_id", "date", name="uq_attendance_records_tenant_emp_date"
+    ),
+    Index(
+        "ix_attendance_records_tenant_date",
+        "tenant_id",
+        "date",
     ),
 )
 

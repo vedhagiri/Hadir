@@ -1,14 +1,12 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-P1 + P2 + P3 + P5 + P6 + P7 + P8 complete. **P9 complete**: InsightFace
-``buffalo_l`` recognition enabled; per-photo Fernet-encrypted 512-D
-embeddings; in-memory matcher cache with per-employee invalidation;
-cosine-similarity matching with a **hard** threshold
-(``HADIR_MATCH_THRESHOLD``, default 0.45) and DEBUG top-3 logging;
-``POST /api/identification/reembed`` for tenant-wide rebuild;
-``detection_events`` rows now carry the encrypted embedding +
-employee_id + confidence on the same insert. P10 next.
+P1 + P2 + P3 + P5 + P6 + P7 + P8 + P9 complete. **P10 complete**: pure
+attendance engine (``hadir/attendance/engine.py``); one Fixed pilot
+policy seeded; APScheduler job recomputes today's
+``attendance_records`` every 15 minutes (configurable via
+``HADIR_ATTENDANCE_RECOMPUTE_MINUTES``); ``GET /api/attendance``
+returns a role-scoped daily list. P11 next.
 
 ## Stack
 - Python 3.11
@@ -87,6 +85,12 @@ backend/
       enrollment.py            # compute_embedding_for_file, enroll_photo, enroll_missing, reembed_all
       matcher.py               # MatcherCache singleton (in-memory, per-employee invalidation, cosine + top-k)
       router.py                # POST /api/identification/reembed
+    attendance/                # P10
+      __init__.py              # exports attendance_scheduler
+      engine.py                # PURE compute(): no DB, no IO; ShiftPolicy + AttendanceRecord
+      repository.py            # active_policy_for, events_for (TZ-converted), upsert_attendance, list_for_date
+      scheduler.py             # AttendanceScheduler — APScheduler 15-min job + startup seed
+      router.py                # GET /api/attendance with role scoping
   scripts/
     __init__.py
     seed_admin.py              # python -m scripts.seed_admin
@@ -100,6 +104,7 @@ backend/
     test_tracker.py            #  8 tests — P8 IoU tracker pure logic
     test_capture.py            #  5 tests — P8 worker + manager (scripted feed, stub analyzer)
     test_identification.py     #  9 tests — P9 matcher (Fernet round-trip, happy/below-threshold, multi-angle top-k, cache invalidation)
+    test_attendance_engine.py  # 12 tests — P10 pure engine (on-time, late, early-out, short-hours, overtime, absent, leave clears absent)
 ```
 
 ## Schema map (P2)
@@ -450,6 +455,37 @@ returns ``None`` → enrollment marks the photo as skipped. The suite
 runs in ~3 seconds without touching InsightFace or the ~250 MB
 ``buffalo_l`` model.
 
+## Attendance (P10)
+- `hadir.attendance.engine.compute(...)` is **pure** — no DB, no
+  network. Inputs: employee_id, the_date, ``ShiftPolicy``, list of
+  per-day events (already converted to wall-clock local times),
+  optional leaves/holidays. Output: ``AttendanceRecord`` value object
+  carrying in/out/total/late/early_out/short_hours/absent/overtime.
+  Tests in ``test_attendance_engine.py`` cover the rule set without
+  touching Postgres.
+- ``hadir.attendance.repository`` does the side-effecty work:
+  ``active_policy_for`` resolves the Fixed pilot policy;
+  ``events_for`` converts UTC ``detection_events.captured_at`` to
+  ``HADIR_LOCAL_TIMEZONE`` (default ``Asia/Muscat``) and returns
+  naive local datetimes the engine compares directly;
+  ``upsert_attendance`` persists via Postgres ``ON CONFLICT``.
+- ``hadir.attendance.scheduler.attendance_scheduler`` runs an
+  APScheduler interval job every
+  ``HADIR_ATTENDANCE_RECOMPUTE_MINUTES`` (default 15). Recomputes
+  today's row for every active employee — never historical days
+  (frozen-after-rollover per pilot-plan; v1.0 adds late recompute).
+  ``start()`` spawns a daemon thread that does an immediate seed pass
+  so the first request after lifespan finds rows already in place.
+- ``GET /api/attendance?date=…&department_id=…`` is role-scoped:
+  Admin/HR see everything; Manager is auto-scoped to their assigned
+  department(s) and is forbidden from filtering across them; Employee
+  sees their own row only (employee↔user is matched by lower-cased
+  email until v1.0 adds an explicit join table).
+
+The tests' ``conftest.py`` neutralises ``attendance_scheduler.start/stop``
+so ``TestClient(app)`` lifespan entries don't spawn 15-minute job
+threads on every test.
+
 ## Pilot prompt currently active
-P9 — done. Next: **P10 — Attendance engine, one Fixed policy,
-15-minute scheduler.** Wait for the user before starting P10.
+P10 — done. Next: **P11 — Camera Logs page + System page + Audit Log
+UI.** Wait for the user before starting P11.
