@@ -1,12 +1,13 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-P1 + P2 + P3 + P5 + P6 + P7 + P8 + P9 complete. **P10 complete**: pure
-attendance engine (``hadir/attendance/engine.py``); one Fixed pilot
-policy seeded; APScheduler job recomputes today's
-``attendance_records`` every 15 minutes (configurable via
-``HADIR_ATTENDANCE_RECOMPUTE_MINUTES``); ``GET /api/attendance``
-returns a role-scoped daily list. P11 next.
+P1–P10 complete. **P11 complete**: read endpoints for the Camera Logs,
+System, and Audit Log Admin pages. Detection-events list (with
+camera / employee / identified / date-range filters + 100/page),
+auth-gated crop endpoint that decrypts on the fly and audit-logs each
+view, system health exposes uptime + DB conns + scheduler statuses +
+counts, cameras-health exposes per-camera last-seen + 24-hour series,
+audit log read-only with action/entity_type filter selectors. P12 next.
 
 ## Stack
 - Python 3.11
@@ -91,6 +92,15 @@ backend/
       repository.py            # active_policy_for, events_for (TZ-converted), upsert_attendance, list_for_date
       scheduler.py             # AttendanceScheduler — APScheduler 15-min job + startup seed
       router.py                # GET /api/attendance with role scoping
+    detection_events/          # P11 (read-only)
+      __init__.py
+      router.py                # GET /api/detection-events (paginated + filters), GET /{id}/crop (decrypt + audit)
+    system/                    # P11 (read-only)
+      __init__.py
+      router.py                # GET /api/system/{health, cameras-health}
+    audit_log/                 # P11 (read-only)
+      __init__.py
+      router.py                # GET /api/audit-log (paginated + filters + distinct selectors)
   scripts/
     __init__.py
     seed_admin.py              # python -m scripts.seed_admin
@@ -105,6 +115,7 @@ backend/
     test_capture.py            #  5 tests — P8 worker + manager (scripted feed, stub analyzer)
     test_identification.py     #  9 tests — P9 matcher (Fernet round-trip, happy/below-threshold, multi-angle top-k, cache invalidation)
     test_attendance_engine.py  # 12 tests — P10 pure engine (on-time, late, early-out, short-hours, overtime, absent, leave clears absent)
+    test_p11_endpoints.py      # 14 tests — P11 detection-events list/filters/crop, system health/cameras-health, audit-log + 403s
 ```
 
 ## Schema map (P2)
@@ -486,6 +497,17 @@ The tests' ``conftest.py`` neutralises ``attendance_scheduler.start/stop``
 so ``TestClient(app)`` lifespan entries don't spawn 15-minute job
 threads on every test.
 
+## P11 endpoints
+All Admin-only.
+
+| Method + Path | Notes |
+| --- | --- |
+| `GET /api/detection-events` | Paginated (100 default, max 200). Filters: `camera_id`, `employee_id`, `identified` (bool), `start`, `end` (ISO datetime). Returns `{items, total, page, page_size}` with each item carrying camera + employee join + `has_crop` flag for the UI. |
+| `GET /api/detection-events/{id}/crop` | Decrypts the Fernet-encrypted JPEG on disk (P8 storage) and streams it. Writes a `detection_event.crop_viewed` audit row per fetch (entity_id = event id, after = `{camera_id, employee_id}`). 410 if the file is missing on disk. |
+| `GET /api/system/health` | Uptime, process pid, active DB connections (`pg_stat_activity`), capture-workers count, attendance-scheduler/rate-limiter running flags, enrolled-employees + active-employees + cameras totals, today's events + attendance counts. |
+| `GET /api/system/cameras-health` | Per-camera latest snapshot (`frames_last_minute`, `reachable`, `last_seen_at`) + 24-hour `series_24h` of `(captured_at, frames_last_minute, reachable)`. |
+| `GET /api/audit-log` | Paginated read-only list. Filters: `actor_user_id`, `action`, `entity_type`, `start`, `end`. Response includes `distinct_actions` + `distinct_entity_types` so the UI's filter selectors stay in sync. **No write handlers** anywhere — UPDATE/DELETE on `audit_log` would also be rejected at the DB grant level (P2). |
+
 ## Pilot prompt currently active
-P10 — done. Next: **P11 — Camera Logs page + System page + Audit Log
-UI.** Wait for the user before starting P11.
+P11 — done. Next: **P12 — Role dashboards + Daily Attendance page with
+detail drawer.** Wait for the user before starting P12.

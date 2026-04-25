@@ -1,11 +1,12 @@
 # Hadir frontend — Claude Code notes
 
 ## Status
-P1 + P4 + P6 complete. **P7 complete**: `/cameras` route renders a
-real list page with per-row Preview / Edit / Delete, an Add/Edit
-drawer whose RTSP field shows `***` on edit (stored credential kept
-when blank), and a preview modal that fetches a single frame and
-offers a Refresh button. 21 placeholder routes remain for P8+.
+P1 + P4 + P6 + P7 complete. **P11 complete**: `/camera-logs`,
+`/system`, and `/audit` are real pages. Camera Logs is a paginated
+table with inline thumbnails (auth-gated `/crop` endpoint) and
+filters; System has stat cards + camera fleet table with 24-hour
+sparklines + system-signals card; Audit Log is read-only with
+expandable JSON detail rows.
 
 ## Stack
 - Vite 5 + React 18
@@ -61,6 +62,12 @@ frontend/
         CamerasPage.tsx   # list with Preview/Edit/Delete per row
         CameraDrawer.tsx  # Add/Edit drawer; RTSP field is *** placeholder on edit
         PreviewModal.tsx  # single-frame fetch + Refresh; revokes blob URLs on unmount
+      camera-logs/        # P11
+        types.ts hooks.ts CameraLogsPage.tsx
+      system/             # P11
+        types.ts hooks.ts SystemPage.tsx
+      audit-log/          # P11
+        types.ts hooks.ts AuditLogPage.tsx
     styles/               # design CSS, copied verbatim — DO NOT EDIT
       styles.css
       styles-enhancements.css
@@ -111,5 +118,5 @@ identity card with a TODO comment pointing at the deferred switcher.
 - `docker compose exec frontend npm run dev` — Vite hot-reloads on save.
 
 ## Pilot prompt currently active
-P7 — done. Next: **P8 — Background capture pipeline + IoU tracker +
-detection events.** Wait for the user before starting P8.
+P11 — done. Next: **P12 — Role dashboards + Daily Attendance page
+with detail drawer.** Wait for the user before starting P12.

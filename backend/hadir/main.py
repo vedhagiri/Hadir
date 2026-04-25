@@ -20,13 +20,16 @@ from fastapi import FastAPI
 from hadir import __version__
 from hadir.attendance import attendance_scheduler
 from hadir.attendance.router import router as attendance_router
+from hadir.audit_log.router import router as audit_log_router
 from hadir.auth import get_rate_limiter
 from hadir.auth import router as auth_router
 from hadir.cameras.router import router as cameras_router
 from hadir.capture import capture_manager
 from hadir.config import get_settings
+from hadir.detection_events.router import router as detection_events_router
 from hadir.employees import router as employees_router
 from hadir.identification.router import router as identification_router
+from hadir.system.router import router as system_router
 
 
 def _configure_logging() -> None:
@@ -114,6 +117,9 @@ def create_app() -> FastAPI:
     app.include_router(cameras_router)
     app.include_router(identification_router)
     app.include_router(attendance_router)
+    app.include_router(detection_events_router)
+    app.include_router(system_router)
+    app.include_router(audit_log_router)
 
     logging.getLogger(__name__).info(
         "Hadir backend started (env=%s, tenant_mode=%s)", settings.env, settings.tenant_mode
