@@ -22,10 +22,19 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 
 from hadir.auth.audit import write_audit
-from hadir.auth.dependencies import CurrentUser, _load_current_user_bundle, current_user
+from hadir.auth.dependencies import (
+    CurrentUser,
+    _load_current_user_bundle,
+    current_user,
+    primary_role,
+)
 from hadir.auth.passwords import verify_password
 from hadir.auth.ratelimit import LoginRateLimiter, get_rate_limiter
-from hadir.auth.sessions import create_session, delete_session
+from hadir.auth.sessions import (
+    create_session,
+    delete_session,
+    update_active_role,
+)
 from hadir.config import get_settings
 from hadir.db import _TENANT_SCHEMA_RE, get_engine, tenant_context, tenants, users
 from hadir.tenants import TenantScope, get_tenant_scope
@@ -61,13 +70,24 @@ class MeResponse(BaseModel):
     id: int
     email: str
     full_name: str
+    # P7: ``roles`` carries only the active role (preserves the pilot
+    # contract — older clients that don't know about the switcher
+    # treat the user as if they hold exactly that role). ``active_role``
+    # makes that explicit for new clients; ``available_roles`` is the
+    # full set the user holds and drives the topbar dropdown.
     roles: list[str]
+    available_roles: list[str]
+    active_role: str
     departments: list[int]
     # P3: True when ``current_user`` resolved a synthetic Super-Admin
     # in impersonation mode. The tenant shell uses this to render the
     # "Viewing as SuperAdmin" red banner.
     is_super_admin_impersonation: bool = False
     super_admin_user_id: int | None = None
+
+
+class SwitchRoleRequest(BaseModel):
+    role: str = Field(min_length=1, max_length=64)
 
 
 def _client_ip(request: Request) -> str:
@@ -224,12 +244,25 @@ def login(
         # Success — reset the counter, create the session, audit, load bundle.
         limiter.reset_key(email, ip)
         with engine.begin() as conn:
+            # P7: prime ``active_role`` with the user's highest role
+            # so a fresh session lands on the most-capable nav by
+            # default. We have to load the bundle once up front to
+            # know which roles they hold.
+            initial_bundle = _load_current_user_bundle(
+                conn,
+                user_id=int(user_row.id),
+                tenant_id=target_tenant_id,
+            )
+            initial_active = primary_role(
+                initial_bundle.roles if initial_bundle is not None else ()
+            )
             session = create_session(
                 conn,
                 tenant_id=target_tenant_id,
                 user_id=int(user_row.id),
                 idle_minutes=settings.session_idle_minutes,
                 tenant_schema=target_schema,
+                active_role=initial_active,
             )
             write_audit(
                 conn,
@@ -279,7 +312,9 @@ def login(
         id=bundle.id,
         email=bundle.email,
         full_name=bundle.full_name,
-        roles=list(bundle.roles),
+        roles=[initial_active],
+        available_roles=list(bundle.roles),
+        active_role=initial_active,
         departments=list(bundle.departments),
     )
 
@@ -325,12 +360,85 @@ def me(
     sa_user_id: int | None = (
         int(getattr(request.state, "super_admin_user_id", 0)) if is_imp else None
     )
+    return _to_me_response(user, is_imp=is_imp, sa_user_id=sa_user_id)
+
+
+def _to_me_response(
+    user: CurrentUser,
+    *,
+    is_imp: bool = False,
+    sa_user_id: int | None = None,
+) -> MeResponse:
     return MeResponse(
         id=user.id,
         email=user.email,
         full_name=user.full_name,
         roles=list(user.roles),
+        available_roles=list(user.available_roles),
+        active_role=user.active_role,
         departments=list(user.departments),
         is_super_admin_impersonation=is_imp,
         super_admin_user_id=sa_user_id,
     )
+
+
+@router.post("/switch-role")
+def switch_role(
+    payload: SwitchRoleRequest,
+    request: Request,
+    user: Annotated[CurrentUser, Depends(current_user)],
+) -> MeResponse:
+    """Flip the session's active role (P7).
+
+    Validates the user actually holds the role, persists the new
+    ``active_role`` claim on ``user_sessions.data``, audits the
+    transition, and returns the refreshed ``/me`` payload. Refuses
+    for the synthetic Super-Admin (no real session row to update —
+    operators QA non-Admin flows by signing in as a real test user).
+    """
+
+    if user.id == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="cannot switch role for super-admin impersonation",
+        )
+
+    if payload.role not in user.available_roles:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"user does not hold role {payload.role!r}",
+        )
+    if payload.role == user.active_role:
+        # No-op — return current state without an audit row.
+        return _to_me_response(user)
+
+    engine = get_engine()
+    with engine.begin() as conn:
+        update_active_role(conn, user.session_id, active_role=payload.role)
+        write_audit(
+            conn,
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            action="auth.role.switched",
+            entity_type="session",
+            entity_id=user.session_id,
+            before={"active_role": user.active_role},
+            after={"active_role": payload.role},
+        )
+        bundle = _load_current_user_bundle(
+            conn, user_id=user.id, tenant_id=user.tenant_id
+        )
+    assert bundle is not None
+
+    refreshed = CurrentUser(
+        id=user.id,
+        tenant_id=user.tenant_id,
+        email=user.email,
+        full_name=user.full_name,
+        roles=(payload.role,),
+        available_roles=bundle.roles,
+        active_role=payload.role,
+        departments=user.departments,
+        session_id=user.session_id,
+    )
+    return _to_me_response(refreshed)

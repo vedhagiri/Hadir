@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6.**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7.**
 
 > **Tenant isolation is a P0 blocker.** The suites
 > `backend/tests/test_multi_tenant_isolation.py` (the P1 canary) and
@@ -126,8 +126,19 @@ To return to v1.0 work: `git checkout main`.
   config CRUD pings the discovery URL before persisting and refuses
   to save a broken config. Plain secrets never appear in API
   responses, audit rows, or logs.
+- **P7** — Multi-role user switcher. Sessions persist
+  `data.active_role`; `current_user` narrows `CurrentUser.roles`
+  to that single value so existing role guards re-evaluate per
+  request without changes (the pilot's "highest role only"
+  shortcut is retired). New `POST /api/auth/switch-role`
+  validates the user holds the role, updates the session, and
+  audits the transition (`auth.role.switched`). The frontend
+  topbar renders a role chip + dropdown when a user has more
+  than one role; selecting reloads the page so navigation
+  re-renders cleanly against the new active role. Synthetic
+  Super-Admin refuses switch (no real session row to update).
 
-Next: **P7** per `v1.0-phase-plan.md`. Wait for the user before
+Next: **P8** per `v1.0-phase-plan.md`. Wait for the user before
 starting. Per-phase records: `docs/phases/P*.md`.
 
 ---

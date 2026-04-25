@@ -6,7 +6,14 @@ export interface MeResponse {
   id: number;
   email: string;
   full_name: string;
+  // P7: ``roles`` is the **active** role only — the same value as
+  // ``active_role``, kept here for backwards compat with code that
+  // still iterates ``me.roles``. ``available_roles`` is the full set
+  // the user holds; the topbar dropdown reads it to render the
+  // switcher when the user has more than one.
   roles: Role[];
+  available_roles: Role[];
+  active_role: Role;
   departments: number[];
   // P3: backend sets these when the request is served by a Super-Admin
   // synthetic user under "Access as" impersonation. The tenant shell

@@ -71,6 +71,7 @@ from hadir.auth.audit import write_audit
 from hadir.auth.dependencies import (
     CurrentUser,
     _load_current_user_bundle,
+    primary_role,
     require_role,
 )
 from hadir.auth.sessions import create_session
@@ -729,12 +730,21 @@ def oidc_callback(
     # 6. Create a Hadir session — identical shape to local login.
     with tenant_context(schema):
         with engine.begin() as conn:
+            # P7: seed ``active_role`` with the user's highest role,
+            # same default as the local-login path.
+            initial_bundle = _load_current_user_bundle(
+                conn, user_id=int(user_row.id), tenant_id=tenant_id
+            )
+            initial_active = primary_role(
+                initial_bundle.roles if initial_bundle is not None else ()
+            )
             session = create_session(
                 conn,
                 tenant_id=tenant_id,
                 user_id=int(user_row.id),
                 idle_minutes=settings.session_idle_minutes,
                 tenant_schema=schema,
+                active_role=initial_active,
             )
             write_audit(
                 conn,

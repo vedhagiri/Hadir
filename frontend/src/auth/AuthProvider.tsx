@@ -62,3 +62,21 @@ export function useLogout() {
     },
   });
 }
+
+/** P7: switch the session's active role. Caller is expected to refresh
+ *  the page after success so the navigation re-renders against the new
+ *  role consistently — the tenant shell decides which nav set to show
+ *  by reading ``me.active_role``. */
+export function useSwitchRole() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (role: string): Promise<MeResponse> =>
+      api<MeResponse>("/api/auth/switch-role", {
+        method: "POST",
+        body: { role },
+      }),
+    onSuccess: (me) => {
+      qc.setQueryData(ME_KEY, me);
+    },
+  });
+}

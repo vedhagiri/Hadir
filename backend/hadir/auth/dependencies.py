@@ -31,15 +31,55 @@ COOKIE_NAME = "hadir_session"  # settings.session_cookie_name default — see se
 
 @dataclass(frozen=True, slots=True)
 class CurrentUser:
-    """Per-request user snapshot loaded via ``current_user``."""
+    """Per-request user snapshot loaded via ``current_user``.
+
+    P7: ``roles`` carries ONLY the active role for this request — the
+    one the user picked via the role switcher (or their highest role
+    at login). ``available_roles`` carries the full set the user
+    actually holds. Existing role guards (``require_role`` etc.) check
+    membership in ``roles`` and therefore re-evaluate against the
+    ACTIVE role per request, not against everything the user could
+    ever do. Backend authorisation never trusts the frontend's idea
+    of which role is active.
+    """
 
     id: int
     tenant_id: int
     email: str
     full_name: str
     roles: tuple[str, ...]
+    available_roles: tuple[str, ...]
+    active_role: str
     departments: tuple[int, ...]
     session_id: str
+
+
+# Highest-first ranking. Used at login + on a no-stored-active-role
+# fallback to pick a sensible default.
+_ROLE_PRIORITY: dict[str, int] = {
+    "Admin": 4,
+    "HR": 3,
+    "Manager": 2,
+    "Employee": 1,
+}
+
+
+def primary_role(roles: Iterable[str]) -> str:
+    """Return the highest-ranked role from ``roles``.
+
+    Falls back to ``Employee`` for the (edge) case of an empty role
+    set; the API surface elsewhere keeps users with no roles out of
+    every guarded route.
+    """
+
+    best = "Employee"
+    best_rank = 0
+    for role in roles:
+        rank = _ROLE_PRIORITY.get(role, 0)
+        if rank > best_rank:
+            best = role
+            best_rank = rank
+    return best
 
 
 def _load_current_user_bundle(conn, *, user_id: int, tenant_id: int) -> CurrentUser | None:
@@ -79,12 +119,16 @@ def _load_current_user_bundle(conn, *, user_id: int, tenant_id: int) -> CurrentU
             )
         ).all()
     )
+    # ``roles`` here is the FULL set; the caller (``current_user``)
+    # narrows it to the active role before returning.
     return CurrentUser(
         id=int(user_row.id),
         tenant_id=int(user_row.tenant_id),
         email=str(user_row.email),
         full_name=str(user_row.full_name),
         roles=role_codes,
+        available_roles=role_codes,
+        active_role=primary_role(role_codes),
         departments=department_ids,
         session_id="",  # filled in by the caller
     )
@@ -126,12 +170,18 @@ def current_user(
             getattr(request.state, "is_super_admin", False)
             and getattr(request.state, "tenant_id", None) is not None
         ):
+            # P7: synthetic operator acts as Admin. Listing every role
+            # in ``available_roles`` keeps the topbar dropdown happy
+            # even though the switch endpoint refuses for the
+            # synthetic (no real session row to update).
             return CurrentUser(
                 id=0,  # not a real users.id; persisted audit rows use actor_user_id=None
                 tenant_id=int(request.state.tenant_id),
                 email=f"super-admin#{getattr(request.state, 'super_admin_user_id', 0)}",
                 full_name="Super-Admin (impersonating)",
-                roles=("Admin", "HR", "Manager", "Employee"),
+                roles=("Admin",),
+                available_roles=("Admin", "HR", "Manager", "Employee"),
+                active_role="Admin",
                 departments=tuple(),
                 session_id=str(getattr(request.state, "super_admin_session_id", "")),
             )
@@ -203,13 +253,26 @@ def current_user(
     # Make tenant resolvable by downstream deps (hadir.tenants.scope).
     request.state.tenant_id = session_row.tenant_id
 
-    # Rebuild with the real session_id.
+    # P7: pick the effective active role. Stored claim wins as long as
+    # the user still actually holds it; otherwise fall back to their
+    # highest role. ``current_user.roles`` is then narrowed to that
+    # single value so existing ``require_role`` guards re-evaluate
+    # against the active role per request.
+    available = bundle.roles
+    stored = session_row.data.get("active_role") if session_row.data else None
+    if isinstance(stored, str) and stored in available:
+        active = stored
+    else:
+        active = primary_role(available)
+
     return CurrentUser(
         id=bundle.id,
         tenant_id=bundle.tenant_id,
         email=bundle.email,
         full_name=bundle.full_name,
-        roles=bundle.roles,
+        roles=(active,),
+        available_roles=available,
+        active_role=active,
         departments=bundle.departments,
         session_id=session_row.id,
     )

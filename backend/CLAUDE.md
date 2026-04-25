@@ -1,7 +1,7 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 complete**:
+Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 complete**:
 pilot frozen at tag `v0.1-pilot` on branch `release/pilot`; multi-tenant
 routing wired up via a per-connection `SET search_path` driven by a
 ContextVar + SQLAlchemy `checkout` event; the global `tenants` registry
@@ -34,8 +34,14 @@ httpx, signed state+nonce cookie between login and callback, ID
 token validation against cached JWKS, email-match on existing tenant
 users (red line: no auto-provision, no role derivation from claims),
 LoginPage promotes "Sign in with Microsoft" to primary when enabled.
+**P7** added the multi-role switcher: `user_sessions.data.active_role`
+is set at login (highest role) and updated by
+`POST /api/auth/switch-role` with `auth.role.switched` audit;
+`current_user.roles` is narrowed to `(active_role,)` so existing
+`require_role` guards re-evaluate per request; topbar renders a
+role chip + dropdown when the user holds more than one role.
 Single-mode backwards-compatible (pilot's `main` schema is the
-default). **v1.0 P7 next.**
+default). **v1.0 P8 next.**
 
 ## Tenant routing (v1.0 P1)
 **Approach chosen: SQLAlchemy `checkout` event + Python ContextVar**,

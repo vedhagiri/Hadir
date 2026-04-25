@@ -6,7 +6,6 @@ import { Outlet, useLocation } from "react-router-dom";
 
 import { useMe } from "../auth/AuthProvider";
 import { BrandingProvider } from "../branding/BrandingProvider";
-import { primaryRole } from "../types";
 import { ImpersonationBanner } from "./ImpersonationBanner";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
@@ -19,7 +18,11 @@ export function Layout() {
   // narrowing keeps the rest of the component honest against TS strict.
   if (!me) return null;
 
-  const role = primaryRole(me.roles);
+  // P7: navigation is driven by the user's *active* role — the one
+  // they picked via the topbar switcher. Falls back to the first
+  // entry in ``available_roles`` for the legacy super-admin synthetic
+  // (which doesn't carry a single active role per tenant).
+  const role = me.active_role ?? me.roles[0] ?? "Employee";
   // Route path is always ``/<pageId>`` in P4 (no nested routes yet).
   const pageId = location.pathname.replace(/^\//, "") || "dashboard";
 
