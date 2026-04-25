@@ -1,0 +1,9 @@
+# Hadir backup cron (v1.0 P24).
+# supercronic crontab — see ops/backup/Dockerfile.
+#
+# Five fields: m h dom mon dow. The container's TZ is set to
+# Asia/Muscat by default (override via ``TZ=...`` on the
+# service definition); 0 2 * * * therefore fires at 02:00
+# Muscat local time, which is what BRD §"backups" asks for.
+
+0 2 * * * /app/scripts/backup.sh

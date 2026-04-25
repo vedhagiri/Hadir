@@ -58,6 +58,46 @@ services:
     profiles:
       - never
 
+  # P24: nightly backup container. supercronic fires
+  # ``backend/scripts/backup.sh`` at 02:00 Asia/Muscat by default
+  # (override via ``TZ`` if you ever move tenants to another
+  # region). The script writes to the ``backup_storage`` named
+  # volume; an operator can also point ``HADIR_BACKUP_S3_URI``
+  # at an S3-compatible bucket for off-site copies. See
+  # ``docs/disaster-recovery.md`` and ``docs/dr-rehearsal.md``.
+  backup:
+    build:
+      context: .
+      dockerfile: ops/backup/Dockerfile
+    image: hadir-backup:latest
+    environment:
+      HADIR_ADMIN_DATABASE_URL: ${HADIR_ADMIN_DATABASE_URL:?must be set in production}
+      HADIR_BACKUP_ROOT: /backup
+      HADIR_DATA_ROOT: /data
+      HADIR_BACKUP_S3_URI: ${HADIR_BACKUP_S3_URI:-}
+      HADIR_BACKUP_RETAIN_DAILY: ${HADIR_BACKUP_RETAIN_DAILY:-30}
+      HADIR_BACKUP_RETAIN_WEEKLY: ${HADIR_BACKUP_RETAIN_WEEKLY:-12}
+      HADIR_BACKUP_RETAIN_MONTHLY: ${HADIR_BACKUP_RETAIN_MONTHLY:-12}
+      TZ: ${HADIR_BACKUP_TZ:-Asia/Muscat}
+    volumes:
+      # Backup output. ``backup_storage`` is a named volume so
+      # the destination survives container rebuilds without
+      # bind-mount path drift on the host. Operators who prefer
+      # a host bind-mount can override via the env file.
+      - ${HADIR_BACKUP_DIR:-backup_storage}:/backup
+      # Read-only mount of the data dirs so tar can snapshot
+      # them. Read-only is the load-bearing red line —
+      # supercronic should never mutate the source artifacts.
+      - faces_data:/data:ro
+      # Bind-mount the script directory so updates ship without
+      # an image rebuild.
+      - ./backend/scripts:/app/scripts:ro
+    depends_on:
+      - postgres
+    networks:
+      - hadir-internal
+    restart: unless-stopped
+
   nginx:
     build:
       context: .
@@ -87,6 +127,7 @@ services:
 
 volumes:
   certbot_webroot:
+  backup_storage:
 
 networks:
   hadir-internal:

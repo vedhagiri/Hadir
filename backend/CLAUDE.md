@@ -1,7 +1,7 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 + P23 complete (M2 core + first M3 hardening phase)**:
+Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 + P23 + P24 complete (M2 core + second M3 hardening phase)**:
 pilot frozen at tag `v0.1-pilot` on branch `release/pilot`; multi-tenant
 routing wired up via a per-connection `SET search_path` driven by a
 ContextVar + SQLAlchemy `checkout` event; the global `tenants` registry
@@ -230,8 +230,24 @@ service to a new `hadir-internal` network, and adds the nginx
 service. Optional `docker-compose.le.yml` adds a Let's Encrypt
 certbot sidecar; default cert path is operator-provided certs
 in `ops/certs/`. `docs/deploy-production.md` is the runbook
-from a fresh Ubuntu 22.04 to a serving stack. **v1.0 M3
-hardening continues with P24.**
+from a fresh Ubuntu 22.04 to a serving stack. **P24** added
+backups + DR rehearsal: `backend/scripts/backup.sh` (pg_dump
+per schema in `public.tenants` + `main` + `public`, tarballs
+of `/data/{faces,attachments,branding,erp,reports}`, JSON
+manifest with sha256 per file, `_complete` marker for
+partial-run safety, optional S3 off-site upload via
+`HADIR_BACKUP_S3_URI`, retention 30 daily/12 weekly/12
+monthly), `backend/scripts/restore.sh` (checksum gate,
+typed `RESTORE` confirmation on `/dev/tty` for non-empty
+targets, drops in reverse dependency order, restores public
++ main + tenants in forward order, filters `CREATE SCHEMA
+public` to coexist with citext, extracts data tarballs).
+New `ops/backup/` image (postgres-15-alpine + supercronic).
+`docker-compose.prod.yml` adds the `backup` service with
+the script bind-mounted in. Live DR rehearsal documented in
+`docs/dr-rehearsal.md`: 13 s RTO actual against 4 h target,
+P22 user prefs round-tripped intact. **v1.0 M3 hardening
+continues with P25.**
 
 ## Tenant routing (v1.0 P1)
 **Approach chosen: SQLAlchemy `checkout` event + Python ContextVar**,

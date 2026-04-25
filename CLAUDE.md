@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 (M2 core complete) + P23 (M3 hardening — first phase).**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 (M2 core complete) + P23 + P24 (M3 hardening — second phase).**
 
 > **Tenant isolation is a P0 blocker.** The suites
 > `backend/tests/test_multi_tenant_isolation.py` (the P1 canary) and
@@ -478,7 +478,48 @@ of the Arabic translations before v1.0 launch** — see
   headers + 301 from HTTP, and the dev stack on :5173/:8000
   was untouched. **425 tests passing** (409 prior + 16 P23).
 
-Next: **P24 (M3 hardening continues)** per
+- **P24** — Backups + DR rehearsal. New
+  `backend/scripts/backup.sh` runs `pg_dump --schema=NAME`
+  per schema (public + main + every tenant in
+  `public.tenants`), tarballs `/data/{faces,attachments,
+  branding,erp,reports}` (skipping empties), writes a
+  `manifest.json` with sha256 per file +
+  `pg_server_version`, and marks the run complete only at
+  the end so partial runs aren't swept by retention.
+  Retention: 30 daily / 12 weekly / 12 monthly (configurable
+  via `HADIR_BACKUP_RETAIN_*`). Optional off-site upload to
+  S3-compatible storage via `HADIR_BACKUP_S3_URI` (requires
+  `INCLUDE_AWS_CLI=1` at image build; default OFF — local
+  NAS is the BRD Open Item Q4 default). New
+  `backend/scripts/restore.sh` validates every checksum
+  before any destructive SQL, drops every schema in the
+  manifest in reverse dependency order (cross-schema FKs
+  bite back otherwise), restores in forward order (filtering
+  the dump's `CREATE SCHEMA public` line to coexist with
+  citext), then extracts data tarballs. Destructive-confirm
+  red line: typed `RESTORE` on `/dev/tty` (case-sensitive),
+  with `--yes-i-have-a-backup-of-the-target` as the
+  non-interactive checkpoint (production refuses without it).
+  New `ops/backup/` ships a postgres-15-alpine image +
+  supercronic cron at 02:00 Asia/Muscat by default.
+  `docker-compose.prod.yml` adds the `backup` service with
+  the script bind-mounted in (updates ship without rebuild)
+  and `/data` mounted read-only. Live DR rehearsal cycle
+  ran end-to-end on a throwaway `-p hadirdr` project: backup
+  in 1 s, restore in 1 s, backend cold-boot in 11 s — total
+  RTO actual ~13 s against a 4-hour target. P22 user
+  preferences (theme=dark, density=compact) round-tripped
+  through the cycle. Three issues surfaced and fixed in the
+  same session (`pg_dump --clean --if-exists` conflicting
+  with citext, cross-schema FKs blocking per-schema drops,
+  `--no-privileges` stripping the `hadir_app` grants — see
+  `docs/dr-rehearsal.md`). New `docs/disaster-recovery.md`
+  states pilot RTO 4 h / RPO 24 h with future-work path to
+  RTO 1 h / RPO 5 min via wal-g. New `docs/dr-rehearsal.md`
+  is the append-only log; quarterly cadence with next
+  rehearsal due 2026-07-25.
+
+Next: **P25 (M3 hardening continues)** per
 `v1.0-phase-plan.md`. Wait for the user before starting.
 **Open critical item carries over: Omran HR native-speaker
 review of the Arabic translations before v1.0 launch** — see
