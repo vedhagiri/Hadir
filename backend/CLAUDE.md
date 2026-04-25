@@ -1,7 +1,7 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 complete**:
+Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 complete**:
 pilot frozen at tag `v0.1-pilot` on branch `release/pilot`; multi-tenant
 routing wired up via a per-connection `SET search_path` driven by a
 ContextVar + SQLAlchemy `checkout` event; the global `tenants` registry
@@ -21,8 +21,14 @@ branding (`tenant_branding` table; curated 8-colour palette + 3
 fonts; PNG/SVG logo upload validated by magic bytes; `/api/branding`
 + `/api/super-admin/tenants/{id}/branding` endpoints; frontend
 `BrandingProvider` writes a `<style>` tag with `--accent` overrides +
-body font-family at sign-in). Single-mode backwards-compatible
-(pilot's `main` schema is the default). **v1.0 P5 next.**
+body font-family at sign-in). **P5** wired multi-tenant login
+(`POST /api/auth/login` accepts `tenant_slug`; sets `hadir_tenant`
+cookie alongside `hadir_session`; middleware reads the slug to pick
+which schema's `user_sessions` to look up); shipped the
+end-to-end isolation suite `tests/test_two_tenant_isolation.py`;
+added `.github/workflows/isolation.yml` as a P0-blocker CI gate.
+Single-mode backwards-compatible (pilot's `main` schema is the
+default). **v1.0 P6 next.**
 
 ## Tenant routing (v1.0 P1)
 **Approach chosen: SQLAlchemy `checkout` event + Python ContextVar**,

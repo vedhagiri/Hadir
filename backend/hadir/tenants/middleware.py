@@ -45,6 +45,7 @@ from hadir.auth.audit import (
 from hadir.config import get_settings
 from hadir.db import (
     DEFAULT_SCHEMA,
+    _TENANT_SCHEMA_RE,
     get_engine,
     set_tenant_schema,
     super_admin_sessions,
@@ -65,19 +66,23 @@ class TenantScopeMiddleware(BaseHTTPMiddleware):
         *,
         cookie_name: Optional[str] = None,
         super_cookie_name: str = "hadir_super_session",
+        tenant_cookie_name: str = "hadir_tenant",
     ) -> None:
         super().__init__(app)
         self._cookie_name = cookie_name
         self._super_cookie_name = super_cookie_name
+        self._tenant_cookie_name = tenant_cookie_name
 
     async def dispatch(self, request, call_next):  # type: ignore[no-untyped-def]
         cookie_name = self._cookie_name or get_settings().session_cookie_name
         tenant_session_id = request.cookies.get(cookie_name)
         super_session_id = request.cookies.get(self._super_cookie_name)
+        tenant_cookie = request.cookies.get(self._tenant_cookie_name)
 
         resolved = self._resolve(
             super_session_id=super_session_id,
             tenant_session_id=tenant_session_id,
+            tenant_cookie=tenant_cookie,
             request=request,
         )
         resolved_schema = resolved["schema"]
@@ -125,6 +130,7 @@ class TenantScopeMiddleware(BaseHTTPMiddleware):
         *,
         super_session_id: Optional[str],
         tenant_session_id: Optional[str],
+        tenant_cookie: Optional[str],
         request,
     ) -> dict:
         """Return resolution dict — see class docstring for priority."""
@@ -142,8 +148,11 @@ class TenantScopeMiddleware(BaseHTTPMiddleware):
             # session for testing). Stale super cookies otherwise lock
             # the user out.
 
-        # 2. Tenant session.
-        return self._resolve_tenant(tenant_session_id)
+        # 2. Tenant session, scoped by the ``hadir_tenant`` cookie when
+        #    present. P5: this is how non-pilot tenants log in — the
+        #    cookie tells us which schema's ``user_sessions`` to look
+        #    the opaque session token up in.
+        return self._resolve_tenant(tenant_session_id, tenant_cookie)
 
     def _resolve_super(self, super_session_id: str) -> Optional[dict]:
         engine = get_engine()
@@ -203,7 +212,9 @@ class TenantScopeMiddleware(BaseHTTPMiddleware):
             "impersonated_tenant_id": None,
         }
 
-    def _resolve_tenant(self, session_id: Optional[str]) -> dict:
+    def _resolve_tenant(
+        self, session_id: Optional[str], tenant_cookie: Optional[str]
+    ) -> dict:
         settings = get_settings()
         if not session_id:
             return {
@@ -214,12 +225,16 @@ class TenantScopeMiddleware(BaseHTTPMiddleware):
             }
 
         engine = get_engine()
-        # The pilot's user_sessions table still lives per-tenant; the
-        # one we need (to bootstrap routing) is on ``main`` for the
-        # legacy tenant. v1.0 multi-mode session-to-tenant resolution
-        # for non-pilot tenants needs a token-with-prefix or a separate
-        # cookie carrying the tenant — deferred to a follow-up phase.
-        with tenant_context("main"):
+        # P5: scope the session lookup by the ``hadir_tenant`` cookie
+        # when present. The cookie carries the schema name picked at
+        # login; we validate against the same regex Postgres CHECKs
+        # before using it. Falls back to ``main`` when missing so the
+        # pilot's single-tenant flow keeps working untouched.
+        if tenant_cookie and _TENANT_SCHEMA_RE.match(tenant_cookie):
+            session_lookup_schema = tenant_cookie
+        else:
+            session_lookup_schema = "main"
+        with tenant_context(session_lookup_schema):
             try:
                 with engine.begin() as conn:
                     row = conn.execute(

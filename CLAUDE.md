@@ -33,7 +33,16 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4.**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5.**
+
+> **Tenant isolation is a P0 blocker.** The suites
+> `backend/tests/test_multi_tenant_isolation.py` (the P1 canary) and
+> `backend/tests/test_two_tenant_isolation.py` (the P5 end-to-end
+> two-tenant smoke) MUST pass on every push to `main`. The CI
+> workflow at `.github/workflows/isolation.yml` runs them plus
+> `tests/test_migration_lint.py` against a Postgres service. **A
+> failure stops the line — fix the leak before merging anything
+> else, do not punt it to a known-issue list.**
 - **P0** — pilot frozen at `v0.1-pilot` (commit `1a0782c`);
   `release/pilot` branch exists locally + at origin.
 - **P1** — multi-tenant routing switch wired up. `MetaData()` is
@@ -86,8 +95,23 @@ To return to v1.0 work: `git checkout main`.
   Curated red lines from BRD FR-BRD-002: no free-form hex, no
   custom CSS upload, no custom font upload — enforced by both the
   CHECK constraints and the API validation.
+- **P5** — Second-tenant non-prod smoke. Multi-tenant login wired:
+  `POST /api/auth/login` accepts an optional `tenant_slug`,
+  resolves the schema from `public.tenants`, and runs the user
+  lookup + session creation under that tenant's schema. Login sets
+  both `hadir_session` (opaque token) and `hadir_tenant` (slug)
+  cookies; `TenantScopeMiddleware` reads the slug to pick which
+  schema's `user_sessions` to look the token up in. The new
+  end-to-end suite `tests/test_two_tenant_isolation.py` provisions
+  two tenants via the CLI, logs in as each Admin separately,
+  creates distinct employees, asserts cross-reads via every
+  employee API + audit log return zero leakage, and confirms
+  Super-Admin Access-as for both lands in `public.super_admin_audit`.
+  CI workflow `.github/workflows/isolation.yml` runs the isolation
+  suites + the migration lint on every push to main / PR touching
+  `backend/`.
 
-Next: **P5** per `v1.0-phase-plan.md`. Wait for the user before
+Next: **P6** per `v1.0-phase-plan.md`. Wait for the user before
 starting. Per-phase records: `docs/phases/P*.md`.
 
 ---

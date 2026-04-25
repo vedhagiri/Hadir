@@ -27,8 +27,13 @@ from hadir.auth.passwords import verify_password
 from hadir.auth.ratelimit import LoginRateLimiter, get_rate_limiter
 from hadir.auth.sessions import create_session, delete_session
 from hadir.config import get_settings
-from hadir.db import get_engine, users
+from hadir.db import _TENANT_SCHEMA_RE, get_engine, tenant_context, tenants, users
 from hadir.tenants import TenantScope, get_tenant_scope
+
+# Cookie that carries the tenant the session belongs to. Set alongside
+# ``hadir_session`` at login, read by ``TenantScopeMiddleware`` to
+# resolve which schema's ``user_sessions`` to look the cookie up in.
+TENANT_COOKIE_NAME = "hadir_tenant"
 
 logger = logging.getLogger(__name__)
 
@@ -40,10 +45,16 @@ class LoginRequest(BaseModel):
 
     ``EmailStr`` validates the format; we lowercase the stored value so
     CITEXT's case-insensitive comparison matches every time.
+
+    ``tenant_slug`` (v1.0 P5) is the schema name of the tenant the
+    caller belongs to. Optional for backward compatibility with the
+    pilot's single-tenant flow — when omitted, login defaults to the
+    pilot's ``main`` schema. Required for any non-pilot tenant.
     """
 
     email: EmailStr
     password: str = Field(min_length=1, max_length=1024)
+    tenant_slug: str | None = Field(default=None, max_length=63)
 
 
 class MeResponse(BaseModel):
@@ -66,6 +77,55 @@ def _client_ip(request: Request) -> str:
     return client.host if client is not None else "unknown"
 
 
+def _resolve_login_target(
+    *,
+    tenant_slug: str | None,
+    settings,
+    engine,
+) -> tuple[int, str]:
+    """Return ``(tenant_id, tenant_schema)`` the login should run under.
+
+    Path A — explicit ``tenant_slug`` (v1.0 multi-tenant): validate the
+    slug against the same regex Postgres CHECK enforces, then look up
+    the row in the global registry. Refuse suspended tenants. Refuse
+    unknown slugs.
+
+    Path B — no slug (pilot single-tenant compatibility): use the
+    configured default tenant id and the conventional ``main`` schema.
+    """
+
+    if tenant_slug is not None:
+        if not _TENANT_SCHEMA_RE.match(tenant_slug):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="invalid tenant_slug",
+            )
+        with tenant_context("public"):
+            with engine.begin() as conn:
+                row = conn.execute(
+                    select(
+                        tenants.c.id,
+                        tenants.c.schema_name,
+                        tenants.c.status,
+                    ).where(tenants.c.schema_name == tenant_slug)
+                ).first()
+        if row is None:
+            # Don't 404 — that leaks tenant existence by oracle. Treat
+            # as bad credentials so attackers can't enumerate tenants.
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="invalid credentials",
+            )
+        if str(row.status) == "suspended":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="tenant suspended",
+            )
+        return int(row.id), str(row.schema_name)
+
+    return settings.default_tenant_id, "main"
+
+
 @router.post("/login", status_code=status.HTTP_200_OK)
 def login(
     payload: LoginRequest,
@@ -81,113 +141,133 @@ def login(
     settings = get_settings()
     engine = get_engine()
 
-    if limiter.is_blocked(email, ip):
+    target_tenant_id, target_schema = _resolve_login_target(
+        tenant_slug=payload.tenant_slug, settings=settings, engine=engine
+    )
+
+    # All DB ops below run under the resolved tenant's schema. The
+    # checkout listener applies SET search_path on every borrowed
+    # connection. Login pre-dates the middleware setting any schema
+    # (the request was anonymous on entry), so this context is what
+    # makes multi-tenant login work.
+    with tenant_context(target_schema):
+        if limiter.is_blocked(email, ip):
+            with engine.begin() as conn:
+                write_audit(
+                    conn,
+                    tenant_id=target_tenant_id,
+                    action="auth.login.rate_limited",
+                    entity_type="user",
+                    entity_id=None,
+                    after={"email_attempted": email, "ip": ip},
+                )
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="too many login attempts",
+            )
+
+        # Load the user in a short read-only transaction. We end it before
+        # any branch that might ``raise HTTPException`` — raising inside
+        # ``engine.begin()`` would roll back the audit write that follows.
         with engine.begin() as conn:
+            user_row = conn.execute(
+                select(
+                    users.c.id,
+                    users.c.tenant_id,
+                    users.c.email,
+                    users.c.full_name,
+                    users.c.password_hash,
+                    users.c.is_active,
+                ).where(
+                    users.c.tenant_id == target_tenant_id,
+                    users.c.email == email,
+                )
+            ).first()
+
+        # Single "invalid credentials" path for (a) unknown email, (b)
+        # wrong password, and (c) inactive user. We still audit each case
+        # with a distinct ``reason`` so operators can tell them apart in
+        # the log, but the client sees one generic 401.
+        failure_reason: str | None = None
+        if user_row is None:
+            failure_reason = "unknown_email"
+        elif not user_row.is_active:
+            failure_reason = "inactive_user"
+        elif not verify_password(user_row.password_hash, payload.password):
+            failure_reason = "wrong_password"
+
+        if failure_reason is not None:
+            attempts = limiter.register_failure(email, ip)
+            with engine.begin() as conn:
+                write_audit(
+                    conn,
+                    tenant_id=target_tenant_id,
+                    actor_user_id=int(user_row.id) if user_row is not None else None,
+                    action="auth.login.failure",
+                    entity_type="user",
+                    entity_id=str(user_row.id) if user_row is not None else None,
+                    after={
+                        "email_attempted": email,
+                        "ip": ip,
+                        "reason": failure_reason,
+                        "attempts": attempts,
+                    },
+                )
+            # Do not reveal which case fired — PROJECT_CONTEXT §12 red line.
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="invalid credentials",
+            )
+
+        assert user_row is not None  # narrowed by the failure_reason branch.
+
+        # Success — reset the counter, create the session, audit, load bundle.
+        limiter.reset_key(email, ip)
+        with engine.begin() as conn:
+            session = create_session(
+                conn,
+                tenant_id=target_tenant_id,
+                user_id=int(user_row.id),
+                idle_minutes=settings.session_idle_minutes,
+                tenant_schema=target_schema,
+            )
             write_audit(
                 conn,
-                tenant_id=scope.tenant_id,
-                action="auth.login.rate_limited",
+                tenant_id=target_tenant_id,
+                actor_user_id=int(user_row.id),
+                action="auth.login.success",
                 entity_type="user",
-                entity_id=None,
-                after={"email_attempted": email, "ip": ip},
-            )
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="too many login attempts",
-        )
-
-    # Load the user in a short read-only transaction. We end it before any
-    # branch that might ``raise HTTPException`` — raising inside
-    # ``engine.begin()`` would roll back the audit write that follows.
-    with engine.begin() as conn:
-        user_row = conn.execute(
-            select(
-                users.c.id,
-                users.c.tenant_id,
-                users.c.email,
-                users.c.full_name,
-                users.c.password_hash,
-                users.c.is_active,
-            ).where(
-                users.c.tenant_id == scope.tenant_id,
-                users.c.email == email,
-            )
-        ).first()
-
-    # Single "invalid credentials" path for (a) unknown email, (b) wrong
-    # password, and (c) inactive user. We still audit each case with a
-    # distinct ``reason`` so operators can tell them apart in the log,
-    # but the client sees one generic 401.
-    failure_reason: str | None = None
-    if user_row is None:
-        failure_reason = "unknown_email"
-    elif not user_row.is_active:
-        failure_reason = "inactive_user"
-    elif not verify_password(user_row.password_hash, payload.password):
-        failure_reason = "wrong_password"
-
-    if failure_reason is not None:
-        attempts = limiter.register_failure(email, ip)
-        with engine.begin() as conn:
-            write_audit(
-                conn,
-                tenant_id=scope.tenant_id,
-                actor_user_id=int(user_row.id) if user_row is not None else None,
-                action="auth.login.failure",
-                entity_type="user",
-                entity_id=str(user_row.id) if user_row is not None else None,
+                entity_id=str(user_row.id),
                 after={
-                    "email_attempted": email,
                     "ip": ip,
-                    "reason": failure_reason,
-                    "attempts": attempts,
+                    "session_id": session.id,
+                    "tenant_schema": target_schema,
                 },
             )
-        # Do not reveal which case fired — PROJECT_CONTEXT §12 red line.
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials"
-        )
+            bundle = _load_current_user_bundle(
+                conn,
+                user_id=int(user_row.id),
+                tenant_id=target_tenant_id,
+            )
 
-    assert user_row is not None  # narrowed by the failure_reason branch above.
-
-    # Success — reset the counter, create the session, audit, load bundle.
-    limiter.reset_key(email, ip)
-    with engine.begin() as conn:
-        # Resolve the user's home tenant schema once at login and stash
-        # it on the session so the per-request middleware doesn't have
-        # to round-trip the registry on every call.
-        from hadir.tenants.scope import resolve_tenant_schema  # noqa: PLC0415
-
-        tenant_schema = resolve_tenant_schema(conn, int(user_row.tenant_id))
-        session = create_session(
-            conn,
-            tenant_id=int(user_row.tenant_id),
-            user_id=int(user_row.id),
-            idle_minutes=settings.session_idle_minutes,
-            tenant_schema=tenant_schema,
-        )
-        write_audit(
-            conn,
-            tenant_id=scope.tenant_id,
-            actor_user_id=int(user_row.id),
-            action="auth.login.success",
-            entity_type="user",
-            entity_id=str(user_row.id),
-            after={
-                "ip": ip,
-                "session_id": session.id,
-                "tenant_schema": tenant_schema,
-            },
-        )
-        bundle = _load_current_user_bundle(
-            conn, user_id=int(user_row.id), tenant_id=int(user_row.tenant_id)
-        )
     # bundle can't be None here — we just authenticated the row.
     assert bundle is not None
 
     response.set_cookie(
         key=settings.session_cookie_name,
         value=session.id,
+        max_age=settings.session_idle_minutes * 60,
+        httponly=True,
+        samesite="lax",
+        secure=settings.session_cookie_secure,
+        path="/",
+    )
+    # P5: pin the session to its tenant. The middleware reads this on
+    # every subsequent request to know which ``user_sessions`` table to
+    # look the opaque ``hadir_session`` token up in.
+    response.set_cookie(
+        key=TENANT_COOKIE_NAME,
+        value=target_schema,
         max_age=settings.session_idle_minutes * 60,
         httponly=True,
         samesite="lax",
@@ -229,6 +309,7 @@ def logout(
         delete_session(conn, user.session_id)
 
     response.delete_cookie(key=settings.session_cookie_name, path="/")
+    response.delete_cookie(key=TENANT_COOKIE_NAME, path="/")
     response.status_code = status.HTTP_204_NO_CONTENT
     return response
 
