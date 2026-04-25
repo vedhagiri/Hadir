@@ -162,10 +162,22 @@ def _attach_search_path_listener(engine: Engine) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Metadata — UNQUALIFIED (no schema=) so search_path resolves at runtime.
+# Metadata
 # ---------------------------------------------------------------------------
+# A single ``MetaData`` carries both the tenant-scoped tables (no schema
+# qualifier — placed by ``SET search_path``) and the globally-visible
+# ``tenants`` table (``schema="public"`` baked in on the Table itself).
+# Keeping them in one metadata lets SQLAlchemy resolve cross-schema
+# foreign keys (per-tenant tables → ``public.tenants``) at table-build
+# time. The provisioning CLI calls ``create_all(tables=…)`` with the
+# global tables filtered out so it only materialises the per-tenant
+# set inside a fresh tenant schema.
 
 metadata = MetaData()
+# Used by ``alembic env.py`` to keep autogenerate aware of the global
+# slot when running against the public schema. Same object as
+# ``metadata`` — the alias just documents intent at the call site.
+metadata_global = metadata
 
 
 # --- Tables -----------------------------------------------------------------
@@ -174,6 +186,11 @@ metadata = MetaData()
 # ``TenantScope`` dependency (``hadir.tenants.scope``) to thread the value
 # through repositories.
 
+# P2: tenants is the single globally-visible table — lives in ``public``
+# so it sits outside any tenant's schema and the orchestrator can iterate
+# it to discover which tenant schemas to migrate. ``schema="public"`` is
+# baked into the Table itself so the per-tenant ``create_all`` path can
+# filter it out by inspecting ``Table.schema``.
 tenants = Table(
     "tenants",
     metadata,
@@ -190,6 +207,7 @@ tenants = Table(
         nullable=False,
         server_default=func.now(),
     ),
+    schema="public",
 )
 
 
@@ -200,7 +218,7 @@ users = Table(
     Column(
         "tenant_id",
         Integer,
-        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     ),
@@ -227,7 +245,7 @@ roles = Table(
     Column(
         "tenant_id",
         Integer,
-        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     ),
@@ -256,7 +274,7 @@ user_roles = Table(
     Column(
         "tenant_id",
         Integer,
-        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
         primary_key=True,
     ),
 )
@@ -269,7 +287,7 @@ departments = Table(
     Column(
         "tenant_id",
         Integer,
-        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     ),
@@ -297,7 +315,7 @@ user_departments = Table(
     Column(
         "tenant_id",
         Integer,
-        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
         primary_key=True,
     ),
 )
@@ -313,7 +331,7 @@ user_sessions = Table(
     Column(
         "tenant_id",
         Integer,
-        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     ),
@@ -356,7 +374,7 @@ audit_log = Table(
     Column(
         "tenant_id",
         Integer,
-        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     ),
@@ -394,7 +412,7 @@ employees = Table(
     Column(
         "tenant_id",
         Integer,
-        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     ),
@@ -433,7 +451,7 @@ employee_photos = Table(
     Column(
         "tenant_id",
         Integer,
-        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     ),
@@ -477,7 +495,7 @@ cameras = Table(
     Column(
         "tenant_id",
         Integer,
-        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     ),
@@ -517,7 +535,7 @@ detection_events = Table(
     Column(
         "tenant_id",
         Integer,
-        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     ),
@@ -576,7 +594,7 @@ camera_health_snapshots = Table(
     Column(
         "tenant_id",
         Integer,
-        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     ),
@@ -614,7 +632,7 @@ shift_policies = Table(
     Column(
         "tenant_id",
         Integer,
-        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     ),
@@ -644,7 +662,7 @@ attendance_records = Table(
     Column(
         "tenant_id",
         Integer,
-        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     ),

@@ -1,15 +1,17 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 complete**:
+Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 complete**:
 pilot frozen at tag `v0.1-pilot` on branch `release/pilot`; multi-tenant
 routing wired up via a per-connection `SET search_path` driven by a
-ContextVar + SQLAlchemy `checkout` event. Login persists
-`tenant_id` / `tenant_schema` on `user_sessions.data`;
-`TenantScopeMiddleware` reads the claim and sets the contextvar for
-the request scope. Isolation canary in
+ContextVar + SQLAlchemy `checkout` event; the global `tenants` registry
+lives in `public`, every per-tenant table lives in its own schema, and
+the migration history splits into "legacy main" (0001-0007), the
+boundary migration (0008), and "schema-agnostic going forward" (0009+).
+Provisioning + deprovisioning CLIs in `scripts/`. Migration-authoring
+lint at `tests/test_migration_lint.py`. Isolation canary in
 `tests/test_multi_tenant_isolation.py`. Single-mode backwards-compatible
-(pilot's `main` schema is the default). **v1.0 P2 next.**
+(pilot's `main` schema is the default). **v1.0 P3 next.**
 
 ## Tenant routing (v1.0 P1)
 **Approach chosen: SQLAlchemy `checkout` event + Python ContextVar**,
@@ -96,7 +98,7 @@ Isolation canary (`tests/test_multi_tenant_isolation.py`):
 backend/
   pyproject.toml
   Dockerfile
-  entrypoint.sh                # alembic upgrade head; exec uvicorn
+  entrypoint.sh                # python -m scripts.migrate; exec uvicorn
   alembic.ini
   alembic/
     env.py                     # reads HADIR_ADMIN_DATABASE_URL, version in main schema
@@ -185,9 +187,101 @@ backend/
     test_p13_reports.py        #  9 tests — P13 report round-trip + manager scoping + dev-only endpoints
 ```
 
+## Per-schema migration model (v1.0 P2)
+**Three categories of migrations** in `alembic/versions/`:
+
+1. **Legacy main pilot** (0001-0007) — pilot history, frozen, only
+   ever applied to the `main` schema.
+2. **Boundary migration** (0008_tenants_to_public) — one-shot,
+   intentionally cross-schema. Creates `public.tenants` from
+   `main.tenants`, programmatically rewires every FK in the DB, and
+   drops `main.tenants`. Tracked in `main.alembic_version` (which is
+   the only place that knew anything about `tenants` pre-P2).
+3. **Schema-agnostic forward migrations** (0009+) — every new
+   migration ships here. **No hardcoded `main`/`public` literals** —
+   `tests/test_migration_lint.py` fails the suite if it spots one.
+   `alembic env.py` sets `search_path` to the active schema, so an
+   unqualified `op.create_table("foo", ...)` lands in whichever
+   tenant schema is being upgraded.
+
+`alembic env.py` reads `-x schema=<name>` from the CLI. The version
+table lives in that schema (`<schema>.alembic_version`), and
+`search_path` points at it before any DDL runs. The default (no
+`-x`) is `main` for backward compat.
+
+`scripts/migrate.py` is the orchestrator the entrypoint runs at
+container start:
+
+1. `alembic -x schema=main upgrade head` (advances pilot legacy +
+   boundary).
+2. Iterate `public.tenants` for `schema_name <> 'main'`; for each,
+   run `alembic -x schema=<name> upgrade head`. Schema-agnostic 0009+
+   migrations apply uniformly.
+
+A new tenant created via `scripts/provision_tenant.py` arrives with
+its `alembic_version` already stamped at head (the CLI runs
+`alembic stamp` after `metadata.create_all`), so the orchestrator's
+loop is a no-op for it until the next forward migration ships.
+
+## Tenant provisioning CLI (v1.0 P2)
+```
+docker compose exec -e HADIR_PROVISION_PASSWORD='…' backend \
+  python -m scripts.provision_tenant \
+    --slug tenant_<slug> --name '<Display Name>' \
+    --admin-email <email> [--admin-full-name '<Name>']
+```
+Steps run inside one transaction (rolled back on any failure):
+
+1. Validate slug against `^[A-Za-z_][A-Za-z0-9_]{0,62}$` (mirrors
+   the DB CHECK on `public.tenants.schema_name`).
+2. INSERT row into `public.tenants` (returns the new tenant_id).
+3. `CREATE SCHEMA <slug>`.
+4. `metadata.create_all` against the new schema, filtered to skip
+   `public.tenants` (the only `Table` with `schema="public"`).
+5. Apply grants: `hadir_admin` owner, `hadir_app` SELECT/INSERT/
+   UPDATE/DELETE on every per-tenant table EXCEPT `audit_log`
+   (INSERT + SELECT only — same append-only contract as main).
+6. Seed defaults: 4 roles (Admin/HR/Manager/Employee), 3 departments
+   (ENG/OPS/ADM), one Fixed shift policy `Default 07:30–15:30`.
+7. Create the first Admin user with an Argon2id-hashed password.
+8. Insert a `tenant.provisioned` audit row in the new schema.
+
+After the transaction commits, `alembic stamp head` runs as a
+subprocess to record `<slug>.alembic_version` at the latest revision.
+If the stamp fails, the schema and registry row are dropped before
+the script exits non-zero. **Password input** order: `--admin-password`
+flag → `$HADIR_PROVISION_PASSWORD` → interactive prompt with
+confirmation. The plain password never appears in `argv`, logs, or
+audit rows.
+
+## Tenant deprovisioning CLI (v1.0 P2 — destructive)
+```
+docker compose exec backend python -m scripts.deprovision_tenant \
+  --slug tenant_<slug> --confirm [--backup-taken] [--yes-i-know]
+```
+**Red lines** (mirrored at the script's docstring):
+
+- `--confirm` is necessary but not sufficient. Without `--yes-i-know`
+  the script prompts the operator to re-type the slug on stdin.
+- In `HADIR_ENV=production`, the script refuses without
+  `--backup-taken`. There is no way for the script to verify a backup
+  was taken — the flag is a hard checkpoint on operator discipline.
+- Refuses to drop the pilot schema `main`.
+- Drops only the schema (`DROP SCHEMA <slug> CASCADE`) and the
+  registry row. Encrypted face crops under
+  `/data/faces/<tenant_id>/` and `/data/faces/captures/<tenant_id>/`
+  are NOT removed — operators clean up the volume separately.
+
 ## Schema map (P2)
-All tables live in schema **`main`**. Alembic version table is
-`main.alembic_version`.
+**Global** (lives in `public`):
+
+| Table     | Notes |
+| --------- | --------- |
+| `tenants` | Single globally-visible table. Holds id, name, schema_name, created_at. CHECK on schema_name regex + UNIQUE on schema_name (and on name). |
+
+**Per-tenant** (lives in `<tenant_schema>` — `main` for the pilot,
+`tenant_<slug>` for v1.0 tenants). Each row is `tenant_id NOT NULL FK
+public.tenants(id)`. Identical shape across every tenant schema.
 
 | Table              | PK                                  | tenant_id | Notes                                                |
 | ------------------ | ----------------------------------- | --------- | ---------------------------------------------------- |
@@ -253,7 +347,8 @@ not a shortcut.
 - **First boot (dev):**
   ```
   docker compose up --build
-  # backend entrypoint runs `alembic upgrade head`, then uvicorn.
+  # backend entrypoint runs `scripts.migrate` (orchestrator: main + every
+  # tenant schema in public.tenants), then uvicorn.
   # Migration creates schema `main`, DB roles, and seeds tenant + roles.
   ```
 - **Seed admin:**
@@ -263,7 +358,9 @@ not a shortcut.
   ```
   Re-running is safe — upserts the user and idempotently asserts the
   `Admin` role. The script never logs the password.
-- **Run migrations manually:** `docker compose exec backend alembic upgrade head`
+- **Run migrations manually:**
+  - All schemas (every tenant): `docker compose exec backend python -m scripts.migrate`
+  - One schema (e.g. just `main`): `docker compose exec backend alembic -x schema=main upgrade head`
 - **Health:** `curl http://localhost:8000/api/health`
 
 ## Conventions (reinforced in P2)

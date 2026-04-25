@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1.**
+**v1.0 phases currently complete: P0 + P1 + P2.**
 - **P0** — pilot frozen at `v0.1-pilot` (commit `1a0782c`);
   `release/pilot` branch exists locally + at origin.
 - **P1** — multi-tenant routing switch wired up. `MetaData()` is
@@ -46,10 +46,21 @@ To return to v1.0 work: `git checkout main`.
   is the canary — it must keep passing for the rest of v1.0.
   Single-mode (the pilot's `main` schema) is the backwards-compatible
   default.
+- **P2** — Per-schema Alembic + tenant provisioning CLI. Migration
+  `0008_tenants_to_public` moves the global `tenants` registry from
+  `main` to `public` and rewires every FK across the DB.
+  `alembic env.py` reads `-x schema=<name>` and stamps a
+  `version_table_schema` per tenant; `scripts/migrate.py` orchestrates
+  `main` first (legacy + 0008) then iterates `public.tenants` and
+  upgrades every tenant schema. `scripts/provision_tenant.py` and
+  `scripts/deprovision_tenant.py` are the CLIs; provisioning is
+  fail-closed (rolls back the schema + registry row on any error),
+  deprovisioning refuses in production without `--backup-taken`.
+  `tests/test_migration_lint.py` enforces that 0009+ migrations are
+  schema-agnostic (no hardcoded `main`/`public` literals).
 
-Next: **P2 — Per-schema Alembic + tenant provisioning CLI (M2).**
-Wait for the user before starting. Per-phase records:
-`docs/phases/P*.md`.
+Next: **P3** per `v1.0-phase-plan.md`. Wait for the user before
+starting. Per-phase records: `docs/phases/P*.md`.
 
 ---
 

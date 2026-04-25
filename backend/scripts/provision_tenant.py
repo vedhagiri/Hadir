@@ -1,0 +1,464 @@
+"""Provision a new Hadir tenant from scratch.
+
+Creates the Postgres schema, materialises every per-tenant table inside
+it, wires the grants ``hadir_app`` needs, stamps the schema's
+``alembic_version`` at head so future migrations apply incrementally,
+seeds the default roles + departments + Fixed shift policy, and creates
+the first Admin user with an Argon2-hashed password.
+
+Usage::
+
+    docker compose exec backend python -m scripts.provision_tenant \\
+        --slug tenant_omran --name 'Omran' --admin-email hr@omran.om
+
+The password is read from ``$HADIR_PROVISION_PASSWORD`` if set; otherwise
+the script prompts for it on stdin (with confirmation). The plain
+password never appears on the command line, in logs, or in stdout.
+
+The script is **fail-closed**: if any step after the schema is created
+raises, the schema is dropped and the ``public.tenants`` row removed
+before the script exits non-zero. There is no half-provisioned middle
+state on disk.
+
+Red lines (mirrored in ``backend/CLAUDE.md``):
+
+* The slug must match ``^[A-Za-z_][A-Za-z0-9_]{0,62}$`` — same regex
+  the DB enforces on ``public.tenants.schema_name``.
+* The ``public`` schema is reserved for ``tenants`` and the global
+  ``alembic_version`` only. This script never creates anything else
+  there.
+"""
+
+from __future__ import annotations
+
+import argparse
+import getpass
+import logging
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+from typing import Optional
+
+from sqlalchemy import insert, select, text
+from sqlalchemy.engine import Connection, Engine
+
+from hadir.auth.passwords import hash_password
+from hadir.db import (
+    _TENANT_SCHEMA_RE,
+    audit_log,
+    departments,
+    make_admin_engine,
+    metadata,
+    reset_tenant_schema,
+    roles,
+    set_tenant_schema,
+    shift_policies,
+    tenants,
+    user_roles,
+    users,
+)
+
+logger = logging.getLogger("hadir.provision_tenant")
+
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+_DEFAULT_ROLE_CODES = (
+    ("Admin", "Administrator"),
+    ("HR", "Human Resources"),
+    ("Manager", "Manager"),
+    ("Employee", "Employee"),
+)
+_DEFAULT_DEPARTMENTS = (
+    ("ENG", "Engineering"),
+    ("OPS", "Operations"),
+    ("ADM", "Administration"),
+)
+_DEFAULT_POLICY = {
+    "name": "Default 07:30–15:30",
+    "config": {
+        "start": "07:30",
+        "end": "15:30",
+        "grace_minutes": 15,
+        "required_hours": 8,
+    },
+}
+
+# Tables that ``hadir_app`` operates on with full CRUD inside the new
+# tenant schema. ``audit_log`` is excluded — its grants are narrower.
+_APP_CRUD_TABLES = (
+    "users",
+    "roles",
+    "user_roles",
+    "departments",
+    "user_departments",
+    "user_sessions",
+    "employees",
+    "employee_photos",
+    "cameras",
+    "detection_events",
+    "camera_health_snapshots",
+    "shift_policies",
+    "attendance_records",
+)
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Provision a new Hadir tenant.",
+    )
+    parser.add_argument("--slug", required=True, help="Schema name (e.g. tenant_omran).")
+    parser.add_argument("--name", required=True, help="Display name (e.g. 'Omran').")
+    parser.add_argument(
+        "--admin-email", required=True, help="First Admin user's email."
+    )
+    parser.add_argument(
+        "--admin-full-name",
+        default=None,
+        help="Display name for the Admin user. Defaults to the email local-part.",
+    )
+    parser.add_argument(
+        "--admin-password",
+        default=None,
+        help=(
+            "Admin password. If omitted, reads $HADIR_PROVISION_PASSWORD or "
+            "prompts on stdin."
+        ),
+    )
+    return parser.parse_args(argv)
+
+
+def _resolve_password(cli_password: Optional[str]) -> str:
+    if cli_password:
+        return cli_password
+    env_password = os.environ.get("HADIR_PROVISION_PASSWORD")
+    if env_password:
+        return env_password
+    # Interactive prompt with confirmation. getpass never echoes.
+    pw1 = getpass.getpass("Admin password: ")
+    pw2 = getpass.getpass("Confirm password: ")
+    if not pw1:
+        raise ValueError("password must not be empty")
+    if pw1 != pw2:
+        raise ValueError("passwords do not match")
+    return pw1
+
+
+def _ensure_unique(conn: Connection, *, slug: str, name: str) -> None:
+    existing = conn.execute(
+        select(tenants.c.id, tenants.c.name, tenants.c.schema_name).where(
+            (tenants.c.schema_name == slug) | (tenants.c.name == name)
+        )
+    ).first()
+    if existing is not None:
+        raise ValueError(
+            f"tenant already exists (id={existing.id}, name={existing.name!r}, "
+            f"schema_name={existing.schema_name!r})"
+        )
+
+    schema_exists = conn.execute(
+        text(
+            "SELECT 1 FROM information_schema.schemata "
+            "WHERE schema_name = :s"
+        ),
+        {"s": slug},
+    ).scalar()
+    if schema_exists:
+        raise ValueError(f"schema {slug!r} already exists")
+
+
+def _create_per_tenant_tables(conn: Connection, *, slug: str) -> None:
+    """Materialise every per-tenant table inside ``slug``.
+
+    Filters out tables with ``schema="public"`` (currently just the
+    global ``tenants`` registry) so we don't try to recreate or
+    re-grant the global table — that's owned by migration 0008.
+    Search_path on the connection already points at ``slug``, so
+    unqualified tables land there.
+    """
+
+    per_tenant_tables = [
+        t for t in metadata.tables.values() if t.schema != "public"
+    ]
+    metadata.create_all(bind=conn, tables=per_tenant_tables)
+
+
+def _apply_grants(conn: Connection, *, slug: str) -> None:
+    """Mirror the grants that 0001-0006 applied to ``main`` for the new schema."""
+
+    conn.execute(text(f'ALTER SCHEMA "{slug}" OWNER TO hadir_admin'))
+    conn.execute(text(f'GRANT USAGE ON SCHEMA "{slug}" TO hadir_app'))
+
+    for tbl in _APP_CRUD_TABLES:
+        conn.execute(text(f'ALTER TABLE "{slug}"."{tbl}" OWNER TO hadir_admin'))
+        conn.execute(
+            text(
+                f'GRANT SELECT, INSERT, UPDATE, DELETE ON "{slug}"."{tbl}" TO hadir_app'
+            )
+        )
+
+    # audit_log is append-only at the grant level — INSERT + SELECT only.
+    conn.execute(text(f'ALTER TABLE "{slug}"."audit_log" OWNER TO hadir_admin'))
+    conn.execute(
+        text(f'GRANT SELECT, INSERT ON "{slug}"."audit_log" TO hadir_app')
+    )
+
+    conn.execute(
+        text(f'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA "{slug}" TO hadir_app')
+    )
+    conn.execute(
+        text(
+            f'ALTER DEFAULT PRIVILEGES IN SCHEMA "{slug}" '
+            "GRANT USAGE, SELECT ON SEQUENCES TO hadir_app"
+        )
+    )
+
+
+def _seed_defaults(
+    conn: Connection,
+    *,
+    tenant_id: int,
+    slug: str,
+    admin_email: str,
+    admin_password_hash: str,
+    admin_full_name: str,
+) -> int:
+    """Seed roles, departments, Fixed shift policy, and the first Admin user.
+
+    Returns the new admin user's id. Runs inside the caller's transaction
+    so a failure rolls every seed row back along with the schema.
+    """
+
+    role_ids: dict[str, int] = {}
+    for code, name in _DEFAULT_ROLE_CODES:
+        rid = conn.execute(
+            insert(roles)
+            .values(tenant_id=tenant_id, code=code, name=name)
+            .returning(roles.c.id)
+        ).scalar_one()
+        role_ids[code] = int(rid)
+
+    for code, name in _DEFAULT_DEPARTMENTS:
+        conn.execute(
+            insert(departments).values(tenant_id=tenant_id, code=code, name=name)
+        )
+
+    conn.execute(
+        insert(shift_policies).values(
+            tenant_id=tenant_id,
+            name=_DEFAULT_POLICY["name"],
+            type="Fixed",
+            config=_DEFAULT_POLICY["config"],
+            active_from=text("CURRENT_DATE"),
+            active_until=None,
+        )
+    )
+
+    user_id = conn.execute(
+        insert(users)
+        .values(
+            tenant_id=tenant_id,
+            email=admin_email,
+            password_hash=admin_password_hash,
+            full_name=admin_full_name,
+            is_active=True,
+        )
+        .returning(users.c.id)
+    ).scalar_one()
+    conn.execute(
+        insert(user_roles).values(
+            tenant_id=tenant_id,
+            user_id=int(user_id),
+            role_id=role_ids["Admin"],
+        )
+    )
+
+    # First audit row — provisioning event itself, so the new tenant's
+    # log isn't empty on first read. ``actor_user_id`` is null because
+    # the operator running the CLI isn't authenticated as a user inside
+    # this tenant.
+    conn.execute(
+        insert(audit_log).values(
+            tenant_id=tenant_id,
+            actor_user_id=None,
+            action="tenant.provisioned",
+            entity_type="tenant",
+            entity_id=str(tenant_id),
+            after={"schema_name": slug, "admin_user_id": int(user_id)},
+        )
+    )
+
+    return int(user_id)
+
+
+def _stamp_alembic_head(slug: str) -> None:
+    """Run ``alembic -x schema=<slug> stamp head`` as a subprocess.
+
+    Subprocess (rather than ``alembic.command.stamp``) so env.py reads
+    the ``-x`` arg fresh and the stamp commits in its own transaction —
+    intentional, because the calling transaction has already committed
+    by the time we get here.
+    """
+
+    cmd = ["alembic", "-x", f"schema={slug}", "stamp", "head"]
+    completed = subprocess.run(cmd, cwd=_BACKEND_DIR, check=False)
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"alembic stamp failed for schema={slug} (exit={completed.returncode})"
+        )
+
+
+def _cleanup(engine: Engine, *, slug: str) -> None:
+    """Drop the tenant schema and remove the public.tenants row.
+
+    Runs as best-effort: each step is logged but not raised, so a
+    cleanup failure doesn't mask the original error.
+    """
+
+    token = set_tenant_schema("public")
+    try:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f'DROP SCHEMA IF EXISTS "{slug}" CASCADE'))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("cleanup: drop schema failed: %s", type(exc).__name__)
+        try:
+            with engine.begin() as conn:
+                conn.execute(
+                    text("DELETE FROM public.tenants WHERE schema_name = :s"),
+                    {"s": slug},
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "cleanup: delete public.tenants row failed: %s",
+                type(exc).__name__,
+            )
+    finally:
+        reset_tenant_schema(token)
+
+
+def provision(
+    *,
+    slug: str,
+    name: str,
+    admin_email: str,
+    admin_full_name: str,
+    admin_password: str,
+) -> dict[str, object]:
+    """Run every provisioning step in order, with cleanup on failure."""
+
+    if not _TENANT_SCHEMA_RE.match(slug):
+        raise ValueError(
+            f"invalid slug {slug!r}: must match ^[A-Za-z_][A-Za-z0-9_]{{0,62}}$"
+        )
+    if not _EMAIL_RE.match(admin_email):
+        raise ValueError(f"invalid admin email {admin_email!r}")
+    if not admin_password:
+        raise ValueError("admin password must not be empty")
+
+    admin_email = admin_email.strip().lower()
+    if not admin_full_name:
+        admin_full_name = admin_email.split("@", 1)[0]
+
+    admin_password_hash = hash_password(admin_password)
+
+    engine = make_admin_engine()
+    tenant_id: Optional[int] = None
+    user_id: Optional[int] = None
+    schema_created = False
+
+    try:
+        # Phase 1: register the tenant in public, create the schema +
+        # tables, apply grants, seed defaults — all in one transaction
+        # so a failure rolls everything back together.
+        token = set_tenant_schema(slug)
+        try:
+            with engine.begin() as conn:
+                # Switch into "public" momentarily for the uniqueness
+                # check + the public.tenants insert. ``search_path``
+                # already has public on it, so this just ensures we
+                # touch the right registry table.
+                _ensure_unique(conn, slug=slug, name=name)
+
+                tenant_id = conn.execute(
+                    insert(tenants)
+                    .values(name=name, schema_name=slug)
+                    .returning(tenants.c.id)
+                ).scalar_one()
+                tenant_id = int(tenant_id)
+
+                conn.execute(text(f'CREATE SCHEMA "{slug}"'))
+                schema_created = True
+
+                # Pin search_path on this connection to the new schema
+                # so unqualified tables in metadata.create_all land in
+                # ``slug``.
+                conn.execute(text(f'SET search_path TO "{slug}", public'))
+
+                _create_per_tenant_tables(conn, slug=slug)
+                _apply_grants(conn, slug=slug)
+
+                user_id = _seed_defaults(
+                    conn,
+                    tenant_id=tenant_id,
+                    slug=slug,
+                    admin_email=admin_email,
+                    admin_password_hash=admin_password_hash,
+                    admin_full_name=admin_full_name,
+                )
+        finally:
+            reset_tenant_schema(token)
+
+        # Phase 2: stamp alembic head outside the main transaction.
+        # Failure here triggers the cleanup branch below.
+        _stamp_alembic_head(slug)
+
+    except Exception:
+        logger.exception("provisioning failed for slug=%s — rolling back", slug)
+        if schema_created or tenant_id is not None:
+            _cleanup(engine, slug=slug)
+        engine.dispose()
+        raise
+
+    engine.dispose()
+
+    return {
+        "tenant_id": tenant_id,
+        "schema": slug,
+        "name": name,
+        "admin_user_id": user_id,
+        "admin_email": admin_email,
+    }
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    logging.basicConfig(level=logging.INFO, format="[provision] %(message)s")
+    args = _parse_args(argv)
+    try:
+        password = _resolve_password(args.admin_password)
+        result = provision(
+            slug=args.slug,
+            name=args.name,
+            admin_email=args.admin_email,
+            admin_full_name=args.admin_full_name or "",
+            admin_password=password,
+        )
+    except Exception as exc:
+        logger.error("provisioning failed: %s: %s", type(exc).__name__, exc)
+        return 1
+
+    logger.info(
+        "provisioned tenant_id=%s schema=%s admin_user_id=%s admin_email=%s",
+        result["tenant_id"],
+        result["schema"],
+        result["admin_user_id"],
+        result["admin_email"],
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
