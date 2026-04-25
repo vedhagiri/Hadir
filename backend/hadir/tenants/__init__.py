@@ -6,6 +6,16 @@ the v1.0 multi-tenant migration is additive: the default changes from
 ``1`` to "pull from session / request host", and the queries don't change.
 """
 
-from hadir.tenants.scope import TenantScope, get_tenant_scope
+from hadir.tenants.scope import (
+    TenantScope,
+    get_tenant_scope,
+    resolve_tenant_schema,
+    resolve_tenant_schema_via_engine,
+)
 
-__all__ = ["TenantScope", "get_tenant_scope"]
+__all__ = [
+    "TenantScope",
+    "get_tenant_scope",
+    "resolve_tenant_schema",
+    "resolve_tenant_schema_via_engine",
+]

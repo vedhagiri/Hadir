@@ -33,8 +33,19 @@ def recompute_today(scope: TenantScope) -> int:
 
     Returns the number of rows upserted. Keeps itself resilient: a single
     employee blowing up doesn't abort the others.
+
+    v1.0 P1: this is a non-request entry point, so we set the tenant
+    context explicitly. Every connection borrowed inside the block
+    runs against ``scope.tenant_schema`` via the checkout event.
     """
 
+    from hadir.db import tenant_context  # noqa: PLC0415
+
+    with tenant_context(scope.tenant_schema):
+        return _recompute_today_inner(scope)
+
+
+def _recompute_today_inner(scope: TenantScope) -> int:
     engine = get_engine()
     tz = attendance_repo.local_tz()
     today = datetime.now(timezone.utc).astimezone(tz).date()

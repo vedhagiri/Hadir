@@ -69,9 +69,12 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     from hadir.tenants.scope import TenantScope as _TenantScope
 
     def _run_backfill() -> None:
+        from hadir.db import tenant_context as _tenant_context  # noqa: PLC0415
+
         try:
             scope = _TenantScope(tenant_id=get_settings().default_tenant_id)
-            _enrollment.enroll_missing(_make_engine(), scope)
+            with _tenant_context(scope.tenant_schema):
+                _enrollment.enroll_missing(_make_engine(), scope)
         except Exception as exc:  # noqa: BLE001
             logging.getLogger(__name__).warning(
                 "identification backfill failed: %s", type(exc).__name__
@@ -106,6 +109,13 @@ def create_app() -> FastAPI:
         openapi_url="/api/openapi.json",
         lifespan=lifespan,
     )
+
+    # Tenant routing — must run before any handler that touches the DB.
+    # Middleware order in Starlette is "last added, first run", so this
+    # add_middleware call wraps everything attached afterward.
+    from hadir.tenants.middleware import TenantScopeMiddleware  # noqa: PLC0415
+
+    app.add_middleware(TenantScopeMiddleware)
 
     @app.get("/api/health")
     def health() -> dict[str, str]:

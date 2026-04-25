@@ -48,8 +48,14 @@ def create_session(
     tenant_id: int,
     user_id: int,
     idle_minutes: int,
+    tenant_schema: str = "main",
 ) -> SessionRow:
-    """Insert a fresh session and return it."""
+    """Insert a fresh session and return it.
+
+    ``tenant_schema`` is persisted in ``data`` so the per-request
+    ``TenantScopeMiddleware`` can apply ``SET search_path`` without a
+    second registry lookup. v1.0 multi-tenant relies on this claim.
+    """
 
     token = secrets.token_urlsafe(_TOKEN_BYTES)
     now = _now()
@@ -61,7 +67,10 @@ def create_session(
             tenant_id=tenant_id,
             user_id=user_id,
             expires_at=expires,
-            data={},
+            data={
+                "tenant_id": tenant_id,
+                "tenant_schema": tenant_schema,
+            },
             created_at=now,
             last_seen_at=now,
         )

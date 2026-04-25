@@ -148,11 +148,18 @@ def login(
     # Success — reset the counter, create the session, audit, load bundle.
     limiter.reset_key(email, ip)
     with engine.begin() as conn:
+        # Resolve the user's home tenant schema once at login and stash
+        # it on the session so the per-request middleware doesn't have
+        # to round-trip the registry on every call.
+        from hadir.tenants.scope import resolve_tenant_schema  # noqa: PLC0415
+
+        tenant_schema = resolve_tenant_schema(conn, int(user_row.tenant_id))
         session = create_session(
             conn,
             tenant_id=int(user_row.tenant_id),
             user_id=int(user_row.id),
             idle_minutes=settings.session_idle_minutes,
+            tenant_schema=tenant_schema,
         )
         write_audit(
             conn,
@@ -161,7 +168,11 @@ def login(
             action="auth.login.success",
             entity_type="user",
             entity_id=str(user_row.id),
-            after={"ip": ip, "session_id": session.id},
+            after={
+                "ip": ip,
+                "session_id": session.id,
+                "tenant_schema": tenant_schema,
+            },
         )
         bundle = _load_current_user_bundle(
             conn, user_id=int(user_row.id), tenant_id=int(user_row.tenant_id)

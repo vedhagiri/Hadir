@@ -1,12 +1,72 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-P1–P12 complete. **P13 complete**: on-demand attendance Excel reports
-(`POST /api/reports/attendance.xlsx` — Admin / HR / Manager,
-dept-scoped for managers); dev-only smoke endpoints under
-`/api/_test/*` mounted **only when** `HADIR_ENV=dev`; Playwright
-end-to-end smoke spec; operator runbook at `docs/pilot-deployment.md`.
-P14 next (Omran on-site deployment).
+Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 complete**:
+pilot frozen at tag `v0.1-pilot` on branch `release/pilot`; multi-tenant
+routing wired up via a per-connection `SET search_path` driven by a
+ContextVar + SQLAlchemy `checkout` event. Login persists
+`tenant_id` / `tenant_schema` on `user_sessions.data`;
+`TenantScopeMiddleware` reads the claim and sets the contextvar for
+the request scope. Isolation canary in
+`tests/test_multi_tenant_isolation.py`. Single-mode backwards-compatible
+(pilot's `main` schema is the default). **v1.0 P2 next.**
+
+## Tenant routing (v1.0 P1)
+**Approach chosen: SQLAlchemy `checkout` event + Python ContextVar**,
+not a per-route DI dependency. Documented here per the v1.0 P1
+prompt's "Document the choice" rule.
+
+Why events over DI:
+1. Existing pilot routes use `with engine.begin() as conn:` directly.
+   Switching to a DI dependency would touch every handler. Event
+   listener leaves them untouched.
+2. Background workers (capture, attendance, lifespan enrolment)
+   already had to wrap themselves in a tenant scope. They wrap in
+   `tenant_context(schema)` once at thread entry; every pool
+   checkout inside the scope auto-applies `SET search_path`.
+3. New endpoints automatically inherit tenant routing — no risk of a
+   future PR forgetting a `Depends(get_tenant_connection)`.
+4. Defense-in-depth: in `multi` mode the `_resolve_active_schema`
+   helper raises before any SQL is issued if no contextvar is set
+   (the **fail-closed red line**). DI would happily skip the dep
+   for endpoints that don't declare it.
+
+Mechanics (`hadir/db.py`):
+- `metadata = MetaData()` — **no `schema=`**. All `Table` objects are
+  unqualified; FK target strings are `"tenants.id"` etc.
+- `_tenant_schema_var: ContextVar[str | None]` — None by default.
+- `set_tenant_schema(schema)` validates against
+  `^[A-Za-z_][A-Za-z0-9_]{0,62}$` before setting; the same regex is
+  enforced server-side in migration 0007 as a `CHECK` constraint on
+  `tenants.schema_name`. Defence in depth.
+- `_attach_search_path_listener(engine)` registers a `checkout` event:
+  every borrowed connection issues `SET search_path TO "<schema>", public`.
+  In `single` mode with no contextvar, the listener defaults to
+  `main`. In `multi` mode it raises `RuntimeError("no tenant schema
+  in scope — refusing to issue queries")`.
+- `tenant_context(schema)` is a context manager for non-request entry
+  points (workers + lifespan); the request path goes through
+  `TenantScopeMiddleware`.
+
+Login persists the claim:
+- `auth.sessions.create_session(..., tenant_schema=...)` writes
+  `data = {"tenant_id": ..., "tenant_schema": ...}` on the new row.
+- `auth.router.login` resolves `user.tenant_id → tenants.schema_name`
+  once at login and passes it to `create_session`.
+- The request middleware reads the row's `data` claim. A super-admin
+  impersonation hook (`data.impersonated_tenant_id`) overrides the
+  home tenant — UI for that lands in v1.0 P3, the override path is
+  already wired here.
+
+Isolation canary (`tests/test_multi_tenant_isolation.py`):
+- Provisions two real schemas (`tenant_a`, `tenant_b`) with one tiny
+  `widgets` table each, disjoint rows.
+- Verifies queries under one schema never see the other's rows;
+  inserts route to the active schema only.
+- Asserts the multi-mode + no-context path raises with the exact
+  fail-closed error message.
+- This test is the **canary** — if it ever fails in a future phase,
+  tenant isolation is broken. Don't `pytest.mark.skip` past it.
 
 ## Stack
 - Python 3.11

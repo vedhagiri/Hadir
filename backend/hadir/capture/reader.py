@@ -144,6 +144,16 @@ class CaptureWorker:
     def _run(self) -> None:
         """Outer reconnect loop + inner frame loop."""
 
+        # Multi-tenant routing (v1.0 P1): every DB call from this
+        # worker must run under the right tenant's search_path. Set
+        # the contextvar once at thread entry so the whole loop
+        # inherits it — pool checkouts auto-apply ``SET search_path``.
+        from hadir.db import tenant_context  # noqa: PLC0415
+
+        with tenant_context(self._scope.tenant_schema):
+            self._run_inner()
+
+    def _run_inner(self) -> None:
         backoff = self._config.reconnect_backoff_initial_s
         iterations = 0
         while not self._stop.is_set():

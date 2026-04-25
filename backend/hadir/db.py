@@ -1,22 +1,42 @@
 """SQLAlchemy engine, session factory, and schema metadata.
 
-P2 introduces the initial tables in the ``main`` Postgres schema. SQLAlchemy
-Core is used (not the ORM) because most of the codebase is already built
-around explicit queries — easier to reason about, easier to audit for the
-tenant-scope filter.
+Pilot used a single Postgres schema (``main``) baked into the metadata.
+v1.0 P1 generalises this: ``MetaData()`` carries no schema, every Table
+is unqualified, and the active schema is selected per-connection via
+``SET search_path``. A SQLAlchemy ``checkout`` event reads the
+``_tenant_schema_var`` ContextVar and applies it to each pooled
+connection at borrow time.
 
-Two engines are exposed:
+Behaviour by ``HADIR_TENANT_MODE``:
 
-* ``engine`` — connects as ``hadir_app`` and is used by request handlers.
-  This role has restricted grants on ``audit_log`` (INSERT + SELECT only);
-  every other operation against the audit log is rejected by Postgres.
-* ``admin_engine`` — connects as ``hadir_admin`` and is used by Alembic and
-  the seed scripts. Do not use this at request time.
+* ``single`` — pilot mode. If no tenant context is set, the checkout
+  defaults the search_path to ``main`` so existing pilot code paths
+  (seed_admin, capture workers, scheduler, tests) keep working.
+* ``multi`` — v1.0 mode. Refuses to issue queries unless a tenant
+  context is set explicitly. This is the **fail-closed** red line:
+  a code path that reaches the DB without resolving a tenant raises
+  before any SQL leaves the process.
 
-See ``backend/CLAUDE.md`` for the full role/grants matrix.
+SQLAlchemy Core (not the ORM) — same reasoning as in pilot.
+
+Two engines:
+
+* ``make_engine()`` — connects as ``hadir_app`` (request path).
+  Restricted grants on ``audit_log`` (INSERT + SELECT only).
+* ``make_admin_engine()`` — connects as the DB owner (migrations,
+  seed scripts). Do not use at request time.
+
+See ``backend/CLAUDE.md`` for the full role/grants matrix and the
+documented approach (events vs DI) chosen for P1.
 """
 
 from __future__ import annotations
+
+import contextvars
+import logging
+import re
+from contextlib import contextmanager
+from typing import Iterator, Optional
 
 from sqlalchemy import (
     Boolean,
@@ -37,19 +57,115 @@ from sqlalchemy import (
     Time,
     UniqueConstraint,
     create_engine,
+    event,
     func,
 )
 from sqlalchemy.dialects.postgresql import CITEXT, JSONB
 
 from hadir.config import get_settings
 
-# All application tables live under the ``main`` schema. In multi-tenant mode
-# (v1.0) additional schemas named after each tenant will be cut from the same
-# metadata — the schema label here becomes the default, not a hard-coded
-# value.
-SCHEMA = "main"
+logger = logging.getLogger(__name__)
 
-metadata = MetaData(schema=SCHEMA)
+# Default schema used in single-tenant mode and as the conventional name
+# for the pilot tenant in multi-tenant mode (the existing Omran data
+# stays in ``main``; new tenants get ``tenant_<slug>`` schemas).
+SCHEMA = "main"
+DEFAULT_SCHEMA = SCHEMA
+
+# ---------------------------------------------------------------------------
+# Tenant routing — contextvar + connection-checkout search_path
+# ---------------------------------------------------------------------------
+# Postgres schema identifiers must match a defensive whitelist before we
+# ever interpolate them into a SET statement. Schemas are sourced from
+# ``tenants.schema_name`` (which we'll constrain in P2's provisioning
+# CLI) and from server-side fixtures, never user input — but defence in
+# depth here keeps us safe if either of those constraints slips later.
+_TENANT_SCHEMA_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
+
+_tenant_schema_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "hadir_tenant_schema", default=None
+)
+
+
+def set_tenant_schema(schema: Optional[str]) -> contextvars.Token:
+    """Set the active tenant schema for this context. Returns a reset token."""
+
+    if schema is not None and not _TENANT_SCHEMA_RE.match(schema):
+        raise ValueError(f"invalid tenant schema name: {schema!r}")
+    return _tenant_schema_var.set(schema)
+
+
+def get_tenant_schema() -> Optional[str]:
+    return _tenant_schema_var.get()
+
+
+def reset_tenant_schema(token: contextvars.Token) -> None:
+    _tenant_schema_var.reset(token)
+
+
+@contextmanager
+def tenant_context(schema: Optional[str]) -> Iterator[None]:
+    """Run a block with ``schema`` as the active tenant schema.
+
+    Used by background workers, schedulers, and the lifespan startup
+    routines that touch the DB outside an HTTP request scope. The
+    ``TenantScopeMiddleware`` does the same for the request path.
+    """
+
+    token = set_tenant_schema(schema)
+    try:
+        yield
+    finally:
+        reset_tenant_schema(token)
+
+
+def _resolve_active_schema() -> str:
+    """Return the schema to apply on the next connection checkout.
+
+    Single mode falls back to ``main`` when no context is set; multi
+    mode refuses (fail-closed). This is enforced at the *connection
+    checkout* boundary so a forgotten ``with tenant_context(...):``
+    surfaces immediately, not as a silent cross-tenant read.
+    """
+
+    schema = _tenant_schema_var.get()
+    if schema is not None:
+        return schema
+    settings = get_settings()
+    if settings.tenant_mode == "single":
+        return DEFAULT_SCHEMA
+    raise RuntimeError(
+        "no tenant schema in scope — refusing to issue queries "
+        "(HADIR_TENANT_MODE=multi). Wrap the code path in "
+        "hadir.db.tenant_context(schema=...) or attach the request "
+        "to a session."
+    )
+
+
+def _attach_search_path_listener(engine: Engine) -> None:
+    """Install the per-checkout ``SET search_path`` event handler."""
+
+    @event.listens_for(engine, "checkout")
+    def _on_checkout(dbapi_conn, _conn_record, _conn_proxy):  # type: ignore[no-untyped-def]
+        schema = _resolve_active_schema()
+        # Validated again here in case a non-matching value slipped past
+        # ``set_tenant_schema``.
+        if not _TENANT_SCHEMA_RE.match(schema):
+            raise RuntimeError(f"unsafe tenant schema {schema!r}")
+        cur = dbapi_conn.cursor()
+        try:
+            # ``public`` stays on the path so extension types (citext,
+            # functions installed in public) keep resolving.
+            cur.execute(f'SET search_path TO "{schema}", public')
+        finally:
+            cur.close()
+
+
+# ---------------------------------------------------------------------------
+# Metadata — UNQUALIFIED (no schema=) so search_path resolves at runtime.
+# ---------------------------------------------------------------------------
+
+metadata = MetaData()
 
 
 # --- Tables -----------------------------------------------------------------
@@ -63,6 +179,11 @@ tenants = Table(
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("name", Text, nullable=False, unique=True),
+    # Postgres schema this tenant's data lives in. Pilot tenant uses
+    # ``main`` for backward compat; v1.0 provisioning creates
+    # ``tenant_<slug>`` schemas. Constrained server-side via the regex
+    # in migration 0007 to match ``_TENANT_SCHEMA_RE`` above.
+    Column("schema_name", Text, nullable=False, server_default="main", unique=True),
     Column(
         "created_at",
         DateTime(timezone=True),
@@ -79,7 +200,7 @@ users = Table(
     Column(
         "tenant_id",
         Integer,
-        ForeignKey(f"{SCHEMA}.tenants.id", ondelete="RESTRICT"),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     ),
@@ -106,7 +227,7 @@ roles = Table(
     Column(
         "tenant_id",
         Integer,
-        ForeignKey(f"{SCHEMA}.tenants.id", ondelete="RESTRICT"),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     ),
@@ -123,19 +244,19 @@ user_roles = Table(
     Column(
         "user_id",
         Integer,
-        ForeignKey(f"{SCHEMA}.users.id", ondelete="CASCADE"),
+        ForeignKey("users.id", ondelete="CASCADE"),
         primary_key=True,
     ),
     Column(
         "role_id",
         Integer,
-        ForeignKey(f"{SCHEMA}.roles.id", ondelete="CASCADE"),
+        ForeignKey("roles.id", ondelete="CASCADE"),
         primary_key=True,
     ),
     Column(
         "tenant_id",
         Integer,
-        ForeignKey(f"{SCHEMA}.tenants.id", ondelete="RESTRICT"),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
         primary_key=True,
     ),
 )
@@ -148,7 +269,7 @@ departments = Table(
     Column(
         "tenant_id",
         Integer,
-        ForeignKey(f"{SCHEMA}.tenants.id", ondelete="RESTRICT"),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     ),
@@ -164,19 +285,19 @@ user_departments = Table(
     Column(
         "user_id",
         Integer,
-        ForeignKey(f"{SCHEMA}.users.id", ondelete="CASCADE"),
+        ForeignKey("users.id", ondelete="CASCADE"),
         primary_key=True,
     ),
     Column(
         "department_id",
         Integer,
-        ForeignKey(f"{SCHEMA}.departments.id", ondelete="CASCADE"),
+        ForeignKey("departments.id", ondelete="CASCADE"),
         primary_key=True,
     ),
     Column(
         "tenant_id",
         Integer,
-        ForeignKey(f"{SCHEMA}.tenants.id", ondelete="RESTRICT"),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
         primary_key=True,
     ),
 )
@@ -192,14 +313,14 @@ user_sessions = Table(
     Column(
         "tenant_id",
         Integer,
-        ForeignKey(f"{SCHEMA}.tenants.id", ondelete="RESTRICT"),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     ),
     Column(
         "user_id",
         Integer,
-        ForeignKey(f"{SCHEMA}.users.id", ondelete="CASCADE"),
+        ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     ),
@@ -235,7 +356,7 @@ audit_log = Table(
     Column(
         "tenant_id",
         Integer,
-        ForeignKey(f"{SCHEMA}.tenants.id", ondelete="RESTRICT"),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     ),
@@ -244,7 +365,7 @@ audit_log = Table(
     Column(
         "actor_user_id",
         Integer,
-        ForeignKey(f"{SCHEMA}.users.id", ondelete="SET NULL"),
+        ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     ),
     Column("action", Text, nullable=False),
@@ -273,7 +394,7 @@ employees = Table(
     Column(
         "tenant_id",
         Integer,
-        ForeignKey(f"{SCHEMA}.tenants.id", ondelete="RESTRICT"),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     ),
@@ -285,7 +406,7 @@ employees = Table(
     Column(
         "department_id",
         Integer,
-        ForeignKey(f"{SCHEMA}.departments.id", ondelete="RESTRICT"),
+        ForeignKey("departments.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     ),
@@ -312,14 +433,14 @@ employee_photos = Table(
     Column(
         "tenant_id",
         Integer,
-        ForeignKey(f"{SCHEMA}.tenants.id", ondelete="RESTRICT"),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     ),
     Column(
         "employee_id",
         Integer,
-        ForeignKey(f"{SCHEMA}.employees.id", ondelete="CASCADE"),
+        ForeignKey("employees.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     ),
@@ -328,7 +449,7 @@ employee_photos = Table(
     Column(
         "approved_by_user_id",
         Integer,
-        ForeignKey(f"{SCHEMA}.users.id", ondelete="SET NULL"),
+        ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     ),
     Column("approved_at", DateTime(timezone=True), nullable=True),
@@ -356,7 +477,7 @@ cameras = Table(
     Column(
         "tenant_id",
         Integer,
-        ForeignKey(f"{SCHEMA}.tenants.id", ondelete="RESTRICT"),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     ),
@@ -396,14 +517,14 @@ detection_events = Table(
     Column(
         "tenant_id",
         Integer,
-        ForeignKey(f"{SCHEMA}.tenants.id", ondelete="RESTRICT"),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     ),
     Column(
         "camera_id",
         Integer,
-        ForeignKey(f"{SCHEMA}.cameras.id", ondelete="CASCADE"),
+        ForeignKey("cameras.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     ),
@@ -421,7 +542,7 @@ detection_events = Table(
     Column(
         "employee_id",
         Integer,
-        ForeignKey(f"{SCHEMA}.employees.id", ondelete="SET NULL"),
+        ForeignKey("employees.id", ondelete="SET NULL"),
         nullable=True,
     ),
     Column("confidence", Float, nullable=True),
@@ -455,14 +576,14 @@ camera_health_snapshots = Table(
     Column(
         "tenant_id",
         Integer,
-        ForeignKey(f"{SCHEMA}.tenants.id", ondelete="RESTRICT"),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     ),
     Column(
         "camera_id",
         Integer,
-        ForeignKey(f"{SCHEMA}.cameras.id", ondelete="CASCADE"),
+        ForeignKey("cameras.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     ),
@@ -493,7 +614,7 @@ shift_policies = Table(
     Column(
         "tenant_id",
         Integer,
-        ForeignKey(f"{SCHEMA}.tenants.id", ondelete="RESTRICT"),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     ),
@@ -523,14 +644,14 @@ attendance_records = Table(
     Column(
         "tenant_id",
         Integer,
-        ForeignKey(f"{SCHEMA}.tenants.id", ondelete="RESTRICT"),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     ),
     Column(
         "employee_id",
         Integer,
-        ForeignKey(f"{SCHEMA}.employees.id", ondelete="CASCADE"),
+        ForeignKey("employees.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     ),
@@ -541,7 +662,7 @@ attendance_records = Table(
     Column(
         "policy_id",
         Integer,
-        ForeignKey(f"{SCHEMA}.shift_policies.id", ondelete="RESTRICT"),
+        ForeignKey("shift_policies.id", ondelete="RESTRICT"),
         nullable=False,
     ),
     Column("late", Boolean, nullable=False, server_default="false"),
@@ -574,11 +695,14 @@ def make_engine() -> Engine:
 
     ``pool_pre_ping`` catches Postgres restarts (common in dev with
     ``docker compose down``) and recycles dead connections rather than
-    letting them fail a request.
+    letting them fail a request. The checkout event installed below
+    sets ``search_path`` for every borrowed connection.
     """
 
     settings = get_settings()
-    return create_engine(settings.database_url, pool_pre_ping=True, future=True)
+    eng = create_engine(settings.database_url, pool_pre_ping=True, future=True)
+    _attach_search_path_listener(eng)
+    return eng
 
 
 def make_admin_engine() -> Engine:
@@ -586,10 +710,15 @@ def make_admin_engine() -> Engine:
 
     Not for request-path use. The admin role bypasses the append-only
     constraint on ``audit_log`` and should never service user traffic.
+    The same checkout event listener applies — admin queries also rely
+    on a resolved tenant schema (single mode → ``main``; multi mode →
+    explicit ``tenant_context``).
     """
 
     settings = get_settings()
-    return create_engine(settings.admin_database_url, pool_pre_ping=True, future=True)
+    eng = create_engine(settings.admin_database_url, pool_pre_ping=True, future=True)
+    _attach_search_path_listener(eng)
+    return eng
 
 
 # Process-wide runtime engine. Lazily created so tests that override the

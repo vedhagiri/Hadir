@@ -33,11 +33,23 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phase currently complete: P0 — branching + v1.0 bootstrap.**
-Pilot frozen at tag `v0.1-pilot` (commit `1a0782c`); maintenance
-branch `release/pilot` exists locally + at origin. Next:
-**P1 — Multi-tenant routing switch (M2).** Wait for the user before
-starting. Per-phase records: `docs/phases/`.
+**v1.0 phases currently complete: P0 + P1.**
+- **P0** — pilot frozen at `v0.1-pilot` (commit `1a0782c`);
+  `release/pilot` branch exists locally + at origin.
+- **P1** — multi-tenant routing switch wired up. `MetaData()` is
+  unqualified; a SQLAlchemy `checkout` event applies
+  `SET search_path TO {schema}, public` per connection driven by a
+  Python `ContextVar`. Login persists `tenant_id` / `tenant_schema`
+  on `user_sessions.data`; `TenantScopeMiddleware` reads the claim
+  for the request scope; background workers + lifespan startup wrap
+  in `tenant_context(...)`. `tests/test_multi_tenant_isolation.py`
+  is the canary — it must keep passing for the rest of v1.0.
+  Single-mode (the pilot's `main` schema) is the backwards-compatible
+  default.
+
+Next: **P2 — Per-schema Alembic + tenant provisioning CLI (M2).**
+Wait for the user before starting. Per-phase records:
+`docs/phases/P*.md`.
 
 ---
 
