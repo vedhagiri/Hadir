@@ -4,17 +4,22 @@ export type PolicyType = "Fixed" | "Flex" | "Ramadan" | "Custom";
 export type ScopeType = "tenant" | "department" | "employee";
 
 export interface PolicyConfig {
-  // Fixed
+  // Fixed (and Ramadan, Custom-Fixed)
   start?: string; // "HH:MM"
   end?: string;
   grace_minutes?: number;
-  // Flex
+  // Flex (and Custom-Flex)
   in_window_start?: string;
   in_window_end?: string;
   out_window_start?: string;
   out_window_end?: string;
   // Common
   required_hours?: number;
+  // Ramadan + Custom — calendar range (YYYY-MM-DD).
+  start_date?: string;
+  end_date?: string;
+  // Custom only — picks which inner shape applies.
+  inner_type?: "Fixed" | "Flex";
 }
 
 export interface PolicyResponse {

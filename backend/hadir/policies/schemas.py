@@ -21,12 +21,12 @@ def _is_hhmm(value: object) -> bool:
 class PolicyConfig(BaseModel):
     """Policy ``config`` JSONB. Validates per-type field presence."""
 
-    # Fixed
+    # Fixed (also Ramadan, Custom-Fixed)
     start: Optional[str] = None
     end: Optional[str] = None
     grace_minutes: Optional[int] = Field(default=None, ge=0, le=180)
 
-    # Flex
+    # Flex (also Custom-Flex)
     in_window_start: Optional[str] = None
     in_window_end: Optional[str] = None
     out_window_start: Optional[str] = None
@@ -34,6 +34,13 @@ class PolicyConfig(BaseModel):
 
     # Common
     required_hours: int = Field(default=8, ge=1, le=24)
+
+    # Ramadan + Custom: ISO date strings (YYYY-MM-DD).
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+
+    # Custom only — picks which inner shape to use.
+    inner_type: Optional[Literal["Fixed", "Flex"]] = None
 
     @model_validator(mode="after")
     def _check_times(self) -> "PolicyConfig":
@@ -49,6 +56,21 @@ class PolicyConfig(BaseModel):
                 raise ValueError(
                     f"{field}: expected 'HH:MM', got {value!r}"
                 )
+        # Date sanity. Pydantic-side parse rather than full
+        # ``datetime.fromisoformat`` so the error stays at the API
+        # boundary instead of bubbling up from the engine helpers.
+        if self.start_date and self.end_date:
+            try:
+                from datetime import date  # noqa: PLC0415
+
+                rs = date.fromisoformat(self.start_date)
+                re_ = date.fromisoformat(self.end_date)
+            except ValueError as exc:
+                raise ValueError(
+                    f"start_date / end_date must be YYYY-MM-DD ({exc})"
+                )
+            if rs > re_:
+                raise ValueError("start_date must be on or before end_date")
         return self
 
 
@@ -71,8 +93,9 @@ class PolicyCreateRequest(BaseModel):
 
     @model_validator(mode="after")
     def _check_type_fields(self) -> "PolicyCreateRequest":
+        cfg = self.config
         if self.type == "Fixed":
-            if not self.config.start or not self.config.end:
+            if not cfg.start or not cfg.end:
                 raise ValueError(
                     "Fixed policy requires start + end times in config"
                 )
@@ -83,10 +106,45 @@ class PolicyCreateRequest(BaseModel):
                 "out_window_start",
                 "out_window_end",
             ):
-                if getattr(self.config, field) is None:
+                if getattr(cfg, field) is None:
                     raise ValueError(
                         f"Flex policy requires {field} in config"
                     )
+        elif self.type == "Ramadan":
+            # Ramadan = Fixed shape + a date range.
+            if not cfg.start or not cfg.end:
+                raise ValueError(
+                    "Ramadan policy requires start + end times in config"
+                )
+            if not cfg.start_date or not cfg.end_date:
+                raise ValueError(
+                    "Ramadan policy requires start_date + end_date in config"
+                )
+        elif self.type == "Custom":
+            if not cfg.start_date or not cfg.end_date:
+                raise ValueError(
+                    "Custom policy requires start_date + end_date in config"
+                )
+            if cfg.inner_type is None:
+                raise ValueError(
+                    "Custom policy requires inner_type ('Fixed' | 'Flex')"
+                )
+            if cfg.inner_type == "Fixed":
+                if not cfg.start or not cfg.end:
+                    raise ValueError(
+                        "Custom (Fixed) requires start + end times in config"
+                    )
+            elif cfg.inner_type == "Flex":
+                for field in (
+                    "in_window_start",
+                    "in_window_end",
+                    "out_window_start",
+                    "out_window_end",
+                ):
+                    if getattr(cfg, field) is None:
+                        raise ValueError(
+                            f"Custom (Flex) requires {field} in config"
+                        )
         return self
 
 

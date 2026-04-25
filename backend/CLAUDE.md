@@ -1,7 +1,7 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 complete**:
+Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 complete**:
 pilot frozen at tag `v0.1-pilot` on branch `release/pilot`; multi-tenant
 routing wired up via a per-connection `SET search_path` driven by a
 ContextVar + SQLAlchemy `checkout` event; the global `tenants` registry
@@ -50,8 +50,13 @@ internally; still pure) + per-tenant `policy_assignments` with
 the cascade `employee > department > tenant > legacy fallback`
 in `resolve_policies_for_employees`; the scheduler now resolves
 per employee. `/api/policies` + `/api/policy-assignments` Admin/HR
-CRUD, audit on every change. Single-mode backwards-compatible
-(pilot's `main` schema is the default). **v1.0 P10 next.**
+CRUD, audit on every change. **P10** added Ramadan + Custom: engine
+dispatches Custom→inner-shape (Fixed or Flex) and Ramadan→Fixed
+math, both still pure; resolver prepends Custom > Ramadan > … as
+the new highest tiers. Priority documented in
+`backend/CLAUDE.md §"Policy resolution priority"`. Single-mode
+backwards-compatible (pilot's `main` schema is the default).
+**v1.0 P11 next.**
 
 ## Tenant routing (v1.0 P1)
 **Approach chosen: SQLAlchemy `checkout` event + Python ContextVar**,
@@ -311,6 +316,37 @@ docker compose exec backend python -m scripts.deprovision_tenant \
   registry row. Encrypted face crops under
   `/data/faces/<tenant_id>/` and `/data/faces/captures/<tenant_id>/`
   are NOT removed — operators clean up the volume separately.
+
+## Policy resolution priority (P9 + P10)
+
+For any ``(employee, date)`` tuple,
+``hadir.attendance.repository.resolve_policies_for_employees``
+walks this cascade and returns the **first** match. **Only one
+policy applies per (employee, date) — no stacking.** The order is
+deterministic and load-bearing:
+
+1. **Custom** policy whose ``config.start_date <= the_date <=
+   config.end_date`` (tenant-wide for that date — applies to every
+   employee).
+2. **Ramadan** policy whose date range covers ``the_date``
+   (tenant-wide for that date).
+3. **Employee-scoped** ``policy_assignments`` row matching this
+   employee.
+4. **Department-scoped** ``policy_assignments`` row matching this
+   employee's ``department_id``.
+5. **Tenant-scoped** ``policy_assignments`` row.
+6. **Legacy fallback** — any active ``shift_policies`` row covering
+   the date (the pilot seeded a tenant-wide Fixed policy here;
+   tenants without explicit assignments rely on this).
+
+The resolver is the **only** DB-touching part of the engine
+pipeline (P9 / P10 red lines). The engine itself stays pure.
+
+If a policy is created with a Custom or Ramadan type but no
+``config.start_date`` / ``end_date``, the row is invalid and the
+resolver skips it rather than apply tenant-wide. The Pydantic
+validators on ``PolicyConfig`` reject this shape at the API
+boundary; the in-resolver guard is defence in depth.
 
 ## Schema map (P2)
 **Global** (lives in `public`):

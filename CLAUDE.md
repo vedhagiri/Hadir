@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9.**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10.**
 
 > **Tenant isolation is a P0 blocker.** The suites
 > `backend/tests/test_multi_tenant_isolation.py` (the P1 canary) and
@@ -164,8 +164,21 @@ To return to v1.0 work: `git checkout main`.
   retires the placeholder; create/edit form switches fields per
   type; per-row assignment chips with tenant-default toggle +
   per-department / per-employee assignment.
+- **P10** — Policy engine: Ramadan + Custom. Engine extended to
+  dispatch Ramadan → Fixed flag math and Custom → Fixed-or-Flex
+  inner-shape based on ``policy.custom_inner_type`` (still pure).
+  ``ShiftPolicy`` carries ``range_start`` / ``range_end`` for the
+  resolver's date check and ``custom_inner_type`` for Custom.
+  Resolver gets two new top-priority tiers: **Custom** covering
+  the date wins over Ramadan covering the date, both tenant-wide
+  for the matched date. Documented order in `backend/CLAUDE.md
+  §"Policy resolution priority"`. Pydantic validators reject
+  Ramadan/Custom missing date ranges + inverted ranges. Frontend
+  Policies page segments into Standard / Ramadan / Custom tables;
+  the form gains a date-range picker (Ramadan + Custom) and an
+  inner_type dropdown (Custom).
 
-Next: **P10** per `v1.0-phase-plan.md`. Wait for the user before
+Next: **P11** per `v1.0-phase-plan.md`. Wait for the user before
 starting. Per-phase records: `docs/phases/P*.md`.
 
 ---

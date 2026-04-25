@@ -108,6 +108,62 @@ def _date_window_match(active_from_col, active_until_col, the_date):
     )
 
 
+def _custom_or_ramadan_for_date(
+    conn: Connection,
+    scope: TenantScope,
+    *,
+    the_date: date,
+    policy_type: str,
+) -> Optional[ShiftPolicy]:
+    """Return the Custom or Ramadan policy whose date range covers
+    ``the_date`` for this tenant, or ``None``.
+
+    Date-range filter is applied in Python because ``config`` is a
+    JSONB blob — keeps the SQL portable and the index strategy
+    simple. Tenant-scale (a few Custom days a year, one Ramadan) is
+    well below the threshold where a JSON path index would matter.
+    Multiple matches → most recent ``active_from`` wins (the policy
+    table's existing window check still applies on top).
+    """
+
+    rows = conn.execute(
+        select(
+            shift_policies.c.id,
+            shift_policies.c.name,
+            shift_policies.c.type,
+            shift_policies.c.config,
+            shift_policies.c.active_from,
+        )
+        .where(
+            shift_policies.c.tenant_id == scope.tenant_id,
+            shift_policies.c.type == policy_type,
+            shift_policies.c.active_from <= the_date,
+            or_(
+                shift_policies.c.active_until.is_(None),
+                shift_policies.c.active_until >= the_date,
+            ),
+        )
+        .order_by(shift_policies.c.active_from.desc())
+    ).all()
+
+    for row in rows:
+        cfg = row.config or {}
+        rs_raw = cfg.get("start_date")
+        re_raw = cfg.get("end_date")
+        if not rs_raw or not re_raw:
+            # A Custom/Ramadan row missing its date range is
+            # malformed — skip rather than apply tenant-wide.
+            continue
+        try:
+            rs = date.fromisoformat(str(rs_raw))
+            re_ = date.fromisoformat(str(re_raw))
+        except ValueError:
+            continue
+        if rs <= the_date <= re_:
+            return policy_from_row(row)
+    return None
+
+
 def resolve_policies_for_employees(
     conn: Connection,
     scope: TenantScope,
@@ -117,25 +173,48 @@ def resolve_policies_for_employees(
 ) -> dict[int, ShiftPolicy]:
     """Return ``{employee_id: ShiftPolicy}`` via the resolution cascade.
 
-    Priority — highest first wins:
+    Priority — highest first wins (P10 update):
 
-    1. Employee-scoped assignment matching this employee.
-    2. Department-scoped assignment matching this employee's
-       ``department_id``.
-    3. Tenant-scoped assignment.
-    4. Legacy fallback — any ``shift_policies`` row covering the date
-       (the pilot seeded this; new tenants may rely on it too if no
-       ``policy_assignments`` rows exist).
+    0a. **Custom** policy whose date range covers ``the_date``
+        (tenant-wide for that date — applies to every employee).
+    0b. **Ramadan** policy whose date range covers ``the_date``
+        (tenant-wide for that date).
+    1.  Employee-scoped assignment matching this employee.
+    2.  Department-scoped assignment matching this employee's
+        ``department_id``.
+    3.  Tenant-scoped assignment.
+    4.  Legacy fallback — any ``shift_policies`` row covering the
+        date (the pilot seeded this; new tenants may rely on it too
+        if no ``policy_assignments`` rows exist).
 
-    Resolution is the **only DB-touching part** of the engine pipeline
-    (P9 red line). All four queries run inline here; the engine
-    receives the resolved ``ShiftPolicy`` and stays pure.
+    **Only one policy applies per (employee, date) — no stacking.**
+    Custom beats Ramadan beats everything else; this is the
+    deterministic priority documented in
+    ``backend/CLAUDE.md §"Policy resolution priority"``.
+
+    Resolution is the **only DB-touching part** of the engine
+    pipeline (P9 red line). The engine itself receives the resolved
+    ``ShiftPolicy`` and stays pure.
     """
 
     if not employee_ids:
         return {}
 
     from hadir.db import policy_assignments  # noqa: PLC0415
+
+    # ----- Tier 0a + 0b: Custom / Ramadan tenant-wide overrides -----
+    custom = _custom_or_ramadan_for_date(
+        conn, scope, the_date=the_date, policy_type="Custom"
+    )
+    if custom is not None:
+        # Tenant-wide one-off — every employee uses it for this date.
+        return {eid: custom for eid in employee_ids}
+
+    ramadan = _custom_or_ramadan_for_date(
+        conn, scope, the_date=the_date, policy_type="Ramadan"
+    )
+    if ramadan is not None:
+        return {eid: ramadan for eid in employee_ids}
 
     # 1. Employee-scoped — at most one policy per employee in scope.
     emp_rows = conn.execute(

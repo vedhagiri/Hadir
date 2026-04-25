@@ -180,6 +180,87 @@ export function PoliciesPage() {
 
       {showForm && <PolicyForm onSubmit={onSubmit} busy={create.isPending} />}
 
+      <PolicyTable
+        title="Standard policies"
+        subtitle="Tenant-default Fixed and Flex policies. Apply via the assignment cascade (employee → dept → tenant)."
+        rows={policyList.filter((p) => p.type === "Fixed" || p.type === "Flex")}
+        assignmentsByPolicy={assignmentsByPolicy}
+        onDeletePolicy={onDeletePolicy}
+        onAssign={onAssign}
+        onUnassign={onUnassign}
+        showAssignmentColumn
+      />
+      <PolicyTable
+        title="Ramadan policies"
+        subtitle="One per year, typically. Tenant-wide on every date inside the configured range — wins over the standard cascade."
+        rows={policyList.filter((p) => p.type === "Ramadan")}
+        assignmentsByPolicy={assignmentsByPolicy}
+        onDeletePolicy={onDeletePolicy}
+        onAssign={onAssign}
+        onUnassign={onUnassign}
+        showAssignmentColumn={false}
+      />
+      <PolicyTable
+        title="Custom policies"
+        subtitle="One-off days (half-day before a holiday, etc.). Tenant-wide on every date inside the configured range — wins over Ramadan and the standard cascade."
+        rows={policyList.filter((p) => p.type === "Custom")}
+        assignmentsByPolicy={assignmentsByPolicy}
+        onDeletePolicy={onDeletePolicy}
+        onAssign={onAssign}
+        onUnassign={onUnassign}
+        showAssignmentColumn={false}
+      />
+    </div>
+  );
+}
+
+
+function PolicyTable({
+  title,
+  subtitle,
+  rows,
+  assignmentsByPolicy,
+  onDeletePolicy,
+  onAssign,
+  onUnassign,
+  showAssignmentColumn,
+}: {
+  title: string;
+  subtitle: string;
+  rows: PolicyResponse[];
+  assignmentsByPolicy: Record<number, AssignmentResponse[]>;
+  onDeletePolicy: (p: PolicyResponse) => Promise<void> | void;
+  onAssign: (
+    policyId: number,
+    scopeType: ScopeType,
+    scopeId: number | null,
+  ) => Promise<void> | void;
+  onUnassign: (assignmentId: number) => Promise<void> | void;
+  showAssignmentColumn: boolean;
+}) {
+  return (
+    <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <header>
+        <h2
+          style={{
+            fontSize: 13,
+            margin: 0,
+            fontWeight: 600,
+            color: "var(--text)",
+          }}
+        >
+          {title}
+        </h2>
+        <p
+          style={{
+            fontSize: 12,
+            color: "var(--text-tertiary)",
+            margin: "2px 0 0 0",
+          }}
+        >
+          {subtitle}
+        </p>
+      </header>
       <div
         style={{
           background: "var(--bg-elev)",
@@ -195,13 +276,13 @@ export function PoliciesPage() {
               <th style={th}>Type</th>
               <th style={th}>Window</th>
               <th style={th}>Required</th>
-              <th style={th}>Active</th>
-              <th style={th}>Assignments</th>
+              <th style={th}>Row active</th>
+              {showAssignmentColumn && <th style={th}>Assignments</th>}
               <th style={th}></th>
             </tr>
           </thead>
           <tbody>
-            {policyList.map((p) => (
+            {rows.map((p) => (
               <tr key={p.id} style={{ borderTop: "1px solid var(--border)" }}>
                 <td style={td}>
                   <div style={{ fontWeight: 600 }}>{p.name}</div>
@@ -226,20 +307,22 @@ export function PoliciesPage() {
                     {p.active_until ?? "open"}
                   </div>
                 </td>
-                <td style={td}>
-                  <AssignmentCell
-                    policyId={p.id}
-                    rows={assignmentsByPolicy[p.id] ?? []}
-                    onAssignTenant={() => onAssign(p.id, "tenant", null)}
-                    onAssignDepartment={(deptId) =>
-                      onAssign(p.id, "department", deptId)
-                    }
-                    onAssignEmployee={(empId) =>
-                      onAssign(p.id, "employee", empId)
-                    }
-                    onUnassign={onUnassign}
-                  />
-                </td>
+                {showAssignmentColumn && (
+                  <td style={td}>
+                    <AssignmentCell
+                      policyId={p.id}
+                      rows={assignmentsByPolicy[p.id] ?? []}
+                      onAssignTenant={() => onAssign(p.id, "tenant", null)}
+                      onAssignDepartment={(deptId) =>
+                        onAssign(p.id, "department", deptId)
+                      }
+                      onAssignEmployee={(empId) =>
+                        onAssign(p.id, "employee", empId)
+                      }
+                      onUnassign={onUnassign}
+                    />
+                  </td>
+                )}
                 <td style={{ ...td, textAlign: "right" }}>
                   <button
                     type="button"
@@ -251,20 +334,24 @@ export function PoliciesPage() {
                 </td>
               </tr>
             ))}
-            {policyList.length === 0 && (
+            {rows.length === 0 && (
               <tr>
                 <td
-                  colSpan={7}
-                  style={{ ...td, textAlign: "center", color: "var(--text-tertiary)" }}
+                  colSpan={showAssignmentColumn ? 7 : 6}
+                  style={{
+                    ...td,
+                    textAlign: "center",
+                    color: "var(--text-tertiary)",
+                  }}
                 >
-                  No policies yet.
+                  None yet.
                 </td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -299,6 +386,16 @@ function describeWindow(p: PolicyResponse): string {
   }
   if (p.type === "Flex") {
     return `IN ${p.config.in_window_start ?? "??"}–${p.config.in_window_end ?? "??"}; OUT ${p.config.out_window_start ?? "??"}–${p.config.out_window_end ?? "??"}`;
+  }
+  if (p.type === "Ramadan") {
+    return `${p.config.start ?? "??"} – ${p.config.end ?? "??"} (grace ${p.config.grace_minutes ?? 15}m) · ${p.config.start_date ?? "??"} → ${p.config.end_date ?? "??"}`;
+  }
+  if (p.type === "Custom") {
+    const inner =
+      p.config.inner_type === "Flex"
+        ? `IN ${p.config.in_window_start ?? "??"}–${p.config.in_window_end ?? "??"}; OUT ${p.config.out_window_start ?? "??"}–${p.config.out_window_end ?? "??"}`
+        : `${p.config.start ?? "??"} – ${p.config.end ?? "??"} (grace ${p.config.grace_minutes ?? 15}m)`;
+    return `[${p.config.inner_type ?? "Fixed"}] ${inner} · ${p.config.start_date ?? "??"} → ${p.config.end_date ?? "??"}`;
   }
   return "—";
 }
@@ -453,35 +550,86 @@ function PolicyForm({
   const [activeFrom, setActiveFrom] = useState(
     new Date().toISOString().slice(0, 10),
   );
-  // Fixed
+  // Fixed (also used by Ramadan + Custom-Fixed)
   const [start, setStart] = useState("07:30");
   const [end, setEnd] = useState("15:30");
   const [grace, setGrace] = useState(15);
-  // Flex
+  // Flex (also used by Custom-Flex)
   const [inStart, setInStart] = useState("07:30");
   const [inEnd, setInEnd] = useState("08:30");
   const [outStart, setOutStart] = useState("15:30");
   const [outEnd, setOutEnd] = useState("16:30");
   // Common
   const [requiredHours, setRequiredHours] = useState(8);
+  // Ramadan / Custom — calendar range
+  const [rangeStart, setRangeStart] = useState("");
+  const [rangeEnd, setRangeEnd] = useState("");
+  // Custom — Fixed or Flex inner
+  const [innerType, setInnerType] = useState<"Fixed" | "Flex">("Fixed");
+
+  // Pre-fill Ramadan defaults the first time the user picks the type.
+  // 2026 Ramadan dates from BRD §"Ramadan policy 2026".
+  const onTypeChange = (next: PolicyType) => {
+    setType(next);
+    if (next === "Ramadan" && !rangeStart) {
+      setRangeStart("2026-02-18");
+      setRangeEnd("2026-03-19");
+      setStart("08:00");
+      setEnd("14:00");
+      setRequiredHours(6);
+    }
+  };
+
+  const isFixedShape =
+    type === "Fixed" ||
+    type === "Ramadan" ||
+    (type === "Custom" && innerType === "Fixed");
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    const config: PolicyConfig =
-      type === "Fixed"
-        ? {
-            start,
-            end,
-            grace_minutes: grace,
-            required_hours: requiredHours,
-          }
-        : {
-            in_window_start: inStart,
-            in_window_end: inEnd,
-            out_window_start: outStart,
-            out_window_end: outEnd,
-            required_hours: requiredHours,
-          };
+    const fixedFields = {
+      start,
+      end,
+      grace_minutes: grace,
+      required_hours: requiredHours,
+    } as const;
+    const flexFields = {
+      in_window_start: inStart,
+      in_window_end: inEnd,
+      out_window_start: outStart,
+      out_window_end: outEnd,
+      required_hours: requiredHours,
+    } as const;
+
+    let config: PolicyConfig;
+    if (type === "Fixed") {
+      config = { ...fixedFields };
+    } else if (type === "Flex") {
+      config = { ...flexFields };
+    } else if (type === "Ramadan") {
+      config = {
+        ...fixedFields,
+        start_date: rangeStart,
+        end_date: rangeEnd,
+      };
+    } else {
+      // Custom
+      config =
+        innerType === "Flex"
+          ? {
+              ...flexFields,
+              start_date: rangeStart,
+              end_date: rangeEnd,
+              inner_type: "Flex",
+            }
+          : {
+              ...fixedFields,
+              start_date: rangeStart,
+              end_date: rangeEnd,
+              inner_type: "Fixed",
+            };
+    }
+
     void onSubmit({
       name: name.trim(),
       type,
@@ -517,11 +665,13 @@ function PolicyForm({
         <Field label="Type">
           <select
             value={type}
-            onChange={(e) => setType(e.target.value as PolicyType)}
+            onChange={(e) => onTypeChange(e.target.value as PolicyType)}
             style={inputStyle}
           >
             <option value="Fixed">Fixed</option>
             <option value="Flex">Flex</option>
+            <option value="Ramadan">Ramadan</option>
+            <option value="Custom">Custom</option>
           </select>
         </Field>
         <Field label="Active from">
@@ -535,7 +685,43 @@ function PolicyForm({
         </Field>
       </div>
 
-      {type === "Fixed" ? (
+      {/* Date-range picker — Ramadan + Custom only */}
+      {(type === "Ramadan" || type === "Custom") && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+          <Field label="Range start">
+            <input
+              type="date"
+              value={rangeStart}
+              onChange={(e) => setRangeStart(e.target.value)}
+              required
+              style={inputStyle}
+            />
+          </Field>
+          <Field label="Range end">
+            <input
+              type="date"
+              value={rangeEnd}
+              onChange={(e) => setRangeEnd(e.target.value)}
+              required
+              style={inputStyle}
+            />
+          </Field>
+          {type === "Custom" && (
+            <Field label="Custom inner type">
+              <select
+                value={innerType}
+                onChange={(e) => setInnerType(e.target.value as "Fixed" | "Flex")}
+                style={inputStyle}
+              >
+                <option value="Fixed">Fixed (start/end + grace)</option>
+                <option value="Flex">Flex (in/out windows)</option>
+              </select>
+            </Field>
+          )}
+        </div>
+      )}
+
+      {isFixedShape ? (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
           <Field label="Start">
             <input

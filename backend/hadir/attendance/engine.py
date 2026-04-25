@@ -1,9 +1,16 @@
 """Pure attendance computation.
 
-Two policy types are supported in v1.0 P9: ``Fixed`` (pilot rules,
-unchanged) and ``Flex`` (windowed arrival + windowed departure).
-``Ramadan`` and ``Custom`` slots stay reserved on the type enum but
-the compute path falls back to Fixed flags until those phases land.
+Four policy types are supported as of v1.0 P10:
+
+* ``Fixed`` — start, end, grace_minutes (pilot rules).
+* ``Flex`` — windowed arrival + windowed departure (P9).
+* ``Ramadan`` — Fixed shape with a calendar date range. The
+  resolver gates this; the engine itself uses the Fixed flag
+  helper. One per year, typically.
+* ``Custom`` — wraps a Fixed-shaped or a Flex-shaped inner
+  policy plus a date range. Used for one-off days (half-day
+  before a holiday, etc.). The dispatcher reads
+  ``policy.custom_inner_type`` to pick the right flag helper.
 
 Common rules (apply to every type):
 
@@ -15,19 +22,22 @@ Common rules (apply to every type):
 * ``absent`` = ``events.empty and no leave covers this date``.
 * ``overtime_minutes`` = ``max(0, total_minutes - required_minutes)``.
 
-Per-type rules:
+Per-type flag rules:
 
-* **Fixed** — late = ``in_time > policy.start + grace_minutes``;
-  early_out = ``out_time < policy.end - grace_minutes``;
+* **Fixed / Ramadan / Custom-Fixed** — late =
+  ``in_time > policy.start + grace_minutes``; early_out =
+  ``out_time < policy.end - grace_minutes``;
   short_hours = ``total_minutes < required_minutes``.
-* **Flex** — late = ``in_time > policy.in_window_end``;
-  early_out = ``out_time < policy.out_window_start``;
+* **Flex / Custom-Flex** — late =
+  ``in_time > policy.in_window_end``; early_out =
+  ``out_time < policy.out_window_start``;
   short_hours = ``total_minutes < required_minutes``.
 
-**Red line (pilot-plan P10, reaffirmed in P9 prompt)**: this module
-is pure — no DB, no network, no side effects. Callers pass inputs;
-we return a value. Policy *resolution* is the only DB-touching part
-of the system, and it lives in ``hadir.attendance.repository``.
+**Red line (pilot-plan P10, reaffirmed in P9 + P10 prompts)**:
+this module is pure — no DB, no network, no side effects. Callers
+pass inputs; we return a value. Policy *resolution* is the only
+DB-touching part of the pipeline, and it lives in
+``hadir.attendance.repository``.
 """
 
 from __future__ import annotations
@@ -44,13 +54,18 @@ PolicyType = Literal["Fixed", "Flex", "Ramadan", "Custom"]
 class ShiftPolicy:
     """Policy value object the engine takes as input.
 
-    The dataclass holds the union of all policy-type fields. Fixed
-    populates ``start`` / ``end`` / ``grace_minutes`` (existing pilot
-    contract). Flex populates the four window times. Both populate
-    ``required_hours`` for the short-hours / overtime check.
+    The dataclass holds the union of every policy-type field; each
+    type populates the relevant subset:
 
-    The engine dispatches on ``type`` to pick the matching flag
-    helpers — see ``_fixed_flags`` / ``_flex_flags`` below.
+    * **Fixed** uses ``start`` / ``end`` / ``grace_minutes``.
+    * **Flex** uses the four window times.
+    * **Ramadan** uses the Fixed fields PLUS ``range_start`` /
+      ``range_end`` for the resolver's date-range check. The engine
+      itself dispatches Ramadan to the Fixed flag helper.
+    * **Custom** uses ``range_start`` / ``range_end`` PLUS one of
+      the inner policy shapes. ``custom_inner_type`` tells the
+      engine which one.
+    * Every type uses ``required_hours``.
     """
 
     id: int
@@ -60,16 +75,26 @@ class ShiftPolicy:
     # Common
     required_hours: int = 8
 
-    # Fixed-only
+    # Fixed / Ramadan / Custom-Fixed
     start: Optional[time] = None
     end: Optional[time] = None
     grace_minutes: int = 15
 
-    # Flex-only
+    # Flex / Custom-Flex
     in_window_start: Optional[time] = None
     in_window_end: Optional[time] = None
     out_window_start: Optional[time] = None
     out_window_end: Optional[time] = None
+
+    # Ramadan + Custom: the calendar range over which this policy
+    # applies. The resolver gates by these — the engine doesn't
+    # check the date itself, it just uses the right flag helper.
+    range_start: Optional[date] = None
+    range_end: Optional[date] = None
+
+    # Custom only — names which inner shape the engine should use.
+    # ``None`` for non-Custom types (Custom always sets it).
+    custom_inner_type: Optional[Literal["Fixed", "Flex"]] = None
 
     @property
     def required_minutes(self) -> int:
@@ -194,7 +219,15 @@ def _flags_for(
     total_minutes: Optional[int],
     the_date: date,
 ) -> _Flags:
-    """Dispatch on policy.type to the right per-type flag helper."""
+    """Dispatch on policy.type to the right per-type flag helper.
+
+    * ``Flex`` → ``_flex_flags``.
+    * ``Custom`` with ``custom_inner_type='Flex'`` → ``_flex_flags``.
+    * Everything else (``Fixed``, ``Ramadan``, ``Custom`` with
+      ``custom_inner_type='Fixed'``) → ``_fixed_flags``. Ramadan
+      reuses Fixed flag math because its shape *is* Fixed; the
+      resolver filters by date range, not the engine.
+    """
 
     if policy.type == "Flex":
         return _flex_flags(
@@ -203,8 +236,13 @@ def _flags_for(
             out_time=out_time,
             total_minutes=total_minutes,
         )
-    # Fixed (default) — Ramadan + Custom fall back to Fixed flags
-    # until their respective phases ship.
+    if policy.type == "Custom" and policy.custom_inner_type == "Flex":
+        return _flex_flags(
+            policy,
+            in_time=in_time,
+            out_time=out_time,
+            total_minutes=total_minutes,
+        )
     return _fixed_flags(
         policy,
         in_time=in_time,
@@ -307,6 +345,17 @@ def _parse_time(value: object) -> time:
     raise ValueError(f"invalid time value: {value!r}")
 
 
+def _parse_date(value: object) -> Optional[date]:
+    if value is None:
+        return None
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        # ISO date — ``date.fromisoformat`` handles ``YYYY-MM-DD``.
+        return date.fromisoformat(value)
+    raise ValueError(f"invalid date value: {value!r}")
+
+
 def policy_from_row(row) -> ShiftPolicy:  # type: ignore[no-untyped-def]
     """Inflate a ``shift_policies`` row into a ``ShiftPolicy`` value.
 
@@ -331,8 +380,61 @@ def policy_from_row(row) -> ShiftPolicy:  # type: ignore[no-untyped-def]
             out_window_end=_parse_time(config.get("out_window_end", "16:30")),
         )
 
-    # Fixed (default). Ramadan / Custom fall through here too — those
-    # phases will add their own branches.
+    if policy_type == "Ramadan":
+        # Functionally a Fixed policy that's only valid inside the
+        # date range. The resolver filters by ``range_start`` /
+        # ``range_end``; the engine uses ``_fixed_flags``.
+        return ShiftPolicy(
+            id=int(row.id),
+            name=str(row.name),
+            type="Ramadan",
+            required_hours=required_hours,
+            start=_parse_time(config.get("start", "08:00")),
+            end=_parse_time(config.get("end", "14:00")),
+            grace_minutes=int(config.get("grace_minutes", 15)),
+            range_start=_parse_date(config.get("start_date")),
+            range_end=_parse_date(config.get("end_date")),
+        )
+
+    if policy_type == "Custom":
+        inner = str(config.get("inner_type", "Fixed"))
+        if inner == "Flex":
+            return ShiftPolicy(
+                id=int(row.id),
+                name=str(row.name),
+                type="Custom",
+                required_hours=required_hours,
+                in_window_start=_parse_time(
+                    config.get("in_window_start", "07:30")
+                ),
+                in_window_end=_parse_time(
+                    config.get("in_window_end", "08:30")
+                ),
+                out_window_start=_parse_time(
+                    config.get("out_window_start", "15:30")
+                ),
+                out_window_end=_parse_time(
+                    config.get("out_window_end", "16:30")
+                ),
+                range_start=_parse_date(config.get("start_date")),
+                range_end=_parse_date(config.get("end_date")),
+                custom_inner_type="Flex",
+            )
+        # Custom-Fixed (default).
+        return ShiftPolicy(
+            id=int(row.id),
+            name=str(row.name),
+            type="Custom",
+            required_hours=required_hours,
+            start=_parse_time(config.get("start", "07:30")),
+            end=_parse_time(config.get("end", "15:30")),
+            grace_minutes=int(config.get("grace_minutes", 15)),
+            range_start=_parse_date(config.get("start_date")),
+            range_end=_parse_date(config.get("end_date")),
+            custom_inner_type="Fixed",
+        )
+
+    # Fixed (default).
     return ShiftPolicy(
         id=int(row.id),
         name=str(row.name),
