@@ -108,6 +108,17 @@ class Settings(BaseSettings):
     # Clock-skew tolerance when validating ID-token ``exp`` / ``nbf``.
     oidc_clock_skew_seconds: int = 60
 
+    # --- Request attachments (v1.0 P14) ------------------------------------
+    # Max upload size in megabytes. Enforced server-side regardless of
+    # what the client claims (the P14 red line). The client is told the
+    # same number via ``GET /api/requests/attachment-config`` so it can
+    # block bad files before the upload starts.
+    request_attachment_max_mb: int = 5
+    # Where attachments live on disk. The router writes
+    # ``{root}/{tenant_id}/requests/{uuid}.{ext}``. Encrypted at rest
+    # via the same Fernet key the photo path uses.
+    request_attachment_root: str = "/data/attachments"
+
 
 def get_settings() -> Settings:
     """Return a fresh Settings instance.

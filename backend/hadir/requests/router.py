@@ -21,23 +21,40 @@ import logging
 from datetime import date as date_type, datetime, timezone
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import insert, select
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Response,
+    UploadFile,
+    status,
+)
+from sqlalchemy import delete, insert, select
 
 from hadir.attendance import scheduler as attendance_scheduler_mod
 from hadir.auth.audit import write_audit
-from hadir.auth.dependencies import CurrentUser, current_user
+from hadir.auth.dependencies import CurrentUser, current_user, require_role
+from hadir.config import get_settings
 from hadir.db import (
     approved_leaves,
     get_engine,
     leave_types,
     manager_assignments,
+    request_attachments,
 )
+from hadir.requests import attachments as attachment_io
+from hadir.requests import reason_categories as cat_repo
 from hadir.requests import repository as repo
 from hadir.requests import state_machine as sm
 from hadir.requests.schemas import (
     AdminOverrideBody,
+    AttachmentConfigResponse,
+    AttachmentResponse,
     DecisionBody,
+    ReasonCategoryCreate,
+    ReasonCategoryPatch,
+    ReasonCategoryResponse,
     RequestCreate,
     RequestEmployee,
     RequestResponse,
@@ -48,7 +65,15 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/requests", tags=["requests"])
 
+# Sibling router for the Admin-managed reason categories. Lives at the
+# top-level ``/api/request-reason-categories`` so it doesn't sit under
+# the ``/api/requests/{id}/...`` namespace.
+reason_categories_router = APIRouter(
+    prefix="/api/request-reason-categories", tags=["request-reason-categories"]
+)
+
 USER = Depends(current_user)
+ADMIN = Depends(require_role("Admin"))
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +266,25 @@ def list_requests(user: Annotated[CurrentUser, USER]) -> list[RequestResponse]:
             )
         return [_row_to_response(r) for r in rows]
     return []
+
+
+@router.get(
+    "/attachment-config", response_model=AttachmentConfigResponse
+)
+def get_attachment_config(
+    _user: Annotated[CurrentUser, USER],
+) -> AttachmentConfigResponse:
+    """Surface the upload limits to the client so it can pre-validate.
+
+    Declared **before** the ``/{request_id}`` route so FastAPI's
+    route matcher picks the static path first.
+    """
+
+    settings = get_settings()
+    return AttachmentConfigResponse(
+        max_mb=settings.request_attachment_max_mb,
+        accepted_mime_types=sorted(attachment_io.ALLOWED_TYPES),
+    )
 
 
 @router.get("/{request_id}", response_model=RequestResponse)
@@ -560,3 +604,432 @@ def admin_override_endpoint(
         scope=scope, row=after, actor_user_id=user.id
     )
     return _row_to_response(after)
+
+
+# ---------------------------------------------------------------------------
+# Attachments (P14)
+# ---------------------------------------------------------------------------
+
+
+def _attachment_can_modify(user: CurrentUser, row: repo.RequestRow) -> bool:
+    """Same rule as ``cancel``: only the owning Employee (or an Admin)
+    can attach files to or delete files from a request, and only while
+    the request is still ``submitted``.
+    """
+
+    if not _can_view(user, row):
+        return False
+    if _has_role(user, "Admin"):
+        return True
+    if row.status != "submitted":
+        return False
+    scope = TenantScope(tenant_id=user.tenant_id)
+    with get_engine().begin() as conn:
+        mine = repo.employee_for_user_email(conn, scope, email=user.email)
+    return mine is not None and mine == row.employee_id
+
+
+def _attachment_to_response(row) -> AttachmentResponse:  # type: ignore[no-untyped-def]
+    return AttachmentResponse(
+        id=int(row.id),
+        request_id=int(row.request_id),
+        original_filename=str(row.original_filename),
+        content_type=str(row.content_type),
+        size_bytes=int(row.size_bytes),
+        uploaded_at=row.uploaded_at,
+    )
+
+
+@router.post(
+    "/{request_id}/attachments",
+    response_model=AttachmentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_attachment(
+    request_id: int,
+    user: Annotated[CurrentUser, USER],
+    file: UploadFile = File(...),
+) -> AttachmentResponse:
+    scope = TenantScope(tenant_id=user.tenant_id)
+    with get_engine().begin() as conn:
+        row = repo.get_request(conn, scope, request_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="request not found")
+    if not _attachment_can_modify(user, row):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "you can only attach files to your own request while it "
+                "is still in submitted"
+            ),
+        )
+
+    data = await file.read()
+    declared = file.content_type or ""
+    original = file.filename or "upload"
+
+    try:
+        stored = attachment_io.validate_and_store(
+            scope=scope,
+            data=data,
+            declared_content_type=declared,
+            original_filename=original,
+        )
+    except attachment_io.AttachmentError as exc:
+        msg = str(exc)
+        code = 413 if "max is" in msg else 400
+        raise HTTPException(status_code=code, detail=msg) from exc
+
+    with get_engine().begin() as conn:
+        new_id = int(
+            conn.execute(
+                insert(request_attachments)
+                .values(
+                    request_id=request_id,
+                    tenant_id=scope.tenant_id,
+                    file_path=stored.file_path,
+                    original_filename=original,
+                    content_type=stored.detected_mime,
+                    size_bytes=stored.size_bytes,
+                )
+                .returning(request_attachments.c.id)
+            ).scalar_one()
+        )
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="request.attachment.uploaded",
+            entity_type="request",
+            entity_id=str(request_id),
+            after={
+                "attachment_id": new_id,
+                "original_filename": original,
+                "content_type": stored.detected_mime,
+                "size_bytes": stored.size_bytes,
+            },
+        )
+        new_row = conn.execute(
+            select(
+                request_attachments.c.id,
+                request_attachments.c.request_id,
+                request_attachments.c.original_filename,
+                request_attachments.c.content_type,
+                request_attachments.c.size_bytes,
+                request_attachments.c.uploaded_at,
+            ).where(request_attachments.c.id == new_id)
+        ).first()
+        assert new_row is not None
+    return _attachment_to_response(new_row)
+
+
+@router.get(
+    "/{request_id}/attachments", response_model=list[AttachmentResponse]
+)
+def list_attachments(
+    request_id: int, user: Annotated[CurrentUser, USER]
+) -> list[AttachmentResponse]:
+    scope = TenantScope(tenant_id=user.tenant_id)
+    with get_engine().begin() as conn:
+        row = repo.get_request(conn, scope, request_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="request not found")
+        if not _can_view(user, row):
+            raise HTTPException(status_code=403, detail="forbidden")
+        rows = conn.execute(
+            select(
+                request_attachments.c.id,
+                request_attachments.c.request_id,
+                request_attachments.c.original_filename,
+                request_attachments.c.content_type,
+                request_attachments.c.size_bytes,
+                request_attachments.c.uploaded_at,
+            )
+            .where(
+                request_attachments.c.tenant_id == scope.tenant_id,
+                request_attachments.c.request_id == request_id,
+            )
+            .order_by(request_attachments.c.id.asc())
+        ).all()
+    return [_attachment_to_response(r) for r in rows]
+
+
+@router.get(
+    "/{request_id}/attachments/{attachment_id}/download"
+)
+def download_attachment(
+    request_id: int,
+    attachment_id: int,
+    user: Annotated[CurrentUser, USER],
+) -> Response:
+    scope = TenantScope(tenant_id=user.tenant_id)
+    with get_engine().begin() as conn:
+        row = repo.get_request(conn, scope, request_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="request not found")
+        if not _can_view(user, row):
+            raise HTTPException(status_code=403, detail="forbidden")
+        att = conn.execute(
+            select(
+                request_attachments.c.id,
+                request_attachments.c.file_path,
+                request_attachments.c.original_filename,
+                request_attachments.c.content_type,
+            ).where(
+                request_attachments.c.tenant_id == scope.tenant_id,
+                request_attachments.c.id == attachment_id,
+                request_attachments.c.request_id == request_id,
+            )
+        ).first()
+        if att is None:
+            raise HTTPException(status_code=404, detail="attachment not found")
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="request.attachment.downloaded",
+            entity_type="request",
+            entity_id=str(request_id),
+            after={"attachment_id": int(att.id)},
+        )
+
+    try:
+        plain = attachment_io.read_decrypted(str(att.file_path))
+    except (FileNotFoundError, RuntimeError) as exc:
+        logger.warning(
+            "attachment read failed for id=%s: %s", attachment_id, exc
+        )
+        raise HTTPException(
+            status_code=500, detail="could not read attachment"
+        ) from exc
+
+    safe_filename = (
+        str(att.original_filename).replace("\r", "").replace("\n", "")
+    )
+    return Response(
+        content=plain,
+        media_type=str(att.content_type) or "application/octet-stream",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{safe_filename}"'
+            )
+        },
+    )
+
+
+@router.delete(
+    "/{request_id}/attachments/{attachment_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_attachment(
+    request_id: int,
+    attachment_id: int,
+    user: Annotated[CurrentUser, USER],
+    response: Response,
+) -> Response:
+    scope = TenantScope(tenant_id=user.tenant_id)
+    with get_engine().begin() as conn:
+        row = repo.get_request(conn, scope, request_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="request not found")
+        if not _attachment_can_modify(user, row):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "you can only remove attachments while the request "
+                    "is still in submitted"
+                ),
+            )
+        att = conn.execute(
+            select(
+                request_attachments.c.id,
+                request_attachments.c.file_path,
+                request_attachments.c.original_filename,
+            ).where(
+                request_attachments.c.tenant_id == scope.tenant_id,
+                request_attachments.c.id == attachment_id,
+                request_attachments.c.request_id == request_id,
+            )
+        ).first()
+        if att is None:
+            raise HTTPException(status_code=404, detail="attachment not found")
+        conn.execute(
+            delete(request_attachments).where(
+                request_attachments.c.id == attachment_id
+            )
+        )
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="request.attachment.deleted",
+            entity_type="request",
+            entity_id=str(request_id),
+            before={
+                "attachment_id": int(att.id),
+                "original_filename": str(att.original_filename),
+            },
+        )
+
+    attachment_io.drop_attachment_file(str(att.file_path))
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Reason categories (P14, Admin-only writes)
+# ---------------------------------------------------------------------------
+# Read access is open to authenticated users — every role needs to see
+# the dropdown when filing a request or rendering an existing one.
+
+def _category_to_response(row: cat_repo.CategoryRow) -> ReasonCategoryResponse:
+    return ReasonCategoryResponse(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        request_type=row.request_type,  # type: ignore[arg-type]
+        code=row.code,
+        name=row.name,
+        display_order=row.display_order,
+        active=row.active,
+    )
+
+
+@reason_categories_router.get(
+    "", response_model=list[ReasonCategoryResponse]
+)
+def list_reason_categories(
+    user: Annotated[CurrentUser, USER],
+    request_type: Optional[str] = None,
+    include_inactive: bool = False,
+) -> list[ReasonCategoryResponse]:
+    if request_type is not None and request_type not in ("exception", "leave"):
+        raise HTTPException(
+            status_code=400,
+            detail="request_type must be 'exception' or 'leave'",
+        )
+    scope = TenantScope(tenant_id=user.tenant_id)
+    with get_engine().begin() as conn:
+        rows = cat_repo.list_categories(
+            conn,
+            scope,
+            request_type=request_type,
+            include_inactive=include_inactive,
+        )
+    return [_category_to_response(r) for r in rows]
+
+
+@reason_categories_router.post(
+    "",
+    response_model=ReasonCategoryResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_reason_category(
+    payload: ReasonCategoryCreate,
+    user: Annotated[CurrentUser, ADMIN],
+) -> ReasonCategoryResponse:
+    scope = TenantScope(tenant_id=user.tenant_id)
+    with get_engine().begin() as conn:
+        existing = cat_repo.get_category_by_code(
+            conn, scope, request_type=payload.request_type, code=payload.code
+        )
+        if existing is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"reason category {payload.code!r} already exists "
+                    f"for type {payload.request_type!r}"
+                ),
+            )
+        new_id = cat_repo.create_category(
+            conn,
+            scope,
+            request_type=payload.request_type,
+            code=payload.code,
+            name=payload.name,
+        )
+        created = cat_repo.get_category(conn, scope, new_id)
+        assert created is not None
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="request_reason_category.created",
+            entity_type="request_reason_category",
+            entity_id=str(new_id),
+            after={
+                "request_type": created.request_type,
+                "code": created.code,
+                "name": created.name,
+                "display_order": created.display_order,
+            },
+        )
+    return _category_to_response(created)
+
+
+@reason_categories_router.patch(
+    "/{category_id}", response_model=ReasonCategoryResponse
+)
+def patch_reason_category(
+    category_id: int,
+    payload: ReasonCategoryPatch,
+    user: Annotated[CurrentUser, ADMIN],
+) -> ReasonCategoryResponse:
+    scope = TenantScope(tenant_id=user.tenant_id)
+    provided = payload.model_dump(exclude_unset=True)
+    with get_engine().begin() as conn:
+        before = cat_repo.get_category(conn, scope, category_id)
+        if before is None:
+            raise HTTPException(status_code=404, detail="category not found")
+        cat_repo.update_category(conn, scope, category_id, values=provided)
+        after = cat_repo.get_category(conn, scope, category_id)
+        assert after is not None
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="request_reason_category.updated",
+            entity_type="request_reason_category",
+            entity_id=str(category_id),
+            before={
+                "name": before.name,
+                "display_order": before.display_order,
+                "active": before.active,
+            },
+            after={
+                "name": after.name,
+                "display_order": after.display_order,
+                "active": after.active,
+            },
+        )
+    return _category_to_response(after)
+
+
+@reason_categories_router.delete(
+    "/{category_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+def delete_reason_category(
+    category_id: int,
+    user: Annotated[CurrentUser, ADMIN],
+    response: Response,
+) -> Response:
+    scope = TenantScope(tenant_id=user.tenant_id)
+    with get_engine().begin() as conn:
+        existing = cat_repo.get_category(conn, scope, category_id)
+        if existing is None:
+            raise HTTPException(status_code=404, detail="category not found")
+        cat_repo.delete_category(conn, scope, category_id)
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="request_reason_category.deleted",
+            entity_type="request_reason_category",
+            entity_id=str(category_id),
+            before={
+                "request_type": existing.request_type,
+                "code": existing.code,
+                "name": existing.name,
+            },
+        )
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response

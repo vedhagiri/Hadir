@@ -1,7 +1,7 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 complete**:
+Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 complete**:
 pilot frozen at tag `v0.1-pilot` on branch `release/pilot`; multi-tenant
 routing wired up via a per-connection `SET search_path` driven by a
 ContextVar + SQLAlchemy `checkout` event; the global `tenants` registry
@@ -88,7 +88,21 @@ Manager-decide assigned-only, HR-decide gated on
 idempotent `approved_leaves` row + per-employee/per-date attendance
 recompute via the new `attendance.scheduler.recompute_for(...)`
 (single-employee, handles past dates). Audit hook on every
-transition. Role-scoped GET. **v1.0 P14 next.**
+transition. Role-scoped GET. **P14** added the request submission UI:
+migration 0017 + per-tenant `request_reason_categories` with the BRD
+§FR-REQ-008 default list seeded. Read endpoint open to every
+authenticated role; admin-only writes on `/api/request-reason-categories`
+(+ POST/PATCH/DELETE). Attachment pipeline in
+`hadir/requests/attachments.py` validates via explicit magic-byte
+sniff (load-bearing P14 red line — extension never trusted; bare
+ZIP refused even though `.docx` is allowed). Server-enforced size
+cap via `HADIR_REQUEST_ATTACHMENT_MAX_MB` (default 5). Attachments
+Fernet-encrypted at `/data/attachments/{tenant_id}/requests/{uuid}.{ext}`,
+audit hooks on upload/download/delete. Owner-modify (Employee for
+own + still-submitted; Admin always). The static
+`/api/requests/attachment-config` route is registered before
+`/{request_id}` so FastAPI matches it first.
+**v1.0 P15 next.**
 
 ## Tenant routing (v1.0 P1)
 **Approach chosen: SQLAlchemy `checkout` event + Python ContextVar**,

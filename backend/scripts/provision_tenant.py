@@ -114,6 +114,7 @@ _APP_CRUD_TABLES = (
     "custom_field_values",
     "requests",
     "request_attachments",
+    "request_reason_categories",
 )
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -279,6 +280,7 @@ def _seed_defaults(
     # ``enabled`` on the Authentication settings page.
     from hadir.db import (  # noqa: PLC0415
         leave_types as _leave_types,
+        request_reason_categories as _reason_categories,
         tenant_oidc_config,
         tenant_settings as _tenant_settings,
     )
@@ -303,6 +305,29 @@ def _seed_defaults(
             )
         )
     conn.execute(insert(_tenant_settings).values(tenant_id=tenant_id))
+
+    # P14: request reason categories. Same defaults as the migration
+    # seeds (BRD §FR-REQ-008).
+    for request_type, code, name, display_order in (
+        ("exception", "Doctor",   "Doctor",            0),
+        ("exception", "Family",   "Family",            1),
+        ("exception", "Traffic",  "Traffic",           2),
+        ("exception", "Official", "Official business", 3),
+        ("exception", "Other",    "Other",             4),
+        ("leave",     "Annual",    "Annual leave",     0),
+        ("leave",     "Sick",      "Sick leave",       1),
+        ("leave",     "Emergency", "Emergency leave",  2),
+        ("leave",     "Unpaid",    "Unpaid leave",     3),
+    ):
+        conn.execute(
+            insert(_reason_categories).values(
+                tenant_id=tenant_id,
+                request_type=request_type,
+                code=code,
+                name=name,
+                display_order=display_order,
+            )
+        )
 
     user_id = conn.execute(
         insert(users)

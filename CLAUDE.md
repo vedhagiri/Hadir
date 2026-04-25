@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13.**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14.**
 
 > **Tenant isolation is a P0 blocker.** The suites
 > `backend/tests/test_multi_tenant_isolation.py` (the P1 canary) and
@@ -231,8 +231,32 @@ To return to v1.0 work: `git checkout main`.
   hook on every transition. Role-scoped GET — Employee sees own,
   Manager sees own + assigned, HR sees `manager_approved` + HR/Admin
   terminals, Admin sees all.
+- **P14** — Request submission UI. Migration 0017 adds per-tenant
+  `request_reason_categories` (id, tenant_id, request_type
+  ['exception','leave'], code, name, display_order, active) seeded
+  with the BRD §FR-REQ-008 list (Doctor / Family / Traffic /
+  Official / Other; Annual / Sick / Emergency / Unpaid). Reads open
+  to every authenticated role; writes Admin-only.
+  `hadir/requests/attachments.py` validates uploads via **explicit
+  magic-byte sniff** — JPEG/PNG/GIF/WEBP/PDF allowed; ZIP only
+  passes when the operator-supplied content-type or filename
+  declares `.docx` (the load-bearing P14 red line: extension is
+  not enough). Per-tenant size cap configured by
+  `HADIR_REQUEST_ATTACHMENT_MAX_MB` (default 5MB), enforced
+  server-side regardless of any client check. Attachments are
+  Fernet-encrypted at rest at
+  `/data/attachments/{tenant_id}/requests/{uuid}.{ext}`.
+  `/api/requests/attachment-config` surfaces the limits to the
+  client; upload/list/download/delete endpoints inherit the parent
+  request's role visibility (owner-modify only while
+  `submitted`). Frontend `/my-requests` page (Employee/Manager) +
+  New Request drawer (type radio, reason-category dropdown,
+  optional dropzone) + Request detail drawer (status timeline,
+  attachment list with blob downloads, cancel-while-submitted) +
+  Settings → Request reasons CRUD page wired into the shared
+  SettingsTabs.
 
-Next: **P14** per `v1.0-phase-plan.md`. Wait for the user before
+Next: **P15** per `v1.0-phase-plan.md`. Wait for the user before
 starting. Per-phase records: `docs/phases/P*.md`.
 
 ---

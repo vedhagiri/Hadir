@@ -12,6 +12,8 @@ import { ProtectedRoute } from "./auth/ProtectedRoute";
 import { AuthenticationPage } from "./auth-oidc/AuthenticationPage";
 import { BrandingPage } from "./branding/BrandingPage";
 import { CustomFieldsPage } from "./custom-fields/CustomFieldsPage";
+import { MyRequestsPage } from "./requests/MyRequestsPage";
+import { ReasonCategoriesPage } from "./requests/ReasonCategoriesPage";
 import { AuditLogPage } from "./features/audit-log/AuditLogPage";
 import { DailyAttendancePage } from "./features/attendance/DailyAttendancePage";
 import { MyAttendancePage } from "./features/attendance/MyAttendancePage";
@@ -79,6 +81,8 @@ export function App() {
         <Route path="settings/branding" element={<BrandingPage />} />
         <Route path="settings/authentication" element={<AuthenticationPage />} />
         <Route path="settings/custom-fields" element={<CustomFieldsPage />} />
+        <Route path="settings/reason-categories" element={<ReasonCategoriesPage />} />
+        <Route path="my-requests" element={<MyRequestsPage />} />
         {ALL_PAGE_IDS.filter(
           (id) =>
             id !== "dashboard" &&
@@ -94,7 +98,8 @@ export function App() {
             id !== "settings" &&
             id !== "mgr-assign" &&
             id !== "policies" &&
-            id !== "leave-policy",
+            id !== "leave-policy" &&
+            id !== "my-requests",
         ).map((id) => (
           <Route key={id} path={id} element={<Placeholder pageId={id} />} />
         ))}

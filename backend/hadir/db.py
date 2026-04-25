@@ -612,6 +612,47 @@ requests = Table(
 )
 
 
+request_reason_categories = Table(
+    "request_reason_categories",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column("request_type", Text, nullable=False),
+    Column("code", Text, nullable=False),
+    Column("name", Text, nullable=False),
+    Column("display_order", Integer, nullable=False, server_default="0"),
+    Column("active", Boolean, nullable=False, server_default="true"),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    UniqueConstraint(
+        "tenant_id",
+        "request_type",
+        "code",
+        name="uq_request_reason_categories_tenant_type_code",
+    ),
+    CheckConstraint(
+        "request_type IN ('exception','leave')",
+        name="ck_request_reason_categories_request_type",
+    ),
+)
+
+
 request_attachments = Table(
     "request_attachments",
     metadata,

@@ -74,6 +74,44 @@ class RequestEmployee(BaseModel):
     full_name: str
 
 
+class ReasonCategoryResponse(BaseModel):
+    id: int
+    tenant_id: int
+    request_type: RequestType
+    code: str
+    name: str
+    display_order: int
+    active: bool
+
+
+class ReasonCategoryCreate(BaseModel):
+    request_type: RequestType
+    code: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=200)
+
+
+class ReasonCategoryPatch(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    display_order: Optional[int] = Field(default=None, ge=0)
+    active: Optional[bool] = None
+
+
+class AttachmentResponse(BaseModel):
+    id: int
+    request_id: int
+    original_filename: str
+    content_type: str
+    size_bytes: int
+    uploaded_at: datetime
+
+
+class AttachmentConfigResponse(BaseModel):
+    """What the browser needs to client-side validate before upload."""
+
+    max_mb: int
+    accepted_mime_types: list[str]
+
+
 class RequestResponse(BaseModel):
     id: int
     tenant_id: int
