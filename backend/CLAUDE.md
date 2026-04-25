@@ -1,7 +1,7 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 complete**:
+Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 complete**:
 pilot frozen at tag `v0.1-pilot` on branch `release/pilot`; multi-tenant
 routing wired up via a per-connection `SET search_path` driven by a
 ContextVar + SQLAlchemy `checkout` event; the global `tenants` registry
@@ -101,8 +101,20 @@ Fernet-encrypted at `/data/attachments/{tenant_id}/requests/{uuid}.{ext}`,
 audit hooks on upload/download/delete. Owner-modify (Employee for
 own + still-submitted; Admin always). The static
 `/api/requests/attachment-config` route is registered before
-`/{request_id}` so FastAPI matches it first.
-**v1.0 P15 next.**
+`/{request_id}` so FastAPI matches it first. **P15** added the
+approvals inbox: manager scope widened to union of
+`manager_assignments` + `user_departments`
+(`get_manager_visible_employee_ids` from P8) on both `_can_view`
+and `manager_decide`. New pure `hadir/requests/sla.py` computes
+business-hours-open against the tenant's weekend list (P11);
+thresholds via `HADIR_REQUEST_SLA_BUSINESS_HOURS` (default 48) +
+`HADIR_REQUEST_SLA_BUSINESS_DAY_HOURS` (default 8). Three new
+endpoints — `GET /api/requests/inbox/{pending,decided,summary}` —
+declared before the dynamic `/{request_id}` route so static
+matching wins. Every request response carries `attachment_count`,
+`business_hours_open`, `sla_breached`, and
+`is_primary_for_viewer` for the frontend table.
+**v1.0 P16 next.**
 
 ## Tenant routing (v1.0 P1)
 **Approach chosen: SQLAlchemy `checkout` event + Python ContextVar**,

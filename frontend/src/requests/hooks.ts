@@ -7,6 +7,8 @@ import { api } from "../api/client";
 import type {
   AttachmentConfig,
   AttachmentRecord,
+  DecisionInput,
+  InboxSummary,
   ReasonCategory,
   ReasonCategoryCreateInput,
   ReasonCategoryPatchInput,
@@ -59,6 +61,84 @@ export function useCancelRequest() {
         body: {},
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: REQUESTS_KEY }),
+  });
+}
+
+// ---- Inbox (P15) ----------------------------------------------------------
+
+const INBOX_PENDING_KEY = ["requests", "inbox", "pending"] as const;
+const INBOX_DECIDED_KEY = ["requests", "inbox", "decided"] as const;
+const INBOX_SUMMARY_KEY = ["requests", "inbox", "summary"] as const;
+
+export function useInboxPending(): UseQueryResult<RequestRecord[], Error> {
+  return useQuery({
+    queryKey: INBOX_PENDING_KEY,
+    queryFn: () => api<RequestRecord[]>("/api/requests/inbox/pending"),
+    staleTime: 15 * 1000,
+  });
+}
+
+export function useInboxDecided(): UseQueryResult<RequestRecord[], Error> {
+  return useQuery({
+    queryKey: INBOX_DECIDED_KEY,
+    queryFn: () => api<RequestRecord[]>("/api/requests/inbox/decided"),
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useInboxSummary(): UseQueryResult<InboxSummary, Error> {
+  return useQuery({
+    queryKey: INBOX_SUMMARY_KEY,
+    queryFn: () => api<InboxSummary>("/api/requests/inbox/summary"),
+    // Refetch on window focus so a manager who decides in another tab
+    // sees the badge update when they come back.
+    staleTime: 15 * 1000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+// ---- Decisions ------------------------------------------------------------
+
+function invalidateAfterDecision(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: REQUESTS_KEY });
+  qc.invalidateQueries({ queryKey: INBOX_PENDING_KEY });
+  qc.invalidateQueries({ queryKey: INBOX_DECIDED_KEY });
+  qc.invalidateQueries({ queryKey: INBOX_SUMMARY_KEY });
+}
+
+export function useManagerDecide(requestId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: DecisionInput) =>
+      api<RequestRecord>(`/api/requests/${requestId}/manager-decide`, {
+        method: "POST",
+        body: input,
+      }),
+    onSuccess: () => invalidateAfterDecision(qc),
+  });
+}
+
+export function useHrDecide(requestId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: DecisionInput) =>
+      api<RequestRecord>(`/api/requests/${requestId}/hr-decide`, {
+        method: "POST",
+        body: input,
+      }),
+    onSuccess: () => invalidateAfterDecision(qc),
+  });
+}
+
+export function useAdminOverride(requestId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: DecisionInput) =>
+      api<RequestRecord>(`/api/requests/${requestId}/admin-override`, {
+        method: "POST",
+        body: input,
+      }),
+    onSuccess: () => invalidateAfterDecision(qc),
   });
 }
 

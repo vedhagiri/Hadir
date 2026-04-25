@@ -136,3 +136,23 @@ class RequestResponse(BaseModel):
     admin_comment: Optional[str] = None
     submitted_at: datetime
     created_at: datetime
+    # P15: per-row attachment count + SLA flags surfaced to the table.
+    attachment_count: int = 0
+    business_hours_open: float = 0.0
+    sla_breached: bool = False
+    # P15: marks the manager's primary-assigned employees so the
+    # frontend can sort + show a "primary" badge.
+    is_primary_for_viewer: bool = False
+
+
+class InboxSummaryResponse(BaseModel):
+    """Sidebar badge feed.
+
+    ``pending_count`` is the number of requests in "Pending my decision"
+    for the caller's role; ``breached_count`` is the subset breaching
+    SLA. The frontend renders one number with a tone that escalates
+    when ``breached_count > 0``.
+    """
+
+    pending_count: int
+    breached_count: int

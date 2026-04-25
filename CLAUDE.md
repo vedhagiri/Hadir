@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14.**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15.**
 
 > **Tenant isolation is a P0 blocker.** The suites
 > `backend/tests/test_multi_tenant_isolation.py` (the P1 canary) and
@@ -255,8 +255,29 @@ To return to v1.0 work: `git checkout main`.
   attachment list with blob downloads, cancel-while-submitted) +
   Settings → Request reasons CRUD page wired into the shared
   SettingsTabs.
+- **P15** — Approvals inbox. Manager scope **widens** to the union
+  of `manager_assignments` + `user_departments`
+  (`get_manager_visible_employee_ids` from P8) — both `_can_view`
+  and the `manager_decide` gate use the wider set; explicit
+  assignments still drive primary-manager auto-routing on
+  submission. New `hadir/requests/sla.py` (pure) computes
+  business-hours-open against the tenant's weekend list (P11);
+  thresholds via `HADIR_REQUEST_SLA_BUSINESS_HOURS` (default 48,
+  BRD Open Item Q6) + `HADIR_REQUEST_SLA_BUSINESS_DAY_HOURS`
+  (default 8). Three new endpoints — `GET /api/requests/inbox/{pending,decided,summary}`
+  — declared before `/{request_id}` so the static paths route
+  cleanly. Every request response now carries
+  `attachment_count`, `business_hours_open`, `sla_breached`, and
+  `is_primary_for_viewer`. Frontend `/approvals` page (Manager /
+  HR / Admin) replaces the placeholder with three tabs (Pending
+  mine / Decided by me / All — Admin only), per-row stage label,
+  SLA pill, and a primary-assignment badge. The detail drawer
+  gains a `decisionRole` prop that renders an Approve / Reject
+  footer with role-scoped gating + mandatory-comment-on-Admin-or-
+  reject. Sidebar Approvals nav item shows a live badge from
+  `inbox/summary` that switches to a danger tone on SLA breach.
 
-Next: **P15** per `v1.0-phase-plan.md`. Wait for the user before
+Next: **P16** per `v1.0-phase-plan.md`. Wait for the user before
 starting. Per-phase records: `docs/phases/P*.md`.
 
 ---

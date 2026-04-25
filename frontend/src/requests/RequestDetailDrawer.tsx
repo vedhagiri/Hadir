@@ -10,27 +10,36 @@ import { ApiError } from "../api/client";
 import { Icon } from "../shell/Icon";
 import { StatusPill } from "./StatusPill";
 import {
+  useAdminOverride,
   useCancelRequest,
   useDeleteAttachment,
+  useHrDecide,
+  useManagerDecide,
   useRequest,
   useRequestAttachments,
   useUploadAttachment,
 } from "./hooks";
 import type { RequestRecord } from "./types";
 
+export type DecisionRole = "Manager" | "HR" | "Admin" | null;
+
 interface Props {
   requestId: number;
   onClose: () => void;
   // ``allowOwnerActions`` keeps the cancel + add-attachment affordances
-  // confined to the My Requests page; the future Approvals inbox can
-  // pass false so HR/Manager don't see them.
+  // confined to the My Requests page; the Approvals inbox passes
+  // ``false`` so HR/Manager don't see them.
   allowOwnerActions: boolean;
+  // P15: when set, the drawer renders a decision footer scoped to the
+  // active reviewer role. ``null`` hides the footer (read-only view).
+  decisionRole?: DecisionRole;
 }
 
 export function RequestDetailDrawer({
   requestId,
   onClose,
   allowOwnerActions,
+  decisionRole = null,
 }: Props) {
   const detail = useRequest(requestId);
   const attachments = useRequestAttachments(requestId);
@@ -308,7 +317,13 @@ export function RequestDetailDrawer({
           )}
         </div>
         <div className="drawer-foot">
-          {r && allowOwnerActions && r.status === "submitted" ? (
+          {r && decisionRole ? (
+            <DecisionFooter
+              request={r}
+              role={decisionRole}
+              onDone={onClose}
+            />
+          ) : r && allowOwnerActions && r.status === "submitted" ? (
             <>
               <button
                 className="btn"
@@ -525,6 +540,129 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
       }}
     >
       {children}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Decision footer (P15)
+// ---------------------------------------------------------------------------
+
+function DecisionFooter({
+  request,
+  role,
+  onDone,
+}: {
+  request: RequestRecord;
+  role: NonNullable<DecisionRole>;
+  onDone: () => void;
+}) {
+  const managerDecide = useManagerDecide(request.id);
+  const hrDecide = useHrDecide(request.id);
+  const adminOverride = useAdminOverride(request.id);
+
+  const [comment, setComment] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  // Per-role gating that mirrors the backend state machine.
+  const status = request.status;
+  const canManager = role === "Manager" && status === "submitted";
+  const canHr = role === "HR" && status === "manager_approved";
+  // Admin can override at any time per BRD FR-REQ-006 — comment
+  // mandatory.
+  const canAdmin = role === "Admin";
+  const canAct = canManager || canHr || canAdmin;
+
+  const decide = async (decision: "approve" | "reject") => {
+    setError(null);
+    if (role === "Admin" && !comment.trim()) {
+      setError("Admin override requires a comment.");
+      return;
+    }
+    if (decision === "reject" && !comment.trim()) {
+      setError("Rejection requires a comment.");
+      return;
+    }
+    try {
+      const body = { decision, comment: comment.trim() };
+      if (role === "Manager") await managerDecide.mutateAsync(body);
+      else if (role === "HR") await hrDecide.mutateAsync(body);
+      else await adminOverride.mutateAsync(body);
+      onDone();
+    } catch (err) {
+      if (err instanceof ApiError) {
+        const body = err.body as { detail?: unknown } | null;
+        setError(
+          typeof body?.detail === "string"
+            ? body.detail
+            : `Decision failed (${err.status}).`,
+        );
+      } else {
+        setError("Decision failed.");
+      }
+    }
+  };
+
+  const pending =
+    managerDecide.isPending || hrDecide.isPending || adminOverride.isPending;
+
+  if (!canAct) {
+    return <button className="btn" onClick={onDone}>Close</button>;
+  }
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+        width: "100%",
+      }}
+    >
+      <textarea
+        className="input"
+        rows={2}
+        value={comment}
+        onChange={(e) => setComment(e.target.value)}
+        placeholder={
+          role === "Admin"
+            ? "Override comment (required)…"
+            : "Optional on approve · required on reject"
+        }
+        style={{ resize: "vertical" }}
+      />
+      {error && (
+        <div
+          role="alert"
+          style={{
+            background: "var(--danger-soft)",
+            color: "var(--danger-text)",
+            border: "1px solid var(--border)",
+            padding: "6px 8px",
+            borderRadius: "var(--radius-sm)",
+            fontSize: 12,
+          }}
+        >
+          {error}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+        <button
+          className="btn"
+          onClick={() => void decide("reject")}
+          disabled={pending}
+          style={{ color: "var(--danger-text)" }}
+        >
+          <Icon name="x" size={12} /> Reject
+        </button>
+        <button
+          className="btn btn-primary"
+          onClick={() => void decide("approve")}
+          disabled={pending}
+        >
+          <Icon name="check" size={12} /> Approve
+        </button>
+      </div>
     </div>
   );
 }

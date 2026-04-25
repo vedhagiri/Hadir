@@ -52,6 +52,21 @@ export interface RequestRecord {
   admin_comment: string | null;
   submitted_at: string;
   created_at: string;
+  // P15 enrichment
+  attachment_count: number;
+  business_hours_open: number;
+  sla_breached: boolean;
+  is_primary_for_viewer: boolean;
+}
+
+export interface InboxSummary {
+  pending_count: number;
+  breached_count: number;
+}
+
+export interface DecisionInput {
+  decision: "approve" | "reject";
+  comment: string;
 }
 
 export interface RequestCreateInput {

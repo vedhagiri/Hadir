@@ -173,6 +173,84 @@ def list_requests_for_employee_ids(
     return [_row_to_request(r) for r in rows]
 
 
+def list_pending_manager_for_employees(
+    conn: Connection, scope: TenantScope, *, employee_ids: Iterable[int]
+) -> list[RequestRow]:
+    """Submitted requests for a manager's visible employees.
+
+    Sorted with the manager's primary-assigned employees first
+    (matching the P15 ask) — same partial-unique-index row from
+    migration 0012 governs ``is_primary``.
+    """
+
+    ids = list(employee_ids)
+    if not ids:
+        return []
+    rows = conn.execute(
+        _select_with_joins(scope)
+        .where(
+            requests_table.c.employee_id.in_(ids),
+            requests_table.c.status == "submitted",
+        )
+        .order_by(
+            requests_table.c.submitted_at.asc(),
+            requests_table.c.id.asc(),
+        )
+    ).all()
+    return [_row_to_request(r) for r in rows]
+
+
+def list_pending_hr(conn: Connection, scope: TenantScope) -> list[RequestRow]:
+    """Manager-approved requests awaiting HR — oldest first."""
+
+    rows = conn.execute(
+        _select_with_joins(scope)
+        .where(requests_table.c.status == "manager_approved")
+        .order_by(
+            requests_table.c.submitted_at.asc(),
+            requests_table.c.id.asc(),
+        )
+    ).all()
+    return [_row_to_request(r) for r in rows]
+
+
+def list_decided_by_user(
+    conn: Connection, scope: TenantScope, *, user_id: int
+) -> list[RequestRow]:
+    """Every request the given user has touched at any decision stage."""
+
+    rows = conn.execute(
+        _select_with_joins(scope)
+        .where(
+            (requests_table.c.manager_user_id == user_id)
+            | (requests_table.c.hr_user_id == user_id)
+            | (requests_table.c.admin_user_id == user_id)
+        )
+        .order_by(requests_table.c.id.desc())
+    ).all()
+    return [_row_to_request(r) for r in rows]
+
+
+def primary_managed_employee_ids(
+    conn: Connection, scope: TenantScope, *, manager_user_id: int
+) -> set[int]:
+    """Subset of the manager's visible employees flagged ``is_primary``.
+
+    Used by the inbox to sort primary-assigned requests first; the
+    surrounding visible-set computation lives in the manager-assignments
+    repo (``get_manager_visible_employee_ids``).
+    """
+
+    rows = conn.execute(
+        select(manager_assignments.c.employee_id).where(
+            manager_assignments.c.tenant_id == scope.tenant_id,
+            manager_assignments.c.manager_user_id == manager_user_id,
+            manager_assignments.c.is_primary.is_(True),
+        )
+    ).all()
+    return {int(r.employee_id) for r in rows}
+
+
 def list_requests_for_hr(
     conn: Connection, scope: TenantScope
 ) -> list[RequestRow]:

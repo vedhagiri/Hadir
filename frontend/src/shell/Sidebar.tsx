@@ -7,6 +7,7 @@
 
 import { NavLink } from "react-router-dom";
 
+import { useInboxSummary } from "../requests/hooks";
 import type { MeResponse, Role } from "../types";
 import { Icon } from "./Icon";
 import { NAV } from "./nav";
@@ -25,6 +26,17 @@ function initialsFor(fullName: string): string {
 
 export function Sidebar({ role, me }: Props) {
   const items = NAV[role];
+  // Only Manager / HR / Admin have an Approvals link; Employees don't,
+  // so we skip the inbox query for them.
+  const approvalsRoles = role === "Admin" || role === "HR" || role === "Manager";
+  const inbox = useInboxSummary();
+  const inboxBadge = approvalsRoles && inbox.data
+    ? inbox.data.pending_count > 0
+      ? String(inbox.data.pending_count)
+      : null
+    : null;
+  const inboxBreached =
+    approvalsRoles && (inbox.data?.breached_count ?? 0) > 0;
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
@@ -52,6 +64,12 @@ export function Sidebar({ role, me }: Props) {
             </div>
           );
         }
+        // P15: live badge for the Approvals item (counts "pending my
+        // decision"). Falls back to the static design-archive value
+        // for everything else.
+        const liveBadge = it.id === "approvals" ? inboxBadge : null;
+        const badge = liveBadge ?? it.badge ?? null;
+        const breached = it.id === "approvals" && inboxBreached;
         return (
           <NavLink
             key={it.id}
@@ -60,7 +78,21 @@ export function Sidebar({ role, me }: Props) {
           >
             <Icon name={it.icon} size={14} />
             <span>{it.label}</span>
-            {it.badge && <span className="nav-badge">{it.badge}</span>}
+            {badge && (
+              <span
+                className="nav-badge"
+                style={
+                  breached
+                    ? {
+                        background: "var(--danger-bg)",
+                        color: "var(--danger-text)",
+                      }
+                    : undefined
+                }
+              >
+                {badge}
+              </span>
+            )}
           </NavLink>
         );
       })}

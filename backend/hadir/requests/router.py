@@ -30,9 +30,10 @@ from fastapi import (
     UploadFile,
     status,
 )
-from sqlalchemy import delete, insert, select
+from sqlalchemy import delete, func as sa_func, insert, select
 
 from hadir.attendance import scheduler as attendance_scheduler_mod
+from hadir.attendance import repository as attendance_repo
 from hadir.auth.audit import write_audit
 from hadir.auth.dependencies import CurrentUser, current_user, require_role
 from hadir.config import get_settings
@@ -43,15 +44,20 @@ from hadir.db import (
     manager_assignments,
     request_attachments,
 )
+from hadir.manager_assignments.repository import (
+    get_manager_visible_employee_ids,
+)
 from hadir.requests import attachments as attachment_io
 from hadir.requests import reason_categories as cat_repo
 from hadir.requests import repository as repo
+from hadir.requests import sla as sla_mod
 from hadir.requests import state_machine as sm
 from hadir.requests.schemas import (
     AdminOverrideBody,
     AttachmentConfigResponse,
     AttachmentResponse,
     DecisionBody,
+    InboxSummaryResponse,
     ReasonCategoryCreate,
     ReasonCategoryPatch,
     ReasonCategoryResponse,
@@ -81,7 +87,14 @@ ADMIN = Depends(require_role("Admin"))
 # ---------------------------------------------------------------------------
 
 
-def _row_to_response(row: repo.RequestRow) -> RequestResponse:
+def _row_to_response(
+    row: repo.RequestRow,
+    *,
+    attachment_count: int = 0,
+    business_hours_open: float = 0.0,
+    sla_breached: bool = False,
+    is_primary_for_viewer: bool = False,
+) -> RequestResponse:
     return RequestResponse(
         id=row.id,
         tenant_id=row.tenant_id,
@@ -110,11 +123,104 @@ def _row_to_response(row: repo.RequestRow) -> RequestResponse:
         admin_comment=row.admin_comment,
         submitted_at=row.submitted_at,
         created_at=row.created_at,
+        attachment_count=attachment_count,
+        business_hours_open=business_hours_open,
+        sla_breached=sla_breached,
+        is_primary_for_viewer=is_primary_for_viewer,
     )
 
 
 def _has_role(user: CurrentUser, *role_codes: str) -> bool:
     return any(r in user.roles for r in role_codes)
+
+
+def _attachment_counts(
+    conn, scope: TenantScope, request_ids: list[int]
+) -> dict[int, int]:
+    """Return ``{request_id: count}`` for the given ids; 0 for absent."""
+
+    if not request_ids:
+        return {}
+    rows = conn.execute(
+        select(
+            request_attachments.c.request_id,
+            sa_func.count(request_attachments.c.id).label("n"),
+        )
+        .where(
+            request_attachments.c.tenant_id == scope.tenant_id,
+            request_attachments.c.request_id.in_(request_ids),
+        )
+        .group_by(request_attachments.c.request_id)
+    ).all()
+    return {int(r.request_id): int(r.n) for r in rows}
+
+
+def _sla_config(weekend_days: tuple[str, ...]) -> sla_mod.SlaConfig:
+    settings = get_settings()
+    return sla_mod.SlaConfig(
+        business_hours_threshold=settings.request_sla_business_hours,
+        business_day_hours=settings.request_sla_business_day_hours,
+        weekend_days=weekend_days,
+    )
+
+
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _enrich_single(
+    row: repo.RequestRow,
+    *,
+    scope: TenantScope,
+    viewer_primary_ids: frozenset[int] = frozenset(),
+) -> RequestResponse:
+    return _enrich_responses(
+        [row], scope=scope, viewer_primary_ids=viewer_primary_ids
+    )[0]
+
+
+def _enrich_responses(
+    rows: list[repo.RequestRow],
+    *,
+    scope: TenantScope,
+    viewer_primary_ids: frozenset[int] = frozenset(),
+) -> list[RequestResponse]:
+    """Convert a list of request rows into responses, joining attachment
+    counts + SLA + primary flag in one DB round-trip.
+    """
+
+    if not rows:
+        return []
+    with get_engine().begin() as conn:
+        counts = _attachment_counts(
+            conn, scope, [r.id for r in rows]
+        )
+        tenant_settings = attendance_repo.load_tenant_settings(conn, scope)
+    cfg = _sla_config(tuple(tenant_settings.weekend_days))
+    now = _now_utc()
+    out: list[RequestResponse] = []
+    for r in rows:
+        bh = sla_mod.business_hours_open(
+            submitted_at=r.submitted_at,
+            as_of=now,
+            config=cfg,
+        )
+        breached = (
+            r.status not in sm.TERMINAL_STATUSES
+            and bh >= cfg.business_hours_threshold
+        )
+        out.append(
+            _row_to_response(
+                r,
+                attachment_count=counts.get(r.id, 0),
+                business_hours_open=bh,
+                sla_breached=breached,
+                is_primary_for_viewer=(
+                    r.employee_id in viewer_primary_ids
+                ),
+            )
+        )
+    return out
 
 
 def _can_view(user: CurrentUser, row: repo.RequestRow) -> bool:
@@ -133,16 +239,18 @@ def _can_view(user: CurrentUser, row: repo.RequestRow) -> bool:
         ):
             return True
     if _has_role(user, "Manager"):
-        # Manager sees rows for employees they're assigned to.
+        # Manager sees rows for employees they're assigned to OR who
+        # are members of a department they're a member of (P15 widens
+        # the gate from "directly assigned only" to match the
+        # ``get_manager_visible_employee_ids`` set used everywhere
+        # else, including the attendance scope).
         scope = TenantScope(tenant_id=user.tenant_id)
         with get_engine().begin() as conn:
-            if repo.is_manager_assigned_to(
-                conn,
-                scope,
-                manager_user_id=user.id,
-                employee_id=row.employee_id,
-            ):
-                return True
+            visible = get_manager_visible_employee_ids(
+                conn, scope, manager_user_id=user.id
+            )
+        if row.employee_id in visible:
+            return True
     if _has_role(user, "Employee"):
         scope = TenantScope(tenant_id=user.tenant_id)
         with get_engine().begin() as conn:
@@ -231,41 +339,49 @@ def _apply_post_approval_side_effects(
 @router.get("", response_model=list[RequestResponse])
 def list_requests(user: Annotated[CurrentUser, USER]) -> list[RequestResponse]:
     scope = TenantScope(tenant_id=user.tenant_id)
+    rows: list[repo.RequestRow] = []
+    primary_ids: frozenset[int] = frozenset()
+
     if _has_role(user, "Admin"):
         with get_engine().begin() as conn:
             rows = repo.list_all_requests(conn, scope)
-        return [_row_to_response(r) for r in rows]
-    if _has_role(user, "HR"):
+    elif _has_role(user, "HR"):
         with get_engine().begin() as conn:
             rows = repo.list_requests_for_hr(conn, scope)
-        return [_row_to_response(r) for r in rows]
-    if _has_role(user, "Manager"):
+    elif _has_role(user, "Manager"):
         with get_engine().begin() as conn:
-            assigned = conn.execute(
-                select(manager_assignments.c.employee_id).where(
-                    manager_assignments.c.tenant_id == scope.tenant_id,
-                    manager_assignments.c.manager_user_id == user.id,
+            visible = get_manager_visible_employee_ids(
+                conn, scope, manager_user_id=user.id
+            )
+            primary_ids = frozenset(
+                repo.primary_managed_employee_ids(
+                    conn, scope, manager_user_id=user.id
                 )
-            ).all()
-            employee_ids = [int(r.employee_id) for r in assigned]
+            )
             # Manager may also be an Employee — include their own row(s).
-            mine = repo.employee_for_user_email(conn, scope, email=user.email)
+            mine = repo.employee_for_user_email(
+                conn, scope, email=user.email
+            )
+            employee_ids: set[int] = set(visible)
             if mine is not None:
-                employee_ids.append(mine)
+                employee_ids.add(mine)
             rows = repo.list_requests_for_employee_ids(
                 conn, scope, employee_ids=employee_ids
             )
-        return [_row_to_response(r) for r in rows]
-    if _has_role(user, "Employee"):
+    elif _has_role(user, "Employee"):
         with get_engine().begin() as conn:
-            mine = repo.employee_for_user_email(conn, scope, email=user.email)
+            mine = repo.employee_for_user_email(
+                conn, scope, email=user.email
+            )
             if mine is None:
                 return []
             rows = repo.list_requests_for_employee(
                 conn, scope, employee_id=mine
             )
-        return [_row_to_response(r) for r in rows]
-    return []
+
+    return _enrich_responses(
+        rows, scope=scope, viewer_primary_ids=primary_ids
+    )
 
 
 @router.get(
@@ -287,6 +403,119 @@ def get_attachment_config(
     )
 
 
+# ---------------------------------------------------------------------------
+# Inbox (P15) — must be declared before ``/{request_id}`` so FastAPI's
+# matcher routes the static paths first.
+# ---------------------------------------------------------------------------
+
+
+def _pending_for_role(
+    conn,
+    scope: TenantScope,
+    *,
+    user: CurrentUser,
+) -> tuple[list[repo.RequestRow], frozenset[int]]:
+    """Return ``(rows, primary_ids)`` for the caller's "pending mine"
+    queue per their role.
+
+    Manager — submitted requests for visible employees (department
+    union assigned), primary-assigned employees first.
+    HR — manager_approved requests across the tenant.
+    Admin — every non-terminal request (so the override surface
+    matches the BRD FR-REQ-006 capability).
+    Other roles get an empty list.
+    """
+
+    if _has_role(user, "Admin"):
+        rows = [
+            r
+            for r in repo.list_all_requests(conn, scope)
+            if r.status not in sm.TERMINAL_STATUSES
+        ]
+        return rows, frozenset()
+    if _has_role(user, "HR"):
+        return repo.list_pending_hr(conn, scope), frozenset()
+    if _has_role(user, "Manager"):
+        visible = get_manager_visible_employee_ids(
+            conn, scope, manager_user_id=user.id
+        )
+        primary = frozenset(
+            repo.primary_managed_employee_ids(
+                conn, scope, manager_user_id=user.id
+            )
+        )
+        rows = repo.list_pending_manager_for_employees(
+            conn, scope, employee_ids=visible
+        )
+        # Sort: primary-assigned first, then by submitted_at ascending.
+        rows.sort(
+            key=lambda r: (
+                0 if r.employee_id in primary else 1,
+                r.submitted_at,
+                r.id,
+            )
+        )
+        return rows, primary
+    return [], frozenset()
+
+
+@router.get("/inbox/pending", response_model=list[RequestResponse])
+def list_pending_inbox(
+    user: Annotated[CurrentUser, USER],
+) -> list[RequestResponse]:
+    scope = TenantScope(tenant_id=user.tenant_id)
+    with get_engine().begin() as conn:
+        rows, primary = _pending_for_role(conn, scope, user=user)
+    return _enrich_responses(
+        rows, scope=scope, viewer_primary_ids=primary
+    )
+
+
+@router.get("/inbox/decided", response_model=list[RequestResponse])
+def list_decided_inbox(
+    user: Annotated[CurrentUser, USER],
+) -> list[RequestResponse]:
+    scope = TenantScope(tenant_id=user.tenant_id)
+    with get_engine().begin() as conn:
+        rows = repo.list_decided_by_user(conn, scope, user_id=user.id)
+        primary = frozenset(
+            repo.primary_managed_employee_ids(
+                conn, scope, manager_user_id=user.id
+            )
+            if _has_role(user, "Manager")
+            else set()
+        )
+    return _enrich_responses(
+        rows, scope=scope, viewer_primary_ids=primary
+    )
+
+
+@router.get("/inbox/summary", response_model=InboxSummaryResponse)
+def inbox_summary(
+    user: Annotated[CurrentUser, USER],
+) -> InboxSummaryResponse:
+    """Sidebar feed: pending count + breached count for the caller."""
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    with get_engine().begin() as conn:
+        rows, _primary = _pending_for_role(conn, scope, user=user)
+        if not rows:
+            return InboxSummaryResponse(pending_count=0, breached_count=0)
+        tenant_settings = attendance_repo.load_tenant_settings(conn, scope)
+    cfg = _sla_config(tuple(tenant_settings.weekend_days))
+    now = _now_utc()
+    breached = sum(
+        1
+        for r in rows
+        if sla_mod.is_breached(
+            submitted_at=r.submitted_at, as_of=now, config=cfg
+        )
+    )
+    return InboxSummaryResponse(
+        pending_count=len(rows), breached_count=breached
+    )
+
+
 @router.get("/{request_id}", response_model=RequestResponse)
 def get_request(
     request_id: int, user: Annotated[CurrentUser, USER]
@@ -298,7 +527,7 @@ def get_request(
         raise HTTPException(status_code=404, detail="request not found")
     if not _can_view(user, row):
         raise HTTPException(status_code=403, detail="forbidden")
-    return _row_to_response(row)
+    return _enrich_single(row, scope=scope)
 
 
 @router.post("", response_model=RequestResponse, status_code=status.HTTP_201_CREATED)
@@ -387,7 +616,7 @@ def create_request_endpoint(
                 "status": created.status,
             },
         )
-    return _row_to_response(created)
+    return _enrich_single(created, scope=scope)
 
 
 @router.post("/{request_id}/cancel", response_model=RequestResponse)
@@ -437,7 +666,7 @@ def cancel_request(
         )
         after = repo.get_request(conn, scope, request_id)
         assert after is not None
-    return _row_to_response(after)
+    return _enrich_single(after, scope=scope)
 
 
 @router.post(
@@ -456,12 +685,13 @@ def manager_decide_endpoint(
         row = repo.get_request(conn, scope, request_id)
         if row is None:
             raise HTTPException(status_code=404, detail="request not found")
-        if not repo.is_manager_assigned_to(
-            conn,
-            scope,
-            manager_user_id=user.id,
-            employee_id=row.employee_id,
-        ):
+        # P15 widens the gate from "directly assigned only" to the
+        # union of department membership + direct assignment — same
+        # set used by the inbox listing and ``_can_view``.
+        visible = get_manager_visible_employee_ids(
+            conn, scope, manager_user_id=user.id
+        )
+        if row.employee_id not in visible:
             raise HTTPException(
                 status_code=403,
                 detail="you are not assigned to this employee",
@@ -497,7 +727,7 @@ def manager_decide_endpoint(
         )
         after = repo.get_request(conn, scope, request_id)
         assert after is not None
-    return _row_to_response(after)
+    return _enrich_single(after, scope=scope)
 
 
 @router.post("/{request_id}/hr-decide", response_model=RequestResponse)
@@ -550,7 +780,7 @@ def hr_decide_endpoint(
     _apply_post_approval_side_effects(
         scope=scope, row=after, actor_user_id=user.id
     )
-    return _row_to_response(after)
+    return _enrich_single(after, scope=scope)
 
 
 @router.post(
@@ -603,7 +833,7 @@ def admin_override_endpoint(
     _apply_post_approval_side_effects(
         scope=scope, row=after, actor_user_id=user.id
     )
-    return _row_to_response(after)
+    return _enrich_single(after, scope=scope)
 
 
 # ---------------------------------------------------------------------------

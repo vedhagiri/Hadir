@@ -119,6 +119,17 @@ class Settings(BaseSettings):
     # via the same Fernet key the photo path uses.
     request_attachment_root: str = "/data/attachments"
 
+    # --- Approvals SLA (v1.0 P15) ------------------------------------------
+    # Business hours after which a non-terminal request is flagged as
+    # breaching SLA. BRD Open Item Q6 — operators tune per tenant; the
+    # default mirrors the BRD recommendation (48 business hours).
+    # "Business hours" = wall-clock hours on days that aren't tenant
+    # weekends (per the P11 tenant_settings.weekend_days).
+    request_sla_business_hours: int = 48
+    # Length of a single business day in hours. We use this to convert
+    # the threshold to a calendar duration when picking the cutoff.
+    request_sla_business_day_hours: int = 8
+
 
 def get_settings() -> Settings:
     """Return a fresh Settings instance.
