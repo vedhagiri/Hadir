@@ -39,6 +39,7 @@ from hadir.leave_calendar import router as leave_calendar_router
 from hadir.manager_assignments import router as manager_assignments_router
 from hadir.policies import router as policies_router
 from hadir.reporting.router import router as reporting_router
+from hadir.requests import router as requests_router
 from hadir.super_admin import router as super_admin_router
 from hadir.system.router import router as system_router
 
@@ -150,6 +151,7 @@ def create_app() -> FastAPI:
     app.include_router(policies_router)
     app.include_router(leave_calendar_router)
     app.include_router(custom_fields_router)
+    app.include_router(requests_router)
 
     # Dev-only test endpoints — used by the Playwright smoke test in
     # frontend/tests/. Mounted ONLY when HADIR_ENV=dev so a production

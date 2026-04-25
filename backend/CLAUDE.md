@@ -1,7 +1,7 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 complete**:
+Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 complete**:
 pilot frozen at tag `v0.1-pilot` on branch `release/pilot`; multi-tenant
 routing wired up via a per-connection `SET search_path` driven by a
 ContextVar + SQLAlchemy `checkout` event; the global `tenants` registry
@@ -77,8 +77,18 @@ still import). Frontend Settings → Custom Fields page +
 drag-handle reorder + delete-confirmation modal that warns about
 the value cascade. The values table is the single source of truth
 — never free-form JSON on the employee row (the load-bearing P12
-red line).
-**v1.0 P13 next.**
+red line). **P13** added the request state machine (backend):
+per-tenant `requests` + `request_attachments` (upload UI in P14);
+pure `hadir.requests.state_machine` enforces the 8-state model with
+manager rejection terminal (the load-bearing red line) and HR final
+except for Admin override (mandatory non-empty comment per BRD
+FR-REQ-006). `/api/requests` (Employee submit, Employee cancel,
+Manager-decide assigned-only, HR-decide gated on
+`manager_approved`, Admin-override universal). On approval:
+idempotent `approved_leaves` row + per-employee/per-date attendance
+recompute via the new `attendance.scheduler.recompute_for(...)`
+(single-employee, handles past dates). Audit hook on every
+transition. Role-scoped GET. **v1.0 P14 next.**
 
 ## Tenant routing (v1.0 P1)
 **Approach chosen: SQLAlchemy `checkout` event + Python ContextVar**,

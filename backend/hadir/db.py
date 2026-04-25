@@ -499,6 +499,150 @@ tenant_settings = Table(
 )
 
 
+# --- Requests (P13) --------------------------------------------------------
+# Exception + leave requests submitted by employees and walked through the
+# state machine (submitted → manager_{approved,rejected} →
+# hr_{approved,rejected} → admin_{approved,rejected} | cancelled).
+# State transitions are enforced in application code; the CHECK on
+# ``status`` is defence-in-depth.
+
+requests = Table(
+    "requests",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "employee_id",
+        Integer,
+        ForeignKey("employees.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column("type", Text, nullable=False),
+    Column("reason_category", Text, nullable=False),
+    Column("reason_text", Text, nullable=False, server_default=""),
+    Column("target_date_start", Date, nullable=False),
+    Column("target_date_end", Date, nullable=True),
+    Column(
+        "leave_type_id",
+        Integer,
+        ForeignKey("leave_types.id", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    Column("status", Text, nullable=False, server_default="submitted"),
+    Column(
+        "manager_user_id",
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    Column("manager_decision_at", DateTime(timezone=True), nullable=True),
+    Column("manager_comment", Text, nullable=True),
+    Column(
+        "hr_user_id",
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    Column("hr_decision_at", DateTime(timezone=True), nullable=True),
+    Column("hr_comment", Text, nullable=True),
+    Column(
+        "admin_user_id",
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    Column("admin_decision_at", DateTime(timezone=True), nullable=True),
+    Column("admin_comment", Text, nullable=True),
+    Column(
+        "submitted_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    CheckConstraint("type IN ('exception','leave')", name="ck_requests_type"),
+    CheckConstraint(
+        "status IN ("
+        "'submitted','manager_approved','manager_rejected',"
+        "'hr_approved','hr_rejected',"
+        "'admin_approved','admin_rejected','cancelled'"
+        ")",
+        name="ck_requests_status",
+    ),
+    CheckConstraint(
+        "target_date_end IS NULL OR target_date_end >= target_date_start",
+        name="ck_requests_date_range",
+    ),
+    CheckConstraint(
+        "(type = 'leave' AND leave_type_id IS NOT NULL) "
+        "OR (type = 'exception' AND leave_type_id IS NULL)",
+        name="ck_requests_leave_type_consistency",
+    ),
+    Index("ix_requests_tenant_status", "tenant_id", "status"),
+    Index(
+        "ix_requests_tenant_employee_status",
+        "tenant_id",
+        "employee_id",
+        "status",
+    ),
+    Index(
+        "ix_requests_tenant_manager_status",
+        "tenant_id",
+        "manager_user_id",
+        "status",
+    ),
+)
+
+
+request_attachments = Table(
+    "request_attachments",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "request_id",
+        Integer,
+        ForeignKey("requests.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column("file_path", Text, nullable=False),
+    Column("original_filename", Text, nullable=False),
+    Column("content_type", Text, nullable=False, server_default=""),
+    Column("size_bytes", Integer, nullable=False, server_default="0"),
+    Column(
+        "uploaded_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+)
+
+
 # --- Custom fields (P12) ---------------------------------------------------
 # Admin-defined extra columns for the employee record. Field definitions
 # live in ``custom_fields``; per-employee values live in

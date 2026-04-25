@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12.**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13.**
 
 > **Tenant isolation is a P0 blocker.** The suites
 > `backend/tests/test_multi_tenant_isolation.py` (the P1 canary) and
@@ -210,8 +210,29 @@ To return to v1.0 work: `git checkout main`.
   inline edit, delete-confirmation modal that warns about value
   cascade). Employee detail drawer renders custom fields below the
   standard fact grid with typed inline inputs.
+- **P13** — Request state machine (backend). Migration 0016 adds
+  per-tenant `requests` (id, tenant_id, employee_id, type
+  ['exception','leave'], reason_category, reason_text,
+  target_date_start, target_date_end nullable, leave_type_id
+  nullable, status, per-stage manager/hr/admin actor + decision_at
+  + comment trios, submitted_at, created_at, updated_at; CHECK on
+  the eight status values + leave-type/exception consistency) and
+  `request_attachments` (schema only; the upload route lands in
+  P14). Pure state machine `hadir.requests.state_machine` enforces
+  the transitions; the router translates `InvalidTransition` to
+  HTTP 409 with the exact reason. Manager rejection is terminal
+  (HR-decide on it 409s — load-bearing red line). HR rejection is
+  terminal except for Admin override (mandatory non-empty comment,
+  enforced server-side per BRD FR-REQ-006). On `hr_approved` /
+  `admin_approved`: leave requests insert an idempotent
+  `approved_leaves` row, every covered date triggers a per-employee
+  recompute via the new `attendance.scheduler.recompute_for(...)`
+  helper (single-employee/single-date, handles past dates). Audit
+  hook on every transition. Role-scoped GET — Employee sees own,
+  Manager sees own + assigned, HR sees `manager_approved` + HR/Admin
+  terminals, Admin sees all.
 
-Next: **P13** per `v1.0-phase-plan.md`. Wait for the user before
+Next: **P14** per `v1.0-phase-plan.md`. Wait for the user before
 starting. Per-phase records: `docs/phases/P*.md`.
 
 ---

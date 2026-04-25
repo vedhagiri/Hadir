@@ -28,6 +28,67 @@ logger = logging.getLogger(__name__)
 _JOB_ID = "attendance-recompute-today"
 
 
+def recompute_for(
+    scope: TenantScope,
+    *,
+    employee_id: int,
+    the_date,
+) -> bool:
+    """Recompute the attendance row for one employee on one date.
+
+    Unlike ``recompute_today`` this does **not** restrict to today —
+    it's the path used by P13 request approvals to reflect a newly-
+    approved exception or leave on a past date. The contract is the
+    same: pure engine call + ``ON CONFLICT`` upsert. Returns ``True``
+    when a row was upserted, ``False`` if no policy resolves for the
+    employee/date pair.
+    """
+
+    from hadir.db import tenant_context  # noqa: PLC0415
+
+    with tenant_context(scope.tenant_schema):
+        return _recompute_for_inner(scope, employee_id=employee_id, the_date=the_date)
+
+
+def _recompute_for_inner(
+    scope: TenantScope, *, employee_id: int, the_date
+) -> bool:
+    engine = get_engine()
+    with engine.begin() as conn:
+        settings = attendance_repo.load_tenant_settings(conn, scope)
+        policy_map = attendance_repo.resolve_policies_for_employees(
+            conn, scope, the_date=the_date, employee_ids=[employee_id]
+        )
+        policy = policy_map.get(employee_id)
+        if policy is None:
+            logger.warning(
+                "attendance recompute_for: no policy for employee %s on %s",
+                employee_id,
+                the_date,
+            )
+            return False
+        events = attendance_repo.events_for(
+            conn, scope, employee_id=employee_id, the_date=the_date
+        )
+        leaves = attendance_repo.leaves_for_employee_on(
+            conn, scope, employee_id=employee_id, the_date=the_date
+        )
+        todays_holidays = attendance_repo.holidays_on(
+            conn, scope, the_date=the_date
+        )
+        record = attendance_engine.compute(
+            employee_id=employee_id,
+            the_date=the_date,
+            policy=policy,
+            events=events,
+            leaves=leaves,
+            holidays=todays_holidays,
+            weekend_days=settings.weekend_days,
+        )
+        attendance_repo.upsert_attendance(conn, scope, record)
+    return True
+
+
 def recompute_today(scope: TenantScope) -> int:
     """Recompute the attendance_records row for every active employee today.
 

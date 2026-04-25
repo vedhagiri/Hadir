@@ -112,6 +112,8 @@ _APP_CRUD_TABLES = (
     "tenant_settings",
     "custom_fields",
     "custom_field_values",
+    "requests",
+    "request_attachments",
 )
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
