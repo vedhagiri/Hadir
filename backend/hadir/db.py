@@ -1186,6 +1186,11 @@ users = Table(
     # two codes Hadir ships translations for ('en', 'ar') are
     # acceptable — DB CHECK is the load-bearing guard.
     Column("preferred_language", Text, nullable=True),
+    # P22: theme + density. NULL on theme = "follow system"; NULL on
+    # density = "comfortable" (the design's default). DB CHECK locks
+    # the enums.
+    Column("preferred_theme", Text, nullable=True),
+    Column("preferred_density", Text, nullable=True),
     Column(
         "created_at",
         DateTime(timezone=True),
@@ -1196,6 +1201,14 @@ users = Table(
     CheckConstraint(
         "preferred_language IS NULL OR preferred_language IN ('en','ar')",
         name="ck_users_preferred_language",
+    ),
+    CheckConstraint(
+        "preferred_theme IS NULL OR preferred_theme IN ('system','light','dark')",
+        name="ck_users_preferred_theme",
+    ),
+    CheckConstraint(
+        "preferred_density IS NULL OR preferred_density IN ('compact','comfortable')",
+        name="ck_users_preferred_density",
     ),
 )
 

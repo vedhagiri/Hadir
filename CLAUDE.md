@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21.**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 (M2 core complete).**
 
 > **Tenant isolation is a P0 blocker.** The suites
 > `backend/tests/test_multi_tenant_isolation.py` (the P1 canary) and
@@ -414,6 +414,42 @@ Next: **P22** per `v1.0-phase-plan.md`. Wait for the user before
 starting. **Open critical item: Omran HR native-speaker review
 of the Arabic translations before v1.0 launch** — see
 `docs/phases/P21.md`. Per-phase records: `docs/phases/P*.md`.
+- **P22** — Dark mode + density + reference pages. Migration
+  0023 adds two nullable columns on ``users``:
+  ``preferred_theme`` (CHECK locked to system/light/dark) +
+  ``preferred_density`` (CHECK locked to compact/comfortable);
+  schema-agnostic. ``CurrentUser`` + ``MeResponse`` carry both
+  through; new ``PATCH /api/auth/preferred-theme`` and
+  ``PATCH /api/auth/preferred-density`` endpoints audit
+  (``auth.preferred_theme.updated`` /
+  ``auth.preferred_density.updated``) and refuse synthetic
+  Super-Admin. Frontend ships ``src/theme/`` — a tiny external
+  store that flips ``data-theme`` (``light``/``dark`` resolved;
+  ``system`` watches ``prefers-color-scheme``) and
+  ``data-density`` on ``<html>``; the design's CSS already
+  declared the two attribute selectors so no rewrite was
+  needed. Topbar gains a unified ``DisplaySwitcher`` (sun/moon
+  trigger; Esc-to-close, focus-restore, ``aria-haspopup`` /
+  ``aria-pressed`` segmented controls). AuthProvider applies
+  server-saved preferences on every ``/api/auth/me`` resolve so
+  the choice rides with the user across browsers. New
+  translated keys (``display.*``, ``pipeline.*``, ``apiDocs.*``)
+  in en.json + ar.json. New ``/pipeline`` page (all roles —
+  static seven-step explainer using the design's
+  ``.pipeline-big`` + ``.pb-step`` classes); new ``/api-docs``
+  page (Admin-only via inline route guard) embeds the FastAPI-
+  generated Swagger at ``/api/docs`` with an operator overview
+  section above. Accessibility sweep: ``:focus-visible``
+  outlines via accent colour on every interactive element
+  (light + dark variants), ``aria-label`` on every icon-only
+  button, ``aria-haspopup``/``aria-expanded`` on dropdown
+  triggers, ``aria-pressed`` on segmented controls. The lint
+  test from P21 covers the two new translated pages.
+
+Next: **P23 (M3 hardening)** per `v1.0-phase-plan.md`. Wait for
+the user before starting. **Open critical item carries over:
+Omran HR native-speaker review of the Arabic translations
+before v1.0 launch** — see `docs/phases/P21.md`.
 
 ---
 

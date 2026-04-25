@@ -88,11 +88,25 @@ class MeResponse(BaseModel):
     # means "follow browser" — the frontend's i18next detector reads
     # ``navigator.language`` in that case.
     preferred_language: str | None = None
+    # P22: theme + density. ``None`` on theme = "follow system";
+    # ``None`` on density = "comfortable" (the design's default).
+    preferred_theme: str | None = None
+    preferred_density: str | None = None
 
 
 class PreferredLanguageRequest(BaseModel):
     # ``None`` clears the preference and lets the browser drive.
     preferred_language: str | None = Field(default=None, max_length=8)
+
+
+class PreferredThemeRequest(BaseModel):
+    # ``None`` clears the preference and falls back to "system".
+    preferred_theme: str | None = Field(default=None, max_length=16)
+
+
+class PreferredDensityRequest(BaseModel):
+    # ``None`` clears the preference and falls back to "comfortable".
+    preferred_density: str | None = Field(default=None, max_length=16)
 
 
 class SwitchRoleRequest(BaseModel):
@@ -325,6 +339,9 @@ def login(
         available_roles=list(bundle.roles),
         active_role=initial_active,
         departments=list(bundle.departments),
+        preferred_language=bundle.preferred_language,
+        preferred_theme=bundle.preferred_theme,
+        preferred_density=bundle.preferred_density,
     )
 
 
@@ -389,6 +406,8 @@ def _to_me_response(
         is_super_admin_impersonation=is_imp,
         super_admin_user_id=sa_user_id,
         preferred_language=user.preferred_language,
+        preferred_theme=user.preferred_theme,
+        preferred_density=user.preferred_density,
     )
 
 
@@ -453,6 +472,129 @@ def set_preferred_language(
         departments=user.departments,
         session_id=user.session_id,
         preferred_language=new_value,
+        preferred_theme=user.preferred_theme,
+        preferred_density=user.preferred_density,
+    )
+    return _to_me_response(refreshed)
+
+
+# Allowed values mirror the DB CHECK constraints (migration 0023).
+_THEME_OPTIONS = ("system", "light", "dark")
+_DENSITY_OPTIONS = ("compact", "comfortable")
+
+
+@router.patch("/preferred-theme")
+def set_preferred_theme(
+    payload: PreferredThemeRequest,
+    user: Annotated[CurrentUser, Depends(current_user)],
+) -> MeResponse:
+    """P22: persist the operator's theme preference (system/light/dark).
+
+    ``preferred_theme=null`` clears the explicit choice — the
+    frontend's ThemeProvider then falls back to the OS preference
+    via ``prefers-color-scheme``. The DB CHECK constraint rejects
+    anything outside the documented enum.
+    """
+
+    new_value = payload.preferred_theme
+    if new_value is not None and new_value not in _THEME_OPTIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "preferred_theme must be null or one of: "
+                + ", ".join(_THEME_OPTIONS)
+            ),
+        )
+
+    if user.id == 0:
+        return _to_me_response(user)
+
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            users.update()
+            .where(users.c.id == user.id, users.c.tenant_id == user.tenant_id)
+            .values(preferred_theme=new_value)
+        )
+        write_audit(
+            conn,
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            action="auth.preferred_theme.updated",
+            entity_type="user",
+            entity_id=str(user.id),
+            before={"preferred_theme": user.preferred_theme},
+            after={"preferred_theme": new_value},
+        )
+
+    refreshed = CurrentUser(
+        id=user.id,
+        tenant_id=user.tenant_id,
+        email=user.email,
+        full_name=user.full_name,
+        roles=user.roles,
+        available_roles=user.available_roles,
+        active_role=user.active_role,
+        departments=user.departments,
+        session_id=user.session_id,
+        preferred_language=user.preferred_language,
+        preferred_theme=new_value,
+        preferred_density=user.preferred_density,
+    )
+    return _to_me_response(refreshed)
+
+
+@router.patch("/preferred-density")
+def set_preferred_density(
+    payload: PreferredDensityRequest,
+    user: Annotated[CurrentUser, Depends(current_user)],
+) -> MeResponse:
+    """P22: persist the operator's density preference (compact/comfortable)."""
+
+    new_value = payload.preferred_density
+    if new_value is not None and new_value not in _DENSITY_OPTIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "preferred_density must be null or one of: "
+                + ", ".join(_DENSITY_OPTIONS)
+            ),
+        )
+
+    if user.id == 0:
+        return _to_me_response(user)
+
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            users.update()
+            .where(users.c.id == user.id, users.c.tenant_id == user.tenant_id)
+            .values(preferred_density=new_value)
+        )
+        write_audit(
+            conn,
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            action="auth.preferred_density.updated",
+            entity_type="user",
+            entity_id=str(user.id),
+            before={"preferred_density": user.preferred_density},
+            after={"preferred_density": new_value},
+        )
+
+    refreshed = CurrentUser(
+        id=user.id,
+        tenant_id=user.tenant_id,
+        email=user.email,
+        full_name=user.full_name,
+        roles=user.roles,
+        available_roles=user.available_roles,
+        active_role=user.active_role,
+        departments=user.departments,
+        session_id=user.session_id,
+        preferred_language=user.preferred_language,
+        preferred_theme=user.preferred_theme,
+        preferred_density=new_value,
     )
     return _to_me_response(refreshed)
 
@@ -516,5 +658,7 @@ def switch_role(
         departments=user.departments,
         session_id=user.session_id,
         preferred_language=user.preferred_language,
+        preferred_theme=user.preferred_theme,
+        preferred_density=user.preferred_density,
     )
     return _to_me_response(refreshed)

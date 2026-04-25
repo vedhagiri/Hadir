@@ -1,7 +1,7 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 complete**:
+Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 complete (M2 core)**:
 pilot frozen at tag `v0.1-pilot` on branch `release/pilot`; multi-tenant
 routing wired up via a per-connection `SET search_path` driven by a
 ContextVar + SQLAlchemy `checkout` event; the global `tenants` registry
@@ -198,8 +198,24 @@ preference applied on every `/api/auth/me` resolve;
 `<html dir="rtl">` flips on language change; topbar
 EN/العربية switcher; CSS logical-properties sweep across the
 four design CSS files; `[dir="rtl"]` flips directional icons
-(chevrons + arrows) via `transform: scaleX(-1)`. **v1.0 P22
-next.**
+(chevrons + arrows) via `transform: scaleX(-1)`. **P22** added
+dark mode + density + reference pages: migration 0023 adds
+nullable `users.preferred_theme` (CHECK system/light/dark) and
+`users.preferred_density` (CHECK compact/comfortable) — both
+schema-agnostic. `CurrentUser` + `MeResponse` thread the
+fields; new `PATCH /api/auth/preferred-theme` and
+`/api/auth/preferred-density` endpoints audit
+(`auth.preferred_theme.updated` /
+`auth.preferred_density.updated`) and refuse synthetic Super-
+Admin. The frontend `theme/` module flips `data-theme` +
+`data-density` on `<html>` (the design's CSS already declared
+the two attribute selectors — no rewrite needed); a unified
+`DisplaySwitcher` lives in the topbar with `aria-haspopup` +
+`aria-pressed` semantics + Esc-to-close. `:focus-visible`
+outlines + accessible names round out the a11y sweep. New
+`/pipeline` (all roles) static explainer + Admin-only
+`/api-docs` Swagger embed render the long-deferred reference
+surfaces. **v1.0 M3 hardening next.**
 
 ## Tenant routing (v1.0 P1)
 **Approach chosen: SQLAlchemy `checkout` event + Python ContextVar**,

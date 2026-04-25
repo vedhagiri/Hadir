@@ -15,6 +15,12 @@ import "./styles/styles-enhancements3.css";
 // dir="rtl"> on boot for the detected language.
 import "./i18n";
 
+// P22: boot the theme + density resolver so the first paint already
+// reflects the user's localStorage choice (or the OS-level
+// prefers-color-scheme when ``system`` is active). AuthProvider
+// applies any server-saved override after /api/auth/me resolves.
+import "./theme";
+
 import { App } from "./App";
 
 const rootEl = document.getElementById("root");

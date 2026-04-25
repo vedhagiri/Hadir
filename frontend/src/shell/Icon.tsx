@@ -95,6 +95,51 @@ const paths: Record<string, ReactNode> = {
   ),
   check: <path d="M5 12l5 5L20 6" />,
   circle: <circle cx="12" cy="12" r="4" />,
+  // P22 + back-fill of icons referenced elsewhere in the tree.
+  // Path data ported verbatim from frontend/src/design/icons.jsx.
+  bell: (
+    <>
+      <path d="M18 16v-5a6 6 0 10-12 0v5l-2 2h16l-2-2z" />
+      <path d="M10 21a2 2 0 004 0" />
+    </>
+  ),
+  plus: <path d="M12 5v14M5 12h14" />,
+  x: <path d="M6 6l12 12M6 18L18 6" />,
+  moon: <path d="M21 13a9 9 0 11-10-10 7 7 0 0010 10z" />,
+  sun: (
+    <>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5L19 19M5 19l1.5-1.5M17.5 6.5L19 5" />
+    </>
+  ),
+  // ``maximize`` here is the design's chosen "comfortable" affordance —
+  // a wide rectangle of negative space — and ``minimize`` is the
+  // tighter "compact" counterpart. Path data borrowed from the design
+  // archive's ``rectFill``-style stroke set.
+  maximize: (
+    <>
+      <path d="M3 9V5a2 2 0 012-2h4M21 9V5a2 2 0 00-2-2h-4" />
+      <path d="M3 15v4a2 2 0 002 2h4M21 15v4a2 2 0 01-2 2h-4" />
+    </>
+  ),
+  minimize: (
+    <>
+      <path d="M9 3H5a2 2 0 00-2 2v4M15 3h4a2 2 0 012 2v4" />
+      <path d="M9 21H5a2 2 0 01-2-2v-4M15 21h4a2 2 0 002-2v-4" />
+    </>
+  ),
+  info: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 11v5M12 7.5v.01" />
+    </>
+  ),
+  globe: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18" />
+    </>
+  ),
 };
 
 export type IconName = keyof typeof paths;

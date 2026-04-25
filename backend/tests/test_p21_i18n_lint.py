@@ -35,6 +35,7 @@ _FRONTEND_SRC: Path | None = next((p for p in _CANDIDATE_ROOTS if p.exists()), N
 _TRANSLATED_FILES = (
     "shell/Topbar.tsx",
     "shell/LanguageSwitcher.tsx",
+    "shell/DisplaySwitcher.tsx",
     "shell/Sidebar.tsx",
     "auth/LoginPage.tsx",
     "notifications/NotificationBell.tsx",
@@ -43,6 +44,8 @@ _TRANSLATED_FILES = (
     "requests/ApprovalsPage.tsx",
     "requests/MyRequestsPage.tsx",
     "settings/SettingsTabs.tsx",
+    "features/pipeline/PipelinePage.tsx",
+    "features/api-docs/ApiDocsPage.tsx",
 )
 
 # Strings that legitimately stay as-is — brand names, codes,

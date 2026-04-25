@@ -23,6 +23,11 @@ export interface MeResponse {
   // P21: explicit user-chosen UI language. ``null`` means
   // "follow Accept-Language" — the browser drives.
   preferred_language?: "en" | "ar" | null;
+  // P22: theme + density preferences. ``null`` on theme = follow
+  // OS via prefers-color-scheme; ``null`` on density = comfortable
+  // (the design's default).
+  preferred_theme?: "system" | "light" | "dark" | null;
+  preferred_density?: "compact" | "comfortable" | null;
 }
 
 // Used by the shell to decide which NAV to render when a user holds more

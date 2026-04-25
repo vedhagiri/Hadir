@@ -55,6 +55,11 @@ class CurrentUser:
     # P21: explicit per-user UI language. ``None`` means
     # "follow Accept-Language" — the i18n resolver consumes this.
     preferred_language: str | None = None
+    # P22: theme + density. ``None`` on theme = "follow system";
+    # ``None`` on density = "comfortable" (design default). The
+    # frontend ThemeProvider applies both at sign-in.
+    preferred_theme: str | None = None
+    preferred_density: str | None = None
 
 
 # Highest-first ranking. Used at login + on a no-stored-active-role
@@ -96,6 +101,8 @@ def _load_current_user_bundle(conn, *, user_id: int, tenant_id: int) -> CurrentU
             users.c.full_name,
             users.c.is_active,
             users.c.preferred_language,
+            users.c.preferred_theme,
+            users.c.preferred_density,
         ).where(users.c.id == user_id, users.c.tenant_id == tenant_id)
     ).first()
     if user_row is None or not user_row.is_active:
@@ -138,6 +145,16 @@ def _load_current_user_bundle(conn, *, user_id: int, tenant_id: int) -> CurrentU
         preferred_language=(
             str(user_row.preferred_language)
             if user_row.preferred_language is not None
+            else None
+        ),
+        preferred_theme=(
+            str(user_row.preferred_theme)
+            if user_row.preferred_theme is not None
+            else None
+        ),
+        preferred_density=(
+            str(user_row.preferred_density)
+            if user_row.preferred_density is not None
             else None
         ),
     )
@@ -285,6 +302,8 @@ def current_user(
         departments=bundle.departments,
         session_id=session_row.id,
         preferred_language=bundle.preferred_language,
+        preferred_theme=bundle.preferred_theme,
+        preferred_density=bundle.preferred_density,
     )
 
 

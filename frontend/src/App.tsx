@@ -9,6 +9,9 @@ import { Navigate, Route, Routes } from "react-router-dom";
 
 import { LoginPage } from "./auth/LoginPage";
 import { ProtectedRoute } from "./auth/ProtectedRoute";
+import { useMe } from "./auth/AuthProvider";
+import { ApiDocsPage } from "./features/api-docs/ApiDocsPage";
+import { PipelinePage } from "./features/pipeline/PipelinePage";
 import { AuthenticationPage } from "./auth-oidc/AuthenticationPage";
 import { BrandingPage } from "./branding/BrandingPage";
 import { CustomFieldsPage } from "./custom-fields/CustomFieldsPage";
@@ -41,6 +44,20 @@ import { SuperAdminLogin } from "./super-admin/SuperAdminLogin";
 import { SuperAdminProtectedRoute } from "./super-admin/SuperAdminProtectedRoute";
 import { TenantDetailPage } from "./super-admin/TenantDetailPage";
 import { TenantsListPage } from "./super-admin/TenantsListPage";
+
+/** P22: Admin-only gate for the API Reference page. The backend
+ *  serves /api/docs to anyone authenticated, so the gate here is a
+ *  UX guard, not a security boundary — operators on Manager / HR /
+ *  Employee shouldn't reach this URL through the sidebar.
+ */
+function AdminOnly({ children }: { children: React.ReactNode }) {
+  const me = useMe();
+  if (me.isLoading) return null;
+  if (me.data?.active_role !== "Admin") {
+    return <Navigate to="/dashboard" replace />;
+  }
+  return <>{children}</>;
+}
 
 export function App() {
   return (
@@ -95,6 +112,8 @@ export function App() {
         <Route path="notifications" element={<NotificationsPage />} />
         <Route path="my-requests" element={<MyRequestsPage />} />
         <Route path="approvals" element={<ApprovalsPage />} />
+        <Route path="pipeline" element={<PipelinePage />} />
+        <Route path="api-docs" element={<AdminOnly><ApiDocsPage /></AdminOnly>} />
         {ALL_PAGE_IDS.filter(
           (id) =>
             id !== "dashboard" &&
@@ -112,7 +131,9 @@ export function App() {
             id !== "policies" &&
             id !== "leave-policy" &&
             id !== "my-requests" &&
-            id !== "approvals",
+            id !== "approvals" &&
+            id !== "pipeline" &&
+            id !== "api-docs",
         ).map((id) => (
           <Route key={id} path={id} element={<Placeholder pageId={id} />} />
         ))}

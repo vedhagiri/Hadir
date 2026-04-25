@@ -184,5 +184,66 @@
     "title": "Language",
     "english": "English",
     "arabic": "العربية"
+  },
+  "display": {
+    "button": "Display settings",
+    "themeLabel": "Theme",
+    "theme": {
+      "system": "System",
+      "light": "Light",
+      "dark": "Dark"
+    },
+    "densityLabel": "Density",
+    "density": {
+      "compact": "Compact",
+      "comfortable": "Comfortable"
+    }
+  },
+  "pipeline": {
+    "title": "How Hadir works",
+    "subtitle": "From the moment a face crosses the camera to the moment a row lands in your monthly report — here's the path Hadir walks for every employee, every day.",
+    "steps": {
+      "camera": {
+        "title": "Camera",
+        "body": "RTSP-enabled IP cameras stream video from doorways, lobbies, and entry corridors. Credentials are encrypted at rest and never logged. Operators add cameras through the Cameras page; preview lets them confirm the angle without exposing the password."
+      },
+      "capture": {
+        "title": "Capture",
+        "body": "Hadir reads each enabled camera at four frames per second, runs face detection, and groups frames into tracks with an IoU tracker. One detection event lands in the database per track entry — not per frame — so a person standing in view doesn't flood the log."
+      },
+      "detection": {
+        "title": "Detection",
+        "body": "InsightFace's buffalo_l model bounds the face, scores quality, and produces a 512-dimensional embedding. Crops are saved to disk encrypted with Fernet; embeddings are encrypted on the same row before any DB write."
+      },
+      "identification": {
+        "title": "Identification",
+        "body": "The detection embedding is compared against every enrolled photo per employee. The mean of the top-k angle scores wins, and only matches above the configured threshold are accepted. Below the threshold, the event stays unidentified — the system would rather miss than guess."
+      },
+      "attendance": {
+        "title": "Attendance",
+        "body": "A scheduler converts identified events to local time (per tenant timezone) and applies the day's policy to compute in/out, total minutes, late, early-out, short-hours, and overtime. The result is a single row per (employee, date), upserted on every recompute."
+      },
+      "policy": {
+        "title": "Policy",
+        "body": "Policies cascade from Custom range → Ramadan range → employee → department → tenant → legacy fallback. Fixed, Flex, Ramadan, and Custom shapes are all supported, with a single resolved policy applied per employee per date — no stacking."
+      },
+      "report": {
+        "title": "Report",
+        "body": "Excel and PDF reports surface the same rows operators see day-to-day, scheduled or on-demand. Schedules drop files via email or a tenant-pinned ERP file-drop. Every report run is audited and accessible only to the roles your BRD says it should be."
+      }
+    }
+  },
+  "apiDocs": {
+    "title": "API Reference",
+    "subtitle": "Hadir's REST API. The reference below is generated from the same FastAPI handlers that serve every request — it's never out of date.",
+    "overview": {
+      "title": "Overview",
+      "auth": "Authentication uses an HttpOnly session cookie set by POST /api/auth/login. Cookies are SameSite=Lax and refresh sliding-expiry on every authenticated request.",
+      "tenant": "The hadir_tenant cookie names the tenant schema. Most endpoints require an authenticated session and return 401 without one.",
+      "roles": "Endpoints are role-scoped. Admin sees everything; HR sees most reads and request workflow; Manager sees their assigned employees and team-level views; Employee sees only their own data.",
+      "rateLimits": "Login endpoints are rate-limited per (email, IP). Signed report download URLs are rate-limited per IP."
+    },
+    "embedTitle": "Live spec",
+    "openInNewTab": "Open in new tab"
   }
 }

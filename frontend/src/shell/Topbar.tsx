@@ -17,6 +17,7 @@ import { useNavigate } from "react-router-dom";
 import { useLogout, useSwitchRole } from "../auth/AuthProvider";
 import { NotificationBell } from "../notifications/NotificationBell";
 import type { MeResponse, Role } from "../types";
+import { DisplaySwitcher } from "./DisplaySwitcher";
 import { Icon } from "./Icon";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 import { CRUMBS } from "./nav";
@@ -68,6 +69,7 @@ export function Topbar({ pageId, role, me }: Props) {
         }}
       >
         <NotificationBell />
+        <DisplaySwitcher />
         <LanguageSwitcher />
         <RoleChip role={role} me={me} />
         <span

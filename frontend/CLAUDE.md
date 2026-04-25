@@ -8,6 +8,22 @@ department filters + Generate Excel button that downloads via blob).
 goes through login → import → photo → seed detection → recompute →
 generate report → parse downloaded XLSX.
 
+## Accessibility
+**Every new interactive element must have an accessible name.**
+That means an `aria-label` on icon-only buttons, an `aria-haspopup`
++ `aria-expanded` on dropdown triggers, `role="dialog"` +
+`aria-label` on popover panels, and `aria-pressed` on
+segmented-control buttons. Keyboard handlers (Esc-to-close,
+focus-restore-to-trigger) ride on the same components — see
+`shell/DisplaySwitcher.tsx` for the reference shape.
+
+The design CSS resets `:focus`. P22 added a `:focus-visible`
+override at the bottom of `styles-enhancements3.css` that paints a
+2px accent outline for keyboard users only — pointer users still
+see the design's pristine surfaces. Don't reintroduce
+`outline: none` on individual selectors; let the global rule do
+its job.
+
 ## Stack
 - Vite 5 + React 18
 - TypeScript strict (`tsconfig.json` enables `strict`,
