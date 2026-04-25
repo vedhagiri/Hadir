@@ -19,6 +19,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from hadir.auth.audit import write_audit
+from hadir.notifications.producer import notify_report_ready
 from hadir.auth.dependencies import CurrentUser, current_user
 from hadir.db import departments, get_engine, tenants
 from hadir.reporting.attendance import build_xlsx
@@ -127,6 +128,14 @@ def generate_attendance_xlsx(
                 "employee_id": payload.employee_id,
                 "rows": rows,
             },
+        )
+        # P20: in-app "your report is ready" for the requesting user.
+        notify_report_ready(
+            conn,
+            scope,
+            user_id=user.id,
+            fmt="xlsx",
+            range_label=f"{payload.start.isoformat()} to {payload.end.isoformat()}",
         )
     logger.info(
         "report generated: actor=%s start=%s end=%s rows=%d",
@@ -251,6 +260,13 @@ def generate_attendance_pdf(
                 "employee_id": payload.employee_id,
                 "rows": rows,
             },
+        )
+        notify_report_ready(
+            conn,
+            scope,
+            user_id=user.id,
+            fmt="pdf",
+            range_label=f"{payload.start.isoformat()} to {payload.end.isoformat()}",
         )
     logger.info(
         "pdf report generated: actor=%s start=%s end=%s rows=%d",

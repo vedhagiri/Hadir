@@ -26,3 +26,8 @@ _jinja_env = Environment(
 def render_report_email_html(*, context: dict) -> str:
     template = _jinja_env.get_template("report.html")
     return template.render(**context)
+
+
+def render_notification_email_html(*, context: dict) -> str:
+    template = _jinja_env.get_template("notification.html")
+    return template.render(**context)

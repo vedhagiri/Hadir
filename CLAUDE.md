@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19.**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20.**
 
 > **Tenant isolation is a P0 blocker.** The suites
 > `backend/tests/test_multi_tenant_isolation.py` (the P1 canary) and
@@ -356,8 +356,27 @@ To return to v1.0 work: `git checkout main`.
   Frontend Settings → Integrations → ERP Export page surfaces the
   config + Run-now download + last-run status. Schema doc lives at
   `docs/erp-file-drop-schema.md` for the ERP integration team.
+- **P20** — Notifications. Migration 0021 drops the P16 stub
+  `notifications_queue` and adds `notifications` (per-tenant queue
+  + history with `email_sent_at`, `email_attempts`,
+  `email_failed_at`) + `notification_preferences` (composite PK
+  user × tenant × category, defaults to both true when no row).
+  New `hadir/notifications/` ships the producer wrappers, the
+  repository (resolve / list / mark-read / set-preference), the
+  email-rendering template (`notification.html`, tenant branded),
+  the 30-second worker tick that re-resolves preferences per row
+  before sending (the load-bearing P20 red line), and a
+  camera-unreachable watcher mounted in the existing P18 tick.
+  Producers wired into request submit/decide/cancel
+  (approval_assigned + approval_decided), admin override
+  (replaces the P16 stub queue), attendance recompute (overtime
+  flips from 0 → > 0 only), on-demand reports (report_ready), and
+  camera health (>5 min unreachable, deduped per outage).
+  Frontend ships a topbar bell + dropdown, a `/notifications`
+  history page, and a Settings → Notifications grid (category ×
+  channel) with default-true semantics.
 
-Next: **P20** per `v1.0-phase-plan.md`. Wait for the user before
+Next: **P21** per `v1.0-phase-plan.md`. Wait for the user before
 starting. Per-phase records: `docs/phases/P*.md`.
 
 ---

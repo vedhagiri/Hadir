@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import threading
 from datetime import datetime, timezone
+from typing import Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -48,6 +49,79 @@ def recompute_for(
 
     with tenant_context(scope.tenant_schema):
         return _recompute_for_inner(scope, employee_id=employee_id, the_date=the_date)
+
+
+def _maybe_notify_overtime(
+    conn,
+    scope: TenantScope,
+    *,
+    employee_id: int,
+    the_date,
+    prior_overtime: Optional[int],
+    record,
+) -> None:
+    """Fire ``overtime_flagged`` only when overtime crosses the
+    zero → positive boundary for this employee + date.
+
+    Suppresses repeat fires when the same recompute pass touches a
+    row that already had overtime — the producer would skip
+    duplicates anyway, but the cleaner gate keeps the audit log
+    tidy.
+    """
+
+    new_ot = int(record.overtime_minutes or 0)
+    if new_ot <= 0:
+        return
+    if prior_overtime is not None and prior_overtime > 0:
+        return  # already flagged earlier today
+
+    from hadir.db import employees as _employees  # noqa: PLC0415
+    from hadir.notifications.producer import (  # noqa: PLC0415
+        notify_overtime_flagged,
+    )
+    from sqlalchemy import select as _select  # noqa: PLC0415
+
+    emp_row = conn.execute(
+        _select(
+            _employees.c.id,
+            _employees.c.employee_code,
+            _employees.c.full_name,
+        ).where(
+            _employees.c.tenant_id == scope.tenant_id,
+            _employees.c.id == employee_id,
+        )
+    ).first()
+    if emp_row is None:
+        return
+
+    # Manager scope = explicit assignments + department-membership
+    # union (matches P15). Pull the visible-set the same way the
+    # request inbox does so the manager who'd act on this rate
+    # gets the bell.
+    from hadir.manager_assignments.repository import (  # noqa: PLC0415
+        get_manager_visible_employee_ids,
+    )
+    from hadir.db import manager_assignments as _ma  # noqa: PLC0415
+
+    direct_managers = [
+        int(r.manager_user_id)
+        for r in conn.execute(
+            _select(_ma.c.manager_user_id).where(
+                _ma.c.tenant_id == scope.tenant_id,
+                _ma.c.employee_id == employee_id,
+            )
+        ).all()
+    ]
+    notify_overtime_flagged(
+        conn,
+        scope,
+        employee_id=int(emp_row.id),
+        employee_code=str(emp_row.employee_code),
+        employee_full_name=str(emp_row.full_name),
+        the_date=the_date,
+        overtime_minutes=new_ot,
+        manager_user_ids=direct_managers,
+    )
 
 
 def _recompute_for_inner(
@@ -85,7 +159,20 @@ def _recompute_for_inner(
             holidays=todays_holidays,
             weekend_days=settings.weekend_days,
         )
+        # Capture prior overtime BEFORE the upsert so we can detect
+        # the zero → positive flip.
+        prior_overtime = attendance_repo.existing_overtime_minutes(
+            conn, scope, employee_id=employee_id, the_date=the_date
+        )
         attendance_repo.upsert_attendance(conn, scope, record)
+        _maybe_notify_overtime(
+            conn,
+            scope,
+            employee_id=employee_id,
+            the_date=the_date,
+            prior_overtime=prior_overtime,
+            record=record,
+        )
     return True
 
 
@@ -159,7 +246,18 @@ def _recompute_today_inner(scope: TenantScope) -> int:
                     holidays=todays_holidays,
                     weekend_days=settings.weekend_days,
                 )
+                prior_overtime = attendance_repo.existing_overtime_minutes(
+                    conn, scope, employee_id=emp_id, the_date=today
+                )
                 attendance_repo.upsert_attendance(conn, scope, record)
+                _maybe_notify_overtime(
+                    conn,
+                    scope,
+                    employee_id=emp_id,
+                    the_date=today,
+                    prior_overtime=prior_overtime,
+                    record=record,
+                )
             upserted += 1
         except Exception as exc:  # noqa: BLE001
             logger.warning(

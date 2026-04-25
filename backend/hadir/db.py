@@ -827,8 +827,14 @@ report_runs = Table(
 )
 
 
-notifications_queue = Table(
-    "notifications_queue",
+# --- Notifications (P20) --------------------------------------------------
+# Replaces the P16 ``notifications_queue`` stub. ``notifications`` is the
+# real per-tenant queue + history; ``notification_preferences`` carries
+# the per-user category × channel toggles. Missing prefs row → both
+# in_app + email default to true (resolved in code, not DB).
+
+notifications = Table(
+    "notifications",
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column(
@@ -839,29 +845,81 @@ notifications_queue = Table(
         index=True,
     ),
     Column(
-        "recipient_user_id",
+        "user_id",
         Integer,
-        ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=True,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
         index=True,
     ),
-    Column("kind", Text, nullable=False),
-    Column(
-        "request_id",
-        Integer,
-        ForeignKey("requests.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-    ),
+    Column("category", Text, nullable=False),
+    Column("subject", Text, nullable=False),
+    Column("body", Text, nullable=False, server_default=""),
+    Column("link_url", Text, nullable=True),
     Column("payload", JSONB, nullable=False, server_default="{}"),
+    Column("read_at", DateTime(timezone=True), nullable=True),
+    Column("email_sent_at", DateTime(timezone=True), nullable=True),
+    Column("email_attempts", Integer, nullable=False, server_default="0"),
+    Column("email_failed_at", DateTime(timezone=True), nullable=True),
+    Column("email_error", Text, nullable=True),
     Column(
         "created_at",
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
     ),
-    Column("sent_at", DateTime(timezone=True), nullable=True),
-    Index("ix_notifications_queue_tenant_unsent", "tenant_id", "sent_at"),
+    CheckConstraint(
+        "category IN ("
+        "'approval_assigned','approval_decided','overtime_flagged',"
+        "'camera_unreachable','report_ready','admin_override'"
+        ")",
+        name="ck_notifications_category",
+    ),
+    Index(
+        "ix_notifications_tenant_user_unread",
+        "tenant_id",
+        "user_id",
+        "read_at",
+    ),
+    Index(
+        "ix_notifications_tenant_email_pending",
+        "tenant_id",
+        "email_sent_at",
+        "email_failed_at",
+    ),
+)
+
+
+notification_preferences = Table(
+    "notification_preferences",
+    metadata,
+    Column(
+        "user_id",
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
+        primary_key=True,
+    ),
+    Column("category", Text, primary_key=True),
+    Column("in_app", Boolean, nullable=False, server_default="true"),
+    Column("email", Boolean, nullable=False, server_default="true"),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    CheckConstraint(
+        "category IN ("
+        "'approval_assigned','approval_decided','overtime_flagged',"
+        "'camera_unreachable','report_ready','admin_override'"
+        ")",
+        name="ck_notification_preferences_category",
+    ),
 )
 
 

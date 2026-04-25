@@ -1,0 +1,59 @@
+<!--
+  Hadir per-notification email template (v1.0 P20).
+
+  Inline styles only — Outlook / Gmail / mobile clients drop most
+  <style> blocks. Tenant branding (accent hex + name) drives the
+  header. Body content is the notification's subject + body the
+  producer wrote, with a "view it in Hadir" link to ``link_url``
+  when present.
+
+  Last paragraph is the BRD-required unsubscribe pointer — text
+  only (deliberately not a link), pointing the recipient at the
+  Settings → Notifications page so they can flip the per-channel
+  preference for this category.
+-->
+<!doctype html>
+<html lang="en">
+<body style="margin:0;padding:0;background:#f4f6f8;font-family:Arial,Helvetica,sans-serif;color:#1f1f1f;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f4f6f8;padding:24px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;border-radius:8px;overflow:hidden;border:1px solid #e7e7e7;">
+          <tr>
+            <td style="padding:18px 22px;background:{{ branding.accent_hex }};color:#ffffff;">
+              <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;opacity:0.85;">{{ tenant.name }} · {{ category_label }}</div>
+              <div style="font-size:16px;font-weight:600;margin-top:2px;">{{ subject }}</div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:18px 22px;font-size:13.5px;line-height:1.55;">
+              {% if body %}
+              <p style="margin:0 0 12px 0;white-space:pre-wrap;">{{ body }}</p>
+              {% endif %}
+              {% if link_url %}
+              <p style="margin:14px 0 0 0;text-align:center;">
+                <a href="{{ link_url }}"
+                   style="display:inline-block;padding:9px 16px;background:{{ branding.accent_hex }};color:#ffffff;text-decoration:none;border-radius:6px;font-size:13px;font-weight:600;">
+                  Open in Hadir
+                </a>
+              </p>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:14px 22px;background:#fafafa;border-top:1px solid #e7e7e7;font-size:11.5px;color:#777;">
+              You're receiving this because the
+              <strong>{{ category_label }}</strong> category is set to
+              email-on for your account at {{ tenant.name }}. To stop
+              these for this category, open
+              <strong>Settings → Notifications</strong> in Hadir and
+              flip the toggle to off — the change applies on the next
+              event.
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

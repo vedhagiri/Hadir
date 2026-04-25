@@ -43,9 +43,15 @@ from hadir.db import (
     get_engine,
     leave_types,
     manager_assignments,
-    notifications_queue,
     request_attachments,
+    roles,
+    user_roles,
     users,
+)
+from hadir.notifications.producer import (
+    notify_admin_override,
+    notify_approval_assigned,
+    notify_approval_decided,
 )
 from hadir.manager_assignments.repository import (
     get_manager_visible_employee_ids,
@@ -284,6 +290,31 @@ def _identify_previous_decider(
     return None, None
 
 
+def _employee_user_id(
+    conn, scope: TenantScope, *, employee_id: int
+) -> Optional[int]:
+    """Best-effort employee → user lookup via lower-cased email."""
+
+    employee_row = conn.execute(
+        select(employees.c.email).where(
+            employees.c.tenant_id == scope.tenant_id,
+            employees.c.id == employee_id,
+        )
+    ).first()
+    if employee_row is None or employee_row.email is None:
+        return None
+    needle = str(employee_row.email).strip().lower()
+    if not needle:
+        return None
+    match = conn.execute(
+        select(users.c.id).where(
+            users.c.tenant_id == scope.tenant_id,
+            sa_func.lower(users.c.email) == needle,
+        )
+    ).first()
+    return int(match.id) if match is not None else None
+
+
 def _queue_override_notifications(
     conn,
     *,
@@ -296,89 +327,28 @@ def _queue_override_notifications(
     previous_decider_user_id: Optional[int],
     row: repo.RequestRow,
 ) -> None:
-    """Append one ``notifications_queue`` row per audience.
+    """Replaces the P16 stub queue: writes one P20 ``notifications``
+    row per audience (Manager + HR + Employee) via the producer.
 
-    P20 drains this table; today we just record what needs to be
-    sent. Audiences:
-
-    - The original Manager decider (if any).
-    - The original HR decider (if any).
-    - The submitting Employee, resolved by lower-cased email match
-      against ``users``. The row stores ``recipient_email`` in the
-      payload as a fallback for delivery when no ``users`` row
-      matches (the email match might miss for deactivated accounts).
-
-    The same comment + actor + previous_stage triple lands in every
-    payload so the eventual delivery doesn't have to re-query.
+    Producer respects each user's per-category in-app preference at
+    write time; the email side is honoured by the worker on drain.
     """
 
-    # 1) Resolve the employee's user_id (best-effort) + email.
-    employee_email_row = conn.execute(
-        select(employees.c.email).where(
-            employees.c.tenant_id == scope.tenant_id,
-            employees.c.id == row.employee_id,
-        )
-    ).first()
-    employee_email = (
-        str(employee_email_row.email).strip().lower()
-        if employee_email_row is not None
-        and employee_email_row.email is not None
-        else ""
+    employee_user_id = _employee_user_id(
+        conn, scope, employee_id=row.employee_id
     )
-    employee_user_id: Optional[int] = None
-    if employee_email:
-        match = conn.execute(
-            select(users.c.id).where(
-                users.c.tenant_id == scope.tenant_id,
-                sa_func.lower(users.c.email) == employee_email,
-            )
-        ).first()
-        if match is not None:
-            employee_user_id = int(match.id)
-
-    base_payload: dict[str, object] = {
-        "request_id": request_id,
-        "decision": decision,
-        "comment": comment,
-        "actor_user_id": actor.id,
-        "actor_email": actor.email,
-        "previous_stage": previous_stage,
-        "previous_decider_user_id": previous_decider_user_id,
-        "new_status": row.status,
-    }
-
-    # 2) Build per-recipient rows. Skip duplicates so a single user
-    # who happened to be both the Manager and HR decider doesn't get
-    # the same notification twice.
-    seen_user_ids: set[int] = set()
-
-    def queue(kind: str, user_id: Optional[int], extra: Optional[dict] = None) -> None:
-        if user_id is not None and user_id in seen_user_ids:
-            return
-        if user_id is not None:
-            seen_user_ids.add(user_id)
-        payload = dict(base_payload)
-        payload["kind"] = kind
-        if extra:
-            payload.update(extra)
-        conn.execute(
-            insert(notifications_queue).values(
-                tenant_id=scope.tenant_id,
-                recipient_user_id=user_id,
-                kind=kind,
-                request_id=request_id,
-                payload=payload,
-            )
-        )
-
-    if row.manager_user_id is not None:
-        queue("override.manager_notified", row.manager_user_id)
-    if row.hr_user_id is not None:
-        queue("override.hr_notified", row.hr_user_id)
-    queue(
-        "override.employee_notified",
-        employee_user_id,
-        {"recipient_email": employee_email or None},
+    notify_admin_override(
+        conn,
+        scope,
+        request_id=request_id,
+        request_type=row.type,
+        actor_email=actor.email,
+        decision=decision,
+        comment=comment,
+        previous_stage=previous_stage,
+        employee_user_id=employee_user_id,
+        manager_user_id=row.manager_user_id,
+        hr_user_id=row.hr_user_id,
     )
 
 
@@ -738,6 +708,20 @@ def create_request_endpoint(
                 "status": created.status,
             },
         )
+        # P20: notify the routed Manager that a request reached
+        # their queue. If the employee has no primary manager
+        # assigned, no notification fires — HR / Admin still see
+        # the row through the role-scoped GET.
+        if created.manager_user_id is not None:
+            notify_approval_assigned(
+                conn,
+                scope,
+                request_id=new_id,
+                request_type=created.type,
+                submitter_name=created.employee_full_name,
+                target_user_ids=[created.manager_user_id],
+                stage="Manager",
+            )
     return _enrich_single(created, scope=scope)
 
 
@@ -788,6 +772,23 @@ def cancel_request(
         )
         after = repo.get_request(conn, scope, request_id)
         assert after is not None
+        # P20: notify the employee that their request was cancelled
+        # (they're the actor, but the event is still a state change
+        # they may want to see in their bell). Skipped quietly when
+        # the user has opted out.
+        emp_user_id = _employee_user_id(
+            conn, scope, employee_id=after.employee_id
+        )
+        notify_approval_decided(
+            conn,
+            scope,
+            request_id=request_id,
+            employee_user_id=emp_user_id,
+            request_type=after.type,
+            new_status=new_status,
+            decider_label="You",
+            comment=None,
+        )
     return _enrich_single(after, scope=scope)
 
 
@@ -849,6 +850,56 @@ def manager_decide_endpoint(
         )
         after = repo.get_request(conn, scope, request_id)
         assert after is not None
+        # P20:
+        # - approve → notify every HR user (next stage)
+        # - reject → notify the employee (terminal)
+        if new_status == "manager_approved":
+            hr_ids = [
+                int(r.id)
+                for r in conn.execute(
+                    select(users.c.id)
+                    .select_from(
+                        users.join(
+                            user_roles,
+                            (user_roles.c.user_id == users.c.id)
+                            & (user_roles.c.tenant_id == users.c.tenant_id),
+                        ).join(
+                            roles,
+                            (roles.c.id == user_roles.c.role_id)
+                            & (roles.c.tenant_id == users.c.tenant_id),
+                        )
+                    )
+                    .where(
+                        users.c.tenant_id == scope.tenant_id,
+                        users.c.is_active.is_(True),
+                        roles.c.code == "HR",
+                    )
+                    .distinct()
+                ).all()
+            ]
+            notify_approval_assigned(
+                conn,
+                scope,
+                request_id=request_id,
+                request_type=after.type,
+                submitter_name=after.employee_full_name,
+                target_user_ids=hr_ids,
+                stage="HR",
+            )
+        else:
+            emp_user_id = _employee_user_id(
+                conn, scope, employee_id=after.employee_id
+            )
+            notify_approval_decided(
+                conn,
+                scope,
+                request_id=request_id,
+                employee_user_id=emp_user_id,
+                request_type=after.type,
+                new_status=new_status,
+                decider_label="Manager",
+                comment=payload.comment or None,
+            )
     return _enrich_single(after, scope=scope)
 
 
@@ -896,6 +947,20 @@ def hr_decide_endpoint(
         )
         after = repo.get_request(conn, scope, request_id)
         assert after is not None
+        # P20: HR decision is terminal → notify the Employee.
+        emp_user_id = _employee_user_id(
+            conn, scope, employee_id=after.employee_id
+        )
+        notify_approval_decided(
+            conn,
+            scope,
+            request_id=request_id,
+            employee_user_id=emp_user_id,
+            request_type=after.type,
+            new_status=new_status,
+            decider_label="HR",
+            comment=payload.comment or None,
+        )
 
     # Side effects run in their own transactions so the decision lands
     # even if a recompute fails (logged + skipped, never fatal).

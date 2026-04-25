@@ -1,7 +1,7 @@
-// Topbar — breadcrumbs + role chip + logout.
-// No Arabic toggle, no dark-mode toggle, no notifications bell, no "New
-// request" primary button. All deferred per PROJECT_CONTEXT §8; the
-// design references them but pilot scope is deliberately narrower.
+// Topbar — breadcrumbs + role chip + notifications bell + logout.
+// Arabic toggle + dark mode + "New request" button still deferred per
+// PROJECT_CONTEXT §8; the design references them but pilot scope is
+// deliberately narrower. The bell ships in P20.
 //
 // P7: when the user holds more than one role, the role chip becomes a
 // dropdown that calls ``POST /api/auth/switch-role`` and reloads. The
@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { useLogout, useSwitchRole } from "../auth/AuthProvider";
+import { NotificationBell } from "../notifications/NotificationBell";
 import type { MeResponse, Role } from "../types";
 import { Icon } from "./Icon";
 import { CRUMBS } from "./nav";
@@ -63,6 +64,7 @@ export function Topbar({ pageId, role, me }: Props) {
           gap: 10,
         }}
       >
+        <NotificationBell />
         <RoleChip role={role} me={me} />
         <span
           style={{

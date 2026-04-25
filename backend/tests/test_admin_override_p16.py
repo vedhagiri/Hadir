@@ -33,7 +33,7 @@ from hadir.db import (
     departments,
     employees,
     manager_assignments,
-    notifications_queue,
+    notifications,
     request_attachments,
     requests as requests_table,
     roles,
@@ -202,8 +202,8 @@ def world(admin_engine: Engine) -> Iterator[dict]:
     finally:
         with admin_engine.begin() as conn:
             conn.execute(
-                delete(notifications_queue).where(
-                    notifications_queue.c.tenant_id == TENANT_ID
+                delete(notifications).where(
+                    notifications.c.tenant_id == TENANT_ID
                 )
             )
             conn.execute(
@@ -395,34 +395,28 @@ def test_override_after_manager_rejection_records_previous_decider_and_queues_tw
     assert audit.before["previous_decider_user_id"] == world["manager"]["id"]
     assert audit.after["comment"] == override_comment
 
-    # Queue rows: manager + employee (no HR decided here).
+    # P20 notifications: one row per audience. Manager-rejection
+    # path → manager + employee (no HR row because HR never decided).
     with admin_engine.begin() as conn:
-        queue_rows = conn.execute(
+        rows = conn.execute(
             select(
-                notifications_queue.c.kind,
-                notifications_queue.c.recipient_user_id,
-                notifications_queue.c.payload,
+                notifications.c.user_id,
+                notifications.c.category,
+                notifications.c.payload,
             ).where(
-                notifications_queue.c.tenant_id == TENANT_ID,
-                notifications_queue.c.request_id == rid,
+                notifications.c.tenant_id == TENANT_ID,
+                notifications.c.category == "admin_override",
+                notifications.c.payload["request_id"].as_integer() == rid,
             )
         ).all()
-    kinds = sorted(r.kind for r in queue_rows)
-    assert kinds == ["override.employee_notified", "override.manager_notified"]
-    by_kind = {r.kind: r for r in queue_rows}
-    assert (
-        by_kind["override.manager_notified"].recipient_user_id
-        == world["manager"]["id"]
-    )
-    # Employee row has the email fallback in the payload.
-    employee_row = by_kind["override.employee_notified"]
-    assert (
-        employee_row.payload["recipient_email"]
-        == world["employee"]["email"].lower()
-    )
-    assert employee_row.payload["comment"] == override_comment
-    assert employee_row.payload["actor_user_id"] == world["admin"]["id"]
-    assert employee_row.payload["previous_stage"] == "manager"
+    audience_ids = sorted(int(r.user_id) for r in rows)
+    employee_user_id = world["employee"]["id"]
+    manager_user_id = world["manager"]["id"]
+    assert audience_ids == sorted([employee_user_id, manager_user_id])
+    by_user = {int(r.user_id): r for r in rows}
+    assert by_user[manager_user_id].payload["comment"] == override_comment
+    assert by_user[manager_user_id].payload["previous_stage"] == "manager"
+    assert by_user[manager_user_id].payload["actor_email"] == world["admin"]["email"]
 
 
 def test_override_after_hr_rejection_queues_three_notifications(
@@ -477,15 +471,15 @@ def test_override_after_hr_rejection_queues_three_notifications(
     assert over.json()["status"] == "admin_approved"
 
     with admin_engine.begin() as conn:
-        kinds = sorted(
-            r.kind
-            for r in conn.execute(
-                select(notifications_queue.c.kind).where(
-                    notifications_queue.c.tenant_id == TENANT_ID,
-                    notifications_queue.c.request_id == rid,
-                )
-            ).all()
-        )
+        rows = conn.execute(
+            select(
+                notifications.c.user_id, notifications.c.category
+            ).where(
+                notifications.c.tenant_id == TENANT_ID,
+                notifications.c.category == "admin_override",
+                notifications.c.payload["request_id"].as_integer() == rid,
+            )
+        ).all()
         audit = conn.execute(
             select(audit_log.c.before).where(
                 audit_log.c.entity_type == "request",
@@ -494,11 +488,10 @@ def test_override_after_hr_rejection_queues_three_notifications(
             )
         ).scalar_one()
 
-    assert kinds == [
-        "override.employee_notified",
-        "override.hr_notified",
-        "override.manager_notified",
-    ]
+    audience_ids = sorted(int(r.user_id) for r in rows)
+    assert audience_ids == sorted(
+        [world["employee"]["id"], world["hr"]["id"], world["manager"]["id"]]
+    )
     # The most-recent decider was HR — that's what the audit + the
     # banner text key off.
     assert audit["previous_stage"] == "hr"
@@ -543,16 +536,14 @@ def test_override_on_submitted_row_has_no_previous_decider(
                 audit_log.c.action == "request.admin.reject",
             )
         ).scalar_one()
-        kinds = sorted(
-            r.kind
-            for r in conn.execute(
-                select(notifications_queue.c.kind).where(
-                    notifications_queue.c.tenant_id == TENANT_ID,
-                    notifications_queue.c.request_id == rid,
-                )
-            ).all()
-        )
+        rows = conn.execute(
+            select(notifications.c.user_id).where(
+                notifications.c.tenant_id == TENANT_ID,
+                notifications.c.category == "admin_override",
+                notifications.c.payload["request_id"].as_integer() == rid,
+            )
+        ).all()
     assert audit["previous_stage"] is None
     assert audit["previous_decider_user_id"] is None
     # No prior decider, so only the employee gets a notification.
-    assert kinds == ["override.employee_notified"]
+    assert sorted(int(r.user_id) for r in rows) == [world["employee"]["id"]]

@@ -545,6 +545,30 @@ def active_employee_ids(conn: Connection, scope: TenantScope) -> list[int]:
 # --- Upsert today's row -----------------------------------------------------
 
 
+def existing_overtime_minutes(
+    conn: Connection,
+    scope: TenantScope,
+    *,
+    employee_id: int,
+    the_date: date,
+) -> Optional[int]:
+    """Read the current ``overtime_minutes`` value (or None if no row).
+
+    P20 uses this to detect a "first-time-today" overtime flip
+    before the producer fires — calling it before
+    ``upsert_attendance`` lets the caller compare prior vs new.
+    """
+
+    row = conn.execute(
+        select(attendance_records.c.overtime_minutes).where(
+            attendance_records.c.tenant_id == scope.tenant_id,
+            attendance_records.c.employee_id == employee_id,
+            attendance_records.c.date == the_date,
+        )
+    ).first()
+    return None if row is None else int(row.overtime_minutes)
+
+
 def upsert_attendance(
     conn: Connection,
     scope: TenantScope,

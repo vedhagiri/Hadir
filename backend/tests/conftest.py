@@ -122,6 +122,26 @@ def _neutralise_report_runner() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True, scope="session")
+def _neutralise_notification_worker() -> Iterator[None]:
+    """Block the 30-second email-drain APScheduler job from spinning
+    up during pytest's many TestClient lifespan entries. The P20
+    tests call ``drain_one_tenant`` directly when they need to
+    exercise the worker."""
+
+    from hadir.notifications import notification_worker as _worker  # noqa: PLC0415
+
+    original_start = _worker.start
+    original_stop = _worker.stop
+    _worker.start = lambda: None  # type: ignore[assignment]
+    _worker.stop = lambda: None  # type: ignore[assignment]
+    try:
+        yield
+    finally:
+        _worker.start = original_start  # type: ignore[assignment]
+        _worker.stop = original_stop  # type: ignore[assignment]
+
+
+@pytest.fixture(autouse=True, scope="session")
 def _neutralise_capture_manager() -> Iterator[None]:
     """Prevent the singleton capture manager from spawning real workers.
 

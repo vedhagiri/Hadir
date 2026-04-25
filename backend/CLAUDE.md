@@ -1,7 +1,7 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 complete**:
+Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 complete**:
 pilot frozen at tag `v0.1-pilot` on branch `release/pilot`; multi-tenant
 routing wired up via a per-connection `SET search_path` driven by a
 ContextVar + SQLAlchemy `checkout` event; the global `tenants` registry
@@ -165,7 +165,21 @@ and a runner that shares the existing P18 60-second tick. New
 endpoints `GET/PATCH /api/erp-export-config` and `POST
 /api/erp-export-config/run-now` (writes the file under the tenant
 root **and** streams the same bytes back; audit-logs every run).
-**v1.0 P20 next.**
+**P20** added the notifications subsystem: migration 0021 drops
+the P16 stub `notifications_queue` and adds `notifications` (per-
+tenant queue + history with email delivery columns) +
+`notification_preferences` (composite PK, defaults to both true
+when no row). New `hadir/notifications/` ships producer
+wrappers, repository, the `notification.html` Jinja template
+(tenant-branded, with the "Settings → Notifications" plain-text
+unsubscribe pointer per BRD), the 30-second worker tick that
+re-resolves preferences per row before sending (load-bearing red
+line — `email=False` skips dispatch, the row stays in the bell),
+and a camera-unreachable watcher mounted in the existing P18
+tick. Producers wired into request submit/decide/cancel, admin
+override (replaces the P16 stub), attendance recompute (overtime
+0 → >0 first-time-today gate), on-demand reports, and camera
+health. **v1.0 P21 next.**
 
 ## Tenant routing (v1.0 P1)
 **Approach chosen: SQLAlchemy `checkout` event + Python ContextVar**,

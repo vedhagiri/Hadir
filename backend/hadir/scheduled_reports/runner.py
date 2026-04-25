@@ -513,6 +513,21 @@ def _tick() -> int:
             type(exc).__name__,
         )
 
+    # P20 camera-unreachable watcher — emits one ``camera_unreachable``
+    # notification per outage. Dedupe + threshold logic live in the
+    # watcher itself.
+    try:
+        from hadir.notifications.camera_watch import (  # noqa: PLC0415
+            tick_camera_unreachable,
+        )
+
+        tick_camera_unreachable()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "camera-unreachable tick raised before per-tenant scan: %s",
+            type(exc).__name__,
+        )
+
     fired = 0
     admin_engine = make_admin_engine()
     try:

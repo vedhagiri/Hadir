@@ -26,7 +26,7 @@ from hadir.db import (
     attendance_records,
     email_config,
     employees,
-    notifications_queue,
+    notifications,
     report_runs,
     report_schedules,
     shift_policies,
@@ -252,8 +252,8 @@ def clean_schedules(admin_engine: Engine) -> Iterator[None]:
             delete(report_schedules).where(report_schedules.c.tenant_id == 1)
         )
         conn.execute(
-            delete(notifications_queue).where(
-                notifications_queue.c.tenant_id == 1
+            delete(notifications).where(
+                notifications.c.tenant_id == 1
             )
         )
     yield
@@ -263,8 +263,8 @@ def clean_schedules(admin_engine: Engine) -> Iterator[None]:
             delete(report_schedules).where(report_schedules.c.tenant_id == 1)
         )
         conn.execute(
-            delete(notifications_queue).where(
-                notifications_queue.c.tenant_id == 1
+            delete(notifications).where(
+                notifications.c.tenant_id == 1
             )
         )
 

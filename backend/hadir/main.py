@@ -44,6 +44,10 @@ from hadir.requests import (
     router as requests_router,
 )
 from hadir.erp_export import router as erp_export_router
+from hadir.notifications import (
+    notification_worker,
+    router as notifications_router,
+)
 from hadir.scheduled_reports import (
     report_runner,
     router as scheduled_reports_router,
@@ -106,6 +110,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     capture_manager.start()
     attendance_scheduler.start()
     report_runner.start()
+    notification_worker.start()
     try:
         yield
     finally:
@@ -114,6 +119,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         capture_manager.stop()
         attendance_scheduler.stop()
         report_runner.stop()
+        notification_worker.stop()
         limiter.stop()
 
 
@@ -165,6 +171,7 @@ def create_app() -> FastAPI:
     app.include_router(request_reason_categories_router)
     app.include_router(scheduled_reports_router)
     app.include_router(erp_export_router)
+    app.include_router(notifications_router)
 
     # Dev-only test endpoints — used by the Playwright smoke test in
     # frontend/tests/. Mounted ONLY when HADIR_ENV=dev so a production

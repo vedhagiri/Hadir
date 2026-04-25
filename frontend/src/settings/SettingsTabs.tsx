@@ -12,6 +12,7 @@ const TABS = [
   { to: "/settings/email", label: "Email" },
   { to: "/settings/schedules", label: "Schedules" },
   { to: "/settings/erp-export", label: "ERP export" },
+  { to: "/settings/notifications", label: "Notifications" },
 ] as const;
 
 export function SettingsTabs() {

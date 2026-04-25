@@ -13,6 +13,8 @@ import { AuthenticationPage } from "./auth-oidc/AuthenticationPage";
 import { BrandingPage } from "./branding/BrandingPage";
 import { CustomFieldsPage } from "./custom-fields/CustomFieldsPage";
 import { ErpExportPage } from "./erp-export/ErpExportPage";
+import { NotificationsPage } from "./notifications/NotificationsPage";
+import { NotificationPreferencesPage } from "./notifications/PreferencesPage";
 import { ApprovalsPage } from "./requests/ApprovalsPage";
 import { MyRequestsPage } from "./requests/MyRequestsPage";
 import { ReasonCategoriesPage } from "./requests/ReasonCategoriesPage";
@@ -89,6 +91,8 @@ export function App() {
         <Route path="settings/email" element={<EmailConfigPage />} />
         <Route path="settings/schedules" element={<SchedulesPage />} />
         <Route path="settings/erp-export" element={<ErpExportPage />} />
+        <Route path="settings/notifications" element={<NotificationPreferencesPage />} />
+        <Route path="notifications" element={<NotificationsPage />} />
         <Route path="my-requests" element={<MyRequestsPage />} />
         <Route path="approvals" element={<ApprovalsPage />} />
         {ALL_PAGE_IDS.filter(
