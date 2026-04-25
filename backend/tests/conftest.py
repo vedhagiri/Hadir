@@ -102,6 +102,26 @@ def _neutralise_attendance_scheduler() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True, scope="session")
+def _neutralise_report_runner() -> Iterator[None]:
+    """Same idea as the attendance neutraliser — keep TestClient(app)
+    lifespan entries from spawning the 60-second report runner job.
+    The dedicated P18 tests call ``run_schedule_now`` directly, so
+    they don't depend on the background loop."""
+
+    from hadir.scheduled_reports import report_runner as _runner  # noqa: PLC0415
+
+    original_start = _runner.start
+    original_stop = _runner.stop
+    _runner.start = lambda: None  # type: ignore[assignment]
+    _runner.stop = lambda: None  # type: ignore[assignment]
+    try:
+        yield
+    finally:
+        _runner.start = original_start  # type: ignore[assignment]
+        _runner.stop = original_stop  # type: ignore[assignment]
+
+
+@pytest.fixture(autouse=True, scope="session")
 def _neutralise_capture_manager() -> Iterator[None]:
     """Prevent the singleton capture manager from spawning real workers.
 

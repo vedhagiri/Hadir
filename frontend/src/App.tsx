@@ -15,6 +15,8 @@ import { CustomFieldsPage } from "./custom-fields/CustomFieldsPage";
 import { ApprovalsPage } from "./requests/ApprovalsPage";
 import { MyRequestsPage } from "./requests/MyRequestsPage";
 import { ReasonCategoriesPage } from "./requests/ReasonCategoriesPage";
+import { EmailConfigPage } from "./scheduled-reports/EmailConfigPage";
+import { SchedulesPage } from "./scheduled-reports/SchedulesPage";
 import { AuditLogPage } from "./features/audit-log/AuditLogPage";
 import { DailyAttendancePage } from "./features/attendance/DailyAttendancePage";
 import { MyAttendancePage } from "./features/attendance/MyAttendancePage";
@@ -83,6 +85,8 @@ export function App() {
         <Route path="settings/authentication" element={<AuthenticationPage />} />
         <Route path="settings/custom-fields" element={<CustomFieldsPage />} />
         <Route path="settings/reason-categories" element={<ReasonCategoriesPage />} />
+        <Route path="settings/email" element={<EmailConfigPage />} />
+        <Route path="settings/schedules" element={<SchedulesPage />} />
         <Route path="my-requests" element={<MyRequestsPage />} />
         <Route path="approvals" element={<ApprovalsPage />} />
         {ALL_PAGE_IDS.filter(

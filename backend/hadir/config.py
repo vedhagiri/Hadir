@@ -119,6 +119,31 @@ class Settings(BaseSettings):
     # via the same Fernet key the photo path uses.
     request_attachment_root: str = "/data/attachments"
 
+    # --- Email + scheduled reports (v1.0 P18) -----------------------------
+    # Inbox-friendly attachment cap. Files at or below this size go in
+    # the email body as attachments; anything larger is replaced with a
+    # signed-URL link to the report-runs download endpoint.
+    email_attachment_max_mb: int = 10
+    # Where the runner writes generated report files. Each tenant gets
+    # a subfolder under ``{root}/{tenant_id}/runs/{uuid}.{xlsx|pdf}``.
+    report_output_root: str = "/data/reports"
+    # HMAC secret + TTL for the signed-URL download endpoint. Default
+    # TTL of 7 days mirrors the BRD; ops can rotate the secret without
+    # invalidating active sessions because the secret only signs
+    # download tokens, not auth cookies.
+    report_signed_url_secret: str = Field(
+        default="dev-report-signed-url-secret-change-me"
+    )
+    report_signed_url_ttl_days: int = 7
+    # Per-IP token validation rate limit for the signed-URL endpoint.
+    # Loose by design — legitimate operators rarely fetch the same
+    # report dozens of times in a minute.
+    report_signed_url_rate_limit_per_minute: int = 30
+    # APScheduler poll cadence for the runner. One minute matches the
+    # cron resolution; tighter feels twitchy, wider misses minute-of-
+    # the-hour cron expressions.
+    report_runner_poll_seconds: int = 60
+
     # --- Approvals SLA (v1.0 P15) ------------------------------------------
     # Business hours after which a non-terminal request is flagged as
     # breaching SLA. BRD Open Item Q6 — operators tune per tenant; the

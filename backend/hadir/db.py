@@ -653,6 +653,144 @@ request_reason_categories = Table(
 )
 
 
+# --- Email config + scheduled reports (P18) -------------------------------
+# ``email_config`` carries the tenant's outbound email credentials
+# (Fernet-encrypted at rest); ``report_schedules`` is the operator's
+# recurring-report definition, ``report_runs`` is one row per execution.
+
+email_config = Table(
+    "email_config",
+    metadata,
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("provider", Text, nullable=False, server_default="smtp"),
+    Column("smtp_host", Text, nullable=False, server_default=""),
+    Column("smtp_port", Integer, nullable=False, server_default="587"),
+    Column("smtp_username", Text, nullable=False, server_default=""),
+    Column("smtp_password_encrypted", Text, nullable=True),
+    Column("smtp_use_tls", Boolean, nullable=False, server_default="true"),
+    Column("graph_tenant_id", Text, nullable=False, server_default=""),
+    Column("graph_client_id", Text, nullable=False, server_default=""),
+    Column("graph_client_secret_encrypted", Text, nullable=True),
+    Column("from_address", Text, nullable=False, server_default=""),
+    Column("from_name", Text, nullable=False, server_default=""),
+    Column("enabled", Boolean, nullable=False, server_default="false"),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    CheckConstraint(
+        "provider IN ('smtp','microsoft_graph')",
+        name="ck_email_config_provider",
+    ),
+)
+
+
+report_schedules = Table(
+    "report_schedules",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column("name", Text, nullable=False),
+    Column("report_type", Text, nullable=False, server_default="attendance"),
+    Column("format", Text, nullable=False),
+    Column("filter_config", JSONB, nullable=False, server_default="{}"),
+    Column("recipients", JSONB, nullable=False, server_default="[]"),
+    Column("schedule_cron", Text, nullable=False),
+    Column("active", Boolean, nullable=False, server_default="true"),
+    Column("last_run_at", DateTime(timezone=True), nullable=True),
+    Column("last_run_status", Text, nullable=True),
+    Column("next_run_at", DateTime(timezone=True), nullable=True),
+    Column(
+        "created_by_user_id",
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    CheckConstraint(
+        "format IN ('xlsx','pdf')", name="ck_report_schedules_format"
+    ),
+    CheckConstraint(
+        "report_type IN ('attendance')",
+        name="ck_report_schedules_report_type",
+    ),
+    Index(
+        "ix_report_schedules_tenant_active_next",
+        "tenant_id",
+        "active",
+        "next_run_at",
+    ),
+)
+
+
+report_runs = Table(
+    "report_runs",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "schedule_id",
+        Integer,
+        ForeignKey("report_schedules.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    ),
+    Column(
+        "started_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    Column("finished_at", DateTime(timezone=True), nullable=True),
+    Column("status", Text, nullable=False, server_default="running"),
+    Column("file_path", Text, nullable=True),
+    Column("file_size_bytes", Integer, nullable=True),
+    Column("recipients_delivered_to", JSONB, nullable=False, server_default="[]"),
+    Column("error_message", Text, nullable=True),
+    Column("delivery_mode", Text, nullable=True),
+    CheckConstraint(
+        "status IN ('running','succeeded','failed')",
+        name="ck_report_runs_status",
+    ),
+    Index(
+        "ix_report_runs_tenant_schedule_started",
+        "tenant_id",
+        "schedule_id",
+        "started_at",
+    ),
+)
+
+
 notifications_queue = Table(
     "notifications_queue",
     metadata,

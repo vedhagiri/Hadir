@@ -9,6 +9,8 @@ const TABS = [
   { to: "/settings/authentication", label: "Authentication" },
   { to: "/settings/custom-fields", label: "Custom fields" },
   { to: "/settings/reason-categories", label: "Request reasons" },
+  { to: "/settings/email", label: "Email" },
+  { to: "/settings/schedules", label: "Schedules" },
 ] as const;
 
 export function SettingsTabs() {

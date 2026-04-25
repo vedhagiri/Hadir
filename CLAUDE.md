@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17.**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18.**
 
 > **Tenant isolation is a P0 blocker.** The suites
 > `backend/tests/test_multi_tenant_isolation.py` (the P1 canary) and
@@ -315,8 +315,30 @@ To return to v1.0 work: `git checkout main`.
   per spec. Frontend Reports page gains a "Generate PDF" button
   alongside the existing Excel one — same filter form, per-format
   loading states.
+- **P18** — Scheduled reports + email. Migration 0019 adds three
+  per-tenant tables: `email_config` (provider 'smtp'|'microsoft_graph'
+  + SMTP/Graph credentials with Fernet-encrypted secret columns +
+  enabled flag), `report_schedules` (cron, recipients, filter,
+  format, bookkeeping), and `report_runs` (one row per execution
+  with status, file_path, recipients_delivered_to, delivery_mode).
+  New `hadir/emailing/` ships providers (SMTP via `smtplib`,
+  Microsoft Graph via two `httpx` REST calls — no `msal` SDK), a
+  Jinja-rendered HTML template that honours tenant branding, and a
+  pluggable factory so tests + the live smoke can capture outbound
+  emails. New `hadir/scheduled_reports/` ships an APScheduler
+  60-second scan that scopes per tenant via `tenant_context("public")`
+  for the registry lookup and `tenant_context(slug)` for the
+  per-schedule work; the engine inserts a running row before doing
+  anything, picks attach-vs-link based on
+  `HADIR_EMAIL_ATTACHMENT_MAX_MB` (default 10), and rotates
+  `next_run_at` via `croniter`. Signed-URL download is HMAC-token
+  gated, per-IP rate-limited, anonymous, and audited
+  (`report.signed_url_downloaded`). Settings → Email surfaces
+  write-only secrets via `has_*` flags + a "Send test" button.
+  Settings → Schedules lists schedules with Run-now / Pause /
+  Delete and an inline create form with a tiny cron-preview helper.
 
-Next: **P18** per `v1.0-phase-plan.md`. Wait for the user before
+Next: **P19** per `v1.0-phase-plan.md`. Wait for the user before
 starting. Per-phase records: `docs/phases/P*.md`.
 
 ---

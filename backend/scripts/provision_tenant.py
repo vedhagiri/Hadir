@@ -116,6 +116,9 @@ _APP_CRUD_TABLES = (
     "request_attachments",
     "request_reason_categories",
     "notifications_queue",
+    "email_config",
+    "report_schedules",
+    "report_runs",
 )
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -280,6 +283,7 @@ def _seed_defaults(
     # tenant Admin opts in by entering Entra credentials and toggling
     # ``enabled`` on the Authentication settings page.
     from hadir.db import (  # noqa: PLC0415
+        email_config as _email_config,
         leave_types as _leave_types,
         request_reason_categories as _reason_categories,
         tenant_oidc_config,
@@ -329,6 +333,10 @@ def _seed_defaults(
                 display_order=display_order,
             )
         )
+
+    # P18: empty email_config row (provider=smtp, enabled=false). The
+    # operator fills in credentials in Settings → Email.
+    conn.execute(insert(_email_config).values(tenant_id=tenant_id))
 
     user_id = conn.execute(
         insert(users)

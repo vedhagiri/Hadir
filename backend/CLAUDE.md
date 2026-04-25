@@ -1,7 +1,7 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 complete**:
+Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 complete**:
 pilot frozen at tag `v0.1-pilot` on branch `release/pilot`; multi-tenant
 routing wired up via a per-connection `SET search_path` driven by a
 ContextVar + SQLAlchemy `checkout` event; the global `tenants` registry
@@ -139,7 +139,22 @@ body + role gates + manager scoping + date guards; filename
 `hadir-attendance-{tenant_slug}-{from}-to-{to}.pdf` per spec.
 Multi-employee reports get `page-break-before: always` between
 sections; the `@page` rule paints generation timestamp + "Page x
-of y" via CSS counters. **v1.0 P18 next.**
+of y" via CSS counters. **P18** added scheduled reports + email:
+migration 0019 ships per-tenant `email_config` (Fernet-encrypted
+SMTP / Graph secrets via `HADIR_AUTH_FERNET_KEY`),
+`report_schedules`, and `report_runs`. `hadir/emailing/` exposes
+`SmtpSender` + `GraphSender` (two-call REST, no `msal`) plus a
+pluggable factory for tests and a file-recorder mode
+(`HADIR_EMAIL_RECORDER_PATH`) for the live smoke.
+`hadir/scheduled_reports/runner.py` is the engine — inserts a
+running row, builds the report, picks attach-vs-link by
+`HADIR_EMAIL_ATTACHMENT_MAX_MB` (default 10), dispatches via the
+configured provider, updates the run row + advances `next_run_at`
+via `croniter`. APScheduler 60-second scan iterates active
+schedules where `next_run_at <= now()`. Anonymous signed-URL
+download endpoint at `/api/reports/runs/{id}/download?token=…` is
+HMAC-gated, per-IP rate-limited, and audit-logged. **v1.0 P19
+next.**
 
 ## Tenant routing (v1.0 P1)
 **Approach chosen: SQLAlchemy `checkout` event + Python ContextVar**,
