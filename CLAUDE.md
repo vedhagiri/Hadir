@@ -1,27 +1,53 @@
 # Hadir — Claude Code project notes
 
+> **v1.0 in development.** Pilot frozen at tag `v0.1-pilot` on branch
+> `release/pilot`.
+>
 > **For new sessions:** read this file first, then `PROJECT_CONTEXT.md`
-> (history + decisions), then `pilot-plan.md` (the active phased plan).
-> Never start coding without confirming which prompt is active.
+> (history + decisions), then `v1.0-phase-plan.md` (the active phased
+> plan). `pilot-plan.md` is **historical** — only consult it when
+> triaging a pilot bug on the `release/pilot` branch. Per-phase build
+> records live under `docs/phases/` going forward (one file per phase,
+> committed alongside the phase's code). Never start coding without
+> confirming which prompt is active.
 
 ## What this is
 Hadir is a camera-based employee attendance platform built by Muscat Tech
 Solutions for Omran (Oman). IP cameras detect employees by face, the system
 computes attendance against shift policies, and reports are delivered out.
-The pilot is a 5-day single-tenant demo on a corporate LAN; v1.0 is the
-multi-tenant SaaS-capable product 8–10 weeks after pilot signoff.
+The pilot (v0.1) was delivered to Omran on the corporate LAN; v1.0 is the
+multi-tenant SaaS-capable product, planned in `v1.0-phase-plan.md`.
+
+## Branching
+- `release/pilot` — maintenance branch tracking the `v0.1-pilot` tag.
+  Only touched for hotfixes Omran reports against the pilot. **Do
+  not rewrite history on this branch.**
+- `main` — active v1.0 development. Every phase from
+  `v1.0-phase-plan.md` commits here.
+- Milestone tags arrive at the points noted in the v1.0 plan:
+  `v1.0-m2` (multi-tenant + features), `v1.0-m3` (hardening), `v1.0`
+  (final). Optional pre-hardening safety branches `release/v1.0-m2`
+  and `release/v1.0-m3` per the plan's branching section.
+
+To demo the pilot at any point: `git checkout v0.1-pilot`.
+To return to v1.0 work: `git checkout main`.
 
 ## Status
-**Pilot prompts currently complete: P1–P13.**
-**P14 prep ready, NOT delivered.** The on-site artifacts (bootstrap
-script, day runbook, sign-off template, printable acceptance
-checklist) are in `scripts/omran_bootstrap.sh` and `docs/`. The
-actual P14 deployment is a physical on-site step that has not
-happened yet. Do **not** treat the existence of `docs/pilot-signoff.md`
-as evidence of delivery — that file's first line is
-`STATUS: not yet delivered` and is replaced on the day. The
-`feat(P14): omran pilot deployment + signoff` commit only lands
-*after* the sponsor signs the printed checklist.
+**v1.0 phase currently complete: P0 — branching + v1.0 bootstrap.**
+Pilot frozen at tag `v0.1-pilot` (commit `1a0782c`); maintenance
+branch `release/pilot` exists locally + at origin. Next:
+**P1 — Multi-tenant routing switch (M2).** Wait for the user before
+starting. Per-phase records: `docs/phases/`.
+
+---
+
+## Pilot build log (historical, for context)
+
+The pilot's per-phase build summaries below were written when those
+prompts were live. They're preserved for v1.0 sessions that need to
+look up a pilot-era decision; the **current** plan is
+`v1.0-phase-plan.md` and the active build records are
+`docs/phases/P*.md`.
 
 What P1 built:
 - Monorepo layout per PROJECT_CONTEXT §7

@@ -1,5 +1,11 @@
 # Hadir — Pilot Plan (v0.1)
 
+> **Historical (pilot delivered).** This plan describes the 5-day pilot
+> build, frozen at tag `v0.1-pilot` on branch `release/pilot`. Active
+> development now follows `v1.0-phase-plan.md` on `main`. Consult this
+> file only when triaging a pilot-era issue; do not pull prompts from
+> here into a v1.0 session.
+
 **Purpose:** Step-by-step Claude Code prompts to stand up the 5-day pilot build. This file lives at the repo root and is the authoritative sequence of work for the pilot.
 
 **Audience:** Suresh (driving Claude Code sessions) and any future Claude Code session picking up mid-pilot.
