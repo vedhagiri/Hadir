@@ -253,6 +253,34 @@ tenant_branding = Table(
 )
 
 
+# --- Per-tenant OIDC config (P6) -------------------------------------------
+# One row per tenant. ``client_secret_encrypted`` is Fernet-encrypted
+# with ``HADIR_AUTH_FERNET_KEY`` (separate from the photo/RTSP key —
+# blast-radius isolation is the point of the split). The plain secret
+# never appears in the API surface, in audit rows, or in logs.
+
+tenant_oidc_config = Table(
+    "tenant_oidc_config",
+    metadata,
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("entra_tenant_id", Text, nullable=False, server_default=""),
+    Column("client_id", Text, nullable=False, server_default=""),
+    Column("client_secret_encrypted", Text, nullable=True),
+    Column("enabled", Boolean, nullable=False, server_default="false"),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+)
+
+
 # --- Super-Admin global tables (P3) ----------------------------------------
 # All three live in ``public`` alongside ``tenants``. They are NOT per-tenant
 # and the provisioning CLI's create_all filter (``schema != 'public'``)

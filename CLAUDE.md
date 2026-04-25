@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5.**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6.**
 
 > **Tenant isolation is a P0 blocker.** The suites
 > `backend/tests/test_multi_tenant_isolation.py` (the P1 canary) and
@@ -110,8 +110,24 @@ To return to v1.0 work: `git checkout main`.
   CI workflow `.github/workflows/isolation.yml` runs the isolation
   suites + the migration lint on every push to main / PR touching
   `backend/`.
+- **P6** — Entra ID OIDC. Migration `0011_oidc_config` adds a
+  per-tenant `tenant_oidc_config` table (entra_tenant_id, client_id,
+  Fernet-encrypted client_secret, enabled, updated_at). New env vars
+  `HADIR_AUTH_FERNET_KEY` (separate from photo/RTSP key) and
+  `HADIR_OIDC_REDIRECT_BASE_URL`. `hadir/auth/oidc.py` owns the
+  whole flow: `/api/auth/oidc/login` redirects to Entra with a
+  signed state+nonce cookie, `/api/auth/oidc/callback` validates the
+  signed state, exchanges the code, validates the ID token against
+  the cached JWKS via authlib, and matches on lower-cased email.
+  No-match returns 403 with the prescribed message (no
+  auto-provision); roles are never derived from Entra claims.
+  `/api/auth/oidc/status` is the anonymous probe the LoginPage uses
+  to show "Sign in with Microsoft" as the primary CTA. The Admin
+  config CRUD pings the discovery URL before persisting and refuses
+  to save a broken config. Plain secrets never appear in API
+  responses, audit rows, or logs.
 
-Next: **P6** per `v1.0-phase-plan.md`. Wait for the user before
+Next: **P7** per `v1.0-phase-plan.md`. Wait for the user before
 starting. Per-phase records: `docs/phases/P*.md`.
 
 ---

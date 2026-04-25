@@ -37,6 +37,7 @@ export function useMe(): UseQueryResult<MeResponse | null, Error> {
 export interface LoginInput {
   email: string;
   password: string;
+  tenant_slug?: string;
 }
 
 export function useLogin() {

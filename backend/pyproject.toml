@@ -22,6 +22,11 @@ dependencies = [
     "numpy==1.26.4",
     "insightface==0.7.3",
     "onnxruntime==1.19.2",
+    # P6: Entra ID OIDC. authlib gives us JOSE/JWT validation against
+    # the discovery endpoint's JWKS; httpx is needed at runtime (was
+    # dev-only) for the discovery + token-exchange HTTP calls.
+    "authlib==1.3.2",
+    "httpx==0.27.2",
 ]
 
 [project.optional-dependencies]

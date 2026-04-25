@@ -17,7 +17,7 @@ export class ApiError extends Error {
 }
 
 export interface ApiRequest {
-  method?: "GET" | "POST" | "PATCH" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   // JSON by default. Pass a FormData to send multipart (the browser then
   // sets its own multipart boundary header — we don't touch Content-Type).
   body?: unknown;

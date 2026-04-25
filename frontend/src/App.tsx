@@ -9,6 +9,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 
 import { LoginPage } from "./auth/LoginPage";
 import { ProtectedRoute } from "./auth/ProtectedRoute";
+import { AuthenticationPage } from "./auth-oidc/AuthenticationPage";
 import { BrandingPage } from "./branding/BrandingPage";
 import { AuditLogPage } from "./features/audit-log/AuditLogPage";
 import { DailyAttendancePage } from "./features/attendance/DailyAttendancePage";
@@ -69,6 +70,7 @@ export function App() {
         <Route path="reports" element={<ReportsPage />} />
         <Route path="settings" element={<Navigate to="/settings/branding" replace />} />
         <Route path="settings/branding" element={<BrandingPage />} />
+        <Route path="settings/authentication" element={<AuthenticationPage />} />
         {ALL_PAGE_IDS.filter(
           (id) =>
             id !== "dashboard" &&

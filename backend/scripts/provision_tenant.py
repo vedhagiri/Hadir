@@ -103,6 +103,7 @@ _APP_CRUD_TABLES = (
     "shift_policies",
     "attendance_records",
     "tenant_branding",
+    "tenant_oidc_config",
 )
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -262,6 +263,13 @@ def _seed_defaults(
     # Default branding row (P4). Curated defaults match the existing
     # design system's accent (``teal``) and font (``inter``).
     conn.execute(insert(tenant_branding).values(tenant_id=tenant_id))
+
+    # Default OIDC config row (P6) — disabled, empty fields. The
+    # tenant Admin opts in by entering Entra credentials and toggling
+    # ``enabled`` on the Authentication settings page.
+    from hadir.db import tenant_oidc_config  # noqa: PLC0415
+
+    conn.execute(insert(tenant_oidc_config).values(tenant_id=tenant_id))
 
     user_id = conn.execute(
         insert(users)

@@ -92,6 +92,22 @@ class Settings(BaseSettings):
     # Scheduler cadence for recomputing today's attendance_records rows.
     attendance_recompute_minutes: int = 15
 
+    # --- Entra ID OIDC (v1.0 P6) -------------------------------------------
+    # Separate Fernet key from ``fernet_key`` (which encrypts photos and
+    # RTSP credentials). Auth-scoped. If one is compromised the other
+    # still holds — that's the whole point of the split.
+    auth_fernet_key: str = Field(default="dev-auth-fernet-key-change-me")
+    # Base URL Entra calls back to. The redirect URI we register in
+    # Entra is ``{oidc_redirect_base_url}/api/auth/oidc/callback``. In
+    # production this must be HTTPS; in dev we accept plain http on
+    # localhost.
+    oidc_redirect_base_url: str = "http://localhost:8000"
+    # State + nonce cookie TTL. Ten minutes is enough for an MFA prompt
+    # plus operator hesitation; anything longer widens the replay window.
+    oidc_state_ttl_seconds: int = 600
+    # Clock-skew tolerance when validating ID-token ``exp`` / ``nbf``.
+    oidc_clock_skew_seconds: int = 60
+
 
 def get_settings() -> Settings:
     """Return a fresh Settings instance.

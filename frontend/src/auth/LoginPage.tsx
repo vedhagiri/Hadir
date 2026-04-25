@@ -1,26 +1,36 @@
-// Email + password login.
+// Email + password login (P3) + Entra ID OIDC (P6).
 //
-// Form validation uses React Hook Form with a small hand-written resolver
-// that runs zod. The prompt-named deps are RHF + Zod; we don't pull in
-// `@hookform/resolvers` for a one-liner.
+// When the active tenant has OIDC enabled, "Sign in with Microsoft" is
+// the primary CTA and the local password form collapses behind a
+// "Use local account" link — break-glass only. When OIDC is disabled
+// or the tenant has no config, the local form is the primary surface.
 //
-// On success, we navigate to ``/`` — the role-default landing route. The
-// login mutation's ``onSuccess`` already populates the TanStack Query
-// cache with the user, so the next render of ProtectedRoute will let us
-// through without a second network round-trip.
+// Tenant resolution: subdomain-based routing (omran.hadir.example.com)
+// will land here in production. For local dev the tenant slug comes
+// from a ?tenant=… query param the user types in (or the picker below).
 
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import type { Resolver } from "react-hook-form";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { z } from "zod";
 
 import { ApiError } from "../api/client";
+import { useOidcStatus } from "../auth-oidc/hooks";
 import { Icon } from "../shell/Icon";
 import { useLogin, useMe } from "./AuthProvider";
 
 const loginSchema = z.object({
   email: z.string().email("Enter a valid email"),
   password: z.string().min(1, "Password is required"),
+  tenant_slug: z
+    .string()
+    .max(63)
+    .regex(/^[a-z_][a-z0-9_]{0,62}$/, {
+      message: "Lowercase letters, digits, underscores; start with a letter",
+    })
+    .optional()
+    .or(z.literal("")),
 });
 
 type LoginValues = z.infer<typeof loginSchema>;
@@ -44,26 +54,46 @@ export function LoginPage() {
   const navigate = useNavigate();
   const login = useLogin();
   const { data: me, isLoading: meLoading } = useMe();
+  const [searchParams] = useSearchParams();
+
+  // Tenant slug — pulled from ?tenant=… or the picker we expose
+  // below. We persist whatever the user typed for the duration of the
+  // page so a failed login doesn't ask twice.
+  const [tenantSlug, setTenantSlug] = useState<string>(
+    searchParams.get("tenant") ?? "",
+  );
+  const [showLocal, setShowLocal] = useState<boolean>(false);
+
+  const oidcStatus = useOidcStatus(tenantSlug || null);
 
   const {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
+    setValue,
   } = useForm<LoginValues>({
     resolver: zodResolver,
-    defaultValues: { email: "", password: "" },
+    defaultValues: { email: "", password: "", tenant_slug: tenantSlug },
   });
 
-  // If the user is already logged in, never show the form.
+  useEffect(() => {
+    setValue("tenant_slug", tenantSlug);
+  }, [tenantSlug, setValue]);
+
   if (meLoading) return null;
   if (me != null) return <Navigate to="/" replace />;
 
   const onSubmit = handleSubmit(async (values) => {
     try {
-      await login.mutateAsync(values);
+      const payload: { email: string; password: string; tenant_slug?: string } = {
+        email: values.email,
+        password: values.password,
+      };
+      if (values.tenant_slug) payload.tenant_slug = values.tenant_slug;
+      await login.mutateAsync(payload);
       navigate("/", { replace: true });
     } catch {
-      // Error surfaces through the mutation state below; nothing to do.
+      // surfaces via login.error
     }
   });
 
@@ -71,12 +101,22 @@ export function LoginPage() {
     const err = login.error;
     if (!err) return null;
     if (err instanceof ApiError) {
-      if (err.status === 401) return "Invalid email or password.";
-      if (err.status === 429) return "Too many attempts. Try again in a few minutes.";
+      if (err.status === 401) return "Invalid credentials for this tenant.";
+      if (err.status === 429)
+        return "Too many attempts. Try again in a few minutes.";
+      if (err.status === 403)
+        return "Tenant is suspended. Contact your administrator.";
       return "Login failed. Please try again.";
     }
     return "Login failed. Please try again.";
   })();
+
+  // Decide which surface to render. Order:
+  //   1. No tenant slug → ask for one (the picker)
+  //   2. Tenant has OIDC enabled → primary "Sign in with Microsoft"
+  //   3. Otherwise → local email + password form
+  const showPicker = !tenantSlug;
+  const oidcEnabled = !!oidcStatus.data?.enabled;
 
   return (
     <main
@@ -89,12 +129,10 @@ export function LoginPage() {
         padding: 24,
       }}
     >
-      <form
-        onSubmit={onSubmit}
-        noValidate
+      <div
         style={{
           width: "100%",
-          maxWidth: 380,
+          maxWidth: 400,
           background: "var(--bg-elev)",
           border: "1px solid var(--border)",
           borderRadius: "var(--radius-lg)",
@@ -105,115 +143,319 @@ export function LoginPage() {
           gap: 14,
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            marginBottom: 4,
-          }}
-        >
-          <div className="brand-mark" style={{ width: 28, height: 28, fontSize: 14 }}>
-            ح
-          </div>
-          <div style={{ fontWeight: 600, letterSpacing: "-0.01em" }}>Hadir</div>
-          <span className="brand-tag" style={{ marginInlineStart: "auto" }}>
-            v0.1
-          </span>
-        </div>
-        <h1
-          style={{
-            fontFamily: "var(--font-display)",
-            fontSize: 32,
-            margin: 0,
-            fontWeight: 400,
-            letterSpacing: "-0.01em",
-          }}
-        >
-          Sign in
-        </h1>
-        <p
-          style={{
-            margin: 0,
-            color: "var(--text-secondary)",
-            fontSize: 13,
-          }}
-        >
-          Enter your Hadir credentials. SSO is available in v1.0.
-        </p>
+        <Header tenantSlug={tenantSlug || null} />
 
-        <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <span
-            style={{
-              fontSize: 11,
-              textTransform: "uppercase",
-              letterSpacing: "0.04em",
-              color: "var(--text-tertiary)",
-            }}
-          >
-            Email
-          </span>
-          <input
-            type="email"
-            autoComplete="username"
-            autoFocus
-            aria-invalid={!!errors.email}
-            {...register("email")}
-            style={inputStyle}
+        {showPicker ? (
+          <TenantPicker onPick={setTenantSlug} />
+        ) : oidcEnabled && !showLocal ? (
+          <OidcPanel
+            tenantSlug={tenantSlug}
+            onUseLocal={() => setShowLocal(true)}
           />
-          {errors.email && <FieldError message={errors.email.message ?? ""} />}
-        </label>
-
-        <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <span
-            style={{
-              fontSize: 11,
-              textTransform: "uppercase",
-              letterSpacing: "0.04em",
-              color: "var(--text-tertiary)",
+        ) : (
+          <LocalLoginForm
+            register={register}
+            errors={errors}
+            isSubmitting={isSubmitting}
+            isPending={login.isPending}
+            onSubmit={onSubmit}
+            tenantSlug={tenantSlug}
+            onChangeTenant={() => {
+              setTenantSlug("");
+              setShowLocal(false);
             }}
-          >
-            Password
-          </span>
-          <input
-            type="password"
-            autoComplete="current-password"
-            aria-invalid={!!errors.password}
-            {...register("password")}
-            style={inputStyle}
+            oidcEnabled={oidcEnabled}
+            onUseOidc={() => setShowLocal(false)}
+            serverError={serverError}
           />
-          {errors.password && <FieldError message={errors.password.message ?? ""} />}
-        </label>
-
-        {serverError && (
-          <div
-            role="alert"
-            style={{
-              background: "var(--danger-soft)",
-              color: "var(--danger-text)",
-              border: "1px solid var(--border)",
-              padding: "8px 10px",
-              borderRadius: "var(--radius-sm)",
-              fontSize: 12.5,
-            }}
-          >
-            {serverError}
-          </div>
         )}
-
-        <button
-          type="submit"
-          className="btn btn-primary"
-          disabled={isSubmitting || login.isPending}
-          style={{ justifyContent: "center", marginTop: 4 }}
-        >
-          <Icon name="check" size={13} />
-          {isSubmitting || login.isPending ? "Signing in…" : "Sign in"}
-        </button>
-      </form>
+      </div>
     </main>
   );
 }
+
+function Header({ tenantSlug }: { tenantSlug: string | null }) {
+  return (
+    <>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          marginBottom: 4,
+        }}
+      >
+        <div className="brand-mark" style={{ width: 28, height: 28, fontSize: 14 }}>
+          ح
+        </div>
+        <div style={{ fontWeight: 600, letterSpacing: "-0.01em" }}>Hadir</div>
+        {tenantSlug && (
+          <span
+            style={{
+              marginInlineStart: "auto",
+              fontSize: 11,
+              color: "var(--text-tertiary)",
+              fontFamily: "var(--font-mono)",
+            }}
+          >
+            {tenantSlug}
+          </span>
+        )}
+      </div>
+      <h1
+        style={{
+          fontFamily: "var(--font-display)",
+          fontSize: 32,
+          margin: 0,
+          fontWeight: 400,
+          letterSpacing: "-0.01em",
+        }}
+      >
+        Sign in
+      </h1>
+    </>
+  );
+}
+
+function TenantPicker({ onPick }: { onPick: (slug: string) => void }) {
+  const [value, setValue] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const onSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const slug = value.trim().toLowerCase();
+    if (!/^[a-z_][a-z0-9_]{0,62}$/.test(slug)) {
+      setError("Lowercase letters, digits, underscores; start with a letter.");
+      return;
+    }
+    onPick(slug);
+  };
+  return (
+    <form
+      onSubmit={onSubmit}
+      noValidate
+      style={{ display: "flex", flexDirection: "column", gap: 12 }}
+    >
+      <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 13 }}>
+        Enter your tenant slug. In production this comes from your subdomain
+        (e.g. <code>omran</code> for <code>omran.hadir.example.com</code>).
+      </p>
+      <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <span style={labelStyle}>Tenant slug</span>
+        <input
+          type="text"
+          autoFocus
+          autoComplete="off"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          style={inputStyle}
+        />
+        {error && (
+          <span style={{ color: "var(--danger-text)", fontSize: 11.5 }}>
+            {error}
+          </span>
+        )}
+      </label>
+      <button type="submit" className="btn btn-primary" style={{ justifyContent: "center" }}>
+        Continue
+      </button>
+    </form>
+  );
+}
+
+function OidcPanel({
+  tenantSlug,
+  onUseLocal,
+}: {
+  tenantSlug: string;
+  onUseLocal: () => void;
+}) {
+  const oidcUrl = `/api/auth/oidc/login?tenant=${encodeURIComponent(tenantSlug)}`;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 13 }}>
+        Sign in with your Microsoft account. Your administrator must register
+        you in Hadir before your first sign-in.
+      </p>
+      <a
+        href={oidcUrl}
+        style={{
+          background: "var(--accent)",
+          color: "white",
+          padding: "10px 14px",
+          borderRadius: "var(--radius-sm)",
+          textAlign: "center",
+          textDecoration: "none",
+          fontWeight: 600,
+          fontSize: 14,
+        }}
+      >
+        Sign in with Microsoft
+      </a>
+      <button
+        type="button"
+        onClick={onUseLocal}
+        style={{
+          background: "transparent",
+          border: "none",
+          color: "var(--text-secondary)",
+          cursor: "pointer",
+          fontSize: 12.5,
+          textDecoration: "underline",
+        }}
+      >
+        Use local account (break-glass)
+      </button>
+    </div>
+  );
+}
+
+interface LocalFormProps {
+  register: ReturnType<typeof useForm<LoginValues>>["register"];
+  errors: ReturnType<typeof useForm<LoginValues>>["formState"]["errors"];
+  isSubmitting: boolean;
+  isPending: boolean;
+  onSubmit: (e?: React.BaseSyntheticEvent) => Promise<void>;
+  tenantSlug: string;
+  onChangeTenant: () => void;
+  oidcEnabled: boolean;
+  onUseOidc: () => void;
+  serverError: string | null;
+}
+
+function LocalLoginForm({
+  register,
+  errors,
+  isSubmitting,
+  isPending,
+  onSubmit,
+  tenantSlug,
+  onChangeTenant,
+  oidcEnabled,
+  onUseOidc,
+  serverError,
+}: LocalFormProps) {
+  return (
+    <form
+      onSubmit={onSubmit}
+      noValidate
+      style={{ display: "flex", flexDirection: "column", gap: 14 }}
+    >
+      <input
+        type="hidden"
+        value={tenantSlug}
+        {...register("tenant_slug")}
+      />
+      <p
+        style={{
+          margin: 0,
+          color: "var(--text-secondary)",
+          fontSize: 13,
+        }}
+      >
+        Enter your Hadir credentials.
+      </p>
+
+      <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <span style={labelStyle}>Email</span>
+        <input
+          type="email"
+          autoComplete="username"
+          autoFocus
+          aria-invalid={!!errors.email}
+          {...register("email")}
+          style={inputStyle}
+        />
+        {errors.email && <FieldError message={errors.email.message ?? ""} />}
+      </label>
+
+      <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <span style={labelStyle}>Password</span>
+        <input
+          type="password"
+          autoComplete="current-password"
+          aria-invalid={!!errors.password}
+          {...register("password")}
+          style={inputStyle}
+        />
+        {errors.password && <FieldError message={errors.password.message ?? ""} />}
+      </label>
+
+      {serverError && (
+        <div
+          role="alert"
+          style={{
+            background: "var(--danger-soft)",
+            color: "var(--danger-text)",
+            border: "1px solid var(--border)",
+            padding: "8px 10px",
+            borderRadius: "var(--radius-sm)",
+            fontSize: 12.5,
+          }}
+        >
+          {serverError}
+        </div>
+      )}
+
+      <button
+        type="submit"
+        className="btn btn-primary"
+        disabled={isSubmitting || isPending}
+        style={{ justifyContent: "center", marginTop: 4 }}
+      >
+        <Icon name="check" size={13} />
+        {isSubmitting || isPending ? "Signing in…" : "Sign in"}
+      </button>
+
+      <div
+        style={{
+          display: "flex",
+          gap: 12,
+          fontSize: 12,
+          color: "var(--text-tertiary)",
+          justifyContent: "space-between",
+        }}
+      >
+        <button
+          type="button"
+          onClick={onChangeTenant}
+          style={{
+            background: "transparent",
+            border: "none",
+            color: "inherit",
+            cursor: "pointer",
+            textDecoration: "underline",
+            padding: 0,
+          }}
+        >
+          Change tenant
+        </button>
+        {oidcEnabled && (
+          <button
+            type="button"
+            onClick={onUseOidc}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "inherit",
+              cursor: "pointer",
+              textDecoration: "underline",
+              padding: 0,
+            }}
+          >
+            Sign in with Microsoft
+          </button>
+        )}
+      </div>
+    </form>
+  );
+}
+
+const labelStyle = {
+  fontSize: 11,
+  textTransform: "uppercase" as const,
+  letterSpacing: "0.04em",
+  color: "var(--text-tertiary)",
+};
 
 const inputStyle = {
   padding: "8px 10px",
