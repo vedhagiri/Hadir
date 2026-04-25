@@ -13,9 +13,15 @@ multi-tenant SaaS-capable product 8–10 weeks after pilot signoff.
 
 ## Status
 **Pilot prompts currently complete: P1–P13.**
-Next: P14 — Omran on-site deployment. Wait for the user before
-starting it. The pilot-plan asks for a final UX-papercut polish pass
-on the dev box (walking through the demo script) before P14 begins.
+**P14 prep ready, NOT delivered.** The on-site artifacts (bootstrap
+script, day runbook, sign-off template, printable acceptance
+checklist) are in `scripts/omran_bootstrap.sh` and `docs/`. The
+actual P14 deployment is a physical on-site step that has not
+happened yet. Do **not** treat the existence of `docs/pilot-signoff.md`
+as evidence of delivery — that file's first line is
+`STATUS: not yet delivered` and is replaced on the day. The
+`feat(P14): omran pilot deployment + signoff` commit only lands
+*after* the sponsor signs the printed checklist.
 
 What P1 built:
 - Monorepo layout per PROJECT_CONTEXT §7
