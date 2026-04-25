@@ -47,14 +47,26 @@ def test_no_events_is_absent() -> None:
 
 
 def test_leave_clears_absent_flag() -> None:
+    from hadir.attendance.engine import LeaveRecord  # noqa: PLC0415
+
     r = compute(
         employee_id=1,
         the_date=D,
         policy=FIXED,
         events=[],
-        leaves=[{"id": 1}],  # shape doesn't matter for pilot — presence does
+        leaves=[
+            LeaveRecord(
+                leave_type_id=1,
+                leave_type_code="Annual",
+                leave_type_name="Annual leave",
+                is_paid=True,
+                start_date=D,
+                end_date=D,
+            )
+        ],
     )
     assert r.absent is False
+    assert r.leave_type_name == "Annual leave"
 
 
 # ---------------------------------------------------------------------------

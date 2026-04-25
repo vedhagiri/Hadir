@@ -47,16 +47,23 @@ def recompute_today(scope: TenantScope) -> int:
 
 def _recompute_today_inner(scope: TenantScope) -> int:
     engine = get_engine()
-    tz = attendance_repo.local_tz()
+
+    # P11: timezone is tenant-scoped. Read it (and the weekend
+    # days) once per recompute pass.
+    with engine.begin() as conn:
+        settings = attendance_repo.load_tenant_settings(conn, scope)
+    tz = attendance_repo.local_tz_for(settings)
     today = datetime.now(timezone.utc).astimezone(tz).date()
 
     with engine.begin() as conn:
         employee_ids = attendance_repo.active_employee_ids(conn, scope)
         # P9: resolve per-employee via the policy_assignments cascade.
-        # Falls back to ``active_policy_for`` (legacy single-tenant
-        # policy) when no assignment matches.
         policy_map = attendance_repo.resolve_policies_for_employees(
             conn, scope, the_date=today, employee_ids=employee_ids
+        )
+        # P11: holidays are tenant-wide; load once.
+        todays_holidays = attendance_repo.holidays_on(
+            conn, scope, the_date=today
         )
     if not policy_map:
         logger.warning(
@@ -78,11 +85,18 @@ def _recompute_today_inner(scope: TenantScope) -> int:
                 events = attendance_repo.events_for(
                     conn, scope, employee_id=emp_id, the_date=today
                 )
+                # P11: per-employee leaves overlapping today.
+                leaves = attendance_repo.leaves_for_employee_on(
+                    conn, scope, employee_id=emp_id, the_date=today
+                )
                 record = attendance_engine.compute(
                     employee_id=emp_id,
                     the_date=today,
                     policy=policy,
                     events=events,
+                    leaves=leaves,
+                    holidays=todays_holidays,
+                    weekend_days=settings.weekend_days,
                 )
                 attendance_repo.upsert_attendance(conn, scope, record)
             upserted += 1

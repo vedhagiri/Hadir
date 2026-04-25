@@ -20,6 +20,7 @@ import { DashboardRouter } from "./features/dashboard/DashboardRouter";
 import { EmployeesPage } from "./features/employees/EmployeesPage";
 import { ReportsPage } from "./features/reports/ReportsPage";
 import { SystemPage } from "./features/system/SystemPage";
+import { LeaveCalendarPage } from "./leave-calendar/LeaveCalendarPage";
 import { ManagerAssignmentsPage } from "./manager-assignments/ManagerAssignmentsPage";
 import { Placeholder } from "./pages/Placeholder";
 import { PoliciesPage } from "./policies/PoliciesPage";
@@ -72,6 +73,7 @@ export function App() {
         <Route path="reports" element={<ReportsPage />} />
         <Route path="mgr-assign" element={<ManagerAssignmentsPage />} />
         <Route path="policies" element={<PoliciesPage />} />
+        <Route path="leave-policy" element={<LeaveCalendarPage />} />
         <Route path="settings" element={<Navigate to="/settings/branding" replace />} />
         <Route path="settings/branding" element={<BrandingPage />} />
         <Route path="settings/authentication" element={<AuthenticationPage />} />
@@ -89,7 +91,8 @@ export function App() {
             id !== "reports" &&
             id !== "settings" &&
             id !== "mgr-assign" &&
-            id !== "policies",
+            id !== "policies" &&
+            id !== "leave-policy",
         ).map((id) => (
           <Route key={id} path={id} element={<Placeholder pageId={id} />} />
         ))}

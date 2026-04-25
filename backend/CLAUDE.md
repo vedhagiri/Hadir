@@ -1,7 +1,7 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 complete**:
+Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 complete**:
 pilot frozen at tag `v0.1-pilot` on branch `release/pilot`; multi-tenant
 routing wired up via a per-connection `SET search_path` driven by a
 ContextVar + SQLAlchemy `checkout` event; the global `tenants` registry
@@ -54,9 +54,16 @@ CRUD, audit on every change. **P10** added Ramadan + Custom: engine
 dispatches Custom→inner-shape (Fixed or Flex) and Ramadan→Fixed
 math, both still pure; resolver prepends Custom > Ramadan > … as
 the new highest tiers. Priority documented in
-`backend/CLAUDE.md §"Policy resolution priority"`. Single-mode
+`backend/CLAUDE.md §"Policy resolution priority"`. **P11** added
+the leaves + holidays + tenant-settings module (per-tenant
+timezone — the load-bearing red line); engine takes
+`LeaveRecord` / `HolidayRecord` / `weekend_days` and treats
+holidays + weekends as full-overtime days (single treatment, no
+double-count for holiday-on-weekend). `/api/leave-types` +
+`/api/holidays` (incl. .xlsx import) + `/api/approved-leaves`
++ `/api/tenant-settings` Admin/HR CRUD. Single-mode
 backwards-compatible (pilot's `main` schema is the default).
-**v1.0 P11 next.**
+**v1.0 P12 next.**
 
 ## Tenant routing (v1.0 P1)
 **Approach chosen: SQLAlchemy `checkout` event + Python ContextVar**,

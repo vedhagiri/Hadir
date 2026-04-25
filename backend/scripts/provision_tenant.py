@@ -106,6 +106,10 @@ _APP_CRUD_TABLES = (
     "tenant_oidc_config",
     "manager_assignments",
     "policy_assignments",
+    "leave_types",
+    "holidays",
+    "approved_leaves",
+    "tenant_settings",
 )
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -269,9 +273,32 @@ def _seed_defaults(
     # Default OIDC config row (P6) — disabled, empty fields. The
     # tenant Admin opts in by entering Entra credentials and toggling
     # ``enabled`` on the Authentication settings page.
-    from hadir.db import tenant_oidc_config  # noqa: PLC0415
+    from hadir.db import (  # noqa: PLC0415
+        leave_types as _leave_types,
+        tenant_oidc_config,
+        tenant_settings as _tenant_settings,
+    )
 
     conn.execute(insert(tenant_oidc_config).values(tenant_id=tenant_id))
+
+    # P11: leave types + tenant settings. Same defaults as the
+    # migration's idempotent seed so freshly-provisioned tenants
+    # match existing tenants exactly.
+    for code, name, is_paid in (
+        ("Annual", "Annual leave", True),
+        ("Sick", "Sick leave", True),
+        ("Emergency", "Emergency leave", True),
+        ("Unpaid", "Unpaid leave", False),
+    ):
+        conn.execute(
+            insert(_leave_types).values(
+                tenant_id=tenant_id,
+                code=code,
+                name=name,
+                is_paid=is_paid,
+            )
+        )
+    conn.execute(insert(_tenant_settings).values(tenant_id=tenant_id))
 
     user_id = conn.execute(
         insert(users)

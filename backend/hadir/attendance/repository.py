@@ -16,14 +16,24 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Connection
 
-from hadir.attendance.engine import AttendanceRecord, ShiftPolicy, policy_from_row
+from hadir.attendance.engine import (
+    AttendanceRecord,
+    HolidayRecord,
+    LeaveRecord,
+    ShiftPolicy,
+    policy_from_row,
+)
 from hadir.config import get_settings
 from hadir.db import (
+    approved_leaves,
     attendance_records,
     departments,
     detection_events,
     employees,
+    holidays,
+    leave_types,
     shift_policies,
+    tenant_settings,
 )
 from hadir.tenants.scope import TenantScope
 
@@ -52,7 +62,126 @@ class AttendanceRow:
 
 
 def local_tz() -> ZoneInfo:
+    """Server-scoped legacy fallback. New callers use ``local_tz_for``."""
+
     return ZoneInfo(get_settings().local_timezone)
+
+
+# --- P11: tenant settings + leaves + holidays ------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class TenantTimeSettings:
+    """Subset of ``tenant_settings`` used by the engine pipeline."""
+
+    weekend_days: tuple[str, ...]
+    timezone: str
+
+
+def load_tenant_settings(
+    conn: Connection, scope: TenantScope
+) -> TenantTimeSettings:
+    """Return the tenant's ``weekend_days`` + ``timezone``.
+
+    Falls back to the global ``HADIR_LOCAL_TIMEZONE`` setting +
+    ``("Friday", "Saturday")`` if no row exists. Defence in depth —
+    the migration seeds rows for every tenant; this fallback only
+    fires for partially-bootstrapped DBs.
+    """
+
+    row = conn.execute(
+        select(
+            tenant_settings.c.weekend_days,
+            tenant_settings.c.timezone,
+        ).where(tenant_settings.c.tenant_id == scope.tenant_id)
+    ).first()
+    if row is None:
+        return TenantTimeSettings(
+            weekend_days=("Friday", "Saturday"),
+            timezone=get_settings().local_timezone,
+        )
+    raw_days = row.weekend_days or []
+    return TenantTimeSettings(
+        weekend_days=tuple(str(d) for d in raw_days),
+        timezone=str(row.timezone or get_settings().local_timezone),
+    )
+
+
+def local_tz_for(settings: TenantTimeSettings) -> ZoneInfo:
+    """ZoneInfo from tenant settings — the P11 red line in code form.
+
+    Timezone is **tenant-scoped, not server-scoped**. Every
+    attendance comparison must run through this helper or a value
+    returned by ``load_tenant_settings``.
+    """
+
+    return ZoneInfo(settings.timezone)
+
+
+def holidays_on(
+    conn: Connection,
+    scope: TenantScope,
+    *,
+    the_date: date,
+) -> list[HolidayRecord]:
+    """Active holidays falling on ``the_date`` for this tenant."""
+
+    rows = conn.execute(
+        select(holidays.c.date, holidays.c.name).where(
+            holidays.c.tenant_id == scope.tenant_id,
+            holidays.c.date == the_date,
+            holidays.c.active.is_(True),
+        )
+    ).all()
+    return [HolidayRecord(date=r.date, name=str(r.name)) for r in rows]
+
+
+def leaves_for_employee_on(
+    conn: Connection,
+    scope: TenantScope,
+    *,
+    employee_id: int,
+    the_date: date,
+) -> list[LeaveRecord]:
+    """Approved leaves whose date range covers ``the_date`` for this employee."""
+
+    rows = conn.execute(
+        select(
+            approved_leaves.c.leave_type_id,
+            approved_leaves.c.start_date,
+            approved_leaves.c.end_date,
+            leave_types.c.code,
+            leave_types.c.name,
+            leave_types.c.is_paid,
+        )
+        .select_from(
+            approved_leaves.join(
+                leave_types,
+                and_(
+                    leave_types.c.id == approved_leaves.c.leave_type_id,
+                    leave_types.c.tenant_id == approved_leaves.c.tenant_id,
+                ),
+            )
+        )
+        .where(
+            approved_leaves.c.tenant_id == scope.tenant_id,
+            approved_leaves.c.employee_id == employee_id,
+            approved_leaves.c.start_date <= the_date,
+            approved_leaves.c.end_date >= the_date,
+        )
+        .order_by(approved_leaves.c.id.asc())
+    ).all()
+    return [
+        LeaveRecord(
+            leave_type_id=int(r.leave_type_id),
+            leave_type_code=str(r.code),
+            leave_type_name=str(r.name),
+            is_paid=bool(r.is_paid),
+            start_date=r.start_date,
+            end_date=r.end_date,
+        )
+        for r in rows
+    ]
 
 
 # --- Policy lookup ----------------------------------------------------------
@@ -436,6 +565,7 @@ def upsert_attendance(
         short_hours=record.short_hours,
         absent=record.absent,
         overtime_minutes=record.overtime_minutes,
+        leave_type_id=record.leave_type_id,
     )
     stmt = stmt.on_conflict_do_update(
         constraint="uq_attendance_records_tenant_emp_date",
@@ -449,6 +579,7 @@ def upsert_attendance(
             "short_hours": stmt.excluded.short_hours,
             "absent": stmt.excluded.absent,
             "overtime_minutes": stmt.excluded.overtime_minutes,
+            "leave_type_id": stmt.excluded.leave_type_id,
             "computed_at": __import__("sqlalchemy").func.now(),
         },
     )

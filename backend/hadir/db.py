@@ -351,6 +351,154 @@ manager_assignments = Table(
 )
 
 
+# --- Leaves + holidays + tenant settings (P11) ----------------------------
+
+leave_types = Table(
+    "leave_types",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column("code", Text, nullable=False),
+    Column("name", Text, nullable=False),
+    Column("is_paid", Boolean, nullable=False, server_default="true"),
+    Column("active", Boolean, nullable=False, server_default="true"),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    UniqueConstraint(
+        "tenant_id", "code", name="uq_leave_types_tenant_code"
+    ),
+)
+
+
+holidays = Table(
+    "holidays",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column("date", Date, nullable=False),
+    Column("name", Text, nullable=False),
+    Column("active", Boolean, nullable=False, server_default="true"),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    UniqueConstraint(
+        "tenant_id", "date", name="uq_holidays_tenant_date"
+    ),
+)
+
+
+approved_leaves = Table(
+    "approved_leaves",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "employee_id",
+        Integer,
+        ForeignKey("employees.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "leave_type_id",
+        Integer,
+        ForeignKey("leave_types.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column("start_date", Date, nullable=False),
+    Column("end_date", Date, nullable=False),
+    Column("notes", Text, nullable=True),
+    Column(
+        "approved_by_user_id",
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    Column(
+        "approved_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    CheckConstraint(
+        "start_date <= end_date",
+        name="ck_approved_leaves_date_range",
+    ),
+    Index(
+        "ix_approved_leaves_tenant_employee_dates",
+        "tenant_id",
+        "employee_id",
+        "start_date",
+        "end_date",
+    ),
+)
+
+
+# Per-tenant settings — ``weekend_days`` (JSONB list of weekday names
+# matching ``date.strftime("%A")``) + ``timezone`` (IANA name). Per
+# the P11 red line, **timezone is tenant-scoped, not server-scoped**.
+tenant_settings = Table(
+    "tenant_settings",
+    metadata,
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "weekend_days",
+        JSONB,
+        nullable=False,
+        server_default='["Friday", "Saturday"]',
+    ),
+    Column(
+        "timezone",
+        Text,
+        nullable=False,
+        server_default="Asia/Muscat",
+    ),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+)
+
+
 # --- Per-tenant OIDC config (P6) -------------------------------------------
 # One row per tenant. ``client_secret_encrypted`` is Fernet-encrypted
 # with ``HADIR_AUTH_FERNET_KEY`` (separate from the photo/RTSP key —
@@ -951,6 +1099,15 @@ attendance_records = Table(
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
+    ),
+    # P11: filled when an approved leave covers the date. Nullable
+    # — null on regular working days. The API joins to ``leave_types``
+    # to surface the human-readable name.
+    Column(
+        "leave_type_id",
+        Integer,
+        ForeignKey("leave_types.id", ondelete="SET NULL"),
+        nullable=True,
     ),
     UniqueConstraint(
         "tenant_id", "employee_id", "date", name="uq_attendance_records_tenant_emp_date"

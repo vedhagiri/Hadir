@@ -102,6 +102,31 @@ class ShiftPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class LeaveRecord:
+    """An approved leave covering some date range.
+
+    The engine receives a list of these (typically already filtered
+    to the relevant ``the_date`` by the repository) and matches via
+    ``start_date <= the_date <= end_date``.
+    """
+
+    leave_type_id: int
+    leave_type_code: str
+    leave_type_name: str
+    is_paid: bool
+    start_date: date
+    end_date: date
+
+
+@dataclass(frozen=True, slots=True)
+class HolidayRecord:
+    """A tenant-wide non-working day."""
+
+    date: date
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
 class AttendanceRecord:
     """Value object returned by ``compute`` — persistence is the caller's job."""
 
@@ -116,6 +141,11 @@ class AttendanceRecord:
     short_hours: bool
     absent: bool
     overtime_minutes: int
+    # P11: when an approved leave covers ``date``, both fields are
+    # populated and the per-type flag rules don't run (no late /
+    # early / short on a leave day).
+    leave_type_id: Optional[int] = None
+    leave_type_name: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -263,8 +293,9 @@ def compute(
     the_date: date,
     policy: ShiftPolicy,
     events: Sequence[datetime],
-    leaves: Sequence = (),  # pilot: always empty (pilot-plan P10)
-    holidays: Sequence = (),  # pilot: always empty (pilot-plan P10)
+    leaves: Sequence[LeaveRecord] = (),
+    holidays: Sequence[HolidayRecord] = (),
+    weekend_days: Sequence[str] = (),
 ) -> AttendanceRecord:
     """Compute one ``AttendanceRecord`` from the day's events.
 
@@ -272,16 +303,40 @@ def compute(
     in the same wall-clock timezone as the policy's window times. The
     scheduler handles the timezone conversion before calling us.
 
-    The engine is agnostic to how the caller sources events
-    (detection pipeline, manual import, backfill) — it just needs
-    timestamps.
+    P11 inputs:
+
+    * ``leaves`` — every approved leave the caller wants the engine
+      to consider. The engine matches by ``start_date <= the_date
+      <= end_date``; first match wins.
+    * ``holidays`` — list of ``HolidayRecord`` for the date.
+    * ``weekend_days`` — weekday names matched against
+      ``the_date.strftime("%A")``. Empty tuple = no weekends (the
+      engine doesn't infer locale).
+
+    The engine stays agnostic to how the caller sources any of these.
+    Holiday-on-weekend collapses to a single overtime treatment — no
+    double-counting.
     """
 
     has_events = len(events) > 0
-    covered_by_leave = bool(leaves)
-    absent = (not has_events) and (not covered_by_leave)
+
+    matching_leave: Optional[LeaveRecord] = None
+    for lv in leaves:
+        if lv.start_date <= the_date <= lv.end_date:
+            matching_leave = lv
+            break
+
+    on_holiday = any(h.date == the_date for h in holidays)
+    weekday_name = the_date.strftime("%A")
+    on_weekend = weekday_name in weekend_days
+    is_overtime_day = on_holiday or on_weekend
+
+    leave_id_value = matching_leave.leave_type_id if matching_leave else None
+    leave_name_value = matching_leave.leave_type_name if matching_leave else None
 
     if not has_events:
+        # Absent if NEITHER a leave NOR a holiday/weekend covers the date.
+        absent = (matching_leave is None) and (not is_overtime_day)
         return AttendanceRecord(
             employee_id=employee_id,
             date=the_date,
@@ -294,6 +349,8 @@ def compute(
             short_hours=False,
             absent=absent,
             overtime_minutes=0,
+            leave_type_id=leave_id_value,
+            leave_type_name=leave_name_value,
         )
 
     ordered = sorted(events)
@@ -303,11 +360,31 @@ def compute(
     out_time = (
         last.time().replace(microsecond=0) if len(ordered) > 1 else None
     )
-
     total_minutes: Optional[int] = None
     if out_time is not None:
         total_minutes = max(0, _minutes_between(in_time, out_time))
 
+    if is_overtime_day:
+        # Holiday or weekend with work events: skip per-type flag
+        # math entirely. The whole day is overtime; late/early/short
+        # don't apply when the day isn't a working day.
+        return AttendanceRecord(
+            employee_id=employee_id,
+            date=the_date,
+            policy_id=policy.id,
+            in_time=in_time,
+            out_time=out_time,
+            total_minutes=total_minutes,
+            late=False,
+            early_out=False,
+            short_hours=False,
+            absent=False,
+            overtime_minutes=total_minutes if total_minutes is not None else 0,
+            leave_type_id=leave_id_value,
+            leave_type_name=leave_name_value,
+        )
+
+    # Regular working day with events.
     flags = _flags_for(
         policy,
         in_time=in_time,
@@ -328,6 +405,8 @@ def compute(
         short_hours=flags.short_hours,
         absent=False,
         overtime_minutes=flags.overtime_minutes,
+        leave_type_id=leave_id_value,
+        leave_type_name=leave_name_value,
     )
 
 
