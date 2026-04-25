@@ -1,7 +1,9 @@
-// Admin / HR / Manager reports page (P13).
+// Admin / HR / Manager reports page.
 // Date range, employee filter, department filter (Admin/HR-only).
-// "Generate Excel" POSTs to /api/reports/attendance.xlsx and triggers a
-// browser download via blob + anchor.
+// Two output formats: Excel (pilot P13) and PDF (v1.0 P17). Both
+// share the same filter form; the click handler picks the endpoint.
+// Each click POSTs to /api/reports/attendance.{xlsx,pdf} and triggers
+// a browser download via blob + anchor.
 
 import { useEffect, useState } from "react";
 
@@ -35,7 +37,7 @@ export function ReportsPage() {
   const [end, setEnd] = useState<string>(todayIso());
   const [departmentId, setDepartmentId] = useState<number | null>(null);
   const [employeeId, setEmployeeId] = useState<string>("");
-  const [loading, setLoading] = useState<boolean>(false);
+  const [loading, setLoading] = useState<"xlsx" | "pdf" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
@@ -44,8 +46,8 @@ export function ReportsPage() {
     setInfo(null);
   }, [start, end, departmentId, employeeId]);
 
-  const generate = async () => {
-    setLoading(true);
+  const generate = async (format: "xlsx" | "pdf") => {
+    setLoading(format);
     setError(null);
     setInfo(null);
     try {
@@ -54,7 +56,11 @@ export function ReportsPage() {
       const trimmedEmp = employeeId.trim();
       if (trimmedEmp) body.employee_id = Number(trimmedEmp);
 
-      const resp = await fetch("/api/reports/attendance.xlsx", {
+      const path =
+        format === "pdf"
+          ? "/api/reports/attendance.pdf"
+          : "/api/reports/attendance.xlsx";
+      const resp = await fetch(path, {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
@@ -76,8 +82,9 @@ export function ReportsPage() {
       const a = document.createElement("a");
       a.href = url;
       a.download =
-        deriveFilenameFromContentDisposition(resp.headers.get("content-disposition")) ??
-        `attendance_${start}_to_${end}.xlsx`;
+        deriveFilenameFromContentDisposition(
+          resp.headers.get("content-disposition"),
+        ) ?? `attendance_${start}_to_${end}.${format}`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -86,7 +93,7 @@ export function ReportsPage() {
     } catch {
       setError("Network error generating the report.");
     } finally {
-      setLoading(false);
+      setLoading(null);
     }
   };
 
@@ -96,7 +103,8 @@ export function ReportsPage() {
         <div>
           <h1 className="page-title">Reports</h1>
           <p className="page-sub">
-            On-demand attendance Excel · scheduled delivery is deferred to v1.0
+            On-demand attendance · pick Excel for raw analysis or PDF for a
+            branded letterhead. Scheduled delivery lands in P18.
           </p>
         </div>
       </div>
@@ -178,12 +186,20 @@ export function ReportsPage() {
               </span>
             )}
             <button
-              className="btn btn-primary"
-              onClick={generate}
-              disabled={loading}
+              className="btn"
+              onClick={() => generate("xlsx")}
+              disabled={loading !== null}
             >
               <Icon name="download" size={12} />
-              {loading ? "Generating…" : "Generate Excel"}
+              {loading === "xlsx" ? "Generating Excel…" : "Generate Excel"}
+            </button>
+            <button
+              className="btn btn-primary"
+              onClick={() => generate("pdf")}
+              disabled={loading !== null}
+            >
+              <Icon name="fileText" size={12} />
+              {loading === "pdf" ? "Generating PDF…" : "Generate PDF"}
             </button>
           </div>
 
@@ -195,12 +211,11 @@ export function ReportsPage() {
               lineHeight: 1.5,
             }}
           >
-            One sheet per ISO calendar week. Columns:{" "}
-            <span className="mono">
-              employee_code, name, date, in_time, out_time, total_hours, late,
-              early_out, short, overtime_minutes, policy
-            </span>
-            . Manager exports are auto-scoped to your department(s).
+            <strong>Excel:</strong> one sheet per ISO calendar week, raw
+            columns for further analysis. <strong>PDF:</strong> branded
+            letterhead, one section per employee with daily rows + totals,
+            page-break between employees. Manager exports of either
+            format are auto-scoped to your department(s).
           </div>
         </div>
       </div>

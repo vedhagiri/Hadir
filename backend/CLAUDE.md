@@ -1,7 +1,7 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 complete**:
+Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 complete**:
 pilot frozen at tag `v0.1-pilot` on branch `release/pilot`; multi-tenant
 routing wired up via a per-connection `SET search_path` driven by a
 ContextVar + SQLAlchemy `checkout` event; the global `tenants` registry
@@ -125,7 +125,21 @@ line — server is the source of truth). The audit row records
 original Manager + HR decider (when present) and the submitting
 Employee, resolved by lower-cased email; the payload carries
 `recipient_email` as a fallback for delivery so P20 can email
-deactivated accounts. **v1.0 P17 next.**
+deactivated accounts. **P17** added the PDF attendance report:
+WeasyPrint 62.3 + Jinja templating + a `pydyf==0.10.0` pin
+(WeasyPrint 62 is incompatible with pydyf 0.11+). Dockerfile gains
+`libpango / libcairo / libgdk-pixbuf / libffi / shared-mime-info
+/ fonts-liberation` so the WeasyPrint cffi import doesn't crash on
+a fresh image. `hadir/reporting/pdf.py` reads
+`tenant_branding`, maps `primary_color_key` to a stable hex pair
+via `HEX_PALETTE`, and inlines the tenant logo as a `data:` URL
+so the renderer never opens a network socket. `POST
+/api/reports/attendance.pdf` shares the Excel endpoint's request
+body + role gates + manager scoping + date guards; filename
+`hadir-attendance-{tenant_slug}-{from}-to-{to}.pdf` per spec.
+Multi-employee reports get `page-break-before: always` between
+sections; the `@page` rule paints generation timestamp + "Page x
+of y" via CSS counters. **v1.0 P18 next.**
 
 ## Tenant routing (v1.0 P1)
 **Approach chosen: SQLAlchemy `checkout` event + Python ContextVar**,

@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16.**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17.**
 
 > **Tenant isolation is a P0 blocker.** The suites
 > `backend/tests/test_multi_tenant_isolation.py` (the P1 canary) and
@@ -294,8 +294,29 @@ To return to v1.0 work: `git checkout main`.
   gains an "Override" action button for Admins, and the
   detail-drawer timeline labels the override stage **"⚠
   Overridden by admin"**.
+- **P17** — PDF reports. Dockerfile gains the WeasyPrint runtime
+  system deps (libpango / libcairo / libgdk-pixbuf / libffi /
+  shared-mime-info / fonts-liberation); `pyproject.toml` adds
+  `weasyprint==62.3` + `jinja2==3.1.4` + `pydyf==0.10.0` (pinned —
+  upstream issue #2129 broke WeasyPrint 62 with pydyf 0.11+).
+  `hadir/reporting/templates/attendance.html` is a single-file
+  Jinja template with a tenant-branded letterhead, summary block,
+  and one section per employee with daily rows + totals; multi-
+  employee reports get `page-break-before: always` between each
+  section, and the `@page` rule paints "Generated …" + "Page x of
+  y" on every page via CSS counters. `hadir/reporting/pdf.py`
+  groups query rows by employee, lazy-creates a `tenant_branding`
+  row when missing, picks an accent hex per `primary_color_key`
+  via the new `HEX_PALETTE` (deliberate parallel to the OKLCH
+  set), and inlines the logo as a `data:` URL so the renderer
+  never opens a network socket. New `POST /api/reports/attendance.pdf`
+  mirrors the Excel endpoint's body + role gates + manager scoping
+  + date guards; filename `hadir-attendance-{tenant_slug}-{from}-to-{to}.pdf`
+  per spec. Frontend Reports page gains a "Generate PDF" button
+  alongside the existing Excel one — same filter form, per-format
+  loading states.
 
-Next: **P17** per `v1.0-phase-plan.md`. Wait for the user before
+Next: **P18** per `v1.0-phase-plan.md`. Wait for the user before
 starting. Per-phase records: `docs/phases/P*.md`.
 
 ---

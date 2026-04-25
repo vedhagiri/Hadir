@@ -1,0 +1,320 @@
+<!--
+  Hadir attendance PDF template (v1.0 P17). Rendered by WeasyPrint
+  via hadir/reporting/pdf.py. Tenant branding picks the letterhead
+  accent + heading font; the logo, when present, is embedded as a
+  data: URL so the renderer doesn't need network access.
+
+  Layout:
+    * Letterhead with tenant logo + name + report meta.
+    * Summary block (date range, employees, days, lates, OT hours).
+    * One section per employee with daily rows + per-employee totals.
+    * Page break between employees so each row's manager can hand a
+      single block to the relevant person.
+    * Footer with page-x-of-y and a generation timestamp.
+
+  All inline styles — WeasyPrint reads <style> from the document
+  itself, no external CSS lookups.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Attendance Report — {{ tenant.name }}</title>
+<style>
+  @page {
+    size: A4;
+    margin: 18mm 16mm 22mm 16mm;
+    @bottom-left {
+      content: "Generated {{ generated_at_label }}";
+      font-family: {{ branding.font_family | safe }};
+      font-size: 8.5pt;
+      color: #6b6b6b;
+    }
+    @bottom-right {
+      content: "Page " counter(page) " of " counter(pages);
+      font-family: {{ branding.font_family | safe }};
+      font-size: 8.5pt;
+      color: #6b6b6b;
+    }
+  }
+
+  html, body {
+    font-family: {{ branding.font_family | safe }};
+    font-size: 10pt;
+    color: #1f1f1f;
+    line-height: 1.45;
+  }
+
+  .accent { color: {{ branding.accent_hex }}; }
+  .accent-bg { background: {{ branding.accent_hex }}; color: #ffffff; }
+  .accent-soft-bg { background: {{ branding.accent_soft_hex }}; }
+  .border-accent { border-color: {{ branding.accent_hex }}; }
+
+  /* Letterhead */
+  .letterhead {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 14px;
+    border-bottom: 2px solid {{ branding.accent_hex }};
+    padding-bottom: 10px;
+    margin-bottom: 12px;
+  }
+  .letterhead .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .letterhead .logo {
+    width: 44px;
+    height: 44px;
+    border-radius: 8px;
+    background: {{ branding.accent_soft_hex }};
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .letterhead .logo img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+  .letterhead .logo .mark {
+    color: {{ branding.accent_hex }};
+    font-weight: 700;
+    font-size: 22pt;
+  }
+  .letterhead .name {
+    font-size: 16pt;
+    font-weight: 600;
+    color: {{ branding.accent_hex }};
+  }
+  .letterhead .sub {
+    font-size: 8.5pt;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .letterhead .meta {
+    text-align: right;
+    font-size: 8.5pt;
+    color: #555;
+  }
+  .letterhead .meta .title {
+    color: {{ branding.accent_hex }};
+    font-size: 12pt;
+    font-weight: 600;
+    margin-bottom: 2px;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
+  /* Summary */
+  .summary {
+    margin-bottom: 14px;
+    border: 1px solid #e7e7e7;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .summary .summary-head {
+    padding: 6px 10px;
+    background: {{ branding.accent_soft_hex }};
+    color: {{ branding.accent_hex }};
+    font-size: 9pt;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    border-bottom: 1px solid #e7e7e7;
+  }
+  .summary table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .summary td {
+    padding: 8px 10px;
+    font-size: 10pt;
+    border-bottom: 1px solid #f1f1f1;
+  }
+  .summary td.label {
+    color: #555;
+    width: 30%;
+  }
+  .summary tr:last-child td { border-bottom: 0; }
+
+  /* Employee section */
+  .employee {
+    page-break-inside: avoid;
+    margin-bottom: 18px;
+  }
+  /* Multi-employee reports get a page break BEFORE each employee
+     after the first. Single-employee output stays on one page. */
+  {% if employees|length > 1 %}
+  .employee + .employee { page-break-before: always; }
+  {% endif %}
+
+  .employee-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    border-bottom: 1px solid {{ branding.accent_hex }};
+    padding-bottom: 4px;
+    margin-bottom: 6px;
+  }
+  .employee-head .who { color: {{ branding.accent_hex }}; }
+  .employee-head .who .name {
+    font-size: 13pt;
+    font-weight: 600;
+  }
+  .employee-head .who .code {
+    font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+    font-size: 9pt;
+    color: #555;
+  }
+  .employee-head .totals {
+    text-align: right;
+    font-size: 9pt;
+    color: #444;
+  }
+  .employee-head .totals .num {
+    color: {{ branding.accent_hex }};
+    font-weight: 600;
+  }
+
+  /* Daily rows */
+  table.days {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9pt;
+  }
+  table.days th {
+    text-align: left;
+    background: {{ branding.accent_soft_hex }};
+    color: {{ branding.accent_hex }};
+    padding: 5px 6px;
+    border-bottom: 1px solid #e0e0e0;
+    text-transform: uppercase;
+    font-size: 8pt;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+  }
+  table.days td {
+    padding: 4px 6px;
+    border-bottom: 1px solid #f1f1f1;
+    vertical-align: top;
+  }
+  table.days td.mono {
+    font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  table.days td.center { text-align: center; }
+  table.days td.right { text-align: right; }
+  .flag-yes {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: #fee2e2;
+    color: #991b1b;
+    font-size: 8pt;
+  }
+  .flag-no { color: #999; }
+
+  .empty-day { color: #999; font-style: italic; }
+</style>
+</head>
+<body>
+
+<header class="letterhead">
+  <div class="brand">
+    <div class="logo">
+      {% if branding.logo_data_url %}
+        <img src="{{ branding.logo_data_url }}" alt="{{ tenant.name }} logo" />
+      {% else %}
+        <span class="mark">{{ tenant.name[:1] | upper }}</span>
+      {% endif %}
+    </div>
+    <div>
+      <div class="name">{{ tenant.name }}</div>
+      <div class="sub">Hadir attendance report</div>
+    </div>
+  </div>
+  <div class="meta">
+    <div class="title">Attendance · {{ start_label }} – {{ end_label }}</div>
+    <div>Generated {{ generated_at_label }}</div>
+    <div>By {{ generated_by_email }}</div>
+  </div>
+</header>
+
+<section class="summary">
+  <div class="summary-head">Summary</div>
+  <table>
+    <tr><td class="label">Date range</td><td>{{ start_label }} – {{ end_label }} ({{ summary.day_count }} days)</td></tr>
+    <tr><td class="label">Employees</td><td>{{ summary.employee_count }}</td></tr>
+    <tr><td class="label">Recorded days</td><td>{{ summary.total_days }}</td></tr>
+    <tr><td class="label">Late count</td><td>{{ summary.late_count }}</td></tr>
+    <tr><td class="label">Overtime</td><td>{{ summary.overtime_hours }} hours</td></tr>
+    {% if filters.department_label %}
+    <tr><td class="label">Department</td><td>{{ filters.department_label }}</td></tr>
+    {% endif %}
+  </table>
+</section>
+
+{% if employees %}
+  {% for emp in employees %}
+  <section class="employee">
+    <div class="employee-head">
+      <div class="who">
+        <div class="name">{{ emp.full_name }}</div>
+        <div class="code">{{ emp.employee_code }} · {{ emp.department_code }}</div>
+      </div>
+      <div class="totals">
+        Days <span class="num">{{ emp.totals.days }}</span> ·
+        Late <span class="num">{{ emp.totals.late }}</span> ·
+        Early <span class="num">{{ emp.totals.early_out }}</span> ·
+        Short <span class="num">{{ emp.totals.short_hours }}</span> ·
+        Absent <span class="num">{{ emp.totals.absent }}</span> ·
+        Overtime <span class="num">{{ emp.totals.overtime_hours }}h</span>
+      </div>
+    </div>
+
+    <table class="days">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>In</th>
+          <th>Out</th>
+          <th class="right">Hours</th>
+          <th class="center">Late</th>
+          <th class="center">Early</th>
+          <th class="center">Short</th>
+          <th class="center">Absent</th>
+          <th class="right">OT (min)</th>
+          <th>Policy</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in emp.days %}
+        <tr>
+          <td class="mono">{{ d.date }}</td>
+          <td class="mono">{{ d.in_time or "—" }}</td>
+          <td class="mono">{{ d.out_time or "—" }}</td>
+          <td class="right mono">{{ d.total_hours if d.total_hours is not none else "—" }}</td>
+          <td class="center">{% if d.late %}<span class="flag-yes">Yes</span>{% else %}<span class="flag-no">—</span>{% endif %}</td>
+          <td class="center">{% if d.early_out %}<span class="flag-yes">Yes</span>{% else %}<span class="flag-no">—</span>{% endif %}</td>
+          <td class="center">{% if d.short_hours %}<span class="flag-yes">Yes</span>{% else %}<span class="flag-no">—</span>{% endif %}</td>
+          <td class="center">{% if d.absent %}<span class="flag-yes">Yes</span>{% else %}<span class="flag-no">—</span>{% endif %}</td>
+          <td class="right mono">{{ d.overtime_minutes }}</td>
+          <td>{{ d.policy_name }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10" class="empty-day">No attendance records in this range.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% endfor %}
+{% else %}
+<p style="color:#666;">No attendance records matched the chosen filters.</p>
+{% endif %}
+
+</body>
+</html>

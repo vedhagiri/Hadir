@@ -20,9 +20,11 @@ from pydantic import BaseModel, Field
 
 from hadir.auth.audit import write_audit
 from hadir.auth.dependencies import CurrentUser, current_user
-from hadir.db import get_engine
+from hadir.db import departments, get_engine, tenants
 from hadir.reporting.attendance import build_xlsx
+from hadir.reporting.pdf import build_pdf, filename_for
 from hadir.tenants.scope import TenantScope
+from sqlalchemy import select as sa_select
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +142,171 @@ def generate_attendance_xlsx(
         media_type=(
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         ),
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(data)),
+        },
+    )
+
+
+@router.post("/attendance.pdf")
+def generate_attendance_pdf(
+    payload: AttendanceReportRequest,
+    user: Annotated[CurrentUser, Depends(current_user)],
+) -> StreamingResponse:
+    """PDF cousin of the XLSX endpoint. Same role + scope gates,
+    same body shape, branded letterhead per tenant.
+    """
+
+    # Role gates — copy of the XLSX endpoint's checks.
+    if not (
+        "Admin" in user.roles or "HR" in user.roles or "Manager" in user.roles
+    ):
+        raise HTTPException(
+            status_code=403, detail="reports require Admin, HR, or Manager"
+        )
+    if payload.start > payload.end:
+        raise HTTPException(
+            status_code=400, detail="start must be on or before end"
+        )
+    if (payload.end - payload.start).days + 1 > payload.max_days:
+        raise HTTPException(
+            status_code=400,
+            detail=f"date range exceeds max_days={payload.max_days}",
+        )
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+
+    department_ids: Optional[list[int]] = None
+    is_admin_like = "Admin" in user.roles or "HR" in user.roles
+    if is_admin_like:
+        if payload.department_id is not None:
+            department_ids = [payload.department_id]
+    else:  # Manager-only
+        allowed = set(user.departments)
+        if not allowed:
+            return _empty_pdf_response(scope, payload)
+        if payload.department_id is not None:
+            if payload.department_id not in allowed:
+                raise HTTPException(
+                    status_code=403, detail="not a member of this department"
+                )
+            department_ids = [payload.department_id]
+        else:
+            department_ids = sorted(allowed)
+
+    engine = get_engine()
+    with engine.begin() as conn:
+        # Surface a friendly department label in the letterhead when
+        # one is filtered.
+        department_label: Optional[str] = None
+        if department_ids and len(department_ids) == 1:
+            row = conn.execute(
+                sa_select(departments.c.code, departments.c.name).where(
+                    departments.c.tenant_id == scope.tenant_id,
+                    departments.c.id == department_ids[0],
+                )
+            ).first()
+            if row is not None:
+                department_label = f"{row.code} · {row.name}"
+
+        data, rows = build_pdf(
+            conn,
+            scope,
+            start_date=payload.start,
+            end_date=payload.end,
+            department_ids=department_ids,
+            employee_id=payload.employee_id,
+            generated_by_email=user.email,
+            department_label=department_label,
+        )
+
+        # Schema name fuels the spec'd filename. Fall back to the
+        # tenant id if the row's missing (shouldn't happen — guarded
+        # by current_user already).
+        slug_row = conn.execute(
+            sa_select(tenants.c.schema_name).where(
+                tenants.c.id == scope.tenant_id
+            )
+        ).first()
+        slug = (
+            str(slug_row.schema_name)
+            if slug_row is not None
+            else f"tenant-{scope.tenant_id}"
+        )
+
+    with engine.begin() as conn:
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="report.generated",
+            entity_type="report",
+            entity_id=None,
+            after={
+                "format": "pdf",
+                "start": payload.start.isoformat(),
+                "end": payload.end.isoformat(),
+                "department_id": payload.department_id,
+                "employee_id": payload.employee_id,
+                "rows": rows,
+            },
+        )
+    logger.info(
+        "pdf report generated: actor=%s start=%s end=%s rows=%d",
+        user.id,
+        payload.start,
+        payload.end,
+        rows,
+    )
+
+    filename = filename_for(
+        schema_name=slug, start=payload.start, end=payload.end
+    )
+    return StreamingResponse(
+        BytesIO(data),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(data)),
+        },
+    )
+
+
+def _empty_pdf_response(
+    scope: TenantScope, payload: AttendanceReportRequest
+) -> StreamingResponse:
+    """Manager-only with no assigned departments returns an empty
+    branded PDF (no employee sections) rather than a 4xx — same UX
+    contract the XLSX endpoint follows for the same case."""
+
+    engine = get_engine()
+    with engine.begin() as conn:
+        data, _ = build_pdf(
+            conn,
+            scope,
+            start_date=payload.start,
+            end_date=payload.end,
+            department_ids=[],
+            employee_id=payload.employee_id,
+            generated_by_email="",
+        )
+        slug_row = conn.execute(
+            sa_select(tenants.c.schema_name).where(
+                tenants.c.id == scope.tenant_id
+            )
+        ).first()
+        slug = (
+            str(slug_row.schema_name)
+            if slug_row is not None
+            else f"tenant-{scope.tenant_id}"
+        )
+    filename = filename_for(
+        schema_name=slug, start=payload.start, end=payload.end
+    )
+    return StreamingResponse(
+        BytesIO(data),
+        media_type="application/pdf",
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
             "Content-Length": str(len(data)),
