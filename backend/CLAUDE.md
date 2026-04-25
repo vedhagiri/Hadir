@@ -1,17 +1,23 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 complete**:
+Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 complete**:
 pilot frozen at tag `v0.1-pilot` on branch `release/pilot`; multi-tenant
 routing wired up via a per-connection `SET search_path` driven by a
 ContextVar + SQLAlchemy `checkout` event; the global `tenants` registry
 lives in `public`, every per-tenant table lives in its own schema, and
 the migration history splits into "legacy main" (0001-0007), the
 boundary migration (0008), and "schema-agnostic going forward" (0009+).
-Provisioning + deprovisioning CLIs in `scripts/`. Migration-authoring
-lint at `tests/test_migration_lint.py`. Isolation canary in
+Provisioning + deprovisioning CLIs in `scripts/`. **P3** added
+`mts_staff`, `super_admin_sessions`, `super_admin_audit` (all in
+`public`), the `/api/super-admin/*` console, impersonation routing in
+`TenantScopeMiddleware`, a synthetic `current_user` during
+impersonation, and dual-audit on every tenant-scope write so each
+operator touch lands in BOTH the tenant's own `audit_log` and the
+global operator log. Migration-authoring lint at
+`tests/test_migration_lint.py`. Isolation canary in
 `tests/test_multi_tenant_isolation.py`. Single-mode backwards-compatible
-(pilot's `main` schema is the default). **v1.0 P3 next.**
+(pilot's `main` schema is the default). **v1.0 P4 next.**
 
 ## Tenant routing (v1.0 P1)
 **Approach chosen: SQLAlchemy `checkout` event + Python ContextVar**,

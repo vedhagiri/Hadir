@@ -6,6 +6,7 @@ import { Outlet, useLocation } from "react-router-dom";
 
 import { useMe } from "../auth/AuthProvider";
 import { primaryRole } from "../types";
+import { ImpersonationBanner } from "./ImpersonationBanner";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 
@@ -23,6 +24,9 @@ export function Layout() {
 
   return (
     <div className="app">
+      {me.is_super_admin_impersonation && (
+        <ImpersonationBanner superAdminUserId={me.super_admin_user_id ?? null} />
+      )}
       <Sidebar role={role} me={me} />
       <div className="main">
         <Topbar pageId={pageId} role={role} me={me} />

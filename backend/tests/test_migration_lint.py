@@ -34,6 +34,10 @@ _WHITELIST: frozenset[str] = frozenset(
         "0006_attendance.py",
         "0007_tenants_schema_name.py",
         "0008_tenants_to_public.py",
+        # 0009 creates global tables in the public schema (mts_staff,
+        # super_admin_sessions, super_admin_audit) — operating on
+        # public is the migration's purpose, not an authoring shortcut.
+        "0009_super_admin.py",
     }
 )
 

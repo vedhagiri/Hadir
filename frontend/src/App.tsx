@@ -21,11 +21,31 @@ import { SystemPage } from "./features/system/SystemPage";
 import { Placeholder } from "./pages/Placeholder";
 import { Layout } from "./shell/Layout";
 import { ALL_PAGE_IDS } from "./shell/nav";
+import { ProvisionTenantPage } from "./super-admin/ProvisionTenantPage";
+import { SuperAdminLayout } from "./super-admin/SuperAdminLayout";
+import { SuperAdminLogin } from "./super-admin/SuperAdminLogin";
+import { SuperAdminProtectedRoute } from "./super-admin/SuperAdminProtectedRoute";
+import { TenantDetailPage } from "./super-admin/TenantDetailPage";
+import { TenantsListPage } from "./super-admin/TenantsListPage";
 
 export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/super-admin/login" element={<SuperAdminLogin />} />
+      <Route
+        path="/super-admin"
+        element={
+          <SuperAdminProtectedRoute>
+            <SuperAdminLayout />
+          </SuperAdminProtectedRoute>
+        }
+      >
+        <Route index element={<Navigate to="/super-admin/tenants" replace />} />
+        <Route path="tenants" element={<TenantsListPage />} />
+        <Route path="tenants/:tenantId" element={<TenantDetailPage />} />
+        <Route path="provision" element={<ProvisionTenantPage />} />
+      </Route>
       <Route
         path="/"
         element={

@@ -201,6 +201,101 @@ tenants = Table(
     # ``tenant_<slug>`` schemas. Constrained server-side via the regex
     # in migration 0007 to match ``_TENANT_SCHEMA_RE`` above.
     Column("schema_name", Text, nullable=False, server_default="main", unique=True),
+    # P3: ``active`` or ``suspended``. Login and the request middleware
+    # refuse a suspended tenant; the Super-Admin console can flip the
+    # state (which is itself audit-logged in both places).
+    Column("status", Text, nullable=False, server_default="active"),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    CheckConstraint("status IN ('active','suspended')", name="ck_tenants_status"),
+    schema="public",
+)
+
+
+# --- Super-Admin global tables (P3) ----------------------------------------
+# All three live in ``public`` alongside ``tenants``. They are NOT per-tenant
+# and the provisioning CLI's create_all filter (``schema != 'public'``)
+# excludes them when materialising a new tenant schema.
+
+mts_staff = Table(
+    "mts_staff",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("email", CITEXT, nullable=False, unique=True),
+    Column("password_hash", Text, nullable=False),
+    Column("full_name", Text, nullable=False),
+    Column("is_active", Boolean, nullable=False, server_default="true"),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    schema="public",
+)
+
+
+super_admin_sessions = Table(
+    "super_admin_sessions",
+    metadata,
+    Column("id", String(length=128), primary_key=True),
+    Column(
+        "mts_staff_id",
+        Integer,
+        ForeignKey("public.mts_staff.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    # ``data`` carries optional ``impersonated_tenant_id`` once the
+    # operator hits "Access as" on a tenant in the console.
+    Column("data", JSONB, nullable=False, server_default="{}"),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    Column(
+        "last_seen_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    schema="public",
+)
+
+
+# Append-only at the grant level — ``hadir_app`` has INSERT + SELECT only.
+# Mirrors the contract on per-tenant ``audit_log`` so cross-tenant
+# Super-Admin actions cannot be retroactively rewritten.
+super_admin_audit = Table(
+    "super_admin_audit",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "super_admin_user_id",
+        Integer,
+        ForeignKey("public.mts_staff.id", ondelete="RESTRICT"),
+        nullable=False,
+    ),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    ),
+    Column("action", Text, nullable=False),
+    Column("entity_type", Text, nullable=False),
+    Column("entity_id", Text, nullable=True),
+    Column("before", JSONB, nullable=True),
+    Column("after", JSONB, nullable=True),
+    Column("ip", Text, nullable=True),
     Column(
         "created_at",
         DateTime(timezone=True),

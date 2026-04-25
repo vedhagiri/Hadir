@@ -52,6 +52,11 @@ class MeResponse(BaseModel):
     full_name: str
     roles: list[str]
     departments: list[int]
+    # P3: True when ``current_user`` resolved a synthetic Super-Admin
+    # in impersonation mode. The tenant shell uses this to render the
+    # "Viewing as SuperAdmin" red banner.
+    is_super_admin_impersonation: bool = False
+    super_admin_user_id: int | None = None
 
 
 def _client_ip(request: Request) -> str:
@@ -229,13 +234,22 @@ def logout(
 
 
 @router.get("/me")
-def me(user: Annotated[CurrentUser, Depends(current_user)]) -> MeResponse:
+def me(
+    request: Request,
+    user: Annotated[CurrentUser, Depends(current_user)],
+) -> MeResponse:
     """Describe the caller."""
 
+    is_imp = bool(getattr(request.state, "is_super_admin", False)) and user.id == 0
+    sa_user_id: int | None = (
+        int(getattr(request.state, "super_admin_user_id", 0)) if is_imp else None
+    )
     return MeResponse(
         id=user.id,
         email=user.email,
         full_name=user.full_name,
         roles=list(user.roles),
         departments=list(user.departments),
+        is_super_admin_impersonation=is_imp,
+        super_admin_user_id=sa_user_id,
     )

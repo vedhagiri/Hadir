@@ -105,9 +105,36 @@ def current_user(
     Also sets ``request.state.tenant_id`` so ``hadir.tenants.scope`` picks
     it up for composed dependencies — this is how the tenant plumbing
     threads through the request chain.
+
+    P3: when a Super-Admin is impersonating a tenant, the tenant cookie
+    won't exist (the operator is logged in via ``hadir_super_session``),
+    but the middleware has already populated ``request.state`` with
+    ``is_super_admin``, ``super_admin_user_id``, and ``tenant_id``. We
+    return a synthetic ``CurrentUser`` with all four roles so existing
+    role guards permit the request. Every audit row written under this
+    user threads ``actor_user_id=None`` and is dual-logged via
+    ``hadir.super_admin.audit.write_audit_dual`` (the per-tenant
+    handlers detect impersonation on ``request.state``).
     """
 
     if not hadir_session:
+        # Super-Admin impersonation path: the middleware already
+        # resolved a tenant schema for this request and flagged
+        # is_super_admin. Construct a synthetic operator-user so the
+        # existing role guards pass.
+        if (
+            getattr(request.state, "is_super_admin", False)
+            and getattr(request.state, "tenant_id", None) is not None
+        ):
+            return CurrentUser(
+                id=0,  # not a real users.id; persisted audit rows use actor_user_id=None
+                tenant_id=int(request.state.tenant_id),
+                email=f"super-admin#{getattr(request.state, 'super_admin_user_id', 0)}",
+                full_name="Super-Admin (impersonating)",
+                roles=("Admin", "HR", "Manager", "Employee"),
+                departments=tuple(),
+                session_id=str(getattr(request.state, "super_admin_session_id", "")),
+            )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required"
         )

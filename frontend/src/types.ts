@@ -8,6 +8,11 @@ export interface MeResponse {
   full_name: string;
   roles: Role[];
   departments: number[];
+  // P3: backend sets these when the request is served by a Super-Admin
+  // synthetic user under "Access as" impersonation. The tenant shell
+  // mounts the red impersonation banner whenever this is true.
+  is_super_admin_impersonation?: boolean;
+  super_admin_user_id?: number | null;
 }
 
 // Used by the shell to decide which NAV to render when a user holds more

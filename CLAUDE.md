@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2.**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3.**
 - **P0** — pilot frozen at `v0.1-pilot` (commit `1a0782c`);
   `release/pilot` branch exists locally + at origin.
 - **P1** — multi-tenant routing switch wired up. `MetaData()` is
@@ -58,8 +58,22 @@ To return to v1.0 work: `git checkout main`.
   deprovisioning refuses in production without `--backup-taken`.
   `tests/test_migration_lint.py` enforces that 0009+ migrations are
   schema-agnostic (no hardcoded `main`/`public` literals).
+- **P3** — Super-Admin role + console. Migration `0009_super_admin`
+  adds three global tables in `public` (`mts_staff`,
+  `super_admin_sessions`, `super_admin_audit`) plus a `status` column
+  on `public.tenants`. New `hadir/super_admin/` package + `/api/super-admin/*`
+  endpoints (login, tenants list/detail, in-process provisioning,
+  Access-as start/end, suspend/unsuspend). `TenantScopeMiddleware`
+  honours the `hadir_super_session` cookie and applies impersonation;
+  `current_user` returns a synthetic Super-Admin during impersonation
+  with all four roles; `auth.audit.write_audit` dual-logs to
+  `public.super_admin_audit` whenever an impersonation context is
+  active. Frontend ships a separate red-accent shell at
+  `/super-admin/*` plus a persistent `ImpersonationBanner` over the
+  tenant shell whenever `/api/auth/me` reports
+  `is_super_admin_impersonation=true`.
 
-Next: **P3** per `v1.0-phase-plan.md`. Wait for the user before
+Next: **P4** per `v1.0-phase-plan.md`. Wait for the user before
 starting. Per-phase records: `docs/phases/P*.md`.
 
 ---

@@ -30,6 +30,7 @@ from hadir.detection_events.router import router as detection_events_router
 from hadir.employees import router as employees_router
 from hadir.identification.router import router as identification_router
 from hadir.reporting.router import router as reporting_router
+from hadir.super_admin import router as super_admin_router
 from hadir.system.router import router as system_router
 
 
@@ -132,6 +133,7 @@ def create_app() -> FastAPI:
     app.include_router(system_router)
     app.include_router(audit_log_router)
     app.include_router(reporting_router)
+    app.include_router(super_admin_router)
 
     # Dev-only test endpoints — used by the Playwright smoke test in
     # frontend/tests/. Mounted ONLY when HADIR_ENV=dev so a production
