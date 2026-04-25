@@ -284,8 +284,17 @@ def list_for_date(
     the_date: date,
     department_ids: Optional[list[int]] = None,
     employee_id: Optional[int] = None,
+    employee_ids: Optional[list[int]] = None,
 ) -> list[AttendanceRow]:
-    """Return joined attendance rows for role-scoped listing."""
+    """Return joined attendance rows for role-scoped listing.
+
+    ``employee_ids`` (P8) is the explicit set of employees the caller
+    is allowed to see — used by the Manager scope to combine
+    department membership with direct ``manager_assignments``. When
+    both ``employee_ids`` and ``department_ids`` are provided, rows
+    must satisfy BOTH (intersection) so an Admin-style department
+    filter still narrows the visibility further.
+    """
 
     stmt = (
         select(
@@ -342,6 +351,12 @@ def list_for_date(
         stmt = stmt.where(employees.c.department_id.in_(department_ids))
     if employee_id is not None:
         stmt = stmt.where(employees.c.id == employee_id)
+    if employee_ids is not None:
+        if not employee_ids:
+            # Manager has zero visible employees → empty list.
+            # Distinguishes from ``None`` (unrestricted).
+            return []
+        stmt = stmt.where(employees.c.id.in_(employee_ids))
 
     rows = conn.execute(stmt).all()
     return [

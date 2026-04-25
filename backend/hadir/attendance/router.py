@@ -17,6 +17,9 @@ from pydantic import BaseModel
 from hadir.attendance import repository as repo
 from hadir.auth.dependencies import CurrentUser, current_user
 from hadir.db import employees, get_engine
+from hadir.manager_assignments.repository import (
+    get_manager_visible_employee_ids,
+)
 from hadir.tenants.scope import TenantScope
 
 logger = logging.getLogger(__name__)
@@ -117,10 +120,13 @@ def list_attendance(
 
     the_date = date or datetime.now(timezone.utc).astimezone(local_tz()).date()
 
-    # Role scoping. Admin/HR see everything; Manager's view is scoped to
-    # their department membership; Employee sees only themselves. Never
-    # trust a path/query parameter to widen the scope.
+    # Role scoping. Admin/HR see everything; Manager's view is the
+    # **union** of (a) their department(s) and (b) employees directly
+    # assigned via ``manager_assignments``; Employee sees only
+    # themselves. Never trust a path/query parameter to widen the
+    # scope.
     department_ids: Optional[list[int]] = None
+    employee_ids: Optional[list[int]] = None
     employee_filter_id: Optional[int] = None
     is_admin_like = "Admin" in user.roles or "HR" in user.roles
 
@@ -128,17 +134,25 @@ def list_attendance(
         if department_id is not None:
             department_ids = [department_id]
     elif "Manager" in user.roles:
-        allowed = set(user.departments)
-        if not allowed:
+        with get_engine().begin() as conn:
+            visible = get_manager_visible_employee_ids(
+                conn, scope, manager_user_id=user.id
+            )
+        if not visible:
             return AttendanceListOut(date=the_date, items=[])
         if department_id is not None:
-            if department_id not in allowed:
+            # The Admin-style department filter narrows further but
+            # cannot widen past the Manager's union. Refuse a filter
+            # that lands outside any visible department membership.
+            allowed_depts = set(user.departments)
+            if department_id not in allowed_depts:
                 raise HTTPException(
                     status_code=403, detail="not a member of this department"
                 )
             department_ids = [department_id]
-        else:
-            department_ids = sorted(allowed)
+        # Always pass the visible-employee union — together with the
+        # optional department filter, the repo intersects them.
+        employee_ids = sorted(visible)
     else:  # Employee-only
         if department_id is not None:
             raise HTTPException(
@@ -155,6 +169,7 @@ def list_attendance(
             the_date=the_date,
             department_ids=department_ids,
             employee_id=employee_filter_id,
+            employee_ids=employee_ids,
         )
     return AttendanceListOut(
         date=the_date, items=[_row_to_item(r) for r in rows]

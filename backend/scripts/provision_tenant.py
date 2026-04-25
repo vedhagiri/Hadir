@@ -104,6 +104,7 @@ _APP_CRUD_TABLES = (
     "attendance_records",
     "tenant_branding",
     "tenant_oidc_config",
+    "manager_assignments",
 )
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")

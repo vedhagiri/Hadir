@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7.**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8.**
 
 > **Tenant isolation is a P0 blocker.** The suites
 > `backend/tests/test_multi_tenant_isolation.py` (the P1 canary) and
@@ -137,8 +137,22 @@ To return to v1.0 work: `git checkout main`.
   than one role; selecting reloads the page so navigation
   re-renders cleanly against the new active role. Synthetic
   Super-Admin refuses switch (no real session row to update).
+- **P8** — Manager assignments UI. Migration 0012 adds a per-tenant
+  `manager_assignments` (id, tenant_id, manager_user_id, employee_id,
+  is_primary, timestamps) with a unique trio + a **partial unique
+  index** `(tenant_id, employee_id) WHERE is_primary` — Postgres
+  rejects two primaries even on a buggy direct INSERT. Admin-only
+  `/api/manager-assignments` endpoints (GET grouped, POST upsert
+  with primary-clear-on-set, DELETE). Manager scope helper
+  `get_manager_visible_employee_ids` unions department membership
+  with direct assignments; the attendance router now passes that
+  set so a Manager assigned to an out-of-dept employee sees them
+  on `/api/attendance`. Frontend ships an Admin-only drag-and-drop
+  page (native HTML5, no new deps): unassigned column on the left,
+  manager card grid on the right, star icon toggles primary.
+  Audit rows: `manager_assignment.{created,primary_set,deleted}`.
 
-Next: **P8** per `v1.0-phase-plan.md`. Wait for the user before
+Next: **P9** per `v1.0-phase-plan.md`. Wait for the user before
 starting. Per-phase records: `docs/phases/P*.md`.
 
 ---

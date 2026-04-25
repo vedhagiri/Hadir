@@ -253,6 +253,58 @@ tenant_branding = Table(
 )
 
 
+# --- Manager assignments (P8) ----------------------------------------------
+# Many-to-many between Manager users and employees. Up to one
+# ``is_primary=true`` row per (tenant_id, employee_id) — enforced at
+# the DB level via the partial unique index in migration 0012.
+
+manager_assignments = Table(
+    "manager_assignments",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "manager_user_id",
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "employee_id",
+        Integer,
+        ForeignKey("employees.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column("is_primary", Boolean, nullable=False, server_default="false"),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    UniqueConstraint(
+        "tenant_id",
+        "employee_id",
+        "manager_user_id",
+        name="uq_manager_assignments_tenant_employee_manager",
+    ),
+)
+
+
 # --- Per-tenant OIDC config (P6) -------------------------------------------
 # One row per tenant. ``client_secret_encrypted`` is Fernet-encrypted
 # with ``HADIR_AUTH_FERNET_KEY`` (separate from the photo/RTSP key —
