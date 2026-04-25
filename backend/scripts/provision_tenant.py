@@ -115,6 +115,7 @@ _APP_CRUD_TABLES = (
     "requests",
     "request_attachments",
     "request_reason_categories",
+    "notifications_queue",
 )
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")

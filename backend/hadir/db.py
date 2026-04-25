@@ -653,6 +653,44 @@ request_reason_categories = Table(
 )
 
 
+notifications_queue = Table(
+    "notifications_queue",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "recipient_user_id",
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    ),
+    Column("kind", Text, nullable=False),
+    Column(
+        "request_id",
+        Integer,
+        ForeignKey("requests.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    ),
+    Column("payload", JSONB, nullable=False, server_default="{}"),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    Column("sent_at", DateTime(timezone=True), nullable=True),
+    Index("ix_notifications_queue_tenant_unsent", "tenant_id", "sent_at"),
+)
+
+
 request_attachments = Table(
     "request_attachments",
     metadata,

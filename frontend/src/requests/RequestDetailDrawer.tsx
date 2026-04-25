@@ -391,8 +391,10 @@ function Timeline({ request }: { request: RequestRecord }) {
     request.status === "admin_approved" ||
     request.status === "admin_rejected"
   ) {
+    // P16: prefix with the warning glyph so it visually pops in the
+    // timeline even when the rest of the row reads neutral.
     stages.push({
-      name: "Admin override",
+      name: "⚠ Overridden by admin",
       at: request.admin_decision_at,
       comment: request.admin_comment,
       state:

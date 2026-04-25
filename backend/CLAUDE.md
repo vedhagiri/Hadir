@@ -1,7 +1,7 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 complete**:
+Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 complete**:
 pilot frozen at tag `v0.1-pilot` on branch `release/pilot`; multi-tenant
 routing wired up via a per-connection `SET search_path` driven by a
 ContextVar + SQLAlchemy `checkout` event; the global `tenants` registry
@@ -114,7 +114,18 @@ declared before the dynamic `/{request_id}` route so static
 matching wins. Every request response carries `attachment_count`,
 `business_hours_open`, `sla_breached`, and
 `is_primary_for_viewer` for the frontend table.
-**v1.0 P16 next.**
+**P16** added the Admin override surface: migration 0018 adds
+per-tenant `notifications_queue` (id, tenant_id,
+recipient_user_id, kind, request_id, payload JSONB, created_at,
+sent_at). `AdminOverrideBody.comment` tightens to `min_length=10`
+with a strip-then-recheck `model_validator` (load-bearing red
+line — server is the source of truth). The audit row records
+`previous_stage`, `previous_decider_user_id`, and the comment
+**verbatim**. On override the router queues one row each for the
+original Manager + HR decider (when present) and the submitting
+Employee, resolved by lower-cased email; the payload carries
+`recipient_email` as a fallback for delivery so P20 can email
+deactivated accounts. **v1.0 P17 next.**
 
 ## Tenant routing (v1.0 P1)
 **Approach chosen: SQLAlchemy `checkout` event + Python ContextVar**,

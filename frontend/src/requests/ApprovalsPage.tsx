@@ -8,6 +8,7 @@ import { useMemo, useState } from "react";
 
 import { useMe } from "../auth/AuthProvider";
 import { Icon } from "../shell/Icon";
+import { OverrideModal } from "./OverrideModal";
 import { RequestDetailDrawer } from "./RequestDetailDrawer";
 import type { DecisionRole } from "./RequestDetailDrawer";
 import { StatusPill } from "./StatusPill";
@@ -35,6 +36,9 @@ export function ApprovalsPage() {
 
   const [tab, setTab] = useState<Tab>("pending");
   const [openId, setOpenId] = useState<number | null>(null);
+  const [overrideTarget, setOverrideTarget] = useState<RequestRecord | null>(
+    null,
+  );
 
   const reviewerRole: DecisionRole = useMemo(() => {
     if (role === "Manager") return "Manager";
@@ -150,6 +154,11 @@ export function ApprovalsPage() {
                   key={r.id}
                   request={r}
                   onOpen={() => setOpenId(r.id)}
+                  onOverride={
+                    role === "Admin"
+                      ? () => setOverrideTarget(r)
+                      : null
+                  }
                 />
               ))
             )}
@@ -163,6 +172,12 @@ export function ApprovalsPage() {
           onClose={() => setOpenId(null)}
           allowOwnerActions={false}
           decisionRole={tab === "pending" ? reviewerRole : null}
+        />
+      )}
+      {overrideTarget && (
+        <OverrideModal
+          request={overrideTarget}
+          onClose={() => setOverrideTarget(null)}
         />
       )}
     </div>
@@ -192,9 +207,11 @@ function Tab({
 function Row({
   request,
   onOpen,
+  onOverride,
 }: {
   request: RequestRecord;
   onOpen: () => void;
+  onOverride: (() => void) | null;
 }) {
   const stage = stageLabel(request);
   const businessHours = request.business_hours_open;
@@ -279,6 +296,23 @@ function Row({
         )}
       </td>
       <td style={{ textAlign: "right" }}>
+        {onOverride && (
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOverride();
+            }}
+            title="Override this decision (audited)"
+            style={{
+              color: "var(--danger-text)",
+              marginRight: 4,
+            }}
+          >
+            Override
+          </button>
+        )}
         <Icon name="chevronRight" size={13} className="text-dim" />
       </td>
     </tr>

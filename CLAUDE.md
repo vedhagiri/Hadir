@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15.**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16.**
 
 > **Tenant isolation is a P0 blocker.** The suites
 > `backend/tests/test_multi_tenant_isolation.py` (the P1 canary) and
@@ -276,8 +276,26 @@ To return to v1.0 work: `git checkout main`.
   footer with role-scoped gating + mandatory-comment-on-Admin-or-
   reject. Sidebar Approvals nav item shows a live badge from
   `inbox/summary` that switches to a danger tone on SLA breach.
+- **P16** — Admin override. Migration 0018 adds per-tenant
+  `notifications_queue` (id, tenant_id, recipient_user_id, kind,
+  request_id, payload JSONB, created_at, sent_at NULL); P20 will
+  drain it. `AdminOverrideBody.comment` tightens to
+  `min_length=10` with a strip-then-recheck `model_validator` —
+  the load-bearing P16 red line, server-enforced regardless of
+  any client check. Audit row carries `previous_stage`,
+  `previous_decider_user_id`, and the comment **verbatim**. On
+  override the router queues one row each for the original
+  Manager + HR decider (when present) and the submitting Employee
+  (resolved by lower-cased email; payload also stores
+  `recipient_email` as a fallback for delivery). Frontend ships an
+  `OverrideModal` with the prescribed red banner ("This will be
+  audit-logged and visible to all parties"), decision pills, and a
+  comment textarea with a 10-char client guard. The Approvals row
+  gains an "Override" action button for Admins, and the
+  detail-drawer timeline labels the override stage **"⚠
+  Overridden by admin"**.
 
-Next: **P16** per `v1.0-phase-plan.md`. Wait for the user before
+Next: **P17** per `v1.0-phase-plan.md`. Wait for the user before
 starting. Per-phase records: `docs/phases/P*.md`.
 
 ---

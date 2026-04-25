@@ -58,13 +58,19 @@ class DecisionBody(BaseModel):
 
 class AdminOverrideBody(BaseModel):
     decision: Decision
-    # Mandatory per BRD FR-REQ-006. Empty / whitespace-only is rejected.
-    comment: str = Field(min_length=1, max_length=2000)
+    # Mandatory per BRD FR-REQ-006 + the P16 red line: comment is the
+    # source of truth for the audit trail and the override notification,
+    # so we enforce a minimum length of 10 trimmed characters server-side
+    # regardless of any client check.
+    comment: str = Field(min_length=10, max_length=2000)
 
     @model_validator(mode="after")
     def _check(self) -> "AdminOverrideBody":
-        if not self.comment.strip():
-            raise ValueError("comment is required for an admin override")
+        trimmed = self.comment.strip()
+        if len(trimmed) < 10:
+            raise ValueError(
+                "admin override comment must be at least 10 characters"
+            )
         return self
 
 

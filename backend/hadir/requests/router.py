@@ -39,10 +39,13 @@ from hadir.auth.dependencies import CurrentUser, current_user, require_role
 from hadir.config import get_settings
 from hadir.db import (
     approved_leaves,
+    employees,
     get_engine,
     leave_types,
     manager_assignments,
+    notifications_queue,
     request_attachments,
+    users,
 )
 from hadir.manager_assignments.repository import (
     get_manager_visible_employee_ids,
@@ -258,6 +261,125 @@ def _can_view(user: CurrentUser, row: repo.RequestRow) -> bool:
         if mine is not None and mine == row.employee_id:
             return True
     return False
+
+
+def _identify_previous_decider(
+    row: repo.RequestRow,
+) -> tuple[Optional[str], Optional[int]]:
+    """Pick the most-recent decider stage on the request before the
+    Admin override fires.
+
+    Returns ``(stage, user_id)`` where ``stage`` is one of
+    ``"hr"``, ``"manager"``, or ``None`` (the row hadn't reached a
+    human decision yet — Admin can still override a fresh
+    ``submitted`` row, in which case there's no prior decider). The
+    UI surfaces this in the override modal's red banner ("Overriding
+    the {manager/HR} decision…").
+    """
+
+    if row.hr_decision_at is not None:
+        return "hr", row.hr_user_id
+    if row.manager_decision_at is not None:
+        return "manager", row.manager_user_id
+    return None, None
+
+
+def _queue_override_notifications(
+    conn,
+    *,
+    scope: TenantScope,
+    request_id: int,
+    actor: CurrentUser,
+    decision: str,
+    comment: str,
+    previous_stage: Optional[str],
+    previous_decider_user_id: Optional[int],
+    row: repo.RequestRow,
+) -> None:
+    """Append one ``notifications_queue`` row per audience.
+
+    P20 drains this table; today we just record what needs to be
+    sent. Audiences:
+
+    - The original Manager decider (if any).
+    - The original HR decider (if any).
+    - The submitting Employee, resolved by lower-cased email match
+      against ``users``. The row stores ``recipient_email`` in the
+      payload as a fallback for delivery when no ``users`` row
+      matches (the email match might miss for deactivated accounts).
+
+    The same comment + actor + previous_stage triple lands in every
+    payload so the eventual delivery doesn't have to re-query.
+    """
+
+    # 1) Resolve the employee's user_id (best-effort) + email.
+    employee_email_row = conn.execute(
+        select(employees.c.email).where(
+            employees.c.tenant_id == scope.tenant_id,
+            employees.c.id == row.employee_id,
+        )
+    ).first()
+    employee_email = (
+        str(employee_email_row.email).strip().lower()
+        if employee_email_row is not None
+        and employee_email_row.email is not None
+        else ""
+    )
+    employee_user_id: Optional[int] = None
+    if employee_email:
+        match = conn.execute(
+            select(users.c.id).where(
+                users.c.tenant_id == scope.tenant_id,
+                sa_func.lower(users.c.email) == employee_email,
+            )
+        ).first()
+        if match is not None:
+            employee_user_id = int(match.id)
+
+    base_payload: dict[str, object] = {
+        "request_id": request_id,
+        "decision": decision,
+        "comment": comment,
+        "actor_user_id": actor.id,
+        "actor_email": actor.email,
+        "previous_stage": previous_stage,
+        "previous_decider_user_id": previous_decider_user_id,
+        "new_status": row.status,
+    }
+
+    # 2) Build per-recipient rows. Skip duplicates so a single user
+    # who happened to be both the Manager and HR decider doesn't get
+    # the same notification twice.
+    seen_user_ids: set[int] = set()
+
+    def queue(kind: str, user_id: Optional[int], extra: Optional[dict] = None) -> None:
+        if user_id is not None and user_id in seen_user_ids:
+            return
+        if user_id is not None:
+            seen_user_ids.add(user_id)
+        payload = dict(base_payload)
+        payload["kind"] = kind
+        if extra:
+            payload.update(extra)
+        conn.execute(
+            insert(notifications_queue).values(
+                tenant_id=scope.tenant_id,
+                recipient_user_id=user_id,
+                kind=kind,
+                request_id=request_id,
+                payload=payload,
+            )
+        )
+
+    if row.manager_user_id is not None:
+        queue("override.manager_notified", row.manager_user_id)
+    if row.hr_user_id is not None:
+        queue("override.hr_notified", row.hr_user_id)
+    queue(
+        "override.employee_notified",
+        employee_user_id,
+        {"recipient_email": employee_email or None},
+    )
 
 
 def _apply_post_approval_side_effects(
@@ -806,6 +928,11 @@ def admin_override_endpoint(
         except sm.InvalidTransition as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+        # Identify the previous decider (P16 red line: the audit row
+        # must carry it). Manager rejection is terminal so we look at
+        # whichever stage actually wrote a decision_at timestamp.
+        previous_stage, previous_decider_user_id = _identify_previous_decider(row)
+
         now = datetime.now(timezone.utc)
         repo.update_status(
             conn,
@@ -824,11 +951,36 @@ def admin_override_endpoint(
             action=f"request.admin.{payload.decision}",
             entity_type="request",
             entity_id=str(request_id),
-            before={"status": row.status},
-            after={"status": new_status, "comment": payload.comment},
+            before={
+                "status": row.status,
+                "previous_stage": previous_stage,
+                "previous_decider_user_id": previous_decider_user_id,
+            },
+            after={
+                "status": new_status,
+                # Stored verbatim so the audit reads like the operator
+                # wrote it. The state-machine + Pydantic guard already
+                # ensured min-length / non-empty.
+                "comment": payload.comment,
+            },
         )
         after = repo.get_request(conn, scope, request_id)
         assert after is not None
+
+        # Queue notifications for the original decision-makers and the
+        # employee. P20 will drain this table; today we just record
+        # what needs to land where.
+        _queue_override_notifications(
+            conn,
+            scope=scope,
+            request_id=request_id,
+            actor=user,
+            decision=payload.decision,
+            comment=payload.comment,
+            previous_stage=previous_stage,
+            previous_decider_user_id=previous_decider_user_id,
+            row=after,
+        )
 
     _apply_post_approval_side_effects(
         scope=scope, row=after, actor_user_id=user.id
