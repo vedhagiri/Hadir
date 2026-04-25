@@ -188,6 +188,92 @@ def upsert_attendance(
     conn.execute(stmt)
 
 
+def list_for_employee_range(
+    conn: Connection,
+    scope: TenantScope,
+    *,
+    employee_id: int,
+    start_date: date,
+    end_date: date,
+) -> list["AttendanceRow"]:
+    """Return attendance rows for one employee across a date range, descending."""
+
+    stmt = (
+        select(
+            employees.c.id.label("employee_id"),
+            employees.c.employee_code,
+            employees.c.full_name,
+            employees.c.department_id,
+            departments.c.code.label("department_code"),
+            departments.c.name.label("department_name"),
+            attendance_records.c.date,
+            attendance_records.c.in_time,
+            attendance_records.c.out_time,
+            attendance_records.c.total_minutes,
+            attendance_records.c.policy_id,
+            shift_policies.c.name.label("policy_name"),
+            attendance_records.c.late,
+            attendance_records.c.early_out,
+            attendance_records.c.short_hours,
+            attendance_records.c.absent,
+            attendance_records.c.overtime_minutes,
+        )
+        .select_from(
+            attendance_records.join(
+                employees,
+                and_(
+                    employees.c.id == attendance_records.c.employee_id,
+                    employees.c.tenant_id == attendance_records.c.tenant_id,
+                ),
+            )
+            .join(
+                departments,
+                and_(
+                    departments.c.id == employees.c.department_id,
+                    departments.c.tenant_id == employees.c.tenant_id,
+                ),
+            )
+            .join(
+                shift_policies,
+                and_(
+                    shift_policies.c.id == attendance_records.c.policy_id,
+                    shift_policies.c.tenant_id == attendance_records.c.tenant_id,
+                ),
+            )
+        )
+        .where(
+            attendance_records.c.tenant_id == scope.tenant_id,
+            attendance_records.c.employee_id == employee_id,
+            attendance_records.c.date >= start_date,
+            attendance_records.c.date <= end_date,
+        )
+        .order_by(attendance_records.c.date.desc())
+    )
+    rows = conn.execute(stmt).all()
+    return [
+        AttendanceRow(
+            employee_id=int(r.employee_id),
+            employee_code=str(r.employee_code),
+            full_name=str(r.full_name),
+            department_id=int(r.department_id),
+            department_code=str(r.department_code),
+            department_name=str(r.department_name),
+            date=r.date,
+            in_time=r.in_time,
+            out_time=r.out_time,
+            total_minutes=r.total_minutes,
+            policy_id=int(r.policy_id),
+            policy_name=str(r.policy_name),
+            late=bool(r.late),
+            early_out=bool(r.early_out),
+            short_hours=bool(r.short_hours),
+            absent=bool(r.absent),
+            overtime_minutes=int(r.overtime_minutes),
+        )
+        for r in rows
+    ]
+
+
 # --- List for the day (GET endpoint) ---------------------------------------
 
 

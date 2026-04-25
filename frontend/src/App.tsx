@@ -10,8 +10,11 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { LoginPage } from "./auth/LoginPage";
 import { ProtectedRoute } from "./auth/ProtectedRoute";
 import { AuditLogPage } from "./features/audit-log/AuditLogPage";
+import { DailyAttendancePage } from "./features/attendance/DailyAttendancePage";
+import { MyAttendancePage } from "./features/attendance/MyAttendancePage";
 import { CameraLogsPage } from "./features/camera-logs/CameraLogsPage";
 import { CamerasPage } from "./features/cameras/CamerasPage";
+import { DashboardRouter } from "./features/dashboard/DashboardRouter";
 import { EmployeesPage } from "./features/employees/EmployeesPage";
 import { SystemPage } from "./features/system/SystemPage";
 import { Placeholder } from "./pages/Placeholder";
@@ -31,18 +34,27 @@ export function App() {
         }
       >
         <Route index element={<Navigate to="/dashboard" replace />} />
+        <Route path="dashboard" element={<DashboardRouter />} />
         <Route path="employees" element={<EmployeesPage />} />
         <Route path="cameras" element={<CamerasPage />} />
         <Route path="camera-logs" element={<CameraLogsPage />} />
         <Route path="system" element={<SystemPage />} />
         <Route path="audit" element={<AuditLogPage />} />
+        <Route path="daily-attendance" element={<DailyAttendancePage />} />
+        <Route path="team-attendance" element={<DailyAttendancePage />} />
+        <Route path="my-attendance" element={<MyAttendancePage />} />
+        <Route path="attendance/me" element={<MyAttendancePage />} />
         {ALL_PAGE_IDS.filter(
           (id) =>
+            id !== "dashboard" &&
             id !== "employees" &&
             id !== "cameras" &&
             id !== "camera-logs" &&
             id !== "system" &&
-            id !== "audit",
+            id !== "audit" &&
+            id !== "daily-attendance" &&
+            id !== "team-attendance" &&
+            id !== "my-attendance",
         ).map((id) => (
           <Route key={id} path={id} element={<Placeholder pageId={id} />} />
         ))}

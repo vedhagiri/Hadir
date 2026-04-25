@@ -12,9 +12,9 @@ The pilot is a 5-day single-tenant demo on a corporate LAN; v1.0 is the
 multi-tenant SaaS-capable product 8–10 weeks after pilot signoff.
 
 ## Status
-**Pilot prompts currently complete: P1–P11.**
-Next: P12 — Role dashboards + Daily Attendance page with detail
-drawer. Wait for the user before starting it.
+**Pilot prompts currently complete: P1–P12.**
+Next: P13 — On-demand Excel reports + end-to-end smoke tests. Wait
+for the user before starting it.
 
 What P1 built:
 - Monorepo layout per PROJECT_CONTEXT §7

@@ -8,7 +8,7 @@ Employee → only their own row.
 from __future__ import annotations
 
 import logging
-from datetime import date as date_type, datetime, timezone
+from datetime import date as date_type, datetime, timedelta, timezone
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -158,4 +158,39 @@ def list_attendance(
         )
     return AttendanceListOut(
         date=the_date, items=[_row_to_item(r) for r in rows]
+    )
+
+
+@router.get("/me/recent", response_model=AttendanceListOut)
+def my_recent_attendance(
+    user: Annotated[CurrentUser, Depends(current_user)],
+    days: Annotated[int, Query(ge=1, le=90)] = 7,
+) -> AttendanceListOut:
+    """Last ``days`` days of attendance for the **current user**.
+
+    Self-only by design — there's no employee_id parameter to widen the
+    scope. The user→employee join uses lower-cased email (pilot
+    convention; v1.0 will introduce an explicit join table).
+    """
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    from hadir.attendance.repository import local_tz  # noqa: PLC0415
+
+    today = datetime.now(timezone.utc).astimezone(local_tz()).date()
+    start = today - timedelta(days=days - 1)
+
+    employee_id = _employee_row_id_for(user)
+    if employee_id is None:
+        return AttendanceListOut(date=today, items=[])
+
+    with get_engine().begin() as conn:
+        rows = repo.list_for_employee_range(
+            conn,
+            scope,
+            employee_id=employee_id,
+            start_date=start,
+            end_date=today,
+        )
+    return AttendanceListOut(
+        date=today, items=[_row_to_item(r) for r in rows]
     )

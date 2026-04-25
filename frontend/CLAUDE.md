@@ -1,12 +1,13 @@
 # Hadir frontend — Claude Code notes
 
 ## Status
-P1 + P4 + P6 + P7 complete. **P11 complete**: `/camera-logs`,
-`/system`, and `/audit` are real pages. Camera Logs is a paginated
-table with inline thumbnails (auth-gated `/crop` endpoint) and
-filters; System has stat cards + camera fleet table with 24-hour
-sparklines + system-signals card; Audit Log is read-only with
-expandable JSON detail rows.
+P1 + P4 + P6 + P7 + P11 complete. **P12 complete**: `/dashboard`
+routes by role to one of four dashboards (Admin/HR/Manager/Employee);
+`/daily-attendance` and `/team-attendance` render the role-scoped
+Daily Attendance page with date+department filters and a right-sliding
+detail drawer (employee profile + flag explanations + thumbnailed
+underlying detection events); `/my-attendance` and `/attendance/me`
+render the Employee self-view (today + last 7 days).
 
 ## Stack
 - Vite 5 + React 18
@@ -68,6 +69,11 @@ frontend/
         types.ts hooks.ts SystemPage.tsx
       audit-log/          # P11
         types.ts hooks.ts AuditLogPage.tsx
+      attendance/         # P12
+        types.ts hooks.ts DailyAttendancePage.tsx AttendanceDrawer.tsx MyAttendancePage.tsx
+      dashboard/          # P12
+        DashboardRouter.tsx + AdminDashboard / HrDashboard / ManagerDashboard / EmployeeDashboard
+        StatCard.tsx + StatusBreakdown.tsx (shared dashboard primitives)
     styles/               # design CSS, copied verbatim — DO NOT EDIT
       styles.css
       styles-enhancements.css
@@ -118,5 +124,5 @@ identity card with a TODO comment pointing at the deferred switcher.
 - `docker compose exec frontend npm run dev` — Vite hot-reloads on save.
 
 ## Pilot prompt currently active
-P11 — done. Next: **P12 — Role dashboards + Daily Attendance page
-with detail drawer.** Wait for the user before starting P12.
+P12 — done. Next: **P13 — On-demand Excel reports + end-to-end smoke
+tests.** Wait for the user before starting P13.

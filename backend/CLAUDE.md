@@ -1,13 +1,11 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-P1–P10 complete. **P11 complete**: read endpoints for the Camera Logs,
-System, and Audit Log Admin pages. Detection-events list (with
-camera / employee / identified / date-range filters + 100/page),
-auth-gated crop endpoint that decrypts on the fly and audit-logs each
-view, system health exposes uptime + DB conns + scheduler statuses +
-counts, cameras-health exposes per-camera last-seen + 24-hour series,
-audit log read-only with action/entity_type filter selectors. P12 next.
+P1–P11 complete. **P12 complete**: per-role dashboards
+(Admin/HR/Manager/Employee), Daily Attendance page with detail drawer,
+Employee self-view at `/attendance/me` and `/my-attendance`. Backend
+gained one read endpoint: `GET /api/attendance/me/recent?days=N` for
+the self-view's last-N-days history. P13 next.
 
 ## Stack
 - Python 3.11
@@ -507,7 +505,8 @@ All Admin-only.
 | `GET /api/system/health` | Uptime, process pid, active DB connections (`pg_stat_activity`), capture-workers count, attendance-scheduler/rate-limiter running flags, enrolled-employees + active-employees + cameras totals, today's events + attendance counts. |
 | `GET /api/system/cameras-health` | Per-camera latest snapshot (`frames_last_minute`, `reachable`, `last_seen_at`) + 24-hour `series_24h` of `(captured_at, frames_last_minute, reachable)`. |
 | `GET /api/audit-log` | Paginated read-only list. Filters: `actor_user_id`, `action`, `entity_type`, `start`, `end`. Response includes `distinct_actions` + `distinct_entity_types` so the UI's filter selectors stay in sync. **No write handlers** anywhere — UPDATE/DELETE on `audit_log` would also be rejected at the DB grant level (P2). |
+| `GET /api/attendance/me/recent?days=N` | (P12) Self-only history for the logged-in user, last `N` days (default 7, max 90). Resolves user→employee by lower-cased email; returns `{date, items:[]}` if no employee row matches. |
 
 ## Pilot prompt currently active
-P11 — done. Next: **P12 — Role dashboards + Daily Attendance page with
-detail drawer.** Wait for the user before starting P12.
+P12 — done. Next: **P13 — On-demand Excel reports + end-to-end smoke
+tests.** Wait for the user before starting P13.
