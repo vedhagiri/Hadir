@@ -216,6 +216,43 @@ tenants = Table(
 )
 
 
+# --- Per-tenant branding (P4) ----------------------------------------------
+# One row per tenant. ``primary_color_key`` and ``font_key`` are both
+# constrained server-side via CHECK to the curated lists in
+# ``hadir/branding/constants.py`` — there is no free-form hex entry and
+# no custom font upload (BRD FR-BRD-002 red line).
+
+tenant_branding = Table(
+    "tenant_branding",
+    metadata,
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("primary_color_key", Text, nullable=False, server_default="teal"),
+    Column("logo_path", Text, nullable=True),
+    Column("font_key", Text, nullable=False, server_default="inter"),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    CheckConstraint(
+        "primary_color_key IN ("
+        "'teal','navy','slate','forest','plum','clay','rose','amber'"
+        ")",
+        name="ck_tenant_branding_primary_color_key",
+    ),
+    CheckConstraint(
+        "font_key IN ('inter','lato','plus-jakarta-sans')",
+        name="ck_tenant_branding_font_key",
+    ),
+)
+
+
 # --- Super-Admin global tables (P3) ----------------------------------------
 # All three live in ``public`` alongside ``tenants``. They are NOT per-tenant
 # and the provisioning CLI's create_all filter (``schema != 'public'``)

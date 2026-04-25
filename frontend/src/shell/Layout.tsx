@@ -5,6 +5,7 @@
 import { Outlet, useLocation } from "react-router-dom";
 
 import { useMe } from "../auth/AuthProvider";
+import { BrandingProvider } from "../branding/BrandingProvider";
 import { primaryRole } from "../types";
 import { ImpersonationBanner } from "./ImpersonationBanner";
 import { Sidebar } from "./Sidebar";
@@ -24,6 +25,9 @@ export function Layout() {
 
   return (
     <div className="app">
+      {/* Mounts a <style> tag in document.head with --accent + body
+          font-family overrides for the active tenant. Returns null. */}
+      <BrandingProvider />
       {me.is_super_admin_impersonation && (
         <ImpersonationBanner superAdminUserId={me.super_admin_user_id ?? null} />
       )}

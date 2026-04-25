@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2 + P3.**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4.**
 - **P0** — pilot frozen at `v0.1-pilot` (commit `1a0782c`);
   `release/pilot` branch exists locally + at origin.
 - **P1** — multi-tenant routing switch wired up. `MetaData()` is
@@ -72,8 +72,22 @@ To return to v1.0 work: `git checkout main`.
   `/super-admin/*` plus a persistent `ImpersonationBanner` over the
   tenant shell whenever `/api/auth/me` reports
   `is_super_admin_impersonation=true`.
+- **P4** — Per-tenant branding. Migration `0010_tenant_branding`
+  adds one per-tenant table (`tenant_branding`) with curated CHECK
+  constraints on `primary_color_key` (8 OKLCH options) and
+  `font_key` (Inter / Lato / Plus Jakarta Sans). New
+  `hadir/branding/` package owns `/api/branding/*` (tenant Admin)
+  and `/api/super-admin/tenants/{id}/branding/*` (operator).
+  Logos are PNG/SVG ≤200KB validated by magic bytes, stored at
+  `/data/branding/{tenant_id}/logo.{ext}`, served via auth-required
+  endpoints. The frontend `BrandingProvider` mounts a `<style>` tag
+  on the document at sign-in and rewrites its content with the
+  tenant's accent + font overrides; no flicker, no reload required.
+  Curated red lines from BRD FR-BRD-002: no free-form hex, no
+  custom CSS upload, no custom font upload — enforced by both the
+  CHECK constraints and the API validation.
 
-Next: **P4** per `v1.0-phase-plan.md`. Wait for the user before
+Next: **P5** per `v1.0-phase-plan.md`. Wait for the user before
 starting. Per-phase records: `docs/phases/P*.md`.
 
 ---

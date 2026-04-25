@@ -9,6 +9,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 
 import { LoginPage } from "./auth/LoginPage";
 import { ProtectedRoute } from "./auth/ProtectedRoute";
+import { BrandingPage } from "./branding/BrandingPage";
 import { AuditLogPage } from "./features/audit-log/AuditLogPage";
 import { DailyAttendancePage } from "./features/attendance/DailyAttendancePage";
 import { MyAttendancePage } from "./features/attendance/MyAttendancePage";
@@ -66,6 +67,8 @@ export function App() {
         <Route path="my-attendance" element={<MyAttendancePage />} />
         <Route path="attendance/me" element={<MyAttendancePage />} />
         <Route path="reports" element={<ReportsPage />} />
+        <Route path="settings" element={<Navigate to="/settings/branding" replace />} />
+        <Route path="settings/branding" element={<BrandingPage />} />
         {ALL_PAGE_IDS.filter(
           (id) =>
             id !== "dashboard" &&
@@ -77,7 +80,8 @@ export function App() {
             id !== "daily-attendance" &&
             id !== "team-attendance" &&
             id !== "my-attendance" &&
-            id !== "reports",
+            id !== "reports" &&
+            id !== "settings",
         ).map((id) => (
           <Route key={id} path={id} element={<Placeholder pageId={id} />} />
         ))}

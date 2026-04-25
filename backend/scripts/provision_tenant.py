@@ -55,6 +55,7 @@ from hadir.db import (
     roles,
     set_tenant_schema,
     shift_policies,
+    tenant_branding,
     tenants,
     user_roles,
     users,
@@ -101,6 +102,7 @@ _APP_CRUD_TABLES = (
     "camera_health_snapshots",
     "shift_policies",
     "attendance_records",
+    "tenant_branding",
 )
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -256,6 +258,10 @@ def _seed_defaults(
             active_until=None,
         )
     )
+
+    # Default branding row (P4). Curated defaults match the existing
+    # design system's accent (``teal``) and font (``inter``).
+    conn.execute(insert(tenant_branding).values(tenant_id=tenant_id))
 
     user_id = conn.execute(
         insert(users)

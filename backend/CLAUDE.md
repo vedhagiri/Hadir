@@ -1,7 +1,7 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 complete**:
+Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 complete**:
 pilot frozen at tag `v0.1-pilot` on branch `release/pilot`; multi-tenant
 routing wired up via a per-connection `SET search_path` driven by a
 ContextVar + SQLAlchemy `checkout` event; the global `tenants` registry
@@ -16,8 +16,13 @@ impersonation, and dual-audit on every tenant-scope write so each
 operator touch lands in BOTH the tenant's own `audit_log` and the
 global operator log. Migration-authoring lint at
 `tests/test_migration_lint.py`. Isolation canary in
-`tests/test_multi_tenant_isolation.py`. Single-mode backwards-compatible
-(pilot's `main` schema is the default). **v1.0 P4 next.**
+`tests/test_multi_tenant_isolation.py`. **P4** added per-tenant
+branding (`tenant_branding` table; curated 8-colour palette + 3
+fonts; PNG/SVG logo upload validated by magic bytes; `/api/branding`
++ `/api/super-admin/tenants/{id}/branding` endpoints; frontend
+`BrandingProvider` writes a `<style>` tag with `--accent` overrides +
+body font-family at sign-in). Single-mode backwards-compatible
+(pilot's `main` schema is the default). **v1.0 P5 next.**
 
 ## Tenant routing (v1.0 P1)
 **Approach chosen: SQLAlchemy `checkout` event + Python ContextVar**,

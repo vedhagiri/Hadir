@@ -1,8 +1,10 @@
-// Tenant detail (P3): branding placeholder + admin users + recent
-// super-admin audit + Access as / Suspend toggles.
+// Tenant detail (P3 + P4 branding tab): admin users + recent
+// super-admin audit + Access as / Suspend toggles, plus the
+// per-tenant branding editor that targets this tenant's id.
 
 import { useNavigate, useParams } from "react-router-dom";
 
+import { SuperAdminBrandingTab } from "../branding/SuperAdminBrandingTab";
 import {
   useAccessAs,
   useTenantDetail,
@@ -133,10 +135,7 @@ export function TenantDetailPage() {
 
       <div style={cardStyle}>
         <h2 style={cardTitleStyle}>Branding</h2>
-        <p style={{ color: "var(--text-tertiary)", fontSize: 13, margin: 0 }}>
-          Per-tenant branding (logo, accent colour, font) lands in P4. Use
-          &ldquo;Access as&rdquo; to view the tenant&apos;s current shell.
-        </p>
+        <SuperAdminBrandingTab tenantId={t.id} />
       </div>
 
       <div style={cardStyle}>
