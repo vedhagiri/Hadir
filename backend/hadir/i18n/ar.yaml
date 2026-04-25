@@ -1,0 +1,66 @@
+# Hadir backend strings — Arabic source bundle.
+#
+# ⚠ All translations below are **Claude-generated draft text**.
+# Per BRD Open Item Q7 + the P21 phase doc, they must be reviewed
+# and adjusted by a native Arabic speaker on Omran HR before v1.0
+# launch. Do not treat this file as production-ready copy.
+
+notifications:
+  approval_assigned:
+    subject: "مراجعة {stage}: طلب {request_type} مقدّم من {submitter_name}"
+    body: "وصل طلب {request_type} إلى قائمتك. راجعه واتخذ القرار من صندوق الموافقات."
+  approval_decided:
+    subject: "تم {status_label} طلب {request_type} الخاص بك"
+    body: "{decider_label} وضع طلبك في حالة {status_label}."
+  admin_override:
+    subject: "تجاوز إداري · طلب {request_type} {status_label}"
+    body: "قام أحد المسؤولين بتجاوز قرار {previous_stage} على هذا الطلب."
+    body_no_prior: "اتخذ أحد المسؤولين قرارًا على هذا الطلب عبر التجاوز الإداري."
+  overtime_flagged:
+    subject: "تنبيه ساعات إضافية · {employee_full_name} ({employee_code}) — {overtime_minutes} دقيقة في {date}"
+    body: "تجمّعت لدى {employee_full_name} ({employee_code}) {overtime_minutes} دقيقة من العمل الإضافي بتاريخ {date}. يرجى المراجعة والاعتماد من صفحة الحضور اليومي."
+  camera_unreachable:
+    subject: "كاميرا غير متاحة · {camera_name} منذ {minutes_unreachable} دقيقة"
+    body: "الكاميرا {camera_name} (المعرّف={camera_id}) غير متاحة منذ {minutes_unreachable} دقيقة. يرجى المتابعة من صفحة سجلات الكاميرا."
+  report_ready:
+    subject: "تقرير {format_upper} جاهز ({range_label})"
+    body: "اكتمل بنجاح تقرير الحضور بصيغة {format_upper} للفترة {range_label}. افتحه من صفحة التقارير أو من البريد المرسل إليك."
+
+email:
+  unsubscribe_pointer: "تتلقى هذه الرسالة لأن خانة {category_label} مفعّلة في حسابك على {tenant_name}. لإيقاف هذه الفئة، افتح الإعدادات ← التنبيهات في حضور وعطّل المفتاح — يسري التغيير عند الحدث التالي."
+  report:
+    subject: "{tenant_name} — تقرير الحضور من {range_start} إلى {range_end}"
+  test:
+    subject: "اختبار إعدادات البريد لحضور"
+    body: "هذه رسالة اختبار من صفحة إعدادات البريد في حضور."
+
+errors:
+  forbidden: "ليست لديك صلاحية لهذا الإجراء."
+  not_found: "غير موجود."
+  invalid_request: "طلب غير صالح."
+  rate_limited: "محاولات كثيرة جدًا. يرجى الانتظار قليلاً ثم المحاولة مجددًا."
+
+categories:
+  approval_assigned: "موافقات معيّنة لي"
+  approval_decided: "تم البت في طلبي"
+  overtime_flagged: "تنبيه ساعات إضافية"
+  camera_unreachable: "كاميرا غير متاحة"
+  report_ready: "تقرير جاهز"
+  admin_override: "تجاوز إداري"
+
+stages:
+  manager: "المدير"
+  hr: "الموارد البشرية"
+  pending_manager: "المدير المنتظر قراره"
+  pending_hr: "مراجعة الموارد البشرية المنتظرة"
+  prior: "السابق"
+
+statuses:
+  submitted: "تم الإرسال"
+  manager_approved: "اعتمده المدير"
+  manager_rejected: "رفضه المدير"
+  hr_approved: "تمت الموافقة"
+  hr_rejected: "رفضته الموارد البشرية"
+  admin_approved: "تجاوز إداري · موافقة"
+  admin_rejected: "تجاوز إداري · رفض"
+  cancelled: "ملغي"

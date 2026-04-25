@@ -1182,6 +1182,10 @@ users = Table(
     Column("password_hash", Text, nullable=False),
     Column("full_name", Text, nullable=False),
     Column("is_active", Boolean, nullable=False, server_default="true"),
+    # P21: per-user UI language. NULL = "follow browser"; only the
+    # two codes Hadir ships translations for ('en', 'ar') are
+    # acceptable — DB CHECK is the load-bearing guard.
+    Column("preferred_language", Text, nullable=True),
     Column(
         "created_at",
         DateTime(timezone=True),
@@ -1189,6 +1193,10 @@ users = Table(
         server_default=func.now(),
     ),
     UniqueConstraint("tenant_id", "email", name="uq_users_tenant_email"),
+    CheckConstraint(
+        "preferred_language IS NULL OR preferred_language IN ('en','ar')",
+        name="ck_users_preferred_language",
+    ),
 )
 
 

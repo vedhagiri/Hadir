@@ -12,6 +12,7 @@
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import type { Resolver } from "react-hook-form";
+import { useTranslation } from "react-i18next";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { z } from "zod";
 
@@ -51,6 +52,7 @@ const zodResolver: Resolver<LoginValues> = async (values) => {
 };
 
 export function LoginPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const login = useLogin();
   const { data: me, isLoading: meLoading } = useMe();
@@ -101,14 +103,13 @@ export function LoginPage() {
     const err = login.error;
     if (!err) return null;
     if (err instanceof ApiError) {
-      if (err.status === 401) return "Invalid credentials for this tenant.";
-      if (err.status === 429)
-        return "Too many attempts. Try again in a few minutes.";
+      if (err.status === 401) return t("login.wrongCredentials");
+      if (err.status === 429) return t("login.rateLimited");
       if (err.status === 403)
         return "Tenant is suspended. Contact your administrator.";
-      return "Login failed. Please try again.";
+      return t("common.error");
     }
-    return "Login failed. Please try again.";
+    return t("common.error");
   })();
 
   // Decide which surface to render. Order:
@@ -202,22 +203,30 @@ function Header({ tenantSlug }: { tenantSlug: string | null }) {
           </span>
         )}
       </div>
-      <h1
-        style={{
-          fontFamily: "var(--font-display)",
-          fontSize: 32,
-          margin: 0,
-          fontWeight: 400,
-          letterSpacing: "-0.01em",
-        }}
-      >
-        Sign in
-      </h1>
+      <H1Title />
     </>
   );
 }
 
+function H1Title() {
+  const { t } = useTranslation();
+  return (
+    <h1
+      style={{
+        fontFamily: "var(--font-display)",
+        fontSize: 32,
+        margin: 0,
+        fontWeight: 400,
+        letterSpacing: "-0.01em",
+      }}
+    >
+      {t("login.title")}
+    </h1>
+  );
+}
+
 function TenantPicker({ onPick }: { onPick: (slug: string) => void }) {
+  const { t } = useTranslation();
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
   const onSubmit = (e: React.FormEvent) => {
@@ -236,15 +245,15 @@ function TenantPicker({ onPick }: { onPick: (slug: string) => void }) {
       style={{ display: "flex", flexDirection: "column", gap: 12 }}
     >
       <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 13 }}>
-        Enter your tenant slug. In production this comes from your subdomain
-        (e.g. <code>omran</code> for <code>omran.hadir.example.com</code>).
+        {t("login.subtitle")}
       </p>
       <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        <span style={labelStyle}>Tenant slug</span>
+        <span style={labelStyle}>{t("login.tenantSlugLabel")}</span>
         <input
           type="text"
           autoFocus
           autoComplete="off"
+          placeholder={t("login.tenantSlugPlaceholder")}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           style={inputStyle}
@@ -256,7 +265,7 @@ function TenantPicker({ onPick }: { onPick: (slug: string) => void }) {
         )}
       </label>
       <button type="submit" className="btn btn-primary" style={{ justifyContent: "center" }}>
-        Continue
+        {t("login.submit")}
       </button>
     </form>
   );
@@ -269,12 +278,12 @@ function OidcPanel({
   tenantSlug: string;
   onUseLocal: () => void;
 }) {
+  const { t } = useTranslation();
   const oidcUrl = `/api/auth/oidc/login?tenant=${encodeURIComponent(tenantSlug)}`;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 13 }}>
-        Sign in with your Microsoft account. Your administrator must register
-        you in Hadir before your first sign-in.
+        {t("login.subtitle")}
       </p>
       <a
         href={oidcUrl}
@@ -289,7 +298,7 @@ function OidcPanel({
           fontSize: 14,
         }}
       >
-        Sign in with Microsoft
+        {t("login.oidcButton")}
       </a>
       <button
         type="button"
@@ -303,7 +312,7 @@ function OidcPanel({
           textDecoration: "underline",
         }}
       >
-        Use local account (break-glass)
+        {t("login.oidcOrLocal")}
       </button>
     </div>
   );
@@ -334,6 +343,7 @@ function LocalLoginForm({
   onUseOidc,
   serverError,
 }: LocalFormProps) {
+  const { t } = useTranslation();
   return (
     <form
       onSubmit={onSubmit}
@@ -352,15 +362,16 @@ function LocalLoginForm({
           fontSize: 13,
         }}
       >
-        Enter your Hadir credentials.
+        {t("login.subtitle")}
       </p>
 
       <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        <span style={labelStyle}>Email</span>
+        <span style={labelStyle}>{t("login.emailLabel")}</span>
         <input
           type="email"
           autoComplete="username"
           autoFocus
+          placeholder={t("login.emailPlaceholder")}
           aria-invalid={!!errors.email}
           {...register("email")}
           style={inputStyle}
@@ -369,10 +380,11 @@ function LocalLoginForm({
       </label>
 
       <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        <span style={labelStyle}>Password</span>
+        <span style={labelStyle}>{t("login.passwordLabel")}</span>
         <input
           type="password"
           autoComplete="current-password"
+          placeholder={t("login.passwordPlaceholder")}
           aria-invalid={!!errors.password}
           {...register("password")}
           style={inputStyle}
@@ -403,7 +415,7 @@ function LocalLoginForm({
         style={{ justifyContent: "center", marginTop: 4 }}
       >
         <Icon name="check" size={13} />
-        {isSubmitting || isPending ? "Signing in…" : "Sign in"}
+        {isSubmitting || isPending ? t("login.submitting") : t("login.submit")}
       </button>
 
       <div
@@ -427,7 +439,7 @@ function LocalLoginForm({
             padding: 0,
           }}
         >
-          Change tenant
+          {t("login.tenantSlugLabel")}
         </button>
         {oidcEnabled && (
           <button
@@ -442,7 +454,7 @@ function LocalLoginForm({
               padding: 0,
             }}
           >
-            Sign in with Microsoft
+            {t("login.oidcButton")}
           </button>
         )}
       </div>

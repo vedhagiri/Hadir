@@ -10,6 +10,11 @@ import "./styles/styles-enhancements.css";
 import "./styles/styles-enhancements2.css";
 import "./styles/styles-enhancements3.css";
 
+// P21: i18next config — must run before any component that calls
+// ``useTranslation`` mounts. The init also flips <html lang> + <html
+// dir="rtl"> on boot for the detected language.
+import "./i18n";
+
 import { App } from "./App";
 
 const rootEl = document.getElementById("root");

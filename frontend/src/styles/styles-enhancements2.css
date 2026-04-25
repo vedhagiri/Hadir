@@ -221,7 +221,7 @@
   cursor: pointer;
   transition: background 0.15s ease;
   width: 100%;
-  text-align: left;
+  text-align: start;
 }
 .mgr-item:hover { background: var(--bg-sunken); }
 .mgr-item.active {

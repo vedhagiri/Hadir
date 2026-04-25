@@ -1,5 +1,7 @@
 // Settings → Notifications. Per-user category × channel grid.
 
+import { useTranslation } from "react-i18next";
+
 import { ApiError } from "../api/client";
 import { SettingsTabs } from "../settings/SettingsTabs";
 import {
@@ -8,13 +10,13 @@ import {
 } from "./hooks";
 import {
   ALL_CATEGORIES,
-  CATEGORY_LABELS,
   type NotificationCategory,
   type NotificationPreference,
 } from "./types";
 
 
 export function NotificationPreferencesPage() {
+  const { t } = useTranslation();
   const prefs = useNotificationPreferences();
   const patch = usePatchPreference();
 
@@ -55,13 +57,10 @@ export function NotificationPreferencesPage() {
             fontWeight: 400,
           }}
         >
-          Notifications
+          {t("notifications.preferences.title")}
         </h1>
         <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 13 }}>
-          Pick which events show up in your bell and which arrive in
-          your inbox. Defaults are both on for every category — flip
-          a checkbox to opt out. Email preferences are honoured the
-          next time the delivery worker runs (within ~30 seconds).
+          {t("notifications.preferences.subtitle")}
         </p>
       </header>
 
@@ -69,9 +68,13 @@ export function NotificationPreferencesPage() {
         <table className="table">
           <thead>
             <tr>
-              <th>Category</th>
-              <th style={{ width: 100, textAlign: "center" }}>In-app bell</th>
-              <th style={{ width: 100, textAlign: "center" }}>Email</th>
+              <th>{t("notifications.preferences.category")}</th>
+              <th style={{ width: 100, textAlign: "center" }}>
+                {t("notifications.preferences.inApp")}
+              </th>
+              <th style={{ width: 100, textAlign: "center" }}>
+                {t("notifications.preferences.email")}
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -79,12 +82,13 @@ export function NotificationPreferencesPage() {
               const p = byCat.get(c);
               const inApp = p?.in_app ?? true;
               const email = p?.email ?? true;
+              const label = t(`notifications.categories.${c}`, {
+                defaultValue: c,
+              });
               return (
                 <tr key={c}>
                   <td>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>
-                      {CATEGORY_LABELS[c]}
-                    </div>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{label}</div>
                     <div className="text-xs text-dim mono">{c}</div>
                   </td>
                   <td style={{ textAlign: "center" }}>
@@ -95,7 +99,7 @@ export function NotificationPreferencesPage() {
                         void onToggle(c, "in_app", e.target.checked)
                       }
                       disabled={patch.isPending}
-                      aria-label={`In-app for ${CATEGORY_LABELS[c]}`}
+                      aria-label={`${t("notifications.preferences.inApp")}: ${label}`}
                     />
                   </td>
                   <td style={{ textAlign: "center" }}>
@@ -106,7 +110,7 @@ export function NotificationPreferencesPage() {
                         void onToggle(c, "email", e.target.checked)
                       }
                       disabled={patch.isPending}
-                      aria-label={`Email for ${CATEGORY_LABELS[c]}`}
+                      aria-label={`${t("notifications.preferences.email")}: ${label}`}
                     />
                   </td>
                 </tr>

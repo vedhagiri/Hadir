@@ -12,10 +12,10 @@
 [data-theme="dark"] .drawer-scrim { background: rgba(0, 0, 0, 0.55); }
 
 .drawer {
-  position: fixed; top: 0; right: 0; bottom: 0;
+  position: fixed; top: 0; inset-inline-end: 0; bottom: 0;
   width: min(640px, 100vw);
   background: var(--bg-elev);
-  border-left: 1px solid var(--border);
+  border-inline-start: 1px solid var(--border);
   box-shadow: var(--shadow-lg);
   z-index: 61;
   display: flex; flex-direction: column;
@@ -317,7 +317,7 @@
   color: var(--text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  text-align: left;
+  text-align: start;
 }
 .cal-grid {
   display: grid;
@@ -326,14 +326,14 @@
 }
 .cal-cell {
   padding: 10px 12px;
-  border-right: 1px solid var(--border);
+  border-inline-end: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   min-height: 100px;
   display: flex; flex-direction: column;
   gap: 4px;
   transition: background 120ms ease;
 }
-.cal-cell:nth-child(7n) { border-right: none; }
+.cal-cell:nth-child(7n) { border-inline-end: none; }
 .cal-cell.weekend { background: var(--bg-sunken); }
 .cal-cell.cal-cell-empty { background: var(--bg-sunken); opacity: 0.5; min-height: 60px; }
 .cal-cell.person:hover { background: var(--bg-hover); }
@@ -394,7 +394,7 @@
   width: 8px; height: 8px;
   border-radius: 50%;
   display: inline-block;
-  margin-right: 5px;
+  margin-inline-end: 5px;
   vertical-align: middle;
 }
 
@@ -417,14 +417,16 @@
 @media (max-width: 900px) {
   .sidebar {
     position: fixed;
-    left: 0; top: 0; bottom: 0;
+    inset-inline-start: 0; top: 0; bottom: 0;
     transform: translateX(-100%);
     transition: transform 200ms ease;
     z-index: 50;
     box-shadow: var(--shadow-lg);
   }
+  [dir="rtl"] .app.mobile-nav-open .sidebar,
   .app.mobile-nav-open .sidebar { transform: translateX(0); }
-  .main { margin-left: 0; }
+  [dir="rtl"] .sidebar { transform: translateX(100%); }
+  .main { margin-inline-start: 0; }
   .mobile-only { display: inline-flex; }
   .topbar-search { display: none; }
   .crumbs { font-size: 13px; }

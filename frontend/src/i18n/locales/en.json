@@ -1,0 +1,188 @@
+{
+  "common": {
+    "loading": "Loading…",
+    "save": "Save changes",
+    "saving": "Saving…",
+    "saved": "Saved.",
+    "cancel": "Cancel",
+    "close": "Close",
+    "delete": "Delete",
+    "edit": "Edit",
+    "yes": "Yes",
+    "no": "No",
+    "all": "All",
+    "search": "Search…",
+    "comingSoon": "Coming soon",
+    "error": "Something went wrong.",
+    "forbidden": "You don't have permission for that.",
+    "networkError": "Network error.",
+    "language": "Language",
+    "languageEnglish": "English",
+    "languageArabic": "العربية"
+  },
+  "login": {
+    "title": "Sign in to Hadir",
+    "subtitle": "Use your Hadir account or your organisation's Microsoft sign-in.",
+    "emailLabel": "Email",
+    "emailPlaceholder": "you@your-domain.com",
+    "passwordLabel": "Password",
+    "passwordPlaceholder": "Your Hadir password",
+    "submit": "Sign in",
+    "submitting": "Signing in…",
+    "wrongCredentials": "Email or password didn't match.",
+    "rateLimited": "Too many attempts. Wait a moment and try again.",
+    "tenantSlugLabel": "Workspace",
+    "tenantSlugPlaceholder": "tenant-name",
+    "oidcButton": "Sign in with Microsoft",
+    "oidcOrLocal": "or use a local account"
+  },
+  "topbar": {
+    "logout": "Log out",
+    "loggingOut": "Logging out…",
+    "switchRole": "Switch role"
+  },
+  "nav": {
+    "sections": {
+      "overview": "Overview",
+      "operations": "Operations",
+      "attendance": "Attendance",
+      "workflow": "Workflow",
+      "system": "System",
+      "people": "People",
+      "team": "Team",
+      "personal": "Personal",
+      "me": "Me"
+    },
+    "items": {
+      "dashboard": "Dashboard",
+      "live": "Live capture",
+      "calendar": "Calendar",
+      "cameras": "Cameras",
+      "employees": "Employees",
+      "enrollment": "Enrollment",
+      "policies": "Shift policies",
+      "leave-policy": "Leave & calendar",
+      "daily-attendance": "Daily attendance",
+      "team-attendance": "Team attendance",
+      "camera-logs": "Camera logs",
+      "pipeline": "How it works",
+      "approvals": "Approvals",
+      "reports": "Reports",
+      "employee-report": "Employee report",
+      "mgr-assign": "Manager assignments",
+      "audit": "Audit log",
+      "system": "System & infrastructure",
+      "api-docs": "API reference",
+      "settings": "Settings & custom fields",
+      "my-attendance": "My attendance",
+      "my-requests": "My requests",
+      "my-profile": "Profile & photo"
+    }
+  },
+  "approvals": {
+    "title": "Approvals",
+    "subtitle": "Two-stage workflow · Manager → HR · Admin override per BRD FR-REQ-006. Manager rejection is final unless overridden.",
+    "tabs": {
+      "pending": "Pending my decision",
+      "decided": "Decided by me",
+      "all": "All"
+    },
+    "columns": {
+      "id": "ID",
+      "employee": "Employee",
+      "type": "Type",
+      "reason": "Reason",
+      "dates": "Date(s)",
+      "daysOpen": "Days open",
+      "stage": "Stage",
+      "files": "Files"
+    },
+    "empty": "Nothing here.",
+    "primary": "primary",
+    "override": "Override",
+    "overrideTitle": "Override this decision (audited)",
+    "stages": {
+      "submitted": "awaiting manager",
+      "managerApproved": "awaiting HR",
+      "managerRejected": "manager rejected",
+      "hrApproved": "HR approved",
+      "hrRejected": "HR rejected",
+      "adminApproved": "admin override · approved",
+      "adminRejected": "admin override · rejected",
+      "cancelled": "cancelled"
+    }
+  },
+  "myRequests": {
+    "title": "My requests",
+    "subtitle": "File an exception or leave request — your line manager and HR review them in turn. Manager rejection is final unless an administrator overrides it.",
+    "newRequest": "New request",
+    "filters": {
+      "type": "Type",
+      "status": "Status",
+      "all": "All",
+      "exception": "Exception",
+      "leave": "Leave",
+      "open": "Open",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "cancelled": "Cancelled"
+    },
+    "columns": {
+      "id": "ID",
+      "type": "Type",
+      "reason": "Reason",
+      "dates": "Date(s)",
+      "status": "Status",
+      "submitted": "Submitted"
+    },
+    "empty": "No requests yet."
+  },
+  "notifications": {
+    "title": "Notifications",
+    "bell": {
+      "label": "Notifications",
+      "unreadAria": "{{count}} unread",
+      "title": "Notifications",
+      "markAllRead": "Mark all read",
+      "markOneRead": "Read",
+      "empty": "You're all caught up.",
+      "seeAll": "See all notifications"
+    },
+    "page": {
+      "subtitle": "Recent activity targeted at you. Adjust which categories land here from {{settingsLink}}.",
+      "settingsLink": "Settings → Notifications"
+    },
+    "categories": {
+      "approval_assigned": "Approval assigned to me",
+      "approval_decided": "My request decided",
+      "overtime_flagged": "Overtime flagged",
+      "camera_unreachable": "Camera unreachable",
+      "report_ready": "Report ready",
+      "admin_override": "Admin override"
+    },
+    "preferences": {
+      "title": "Notifications",
+      "subtitle": "Pick which events show up in your bell and which arrive in your inbox. Defaults are both on for every category — flip a checkbox to opt out. Email preferences are honoured the next time the delivery worker runs (within ~30 seconds).",
+      "category": "Category",
+      "inApp": "In-app bell",
+      "email": "Email"
+    }
+  },
+  "settings": {
+    "tabs": {
+      "branding": "Branding",
+      "authentication": "Authentication",
+      "customFields": "Custom fields",
+      "reasonCategories": "Request reasons",
+      "email": "Email",
+      "schedules": "Schedules",
+      "erpExport": "ERP export",
+      "notifications": "Notifications"
+    }
+  },
+  "language": {
+    "title": "Language",
+    "english": "English",
+    "arabic": "العربية"
+  }
+}

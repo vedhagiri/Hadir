@@ -24,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.engine import Connection
 
 from hadir.db import roles, user_roles, users
+from hadir.i18n import resolve_language, t
 from hadir.notifications.categories import Category
 from hadir.notifications.repository import (
     insert_notification,
@@ -32,6 +33,23 @@ from hadir.notifications.repository import (
 from hadir.tenants.scope import TenantScope
 
 logger = logging.getLogger(__name__)
+
+
+def _user_preferred_language(
+    conn: Connection, scope: TenantScope, *, user_id: int
+) -> str:
+    """Recipient's saved language. Defaults to the server default
+    when the row has no explicit preference."""
+
+    row = conn.execute(
+        select(users.c.preferred_language).where(
+            users.c.tenant_id == scope.tenant_id,
+            users.c.id == user_id,
+        )
+    ).first()
+    if row is None or row.preferred_language is None:
+        return resolve_language()
+    return resolve_language(user_preference=str(row.preferred_language))
 
 
 def notify_user(
@@ -107,16 +125,29 @@ def notify_approval_assigned(
     target_user_ids: Iterable[int],
     stage: str,
 ) -> list[int]:
-    """Manager (on submission) or HR (on manager-approve)."""
+    """Manager (on submission) or HR (on manager-approve).
 
-    subject = f"{stage} review: {request_type} request from {submitter_name}"
-    body = (
-        f"A {request_type} request has reached your queue. "
-        f"Review and decide in the Approvals inbox."
-    )
+    Each recipient sees the subject + body in their preferred
+    language; English is the fallback when a key is missing.
+    """
+
     link_url = f"/approvals?id={request_id}"
     written: list[int] = []
     for uid in target_user_ids:
+        lang = _user_preferred_language(conn, scope, user_id=uid)
+        stage_label = t(f"stages.{stage.lower()}", lang) if stage else stage
+        subject = t(
+            "notifications.approval_assigned.subject",
+            lang,
+            stage=stage_label,
+            request_type=request_type,
+            submitter_name=submitter_name,
+        )
+        body = t(
+            "notifications.approval_assigned.body",
+            lang,
+            request_type=request_type,
+        )
         nid = notify_user(
             conn,
             scope,
@@ -147,9 +178,24 @@ def notify_approval_decided(
 
     if employee_user_id is None:
         return None
-    pretty = new_status.replace("_", " ")
-    subject = f"Your {request_type} request was {pretty}"
-    body_lines = [f"{decider_label} marked your request as {pretty}."]
+    lang = _user_preferred_language(
+        conn, scope, user_id=employee_user_id
+    )
+    status_label = t(f"statuses.{new_status}", lang)
+    subject = t(
+        "notifications.approval_decided.subject",
+        lang,
+        request_type=request_type,
+        status_label=status_label,
+    )
+    body_lines = [
+        t(
+            "notifications.approval_decided.body",
+            lang,
+            decider_label=decider_label,
+            status_label=status_label,
+        )
+    ]
     if comment:
         body_lines.append("")
         body_lines.append(f"Comment: {comment}")
@@ -185,13 +231,6 @@ def notify_admin_override(
 ) -> list[int]:
     """One row per audience — Manager + HR (when present) + Employee."""
 
-    pretty = decision.replace("_", " ")
-    subject_template = f"Admin override · {request_type} request {pretty}"
-    body = (
-        f"An administrator overrode the {previous_stage or 'pending'} "
-        f"decision on this request.\n\n"
-        f"Comment: {comment}"
-    )
     written: list[int] = []
     seen_user_ids: set[int] = set()
 
@@ -199,12 +238,40 @@ def notify_admin_override(
         if uid is None or uid in seen_user_ids:
             return
         seen_user_ids.add(uid)
+        lang = _user_preferred_language(conn, scope, user_id=uid)
+        status_label = t(f"statuses.admin_{decision}d", lang) if False else t(
+            f"statuses.{('admin_approved' if decision == 'approve' else 'admin_rejected')}",
+            lang,
+        )
+        subject = t(
+            "notifications.admin_override.subject",
+            lang,
+            request_type=request_type,
+            status_label=status_label,
+        )
+        if previous_stage:
+            stage_label = t(f"stages.{previous_stage.lower()}", lang)
+            body = (
+                t(
+                    "notifications.admin_override.body",
+                    lang,
+                    previous_stage=stage_label,
+                )
+                + "\n\n"
+                + f"Comment: {comment}"
+            )
+        else:
+            body = (
+                t("notifications.admin_override.body_no_prior", lang)
+                + "\n\n"
+                + f"Comment: {comment}"
+            )
         nid = notify_user(
             conn,
             scope,
             user_id=uid,
             category="admin_override",
-            subject=subject_template,
+            subject=subject,
             body=body,
             link_url=f"/approvals?id={request_id}",
             payload={
@@ -249,19 +316,26 @@ def notify_overtime_flagged(
 
     hr_ids = _user_ids_with_role(conn, scope, role_code="HR")
     targets = list({*manager_user_ids, *hr_ids})
-    subject = (
-        f"Overtime flagged · {employee_full_name} ({employee_code}) "
-        f"— {overtime_minutes} min on {the_date.isoformat()}"
-    )
-    body = (
-        f"{employee_full_name} ({employee_code}) accumulated "
-        f"{overtime_minutes} minutes of overtime on "
-        f"{the_date.isoformat()}. Per BRD FR-ATT-005, review and "
-        f"approve / reject via the Daily Attendance page."
-    )
     link_url = f"/daily-attendance?date={the_date.isoformat()}"
     written: list[int] = []
     for uid in targets:
+        lang = _user_preferred_language(conn, scope, user_id=uid)
+        subject = t(
+            "notifications.overtime_flagged.subject",
+            lang,
+            employee_full_name=employee_full_name,
+            employee_code=employee_code,
+            overtime_minutes=overtime_minutes,
+            date=the_date.isoformat(),
+        )
+        body = t(
+            "notifications.overtime_flagged.body",
+            lang,
+            employee_full_name=employee_full_name,
+            employee_code=employee_code,
+            overtime_minutes=overtime_minutes,
+            date=the_date.isoformat(),
+        )
         nid = notify_user(
             conn,
             scope,
@@ -290,17 +364,23 @@ def notify_camera_unreachable(
     minutes_unreachable: int,
 ) -> list[int]:
     admin_ids = _user_ids_with_role(conn, scope, role_code="Admin")
-    subject = (
-        f"Camera unreachable · {camera_name} for {minutes_unreachable} min"
-    )
-    body = (
-        f"Camera {camera_name} (id={camera_id}) has been unreachable "
-        f"for {minutes_unreachable} minutes. Per BRD NFR-AVL-003, "
-        f"investigate via the Camera logs page."
-    )
     link_url = "/camera-logs"
     written: list[int] = []
     for uid in admin_ids:
+        lang = _user_preferred_language(conn, scope, user_id=uid)
+        subject = t(
+            "notifications.camera_unreachable.subject",
+            lang,
+            camera_name=camera_name,
+            minutes_unreachable=minutes_unreachable,
+        )
+        body = t(
+            "notifications.camera_unreachable.body",
+            lang,
+            camera_name=camera_name,
+            camera_id=camera_id,
+            minutes_unreachable=minutes_unreachable,
+        )
         nid = notify_user(
             conn,
             scope,
@@ -328,17 +408,27 @@ def notify_report_ready(
     range_label: str,
     download_link: Optional[str] = None,
 ) -> Optional[int]:
+    lang = _user_preferred_language(conn, scope, user_id=user_id)
+    fmt_upper = fmt.upper()
+    subject = t(
+        "notifications.report_ready.subject",
+        lang,
+        format_upper=fmt_upper,
+        range_label=range_label,
+    )
+    body = t(
+        "notifications.report_ready.body",
+        lang,
+        format_upper=fmt_upper,
+        range_label=range_label,
+    )
     return notify_user(
         conn,
         scope,
         user_id=user_id,
         category="report_ready",
-        subject=f"Your {fmt.upper()} report is ready ({range_label})",
-        body=(
-            f"Your on-demand {fmt.upper()} attendance report for "
-            f"{range_label} finished successfully. Open it from the "
-            f"Reports page or the email we just sent."
-        ),
+        subject=subject,
+        body=body,
         link_url=download_link or "/reports",
         payload={"format": fmt, "range_label": range_label},
     )

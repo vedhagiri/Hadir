@@ -5,6 +5,7 @@
 // the role-scoped decision footer.
 
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { useMe } from "../auth/AuthProvider";
 import { Icon } from "../shell/Icon";
@@ -17,11 +18,23 @@ import {
   useInboxPending,
   useRequests,
 } from "./hooks";
-import type { RequestRecord } from "./types";
+import type { RequestRecord, RequestStatus } from "./types";
 
 type Tab = "pending" | "decided" | "all";
 
+const STAGE_KEY: Record<RequestStatus, string> = {
+  submitted: "submitted",
+  manager_approved: "managerApproved",
+  manager_rejected: "managerRejected",
+  hr_approved: "hrApproved",
+  hr_rejected: "hrRejected",
+  admin_approved: "adminApproved",
+  admin_rejected: "adminRejected",
+  cancelled: "cancelled",
+};
+
 export function ApprovalsPage() {
+  const { t } = useTranslation();
   const me = useMe();
   const role = (me.data?.active_role ?? null) as
     | "Admin"
@@ -48,15 +61,14 @@ export function ApprovalsPage() {
   }, [role]);
 
   // Employees should never see this page; bounce them with a hint.
-  if (me.isLoading) return <p>Loading…</p>;
+  if (me.isLoading) return <p>{t("common.loading")}</p>;
   if (role === "Employee") {
     return (
       <p style={{ color: "var(--text-secondary)" }}>
-        Approvals is for managers, HR, and administrators. Use{" "}
+        {t("common.forbidden")}{" "}
         <a href="/my-requests" style={{ textDecoration: "underline" }}>
-          My Requests
-        </a>{" "}
-        to file a request instead.
+          {t("nav.items.my-requests")}
+        </a>
       </p>
     );
   }
@@ -86,7 +98,7 @@ export function ApprovalsPage() {
               fontWeight: 400,
             }}
           >
-            Approvals
+            {t("approvals.title")}
           </h1>
           <p
             style={{
@@ -95,23 +107,22 @@ export function ApprovalsPage() {
               fontSize: 13,
             }}
           >
-            Two-stage workflow · Manager → HR · Admin override per BRD
-            FR-REQ-006. Manager rejection is final unless overridden.
+            {t("approvals.subtitle")}
           </p>
         </div>
-        <span className="text-xs text-dim">Active role: {role}</span>
+        <span className="text-xs text-dim">{role}</span>
       </header>
 
       <div className="seg" role="tablist">
         <Tab
-          label={`Pending my decision${
+          label={`${t("approvals.tabs.pending")}${
             pending.data ? ` · ${pending.data.length}` : ""
           }`}
           active={tab === "pending"}
           onSelect={() => setTab("pending")}
         />
         <Tab
-          label={`Decided by me${
+          label={`${t("approvals.tabs.decided")}${
             decided.data ? ` · ${decided.data.length}` : ""
           }`}
           active={tab === "decided"}
@@ -119,7 +130,7 @@ export function ApprovalsPage() {
         />
         {role === "Admin" && (
           <Tab
-            label={`All${all.data ? ` · ${all.data.length}` : ""}`}
+            label={`${t("approvals.tabs.all")}${all.data ? ` · ${all.data.length}` : ""}`}
             active={tab === "all"}
             onSelect={() => setTab("all")}
           />
@@ -130,14 +141,14 @@ export function ApprovalsPage() {
         <table className="table">
           <thead>
             <tr>
-              <th style={{ width: 60 }}>ID</th>
-              <th>Employee</th>
-              <th>Type</th>
-              <th>Reason</th>
-              <th>Date(s)</th>
-              <th>Days open</th>
-              <th>Stage</th>
-              <th style={{ width: 60 }}>Files</th>
+              <th style={{ width: 60 }}>{t("approvals.columns.id")}</th>
+              <th>{t("approvals.columns.employee")}</th>
+              <th>{t("approvals.columns.type")}</th>
+              <th>{t("approvals.columns.reason")}</th>
+              <th>{t("approvals.columns.dates")}</th>
+              <th>{t("approvals.columns.daysOpen")}</th>
+              <th>{t("approvals.columns.stage")}</th>
+              <th style={{ width: 60 }}>{t("approvals.columns.files")}</th>
               <th />
             </tr>
           </thead>
@@ -145,7 +156,7 @@ export function ApprovalsPage() {
             {items.length === 0 ? (
               <tr>
                 <td colSpan={9} className="text-sm text-dim">
-                  Nothing here.
+                  {t("approvals.empty")}
                 </td>
               </tr>
             ) : (
@@ -213,7 +224,8 @@ function Row({
   onOpen: () => void;
   onOverride: (() => void) | null;
 }) {
-  const stage = stageLabel(request);
+  const { t } = useTranslation();
+  const stage = t(`approvals.stages.${STAGE_KEY[request.status]}`);
   const businessHours = request.business_hours_open;
   return (
     <tr style={{ cursor: "pointer" }} onClick={onOpen}>
@@ -227,9 +239,9 @@ function Row({
           {request.is_primary_for_viewer && (
             <span
               className="pill pill-accent"
-              style={{ marginLeft: 6, padding: "0 6px" }}
+              style={{ marginInlineStart: 6, padding: "0 6px" }}
             >
-              primary
+              {t("approvals.primary")}
             </span>
           )}
         </div>
@@ -295,7 +307,7 @@ function Row({
           <span className="text-dim">—</span>
         )}
       </td>
-      <td style={{ textAlign: "right" }}>
+      <td style={{ textAlign: "end" }}>
         {onOverride && (
           <button
             type="button"
@@ -304,38 +316,17 @@ function Row({
               e.stopPropagation();
               onOverride();
             }}
-            title="Override this decision (audited)"
+            title={t("approvals.overrideTitle")}
             style={{
               color: "var(--danger-text)",
-              marginRight: 4,
+              marginInlineEnd: 4,
             }}
           >
-            Override
+            {t("approvals.override")}
           </button>
         )}
         <Icon name="chevronRight" size={13} className="text-dim" />
       </td>
     </tr>
   );
-}
-
-function stageLabel(r: RequestRecord): string {
-  switch (r.status) {
-    case "submitted":
-      return "awaiting manager";
-    case "manager_approved":
-      return "awaiting HR";
-    case "manager_rejected":
-      return "manager rejected";
-    case "hr_approved":
-      return "HR approved";
-    case "hr_rejected":
-      return "HR rejected";
-    case "admin_approved":
-      return "admin override · approved";
-    case "admin_rejected":
-      return "admin override · rejected";
-    case "cancelled":
-      return "cancelled";
-  }
 }

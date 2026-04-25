@@ -39,6 +39,10 @@ dependencies = [
     "jinja2==3.1.4",
     # P18: cron-expression parsing for scheduled reports.
     "croniter==2.0.5",
+    # P21: i18n. PyYAML is the smallest config format that
+    # supports nested keys + Unicode without a build step;
+    # operators editing translations don't need to escape quotes.
+    "PyYAML==6.0.2",
 ]
 
 [project.optional-dependencies]

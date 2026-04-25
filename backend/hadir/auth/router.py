@@ -84,6 +84,15 @@ class MeResponse(BaseModel):
     # "Viewing as SuperAdmin" red banner.
     is_super_admin_impersonation: bool = False
     super_admin_user_id: int | None = None
+    # P21: explicit per-user UI language (``en`` / ``ar``). ``None``
+    # means "follow browser" — the frontend's i18next detector reads
+    # ``navigator.language`` in that case.
+    preferred_language: str | None = None
+
+
+class PreferredLanguageRequest(BaseModel):
+    # ``None`` clears the preference and lets the browser drive.
+    preferred_language: str | None = Field(default=None, max_length=8)
 
 
 class SwitchRoleRequest(BaseModel):
@@ -379,7 +388,73 @@ def _to_me_response(
         departments=list(user.departments),
         is_super_admin_impersonation=is_imp,
         super_admin_user_id=sa_user_id,
+        preferred_language=user.preferred_language,
     )
+
+
+@router.patch("/preferred-language")
+def set_preferred_language(
+    payload: PreferredLanguageRequest,
+    user: Annotated[CurrentUser, Depends(current_user)],
+) -> MeResponse:
+    """P21: persist the operator's UI language preference.
+
+    Pass ``preferred_language=null`` to clear the choice and let the
+    browser drive again. The DB CHECK on ``users.preferred_language``
+    rejects anything other than ``en`` / ``ar`` / NULL.
+    """
+
+    from hadir.i18n import SUPPORTED_LANGUAGES  # noqa: PLC0415
+
+    new_value = payload.preferred_language
+    if new_value is not None and new_value not in SUPPORTED_LANGUAGES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "preferred_language must be null or one of: "
+                + ", ".join(SUPPORTED_LANGUAGES)
+            ),
+        )
+
+    if user.id == 0:
+        # Synthetic Super-Admin — no real users row to update.
+        # Return as-is so the topbar switcher in the impersonation
+        # banner doesn't crash.
+        return _to_me_response(user)
+
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            users.update()
+            .where(
+                users.c.id == user.id, users.c.tenant_id == user.tenant_id
+            )
+            .values(preferred_language=new_value)
+        )
+        write_audit(
+            conn,
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            action="auth.preferred_language.updated",
+            entity_type="user",
+            entity_id=str(user.id),
+            before={"preferred_language": user.preferred_language},
+            after={"preferred_language": new_value},
+        )
+
+    refreshed = CurrentUser(
+        id=user.id,
+        tenant_id=user.tenant_id,
+        email=user.email,
+        full_name=user.full_name,
+        roles=user.roles,
+        available_roles=user.available_roles,
+        active_role=user.active_role,
+        departments=user.departments,
+        session_id=user.session_id,
+        preferred_language=new_value,
+    )
+    return _to_me_response(refreshed)
 
 
 @router.post("/switch-role")
@@ -440,5 +515,6 @@ def switch_role(
         active_role=payload.role,
         departments=user.departments,
         session_id=user.session_id,
+        preferred_language=user.preferred_language,
     )
     return _to_me_response(refreshed)

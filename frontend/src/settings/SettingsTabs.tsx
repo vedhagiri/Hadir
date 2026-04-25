@@ -2,20 +2,22 @@
 // at the top so the operator can hop between Branding, Authentication,
 // and Custom Fields without going back to the sidebar.
 
+import { useTranslation } from "react-i18next";
 import { NavLink } from "react-router-dom";
 
 const TABS = [
-  { to: "/settings/branding", label: "Branding" },
-  { to: "/settings/authentication", label: "Authentication" },
-  { to: "/settings/custom-fields", label: "Custom fields" },
-  { to: "/settings/reason-categories", label: "Request reasons" },
-  { to: "/settings/email", label: "Email" },
-  { to: "/settings/schedules", label: "Schedules" },
-  { to: "/settings/erp-export", label: "ERP export" },
-  { to: "/settings/notifications", label: "Notifications" },
+  { to: "/settings/branding", key: "branding" },
+  { to: "/settings/authentication", key: "authentication" },
+  { to: "/settings/custom-fields", key: "customFields" },
+  { to: "/settings/reason-categories", key: "reasonCategories" },
+  { to: "/settings/email", key: "email" },
+  { to: "/settings/schedules", key: "schedules" },
+  { to: "/settings/erp-export", key: "erpExport" },
+  { to: "/settings/notifications", key: "notifications" },
 ] as const;
 
 export function SettingsTabs() {
+  const { t } = useTranslation();
   return (
     <nav
       style={{
@@ -24,7 +26,7 @@ export function SettingsTabs() {
         borderBottom: "1px solid var(--border)",
         marginBottom: 8,
       }}
-      aria-label="Settings sections"
+      aria-label={t("nav.items.settings")}
     >
       {TABS.map((tab) => (
         <NavLink
@@ -42,7 +44,7 @@ export function SettingsTabs() {
             marginBottom: -1,
           })}
         >
-          {tab.label}
+          {t(`settings.tabs.${tab.key}`)}
         </NavLink>
       ))}
     </nav>

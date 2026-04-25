@@ -1,0 +1,188 @@
+{
+  "common": {
+    "loading": "جارٍ التحميل…",
+    "save": "حفظ التغييرات",
+    "saving": "جارٍ الحفظ…",
+    "saved": "تم الحفظ.",
+    "cancel": "إلغاء",
+    "close": "إغلاق",
+    "delete": "حذف",
+    "edit": "تعديل",
+    "yes": "نعم",
+    "no": "لا",
+    "all": "الكل",
+    "search": "بحث…",
+    "comingSoon": "قريباً",
+    "error": "حدث خطأ ما.",
+    "forbidden": "ليس لديك صلاحية لذلك.",
+    "networkError": "خطأ في الشبكة.",
+    "language": "اللغة",
+    "languageEnglish": "English",
+    "languageArabic": "العربية"
+  },
+  "login": {
+    "title": "تسجيل الدخول إلى حاضر",
+    "subtitle": "استخدم حساب حاضر أو تسجيل دخول مايكروسوفت الخاص بمؤسستك.",
+    "emailLabel": "البريد الإلكتروني",
+    "emailPlaceholder": "you@your-domain.com",
+    "passwordLabel": "كلمة المرور",
+    "passwordPlaceholder": "كلمة مرور حاضر الخاصة بك",
+    "submit": "تسجيل الدخول",
+    "submitting": "جارٍ تسجيل الدخول…",
+    "wrongCredentials": "البريد الإلكتروني أو كلمة المرور غير متطابقة.",
+    "rateLimited": "محاولات كثيرة جداً. انتظر لحظة وحاول مرة أخرى.",
+    "tenantSlugLabel": "مساحة العمل",
+    "tenantSlugPlaceholder": "tenant-name",
+    "oidcButton": "تسجيل الدخول باستخدام مايكروسوفت",
+    "oidcOrLocal": "أو استخدم حساباً محلياً"
+  },
+  "topbar": {
+    "logout": "تسجيل الخروج",
+    "loggingOut": "جارٍ تسجيل الخروج…",
+    "switchRole": "تبديل الدور"
+  },
+  "nav": {
+    "sections": {
+      "overview": "نظرة عامة",
+      "operations": "العمليات",
+      "attendance": "الحضور",
+      "workflow": "سير العمل",
+      "system": "النظام",
+      "people": "الموظفون",
+      "team": "الفريق",
+      "personal": "شخصي",
+      "me": "أنا"
+    },
+    "items": {
+      "dashboard": "لوحة التحكم",
+      "live": "الالتقاط المباشر",
+      "calendar": "التقويم",
+      "cameras": "الكاميرات",
+      "employees": "الموظفون",
+      "enrollment": "التسجيل",
+      "policies": "سياسات الورديات",
+      "leave-policy": "الإجازات والتقويم",
+      "daily-attendance": "الحضور اليومي",
+      "team-attendance": "حضور الفريق",
+      "camera-logs": "سجلات الكاميرا",
+      "pipeline": "كيف يعمل",
+      "approvals": "الموافقات",
+      "reports": "التقارير",
+      "employee-report": "تقرير الموظف",
+      "mgr-assign": "تعيينات المدير",
+      "audit": "سجل التدقيق",
+      "system": "النظام والبنية التحتية",
+      "api-docs": "مرجع واجهة البرمجة",
+      "settings": "الإعدادات والحقول المخصصة",
+      "my-attendance": "حضوري",
+      "my-requests": "طلباتي",
+      "my-profile": "الملف الشخصي والصورة"
+    }
+  },
+  "approvals": {
+    "title": "الموافقات",
+    "subtitle": "سير عمل من مرحلتين · المدير ← الموارد البشرية · تجاوز المسؤول وفقاً لـ BRD FR-REQ-006. رفض المدير نهائي ما لم يتم تجاوزه.",
+    "tabs": {
+      "pending": "بانتظار قراري",
+      "decided": "تم البت فيها بواسطتي",
+      "all": "الكل"
+    },
+    "columns": {
+      "id": "المعرف",
+      "employee": "الموظف",
+      "type": "النوع",
+      "reason": "السبب",
+      "dates": "التاريخ/التواريخ",
+      "daysOpen": "أيام الفتح",
+      "stage": "المرحلة",
+      "files": "الملفات"
+    },
+    "empty": "لا يوجد شيء هنا.",
+    "primary": "أساسي",
+    "override": "تجاوز",
+    "overrideTitle": "تجاوز هذا القرار (مُدقَّق)",
+    "stages": {
+      "submitted": "بانتظار المدير",
+      "managerApproved": "بانتظار الموارد البشرية",
+      "managerRejected": "رفضه المدير",
+      "hrApproved": "موافقة الموارد البشرية",
+      "hrRejected": "رفض الموارد البشرية",
+      "adminApproved": "تجاوز المسؤول · موافقة",
+      "adminRejected": "تجاوز المسؤول · رفض",
+      "cancelled": "ملغى"
+    }
+  },
+  "myRequests": {
+    "title": "طلباتي",
+    "subtitle": "قدّم طلب استثناء أو إجازة — يراجعها مديرك المباشر ثم الموارد البشرية بالترتيب. رفض المدير نهائي ما لم يتجاوزه المسؤول.",
+    "newRequest": "طلب جديد",
+    "filters": {
+      "type": "النوع",
+      "status": "الحالة",
+      "all": "الكل",
+      "exception": "استثناء",
+      "leave": "إجازة",
+      "open": "مفتوح",
+      "approved": "موافق عليه",
+      "rejected": "مرفوض",
+      "cancelled": "ملغى"
+    },
+    "columns": {
+      "id": "المعرف",
+      "type": "النوع",
+      "reason": "السبب",
+      "dates": "التاريخ/التواريخ",
+      "status": "الحالة",
+      "submitted": "تاريخ الإرسال"
+    },
+    "empty": "لا توجد طلبات بعد."
+  },
+  "notifications": {
+    "title": "الإشعارات",
+    "bell": {
+      "label": "الإشعارات",
+      "unreadAria": "{{count}} غير مقروء",
+      "title": "الإشعارات",
+      "markAllRead": "تحديد الكل كمقروء",
+      "markOneRead": "تم القراءة",
+      "empty": "أنت على اطلاع بكل شيء.",
+      "seeAll": "عرض جميع الإشعارات"
+    },
+    "page": {
+      "subtitle": "النشاط الأخير الموجّه إليك. اضبط الفئات التي تظهر هنا من {{settingsLink}}.",
+      "settingsLink": "الإعدادات ← الإشعارات"
+    },
+    "categories": {
+      "approval_assigned": "موافقة موكلة إليّ",
+      "approval_decided": "تم البت في طلبي",
+      "overtime_flagged": "تم رصد ساعات إضافية",
+      "camera_unreachable": "الكاميرا غير متاحة",
+      "report_ready": "التقرير جاهز",
+      "admin_override": "تجاوز من المسؤول"
+    },
+    "preferences": {
+      "title": "الإشعارات",
+      "subtitle": "اختر الأحداث التي تظهر في جرسك والتي تصل إلى بريدك الوارد. الافتراضي تشغيل الاثنين لكل فئة — استخدم مربع الاختيار للاستثناء. تُحترم تفضيلات البريد الإلكتروني في المرة التالية التي يعمل فيها مشغّل التسليم (خلال نحو 30 ثانية).",
+      "category": "الفئة",
+      "inApp": "جرس داخل التطبيق",
+      "email": "البريد الإلكتروني"
+    }
+  },
+  "settings": {
+    "tabs": {
+      "branding": "الهوية البصرية",
+      "authentication": "المصادقة",
+      "customFields": "الحقول المخصصة",
+      "reasonCategories": "أسباب الطلبات",
+      "email": "البريد الإلكتروني",
+      "schedules": "الجداول",
+      "erpExport": "تصدير ERP",
+      "notifications": "الإشعارات"
+    }
+  },
+  "language": {
+    "title": "اللغة",
+    "english": "English",
+    "arabic": "العربية"
+  }
+}

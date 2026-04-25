@@ -20,6 +20,9 @@ export interface MeResponse {
   // mounts the red impersonation banner whenever this is true.
   is_super_admin_impersonation?: boolean;
   super_admin_user_id?: number | null;
+  // P21: explicit user-chosen UI language. ``null`` means
+  // "follow Accept-Language" — the browser drives.
+  preferred_language?: "en" | "ar" | null;
 }
 
 // Used by the shell to decide which NAV to render when a user holds more

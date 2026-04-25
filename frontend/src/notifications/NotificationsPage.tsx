@@ -1,12 +1,13 @@
 // Full notifications history page at /notifications.
 
+import { Trans, useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 
 import { useMarkAllRead, useMarkRead, useNotifications } from "./hooks";
-import { CATEGORY_LABELS } from "./types";
 
 
 export function NotificationsPage() {
+  const { t } = useTranslation();
   const list = useNotifications(100);
   const markRead = useMarkRead();
   const markAll = useMarkAllRead();
@@ -29,18 +30,24 @@ export function NotificationsPage() {
               fontWeight: 400,
             }}
           >
-            Notifications
+            {t("notifications.title")}
           </h1>
           <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 13 }}>
-            Recent activity targeted at you. Adjust which categories
-            land here from{" "}
-            <Link
-              to="/settings/notifications"
-              style={{ color: "var(--accent)", textDecoration: "underline" }}
-            >
-              Settings → Notifications
-            </Link>
-            .
+            <Trans
+              i18nKey="notifications.page.subtitle"
+              components={{
+                1: (
+                  <Link
+                    to="/settings/notifications"
+                    style={{
+                      color: "var(--accent)",
+                      textDecoration: "underline",
+                    }}
+                  />
+                ),
+              }}
+              values={{ settingsLink: t("notifications.page.settingsLink") }}
+            />
           </p>
         </div>
         <button
@@ -49,7 +56,7 @@ export function NotificationsPage() {
           onClick={() => markAll.mutate()}
           disabled={(list.data?.unread_count ?? 0) === 0 || markAll.isPending}
         >
-          Mark all read
+          {t("notifications.bell.markAllRead")}
         </button>
       </header>
 
@@ -57,9 +64,11 @@ export function NotificationsPage() {
         <table className="table">
           <thead>
             <tr>
-              <th style={{ width: 200 }}>When</th>
-              <th style={{ width: 180 }}>Category</th>
-              <th>Subject</th>
+              <th style={{ width: 200 }}>{t("myRequests.columns.submitted")}</th>
+              <th style={{ width: 180 }}>
+                {t("notifications.preferences.category")}
+              </th>
+              <th>{t("approvals.columns.reason")}</th>
               <th style={{ width: 80 }}></th>
             </tr>
           </thead>
@@ -67,13 +76,13 @@ export function NotificationsPage() {
             {list.isLoading ? (
               <tr>
                 <td colSpan={4} className="text-sm text-dim">
-                  Loading…
+                  {t("common.loading")}
                 </td>
               </tr>
             ) : (list.data?.items ?? []).length === 0 ? (
               <tr>
                 <td colSpan={4} className="text-sm text-dim">
-                  Nothing here yet.
+                  {t("notifications.bell.empty")}
                 </td>
               </tr>
             ) : (
@@ -89,7 +98,9 @@ export function NotificationsPage() {
                     {new Date(n.created_at).toLocaleString()}
                   </td>
                   <td className="text-xs">
-                    {CATEGORY_LABELS[n.category] ?? n.category}
+                    {t(`notifications.categories.${n.category}`, {
+                      defaultValue: n.category,
+                    })}
                   </td>
                   <td>
                     <div
@@ -124,14 +135,14 @@ export function NotificationsPage() {
                       </div>
                     )}
                   </td>
-                  <td style={{ textAlign: "right" }}>
+                  <td style={{ textAlign: "end" }}>
                     {n.read_at == null && (
                       <button
                         type="button"
                         className="btn btn-sm"
                         onClick={() => markRead.mutate(n.id)}
                       >
-                        Read
+                        {t("notifications.bell.markOneRead")}
                       </button>
                     )}
                   </td>

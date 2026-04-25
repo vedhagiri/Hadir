@@ -48,6 +48,11 @@ services:
       # downloads to $HOME/.insightface on first use; keeping it on a
       # named volume avoids re-downloading on every container restart.
       - insightface_models:/root/.insightface
+      # P21: read-only mount of the frontend tree so the JSX i18n
+      # lint test can scan ``frontend/src/**/*.tsx`` from the backend
+      # pytest run. Defensive — the lint skips gracefully if the
+      # mount is absent (e.g. a non-compose pytest invocation).
+      - ./frontend:/frontend:ro
     ports:
       - "8000:8000"
     depends_on:

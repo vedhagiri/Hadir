@@ -52,6 +52,9 @@ class CurrentUser:
     active_role: str
     departments: tuple[int, ...]
     session_id: str
+    # P21: explicit per-user UI language. ``None`` means
+    # "follow Accept-Language" — the i18n resolver consumes this.
+    preferred_language: str | None = None
 
 
 # Highest-first ranking. Used at login + on a no-stored-active-role
@@ -92,6 +95,7 @@ def _load_current_user_bundle(conn, *, user_id: int, tenant_id: int) -> CurrentU
             users.c.email,
             users.c.full_name,
             users.c.is_active,
+            users.c.preferred_language,
         ).where(users.c.id == user_id, users.c.tenant_id == tenant_id)
     ).first()
     if user_row is None or not user_row.is_active:
@@ -131,6 +135,11 @@ def _load_current_user_bundle(conn, *, user_id: int, tenant_id: int) -> CurrentU
         active_role=primary_role(role_codes),
         departments=department_ids,
         session_id="",  # filled in by the caller
+        preferred_language=(
+            str(user_row.preferred_language)
+            if user_row.preferred_language is not None
+            else None
+        ),
     )
 
 
@@ -275,6 +284,7 @@ def current_user(
         active_role=active,
         departments=bundle.departments,
         session_id=session_row.id,
+        preferred_language=bundle.preferred_language,
     )
 
 

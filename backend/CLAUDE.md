@@ -1,7 +1,7 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 complete**:
+Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 complete**:
 pilot frozen at tag `v0.1-pilot` on branch `release/pilot`; multi-tenant
 routing wired up via a per-connection `SET search_path` driven by a
 ContextVar + SQLAlchemy `checkout` event; the global `tenants` registry
@@ -179,7 +179,27 @@ and a camera-unreachable watcher mounted in the existing P18
 tick. Producers wired into request submit/decide/cancel, admin
 override (replaces the P16 stub), attendance recompute (overtime
 0 → >0 first-time-today gate), on-demand reports, and camera
-health. **v1.0 P21 next.**
+health. **P21** added Arabic + RTL: migration 0022
+(`users.preferred_language` nullable, CHECK locked to en/ar/null),
+new `hadir/i18n/` (`t()` + Accept-Language q-weighted parser +
+`resolve_language` chain), PyYAML 6.0.2-backed en.yaml + ar.yaml
+bundles (Claude-generated Arabic, **pending Omran HR native-
+speaker review before v1.0 launch**). Notification producers
+refactored — every recipient sees the subject + body in their
+own preferred language (load-bearing red line: two recipients of
+the same event get two different translations). `MeResponse`
++ `CurrentUser` carry `preferred_language`; new `PATCH
+/api/auth/preferred-language` audits as
+`auth.preferred_language.updated` and refuses synthetic Super-
+Admin (no real users row to update). Frontend wires i18next +
+react-i18next + LanguageDetector with detection order
+`localStorage > navigator > htmlTag` + the server-resolved
+preference applied on every `/api/auth/me` resolve;
+`<html dir="rtl">` flips on language change; topbar
+EN/العربية switcher; CSS logical-properties sweep across the
+four design CSS files; `[dir="rtl"]` flips directional icons
+(chevrons + arrows) via `transform: scaleX(-1)`. **v1.0 P22
+next.**
 
 ## Tenant routing (v1.0 P1)
 **Approach chosen: SQLAlchemy `checkout` event + Python ContextVar**,

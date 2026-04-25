@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20.**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21.**
 
 > **Tenant isolation is a P0 blocker.** The suites
 > `backend/tests/test_multi_tenant_isolation.py` (the P1 canary) and
@@ -375,9 +375,45 @@ To return to v1.0 work: `git checkout main`.
   Frontend ships a topbar bell + dropdown, a `/notifications`
   history page, and a Settings → Notifications grid (category ×
   channel) with default-true semantics.
+- **P21** — Arabic + RTL. Migration 0022 adds nullable
+  `users.preferred_language` (CHECK locked to en/ar/null);
+  schema-agnostic. New `hadir/i18n/` module ships `t()` (dotted-
+  key + `str.format` + missing-key-returns-key fallback),
+  Accept-Language q-weighted parser with regional sub-tag
+  folding, and `resolve_language(user_pref, accept_language)`
+  matching the P21 detection chain. PyYAML 6.0.2; en.yaml +
+  ar.yaml (Claude-generated, **pending Omran HR native-speaker
+  review**) cover notifications + email + errors + categories
+  + stages + statuses. Notification producers refactored —
+  every recipient gets the subject + body in their own
+  preferred language (load-bearing red line: Manager A in
+  Arabic and Manager B in English get different copy from the
+  same event). `MeResponse` + `CurrentUser` carry
+  `preferred_language` through. New `PATCH /api/auth/preferred-
+  language` (audit `auth.preferred_language.updated`, refuses
+  synthetic Super-Admin). Frontend wires i18next +
+  i18next-browser-languagedetector + react-i18next; en.json
+  + ar.json mirror the backend keys; `<html dir="rtl">` flip
+  on language change. Topbar EN/العربية switcher; AuthProvider
+  applies the server-resolved language on every `/api/auth/me`.
+  CSS logical-properties sweep across the four design CSS
+  files (margin/padding/border-left/right → -inline-start/end,
+  `text-align: left/right` → `start/end`); `[dir="rtl"]` rules
+  flip directional icons (chevrons, arrows) via
+  `transform: scaleX(-1)` on the new `icon-<kebab>` class
+  stamped by `Icon.tsx`. Translated surfaces: Login, Topbar,
+  Sidebar (incl. nav.sections + nav.items.{id}), Approvals,
+  MyRequests, NotificationBell, NotificationsPage,
+  PreferencesPage, SettingsTabs. Lint test scans every
+  translated TSX for hardcoded English (best-effort heuristic;
+  skips when frontend tree absent). Live smoke confirms the
+  Arabic-preferred manager receives Arabic subject + body in
+  both the in-app row and the email recorder.
 
-Next: **P21** per `v1.0-phase-plan.md`. Wait for the user before
-starting. Per-phase records: `docs/phases/P*.md`.
+Next: **P22** per `v1.0-phase-plan.md`. Wait for the user before
+starting. **Open critical item: Omran HR native-speaker review
+of the Arabic translations before v1.0 launch** — see
+`docs/phases/P21.md`. Per-phase records: `docs/phases/P*.md`.
 
 ---
 

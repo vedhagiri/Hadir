@@ -2,6 +2,7 @@
 // last 20. Click a row to mark it read and follow ``link_url``.
 
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 
 import { Icon } from "../shell/Icon";
@@ -10,10 +11,11 @@ import {
   useMarkRead,
   useNotifications,
 } from "./hooks";
-import { CATEGORY_LABELS, type NotificationItem } from "./types";
+import { type NotificationItem } from "./types";
 
 
 export function NotificationBell() {
+  const { t } = useTranslation();
   const list = useNotifications(20);
   const markRead = useMarkRead();
   const markAll = useMarkAllRead();
@@ -48,18 +50,18 @@ export function NotificationBell() {
       <button
         type="button"
         className="icon-btn"
-        aria-label="Notifications"
+        aria-label={t("notifications.bell.label")}
         onClick={() => setOpen((o) => !o)}
         style={{ position: "relative" }}
       >
         <Icon name="bell" size={14} />
         {unread > 0 && (
           <span
-            aria-label={`${unread} unread`}
+            aria-label={t("notifications.bell.unreadAria", { count: unread })}
             style={{
               position: "absolute",
               top: -2,
-              right: -2,
+              insetInlineEnd: -2,
               background: "var(--danger-bg, #b91c1c)",
               color: "white",
               fontSize: 9,
@@ -78,11 +80,11 @@ export function NotificationBell() {
       {open && (
         <div
           role="dialog"
-          aria-label="Notifications"
+          aria-label={t("notifications.bell.title")}
           style={{
             position: "absolute",
             top: "calc(100% + 6px)",
-            right: 0,
+            insetInlineEnd: 0,
             width: 360,
             maxHeight: 480,
             overflow: "auto",
@@ -102,14 +104,16 @@ export function NotificationBell() {
               justifyContent: "space-between",
             }}
           >
-            <strong style={{ fontSize: 13 }}>Notifications</strong>
+            <strong style={{ fontSize: 13 }}>
+              {t("notifications.bell.title")}
+            </strong>
             <button
               type="button"
               className="btn btn-sm"
               onClick={() => markAll.mutate()}
               disabled={unread === 0 || markAll.isPending}
             >
-              Mark all read
+              {t("notifications.bell.markAllRead")}
             </button>
           </header>
 
@@ -122,7 +126,7 @@ export function NotificationBell() {
                 textAlign: "center",
               }}
             >
-              You're all caught up.
+              {t("notifications.bell.empty")}
             </div>
           ) : (
             <ul
@@ -166,7 +170,7 @@ export function NotificationBell() {
                 textDecoration: "none",
               }}
             >
-              See all notifications
+              {t("notifications.bell.seeAll")}
             </Link>
           </footer>
         </div>
@@ -182,6 +186,7 @@ function RowAction({
   notification: NotificationItem;
   onClick: () => void;
 }) {
+  const { t } = useTranslation();
   const inner = (
     <div
       style={{
@@ -193,8 +198,10 @@ function RowAction({
       }}
     >
       <div className="text-xs text-dim" style={{ fontWeight: 500 }}>
-        {CATEGORY_LABELS[notification.category] ?? notification.category}
-        <span style={{ marginLeft: 8 }}>
+        {t(`notifications.categories.${notification.category}`, {
+          defaultValue: notification.category,
+        })}
+        <span style={{ marginInlineStart: 8 }}>
           {new Date(notification.created_at).toLocaleString()}
         </span>
       </div>

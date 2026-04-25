@@ -5,12 +5,29 @@
 // to v1.0 (PROJECT_CONTEXT §8) — we render a static identity card in its
 // place and put the logout button in the topbar.
 
+import { useTranslation } from "react-i18next";
 import { NavLink } from "react-router-dom";
 
 import { useInboxSummary } from "../requests/hooks";
 import type { MeResponse, Role } from "../types";
 import { Icon } from "./Icon";
 import { NAV } from "./nav";
+
+// Map English section labels (the design source) to i18n keys under
+// nav.sections. Anything not in the map falls back to its English
+// label — that keeps the sidebar functional even if a future NAV
+// section name slips in without a matching key.
+const SECTION_KEY: Record<string, string> = {
+  Overview: "overview",
+  Operations: "operations",
+  Attendance: "attendance",
+  Workflow: "workflow",
+  System: "system",
+  People: "people",
+  Team: "team",
+  Personal: "personal",
+  Me: "me",
+};
 
 interface Props {
   role: Role;
@@ -25,6 +42,7 @@ function initialsFor(fullName: string): string {
 }
 
 export function Sidebar({ role, me }: Props) {
+  const { t } = useTranslation();
   const items = NAV[role];
   // Only Manager / HR / Admin have an Approvals link; Employees don't,
   // so we skip the inbox query for them.
@@ -48,19 +66,21 @@ export function Sidebar({ role, me }: Props) {
       {/* Search is decorative in P4 — real search lands with employees (P6). */}
       <div className="topbar-search" style={{ width: "100%", margin: "0 0 6px" }}>
         <Icon name="search" size={13} />
-        <input placeholder="Search…" />
+        <input placeholder={t("common.search")} />
         <span className="kbd">⌘K</span>
       </div>
 
       {items.map((it, i) => {
         if ("section" in it) {
+          const key = SECTION_KEY[it.section];
+          const label = key ? t(`nav.sections.${key}`) : it.section;
           return (
             <div
               key={`s-${i}`}
               className="nav-label"
               style={{ marginTop: i === 0 ? 8 : 12 }}
             >
-              {it.section}
+              {label}
             </div>
           );
         }
@@ -70,6 +90,12 @@ export function Sidebar({ role, me }: Props) {
         const liveBadge = it.id === "approvals" ? inboxBadge : null;
         const badge = liveBadge ?? it.badge ?? null;
         const breached = it.id === "approvals" && inboxBreached;
+        // Translate the nav item via its id; fall back to the design
+        // label if the i18n key is missing (defensive — the lint test
+        // catches any new id without a key).
+        const navKey = `nav.items.${it.id}`;
+        const translated = t(navKey);
+        const label = translated === navKey ? it.label : translated;
         return (
           <NavLink
             key={it.id}
@@ -77,7 +103,7 @@ export function Sidebar({ role, me }: Props) {
             className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}
           >
             <Icon name={it.icon} size={14} />
-            <span>{it.label}</span>
+            <span>{label}</span>
             {badge && (
               <span
                 className="nav-badge"

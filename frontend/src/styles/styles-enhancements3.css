@@ -2,7 +2,7 @@
 
 /* Report tiles (selectable) */
 .report-tile {
-  text-align: left;
+  text-align: start;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -53,7 +53,7 @@
   margin-bottom: 10px;
   padding-bottom: 6px; border-bottom: 1px solid var(--border);
 }
-.req { color: var(--danger-text); margin-left: 2px; }
+.req { color: var(--danger-text); margin-inline-start: 2px; }
 
 /* Photo grid */
 .photo-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
@@ -168,7 +168,7 @@
 }
 .docs-nav-item {
   display: flex; align-items: center; gap: 8px;
-  width: 100%; text-align: left;
+  width: 100%; text-align: start;
   padding: 6px 8px;
   border: none; background: transparent;
   border-radius: 6px;
@@ -180,7 +180,7 @@
 .docs-nav-item.active {
   background: var(--accent-soft); color: var(--accent-text); font-weight: 500;
 }
-.docs-nav-item.endpoint { padding-left: 4px; gap: 6px; }
+.docs-nav-item.endpoint { padding-inline-start: 4px; gap: 6px; }
 .method-tag {
   font-family: 'JetBrains Mono', monospace;
   font-size: 9.5px; font-weight: 700;
@@ -217,7 +217,7 @@
 }
 .docs-h2 { font-size: 16px; font-weight: 600; margin: 28px 0 10px; }
 .docs-p { font-size: 13.5px; line-height: 1.65; color: var(--text-secondary); margin: 0 0 12px; }
-.docs-list { font-size: 13px; line-height: 1.8; color: var(--text-secondary); padding-left: 20px; }
+.docs-list { font-size: 13px; line-height: 1.8; color: var(--text-secondary); padding-inline-start: 20px; }
 .docs-list li { margin-bottom: 4px; }
 .docs-code-inline {
   font-family: 'JetBrains Mono', monospace;
@@ -334,4 +334,18 @@
   .docs-nav { position: static; max-height: none; }
   .grid-4 { grid-template-columns: repeat(2, 1fr); }
   .photo-grid { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* ---------- v1.0 P21: RTL flips for directional icons ---------- */
+/* The icon set ships physical SVG strokes; under RTL we mirror the
+   directional ones so the breadcrumb chevron, "next" arrows, and
+   any chevron-right indicators point the correct way. CSS logical
+   properties handle layout; transforms handle vector glyphs. */
+[dir="rtl"] .crumb-sep > svg,
+[dir="rtl"] .nav-item > svg.icon-chevron-right,
+[dir="rtl"] svg.icon-chevron-right,
+[dir="rtl"] svg.icon-chevron-left,
+[dir="rtl"] svg.icon-arrow-right,
+[dir="rtl"] svg.icon-arrow-left {
+  transform: scaleX(-1);
 }

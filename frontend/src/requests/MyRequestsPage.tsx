@@ -3,6 +3,7 @@
 // opens the submission drawer.
 
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { Icon } from "../shell/Icon";
 import { NewRequestDrawer } from "./NewRequestDrawer";
@@ -23,6 +24,7 @@ const STATUS_GROUPS: Record<StatusFilter, ReadonlyArray<RequestStatus>> = {
 };
 
 export function MyRequestsPage() {
+  const { t } = useTranslation();
   const requests = useRequests();
   const [openDrawer, setOpenDrawer] = useState<"new" | null>(null);
   const [openRequestId, setOpenRequestId] = useState<number | null>(null);
@@ -59,7 +61,7 @@ export function MyRequestsPage() {
               fontWeight: 400,
             }}
           >
-            My requests
+            {t("myRequests.title")}
           </h1>
           <p
             style={{
@@ -68,16 +70,14 @@ export function MyRequestsPage() {
               fontSize: 13,
             }}
           >
-            File an exception or leave request — your line manager and HR
-            review them in turn. Manager rejection is final unless an
-            administrator overrides it.
+            {t("myRequests.subtitle")}
           </p>
         </div>
         <button
           className="btn btn-primary"
           onClick={() => setOpenDrawer("new")}
         >
-          <Icon name="plus" size={12} /> New request
+          <Icon name="plus" size={12} /> {t("myRequests.newRequest")}
         </button>
       </header>
 
@@ -90,23 +90,23 @@ export function MyRequestsPage() {
         }}
       >
         <FilterChips
-          label="Type"
+          label={t("myRequests.filters.type")}
           options={[
-            ["all", "All"],
-            ["exception", "Exception"],
-            ["leave", "Leave"],
+            ["all", t("myRequests.filters.all")],
+            ["exception", t("myRequests.filters.exception")],
+            ["leave", t("myRequests.filters.leave")],
           ]}
           value={typeFilter}
           onChange={(v) => setTypeFilter(v as TypeFilter)}
         />
         <FilterChips
-          label="Status"
+          label={t("myRequests.filters.status")}
           options={[
-            ["all", "All"],
-            ["open", "Open"],
-            ["approved", "Approved"],
-            ["rejected", "Rejected"],
-            ["cancelled", "Cancelled"],
+            ["all", t("myRequests.filters.all")],
+            ["open", t("myRequests.filters.open")],
+            ["approved", t("myRequests.filters.approved")],
+            ["rejected", t("myRequests.filters.rejected")],
+            ["cancelled", t("myRequests.filters.cancelled")],
           ]}
           value={statusFilter}
           onChange={(v) => setStatusFilter(v as StatusFilter)}
@@ -117,12 +117,12 @@ export function MyRequestsPage() {
         <table className="table">
           <thead>
             <tr>
-              <th style={{ width: 60 }}>ID</th>
-              <th>Type</th>
-              <th>Reason</th>
-              <th>Date(s)</th>
-              <th>Status</th>
-              <th style={{ width: 160 }}>Submitted</th>
+              <th style={{ width: 60 }}>{t("myRequests.columns.id")}</th>
+              <th>{t("myRequests.columns.type")}</th>
+              <th>{t("myRequests.columns.reason")}</th>
+              <th>{t("myRequests.columns.dates")}</th>
+              <th>{t("myRequests.columns.status")}</th>
+              <th style={{ width: 160 }}>{t("myRequests.columns.submitted")}</th>
               <th />
             </tr>
           </thead>
@@ -130,13 +130,13 @@ export function MyRequestsPage() {
             {requests.isLoading ? (
               <tr>
                 <td colSpan={7} className="text-sm text-dim">
-                  Loading…
+                  {t("common.loading")}
                 </td>
               </tr>
             ) : filtered.length === 0 ? (
               <tr>
                 <td colSpan={7} className="text-sm text-dim">
-                  No requests yet.
+                  {t("myRequests.empty")}
                 </td>
               </tr>
             ) : (
@@ -182,7 +182,7 @@ export function MyRequestsPage() {
                   <td className="mono text-xs text-dim">
                     {new Date(r.submitted_at).toLocaleString()}
                   </td>
-                  <td style={{ textAlign: "right" }}>
+                  <td style={{ textAlign: "end" }}>
                     <Icon name="chevronRight" size={13} className="text-dim" />
                   </td>
                 </tr>
@@ -231,7 +231,7 @@ function FilterChips<T extends string>({
         borderRadius: "var(--radius-sm)",
       }}
     >
-      <span className="text-xs text-dim" style={{ marginRight: 4 }}>
+      <span className="text-xs text-dim" style={{ marginInlineEnd: 4 }}>
         {label}
       </span>
       {options.map(([k, v]) => (

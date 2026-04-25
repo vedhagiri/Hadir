@@ -114,6 +114,11 @@ export function Icon({
   strokeWidth = 1.5,
   style,
 }: IconProps) {
+  // P21: stamp ``icon-<kebabName>`` so the RTL CSS sweep can flip
+  // direction-bearing icons (chevrons, arrows) without component-
+  // level branching. ``chevronRight`` → ``icon-chevron-right``.
+  const kebab = name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+  const finalClass = `${className} icon-${kebab}`.trim();
   return (
     <svg
       width={size}
@@ -124,7 +129,7 @@ export function Icon({
       strokeWidth={strokeWidth}
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={className}
+      className={finalClass}
       style={style}
     >
       {paths[name] ?? paths.circle}

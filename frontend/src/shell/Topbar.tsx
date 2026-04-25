@@ -11,12 +11,14 @@
 // scattered through the feature folders.
 
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 
 import { useLogout, useSwitchRole } from "../auth/AuthProvider";
 import { NotificationBell } from "../notifications/NotificationBell";
 import type { MeResponse, Role } from "../types";
 import { Icon } from "./Icon";
+import { LanguageSwitcher } from "./LanguageSwitcher";
 import { CRUMBS } from "./nav";
 
 interface Props {
@@ -26,6 +28,7 @@ interface Props {
 }
 
 export function Topbar({ pageId, role, me }: Props) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const logout = useLogout();
   const crumbs = CRUMBS[pageId] ?? ["Hadir", pageId];
@@ -65,6 +68,7 @@ export function Topbar({ pageId, role, me }: Props) {
         }}
       >
         <NotificationBell />
+        <LanguageSwitcher />
         <RoleChip role={role} me={me} />
         <span
           style={{
@@ -81,10 +85,10 @@ export function Topbar({ pageId, role, me }: Props) {
           className="btn btn-sm"
           onClick={onLogout}
           disabled={logout.isPending}
-          aria-label="Log out"
+          aria-label={t("topbar.logout")}
         >
           <Icon name="logout" size={12} />
-          {logout.isPending ? "…" : "Log out"}
+          {logout.isPending ? "…" : t("topbar.logout")}
         </button>
       </div>
     </div>
@@ -113,6 +117,7 @@ function RoleSwitcher({
   role: Role;
   available: Role[];
 }) {
+  const { t } = useTranslation();
   const switchRole = useSwitchRole();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -185,7 +190,7 @@ function RoleSwitcher({
       {open && (
         <ul
           role="listbox"
-          aria-label="Switch role"
+          aria-label={t("topbar.switchRole")}
           style={{
             position: "absolute",
             top: "calc(100% + 6px)",

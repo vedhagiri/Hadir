@@ -3,10 +3,12 @@
 // read the current user via `useMe()`; mutations are `useLogin()` /
 // `useLogout()`.
 
+import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseQueryResult } from "@tanstack/react-query";
 
 import { ApiError, api } from "../api/client";
+import { applyServerPreferred } from "../i18n";
 import type { MeResponse } from "../types";
 
 const ME_KEY = ["auth", "me"] as const;
@@ -25,13 +27,23 @@ async function fetchMe(): Promise<MeResponse | null> {
 }
 
 export function useMe(): UseQueryResult<MeResponse | null, Error> {
-  return useQuery({
+  const query = useQuery({
     queryKey: ME_KEY,
     queryFn: fetchMe,
     // Keep the session fresh while the user is actively moving around.
     staleTime: 60 * 1000,
     retry: false,
   });
+  // P21: when /api/auth/me resolves with a stored preferred_language,
+  // apply it so a fresh login on another browser immediately reflects
+  // the user's saved choice. ``applyServerPreferred`` no-ops when the
+  // language is already active.
+  useEffect(() => {
+    if (query.data && query.data.preferred_language) {
+      applyServerPreferred(query.data.preferred_language);
+    }
+  }, [query.data]);
+  return query;
 }
 
 export interface LoginInput {
