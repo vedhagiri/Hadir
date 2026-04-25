@@ -29,6 +29,7 @@ from hadir.config import get_settings
 from hadir.detection_events.router import router as detection_events_router
 from hadir.employees import router as employees_router
 from hadir.identification.router import router as identification_router
+from hadir.reporting.router import router as reporting_router
 from hadir.system.router import router as system_router
 
 
@@ -120,6 +121,20 @@ def create_app() -> FastAPI:
     app.include_router(detection_events_router)
     app.include_router(system_router)
     app.include_router(audit_log_router)
+    app.include_router(reporting_router)
+
+    # Dev-only test endpoints — used by the Playwright smoke test in
+    # frontend/tests/. Mounted ONLY when HADIR_ENV=dev so a production
+    # build can never serve these paths even by accident.
+    if settings.env == "dev":
+        from hadir._test_endpoints.router import (  # noqa: PLC0415
+            router as _test_router,
+        )
+
+        app.include_router(_test_router)
+        logging.getLogger(__name__).info(
+            "DEV-ONLY /api/_test endpoints mounted (HADIR_ENV=dev)"
+        )
 
     logging.getLogger(__name__).info(
         "Hadir backend started (env=%s, tenant_mode=%s)", settings.env, settings.tenant_mode

@@ -1,11 +1,12 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-P1–P11 complete. **P12 complete**: per-role dashboards
-(Admin/HR/Manager/Employee), Daily Attendance page with detail drawer,
-Employee self-view at `/attendance/me` and `/my-attendance`. Backend
-gained one read endpoint: `GET /api/attendance/me/recent?days=N` for
-the self-view's last-N-days history. P13 next.
+P1–P12 complete. **P13 complete**: on-demand attendance Excel reports
+(`POST /api/reports/attendance.xlsx` — Admin / HR / Manager,
+dept-scoped for managers); dev-only smoke endpoints under
+`/api/_test/*` mounted **only when** `HADIR_ENV=dev`; Playwright
+end-to-end smoke spec; operator runbook at `docs/pilot-deployment.md`.
+P14 next (Omran on-site deployment).
 
 ## Stack
 - Python 3.11
@@ -99,6 +100,13 @@ backend/
     audit_log/                 # P11 (read-only)
       __init__.py
       router.py                # GET /api/audit-log (paginated + filters + distinct selectors)
+    reporting/                 # P13
+      __init__.py
+      attendance.py            # openpyxl write_only XLSX builder, one sheet per ISO week
+      router.py                # POST /api/reports/attendance.xlsx (Admin/HR/Manager, manager dept-scoped)
+    _test_endpoints/           # P13 — DEV-ONLY (mounted iff HADIR_ENV=dev)
+      __init__.py
+      router.py                # POST /api/_test/seed_detection, /api/_test/recompute_attendance
   scripts/
     __init__.py
     seed_admin.py              # python -m scripts.seed_admin
@@ -114,6 +122,7 @@ backend/
     test_identification.py     #  9 tests — P9 matcher (Fernet round-trip, happy/below-threshold, multi-angle top-k, cache invalidation)
     test_attendance_engine.py  # 12 tests — P10 pure engine (on-time, late, early-out, short-hours, overtime, absent, leave clears absent)
     test_p11_endpoints.py      # 14 tests — P11 detection-events list/filters/crop, system health/cameras-health, audit-log + 403s
+    test_p13_reports.py        #  9 tests — P13 report round-trip + manager scoping + dev-only endpoints
 ```
 
 ## Schema map (P2)
@@ -506,7 +515,22 @@ All Admin-only.
 | `GET /api/system/cameras-health` | Per-camera latest snapshot (`frames_last_minute`, `reachable`, `last_seen_at`) + 24-hour `series_24h` of `(captured_at, frames_last_minute, reachable)`. |
 | `GET /api/audit-log` | Paginated read-only list. Filters: `actor_user_id`, `action`, `entity_type`, `start`, `end`. Response includes `distinct_actions` + `distinct_entity_types` so the UI's filter selectors stay in sync. **No write handlers** anywhere — UPDATE/DELETE on `audit_log` would also be rejected at the DB grant level (P2). |
 | `GET /api/attendance/me/recent?days=N` | (P12) Self-only history for the logged-in user, last `N` days (default 7, max 90). Resolves user→employee by lower-cased email; returns `{date, items:[]}` if no employee row matches. |
+| `POST /api/reports/attendance.xlsx` | (P13) On-demand attendance Excel. Body: `{start, end, department_id?, employee_id?, max_days?}`. Admin/HR see all rows; Manager auto-scoped to assigned departments and 403'd on cross-dept filter; Employee 403'd outright. Sheets named by ISO week (e.g. `2026-W17`). Audited as `report.generated`. |
+| `POST /api/_test/seed_detection` | (P13, **DEV ONLY**) Insert one identified `detection_events` row for the named employee. Mounted only when `HADIR_ENV=dev`. |
+| `POST /api/_test/recompute_attendance` | (P13, **DEV ONLY**) Run today's attendance recompute synchronously so the smoke test doesn't have to wait for the 15-min scheduler. |
+
+## Dev-only test endpoints (P13)
+The `hadir/_test_endpoints/` package exists solely to make
+`frontend/tests/pilot-smoke.spec.ts` runnable without a live camera or
+the 15-minute scheduler delay. **Red line**: `hadir.main.create_app`
+mounts the router **only when** `HADIR_ENV=dev`. A production build
+(env=staging|production) cannot serve `/api/_test/*` even if an
+operator imports the module by accident — the include_router call
+sits inside the env conditional. See `docs/pilot-deployment.md` for
+the operator-facing version of this rule.
 
 ## Pilot prompt currently active
-P12 — done. Next: **P13 — On-demand Excel reports + end-to-end smoke
-tests.** Wait for the user before starting P13.
+P13 — done. Next: **P14 — Omran on-site deployment + acceptance
+walkthrough.** Wait for the user before starting P14. Walk through
+the demo script in pilot-plan.md §P13 first to surface any UX
+papercuts.

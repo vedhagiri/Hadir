@@ -16,6 +16,7 @@ import { CameraLogsPage } from "./features/camera-logs/CameraLogsPage";
 import { CamerasPage } from "./features/cameras/CamerasPage";
 import { DashboardRouter } from "./features/dashboard/DashboardRouter";
 import { EmployeesPage } from "./features/employees/EmployeesPage";
+import { ReportsPage } from "./features/reports/ReportsPage";
 import { SystemPage } from "./features/system/SystemPage";
 import { Placeholder } from "./pages/Placeholder";
 import { Layout } from "./shell/Layout";
@@ -44,6 +45,7 @@ export function App() {
         <Route path="team-attendance" element={<DailyAttendancePage />} />
         <Route path="my-attendance" element={<MyAttendancePage />} />
         <Route path="attendance/me" element={<MyAttendancePage />} />
+        <Route path="reports" element={<ReportsPage />} />
         {ALL_PAGE_IDS.filter(
           (id) =>
             id !== "dashboard" &&
@@ -54,7 +56,8 @@ export function App() {
             id !== "audit" &&
             id !== "daily-attendance" &&
             id !== "team-attendance" &&
-            id !== "my-attendance",
+            id !== "my-attendance" &&
+            id !== "reports",
         ).map((id) => (
           <Route key={id} path={id} element={<Placeholder pageId={id} />} />
         ))}

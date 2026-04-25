@@ -36,6 +36,12 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Playwright artifacts (P13 smoke)
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+frontend/.playwright-cache/
+
 # Editors / IDE
 .idea/
 .vscode/

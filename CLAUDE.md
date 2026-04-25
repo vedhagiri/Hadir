@@ -12,9 +12,10 @@ The pilot is a 5-day single-tenant demo on a corporate LAN; v1.0 is the
 multi-tenant SaaS-capable product 8–10 weeks after pilot signoff.
 
 ## Status
-**Pilot prompts currently complete: P1–P12.**
-Next: P13 — On-demand Excel reports + end-to-end smoke tests. Wait
-for the user before starting it.
+**Pilot prompts currently complete: P1–P13.**
+Next: P14 — Omran on-site deployment. Wait for the user before
+starting it. The pilot-plan asks for a final UX-papercut polish pass
+on the dev box (walking through the demo script) before P14 begins.
 
 What P1 built:
 - Monorepo layout per PROJECT_CONTEXT §7

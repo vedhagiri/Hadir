@@ -1,13 +1,12 @@
 # Hadir frontend — Claude Code notes
 
 ## Status
-P1 + P4 + P6 + P7 + P11 complete. **P12 complete**: `/dashboard`
-routes by role to one of four dashboards (Admin/HR/Manager/Employee);
-`/daily-attendance` and `/team-attendance` render the role-scoped
-Daily Attendance page with date+department filters and a right-sliding
-detail drawer (employee profile + flag explanations + thumbnailed
-underlying detection events); `/my-attendance` and `/attendance/me`
-render the Employee self-view (today + last 7 days).
+P1 + P4 + P6 + P7 + P11 + P12 complete. **P13 complete**: `/reports`
+renders the on-demand Excel report page (date range + employee +
+department filters + Generate Excel button that downloads via blob).
+`tests/pilot-smoke.spec.ts` is the end-to-end Playwright spec that
+goes through login → import → photo → seed detection → recompute →
+generate report → parse downloaded XLSX.
 
 ## Stack
 - Vite 5 + React 18
@@ -74,6 +73,11 @@ frontend/
       dashboard/          # P12
         DashboardRouter.tsx + AdminDashboard / HrDashboard / ManagerDashboard / EmployeeDashboard
         StatCard.tsx + StatusBreakdown.tsx (shared dashboard primitives)
+      reports/            # P13
+        ReportsPage.tsx   # POST /api/reports/attendance.xlsx, blob download
+  tests/                  # P13 — Playwright pilot smoke
+    pilot-smoke.spec.ts   # login → import → photo → seed → recompute → report → assert XLSX
+  playwright.config.ts
     styles/               # design CSS, copied verbatim — DO NOT EDIT
       styles.css
       styles-enhancements.css
@@ -123,6 +127,24 @@ identity card with a TODO comment pointing at the deferred switcher.
 - `docker compose exec frontend npm run typecheck` — TypeScript strict check.
 - `docker compose exec frontend npm run dev` — Vite hot-reloads on save.
 
+## Smoke test (P13)
+The Playwright spec runs against the live compose stack. Requires
+`HADIR_ENV=dev` (it uses the `/api/_test/*` endpoints to seed a
+detection and force a recompute).
+
+```bash
+docker compose up -d
+cd frontend && npm install && npx playwright install chromium
+npm run smoke
+```
+
+The spec exercises the real auth flow (UI login + cookie), the
+employees import + photo upload + report download UI, and the
+dev-only seed/recompute pair. It cleans up the seeded employee at
+the end so a re-run starts clean.
+
 ## Pilot prompt currently active
-P12 — done. Next: **P13 — On-demand Excel reports + end-to-end smoke
-tests.** Wait for the user before starting P13.
+P13 — done. Next: **P14 — Omran on-site deployment + acceptance
+walkthrough.** Wait for the user before starting P14. Walk through
+the demo script in `pilot-plan.md` §P13 first to surface any UX
+papercuts.
