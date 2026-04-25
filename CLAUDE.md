@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 (M2 core complete).**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 (M2 core complete) + P23 (M3 hardening — first phase).**
 
 > **Tenant isolation is a P0 blocker.** The suites
 > `backend/tests/test_multi_tenant_isolation.py` (the P1 canary) and
@@ -446,10 +446,43 @@ of the Arabic translations before v1.0 launch** — see
   triggers, ``aria-pressed`` on segmented controls. The lint
   test from P21 covers the two new translated pages.
 
-Next: **P23 (M3 hardening)** per `v1.0-phase-plan.md`. Wait for
-the user before starting. **Open critical item carries over:
-Omran HR native-speaker review of the Arabic translations
-before v1.0 launch** — see `docs/phases/P21.md`.
+- **P23** — HTTPS + reverse proxy. New `hadir/security.py`
+  ships `check_production_config(settings)` (fail-fast
+  ``ProductionConfigError`` at app boot when
+  ``HADIR_ENV=production`` and any of cookie-secure /
+  behind-proxy / allowed-origins / https OIDC base URL /
+  rotated secrets is missing — listed in one log line),
+  ``HttpsEnforceMiddleware`` (refuses plain HTTP with 421
+  except ``/api/health``), and ``SecurityHeadersMiddleware``
+  (HSTS, X-Frame-Options DENY, X-Content-Type-Options nosniff,
+  Referrer-Policy strict-origin-when-cross-origin, minimal
+  Permissions-Policy). ``Settings`` gains
+  ``allowed_origins_raw`` (CSV → ``allowed_origins`` list
+  property — pydantic-settings 2.5.x lacks ``NoDecode``),
+  ``behind_proxy``, ``forwarded_allow_ips``,
+  ``hsts_max_age_seconds``. ``create_app()`` orders middleware
+  ProxyHeaders → HTTPS gate → CORS → SecurityHeaders → Tenant.
+  ``ops/nginx/`` ships a templated config (``envsubst`` on
+  hostname + cert paths), an entrypoint that ``nginx -t``s
+  before exec, and a multi-stage Dockerfile that builds the
+  Vite bundle and serves it from the nginx image. New
+  ``docker-compose.prod.yml`` removes the dev frontend service,
+  drops the backend host port, attaches every service to a new
+  ``hadir-internal`` network, and adds the nginx service.
+  Optional ``docker-compose.le.yml`` overlays a Let's Encrypt
+  certbot sidecar (HTTP-01 against the ACME-challenge carve-out
+  in nginx). Default cert handling is operator-provided certs
+  in ``ops/certs/``. ``docs/deploy-production.md`` is the
+  Ubuntu 22.04 → running runbook. Live smoke confirmed prod
+  stack serves HTTPS via self-signed cert with all security
+  headers + 301 from HTTP, and the dev stack on :5173/:8000
+  was untouched. **425 tests passing** (409 prior + 16 P23).
+
+Next: **P24 (M3 hardening continues)** per
+`v1.0-phase-plan.md`. Wait for the user before starting.
+**Open critical item carries over: Omran HR native-speaker
+review of the Arabic translations before v1.0 launch** — see
+`docs/phases/P21.md`.
 
 ---
 

@@ -1,0 +1,94 @@
+# Hadir production overlay (v1.0 P23).
+#
+# Layered on top of ``docker-compose.yml``:
+#
+#     docker compose \
+#         -f docker-compose.yml \
+#         -f docker-compose.prod.yml \
+#         up -d
+#
+# Differences from dev:
+#   * adds ``nginx`` fronting the backend on :443 (TLS) and :80
+#     (HTTP -> HTTPS redirect, with a /.well-known/acme-challenge
+#     carve-out for the optional Let's Encrypt overlay).
+#   * the frontend service is *removed* — the frontend bundle is
+#     built into the nginx image and served as static files.
+#   * the backend port is no longer exposed on the host; only
+#     nginx reaches it on the private ``hadir-internal`` network.
+#   * production env vars (``HADIR_ENV=production``,
+#     ``HADIR_BEHIND_PROXY=true``,
+#     ``HADIR_SESSION_COOKIE_SECURE=true``, etc.) are wired
+#     through.
+#
+# See ``docs/deploy-production.md`` for the full runbook.
+
+services:
+  postgres:
+    networks:
+      - hadir-internal
+    # Don't expose the DB port off-host in prod.
+    ports: !reset []
+
+  backend:
+    environment:
+      HADIR_ENV: production
+      HADIR_BEHIND_PROXY: "true"
+      HADIR_FORWARDED_ALLOW_IPS: "*"
+      HADIR_SESSION_COOKIE_SECURE: "true"
+      # Compose-level interpolation pulls these from the ``.env``
+      # file you point ``docker compose --env-file`` at. The
+      # ``:?`` syntax errors out at compose-up time if any are
+      # missing — the production startup check would then catch
+      # placeholders that survive, defence-in-depth.
+      HADIR_ALLOWED_ORIGINS: ${HADIR_ALLOWED_ORIGINS:?must be set in production}
+      HADIR_OIDC_REDIRECT_BASE_URL: ${HADIR_OIDC_REDIRECT_BASE_URL:?must be set in production}
+      HADIR_SESSION_SECRET: ${HADIR_SESSION_SECRET:?rotate before production}
+      HADIR_FERNET_KEY: ${HADIR_FERNET_KEY:?rotate before production}
+      HADIR_AUTH_FERNET_KEY: ${HADIR_AUTH_FERNET_KEY:?rotate before production}
+      HADIR_REPORT_SIGNED_URL_SECRET: ${HADIR_REPORT_SIGNED_URL_SECRET:?rotate before production}
+    networks:
+      - hadir-internal
+    # Backend port is internal-only in production; nginx reaches
+    # it on the private network.
+    ports: !reset []
+
+  # Remove the dev frontend container — nginx serves the static
+  # bundle baked into its own image.
+  frontend:
+    profiles:
+      - never
+
+  nginx:
+    build:
+      context: .
+      dockerfile: ops/nginx/Dockerfile
+    image: hadir-nginx:latest
+    environment:
+      HADIR_PUBLIC_HOSTNAME: ${HADIR_PUBLIC_HOSTNAME:?must be set (e.g. hadir.example.com)}
+      HADIR_TLS_CERT: /etc/nginx/certs/fullchain.pem
+      HADIR_TLS_KEY: /etc/nginx/certs/privkey.pem
+    volumes:
+      # Operator-supplied certs. Default is the layout in
+      # ops/certs/ — generate or copy ``fullchain.pem`` +
+      # ``privkey.pem`` there before bringing the stack up.
+      # Paths are configurable via the env file.
+      - ${HADIR_TLS_CERT_DIR:-./ops/certs}:/etc/nginx/certs:ro
+      # ACME challenge directory — only consumed if you layer
+      # docker-compose.le.yml on top.
+      - certbot_webroot:/var/www/certbot
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend
+    networks:
+      - hadir-internal
+      - default
+
+volumes:
+  certbot_webroot:
+
+networks:
+  hadir-internal:
+    driver: bridge
+    internal: false

@@ -1,0 +1,8 @@
+# Operator-supplied TLS certs land here. Never check them in.
+*.pem
+*.crt
+*.key
+*.cert
+# Keep the directory in source control.
+!.gitignore
+!.gitkeep

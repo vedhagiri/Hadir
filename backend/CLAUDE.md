@@ -1,7 +1,7 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 complete (M2 core)**:
+Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 + P23 complete (M2 core + first M3 hardening phase)**:
 pilot frozen at tag `v0.1-pilot` on branch `release/pilot`; multi-tenant
 routing wired up via a per-connection `SET search_path` driven by a
 ContextVar + SQLAlchemy `checkout` event; the global `tenants` registry
@@ -215,7 +215,23 @@ the two attribute selectors — no rewrite needed); a unified
 outlines + accessible names round out the a11y sweep. New
 `/pipeline` (all roles) static explainer + Admin-only
 `/api-docs` Swagger embed render the long-deferred reference
-surfaces. **v1.0 M3 hardening next.**
+surfaces. **P23** added HTTPS + reverse-proxy hardening: new
+`hadir/security.py` (`check_production_config` fail-fast guard,
+`HttpsEnforceMiddleware` 421-on-plain-HTTP gate exempting
+`/api/health`, `SecurityHeadersMiddleware` defence-in-depth);
+new Settings (`allowed_origins_raw`/`allowed_origins` property,
+`behind_proxy`, `forwarded_allow_ips`, `hsts_max_age_seconds`);
+`create_app` mounts middleware in the order ProxyHeaders →
+HTTPS gate → CORS → SecurityHeaders → Tenant. `ops/nginx/`
+ships a templated config + multi-stage Dockerfile (builds the
+Vite bundle into the image). `docker-compose.prod.yml` removes
+the dev frontend, drops the backend host port, attaches every
+service to a new `hadir-internal` network, and adds the nginx
+service. Optional `docker-compose.le.yml` adds a Let's Encrypt
+certbot sidecar; default cert path is operator-provided certs
+in `ops/certs/`. `docs/deploy-production.md` is the runbook
+from a fresh Ubuntu 22.04 to a serving stack. **v1.0 M3
+hardening continues with P24.**
 
 ## Tenant routing (v1.0 P1)
 **Approach chosen: SQLAlchemy `checkout` event + Python ContextVar**,

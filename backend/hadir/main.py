@@ -129,6 +129,17 @@ def create_app() -> FastAPI:
     _configure_logging()
     settings = get_settings()
 
+    # P23 red line: refuse to boot in production unless every TLS
+    # prerequisite is in place. ``ProductionConfigError`` takes the
+    # process down before a single request is served.
+    from hadir.security import (  # noqa: PLC0415
+        HttpsEnforceMiddleware,
+        SecurityHeadersMiddleware,
+        check_production_config,
+    )
+
+    check_production_config(settings)
+
     app = FastAPI(
         title="Hadir API",
         version=__version__,
@@ -137,12 +148,55 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Tenant routing — must run before any handler that touches the DB.
-    # Middleware order in Starlette is "last added, first run", so this
-    # add_middleware call wraps everything attached afterward.
+    # Middleware order in Starlette is "last added, first run".
+    # Outermost (proxy headers) → HTTPS gate → CORS → security
+    # headers → tenant scope → handler.
     from hadir.tenants.middleware import TenantScopeMiddleware  # noqa: PLC0415
 
     app.add_middleware(TenantScopeMiddleware)
+
+    # Security headers stamp on every response (defence in depth —
+    # nginx adds the same headers, but the backend stays safe even
+    # if a future deployment fronts it differently).
+    if settings.env != "dev":
+        app.add_middleware(
+            SecurityHeadersMiddleware,
+            hsts_max_age=settings.hsts_max_age_seconds,
+        )
+
+    # P23: CORS. Empty allowlist = no headers added (which is what
+    # nginx fronting + the Vite dev proxy both want). Operators
+    # who serve the API from a different origin in production set
+    # ``HADIR_ALLOWED_ORIGINS`` to a comma-separated list.
+    if settings.allowed_origins:
+        from fastapi.middleware.cors import CORSMiddleware  # noqa: PLC0415
+
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(settings.allowed_origins),
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+            allow_headers=["Content-Type", "Authorization"],
+            max_age=600,
+        )
+
+    # P23 red line, in-band: refuse plain-HTTP in production. The
+    # gate trusts ``request.url.scheme`` which Starlette resolves
+    # via ``ProxyHeadersMiddleware`` below.
+    if settings.env == "production":
+        app.add_middleware(HttpsEnforceMiddleware)
+
+    # ProxyHeadersMiddleware must run as the outermost layer so
+    # every downstream middleware sees the rewritten scheme/host.
+    if settings.behind_proxy:
+        from uvicorn.middleware.proxy_headers import (  # noqa: PLC0415
+            ProxyHeadersMiddleware,
+        )
+
+        app.add_middleware(
+            ProxyHeadersMiddleware,
+            trusted_hosts=settings.forwarded_allow_ips,
+        )
 
     @app.get("/api/health")
     def health() -> dict[str, str]:

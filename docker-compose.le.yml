@@ -1,0 +1,60 @@
+# Optional Let's Encrypt overlay (v1.0 P23).
+#
+# Layered on top of ``docker-compose.yml`` AND
+# ``docker-compose.prod.yml``:
+#
+#     docker compose \
+#         -f docker-compose.yml \
+#         -f docker-compose.prod.yml \
+#         -f docker-compose.le.yml \
+#         up -d
+#
+# Adds a ``certbot`` sidecar that reads the ACME HTTP-01
+# challenge from the ``/.well-known/acme-challenge`` path nginx
+# already serves on :80 (see hadir.conf.template). On first run
+# it requests a cert; on every restart it tries to renew.
+#
+# Operators choosing the operator-provided cert path (the
+# default) should NOT include this overlay — nginx picks up
+# /etc/nginx/certs/{fullchain,privkey}.pem from the volume.
+#
+# See ``docs/deploy-production.md`` "TLS cert handling" for the
+# choice between operator-provided and Let's Encrypt.
+
+services:
+  certbot:
+    image: certbot/certbot:latest
+    profiles:
+      - letsencrypt
+    volumes:
+      # Persist the issued cert to the same path nginx reads
+      # from (mounted read-only there).
+      - ${HADIR_TLS_CERT_DIR:-./ops/certs}:/etc/letsencrypt/live/hadir
+      - certbot_webroot:/var/www/certbot
+    environment:
+      HADIR_LE_EMAIL: ${HADIR_LE_EMAIL:?ACME email required (e.g. ops@example.com)}
+      HADIR_PUBLIC_HOSTNAME: ${HADIR_PUBLIC_HOSTNAME:?must match the nginx server_name}
+    # Run-once at compose-up: register an account, request the
+    # cert, then exit. After issuance the operator either
+    # bounces nginx (``docker compose restart nginx``) or runs
+    # ``docker compose run --rm certbot renew`` from cron. There
+    # is intentionally no long-running daemon here — operators
+    # at this scale prefer a single-shot tool over a sidecar
+    # they have to monitor.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        certbot certonly --webroot --webroot-path /var/www/certbot
+        --non-interactive --agree-tos
+        --email "$$HADIR_LE_EMAIL"
+        -d "$$HADIR_PUBLIC_HOSTNAME"
+        --keep-until-expiring
+        && cp /etc/letsencrypt/live/$$HADIR_PUBLIC_HOSTNAME/fullchain.pem /etc/letsencrypt/live/hadir/fullchain.pem
+        && cp /etc/letsencrypt/live/$$HADIR_PUBLIC_HOSTNAME/privkey.pem   /etc/letsencrypt/live/hadir/privkey.pem
+    depends_on:
+      - nginx
+    networks:
+      - default
+
+# certbot_webroot is declared in docker-compose.prod.yml; both
+# this overlay and nginx share the volume. No need to redeclare.

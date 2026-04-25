@@ -151,6 +151,48 @@ class Settings(BaseSettings):
     # the-hour cron expressions.
     report_runner_poll_seconds: int = 60
 
+    # --- HTTPS + reverse proxy (v1.0 P23) ----------------------------------
+    # Comma-separated list of origins (``https://hadir.example.com``) the
+    # API will accept CORS preflights from. Empty list = same-origin
+    # only, which is what nginx fronting + the Vite dev proxy both
+    # produce — we never need wildcard CORS.
+    # Stored as a raw string so pydantic-settings doesn't try to
+    # JSON-decode the env value (we run on pydantic-settings 2.5.x
+    # which lacks ``NoDecode``). Operators write a comma-
+    # separated list; consumers read ``settings.allowed_origins``
+    # which returns a parsed ``list[str]`` via the property below.
+    allowed_origins_raw: str = Field(default="", alias="HADIR_ALLOWED_ORIGINS")
+    # ``True`` when the FastAPI process sits behind a reverse proxy
+    # that strips/rewrites ``X-Forwarded-Proto`` and ``X-Forwarded-For``.
+    # We enable Starlette's ``ProxyHeadersMiddleware`` so
+    # ``request.url.scheme`` reflects the *original* scheme — load-
+    # bearing for the HTTPS enforcement gate below.
+    behind_proxy: bool = False
+    # IP allowlist passed to ``ProxyHeadersMiddleware`` when
+    # ``behind_proxy=True``. Default ``*`` means "trust X-Forwarded-*
+    # from any peer" — fine inside a private docker network where
+    # only nginx can reach the backend port. Tighten for bare-metal.
+    forwarded_allow_ips: str = "*"
+    # Strict-Transport-Security max-age (seconds). nginx ships HSTS
+    # too; the backend's copy is defence-in-depth so the header is
+    # present even if a future deployment skips the proxy.
+    hsts_max_age_seconds: int = 31536000  # 1 year
+
+    @property
+    def allowed_origins(self) -> list[str]:
+        """Comma-separated list of CORS origins, parsed lazily.
+
+        Empty by default — that's the same-origin shape nginx
+        fronting + the Vite dev proxy both expect, so the
+        ``CORSMiddleware`` is only mounted when this returns
+        a non-empty list.
+        """
+
+        raw = (self.allowed_origins_raw or "").strip()
+        if not raw:
+            return []
+        return [item.strip() for item in raw.split(",") if item.strip()]
+
     # --- Approvals SLA (v1.0 P15) ------------------------------------------
     # Business hours after which a non-terminal request is flagged as
     # breaching SLA. BRD Open Item Q6 — operators tune per tenant; the
