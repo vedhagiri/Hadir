@@ -484,13 +484,16 @@ def test_manager_attendance_includes_directly_assigned_out_of_dept(
 
     today = datetime.now(timezone.utc).astimezone(local_tz()).date()
     with admin_engine.begin() as conn:
-        # Pull a Fixed policy id (seeded by 0006).
+        # Pull any policy id for the pilot tenant. P9 may have left
+        # additional rows behind during a parallel test, so don't
+        # assume scalar_one().
         from hadir.db import shift_policies  # noqa: PLC0415
 
         policy_id = conn.execute(
-            select(shift_policies.c.id).where(
-                shift_policies.c.tenant_id == TENANT_ID
-            )
+            select(shift_policies.c.id)
+            .where(shift_policies.c.tenant_id == TENANT_ID)
+            .order_by(shift_policies.c.id.asc())
+            .limit(1)
         ).scalar_one()
         conn.execute(
             insert(attendance_records).values(

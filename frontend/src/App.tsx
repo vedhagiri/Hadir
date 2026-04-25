@@ -22,6 +22,7 @@ import { ReportsPage } from "./features/reports/ReportsPage";
 import { SystemPage } from "./features/system/SystemPage";
 import { ManagerAssignmentsPage } from "./manager-assignments/ManagerAssignmentsPage";
 import { Placeholder } from "./pages/Placeholder";
+import { PoliciesPage } from "./policies/PoliciesPage";
 import { Layout } from "./shell/Layout";
 import { ALL_PAGE_IDS } from "./shell/nav";
 import { ProvisionTenantPage } from "./super-admin/ProvisionTenantPage";
@@ -70,6 +71,7 @@ export function App() {
         <Route path="attendance/me" element={<MyAttendancePage />} />
         <Route path="reports" element={<ReportsPage />} />
         <Route path="mgr-assign" element={<ManagerAssignmentsPage />} />
+        <Route path="policies" element={<PoliciesPage />} />
         <Route path="settings" element={<Navigate to="/settings/branding" replace />} />
         <Route path="settings/branding" element={<BrandingPage />} />
         <Route path="settings/authentication" element={<AuthenticationPage />} />
@@ -86,7 +88,8 @@ export function App() {
             id !== "my-attendance" &&
             id !== "reports" &&
             id !== "settings" &&
-            id !== "mgr-assign",
+            id !== "mgr-assign" &&
+            id !== "policies",
         ).map((id) => (
           <Route key={id} path={id} element={<Placeholder pageId={id} />} />
         ))}

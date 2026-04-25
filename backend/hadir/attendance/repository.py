@@ -61,13 +61,11 @@ def local_tz() -> ZoneInfo:
 def active_policy_for(
     conn: Connection, scope: TenantScope, *, the_date: date
 ) -> Optional[ShiftPolicy]:
-    """Return the pilot policy covering ``the_date``.
+    """Return *some* policy covering ``the_date`` for this tenant.
 
-    Multi-policy resolution (overlapping windows, per-department
-    assignment) is a v1.0 concern. The pilot seed provides exactly one
-    row; this query tolerates a second row (useful if an operator
-    changes the policy mid-pilot) by taking the most recent
-    ``active_from`` whose window covers ``the_date``.
+    Legacy fallback used when ``policy_assignments`` (P9) has no
+    matching row in any of the three scope tiers. Picks the most
+    recent ``active_from`` whose window covers ``the_date``.
     """
 
     row = conn.execute(
@@ -93,6 +91,196 @@ def active_policy_for(
     if row is None:
         return None
     return policy_from_row(row)
+
+
+# --- Multi-tier resolution (P9) --------------------------------------------
+
+
+def _date_window_match(active_from_col, active_until_col, the_date):
+    """SQLAlchemy expression: row covers ``the_date`` (NULL until = open-ended)."""
+
+    return and_(
+        active_from_col <= the_date,
+        or_(
+            active_until_col.is_(None),
+            active_until_col >= the_date,
+        ),
+    )
+
+
+def resolve_policies_for_employees(
+    conn: Connection,
+    scope: TenantScope,
+    *,
+    the_date: date,
+    employee_ids: list[int],
+) -> dict[int, ShiftPolicy]:
+    """Return ``{employee_id: ShiftPolicy}`` via the resolution cascade.
+
+    Priority — highest first wins:
+
+    1. Employee-scoped assignment matching this employee.
+    2. Department-scoped assignment matching this employee's
+       ``department_id``.
+    3. Tenant-scoped assignment.
+    4. Legacy fallback — any ``shift_policies`` row covering the date
+       (the pilot seeded this; new tenants may rely on it too if no
+       ``policy_assignments`` rows exist).
+
+    Resolution is the **only DB-touching part** of the engine pipeline
+    (P9 red line). All four queries run inline here; the engine
+    receives the resolved ``ShiftPolicy`` and stays pure.
+    """
+
+    if not employee_ids:
+        return {}
+
+    from hadir.db import policy_assignments  # noqa: PLC0415
+
+    # 1. Employee-scoped — at most one policy per employee in scope.
+    emp_rows = conn.execute(
+        select(
+            policy_assignments.c.scope_id.label("scope_id"),
+            shift_policies.c.id,
+            shift_policies.c.name,
+            shift_policies.c.type,
+            shift_policies.c.config,
+        )
+        .select_from(
+            policy_assignments.join(
+                shift_policies,
+                and_(
+                    shift_policies.c.id == policy_assignments.c.policy_id,
+                    shift_policies.c.tenant_id == policy_assignments.c.tenant_id,
+                ),
+            )
+        )
+        .where(
+            policy_assignments.c.tenant_id == scope.tenant_id,
+            policy_assignments.c.scope_type == "employee",
+            policy_assignments.c.scope_id.in_(employee_ids),
+            _date_window_match(
+                policy_assignments.c.active_from,
+                policy_assignments.c.active_until,
+                the_date,
+            ),
+        )
+        .order_by(policy_assignments.c.active_from.desc())
+    ).all()
+    by_employee: dict[int, ShiftPolicy] = {}
+    for r in emp_rows:
+        eid = int(r.scope_id)
+        if eid not in by_employee:
+            by_employee[eid] = policy_from_row(r)
+
+    # Resolve every employee's department in one query — we'll need
+    # it for tier 2 lookups even when no employee-scope hit landed.
+    emp_dept_rows = conn.execute(
+        select(employees.c.id, employees.c.department_id).where(
+            employees.c.tenant_id == scope.tenant_id,
+            employees.c.id.in_(employee_ids),
+        )
+    ).all()
+    dept_by_employee = {int(r.id): int(r.department_id) for r in emp_dept_rows}
+    needed_dept_ids = sorted(
+        {
+            dept_by_employee[eid]
+            for eid in employee_ids
+            if eid in dept_by_employee and eid not in by_employee
+        }
+    )
+
+    # 2. Department-scoped — only fetch for departments still needed.
+    by_department: dict[int, ShiftPolicy] = {}
+    if needed_dept_ids:
+        dept_rows = conn.execute(
+            select(
+                policy_assignments.c.scope_id.label("scope_id"),
+                shift_policies.c.id,
+                shift_policies.c.name,
+                shift_policies.c.type,
+                shift_policies.c.config,
+            )
+            .select_from(
+                policy_assignments.join(
+                    shift_policies,
+                    and_(
+                        shift_policies.c.id == policy_assignments.c.policy_id,
+                        shift_policies.c.tenant_id
+                        == policy_assignments.c.tenant_id,
+                    ),
+                )
+            )
+            .where(
+                policy_assignments.c.tenant_id == scope.tenant_id,
+                policy_assignments.c.scope_type == "department",
+                policy_assignments.c.scope_id.in_(needed_dept_ids),
+                _date_window_match(
+                    policy_assignments.c.active_from,
+                    policy_assignments.c.active_until,
+                    the_date,
+                ),
+            )
+            .order_by(policy_assignments.c.active_from.desc())
+        ).all()
+        for r in dept_rows:
+            did = int(r.scope_id)
+            if did not in by_department:
+                by_department[did] = policy_from_row(r)
+
+    # 3. Tenant-scoped — at most one applicable per date in practice.
+    tenant_row = conn.execute(
+        select(
+            shift_policies.c.id,
+            shift_policies.c.name,
+            shift_policies.c.type,
+            shift_policies.c.config,
+        )
+        .select_from(
+            policy_assignments.join(
+                shift_policies,
+                and_(
+                    shift_policies.c.id == policy_assignments.c.policy_id,
+                    shift_policies.c.tenant_id == policy_assignments.c.tenant_id,
+                ),
+            )
+        )
+        .where(
+            policy_assignments.c.tenant_id == scope.tenant_id,
+            policy_assignments.c.scope_type == "tenant",
+            _date_window_match(
+                policy_assignments.c.active_from,
+                policy_assignments.c.active_until,
+                the_date,
+            ),
+        )
+        .order_by(policy_assignments.c.active_from.desc())
+        .limit(1)
+    ).first()
+    tenant_policy = policy_from_row(tenant_row) if tenant_row is not None else None
+
+    # 4. Legacy fallback — any active shift_policies row.
+    legacy = (
+        active_policy_for(conn, scope, the_date=the_date)
+        if tenant_policy is None
+        else None
+    )
+
+    out: dict[int, ShiftPolicy] = {}
+    for eid in employee_ids:
+        if eid in by_employee:
+            out[eid] = by_employee[eid]
+            continue
+        did = dept_by_employee.get(eid)
+        if did is not None and did in by_department:
+            out[eid] = by_department[did]
+            continue
+        if tenant_policy is not None:
+            out[eid] = tenant_policy
+            continue
+        if legacy is not None:
+            out[eid] = legacy
+    return out
 
 
 # --- Event lookup -----------------------------------------------------------

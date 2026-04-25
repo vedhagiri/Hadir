@@ -253,6 +253,52 @@ tenant_branding = Table(
 )
 
 
+# --- Policy assignments (P9) -----------------------------------------------
+# Maps a ``shift_policies`` row to a resolution scope (tenant /
+# department / employee). The engine's resolver walks
+# ``employee > department > tenant > legacy fallback`` to pick the
+# active policy per (employee, date).
+
+policy_assignments = Table(
+    "policy_assignments",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "policy_id",
+        Integer,
+        ForeignKey("shift_policies.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column("scope_type", Text, nullable=False),
+    Column("scope_id", Integer, nullable=True),
+    Column("active_from", Date, nullable=False),
+    Column("active_until", Date, nullable=True),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    CheckConstraint(
+        "scope_type IN ('tenant','department','employee')",
+        name="ck_policy_assignments_scope_type",
+    ),
+    CheckConstraint(
+        "(scope_type = 'tenant' AND scope_id IS NULL) "
+        "OR (scope_type IN ('department','employee') AND scope_id IS NOT NULL)",
+        name="ck_policy_assignments_scope_id_coherent",
+    ),
+)
+
+
 # --- Manager assignments (P8) ----------------------------------------------
 # Many-to-many between Manager users and employees. Up to one
 # ``is_primary=true`` row per (tenant_id, employee_id) — enforced at

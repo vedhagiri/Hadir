@@ -51,18 +51,28 @@ def _recompute_today_inner(scope: TenantScope) -> int:
     today = datetime.now(timezone.utc).astimezone(tz).date()
 
     with engine.begin() as conn:
-        policy = attendance_repo.active_policy_for(conn, scope, the_date=today)
-    if policy is None:
+        employee_ids = attendance_repo.active_employee_ids(conn, scope)
+        # P9: resolve per-employee via the policy_assignments cascade.
+        # Falls back to ``active_policy_for`` (legacy single-tenant
+        # policy) when no assignment matches.
+        policy_map = attendance_repo.resolve_policies_for_employees(
+            conn, scope, the_date=today, employee_ids=employee_ids
+        )
+    if not policy_map:
         logger.warning(
-            "attendance: no active policy for tenant %s on %s", scope.tenant_id, today
+            "attendance: no active policy resolves for tenant %s on %s",
+            scope.tenant_id,
+            today,
         )
         return 0
 
-    with engine.begin() as conn:
-        employee_ids = attendance_repo.active_employee_ids(conn, scope)
-
     upserted = 0
     for emp_id in employee_ids:
+        policy = policy_map.get(emp_id)
+        if policy is None:
+            # Employee with no resolvable policy — skip silently. The
+            # missing-policy log line above already flagged the tenant.
+            continue
         try:
             with engine.begin() as conn:
                 events = attendance_repo.events_for(

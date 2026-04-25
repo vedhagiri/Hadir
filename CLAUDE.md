@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8.**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9.**
 
 > **Tenant isolation is a P0 blocker.** The suites
 > `backend/tests/test_multi_tenant_isolation.py` (the P1 canary) and
@@ -151,8 +151,21 @@ To return to v1.0 work: `git checkout main`.
   page (native HTML5, no new deps): unassigned column on the left,
   manager card grid on the right, star icon toggles primary.
   Audit rows: `manager_assignment.{created,primary_set,deleted}`.
+- **P9** — Policy engine: Flex type. Engine refactored to dispatch
+  on `policy.type` while staying pure (no DB) — Fixed and Flex
+  share the same `_Flags` shape internally. New per-tenant
+  `policy_assignments` table with scope cascade `employee >
+  department > tenant > legacy fallback`; the only DB-touching
+  surface is `resolve_policies_for_employees` in
+  `attendance/repository.py`. The scheduler now resolves per
+  employee. CRUD endpoints `/api/policies` + `/api/policy-assignments`
+  for Admin + HR with audit (`shift_policy.{created,updated,soft_deleted}`,
+  `policy_assignment.{created,deleted}`). Frontend Policies page
+  retires the placeholder; create/edit form switches fields per
+  type; per-row assignment chips with tenant-default toggle +
+  per-department / per-employee assignment.
 
-Next: **P9** per `v1.0-phase-plan.md`. Wait for the user before
+Next: **P10** per `v1.0-phase-plan.md`. Wait for the user before
 starting. Per-phase records: `docs/phases/P*.md`.
 
 ---

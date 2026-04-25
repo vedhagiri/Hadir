@@ -1,7 +1,7 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 complete**:
+Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 complete**:
 pilot frozen at tag `v0.1-pilot` on branch `release/pilot`; multi-tenant
 routing wired up via a per-connection `SET search_path` driven by a
 ContextVar + SQLAlchemy `checkout` event; the global `tenants` registry
@@ -45,8 +45,13 @@ partial unique index for the primary-manager rule),
 `/api/manager-assignments` Admin-only CRUD, and the Manager scope
 helper `get_manager_visible_employee_ids` that unions department
 membership with direct assignments (used by the attendance router).
-Single-mode backwards-compatible (pilot's `main` schema is the
-default). **v1.0 P9 next.**
+**P9** added the Flex policy type (engine refactored to dispatch
+internally; still pure) + per-tenant `policy_assignments` with
+the cascade `employee > department > tenant > legacy fallback`
+in `resolve_policies_for_employees`; the scheduler now resolves
+per employee. `/api/policies` + `/api/policy-assignments` Admin/HR
+CRUD, audit on every change. Single-mode backwards-compatible
+(pilot's `main` schema is the default). **v1.0 P10 next.**
 
 ## Tenant routing (v1.0 P1)
 **Approach chosen: SQLAlchemy `checkout` event + Python ContextVar**,
