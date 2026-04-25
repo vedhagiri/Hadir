@@ -119,6 +119,7 @@ _APP_CRUD_TABLES = (
     "email_config",
     "report_schedules",
     "report_runs",
+    "erp_export_config",
 )
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -284,6 +285,7 @@ def _seed_defaults(
     # ``enabled`` on the Authentication settings page.
     from hadir.db import (  # noqa: PLC0415
         email_config as _email_config,
+        erp_export_config as _erp_export_config,
         leave_types as _leave_types,
         request_reason_categories as _reason_categories,
         tenant_oidc_config,
@@ -337,6 +339,10 @@ def _seed_defaults(
     # P18: empty email_config row (provider=smtp, enabled=false). The
     # operator fills in credentials in Settings → Email.
     conn.execute(insert(_email_config).values(tenant_id=tenant_id))
+
+    # P19: empty ERP export config (enabled=false). Operator opts in
+    # via Settings → Integrations → ERP Export.
+    conn.execute(insert(_erp_export_config).values(tenant_id=tenant_id))
 
     user_id = conn.execute(
         insert(users)

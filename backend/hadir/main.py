@@ -43,6 +43,7 @@ from hadir.requests import (
     reason_categories_router as request_reason_categories_router,
     router as requests_router,
 )
+from hadir.erp_export import router as erp_export_router
 from hadir.scheduled_reports import (
     report_runner,
     router as scheduled_reports_router,
@@ -163,6 +164,7 @@ def create_app() -> FastAPI:
     app.include_router(requests_router)
     app.include_router(request_reason_categories_router)
     app.include_router(scheduled_reports_router)
+    app.include_router(erp_export_router)
 
     # Dev-only test endpoints — used by the Playwright smoke test in
     # frontend/tests/. Mounted ONLY when HADIR_ENV=dev so a production

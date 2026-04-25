@@ -494,7 +494,24 @@ def _format_size(n: int) -> str:
 
 
 def _tick() -> int:
-    """Scan every tenant schema for due schedules and run them."""
+    """Scan every tenant schema for due schedules and run them.
+
+    This same tick also drives the P19 ERP file-drop runner so we
+    don't run two APScheduler instances side-by-side.
+    """
+
+    # P19 ERP exports — independent of schedules but on the same
+    # cadence. Failures are caught + logged inside ``tick_due_exports``;
+    # they never break the scheduled-report scan below.
+    try:
+        from hadir.erp_export.runner import tick_due_exports  # noqa: PLC0415
+
+        tick_due_exports()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "erp export tick raised before per-tenant scan: %s",
+            type(exc).__name__,
+        )
 
     fired = 0
     admin_engine = make_admin_engine()

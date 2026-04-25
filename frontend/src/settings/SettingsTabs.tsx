@@ -11,6 +11,7 @@ const TABS = [
   { to: "/settings/reason-categories", label: "Request reasons" },
   { to: "/settings/email", label: "Email" },
   { to: "/settings/schedules", label: "Schedules" },
+  { to: "/settings/erp-export", label: "ERP export" },
 ] as const;
 
 export function SettingsTabs() {

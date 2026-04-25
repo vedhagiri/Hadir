@@ -1,7 +1,7 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 complete**:
+Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 complete**:
 pilot frozen at tag `v0.1-pilot` on branch `release/pilot`; multi-tenant
 routing wired up via a per-connection `SET search_path` driven by a
 ContextVar + SQLAlchemy `checkout` event; the global `tenants` registry
@@ -153,8 +153,19 @@ configured provider, updates the run row + advances `next_run_at`
 via `croniter`. APScheduler 60-second scan iterates active
 schedules where `next_run_at <= now()`. Anonymous signed-URL
 download endpoint at `/api/reports/runs/{id}/download?token=…` is
-HMAC-gated, per-IP rate-limited, and audit-logged. **v1.0 P19
-next.**
+HMAC-gated, per-IP rate-limited, and audit-logged. **P19** added
+the ERP file-drop export: per-tenant `erp_export_config` (format
+'csv'|'json', operator-supplied output_path, cron, window_days).
+`hadir/erp_export/` ships a path resolver that pins every output
+under `/data/erp/{tenant_id}/` (the load-bearing P19 red line —
+`..` and outside-root absolute paths raise `UnsafeOutputPath`),
+CSV + JSON builders matching `docs/erp-file-drop-schema.md`
+(`metadata.schema_version=1` + `tenant_slug` in every record),
+and a runner that shares the existing P18 60-second tick. New
+endpoints `GET/PATCH /api/erp-export-config` and `POST
+/api/erp-export-config/run-now` (writes the file under the tenant
+root **and** streams the same bytes back; audit-logs every run).
+**v1.0 P20 next.**
 
 ## Tenant routing (v1.0 P1)
 **Approach chosen: SQLAlchemy `checkout` event + Python ContextVar**,

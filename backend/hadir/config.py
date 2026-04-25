@@ -119,6 +119,13 @@ class Settings(BaseSettings):
     # via the same Fernet key the photo path uses.
     request_attachment_root: str = "/data/attachments"
 
+    # --- ERP file-drop export (v1.0 P19) ----------------------------------
+    # Root directory the runner is allowed to write into. Operator-
+    # configured ``output_path`` values are joined onto this root +
+    # the tenant id; the resolved absolute path must stay strictly
+    # under ``{root}/{tenant_id}/`` (the load-bearing P19 red line).
+    erp_export_root: str = "/data/erp"
+
     # --- Email + scheduled reports (v1.0 P18) -----------------------------
     # Inbox-friendly attachment cap. Files at or below this size go in
     # the email body as attachments; anything larger is replaced with a

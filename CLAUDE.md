@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18.**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19.**
 
 > **Tenant isolation is a P0 blocker.** The suites
 > `backend/tests/test_multi_tenant_isolation.py` (the P1 canary) and
@@ -337,8 +337,27 @@ To return to v1.0 work: `git checkout main`.
   write-only secrets via `has_*` flags + a "Send test" button.
   Settings → Schedules lists schedules with Run-now / Pause /
   Delete and an inline create form with a tiny cron-preview helper.
+- **P19** — ERP file-drop export. Migration 0020 adds per-tenant
+  `erp_export_config` (tenant_id PK, enabled, format ['csv','json'],
+  output_path, schedule_cron, window_days, bookkeeping). New
+  `hadir/erp_export/` ships a path resolver (`resolve_safe_dir`
+  enforces the load-bearing P19 red line — every output stays
+  strictly under `/data/erp/{tenant_id}/`, `..` and outside-root
+  absolute paths raise `UnsafeOutputPath`); CSV + JSON builders that
+  match `docs/erp-file-drop-schema.md` (UTF-8/LF CSV with the
+  documented columns + a JSON `metadata` block carrying
+  `schema_version=1`, tenant_slug, range, row_count); a runner that
+  shares the existing 60-second tick from P18 so we don't run two
+  APScheduler instances. New endpoints `GET/PATCH
+  /api/erp-export-config` (Admin; PATCH rejects traversal 400 +
+  invalid cron 422) and `POST /api/erp-export-config/run-now`
+  (Admin; writes the file under the tenant root **and** streams
+  the same bytes back for verification, audit-logs the run).
+  Frontend Settings → Integrations → ERP Export page surfaces the
+  config + Run-now download + last-run status. Schema doc lives at
+  `docs/erp-file-drop-schema.md` for the ERP integration team.
 
-Next: **P19** per `v1.0-phase-plan.md`. Wait for the user before
+Next: **P20** per `v1.0-phase-plan.md`. Wait for the user before
 starting. Per-phase records: `docs/phases/P*.md`.
 
 ---

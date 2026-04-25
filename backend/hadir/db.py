@@ -653,6 +653,42 @@ request_reason_categories = Table(
 )
 
 
+# --- ERP file-drop export (P19) -------------------------------------------
+# Per-tenant config for the scheduled ERP file-drop. ``output_path`` is
+# constrained server-side to live under ``/data/erp/{tenant_id}/...``;
+# the runner refuses any path that escapes via ``..``.
+
+erp_export_config = Table(
+    "erp_export_config",
+    metadata,
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("enabled", Boolean, nullable=False, server_default="false"),
+    Column("format", Text, nullable=False, server_default="csv"),
+    Column("output_path", Text, nullable=False, server_default=""),
+    Column("schedule_cron", Text, nullable=False, server_default=""),
+    Column("window_days", Integer, nullable=False, server_default="1"),
+    Column("last_run_at", DateTime(timezone=True), nullable=True),
+    Column("last_run_status", Text, nullable=True),
+    Column("last_run_path", Text, nullable=True),
+    Column("last_run_error", Text, nullable=True),
+    Column("next_run_at", DateTime(timezone=True), nullable=True),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    CheckConstraint(
+        "format IN ('csv','json')", name="ck_erp_export_config_format"
+    ),
+)
+
+
 # --- Email config + scheduled reports (P18) -------------------------------
 # ``email_config`` carries the tenant's outbound email credentials
 # (Fernet-encrypted at rest); ``report_schedules`` is the operator's
