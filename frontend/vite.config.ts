@@ -7,8 +7,18 @@ import react from "@vitejs/plugin-react";
 // at `backend:8000`; on the host it's `localhost:8000`.
 const backendTarget = process.env.VITE_BACKEND_URL ?? "http://backend:8000";
 
+// P28.5: surface package.json's version as a build-time constant so
+// the sidebar brand chip reads from one source of truth. ``npm`` /
+// ``vite`` set ``npm_package_version`` automatically; the fallback
+// matches the literal in ``package.json`` so a non-npm invocation
+// (e.g. ``vitest`` from a sub-process) doesn't print ``undefined``.
+const appVersion = process.env.npm_package_version ?? "1.0.0";
+
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersion),
+  },
   server: {
     host: "0.0.0.0",
     port: 5173,

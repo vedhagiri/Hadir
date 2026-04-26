@@ -26,6 +26,8 @@ import numpy as np
 from sqlalchemy import func, insert, update
 from sqlalchemy.engine import Engine
 
+from hadir.capture.directory import employee_directory
+from hadir.capture.event_bus import DetectionEvent, event_bus
 from hadir.config import get_settings
 from hadir.db import camera_health_snapshots, cameras, detection_events
 from hadir.employees.photos import encrypt_bytes
@@ -79,6 +81,7 @@ def emit_detection_event(
     track_id: str,
     embedding: Optional[np.ndarray] = None,
     captured_at: Optional[datetime] = None,
+    pre_matched: Optional[tuple[int, float]] = None,
 ) -> Optional[int]:
     """Write the encrypted crop + insert the event row. Returns the new id.
 
@@ -89,6 +92,11 @@ def emit_detection_event(
     and run the matcher to backfill ``employee_id`` + ``confidence`` on
     the same INSERT. The matcher threshold is hard — below threshold,
     ``employee_id`` stays NULL (pilot-plan red line).
+
+    ``pre_matched`` (P28.5): when the caller has already run the matcher
+    for this detection (the live-capture per-frame annotation path
+    needs the result for box labels), pass ``(employee_id, score)``
+    here to skip the duplicate ``matcher_cache.match`` call.
     """
 
     captured_at = captured_at or datetime.now(tz=timezone.utc)
@@ -113,10 +121,13 @@ def emit_detection_event(
             encrypted_embedding = encrypt_embedding(embedding)
         except (RuntimeError, ValueError) as exc:
             logger.debug("skipping embedding encryption: %s", exc)
-        match = matcher_cache.match(scope, embedding)
-        if match is not None:
-            employee_id = match.employee_id
-            confidence = match.score
+        if pre_matched is not None:
+            employee_id, confidence = pre_matched
+        else:
+            match = matcher_cache.match(scope, embedding)
+            if match is not None:
+                employee_id = match.employee_id
+                confidence = match.score
 
     with engine.begin() as conn:
         new_id = conn.execute(
@@ -142,6 +153,28 @@ def emit_detection_event(
 
     observe_detection_event(
         scope.tenant_id, identified=employee_id is not None
+    )
+
+    # P28.5: fan out to live-capture WebSocket subscribers. The
+    # ``event_bus`` publish is non-blocking — full subscriber queues
+    # drop their oldest event rather than stall the capture loop.
+    name_label: Optional[str] = None
+    code_label: Optional[str] = None
+    if employee_id is not None:
+        resolved = employee_directory.label_for(scope, employee_id)
+        if resolved is not None:
+            name_label, code_label = resolved
+    event_bus.publish(
+        DetectionEvent(
+            tenant_id=scope.tenant_id,
+            camera_id=camera_id,
+            captured_at=captured_at.timestamp(),
+            employee_id=employee_id,
+            employee_code=code_label,
+            employee_name=name_label,
+            confidence=confidence,
+            bbox={"x": bbox.x, "y": bbox.y, "w": bbox.w, "h": bbox.h},
+        )
     )
 
     return int(new_id)

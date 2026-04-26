@@ -99,7 +99,7 @@ def create_camera_endpoint(
     logger.info(
         "camera created: id=%s name=%r host=%s", new_id, payload.name, parts.host
     )
-    capture_manager.on_camera_created(new_id)
+    capture_manager.on_camera_created(new_id, tenant_id=scope.tenant_id)
     return _row_to_out(created)
 
 
@@ -170,7 +170,7 @@ def patch_camera_endpoint(
         )
 
     logger.info("camera updated: id=%s host=%s", camera_id, after.rtsp_host)
-    capture_manager.on_camera_updated(camera_id)
+    capture_manager.on_camera_updated(camera_id, tenant_id=scope.tenant_id)
     return _row_to_out(after)
 
 
@@ -200,7 +200,7 @@ def delete_camera_endpoint(
             },
         )
     logger.info("camera deleted: id=%s host=%s", camera_id, before.rtsp_host)
-    capture_manager.on_camera_deleted(camera_id)
+    capture_manager.on_camera_deleted(camera_id, tenant_id=scope.tenant_id)
     response.status_code = status.HTTP_204_NO_CONTENT
     return response
 

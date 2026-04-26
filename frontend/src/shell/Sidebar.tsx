@@ -8,6 +8,7 @@
 import { useTranslation } from "react-i18next";
 import { NavLink } from "react-router-dom";
 
+import { APP_VERSION_SHORT } from "../config";
 import { useInboxSummary } from "../requests/hooks";
 import type { MeResponse, Role } from "../types";
 import { Icon } from "./Icon";
@@ -60,7 +61,7 @@ export function Sidebar({ role, me }: Props) {
       <div className="sidebar-brand">
         <div className="brand-mark">ح</div>
         <div className="brand-name">Hadir</div>
-        <div className="brand-tag">v0.1</div>
+        <div className="brand-tag">{APP_VERSION_SHORT}</div>
       </div>
 
       {/* Search is decorative in P4 — real search lands with employees (P6). */}

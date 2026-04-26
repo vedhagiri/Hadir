@@ -1,18 +1,43 @@
-"""Per-camera RTSP reader.
+"""Per-camera capture worker — split reader / analyzer pipeline (P28.5a).
 
-Opens a ``cv2.VideoCapture``, reads at a throttled rate (4 fps by
-default — we're spending the CPU budget on face detection downstream),
-and feeds each frame to the analyzer + tracker + event emitter.
-Reconnects with backoff on read failure. The plaintext RTSP URL is held
-only on this thread's stack frame; it never gets logged or persisted.
+Architecture (ported from ``prototype-reference/backend/capture.py``):
 
-Health: a frame counter resets every 60 seconds, and a
-``camera_health_snapshots`` row is written with ``frames_last_minute``
-and a reachability flag.
+  ┌─────────────────┐   latest_frame ref     ┌────────────────────┐
+  │  Reader thread  │───────(lock)──────────▶│  Analyzer thread   │
+  │                 │                        │                    │
+  │  read RTSP at   │                        │  pull latest frame │
+  │  native fps     │                        │  motion-check      │
+  │  encode preview │                        │  detect + match    │
+  │  JPEG with the  │                        │  tracker.update()  │
+  │  most-recent    │                        │  emit_event(new)   │
+  │  cached boxes   │                        │  publish cached    │
+  └─────────────────┘                        │  boxes             │
+                                             └────────────────────┘
 
-This module is test-friendly — ``VideoCaptureFactory`` and ``Analyzer``
-are both injectable, so ``tests/test_capture.py`` drives a fake feed
-without OpenCV or InsightFace.
+Why two threads?
+    Pre-P28.5a we read+detected in a single 4 fps loop. Detection takes
+    100-300ms on CPU so the preview ticked at the same rate the
+    detector could keep up — laggy. Splitting lets the reader run at
+    the camera's native rate (smooth preview) while the analyzer runs
+    only as fast as the CPU can manage.
+
+Why motion-skip?
+    Most office cameras stare at empty hallways for most of the day.
+    A cheap downscaled grayscale frame-diff lets us bail before paying
+    for face detection when nothing has changed. Quiet camera → near
+    zero CPU.
+
+Per-worker preview JPEG (``self._latest_jpeg``) replaces the P28.5
+``frame_buffer.py`` singleton. Tenant scoping is naturally enforced —
+the worker only ever serves its own tenant's frame, and
+``CaptureManager.get_preview(tenant_id, camera_id)`` validates that
+the (tenant, camera) tuple maps to a real worker before returning
+bytes.
+
+Test-friendly: ``VideoCaptureFactory`` and ``Analyzer`` are both
+injectable, ``ReaderConfig.max_iterations`` bounds the analyzer loop
+so unit tests can drive a finite scripted feed without joining
+forever.
 """
 
 from __future__ import annotations
@@ -27,7 +52,10 @@ from sqlalchemy.engine import Engine
 
 from hadir.capture import events as events_io
 from hadir.capture.analyzer import Analyzer
-from hadir.capture.tracker import Bbox, IoUTracker
+from hadir.capture.annotate import AnnotationBox, annotate_frame, encode_jpeg
+from hadir.capture.directory import employee_directory
+from hadir.capture.tracker import Bbox, IoUTracker, TrackMatch
+from hadir.identification.matcher import matcher_cache
 from hadir.tenants.scope import TenantScope
 
 logger = logging.getLogger(__name__)
@@ -63,31 +91,94 @@ def default_capture_factory(url: str) -> FrameSource:
     return cap  # type: ignore[return-value]
 
 
-# --- Worker loop ----------------------------------------------------------
+# --- Worker config ---------------------------------------------------------
 
 
 @dataclass
 class ReaderConfig:
     """Tuning knobs for a single camera worker."""
 
-    target_fps: float = 4.0
+    # Analyzer cap. The reader runs at the camera's native rate and is
+    # not throttled here — its only pacing is whatever the RTSP source
+    # delivers. Detection is the expensive call, so the analyzer is
+    # what we cap.
+    analyzer_max_fps: float = 6.0
+
     iou_threshold: float = 0.3
     track_idle_timeout_s: float = 3.0
+
     reconnect_backoff_initial_s: float = 1.0
     reconnect_backoff_max_s: float = 30.0
+
     health_interval_s: float = 60.0
-    # Hard cap so a sick loop doesn't spin forever. The manager resets
-    # this on stop(), not on normal progress.
+
+    # Even when the motion-check says "no motion", re-run detection
+    # every N seconds so we don't get stuck on stale boxes if the
+    # motion check misfires (e.g. very subtle movement).
+    force_detect_every_s: float = 3.0
+
+    # Bound the analyzer loop for tests. The reader thread observes
+    # the same shutdown event so it unwinds together.
     max_iterations: Optional[int] = None
+
+    # Test-only: when True, the analyzer advances ``last_analyzed_seq``
+    # by 1 per iteration instead of jumping to the reader's current
+    # ``frame_seq``. Production stays at False (skip-to-latest) so a
+    # slow analyzer can't backlog forever; tests flip it to True for
+    # deterministic frame-by-frame processing of a scripted feed.
+    analyzer_consume_every_seq: bool = False
+
+    # Preview JPEG quality. 70 is the LAN sweet spot — sharp face IDs
+    # at ~80 KB for 1280×720. P28.5 chose 70; we keep it.
+    preview_jpeg_quality: int = 70
+
+
+# --- Cheap motion check ----------------------------------------------------
+
+
+_MOTION_GRAY_WIDTH = 160
+_MOTION_PIXEL_THRESHOLD = 25
+_MOTION_MIN_PIXELS = 80
+
+
+def _check_motion(frame_bgr, prev_gray):  # type: ignore[no-untyped-def]
+    """Return ``(moved, current_gray)``.
+
+    Compares a downscaled grayscale of the current frame to the
+    previous one. Cheap (~3 ms) compared to the 100-300 ms a real
+    detection costs. First call (``prev_gray is None``) always
+    returns moved=True so detection runs at least once.
+    """
+
+    import cv2  # noqa: PLC0415
+    import numpy as np  # noqa: PLC0415
+
+    h, w = frame_bgr.shape[:2]
+    if w == 0:
+        return False, prev_gray
+    scale = _MOTION_GRAY_WIDTH / w
+    new_h = max(1, int(h * scale))
+    small = cv2.resize(frame_bgr, (_MOTION_GRAY_WIDTH, new_h))
+    gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+    gray = cv2.GaussianBlur(gray, (5, 5), 0)
+
+    if prev_gray is None or prev_gray.shape != gray.shape:
+        return True, gray
+
+    diff = cv2.absdiff(prev_gray, gray)
+    changed = int(np.count_nonzero(diff > _MOTION_PIXEL_THRESHOLD))
+    return changed >= _MOTION_MIN_PIXELS, gray
+
+
+# --- Worker ----------------------------------------------------------------
 
 
 class CaptureWorker:
-    """Owns one camera's read→detect→track→emit loop.
+    """Owns one camera's read+detect+emit pipeline (two threads).
 
     The decrypted RTSP URL is passed in at construction and held only
-    on this instance. Call ``start()`` to spawn the thread and
-    ``stop()`` to ask it to unwind — the thread observes ``_stop``
-    between iterations and releases its VideoCapture before returning.
+    on this instance. ``start()`` spawns both threads; ``stop()`` sets
+    the shutdown flag and joins.
     """
 
     def __init__(
@@ -115,82 +206,161 @@ class CaptureWorker:
             iou_threshold=self._config.iou_threshold,
             idle_timeout_s=self._config.track_idle_timeout_s,
         )
+
+        # Reader → analyzer hand-off. The reader updates ``_latest_frame``
+        # on every read and increments ``_frame_seq``; the analyzer
+        # snapshots both under the lock and skips re-analysing the same
+        # sequence number.
+        self._frame_lock = threading.Lock()
+        self._latest_frame = None  # numpy ndarray
+        self._frame_seq = 0
+
+        # Cached annotated boxes from the most recent analyzer pass.
+        # The reader paints these onto every preview JPEG so a still
+        # subject keeps showing their box even when motion-skip
+        # bypasses detection.
+        self._cached_boxes_lock = threading.Lock()
+        self._cached_boxes: list[AnnotationBox] = []
+
+        # Per-worker latest preview JPEG (replaces frame_buffer.py).
+        # The reader writes here on every successful read; readers in
+        # the live-capture router consume it via
+        # ``CaptureManager.get_preview``.
+        self._preview_lock = threading.Lock()
+        self._latest_jpeg: Optional[bytes] = None
+        self._latest_jpeg_ts: float = 0.0
+
+        # Stats consumed by the WebSocket heartbeat + /live-stats.
+        self._stats_lock = threading.Lock()
+        self._stats: dict[str, float | int | str | None] = {
+            "fps_reader": 0.0,
+            "fps_analyzer": 0.0,
+            "active_tracks": 0,
+            "motion_skipped": 0,
+            "status": "starting",
+            "last_error": None,
+        }
+
         self._stop = threading.Event()
-        self._thread: Optional[threading.Thread] = None
+        self._reader_thread: Optional[threading.Thread] = None
+        self._analyzer_thread: Optional[threading.Thread] = None
 
     # ------------------------------------------------------------------
+    # Lifecycle
 
     def start(self) -> None:
-        if self._thread is not None and self._thread.is_alive():
+        if self._reader_thread is not None and self._reader_thread.is_alive():
             return
         self._stop.clear()
-        self._thread = threading.Thread(
-            target=self._run, name=f"capture-{self.camera_id}", daemon=True
+        self._reader_thread = threading.Thread(
+            target=self._run_reader,
+            name=f"capread-{self.camera_id}",
+            daemon=True,
         )
-        self._thread.start()
+        self._analyzer_thread = threading.Thread(
+            target=self._run_analyzer,
+            name=f"capana-{self.camera_id}",
+            daemon=True,
+        )
+        self._reader_thread.start()
+        self._analyzer_thread.start()
 
     def stop(self, timeout: float = 5.0) -> None:
         self._stop.set()
-        thread = self._thread
-        if thread is not None and thread.is_alive():
-            thread.join(timeout=timeout)
-        self._thread = None
+        for t in (self._reader_thread, self._analyzer_thread):
+            if t is not None and t.is_alive():
+                t.join(timeout=timeout)
+        self._reader_thread = None
+        self._analyzer_thread = None
+        # Drop the per-worker preview so a stale frame can't be served
+        # after the worker is gone.
+        with self._preview_lock:
+            self._latest_jpeg = None
+            self._latest_jpeg_ts = 0.0
 
     def is_alive(self) -> bool:
-        return self._thread is not None and self._thread.is_alive()
+        # The worker is "alive" if at least one of its threads is still
+        # running. The manager's hot-reload checks this to know whether
+        # to spawn a fresh worker on update.
+        for t in (self._reader_thread, self._analyzer_thread):
+            if t is not None and t.is_alive():
+                return True
+        return False
 
     # ------------------------------------------------------------------
+    # Public reads (consumed by manager.get_preview + WS heartbeat)
 
-    def _run(self) -> None:
-        """Outer reconnect loop + inner frame loop."""
+    def get_latest_jpeg(self) -> Optional[tuple[bytes, float]]:
+        """Return ``(jpeg, ts)`` for the most recent preview, or None."""
+
+        with self._preview_lock:
+            if self._latest_jpeg is None:
+                return None
+            return self._latest_jpeg, self._latest_jpeg_ts
+
+    def is_preview_fresh(self, max_age_s: float = 5.0) -> bool:
+        with self._preview_lock:
+            if self._latest_jpeg is None:
+                return False
+            return (time.time() - self._latest_jpeg_ts) <= max_age_s
+
+    def get_stats(self) -> dict:
+        with self._stats_lock:
+            return dict(self._stats)
+
+    # ------------------------------------------------------------------
+    # Reader thread
+
+    def _run_reader(self) -> None:
+        """Outer reconnect loop + inner read loop. Native FPS."""
 
         # Multi-tenant routing (v1.0 P1): every DB call from this
-        # worker must run under the right tenant's search_path. Set
-        # the contextvar once at thread entry so the whole loop
-        # inherits it — pool checkouts auto-apply ``SET search_path``.
+        # worker must run under the right tenant's search_path.
         from hadir.db import tenant_context  # noqa: PLC0415
 
         with tenant_context(self._scope.tenant_schema):
-            self._run_inner()
+            self._reader_loop_outer()
 
-    def _run_inner(self) -> None:
+    def _reader_loop_outer(self) -> None:
         backoff = self._config.reconnect_backoff_initial_s
-        iterations = 0
         while not self._stop.is_set():
             cap: Optional[FrameSource] = None
             try:
                 cap = self._capture_factory(self._rtsp_url_plain)
                 if not cap.isOpened():
+                    self._set_status("reconnecting", error="could not open stream")
                     self._record_unreachable("could not open stream")
-                    backoff = self._bump_backoff(backoff)
                     self._sleep_interruptible(backoff)
+                    backoff = self._bump_backoff(backoff)
                     continue
 
-                # Loop reset — successful open counts as a fresh minute.
+                self._set_status("streaming", error=None)
+                backoff = self._config.reconnect_backoff_initial_s
+
+                last_fps_ts = time.time()
+                frames_this_sec = 0
                 frame_count_minute = 0
                 last_health_ts = time.time()
-                next_read_at = time.time()
 
                 while not self._stop.is_set():
-                    now = time.time()
-                    if now < next_read_at:
-                        self._sleep_interruptible(min(0.1, next_read_at - now))
-                        continue
-                    next_read_at = now + (1.0 / self._config.target_fps)
-
                     ok, frame = cap.read()
                     if not ok or frame is None:
                         logger.info(
                             "camera %s: read returned empty — reconnecting",
                             self.camera_name,
                         )
+                        self._set_status("reconnecting", error="read failed")
                         break
+
+                    # Hand the frame to the analyzer + count for fps.
+                    with self._frame_lock:
+                        self._latest_frame = frame
+                        self._frame_seq += 1
+
+                    frames_this_sec += 1
                     frame_count_minute += 1
-                    # P26: frame counter — opaque tenant + camera
-                    # ids only. Walking past the camera ticks this
-                    # at ~4 Hz; a quiet camera ticks slowly. The
-                    # Grafana "Capture rate per camera" panel is
-                    # rate(hadir_capture_frames_total[5m]).
+
+                    # P26: prom counter — opaque tenant + camera ids only.
                     try:
                         from hadir.metrics import (  # noqa: PLC0415
                             observe_capture_frame,
@@ -200,50 +370,22 @@ class CaptureWorker:
                             self._scope.tenant_id, self.camera_id
                         )
                     except Exception:  # noqa: BLE001
-                        # Metrics must never sink the capture loop.
                         pass
 
-                    # Detect → track → emit one event per NEW track only.
-                    try:
-                        detections = self._analyzer.detect(frame)
-                    except Exception as exc:  # noqa: BLE001
-                        logger.warning(
-                            "camera %s: analyzer error: %s",
-                            self.camera_name,
-                            type(exc).__name__,
-                        )
-                        detections = []
+                    # Encode + store the preview JPEG with whatever boxes
+                    # the analyzer last produced. Done on the reader
+                    # thread so preview pace tracks read pace, not detect
+                    # pace.
+                    self._update_preview(frame)
 
-                    if detections:
-                        matches = self._tracker.update(
-                            [d.bbox for d in detections], now
-                        )
-                        # Tracker returns matches in the same order as the
-                        # input list so we can pair each detection with
-                        # its match and carry the embedding through.
-                        for det, match in zip(detections, matches):
-                            if not match.is_new:
-                                continue
-                            try:
-                                events_io.emit_detection_event(
-                                    self._engine,
-                                    self._scope,
-                                    camera_id=self.camera_id,
-                                    frame_bgr=frame,
-                                    bbox=match.bbox,
-                                    track_id=match.track_id,
-                                    embedding=det.embedding,
-                                )
-                            except Exception as exc:  # noqa: BLE001
-                                logger.warning(
-                                    "camera %s: event emit failed: %s",
-                                    self.camera_name,
-                                    type(exc).__name__,
-                                )
-                    else:
-                        # Still drive track expiry even on empty frames so
-                        # idle tracks clear out on the next update.
-                        self._tracker.update([], now)
+                    now = time.time()
+                    if now - last_fps_ts >= 1.0:
+                        with self._stats_lock:
+                            self._stats["fps_reader"] = round(
+                                frames_this_sec / (now - last_fps_ts), 1
+                            )
+                        frames_this_sec = 0
+                        last_fps_ts = now
 
                     if now - last_health_ts >= self._config.health_interval_s:
                         self._record_health(frame_count_minute, reachable=True)
@@ -256,26 +398,13 @@ class CaptureWorker:
                         frame_count_minute = 0
                         last_health_ts = now
 
-                    iterations += 1
-                    if (
-                        self._config.max_iterations is not None
-                        and iterations >= self._config.max_iterations
-                    ):
-                        # Flush the partial-minute bucket before exiting
-                        # so the test harness sees a health row even on
-                        # a truncated run.
-                        if frame_count_minute > 0:
-                            self._record_health(frame_count_minute, reachable=True)
-                        return
-
-                # Flush any remaining frames in the minute bucket (reached
-                # when the inner while breaks on an empty read).
+                # Flush partial-minute bucket on inner break.
                 if frame_count_minute > 0:
                     self._record_health(frame_count_minute, reachable=True)
 
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
-                    "camera %s: capture loop error: %s",
+                    "camera %s: reader loop error: %s",
                     self.camera_name,
                     type(exc).__name__,
                 )
@@ -289,19 +418,228 @@ class CaptureWorker:
 
             if self._stop.is_set():
                 break
-            backoff = self._bump_backoff(backoff)
             self._sleep_interruptible(backoff)
+            backoff = self._bump_backoff(backoff)
+
+        self._set_status("stopped", error=None)
 
     # ------------------------------------------------------------------
+    # Analyzer thread
+
+    def _run_analyzer(self) -> None:
+        from hadir.db import tenant_context  # noqa: PLC0415
+
+        with tenant_context(self._scope.tenant_schema):
+            self._analyzer_loop()
+
+    def _analyzer_loop(self) -> None:
+        min_interval = 1.0 / max(0.1, self._config.analyzer_max_fps)
+        last_run = 0.0
+        last_analyzed_seq = -1
+        prev_motion_gray = None
+        last_detect_ts = 0.0
+        last_fps_ts = time.time()
+        runs_this_sec = 0
+        iterations = 0
+
+        while not self._stop.is_set():
+            with self._frame_lock:
+                frame = self._latest_frame
+                seq = self._frame_seq
+            if frame is None or seq == last_analyzed_seq:
+                self._sleep_interruptible(0.02)
+                continue
+
+            now = time.time()
+            elapsed = now - last_run
+            if elapsed < min_interval:
+                self._sleep_interruptible(min_interval - elapsed)
+                if self._stop.is_set():
+                    break
+                now = time.time()
+            last_run = now
+            # Production: skip to whatever frame is freshest. Tests:
+            # walk every seq sequentially for deterministic feeds.
+            if self._config.analyzer_consume_every_seq:
+                last_analyzed_seq = last_analyzed_seq + 1
+            else:
+                last_analyzed_seq = seq
+
+            moved, prev_motion_gray = _check_motion(frame, prev_motion_gray)
+            force = (now - last_detect_ts) >= self._config.force_detect_every_s
+
+            detections: list = []
+            if moved or force:
+                try:
+                    detections = self._analyzer.detect(frame)
+                    last_detect_ts = now
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "camera %s: analyzer error: %s",
+                        self.camera_name,
+                        type(exc).__name__,
+                    )
+                    detections = []
+            else:
+                with self._stats_lock:
+                    cur = int(self._stats["motion_skipped"] or 0)
+                    self._stats["motion_skipped"] = cur + 1
+
+            # Drive the tracker even when detections is empty so idle
+            # tracks expire on schedule.
+            matches = self._tracker.update(
+                [d.bbox for d in detections], now
+            )
+
+            # Pre-match each detection against the matcher so (a) the
+            # cached boxes get accurate labels and (b) emit() doesn't
+            # have to re-run the matcher for new tracks.
+            per_detection_match: list[Optional[tuple[int, float]]] = []
+            for det in detections:
+                mm = (
+                    matcher_cache.match(self._scope, det.embedding)
+                    if det.embedding is not None
+                    else None
+                )
+                per_detection_match.append(
+                    (mm.employee_id, mm.score) if mm else None
+                )
+
+            # Build the annotation box list and publish it for the
+            # reader to draw onto subsequent preview frames. We only
+            # overwrite the cached list when we actually ran detection
+            # — motion-skip cycles leave the previous boxes in place
+            # so a still subject keeps their label.
+            if moved or force:
+                self._publish_cached_boxes(detections, matches, per_detection_match)
+
+            # One detection_events row per NEW track, never per frame.
+            for det, match, pm in zip(
+                detections, matches, per_detection_match
+            ):
+                if not match.is_new:
+                    continue
+                try:
+                    events_io.emit_detection_event(
+                        self._engine,
+                        self._scope,
+                        camera_id=self.camera_id,
+                        frame_bgr=frame,
+                        bbox=match.bbox,
+                        track_id=match.track_id,
+                        embedding=det.embedding,
+                        pre_matched=pm,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "camera %s: event emit failed: %s",
+                        self.camera_name,
+                        type(exc).__name__,
+                    )
+
+            runs_this_sec += 1
+            now = time.time()
+            if now - last_fps_ts >= 1.0:
+                with self._stats_lock:
+                    self._stats["fps_analyzer"] = round(
+                        runs_this_sec / (now - last_fps_ts), 1
+                    )
+                    self._stats["active_tracks"] = self._tracker.active_tracks
+                runs_this_sec = 0
+                last_fps_ts = now
+
+            iterations += 1
+            if (
+                self._config.max_iterations is not None
+                and iterations >= self._config.max_iterations
+            ):
+                # Tests bound the loop here. Signal the reader to
+                # unwind too so the worker fully exits.
+                self._stop.set()
+                return
+
+    # ------------------------------------------------------------------
+    # Cached-box hand-off (analyzer → reader's preview encoding)
+
+    def _publish_cached_boxes(
+        self, detections, matches, per_detection_match
+    ) -> None:
+        boxes: list[AnnotationBox] = []
+        for det, match, pm in zip(detections, matches, per_detection_match):
+            bbox: Bbox = match.bbox
+            if pm is not None:
+                employee_id, score = pm
+                pair = employee_directory.label_for(self._scope, employee_id)
+                name = pair[0] if pair else f"EMP {employee_id}"
+                label = f"{name} · {int(round(score * 100))}%"
+                boxes.append(
+                    AnnotationBox(
+                        x=bbox.x, y=bbox.y, w=bbox.w, h=bbox.h,
+                        label=label, known=True,
+                    )
+                )
+            else:
+                boxes.append(
+                    AnnotationBox(
+                        x=bbox.x, y=bbox.y, w=bbox.w, h=bbox.h,
+                        label="Unknown", known=False,
+                    )
+                )
+        with self._cached_boxes_lock:
+            self._cached_boxes = boxes
+
+    # ------------------------------------------------------------------
+    # Preview JPEG (reader thread)
+
+    def _update_preview(self, frame_bgr) -> None:  # type: ignore[no-untyped-def]
+        """Annotate a copy of the frame with cached boxes, encode JPEG,
+        store. Failures are swallowed at DEBUG — preview is a viewer
+        feature; the underlying capture loop must keep running.
+        """
+
+        try:
+            with self._cached_boxes_lock:
+                boxes = list(self._cached_boxes)
+
+            if boxes:
+                # ``annotate_frame`` mutates in place; we don't want
+                # to overwrite the frame the analyzer is about to read,
+                # so we copy first.
+                preview = frame_bgr.copy()
+                annotate_frame(preview, boxes)
+            else:
+                preview = frame_bgr
+
+            jpeg = encode_jpeg(preview, quality=self._config.preview_jpeg_quality)
+            if jpeg is None:
+                return
+            with self._preview_lock:
+                self._latest_jpeg = jpeg
+                self._latest_jpeg_ts = time.time()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "camera %s: preview update failed: %s",
+                self.camera_name,
+                type(exc).__name__,
+            )
+
+    # ------------------------------------------------------------------
+    # Helpers
+
+    def _set_status(self, status: str, *, error: Optional[str]) -> None:
+        with self._stats_lock:
+            self._stats["status"] = status
+            self._stats["last_error"] = error
 
     def _sleep_interruptible(self, seconds: float) -> None:
-        # Wait on the stop event so ``stop()`` wakes us up promptly.
         self._stop.wait(timeout=seconds)
 
     def _bump_backoff(self, current: float) -> float:
         return min(current * 2.0, self._config.reconnect_backoff_max_s)
 
-    def _record_health(self, frames: int, *, reachable: bool, note: Optional[str] = None) -> None:
+    def _record_health(
+        self, frames: int, *, reachable: bool, note: Optional[str] = None
+    ) -> None:
         try:
             events_io.write_health_snapshot(
                 self._engine,

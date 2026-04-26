@@ -336,6 +336,132 @@ Run the §7 SQL queries from
 
 ---
 
+## 13a. Live Capture (P28.5a)
+
+Sidebar nav: **Live capture · LIVE**. Verify the viewer +
+event stream behave correctly across both tenants.
+
+P28.5a refactored the capture worker onto a two-thread design
+(reader at native fps + analyzer at ≤6 fps with motion-skip)
+and re-keyed the manager's worker dict by
+``(tenant_id, camera_id)``. The frame buffer was deleted and
+the per-camera ``latest_jpeg`` lives on the worker now. None of
+the user-facing checks below changed shape — the steps still
+pass on the old behaviour and the new — but a few are sharper
+on the new design (motion-skip means a quiet camera shows ~0%
+analyzer load; the preview should feel ≤500 ms latency on a
+LAN camera). Watch for "perceived latency" specifically.
+
+- [ ] Sidebar brand chip reads **v1.0** (not `v0.1`). Source
+      is `frontend/src/config.ts`; if it says `v0.1` either
+      the backend container has stale build artefacts or
+      `package.json` was reverted — check both.
+
+- [ ] **Demo tenant — empty viewer state.** Log in as
+      `admin@mts-demo.example.com`. Open Live Capture. Page
+      renders with the empty viewer ("Select a camera to
+      begin"), camera list on the right, and an empty event
+      stream below.
+
+- [ ] **Demo tenant — fake-RTSP cameras stay offline.** Click
+      any of the 8 mts_demo cameras. Viewer transitions to
+      "Camera offline" within ~12 s (2 s cold-start grace +
+      10 s idle bail). The capture worker is failing the RTSP
+      open silently; that's correct behaviour for placeholder
+      URLs, not a bug.
+
+- [ ] **Real corporate tenant — live face detection.** Log
+      out, log in as `admin@inaisys.local`. Open Live Capture.
+      Click "Office Camera 1". The MJPEG starts within ~2 s.
+      Walk past the camera. Your face appears with a bounding
+      box (green if your photo is enrolled, amber if not).
+      Box label reads "{Name} · {N}%" (or "Unknown").
+
+- [ ] **Event stream populates.** As detections fire, rows
+      appear at the top of the event-stream table with a
+      brief fade-in. Each row carries a time, the camera id,
+      identified or "Unknown face", a confidence percentage,
+      and a status pill.
+
+- [ ] **Pause holds the viewer; events keep flowing.** Click
+      Pause. The video freezes (the `<img>` src is cleared).
+      Walk past the camera again — the viewer stays paused,
+      but new rows still appear in the event-stream table
+      because the WebSocket stays open.
+
+- [ ] **Resume re-fetches.** Click Resume. Within ~2 s the
+      viewer is live again.
+
+- [ ] **Reconnect button.** Click Reconnect. Brief
+      "Reconnecting…" overlay appears at the bottom-left of
+      the viewer; within a few seconds the stream is back
+      and the WebSocket has re-opened.
+
+- [ ] **Two-tab sharing.** Open Live Capture in two tabs of
+      the same browser, both pointed at the same camera.
+      Both stream successfully. In `docker compose logs
+      backend`, confirm only ONE capture worker is running
+      for that camera (search for
+      `capture worker started for camera id=`). The frame
+      buffer is shared.
+
+- [ ] **Concurrency cap.** Open the same camera in 11 tabs.
+      The 11th tab's request to `/api/cameras/{id}/live.mjpg`
+      returns **503**. Closing one of the earlier tabs frees
+      a slot — the 11th can re-load and succeed.
+
+- [ ] **Manager 403.** Log in as a Manager
+      (`manager.eng@mts-demo.example.com`). Hit `/live` in
+      the URL bar. The router-level role guard returns 403
+      (or the page renders the error state — both acceptable;
+      sidebar doesn't expose `/live` to Manager).
+
+- [ ] **Anonymous 401.** Log out. Hit
+      `/api/cameras/1/live.mjpg` directly. **401**.
+
+- [ ] **Cross-tenant 404.** Logged in as the mts_demo Admin,
+      run `curl -b cookies.txt http://localhost:8000/api/cameras/<inaisys_camera_id>/live.mjpg`
+      with an inaisys camera id (look it up via
+      `psql … 'SELECT id FROM tenant_inaisys.cameras'`).
+      **Must return 404.** If it streams the inaisys camera's
+      frames, **STOP** — that's a P0 cross-tenant leak.
+
+- [ ] **Audit volume sane.** Stream for one minute, then
+      `psql -U hadir -d hadir -c "SELECT action, count(*) FROM
+      tenant_inaisys.audit_log WHERE action LIKE
+      'live_capture%' AND created_at > now() - interval '5
+      minutes' GROUP BY 1 ORDER BY 1"`. Expected: one
+      `live_capture.mjpg.subscribed` per stream open, one
+      `…unsubscribed` per close, one `events.subscribed` and
+      `events.unsubscribed` per WebSocket cycle. **No
+      per-frame audit rows** (the audit log would explode if
+      we wrote per frame).
+
+- [ ] **(P28.5a) Perceived latency under 500 ms.** Wave your
+      hand briefly and count the seconds until the box+frame
+      reflect it. Anything above ~0.5 s on a LAN camera
+      indicates the reader thread is bottlenecked — file a
+      P0. The two-thread design's whole point is to make this
+      snappy.
+
+- [ ] **(P28.5a) Quiet-camera CPU near zero.** Point the camera
+      at an empty wall for 30 s. `docker stats hadir-backend-1`
+      should show the backend container's CPU drop to near
+      idle (<5%). Then walk past — CPU jumps. Motion-skip
+      working as intended.
+
+- [ ] **(P28.5a) Multi-camera concurrency.** Add a second
+      enabled camera (same RTSP URL is fine for the test —
+      different name). Open Live Capture, switch between
+      cameras. Both should produce events independently in
+      Camera Logs. In `docker compose logs backend | grep
+      "capture worker started"` you should see TWO worker
+      starts (one per camera), and `mgr.active_camera_ids()`
+      via the dev REPL would return both ids. Each camera's
+      worker reads at native fps independently.
+
+---
+
 ## 14. Pre-Omran issues
 
 For every problem found, add a row below. This is the

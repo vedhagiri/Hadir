@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 (M2 core complete) + P23 + P24 + P25 + P26 + P27 + P28 (M3 hardening complete + sign-off run).**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 (M2 core complete) + P23 + P24 + P25 + P26 + P27 + P28 (M3 hardening complete + sign-off run) + P28.5a (Live Capture viewer w/ reader+analyzer worker split, multi-tenant CaptureManager, sidebar v1.0 chip).**
 
 > **Tenant isolation is a P0 blocker.** The suites
 > `backend/tests/test_multi_tenant_isolation.py` (the P1 canary) and
@@ -683,6 +683,71 @@ of the Arabic translations before v1.0 launch** — see
   rows across the 3 categories, Prometheus scraped
   `tenant="2"` metrics. **436 backend tests still green**
   (1 new regression test).
+
+- **P28.5a** — Live Capture refactor onto the prototype's
+  proven reader/analyzer split + multi-tenant
+  ``CaptureManager`` keying. Replaces the original P28.5
+  in-place (P28.5 was uncommitted at the time of this
+  refactor; nothing in main shipped its single-thread
+  4 fps design). Capture worker (``hadir/capture/reader.py``)
+  is now two threads: **reader** runs the RTSP loop at the
+  camera's native fps, hands frames to the analyzer via
+  a shared ``_latest_frame`` reference + writes the
+  annotated preview JPEG into a per-worker ``_latest_jpeg``
+  slot; **analyzer** loops at ≤6 fps with cheap
+  motion-skip (downscaled grayscale absdiff, ~3 ms vs.
+  100-300 ms per real detection), runs detect + matcher +
+  tracker + emit, and republishes annotation boxes for the
+  reader to bake onto every preview frame. Quiet camera
+  → analyzer drops to ~zero CPU; live activity → full
+  detection. ``CaptureManager`` re-keyed:
+  ``_workers: dict[(tenant_id, camera_id), CaptureWorker]``
+  with new ``get_preview(tenant_id, camera_id)`` /
+  ``is_preview_fresh(tenant_id, camera_id)`` /
+  ``get_worker_stats(tenant_id, camera_id)`` —
+  defence-in-depth on top of the router's
+  ``WHERE tenant_id = …`` filter. ``frame_buffer.py``
+  deleted; the per-worker slot replaces it. Live-capture
+  router (``hadir/live_capture/router.py``) consumes
+  ``capture_manager.get_preview`` + ``get_worker_stats``;
+  MJPEG paces at 25 fps to bound bandwidth without
+  throwing away the smoothness gain; idle-bail at ~10 s
+  unchanged; 10 viewers/camera cap unchanged; WebSocket
+  heartbeat now carries worker fps_reader/fps_analyzer/
+  motion_skipped. Frontend rename
+  ``features/live-capture/`` → ``pages/LiveCapture/``
+  (``LiveCapturePage.tsx`` → ``LiveCapture.tsx``,
+  ``hooks.ts``, ``types.ts``); App.tsx import updated.
+  Sidebar version chip already shipped v1.0 in P28.5
+  (package.json → Vite ``__APP_VERSION__`` define →
+  config.ts → Sidebar.tsx); P28.5a verified the chain.
+  ``backend/tests/test_live_capture.py`` rewritten end-to-
+  end: 4 manager-scoping tests, 6 MJPEG endpoint tests
+  (incl. cross-tenant 404 + audit subscribe/unsubscribe-
+  only), 2 cap-helper tests, 2 ``/live-stats`` tests,
+  2 ``/events.csv`` tests, 5 WebSocket tests. P5 isolation
+  suite re-verified. ``tests/test_capture.py`` updated
+  for the new ``ReaderConfig`` shape (``analyzer_max_fps``,
+  ``force_detect_every_s=0.0``,
+  ``analyzer_consume_every_seq=True`` for deterministic
+  test feeds). **461 passed + 1 skipped** on the full
+  backend suite (461 prior + the rewrite kept the new
+  surface area equivalent).
+
+  **Architecture invariants for future sessions**:
+  (1) ``analyzer_consume_every_seq`` is test-only;
+  production stays at False (skip-to-latest) so a slow
+  analyzer can't backlog frames forever.
+  (2) Motion-skip's ``FORCE_DETECT_EVERY_S=3.0`` is the
+  safety net — even if motion-check misfires on subtle
+  movement, detection still runs at least every 3 s.
+  (3) The IoU tracker is unchanged — only its caller
+  (analyzer thread vs. read loop) and its rate (≤6 fps
+  vs. 4 fps) changed.
+
+  **Awaiting Suresh's physical-validation sign-off** in
+  ``docs/phases/P28.5a.md`` before commit. Validation
+  steps in ``docs/testing/pre-omran-validation.md §13a``.
 
 Next: **M4 launch** per `v1.0-phase-plan.md`. Wait for
 the user before starting. **Open critical item carries

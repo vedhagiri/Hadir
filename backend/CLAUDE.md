@@ -994,6 +994,91 @@ with stubbed analyzers and scripted ``VideoCapture`` feeds — the suite
 runs without OpenCV touching a real camera or InsightFace loading the
 buffalo_l model.
 
+### Live Capture viewer (P28.5a)
+Live Capture is a **viewer** on top of the existing capture worker,
+not a parallel pipeline. P28.5a refactored the worker onto the
+prototype's two-thread design — reader at native fps + analyzer at
+≤6 fps with motion-skip. The plumbing is three pieces:
+
+* ``capture/reader.py::CaptureWorker`` — per-camera, two threads.
+  The **reader** thread runs the RTSP read loop at native fps,
+  hands the frame to the analyzer via a shared
+  ``_latest_frame`` reference under a lock, and JPEG-encodes a
+  copy with the most-recent cached annotation boxes into the
+  per-worker ``_latest_jpeg`` slot. The **analyzer** thread loops
+  at ≤6 fps (``analyzer_max_fps``), runs cheap motion-skip
+  (downscaled grayscale absdiff, ~3 ms vs. 100-300 ms detect),
+  detects only when motion is present OR ``force_detect_every_s``
+  elapsed (default 3.0), runs the matcher, updates the IoU
+  tracker, emits one ``detection_events`` row per new track,
+  and republishes annotation boxes for the reader to draw.
+  The ``frame_buffer.py`` singleton is gone — the latest JPEG
+  lives on the worker, accessed via
+  ``CaptureManager.get_preview(tenant_id, camera_id)``.
+* ``capture/event_bus.py`` — per-(tenant, camera) asyncio pub/sub.
+  ``emit_detection_event`` publishes a ``DetectionEvent`` with the
+  resolved employee name + code; the WebSocket endpoint subscribes
+  and forwards as JSON. Per-subscriber bounded ``asyncio.Queue``
+  (maxsize=64) drops oldest on overflow so a slow client can't
+  stall the producer.
+* ``capture/annotate.py`` + ``capture/directory.py`` — bounding-box
+  drawing primitives (``cv2.rectangle`` + ``cv2.putText``) and an
+  in-memory ``employee_id → (name, code)`` cache used for box
+  labels. Boxes are baked into the JPEG before it lands in
+  the worker's preview slot — viewers stream straight to
+  ``<img>`` with no client-side overlay.
+
+Tenant scoping (P28.5a): ``CaptureManager._workers`` is keyed by
+``(tenant_id, camera_id)``; ``get_preview(tenant_id, camera_id)``
+returns ``None`` when the pair doesn't match a running worker —
+defence in depth on top of ``hadir/live_capture/router.py``'s
+``WHERE id = :id AND tenant_id = :scope_tenant_id`` resolver.
+Cross-tenant guesses 404. Audit rows are written on stream open
++ close (``live_capture.{mjpg,events}.{sub,unsub}``) — never per
+frame. ``ReaderConfig.analyzer_consume_every_seq`` is a test-only
+knob; production must stay at False (skip-to-latest) or a slow
+analyzer can backlog frames forever.
+
+**Boot-time auto-start** (P28.5a fix): on FastAPI lifespan
+startup, ``capture_manager.start()`` **always** scans
+``public.tenants`` for ``status='active'`` rows — independent of
+``HADIR_TENANT_MODE``. The mode flag governs runtime tenant
+*routing* for HTTP requests; worker *discovery* needs to see every
+tenant's cameras regardless. For each tenant, the manager opens a
+``tenant_context(schema)`` and runs a raw
+``SELECT id, name, rtsp_url_encrypted FROM cameras WHERE
+enabled = true AND tenant_id = :t``, decrypts each row's URL with
+Fernet, and calls ``start_camera`` for it. Per-row decrypt
+failures audit-log as ``capture.worker.start_failed`` and
+**continue** to the next camera — one bad camera must not block
+all others. Successful boots audit as
+``capture.worker.started_at_boot``. The final log line states
+the actual count: ``capture manager started with N worker(s)``.
+
+The raw SELECT bypasses ``cameras.repository.list_cameras`` on
+purpose: the repo decrypts every row to surface ``rtsp_host`` in
+the response shape, so a single corrupt ciphertext would fail the
+listing for the whole tenant.
+
+CRUD reactions are **synchronous**: when ``enabled`` is toggled
+via ``PATCH /api/cameras/{id}``, ``capture_manager.on_camera_updated``
+fires immediately on the request thread, stops the existing worker
+(if any), re-fetches the row, and (if still enabled) spawns a new
+one. No poll loop, no eventual consistency. ``DELETE`` similarly
+calls ``on_camera_deleted`` which stops the worker. The full
+reconciliation poll (every-2-second sweep that recovers from
+out-of-band camera-row mutations or worker crashes) is scoped for
+P28.5b.
+
+Public manager API for explicit control:
+
+* ``start_camera(tenant_id, camera_id, name, decrypted_url, schema=None)``
+  — spawn one worker. Idempotent (existing live worker for the key
+  is a no-op). Failures audit as ``capture.worker.start_failed``.
+* ``stop_camera(tenant_id, camera_id)`` — stop one worker.
+* ``workers_snapshot()`` — list of ``(tenant_id, camera_id)`` for
+  every live worker; consumed by tests for explicit assertions.
+
 ## Identification (P9)
 Every ``employee_photos`` row gets a Fernet-encrypted
 ``embedding BYTEA`` (512 × float32, L2-normalised) computed from the

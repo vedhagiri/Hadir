@@ -245,5 +245,39 @@
     },
     "embedTitle": "المواصفات الحية",
     "openInNewTab": "فتح في علامة تبويب جديدة"
+  },
+  "liveCapture": {
+    "title": "الالتقاط المباشر",
+    "subtitle": "الكشف عن الوجوه في الوقت الحقيقي",
+    "pause": "إيقاف مؤقت",
+    "resume": "استئناف",
+    "reconnect": "إعادة الاتصال",
+    "paused": "متوقف مؤقتاً",
+    "reconnecting": "جاري إعادة الاتصال…",
+    "offline": "الكاميرا غير متصلة",
+    "selectCameraPrompt": "اختر كاميرا للبدء",
+    "viewerAlt": "عرض مباشر للكاميرا",
+    "cameras": "الكاميرات",
+    "noCameras": "لا توجد كاميرات مفعّلة.",
+    "detectionsLast10m": "اكتشافات آخر 10 دقائق",
+    "known": "معروف",
+    "unknown": "مجهول",
+    "statusOnline": "متصل",
+    "statusOffline": "غير متصل",
+    "eventStream": "تدفّق الأحداث",
+    "live": "مباشر",
+    "onlyUnknown": "المجهول فقط",
+    "exportLastHour": "تصدير آخر ساعة",
+    "identified": "تم التعرّف",
+    "unknownFace": "وجه مجهول",
+    "eventsEmpty": "اختر كاميرا لرؤية الاكتشافات المباشرة.",
+    "eventsWaiting": "في انتظار أول اكتشاف…",
+    "col": {
+      "time": "الوقت",
+      "camera": "الكاميرا",
+      "identified": "تم التعرّف",
+      "confidence": "الثقة",
+      "status": "الحالة"
+    }
   }
 }

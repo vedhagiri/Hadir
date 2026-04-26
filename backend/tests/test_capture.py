@@ -152,13 +152,19 @@ def test_worker_emits_one_event_per_new_track_not_per_frame(
         analyzer=analyzer,
         capture_factory=lambda _url: _ScriptedCapture(frames),
         config=ReaderConfig(
-            target_fps=1000.0,  # spin through frames quickly
+            analyzer_max_fps=1000.0,  # spin through analyzer iterations quickly
             iou_threshold=0.3,
             track_idle_timeout_s=3.0,
             reconnect_backoff_initial_s=0.01,
             reconnect_backoff_max_s=0.01,
             health_interval_s=1000.0,  # suppress health writes in this test
             max_iterations=3,
+            # Force every detect call (blank frames produce no motion).
+            force_detect_every_s=0.0,
+            # Walk every seq sequentially so all 3 scripted detections
+            # are consumed by the tracker (P28.5a refactor: production
+            # skip-to-latest would otherwise drop intermediate frames).
+            analyzer_consume_every_seq=True,
         ),
     )
 
@@ -203,11 +209,13 @@ def test_event_crops_on_disk_are_encrypted_not_jpeg(admin_engine) -> None:
         analyzer=analyzer,
         capture_factory=lambda _url: _ScriptedCapture(frames),
         config=ReaderConfig(
-            target_fps=1000.0,
+            analyzer_max_fps=1000.0,
             reconnect_backoff_initial_s=0.01,
             reconnect_backoff_max_s=0.01,
             health_interval_s=1000.0,
             max_iterations=1,
+            force_detect_every_s=0.0,
+            analyzer_consume_every_seq=True,
         ),
     )
 
@@ -282,28 +290,32 @@ def test_manager_hot_reload_cycle(admin_engine) -> None:
         mgr = manager_mod.CaptureManager()
         mgr.start(
             config=ReaderConfig(
-                target_fps=1000.0,
+                analyzer_max_fps=1000.0,
                 reconnect_backoff_initial_s=10.0,  # don't actually reconnect
                 reconnect_backoff_max_s=10.0,
                 health_interval_s=1000.0,
             )
         )
-        assert mgr.active_camera_ids() == []
+        # Tenant 1 (main) starts with no enabled cameras — the
+        # ``clean_capture`` fixture wipes its cameras table. Other
+        # tenants' workers (e.g. tenant_mts_demo's Giri Home from a
+        # dev seed) may be running; we scope the assertion to tenant 1.
+        assert mgr.active_camera_ids(tenant_id=1) == []
 
         cam_id = _seed_camera(
             admin_engine, name="hot-reload", plain_url="rtsp://fake/3"
         )
-        mgr.on_camera_created(cam_id)
+        mgr.on_camera_created(cam_id, tenant_id=1)
         # Give the worker a beat to spin up (it's a new thread).
         time.sleep(0.1)
-        assert cam_id in mgr.active_camera_ids()
+        assert cam_id in mgr.active_camera_ids(tenant_id=1)
 
         # Delete the camera row then notify — worker should be dropped.
         with admin_engine.begin() as conn:
             conn.execute(delete(cameras).where(cameras.c.id == cam_id))
-        mgr.on_camera_deleted(cam_id)
+        mgr.on_camera_deleted(cam_id, tenant_id=1)
         time.sleep(0.1)
-        assert cam_id not in mgr.active_camera_ids()
+        assert cam_id not in mgr.active_camera_ids(tenant_id=1)
 
         mgr.stop()
     finally:
@@ -333,11 +345,13 @@ def test_worker_writes_health_snapshot(admin_engine) -> None:
         analyzer=analyzer,
         capture_factory=lambda _url: _ScriptedCapture(frames),
         config=ReaderConfig(
-            target_fps=1000.0,
+            analyzer_max_fps=1000.0,
             reconnect_backoff_initial_s=0.01,
             reconnect_backoff_max_s=0.01,
             health_interval_s=1000.0,
             max_iterations=1,
+            force_detect_every_s=0.0,
+            analyzer_consume_every_seq=True,
         ),
     )
     worker.start()
@@ -390,11 +404,13 @@ def test_recent_events_query_shape_matches_pilot_check(admin_engine) -> None:
         analyzer=analyzer,
         capture_factory=lambda _url: _ScriptedCapture(frames),
         config=ReaderConfig(
-            target_fps=1000.0,
+            analyzer_max_fps=1000.0,
             reconnect_backoff_initial_s=0.01,
             reconnect_backoff_max_s=0.01,
             health_interval_s=1000.0,
             max_iterations=1,
+            force_detect_every_s=0.0,
+            analyzer_consume_every_seq=True,
         ),
     )
     worker.start()
@@ -415,3 +431,224 @@ def test_recent_events_query_shape_matches_pilot_check(admin_engine) -> None:
             )
         ).scalar_one()
     assert count >= 1
+
+
+# --- P28.5a: boot-time auto-start ----------------------------------------
+
+
+@pytest.mark.usefixtures("clean_capture")
+def test_manager_auto_starts_workers_for_enabled_cameras_at_boot(
+    admin_engine,
+) -> None:
+    """Manager.start() must spawn one worker per enabled camera across
+    every active tenant in ``public.tenants`` — independent of
+    ``HADIR_TENANT_MODE``. The bug fixed by this test:
+    pre-fix the single-mode branch only scanned the default tenant
+    schema and missed cameras living in tenant_<slug> schemas.
+    """
+
+    # Patch CaptureWorker so the spawned worker doesn't try to open a
+    # real RTSP socket. The fake VideoCapture always returns (False,
+    # None) so the reader thread enters reconnect mode but the worker
+    # itself is_alive — that's all this test cares about.
+    from hadir.capture.analyzer import (
+        clear_analyzer_factory,
+        set_analyzer_factory,
+    )
+
+    set_analyzer_factory(lambda: _StubAnalyzer([]))
+    original_default = manager_mod.CaptureWorker
+
+    class _WorkerWithFakeCapture(original_default):  # type: ignore[misc,valid-type]
+        def __init__(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            kwargs.setdefault(
+                "capture_factory",
+                lambda _url: _ScriptedCapture([(False, None)]),
+            )
+            super().__init__(*args, **kwargs)
+
+    manager_mod.CaptureWorker = _WorkerWithFakeCapture  # type: ignore[assignment]
+
+    cam_id = _seed_camera(
+        admin_engine, name="boot-auto-start", plain_url="rtsp://fake/auto"
+    )
+
+    try:
+        mgr = manager_mod.CaptureManager()
+        mgr.start(
+            config=ReaderConfig(
+                analyzer_max_fps=1000.0,
+                reconnect_backoff_initial_s=10.0,  # don't reconnect mid-test
+                reconnect_backoff_max_s=10.0,
+                health_interval_s=1000.0,
+            )
+        )
+
+        # Worker must be running for the seeded enabled camera under
+        # tenant 1 — without the fix, single-mode skipped the per-tenant
+        # discovery loop and this assertion failed.
+        time.sleep(0.1)
+        snapshot = mgr.workers_snapshot()
+        assert (1, cam_id) in snapshot, snapshot
+
+        mgr.stop()
+    finally:
+        manager_mod.CaptureWorker = original_default  # type: ignore[assignment]
+        clear_analyzer_factory()
+
+
+@pytest.mark.usefixtures("clean_capture")
+def test_manager_continues_when_one_camera_fails_to_decrypt(
+    admin_engine,
+) -> None:
+    """A single bad camera (decrypt fail) must not block other cameras
+    from starting. The bad camera audits as
+    ``capture.worker.start_failed``; the good cameras audit as
+    ``capture.worker.started_at_boot``."""
+
+    from hadir.capture.analyzer import (
+        clear_analyzer_factory,
+        set_analyzer_factory,
+    )
+
+    set_analyzer_factory(lambda: _StubAnalyzer([]))
+    original_default = manager_mod.CaptureWorker
+
+    class _WorkerWithFakeCapture(original_default):  # type: ignore[misc,valid-type]
+        def __init__(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            kwargs.setdefault(
+                "capture_factory",
+                lambda _url: _ScriptedCapture([(False, None)]),
+            )
+            super().__init__(*args, **kwargs)
+
+    manager_mod.CaptureWorker = _WorkerWithFakeCapture  # type: ignore[assignment]
+
+    # Good camera — real Fernet ciphertext.
+    good_id = _seed_camera(
+        admin_engine, name="good", plain_url="rtsp://fake/good"
+    )
+    # Bad camera — write garbage into ``rtsp_url_encrypted`` so
+    # rtsp_io.decrypt_url raises RuntimeError.
+    with admin_engine.begin() as conn:
+        bad_id = conn.execute(
+            cameras.insert()
+            .values(
+                tenant_id=TENANT.tenant_id,
+                name="bad",
+                location="",
+                rtsp_url_encrypted="not-a-fernet-token",
+                enabled=True,
+            )
+            .returning(cameras.c.id)
+        ).scalar_one()
+    bad_id = int(bad_id)
+
+    try:
+        mgr = manager_mod.CaptureManager()
+        mgr.start(
+            config=ReaderConfig(
+                analyzer_max_fps=1000.0,
+                reconnect_backoff_initial_s=10.0,
+                reconnect_backoff_max_s=10.0,
+                health_interval_s=1000.0,
+            )
+        )
+
+        time.sleep(0.1)
+        snapshot = mgr.workers_snapshot()
+        # Good worker spawned despite the bad one failing.
+        assert (1, good_id) in snapshot, snapshot
+        assert (1, bad_id) not in snapshot, snapshot
+
+        # Audit rows: one started_at_boot for good, one
+        # start_failed for bad.
+        from hadir.db import audit_log  # noqa: PLC0415
+
+        with admin_engine.begin() as conn:
+            rows = conn.execute(
+                select(
+                    audit_log.c.action, audit_log.c.entity_id
+                ).where(
+                    audit_log.c.action.in_(
+                        [
+                            "capture.worker.started_at_boot",
+                            "capture.worker.start_failed",
+                        ]
+                    )
+                )
+            ).all()
+        actions = {(r.action, r.entity_id) for r in rows}
+        assert ("capture.worker.started_at_boot", str(good_id)) in actions
+        assert ("capture.worker.start_failed", str(bad_id)) in actions
+
+        mgr.stop()
+    finally:
+        manager_mod.CaptureWorker = original_default  # type: ignore[assignment]
+        clear_analyzer_factory()
+
+
+@pytest.mark.usefixtures("clean_capture")
+def test_disable_camera_via_crud_stops_worker_synchronously(
+    admin_engine,
+) -> None:
+    """Toggling enabled=true → enabled=false via the CRUD-style hook
+    must stop the worker without waiting for any poll loop. The hook
+    re-fetches the row, sees enabled=False, and calls stop_camera."""
+
+    from hadir.capture.analyzer import (
+        clear_analyzer_factory,
+        set_analyzer_factory,
+    )
+
+    set_analyzer_factory(lambda: _StubAnalyzer([]))
+    original_default = manager_mod.CaptureWorker
+
+    class _WorkerWithFakeCapture(original_default):  # type: ignore[misc,valid-type]
+        def __init__(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            kwargs.setdefault(
+                "capture_factory",
+                lambda _url: _ScriptedCapture([(False, None)]),
+            )
+            super().__init__(*args, **kwargs)
+
+    manager_mod.CaptureWorker = _WorkerWithFakeCapture  # type: ignore[assignment]
+
+    cam_id = _seed_camera(
+        admin_engine, name="enabled-toggle", plain_url="rtsp://fake/x"
+    )
+
+    try:
+        mgr = manager_mod.CaptureManager()
+        mgr.start(
+            config=ReaderConfig(
+                analyzer_max_fps=1000.0,
+                reconnect_backoff_initial_s=10.0,
+                reconnect_backoff_max_s=10.0,
+                health_interval_s=1000.0,
+            )
+        )
+        time.sleep(0.1)
+        assert (1, cam_id) in mgr.workers_snapshot()
+
+        # Flip enabled=False on the row, fire the CRUD hook, expect
+        # the worker to be gone within 1 second.
+        with admin_engine.begin() as conn:
+            conn.execute(
+                cameras.update()
+                .where(cameras.c.id == cam_id)
+                .values(enabled=False)
+            )
+        mgr.on_camera_updated(cam_id, tenant_id=1)
+
+        deadline = time.time() + 1.0
+        while time.time() < deadline:
+            if (1, cam_id) not in mgr.workers_snapshot():
+                break
+            time.sleep(0.05)
+        assert (1, cam_id) not in mgr.workers_snapshot()
+
+        mgr.stop()
+    finally:
+        manager_mod.CaptureWorker = original_default  # type: ignore[assignment]
+        clear_analyzer_factory()
