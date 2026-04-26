@@ -9,6 +9,14 @@ Thumbs.db
 *.pem
 *.key
 
+# Pre-Omran reset+seed: credentials.txt is regenerated on every run
+# and contains plaintext dev passwords. Never check in.
+credentials.txt
+backend/scripts/_seed_data/sample_photos/*.jpg
+backend/scripts/_seed_data/sample_photos/*.jpeg
+backend/scripts/_seed_data/sample_photos/*.png
+!backend/scripts/_seed_data/sample_photos/.gitkeep
+
 # Python
 __pycache__/
 *.py[cod]

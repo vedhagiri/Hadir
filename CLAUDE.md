@@ -692,6 +692,59 @@ translations before v1.0 launch** — see
 
 ---
 
+## Pre-Omran validation
+
+Between P28 (sign-off run) and P29 (Omran cutover) Suresh
+walks every v1.0 feature end-to-end with two distinct
+tenants — a synthetic ``tenant_mts_demo`` and his real
+corporate office. The tooling for that lives at:
+
+* **`backend/scripts/pre_omran_reset_seed.py`** — single
+  re-runnable script. Wipes the local DB, re-provisions
+  every tenant the validation walkthrough touches, seeds
+  rich dummy data on the demo tenant + minimal real data
+  on the corporate tenant, and writes a fresh
+  ``credentials.txt`` at the repo root. Three brakes:
+  HADIR_ENV must equal ``dev``, no tenant may carry > 50
+  employees, operator must type ``RESET``. Refuses to run
+  unless the operator has filled in
+  ``REAL_CORPORATE_NAME`` / ``REAL_CORPORATE_SLUG`` /
+  ``REAL_TEST_EMPLOYEE_NAME`` at the top of the file.
+  ``credentials.txt`` is gitignored — the script verifies
+  before writing. Migration 0025 added
+  ``audit_log.actor_label`` so seed rows tag as
+  ``system_seed`` and a future auditor can filter them
+  out cleanly. Tenant ``tenant_omran`` is intentionally
+  NOT provisioned here — Omran's tenant gets clean real
+  data at P29 cutover.
+* **`docs/testing/pre-omran-validation.md`** — the
+  step-by-step playbook Suresh follows after the seed.
+  14 sections (bootstrap → smoke → policies → approvals
+  → reports → Arabic + RTL → cross-tenant isolation →
+  real-camera RTSP → face enrollment → full attendance
+  → reports → audit-log → DB isolation → issue log).
+* **`backend/scripts/_seed_helpers.py`** — shared Argon2
+  hash + role/department/manager-assignment helpers used
+  by both the M2 ``seed_test_accounts.py`` and the new
+  pre-Omran reset script.
+* **`backend/scripts/_seed_data/`** — wordlist (200
+  hand-picked English words for typeable demo passwords),
+  sample employee Excel for the import flow, and a README
+  explaining why no fake face photos ship.
+
+Run it:
+
+```sh
+$EDITOR backend/scripts/pre_omran_reset_seed.py    # set the 3 constants
+docker compose exec -T -e HADIR_ENV=dev backend \
+    python -m scripts.pre_omran_reset_seed
+```
+
+Then open ``credentials.txt`` and follow
+``docs/testing/pre-omran-validation.md``.
+
+---
+
 ## Pilot build log (historical, for context)
 
 The pilot's per-phase build summaries below were written when those

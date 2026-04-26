@@ -1368,6 +1368,11 @@ audit_log = Table(
     Column("entity_id", Text, nullable=True),
     Column("before", JSONB, nullable=True),
     Column("after", JSONB, nullable=True),
+    # P28-followup: short tag for non-human actors (system_seed,
+    # retention_sweep, notification_worker, …). NULL when
+    # ``actor_user_id`` is set so the FK stays the source of
+    # truth for human actions.
+    Column("actor_label", Text, nullable=True),
     Column(
         "created_at",
         DateTime(timezone=True),

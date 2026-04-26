@@ -197,15 +197,23 @@ def test_retention_sweep_deletes_expired_user_sessions(admin_engine):
     sid_long = f"p25-{secrets.token_hex(8)}"
     sid_recent = f"p25-{secrets.token_hex(8)}"
 
-    # Need a real user_id for the FK; reuse user id=1 (the
-    # initial seeded admin) — it always exists in the test DB.
+    # Need a real user_id for the FK. Resolve from
+    # ``main.users`` — robust to a wiped DB where the
+    # historic id=1 admin has been replaced by a freshly-
+    # seeded one (P28-followup: pre_omran_reset_seed.py
+    # invalidates the previous fixture assumption).
+    from hadir.db import users as users_t  # noqa: PLC0415
+
     with admin_engine.begin() as conn:
         any_user = conn.execute(
-            select(audit_log.c.actor_user_id).where(
-                audit_log.c.actor_user_id.is_not(None)
-            ).limit(1)
+            select(users_t.c.id).where(users_t.c.tenant_id == TENANT_ID)
+            .order_by(users_t.c.id).limit(1)
         ).scalar_one_or_none()
-        user_id = int(any_user) if any_user else 1
+        if any_user is None:
+            pytest.skip(
+                "no user in main schema — seed an admin before running this test"
+            )
+        user_id = int(any_user)
         conn.execute(
             insert(user_sessions).values(
                 id=sid_long,

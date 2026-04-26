@@ -257,14 +257,23 @@ def _seed_defaults(
     *,
     tenant_id: int,
     slug: str,
-    admin_email: str,
-    admin_password_hash: str,
-    admin_full_name: str,
-) -> int:
-    """Seed roles, departments, Fixed shift policy, and the first Admin user.
+    admin_email: Optional[str],
+    admin_password_hash: Optional[str],
+    admin_full_name: Optional[str],
+    skip_default_admin: bool = False,
+) -> Optional[int]:
+    """Seed roles, departments, Fixed shift policy, and (optionally) the
+    first Admin user.
 
-    Returns the new admin user's id. Runs inside the caller's transaction
+    Returns the new admin user's id, or ``None`` when
+    ``skip_default_admin=True``. Runs inside the caller's transaction
     so a failure rolls every seed row back along with the schema.
+
+    ``skip_default_admin`` (P28-followup): when set, the caller wants
+    to seed its own admin (e.g. ``pre_omran_reset_seed.py`` generates
+    a fresh password per run and writes it to ``credentials.txt``).
+    The roles + departments + Fixed policy + branding rows still get
+    created; only the user + role-assignment is skipped.
     """
 
     role_ids: dict[str, int] = {}
@@ -360,41 +369,56 @@ def _seed_defaults(
     # via Settings → Integrations → ERP Export.
     conn.execute(insert(_erp_export_config).values(tenant_id=tenant_id))
 
-    user_id = conn.execute(
-        insert(users)
-        .values(
-            tenant_id=tenant_id,
-            email=admin_email,
-            password_hash=admin_password_hash,
-            full_name=admin_full_name,
-            is_active=True,
+    user_id: Optional[int] = None
+    if not skip_default_admin:
+        if not admin_email or not admin_password_hash:
+            raise ValueError(
+                "skip_default_admin=False requires admin_email + "
+                "admin_password_hash to be set"
+            )
+        user_id = int(
+            conn.execute(
+                insert(users)
+                .values(
+                    tenant_id=tenant_id,
+                    email=admin_email,
+                    password_hash=admin_password_hash,
+                    full_name=admin_full_name or admin_email.split("@", 1)[0],
+                    is_active=True,
+                )
+                .returning(users.c.id)
+            ).scalar_one()
         )
-        .returning(users.c.id)
-    ).scalar_one()
-    conn.execute(
-        insert(user_roles).values(
-            tenant_id=tenant_id,
-            user_id=int(user_id),
-            role_id=role_ids["Admin"],
+        conn.execute(
+            insert(user_roles).values(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                role_id=role_ids["Admin"],
+            )
         )
-    )
 
     # First audit row — provisioning event itself, so the new tenant's
     # log isn't empty on first read. ``actor_user_id`` is null because
     # the operator running the CLI isn't authenticated as a user inside
-    # this tenant.
+    # this tenant. ``actor_label='provision_tenant'`` distinguishes it
+    # from regular request-driven audit rows.
     conn.execute(
         insert(audit_log).values(
             tenant_id=tenant_id,
             actor_user_id=None,
+            actor_label="provision_tenant",
             action="tenant.provisioned",
             entity_type="tenant",
             entity_id=str(tenant_id),
-            after={"schema_name": slug, "admin_user_id": int(user_id)},
+            after={
+                "schema_name": slug,
+                "admin_user_id": user_id,
+                "skip_default_admin": skip_default_admin,
+            },
         )
     )
 
-    return int(user_id)
+    return user_id
 
 
 def _stamp_alembic_head(slug: str) -> None:
@@ -447,26 +471,35 @@ def provision(
     *,
     slug: str,
     name: str,
-    admin_email: str,
-    admin_full_name: str,
-    admin_password: str,
+    admin_email: Optional[str] = None,
+    admin_full_name: Optional[str] = None,
+    admin_password: Optional[str] = None,
+    skip_default_admin: bool = False,
 ) -> dict[str, object]:
-    """Run every provisioning step in order, with cleanup on failure."""
+    """Run every provisioning step in order, with cleanup on failure.
+
+    P28-followup: ``skip_default_admin=True`` lets a downstream
+    seed script (e.g. ``pre_omran_reset_seed.py``) provision the
+    tenant shell without an admin user, then create its own
+    admin with a freshly-generated password. When skipped, the
+    ``admin_*`` args are optional.
+    """
 
     if not _TENANT_SCHEMA_RE.match(slug):
         raise ValueError(
             f"invalid slug {slug!r}: must match ^[A-Za-z_][A-Za-z0-9_]{{0,62}}$"
         )
-    if not _EMAIL_RE.match(admin_email):
-        raise ValueError(f"invalid admin email {admin_email!r}")
-    if not admin_password:
-        raise ValueError("admin password must not be empty")
 
-    admin_email = admin_email.strip().lower()
-    if not admin_full_name:
-        admin_full_name = admin_email.split("@", 1)[0]
-
-    admin_password_hash = hash_password(admin_password)
+    admin_password_hash: Optional[str] = None
+    if not skip_default_admin:
+        if not admin_email or not _EMAIL_RE.match(admin_email):
+            raise ValueError(f"invalid admin email {admin_email!r}")
+        if not admin_password:
+            raise ValueError("admin password must not be empty")
+        admin_email = admin_email.strip().lower()
+        if not admin_full_name:
+            admin_full_name = admin_email.split("@", 1)[0]
+        admin_password_hash = hash_password(admin_password)
 
     engine = make_admin_engine()
     tenant_id: Optional[int] = None
@@ -511,6 +544,7 @@ def provision(
                     admin_email=admin_email,
                     admin_password_hash=admin_password_hash,
                     admin_full_name=admin_full_name,
+                    skip_default_admin=skip_default_admin,
                 )
         finally:
             reset_tenant_schema(token)
@@ -535,6 +569,13 @@ def provision(
         "admin_user_id": user_id,
         "admin_email": admin_email,
     }
+
+
+# P28-followup: public alias matching the name the prompt uses.
+# Same arguments as ``provision()`` — keeps existing call sites
+# working while letting new callers (the pre-Omran reset script)
+# import a stable, descriptive name.
+provision_tenant = provision
 
 
 def main(argv: Optional[list[str]] = None) -> int:

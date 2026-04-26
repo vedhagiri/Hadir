@@ -46,6 +46,12 @@ services:
       HADIR_ENV: ${HADIR_ENV:-dev}
     volumes:
       - ./backend:/app
+      # P28-followup: the pre_omran_reset_seed script needs to read the
+      # host's .gitignore (red-line check before writing credentials.txt)
+      # and write credentials.txt back to the host's repo root. The
+      # mount is read-write because of the credentials.txt write; the
+      # .gitignore file is never modified by the script.
+      - .:/repo
       # Encrypted employee photos (P6) and capture crops (P8) land under
       # /data/faces. Kept on a named volume so photos survive
       # `docker compose down` but reset on `down -v`.
