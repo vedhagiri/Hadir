@@ -181,6 +181,17 @@ class CaptureWorker:
     the shutdown flag and joins.
     """
 
+    # P28.5b: defaults applied when ``capture_config`` is None or
+    # missing keys. Same values the migration's server_default sets;
+    # mirrored here so a worker constructed without a row (tests,
+    # ad-hoc) gets the prototype-tested behaviour.
+    DEFAULT_CAPTURE_CONFIG: dict = {
+        "max_faces_per_event": 10,
+        "max_event_duration_sec": 60,
+        "min_face_quality_to_save": 0.35,
+        "save_full_frames": False,
+    }
+
     def __init__(
         self,
         *,
@@ -192,6 +203,7 @@ class CaptureWorker:
         analyzer: Analyzer,
         capture_factory: VideoCaptureFactory = default_capture_factory,
         config: Optional[ReaderConfig] = None,
+        capture_config: Optional[dict] = None,
     ) -> None:
         self._engine = engine
         self._scope = scope
@@ -202,9 +214,19 @@ class CaptureWorker:
         self._capture_factory = capture_factory
         self._config = config or ReaderConfig()
 
+        # P28.5b: per-camera capture knobs. Held under a lock because
+        # ``update_config`` mutates this from another thread.
+        self._capture_config_lock = threading.Lock()
+        self._capture_config: dict = dict(self.DEFAULT_CAPTURE_CONFIG)
+        if capture_config:
+            self._capture_config.update(capture_config)
+
         self._tracker = IoUTracker(
             iou_threshold=self._config.iou_threshold,
             idle_timeout_s=self._config.track_idle_timeout_s,
+            max_duration_sec=float(
+                self._capture_config["max_event_duration_sec"]
+            ),
         )
 
         # Reader → analyzer hand-off. The reader updates ``_latest_frame``
@@ -307,6 +329,50 @@ class CaptureWorker:
     def get_stats(self) -> dict:
         with self._stats_lock:
             return dict(self._stats)
+
+    # ------------------------------------------------------------------
+    # P28.5b: per-camera capture knobs
+
+    def get_capture_config(self) -> dict:
+        """Snapshot of the current capture knob bag. Used by the manager's
+        reconcile tick to detect drift against the DB row."""
+
+        with self._capture_config_lock:
+            return dict(self._capture_config)
+
+    def update_config(self, new_config: dict) -> None:
+        """Apply a new capture_config without restarting the worker.
+
+        Knob propagation:
+
+        * ``max_event_duration_sec`` flips the tracker's force-retire
+          threshold immediately (next ``_drop_stale`` call uses the new
+          value).
+        * ``max_faces_per_event``, ``min_face_quality_to_save``,
+          ``save_full_frames`` are read by the analyzer thread on the
+          next emit cycle (face-save path looks up via
+          ``get_capture_config``).
+
+        The manager calls this from the reconcile tick when the DB
+        row's ``capture_config`` differs from the worker's. Audit
+        happens at the manager level so the change is recorded once
+        per actual flip, not per redundant reconcile pass.
+        """
+
+        merged = dict(self.DEFAULT_CAPTURE_CONFIG)
+        merged.update(new_config or {})
+        with self._capture_config_lock:
+            self._capture_config = merged
+        # The tracker's max_duration_sec must be live-updated since
+        # the analyzer thread holds it.
+        self._tracker.update_max_duration(
+            float(merged["max_event_duration_sec"])
+        )
+        logger.info(
+            "capture worker config updated: tenant=%s camera_id=%s",
+            self._scope.tenant_id,
+            self.camera_id,
+        )
 
     # ------------------------------------------------------------------
     # Reader thread
@@ -514,6 +580,10 @@ class CaptureWorker:
                 self._publish_cached_boxes(detections, matches, per_detection_match)
 
             # One detection_events row per NEW track, never per frame.
+            # Snapshot the capture_config under the lock so a
+            # mid-iteration update_config doesn't change values
+            # half-way through the inner loop.
+            current_capture_config = self.get_capture_config()
             for det, match, pm in zip(
                 detections, matches, per_detection_match
             ):
@@ -526,9 +596,12 @@ class CaptureWorker:
                         camera_id=self.camera_id,
                         frame_bgr=frame,
                         bbox=match.bbox,
+                        det_score=det.det_score,
                         track_id=match.track_id,
                         embedding=det.embedding,
                         pre_matched=pm,
+                        annotated_frame_bgr=frame,
+                        capture_config=current_capture_config,
                     )
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(

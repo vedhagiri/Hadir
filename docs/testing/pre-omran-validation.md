@@ -462,6 +462,74 @@ LAN camera). Watch for "perceived latency" specifically.
 
 ---
 
+## 13b. Capture knobs (P28.5b)
+
+P28.5b added the worker / display split + per-camera capture
+knobs. Verify on the running stack with at least one real
+camera (Office Camera 1 / Giri Home).
+
+- [ ] **Drawer renders new fields with default values.**
+      Open Cameras → click any camera. The drawer shows two
+      new toggle rows ("Capture worker" and "Live preview")
+      plus an expandable "Capture settings" panel (max faces
+      per event, max event duration, min face quality slider,
+      save full annotated frames toggle).
+
+- [ ] **Worker disable.** Toggle Capture worker OFF, click
+      Save. Within 5 s, `docker compose logs backend` shows
+      `capture worker stopped: tenant=… camera_id=…`. Walk
+      past the camera — NO new entry in Camera Logs (worker
+      not recording). Live Capture page lists this camera at
+      the bottom of the list with the "Worker disabled"
+      label + tooltip.
+
+- [ ] **Worker re-enable.** Toggle Capture worker ON, save.
+      Within 5 s, `capture worker started: tenant=… camera_id=…`.
+      Walk past the camera — new event in Camera Logs.
+
+- [ ] **Display disable (worker stays on).** Toggle Live
+      preview OFF, save. Walk past — Camera Logs DOES gain a
+      new entry (worker still recording). Live Capture page
+      shows the camera in the main list but greyed; clicking
+      it shows the "Display disabled by Admin" empty state,
+      not video.
+
+- [ ] **Display re-enable.** Toggle Live preview ON, save.
+      Live Capture works again.
+
+- [ ] **Knob test — max_faces_per_event.** Edit the camera:
+      set max_faces_per_event = 1, save. Walk past multiple
+      times. Each event in Camera Logs shows exactly 1 face
+      crop. (Note: P28.5b's single-row-per-track architecture
+      means default 10 also yields 1 crop per event; the
+      multi-face follow-up phase ships separately.)
+
+- [ ] **Knob test — min_face_quality_to_save.** Set the
+      slider to 0.8 (very strict), save. Walk past at a sharp
+      angle (low pose score). Camera Logs shows fewer events
+      overall vs. the default 0.35 threshold. Reset to 0.35.
+
+- [ ] **Audit log.** Navigate to Audit Log. Each toggle and
+      each `capture_config` edit appears with action
+      `camera.updated`; the row's `before` and `after` JSONB
+      carry the full pre/post state. Reconcile-driven config
+      updates appear as `capture.worker.config_updated` with
+      before + after JSONB.
+
+- [ ] **Tenant isolation.** Log in as the mts_demo Admin.
+      The Cameras list does NOT show inaisys cameras; the
+      Live Capture page doesn't list them either. Optionally
+      `psql … 'SELECT id, name, capture_config FROM
+      tenant_inaisys.cameras'` confirms inaisys still has its
+      own settings — the mts_demo edit didn't touch them.
+
+- [ ] **Reconcile loop running.** `docker compose logs
+      backend | grep "_reconcile_tick" | tail -3` shows a
+      tick firing every ~2 seconds with
+      `executed successfully`.
+
+---
+
 ## 14. Pre-Omran issues
 
 For every problem found, add a row below. This is the

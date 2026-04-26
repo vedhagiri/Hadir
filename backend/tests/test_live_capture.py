@@ -174,7 +174,8 @@ def seeded_camera(admin_engine: Engine) -> Iterator[dict]:
                 rtsp_url_encrypted=rtsp_io.encrypt_url(
                     "rtsp://test:test@127.0.0.1:1/stream"
                 ),
-                enabled=False,
+                worker_enabled=False,
+                display_enabled=True,
             )
             .returning(cameras.c.id)
         ).scalar_one()

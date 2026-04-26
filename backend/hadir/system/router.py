@@ -72,7 +72,11 @@ class CameraHealthOut(BaseModel):
     camera_id: int
     name: str
     location: str
-    enabled: bool
+    # P28.5b: split worker / display flags. Old API consumers that
+    # checked ``enabled`` should switch to ``worker_enabled`` (the
+    # operational flag). ``display_enabled`` is supplementary.
+    worker_enabled: bool
+    display_enabled: bool
     rtsp_host: str
     last_seen_at: Optional[datetime] = None
     latest_frames_last_minute: int
@@ -144,7 +148,13 @@ def get_health(user: Annotated[CurrentUser, ADMIN]) -> HealthOut:
             conn.execute(
                 select(func.count()).where(
                     cameras.c.tenant_id == scope.tenant_id,
-                    cameras.c.enabled.is_(True),
+                    # P28.5b: ``enabled`` was split into worker_enabled
+                    # + display_enabled. The system-health "cameras
+                    # enabled" count is the count of cameras whose
+                    # capture worker is on (the operationally-relevant
+                    # number — display-disabled cameras are still
+                    # recording).
+                    cameras.c.worker_enabled.is_(True),
                 )
             ).scalar_one()
         )
@@ -236,7 +246,8 @@ def cameras_health(user: Annotated[CurrentUser, ADMIN]) -> CamerasHealthOut:
                     camera_id=cam.id,
                     name=cam.name,
                     location=cam.location,
-                    enabled=cam.enabled,
+                    worker_enabled=cam.worker_enabled,
+                    display_enabled=cam.display_enabled,
                     rtsp_host=cam.rtsp_host,
                     last_seen_at=cam.last_seen_at,
                     latest_frames_last_minute=(

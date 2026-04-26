@@ -87,7 +87,8 @@ def seed_detection(
                     rtsp_url_encrypted=rtsp_io.encrypt_url(
                         "rtsp://127.0.0.1:1/_test"
                     ),
-                    enabled=False,
+                    worker_enabled=False,
+                    display_enabled=False,
                 )
                 .returning(cameras.c.id)
             ).scalar_one()

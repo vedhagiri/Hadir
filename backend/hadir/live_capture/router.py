@@ -176,14 +176,25 @@ def _release_ws(tenant_id: int, camera_id: int) -> None:
 def _resolve_camera_in_tenant(
     *, tenant_id: int, camera_id: int
 ) -> Optional[dict]:
-    """Return ``{id, name, enabled}`` if the camera belongs to the
-    tenant, ``None`` otherwise. Cross-tenant guesses return None.
+    """Return ``{id, name, worker_enabled, display_enabled}`` if the
+    camera belongs to the tenant, ``None`` otherwise. Cross-tenant
+    guesses return None.
+
+    P28.5b: callers check ``display_enabled`` before yielding bytes —
+    a worker may be running and recording, but a display-disabled
+    camera doesn't surface its feed in Live Capture (privacy review,
+    sensitive area, etc.).
     """
 
     engine = get_engine()
     with engine.begin() as conn:
         row = conn.execute(
-            select(cameras.c.id, cameras.c.name, cameras.c.enabled).where(
+            select(
+                cameras.c.id,
+                cameras.c.name,
+                cameras.c.worker_enabled,
+                cameras.c.display_enabled,
+            ).where(
                 and_(
                     cameras.c.id == camera_id,
                     cameras.c.tenant_id == tenant_id,
@@ -192,7 +203,12 @@ def _resolve_camera_in_tenant(
         ).first()
     if row is None:
         return None
-    return {"id": int(row.id), "name": str(row.name), "enabled": bool(row.enabled)}
+    return {
+        "id": int(row.id),
+        "name": str(row.name),
+        "worker_enabled": bool(row.worker_enabled),
+        "display_enabled": bool(row.display_enabled),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +236,14 @@ def live_mjpg(
         # 404 on cross-tenant guess — never reveal that the id exists
         # in another tenant. Same shape as employee/photo paths.
         raise HTTPException(status_code=404, detail="camera not found")
+
+    # P28.5b: ``display_enabled=false`` keeps the worker recording
+    # but hides the feed in Live Capture. The frontend handles the
+    # 503 by showing an "Display disabled by Admin" empty state.
+    if not cam["display_enabled"]:
+        raise HTTPException(
+            status_code=503, detail="camera_display_disabled"
+        )
 
     if not _try_acquire_mjpeg(scope.tenant_id, camera_id):
         raise HTTPException(
@@ -413,6 +437,15 @@ async def events_ws(websocket: WebSocket, camera_id: int) -> None:
 
     cam = _resolve_camera_in_tenant(tenant_id=scope.tenant_id, camera_id=camera_id)
     if cam is None:
+        await websocket.close(code=1008)
+        return
+
+    # P28.5b: ``display_enabled=false`` closes the WS handshake with
+    # 1008 (policy violation). Frontend treats this the same as an
+    # auth-rejected close: empty state with the "Display disabled by
+    # Admin" tooltip. The worker continues recording in the
+    # background; events are still queryable via Camera Logs.
+    if not cam["display_enabled"]:
         await websocket.close(code=1008)
         return
 

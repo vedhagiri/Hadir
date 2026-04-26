@@ -246,6 +246,41 @@
     "embedTitle": "Live spec",
     "openInNewTab": "Open in new tab"
   },
+  "cameras": {
+    "label": "Camera",
+    "addTitle": "Add camera",
+    "editTitle": "Edit",
+    "fields": {
+      "name": "Name",
+      "location": "Location",
+      "rtspUrl": "RTSP URL",
+      "workerEnabled": "Capture worker",
+      "displayEnabled": "Live preview",
+      "captureSettings": "Capture settings",
+      "maxFacesPerEvent": "Max faces per event",
+      "maxEventDurationSec": "Max event duration (seconds)",
+      "minFaceQualityToSave": "Minimum face quality",
+      "saveFullFrames": "Save full annotated frames"
+    },
+    "hints": {
+      "rtspEdit": "Stored value kept as-is unless you type a new URL here.",
+      "rtspCreate": "rtsp://user:pass@host:port/path",
+      "workerEnabled": "When off, this camera stops detecting faces. No attendance impact for absent employees.",
+      "displayEnabled": "When off, the worker keeps recording but this camera doesn't appear in Live Capture viewer.",
+      "maxFacesPerEvent": "1 to 50",
+      "maxEventDurationSec": "5 to 600 seconds",
+      "minFaceQualityToSave": "0.0 to 1.0 (higher = stricter)",
+      "saveFullFrames": "Debug aid — increases disk usage."
+    },
+    "placeholders": {
+      "name": "e.g. Lobby",
+      "location": "e.g. HQ · North entrance"
+    },
+    "errors": {
+      "rtspRequired": "RTSP URL is required.",
+      "saveFailed": "Could not save camera. Check the RTSP URL and try again."
+    }
+  },
   "liveCapture": {
     "title": "Live capture",
     "subtitle": "Real-time face detection",
@@ -258,7 +293,12 @@
     "selectCameraPrompt": "Select a camera to begin",
     "viewerAlt": "Live camera view",
     "cameras": "Cameras",
-    "noCameras": "No enabled cameras.",
+    "noCameras": "No cameras configured.",
+    "displayDisabled": "Display disabled by Admin",
+    "displayDisabledTooltip": "Display disabled by Admin — capture worker still recording.",
+    "workerDisabled": "Capture worker disabled — no recording.",
+    "workerDisabledTooltip": "Capture worker disabled — no live stream available.",
+    "workerDisabledHeading": "Worker off",
     "detectionsLast10m": "Detections last 10m",
     "known": "Known",
     "unknown": "Unknown",

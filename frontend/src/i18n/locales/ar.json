@@ -246,6 +246,41 @@
     "embedTitle": "المواصفات الحية",
     "openInNewTab": "فتح في علامة تبويب جديدة"
   },
+  "cameras": {
+    "label": "كاميرا",
+    "addTitle": "إضافة كاميرا",
+    "editTitle": "تعديل",
+    "fields": {
+      "name": "الاسم",
+      "location": "الموقع",
+      "rtspUrl": "عنوان RTSP",
+      "workerEnabled": "عامل الالتقاط",
+      "displayEnabled": "العرض المباشر",
+      "captureSettings": "إعدادات الالتقاط",
+      "maxFacesPerEvent": "أقصى عدد من الوجوه لكل حدث",
+      "maxEventDurationSec": "أقصى مدة للحدث (ثانية)",
+      "minFaceQualityToSave": "الحد الأدنى لجودة الوجه",
+      "saveFullFrames": "حفظ الإطارات الكاملة المعلّمة"
+    },
+    "hints": {
+      "rtspEdit": "تُحفظ القيمة المخزّنة كما هي ما لم تُدخل عنواناً جديداً هنا.",
+      "rtspCreate": "rtsp://user:pass@host:port/path",
+      "workerEnabled": "عند الإيقاف، تتوقف هذه الكاميرا عن اكتشاف الوجوه. لا تأثير على الحضور للموظفين الغائبين.",
+      "displayEnabled": "عند الإيقاف، يستمر العامل في التسجيل، ولكن لا تظهر هذه الكاميرا في عارض الالتقاط المباشر.",
+      "maxFacesPerEvent": "من 1 إلى 50",
+      "maxEventDurationSec": "من 5 إلى 600 ثانية",
+      "minFaceQualityToSave": "من 0.0 إلى 1.0 (الأعلى = أكثر صرامة)",
+      "saveFullFrames": "أداة لتصحيح الأخطاء — تزيد من استخدام القرص."
+    },
+    "placeholders": {
+      "name": "مثل: البهو",
+      "location": "مثل: المقر · المدخل الشمالي"
+    },
+    "errors": {
+      "rtspRequired": "عنوان RTSP مطلوب.",
+      "saveFailed": "تعذّر حفظ الكاميرا. تحقّق من عنوان RTSP وحاول مرة أخرى."
+    }
+  },
   "liveCapture": {
     "title": "الالتقاط المباشر",
     "subtitle": "الكشف عن الوجوه في الوقت الحقيقي",
@@ -258,7 +293,12 @@
     "selectCameraPrompt": "اختر كاميرا للبدء",
     "viewerAlt": "عرض مباشر للكاميرا",
     "cameras": "الكاميرات",
-    "noCameras": "لا توجد كاميرات مفعّلة.",
+    "noCameras": "لم يتم تكوين أي كاميرا.",
+    "displayDisabled": "تم تعطيل العرض بواسطة المسؤول",
+    "displayDisabledTooltip": "تم تعطيل العرض بواسطة المسؤول — لا يزال عامل الالتقاط يسجّل.",
+    "workerDisabled": "تم تعطيل عامل الالتقاط — لا يوجد تسجيل.",
+    "workerDisabledTooltip": "تم تعطيل عامل الالتقاط — لا يوجد بث مباشر متاح.",
+    "workerDisabledHeading": "العامل متوقف",
     "detectionsLast10m": "اكتشافات آخر 10 دقائق",
     "known": "معروف",
     "unknown": "مجهول",

@@ -60,6 +60,7 @@ class _Track:
     track_id: str
     bbox: Bbox
     last_seen: float
+    started_at: float = 0.0  # P28.5b: enforces ``max_duration_sec``
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,10 +85,17 @@ class IoUTracker:
         *,
         iou_threshold: float = 0.3,
         idle_timeout_s: float = 3.0,
+        max_duration_sec: float = 60.0,
         id_factory: Optional[callable] = None,  # type: ignore[type-arg]
     ) -> None:
         self.iou_threshold = iou_threshold
         self.idle_timeout_s = idle_timeout_s
+        # P28.5b: forcibly retire a track that has been alive longer
+        # than ``max_duration_sec``, even if the subject is still
+        # visible. Mirrors the prototype's MAX_EVENT_DURATION_SEC. The
+        # next detection on the same bbox will mint a fresh track,
+        # which becomes a fresh ``detection_events`` row.
+        self.max_duration_sec = max_duration_sec
         self._tracks: dict[str, _Track] = {}
         # Dependency-injected id factory so tests can generate deterministic
         # ids; production path uses hex UUIDs.
@@ -125,17 +133,35 @@ class IoUTracker:
             else:
                 # Mint a new track — this is what triggers a detection_events row.
                 new_id = self._id_factory()
-                self._tracks[new_id] = _Track(track_id=new_id, bbox=det, last_seen=ts)
+                self._tracks[new_id] = _Track(
+                    track_id=new_id,
+                    bbox=det,
+                    last_seen=ts,
+                    started_at=ts,
+                )
                 claimed.add(new_id)
                 matches.append(TrackMatch(track_id=new_id, bbox=det, is_new=True))
 
         return matches
 
     def _drop_stale(self, now: float) -> None:
+        # Drop tracks that have idled past the timeout AND tracks that
+        # have been alive longer than ``max_duration_sec`` even if
+        # still visible (P28.5b). The latter prevents a single track
+        # spanning hours of footage; a force-retired subject gets a
+        # new event on the next detection.
         expired = [
             tid
             for tid, t in self._tracks.items()
-            if now - t.last_seen > self.idle_timeout_s
+            if (now - t.last_seen > self.idle_timeout_s)
+            or (now - t.started_at > self.max_duration_sec)
         ]
         for tid in expired:
             del self._tracks[tid]
+
+    def update_max_duration(self, max_duration_sec: float) -> None:
+        """Live-update the duration cap. Called by
+        ``CaptureWorker.update_config`` so a per-camera knob change
+        applies without restart."""
+
+        self.max_duration_sec = max_duration_sec

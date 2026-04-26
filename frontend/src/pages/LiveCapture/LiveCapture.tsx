@@ -11,6 +11,7 @@ import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useCameras } from "../../features/cameras/hooks";
+import type { Camera } from "../../features/cameras/types";
 import { Icon } from "../../shell/Icon";
 import { useEventStream, useLiveStats } from "./hooks";
 import type { LiveEvent } from "./types";
@@ -34,10 +35,23 @@ function formatPct(conf: number | null): string {
 export function LiveCapturePage() {
   const { t } = useTranslation();
   const camerasQuery = useCameras();
-  const enabledCameras = useMemo(
-    () =>
-      (camerasQuery.data?.items ?? []).filter((c) => c.enabled),
-    [camerasQuery.data],
+
+  // P28.5b: cameras list now splits along the worker / display axes.
+  // The worker can be off while display is on (no recording, viewer
+  // sees offline state) and vice versa (recording happens but Live
+  // Capture hides the feed).
+  const allCameras = camerasQuery.data?.items ?? [];
+  const liveCameras = useMemo(
+    () => allCameras.filter((c) => c.worker_enabled && c.display_enabled),
+    [allCameras],
+  );
+  const displayDisabledCameras = useMemo(
+    () => allCameras.filter((c) => c.worker_enabled && !c.display_enabled),
+    [allCameras],
+  );
+  const workerDisabledCameras = useMemo(
+    () => allCameras.filter((c) => !c.worker_enabled),
+    [allCameras],
   );
 
   const [activeCamId, setActiveCamId] = useState<number | null>(null);
@@ -46,13 +60,17 @@ export function LiveCapturePage() {
   const [streamNonce, setStreamNonce] = useState(0);
   const imgRef = useRef<HTMLImageElement | null>(null);
 
-  const stats = useLiveStats(paused ? null : activeCamId);
-  const stream = useEventStream(activeCamId);
-
+  // The streams + stats hooks short-circuit when the active camera is
+  // display-disabled — no point polling /live-stats or opening a WS
+  // for a feed the backend will refuse.
   const activeCam = useMemo(
-    () => enabledCameras.find((c) => c.id === activeCamId) ?? null,
-    [enabledCameras, activeCamId],
+    () => allCameras.find((c) => c.id === activeCamId) ?? null,
+    [allCameras, activeCamId],
   );
+  const activeIsLive =
+    activeCam != null && activeCam.worker_enabled && activeCam.display_enabled;
+  const stats = useLiveStats(paused || !activeIsLive ? null : activeCamId);
+  const stream = useEventStream(activeIsLive ? activeCamId : null);
 
   const onTogglePause = () => setPaused((p) => !p);
   const onReconnect = () => {
@@ -86,9 +104,21 @@ export function LiveCapturePage() {
     stats.data?.status ??
     (stream.status === "open" ? "online" : "offline");
   const showOffline =
-    activeCamId != null && !paused && stats.data && camStatus === "offline";
+    activeIsLive &&
+    !paused &&
+    stats.data &&
+    camStatus === "offline";
   const showReconnecting =
-    activeCamId != null && !paused && stream.status === "reconnecting";
+    activeIsLive && !paused && stream.status === "reconnecting";
+
+  // P28.5b: explanatory empty states for cameras the operator
+  // selected but that aren't currently streaming. The MJPEG endpoint
+  // returns 503 / WebSocket closes — but we want a clear "not loading"
+  // message rather than the offline timeout state.
+  const showDisplayDisabled =
+    activeCam != null && activeCam.worker_enabled && !activeCam.display_enabled;
+  const showWorkerDisabled =
+    activeCam != null && !activeCam.worker_enabled;
 
   return (
     <>
@@ -154,7 +184,7 @@ export function LiveCapturePage() {
                 {t("liveCapture.selectCameraPrompt")}
               </div>
             )}
-            {activeCamId != null && !paused && !showOffline && (
+            {activeIsLive && !paused && !showOffline && (
               <img
                 ref={imgRef}
                 key={`${activeCamId}-${streamNonce}`}
@@ -168,6 +198,38 @@ export function LiveCapturePage() {
                   objectFit: "cover",
                 }}
               />
+            )}
+            {showDisplayDisabled && (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  display: "grid",
+                  placeItems: "center",
+                  color: "var(--text-secondary)",
+                  fontSize: 13,
+                  textAlign: "center",
+                  padding: 24,
+                }}
+              >
+                {t("liveCapture.displayDisabled")}
+              </div>
+            )}
+            {showWorkerDisabled && (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  display: "grid",
+                  placeItems: "center",
+                  color: "var(--text-secondary)",
+                  fontSize: 13,
+                  textAlign: "center",
+                  padding: 24,
+                }}
+              >
+                {t("liveCapture.workerDisabled")}
+              </div>
             )}
             {activeCamId != null && paused && (
               <div
@@ -298,59 +360,71 @@ export function LiveCapturePage() {
                 {t("common.loading")}
               </div>
             )}
-            {!camerasQuery.isLoading && enabledCameras.length === 0 && (
-              <div
-                style={{
-                  padding: 16,
-                  textAlign: "center",
-                  color: "var(--text-secondary)",
-                  fontSize: 12,
-                }}
-              >
-                {t("liveCapture.noCameras")}
-              </div>
-            )}
-            {enabledCameras.map((c) => {
-              const active = c.id === activeCamId;
-              return (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => onSelect(c.id)}
+            {!camerasQuery.isLoading &&
+              liveCameras.length === 0 &&
+              displayDisabledCameras.length === 0 &&
+              workerDisabledCameras.length === 0 && (
+                <div
                   style={{
-                    padding: "8px 10px",
-                    borderRadius: 7,
-                    cursor: "pointer",
-                    background: active
-                      ? "var(--bg-sunken)"
-                      : "transparent",
-                    border: active
-                      ? "1px solid var(--border)"
-                      : "1px solid transparent",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    width: "100%",
-                    textAlign: "start",
-                    color: "inherit",
+                    padding: 16,
+                    textAlign: "center",
+                    color: "var(--text-secondary)",
+                    fontSize: 12,
                   }}
                 >
-                  <Icon
-                    name="camera"
-                    size={13}
-                    className="text-secondary"
-                  />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 500 }}>
-                      {c.name}
-                    </div>
-                    <div className="text-xs text-dim mono">
-                      CAM-{c.id} · {c.location || "—"}
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
+                  {t("liveCapture.noCameras")}
+                </div>
+              )}
+
+            {/* Live cameras (worker on + display on). */}
+            {liveCameras.map((c) => (
+              <CameraRow
+                key={c.id}
+                cam={c}
+                active={c.id === activeCamId}
+                kind="live"
+                onSelect={onSelect}
+              />
+            ))}
+
+            {/* Display-disabled cameras (worker on + display off):
+                still in the main list but greyed; clicking shows an
+                empty "Display disabled by Admin" state. */}
+            {displayDisabledCameras.map((c) => (
+              <CameraRow
+                key={c.id}
+                cam={c}
+                active={c.id === activeCamId}
+                kind="display-disabled"
+                onSelect={onSelect}
+                tooltip={t("liveCapture.displayDisabledTooltip")}
+              />
+            ))}
+
+            {/* Worker-disabled cameras grouped at the bottom of the
+                list. They're not recording — no live stream possible. */}
+            {workerDisabledCameras.length > 0 && (
+              <div
+                className="text-xs text-dim"
+                style={{
+                  padding: "10px 10px 4px",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.04em",
+                }}
+              >
+                {t("liveCapture.workerDisabledHeading")}
+              </div>
+            )}
+            {workerDisabledCameras.map((c) => (
+              <CameraRow
+                key={c.id}
+                cam={c}
+                active={c.id === activeCamId}
+                kind="worker-disabled"
+                onSelect={onSelect}
+                tooltip={t("liveCapture.workerDisabledTooltip")}
+              />
+            ))}
           </div>
         </div>
       </div>
@@ -483,5 +557,66 @@ export function LiveCapturePage() {
         }
       `}</style>
     </>
+  );
+}
+
+
+// P28.5b: shared row renderer for the camera list. The "kind" tag
+// drives styling: live (full-colour), display-disabled (greyed +
+// tooltip), worker-disabled (greyed + bottom group).
+function CameraRow({
+  cam,
+  active,
+  kind,
+  onSelect,
+  tooltip,
+}: {
+  cam: Camera;
+  active: boolean;
+  kind: "live" | "display-disabled" | "worker-disabled";
+  onSelect: (id: number) => void;
+  tooltip?: string;
+}) {
+  const dimmed = kind !== "live";
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(cam.id)}
+      title={tooltip}
+      style={{
+        padding: "8px 10px",
+        borderRadius: 7,
+        cursor: "pointer",
+        background: active ? "var(--bg-sunken)" : "transparent",
+        border: active
+          ? "1px solid var(--border)"
+          : "1px solid transparent",
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        width: "100%",
+        textAlign: "start",
+        color: dimmed ? "var(--text-secondary)" : "inherit",
+        opacity: dimmed ? 0.7 : 1,
+      }}
+    >
+      <Icon name="camera" size={13} className="text-secondary" />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12, fontWeight: 500 }}>{cam.name}</div>
+        <div className="text-xs text-dim mono">
+          CAM-{cam.id} · {cam.location || "—"}
+        </div>
+      </div>
+      {kind === "display-disabled" && (
+        <span className="pill pill-neutral" style={{ fontSize: 10 }}>
+          display
+        </span>
+      )}
+      {kind === "worker-disabled" && (
+        <span className="pill pill-neutral" style={{ fontSize: 10 }}>
+          off
+        </span>
+      )}
+    </button>
   );
 }

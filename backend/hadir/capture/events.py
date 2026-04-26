@@ -71,6 +71,44 @@ def _encode_jpeg(frame_bgr, bbox) -> Optional[bytes]:  # type: ignore[no-untyped
     return bytes(buf.tobytes())
 
 
+def _encode_jpeg_full(frame_bgr) -> Optional[bytes]:  # type: ignore[no-untyped-def]
+    """JPEG-encode the full frame (used when ``save_full_frames=True``)."""
+
+    import cv2  # noqa: PLC0415
+
+    ok, buf = cv2.imencode(".jpg", frame_bgr)
+    if not ok:
+        return None
+    return bytes(buf.tobytes())
+
+
+def quality_score(bbox, det_score: float) -> float:
+    """Composite quality score for a detection. Higher = keep.
+
+    Bigger face + higher detector confidence → higher score. The
+    prototype's formula additionally weighs frontal pose
+    (kps-derived symmetry); v1.0's Detection dataclass doesn't carry
+    landmarks today, so the simplified formula uses face area + det
+    score only with re-balanced weights:
+
+        0.75 × area_norm + 0.25 × det_score
+
+    where ``area_norm`` is ``min(face_w*face_h / 200², 1.0)`` so a
+    200px-wide face saturates the area term.
+
+    Note: with this formula the prototype's tested 0.35 threshold
+    behaves slightly differently than on the original (which was
+    pose-aware). On a reasonable walk-past 0.35 cleanly separates
+    sharp side-profile snapshots (skip) from frontal frames (keep);
+    re-tuning may be warranted once landmarks land in Detection
+    (tracked under "future work" in P28.5b's phase doc).
+    """
+
+    area = max(0, int(bbox.w)) * max(0, int(bbox.h))
+    area_norm = min(area / (200 * 200), 1.0)
+    return 0.75 * area_norm + 0.25 * float(det_score)
+
+
 def emit_detection_event(
     engine: Engine,
     scope: TenantScope,
@@ -78,12 +116,17 @@ def emit_detection_event(
     camera_id: int,
     frame_bgr,  # type: ignore[no-untyped-def]
     bbox,
+    det_score: float = 1.0,
     track_id: str,
     embedding: Optional[np.ndarray] = None,
     captured_at: Optional[datetime] = None,
     pre_matched: Optional[tuple[int, float]] = None,
+    annotated_frame_bgr=None,  # type: ignore[no-untyped-def]
+    capture_config: Optional[dict] = None,
 ) -> Optional[int]:
-    """Write the encrypted crop + insert the event row. Returns the new id.
+    """Write the encrypted crop + insert the event row. Returns the new id,
+    or ``None`` if the row was skipped (low quality below threshold or
+    invalid bbox).
 
     ``frame_bgr`` is an OpenCV BGR numpy array (from ``cv2.VideoCapture.read``).
     ``bbox`` is a ``tracker.Bbox`` whose fields are JSON-serialisable.
@@ -97,9 +140,39 @@ def emit_detection_event(
     for this detection (the live-capture per-frame annotation path
     needs the result for box labels), pass ``(employee_id, score)``
     here to skip the duplicate ``matcher_cache.match`` call.
+
+    P28.5b knobs (read from ``capture_config``):
+
+    * ``min_face_quality_to_save`` — skip if ``quality_score(bbox,
+      det_score)`` falls below the threshold. The single-face-per-
+      event architecture means a low-quality detection doesn't
+      become an event at all (rather than the multi-face semantics
+      where a row exists but the crop is omitted).
+    * ``save_full_frames`` — when ``True``, also save the full
+      annotated frame (passed via ``annotated_frame_bgr``) at a
+      sibling ``_full.jpg`` path. Debug aid; increases disk usage
+      roughly by the ratio of full-frame size to face-crop size.
+    * ``max_faces_per_event`` — stored on the camera row and
+      surfaced via ``capture_config`` here, but the v1.0 single-
+      face-per-event architecture caps the effective value at 1.
+      Multi-face accumulation lands in a follow-up phase.
     """
 
     captured_at = captured_at or datetime.now(tz=timezone.utc)
+    config = capture_config or {}
+    min_quality = float(config.get("min_face_quality_to_save", 0.0))
+    save_full = bool(config.get("save_full_frames", False))
+
+    # Apply the quality threshold BEFORE doing any disk or DB work —
+    # cheap to compute and avoids both the JPEG encode and the
+    # capture-tree mkdir for low-quality detections.
+    score = quality_score(bbox, det_score)
+    if score < min_quality:
+        logger.debug(
+            "crop skipped (quality %.2f < %.2f): camera_id=%s track=%s",
+            score, min_quality, camera_id, track_id,
+        )
+        return None
 
     jpeg = _encode_jpeg(frame_bgr, bbox)
     if jpeg is None:
@@ -112,6 +185,26 @@ def emit_detection_event(
     directory.mkdir(parents=True, exist_ok=True)
     file_path = directory / f"{uuid.uuid4().hex}.jpg"
     file_path.write_bytes(encrypt_bytes(jpeg))
+
+    # P28.5b: ``save_full_frames=True`` also persists the full
+    # annotated frame at a sibling path. Same encrypted-at-rest
+    # contract as the face crop. The DB row only knows about the
+    # face crop path; the full-frame path is stored next to it on
+    # disk (``…_full.jpg``).
+    if save_full and annotated_frame_bgr is not None:
+        full_jpeg = _encode_jpeg_full(annotated_frame_bgr)
+        if full_jpeg is not None:
+            full_path = file_path.with_name(file_path.stem + "_full.jpg")
+            try:
+                full_path.write_bytes(encrypt_bytes(full_jpeg))
+            except OSError as exc:
+                # Full-frame save is a debug aid — never sink the
+                # event write because it failed.
+                logger.debug(
+                    "full-frame save failed: camera_id=%s reason=%s",
+                    camera_id,
+                    type(exc).__name__,
+                )
 
     encrypted_embedding: Optional[bytes] = None
     employee_id: Optional[int] = None

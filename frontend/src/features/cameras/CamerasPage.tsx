@@ -32,8 +32,17 @@ export function CamerasPage() {
     setEditTarget(null);
   };
 
-  const toggleEnabled = (cam: Camera) => {
-    patch.mutate({ id: cam.id, patch: { enabled: !cam.enabled } });
+  const toggleWorkerEnabled = (cam: Camera) => {
+    patch.mutate({
+      id: cam.id,
+      patch: { worker_enabled: !cam.worker_enabled },
+    });
+  };
+  const toggleDisplayEnabled = (cam: Camera) => {
+    patch.mutate({
+      id: cam.id,
+      patch: { display_enabled: !cam.display_enabled },
+    });
   };
 
   return (
@@ -69,14 +78,15 @@ export function CamerasPage() {
               <th>Name</th>
               <th>Location</th>
               <th>Host</th>
-              <th>Enabled</th>
+              <th>Worker</th>
+              <th>Display</th>
               <th style={{ textAlign: "right" }}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {list.isLoading && (
               <tr>
-                <td colSpan={5} className="text-sm text-dim" style={{ padding: 16 }}>
+                <td colSpan={6} className="text-sm text-dim" style={{ padding: 16 }}>
                   Loading…
                 </td>
               </tr>
@@ -84,7 +94,7 @@ export function CamerasPage() {
             {list.isError && (
               <tr>
                 <td
-                  colSpan={5}
+                  colSpan={6}
                   className="text-sm"
                   style={{ padding: 16, color: "var(--danger-text)" }}
                 >
@@ -99,12 +109,22 @@ export function CamerasPage() {
                 <td className="mono text-sm">{cam.rtsp_host}</td>
                 <td>
                   <button
-                    className={`pill ${cam.enabled ? "pill-success" : "pill-neutral"}`}
-                    onClick={() => toggleEnabled(cam)}
+                    className={`pill ${cam.worker_enabled ? "pill-success" : "pill-neutral"}`}
+                    onClick={() => toggleWorkerEnabled(cam)}
                     style={{ cursor: "pointer", border: "none" }}
-                    title="Click to toggle"
+                    title="Click to toggle worker on/off"
                   >
-                    {cam.enabled ? "enabled" : "disabled"}
+                    {cam.worker_enabled ? "on" : "off"}
+                  </button>
+                </td>
+                <td>
+                  <button
+                    className={`pill ${cam.display_enabled ? "pill-success" : "pill-neutral"}`}
+                    onClick={() => toggleDisplayEnabled(cam)}
+                    style={{ cursor: "pointer", border: "none" }}
+                    title="Click to toggle display on/off"
+                  >
+                    {cam.display_enabled ? "on" : "off"}
                   </button>
                 </td>
                 <td>
@@ -135,7 +155,7 @@ export function CamerasPage() {
             ))}
             {list.data && list.data.items.length === 0 && !list.isLoading && (
               <tr>
-                <td colSpan={5} className="text-sm text-dim" style={{ padding: 16 }}>
+                <td colSpan={6} className="text-sm text-dim" style={{ padding: 16 }}>
                   No cameras yet. Add one to see its preview frame.
                 </td>
               </tr>

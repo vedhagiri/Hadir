@@ -4,6 +4,11 @@ Every response, audit row, and error message is written to use
 ``rtsp_host`` at most. A log line or response body containing
 ``rtsp://user:pass@…`` is a bug — grep the container logs for it before
 shipping.
+
+P28.5b: CRUD now accepts/returns ``worker_enabled``, ``display_enabled``,
+and ``capture_config`` (the per-camera knob bag). Audit ``before`` /
+``after`` carry the full row state so an auditor can see exactly what
+flipped on every operator action.
 """
 
 from __future__ import annotations
@@ -13,7 +18,6 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import Response as BytesResponse
-from sqlalchemy.engine import Connection
 
 from hadir.auth.audit import write_audit
 from hadir.auth.dependencies import CurrentUser, require_role
@@ -24,6 +28,7 @@ from hadir.cameras.schemas import (
     CameraListOut,
     CameraOut,
     CameraPatchIn,
+    CaptureConfig,
 )
 from hadir.capture import capture_manager
 from hadir.db import get_engine
@@ -42,11 +47,32 @@ def _row_to_out(row: repo.CameraRow) -> CameraOut:
         name=row.name,
         location=row.location,
         rtsp_host=row.rtsp_host,
-        enabled=row.enabled,
+        worker_enabled=row.worker_enabled,
+        display_enabled=row.display_enabled,
+        capture_config=CaptureConfig.model_validate(row.capture_config),
         created_at=row.created_at,
         last_seen_at=row.last_seen_at,
         images_captured_24h=row.images_captured_24h,
     )
+
+
+def _audit_payload(row: repo.CameraRow) -> dict:
+    """The slice of camera state we record on every audit row.
+
+    Carries the full operational state (both flags + the knob bag)
+    so a before/after pair captures any flip without ambiguity. Never
+    contains the encrypted token or the plaintext URL — only the
+    parsed host.
+    """
+
+    return {
+        "name": row.name,
+        "location": row.location,
+        "rtsp_host": row.rtsp_host,
+        "worker_enabled": row.worker_enabled,
+        "display_enabled": row.display_enabled,
+        "capture_config": dict(row.capture_config),
+    }
 
 
 @router.get("", response_model=CameraListOut)
@@ -77,8 +103,12 @@ def create_camera_endpoint(
             name=payload.name,
             location=payload.location,
             rtsp_url_encrypted=encrypted,
-            enabled=payload.enabled,
+            worker_enabled=payload.worker_enabled,
+            display_enabled=payload.display_enabled,
+            capture_config=payload.capture_config.model_dump(),
         )
+        created = repo.get_camera(conn, scope, new_id)
+        assert created is not None
         write_audit(
             conn,
             tenant_id=scope.tenant_id,
@@ -86,15 +116,8 @@ def create_camera_endpoint(
             action="camera.created",
             entity_type="camera",
             entity_id=str(new_id),
-            after={
-                "name": payload.name,
-                "location": payload.location,
-                "rtsp_host": parts.host,
-                "enabled": payload.enabled,
-            },
+            after=_audit_payload(created),
         )
-        created = repo.get_camera(conn, scope, new_id)
-        assert created is not None
 
     logger.info(
         "camera created: id=%s name=%r host=%s", new_id, payload.name, parts.host
@@ -124,8 +147,15 @@ def patch_camera_endpoint(
             values["name"] = provided["name"]
         if "location" in provided:
             values["location"] = provided["location"]
-        if "enabled" in provided:
-            values["enabled"] = provided["enabled"]
+        if "worker_enabled" in provided:
+            values["worker_enabled"] = provided["worker_enabled"]
+        if "display_enabled" in provided:
+            values["display_enabled"] = provided["display_enabled"]
+        if "capture_config" in provided and provided["capture_config"] is not None:
+            # CaptureConfig is a Pydantic model — model_dump() canonicalises
+            # the JSONB shape so two writes of equivalent payloads produce
+            # the same DB row.
+            values["capture_config"] = provided["capture_config"]
 
         if "rtsp_url" in provided and provided["rtsp_url"] is not None:
             try:
@@ -141,21 +171,11 @@ def patch_camera_endpoint(
         after = repo.get_camera(conn, scope, camera_id)
         assert after is not None
 
-        # Audit carries rtsp_host only. Changed credentials surface as a
-        # host change (if the host itself changed); same-host re-key is
-        # recorded as `rtsp_url_rotated=True` without any URL content.
-        audit_after: dict[str, object] = {
-            "name": after.name,
-            "location": after.location,
-            "enabled": after.enabled,
-            "rtsp_host": after.rtsp_host,
-        }
-        audit_before: dict[str, object] = {
-            "name": before.name,
-            "location": before.location,
-            "enabled": before.enabled,
-            "rtsp_host": before.rtsp_host,
-        }
+        # Audit before/after carries the full operational state so any
+        # diff (worker toggle, display toggle, knob change, host change)
+        # is visible at a glance to an auditor.
+        audit_before = _audit_payload(before)
+        audit_after = _audit_payload(after)
         if new_host is not None and new_host == before.rtsp_host:
             audit_after["rtsp_url_rotated"] = True
         write_audit(
@@ -193,11 +213,7 @@ def delete_camera_endpoint(
             action="camera.deleted",
             entity_type="camera",
             entity_id=str(camera_id),
-            before={
-                "name": before.name,
-                "location": before.location,
-                "rtsp_host": before.rtsp_host,
-            },
+            before=_audit_payload(before),
         )
     logger.info("camera deleted: id=%s host=%s", camera_id, before.rtsp_host)
     capture_manager.on_camera_deleted(camera_id, tenant_id=scope.tenant_id)

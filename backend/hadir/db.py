@@ -1501,7 +1501,29 @@ cameras = Table(
     # messages. Decrypt happens only when a request needs to hit the
     # camera (preview now; capture pipeline in P8).
     Column("rtsp_url_encrypted", Text, nullable=False),
-    Column("enabled", Boolean, nullable=False, server_default="true"),
+    # P28.5b: split the pilot's single ``enabled`` flag into two
+    # independent operational levers. ``worker_enabled`` controls
+    # whether the backend reads frames + records detection events;
+    # ``display_enabled`` controls whether Live Capture surfaces the
+    # camera. Existing rows backfilled by migration 0027 from the old
+    # ``enabled`` column.
+    Column("worker_enabled", Boolean, nullable=False, server_default="true"),
+    Column("display_enabled", Boolean, nullable=False, server_default="true"),
+    # P28.5b: per-camera capture knob bag. Defaults match the
+    # prototype's tested constants. Schema is open by design — the
+    # set of knobs evolves between phases without a migration. The
+    # API + audit log carry the full JSONB.
+    Column(
+        "capture_config",
+        JSONB,
+        nullable=False,
+        server_default=(
+            '{"max_faces_per_event": 10, '
+            '"max_event_duration_sec": 60, '
+            '"min_face_quality_to_save": 0.35, '
+            '"save_full_frames": false}'
+        ),
+    ),
     Column(
         "created_at",
         DateTime(timezone=True),

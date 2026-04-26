@@ -1065,19 +1065,58 @@ via ``PATCH /api/cameras/{id}``, ``capture_manager.on_camera_updated``
 fires immediately on the request thread, stops the existing worker
 (if any), re-fetches the row, and (if still enabled) spawns a new
 one. No poll loop, no eventual consistency. ``DELETE`` similarly
-calls ``on_camera_deleted`` which stops the worker. The full
-reconciliation poll (every-2-second sweep that recovers from
-out-of-band camera-row mutations or worker crashes) is scoped for
-P28.5b.
+calls ``on_camera_deleted`` which stops the worker.
+
+**Reconcile loop** (P28.5b): on top of the synchronous CRUD
+hooks, ``CaptureManager.start()`` schedules a 2-second
+``BackgroundScheduler`` tick that calls ``reconcile_all()``.
+The tick (a) catches out-of-band camera-row mutations
+(psql, ad-hoc scripts), (b) restarts crashed workers, and (c)
+hot-reloads ``capture_config`` changes via
+``CaptureWorker.update_config`` — no worker restart, no dropped
+frames. ``coalesce=True + max_instances=1`` keeps a slow tick
+from backing up. The tick swallows exceptions at WARN; a single
+bad pass must not poison the scheduler.
 
 Public manager API for explicit control:
 
-* ``start_camera(tenant_id, camera_id, name, decrypted_url, schema=None)``
+* ``start_camera(tenant_id, camera_id, name, decrypted_url, capture_config=None, schema=None)``
   — spawn one worker. Idempotent (existing live worker for the key
   is a no-op). Failures audit as ``capture.worker.start_failed``.
 * ``stop_camera(tenant_id, camera_id)`` — stop one worker.
+* ``reconcile_all()`` — one full diff pass; returns
+  ``{started, stopped, config_updated, errors}`` for tests.
 * ``workers_snapshot()`` — list of ``(tenant_id, camera_id)`` for
   every live worker; consumed by tests for explicit assertions.
+
+**Per-camera capture knobs** (P28.5b, ``cameras.capture_config``
+JSONB): ``max_faces_per_event`` (default 10),
+``max_event_duration_sec`` (60), ``min_face_quality_to_save``
+(0.35), ``save_full_frames`` (false). Defaults match the
+prototype's tested constants. The knobs propagate to running
+workers via ``CaptureWorker.update_config(new_config)``:
+
+* ``max_event_duration_sec`` flips the tracker's force-retire
+  threshold immediately.
+* ``min_face_quality_to_save`` is read by ``emit_detection_event``
+  per detection — below threshold the row is skipped (cheap,
+  pre-encode). Quality is computed from face area + det score
+  (the prototype's pose-aware formula awaits InsightFace ``kps``
+  in ``Detection``; documented as future work).
+* ``save_full_frames`` writes a ``…_full.jpg`` sibling next to
+  the face crop (also Fernet-encrypted).
+* ``max_faces_per_event`` is stored + audited but the v1.0
+  single-row-per-track architecture caps the effective value at
+  1; the multi-face child table lands in a follow-up phase.
+
+**Worker / display split** (P28.5b): ``cameras.worker_enabled``
+controls whether the worker runs at all (CPU + DB load);
+``cameras.display_enabled`` is read by
+``hadir/live_capture/router.py`` only — the manager doesn't
+care, so a display-disabled camera keeps recording. MJPEG
+endpoint returns 503 ``camera_display_disabled`` when display
+is off; the WebSocket closes with code 1008. The frontend
+handles both with explanatory empty states.
 
 ## Identification (P9)
 Every ``employee_photos`` row gets a Fernet-encrypted

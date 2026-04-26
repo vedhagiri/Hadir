@@ -133,7 +133,7 @@ def test_retention_sweep_deletes_old_camera_health(admin_engine):
                     name=f"p25-cam-{secrets.token_hex(3)}",
                     location="rehearsal",
                     rtsp_url_encrypted="cipher",
-                    enabled=False,
+                    worker_enabled=False,
                 )
                 .returning(cameras.c.id)
             ).scalar_one()

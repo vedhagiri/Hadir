@@ -1,10 +1,14 @@
-"""Capture supervisor (P28.5a — multi-tenant + boot-time auto-start).
+"""Capture supervisor (P28.5b — reconcile loop + worker/display split).
 
-Owns one ``CaptureWorker`` per enabled camera *per tenant*. Started by
-the FastAPI lifespan on process boot, stopped on shutdown. The P7
-cameras router calls ``on_camera_created`` / ``on_camera_updated`` /
-``on_camera_deleted`` to keep the running worker set in sync — no
-polling.
+Owns one ``CaptureWorker`` per ``worker_enabled`` camera *per tenant*.
+Started by the FastAPI lifespan on process boot, stopped on shutdown.
+The P7 cameras router calls ``on_camera_created`` /
+``on_camera_updated`` / ``on_camera_deleted`` for synchronous reactions
+(visible to the operator on the next API response). On top of that,
+P28.5b adds a 2-second **reconciliation tick** that catches drift —
+out-of-band camera-row mutations (psql, scripts, future replication
+follower writes), worker crashes, capture_config changes that should
+hot-reload without restart.
 
 **Boot-time auto-start** (P28.5a fix): on ``start()`` the manager
 **always** iterates ``public.tenants`` (independent of
@@ -37,29 +41,38 @@ can never outlive the worker that produced it.
 Public surface:
 
 * ``start(*, config=None)`` — boot-time auto-start over every active
-  tenant. Idempotent (second call is a no-op).
-* ``stop()`` — stop every worker.
-* ``start_camera(tenant_id, camera_id, name, decrypted_url)`` —
-  explicit start used by the boot loop and CRUD-side reactions.
-  Returns True on success, False on failure.
-* ``stop_camera(tenant_id, camera_id)`` — explicit stop. No-op if no
-  worker is running.
-* ``on_camera_created`` / ``on_camera_updated`` / ``on_camera_deleted``
-  — synchronous reactions to the cameras CRUD endpoints (re-fetches
-  the current row + reconciles).
+  tenant + start the reconcile scheduler. Idempotent.
+* ``stop()`` — stop every worker + the scheduler.
+* ``start_camera(..., capture_config=None)`` — explicit start used by
+  the boot loop and CRUD-side reactions. Returns True on success.
+* ``stop_camera(tenant_id, camera_id)`` — explicit stop.
+* ``reconcile_all()`` — one pass of the full diff: discover desired
+  worker set from DB, compare to running set, start/stop/update_config
+  to converge. Called every 2 s by the scheduler; safe to call
+  ad-hoc from tests for deterministic timing.
+* ``on_camera_*`` — synchronous CRUD reactions (defer to reconcile_all
+  shape for the heavy lift).
 * ``get_preview`` / ``is_preview_fresh`` / ``get_worker_stats`` —
   consumed by the live-capture router.
 
-The full reconciliation loop (every-2-second poll that handles
-out-of-band camera-row mutations) is scoped for P28.5b.
+P28.5b knobs:
+
+* ``worker_enabled`` controls whether the worker runs at all (CPU + DB).
+* ``display_enabled`` is read by the live-capture router; the manager
+  doesn't care — workers run regardless of display, so an operator
+  can hide the feed without losing recordings.
+* ``capture_config`` (JSONB) carries per-camera face-save knobs;
+  changes propagate via ``CaptureWorker.update_config`` without a
+  worker restart so a tweak doesn't drop frames.
 """
 
 from __future__ import annotations
 
 import logging
 import threading
-from typing import Optional
+from typing import Any, Optional
 
+from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy import select
 from sqlalchemy.engine import Engine
 
@@ -72,6 +85,14 @@ from hadir.config import get_settings
 from hadir.db import cameras as cameras_table
 from hadir.db import get_engine
 from hadir.tenants.scope import TenantScope
+
+
+# How often the reconcile tick fires. Two seconds is the prompt's
+# "visible to operator within 5 seconds" requirement minus a safety
+# margin for the work the tick itself does (DB scan + per-row
+# decrypt + diff). On a typical office stack with single-digit
+# camera counts the tick takes <50 ms.
+RECONCILE_INTERVAL_SECONDS = 2
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +108,10 @@ class CaptureManager:
         self._workers: dict[WorkerKey, CaptureWorker] = {}
         self._enabled = False
         self._config: Optional[ReaderConfig] = None
+        # P28.5b: 2-second reconcile loop catches drift the synchronous
+        # CRUD hooks can't (out-of-band row mutations, worker crashes,
+        # config-only changes). Lazy — only created in start().
+        self._reconcile_scheduler: Optional[BackgroundScheduler] = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -121,8 +146,16 @@ class CaptureManager:
 
         logger.info("capture manager started with %d worker(s)", spawn_count)
 
+        # P28.5b: start the periodic reconcile tick. The scheduler is
+        # daemon-threaded so a SIGTERM unwinds cleanly. ``coalesce=True``
+        # collapses missed ticks (e.g. the reconcile pass took longer
+        # than the interval) into a single follow-up call instead of
+        # backing up.
+        self._start_reconcile_scheduler()
+
     def stop(self) -> None:
-        """Stop every worker. Blocks until all threads unwind (bounded)."""
+        """Stop every worker + the reconcile scheduler. Blocks until
+        all threads unwind (bounded)."""
 
         with self._lock:
             if not self._enabled:
@@ -130,6 +163,16 @@ class CaptureManager:
             self._enabled = False
             workers = list(self._workers.values())
             self._workers.clear()
+            scheduler = self._reconcile_scheduler
+            self._reconcile_scheduler = None
+
+        # Stop the scheduler first so a tick mid-shutdown can't re-add
+        # workers we're about to drop.
+        if scheduler is not None:
+            try:
+                scheduler.shutdown(wait=False)
+            except Exception:  # noqa: BLE001
+                logger.warning("capture manager: scheduler shutdown failed")
         for worker in workers:
             try:
                 worker.stop()
@@ -138,6 +181,45 @@ class CaptureManager:
                     "capture worker %s failed to stop cleanly", worker.camera_id
                 )
         logger.info("capture manager stopped")
+
+    def _start_reconcile_scheduler(self) -> None:
+        """Spin up the BackgroundScheduler that drives ``reconcile_all``.
+
+        ``coalesce=True`` + ``max_instances=1`` keep tick calls from
+        stacking up if a slow tick overruns the interval — the next
+        tick just runs once when the previous returns.
+        """
+
+        scheduler = BackgroundScheduler(daemon=True)
+        scheduler.add_job(
+            self._reconcile_tick,
+            "interval",
+            seconds=RECONCILE_INTERVAL_SECONDS,
+            id="capture-manager-reconcile",
+            coalesce=True,
+            max_instances=1,
+            replace_existing=True,
+        )
+        scheduler.start()
+        with self._lock:
+            self._reconcile_scheduler = scheduler
+        logger.info(
+            "capture manager: reconcile scheduler started "
+            "(interval=%ds)",
+            RECONCILE_INTERVAL_SECONDS,
+        )
+
+    def _reconcile_tick(self) -> None:
+        """APScheduler-side wrapper around ``reconcile_all`` that swallows
+        exceptions — a single bad tick must not poison the scheduler."""
+
+        try:
+            self.reconcile_all()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "capture manager reconcile tick failed: %s",
+                type(exc).__name__,
+            )
 
     # ------------------------------------------------------------------
     # Explicit per-camera control (used by the boot loop + CRUD hooks)
@@ -149,12 +231,17 @@ class CaptureManager:
         camera_id: int,
         name: str,
         decrypted_url: str,
+        capture_config: Optional[dict[str, Any]] = None,
         schema: Optional[str] = None,
     ) -> bool:
         """Start a worker for ``(tenant_id, camera_id)`` with the given
         decrypted URL. Returns True if a worker is now running for that
         key, False on failure. Failures audit-log as
         ``capture.worker.start_failed`` with the failure reason.
+
+        ``capture_config`` (P28.5b) is the per-camera face-save knob bag.
+        When ``None`` the worker uses its built-in defaults (matching
+        the prototype's tested constants).
 
         Idempotent: if a live worker already exists for the key,
         returns True without restarting.
@@ -181,6 +268,7 @@ class CaptureManager:
                 rtsp_url_plain=decrypted_url,
                 analyzer=get_analyzer(),
                 config=self._config,
+                capture_config=capture_config,
             )
             worker.start()
         except Exception as exc:  # noqa: BLE001
@@ -399,7 +487,7 @@ class CaptureManager:
         engine = get_engine()
 
         try:
-            rows = self._select_enabled_cameras(
+            rows = self._select_active_cameras(
                 engine, tenant_id=tenant_id, schema=schema
             )
         except Exception as exc:  # noqa: BLE001
@@ -415,6 +503,9 @@ class CaptureManager:
         for row in rows:
             cam_id = int(row.id)
             cam_name = str(row.name)
+            cam_config = camera_repo._normalise_capture_config(
+                row.capture_config
+            )
             try:
                 plain_url = rtsp_io.decrypt_url(str(row.rtsp_url_encrypted))
             except (RuntimeError, ValueError, Exception) as exc:  # noqa: BLE001
@@ -443,6 +534,7 @@ class CaptureManager:
                 camera_id=cam_id,
                 name=cam_name,
                 decrypted_url=plain_url,
+                capture_config=cam_config,
                 schema=schema,
             )
             plain_url = ""  # noqa: F841
@@ -459,31 +551,38 @@ class CaptureManager:
                     schema=schema,
                     action="capture.worker.started_at_boot",
                     entity_id=str(cam_id),
-                    payload={"name": cam_name},
+                    payload={"name": cam_name, "capture_config": cam_config},
                 )
 
         return spawned
 
-    def _select_enabled_cameras(
+    def _select_active_cameras(
         self,
         engine,
         *,
         tenant_id: int,
         schema: Optional[str],
     ):
-        """Raw SELECT for enabled cameras under a tenant. Bypasses the
-        repository's full row hydration (which decrypts every row's
-        URL to surface ``rtsp_host``) so a single bad ciphertext can't
-        fail the listing for the whole tenant.
+        """Raw SELECT for cameras with ``worker_enabled=true`` under a
+        tenant. Bypasses the repository's full row hydration (which
+        decrypts every row's URL to surface ``rtsp_host``) so a single
+        bad ciphertext can't fail the listing for the whole tenant.
+
+        Returns the columns needed to construct/maintain a
+        ``CaptureWorker``: id, name, rtsp_url_encrypted, capture_config.
+        ``display_enabled`` is intentionally not selected here — the
+        manager doesn't care about it; the live-capture router reads
+        it directly per request.
         """
 
         stmt = select(
             cameras_table.c.id,
             cameras_table.c.name,
             cameras_table.c.rtsp_url_encrypted,
+            cameras_table.c.capture_config,
         ).where(
             cameras_table.c.tenant_id == tenant_id,
-            cameras_table.c.enabled.is_(True),
+            cameras_table.c.worker_enabled.is_(True),
         )
 
         if schema is None:
@@ -530,7 +629,25 @@ class CaptureManager:
         Failures inside the audit write itself are swallowed at WARN —
         we'd rather start workers than crash the manager because the
         audit_log is unavailable.
+
+        ``payload`` may carry the special keys ``before`` and ``after``;
+        when present they're routed to the native ``audit_log.before`` /
+        ``audit_log.after`` JSONB columns rather than nested under
+        ``after``. This keeps config-update audit rows queryable as
+        ``audit_log.after->'max_faces_per_event'`` per the standard
+        audit contract.
         """
+
+        before_payload: Optional[dict] = None
+        after_payload: Optional[dict] = payload
+        if (
+            isinstance(payload, dict)
+            and "before" in payload
+            and "after" in payload
+            and len(payload) == 2
+        ):
+            before_payload = payload["before"]
+            after_payload = payload["after"]
 
         engine = get_engine()
         try:
@@ -543,7 +660,8 @@ class CaptureManager:
                         action=action,
                         entity_type="camera",
                         entity_id=entity_id,
-                        after=payload,
+                        before=before_payload,
+                        after=after_payload,
                     )
                 return
             from hadir.db import tenant_context  # noqa: PLC0415
@@ -557,7 +675,8 @@ class CaptureManager:
                         action=action,
                         entity_type="camera",
                         entity_id=entity_id,
-                        after=payload,
+                        before=before_payload,
+                        after=after_payload,
                     )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
@@ -613,7 +732,7 @@ class CaptureManager:
             )
             return
 
-        if cam is None or not cam.enabled:
+        if cam is None or not cam.worker_enabled:
             self.stop_camera(tenant_id=tenant_id, camera_id=camera_id)
             return
 
@@ -634,10 +753,150 @@ class CaptureManager:
             camera_id=cam.id,
             name=cam.name,
             decrypted_url=plain_url,
+            capture_config=dict(cam.capture_config),
             schema=schema,
         )
         plain_url = ""  # noqa: F841
         del plain_url
+
+    # ------------------------------------------------------------------
+    # P28.5b: periodic reconcile
+
+    def reconcile_all(self) -> dict[str, int]:
+        """One full pass: bring the running worker set in sync with the
+        DB row state, across every active tenant.
+
+        Returns a dict ``{started, stopped, config_updated, errors}``
+        for observability; tests use the return value for explicit
+        timing assertions.
+
+        Concurrency: discovers tenants + cameras OUTSIDE the manager
+        lock (DB calls can be slow) and only reaches under the lock to
+        snapshot ``_workers`` and to mutate the dict via the helper
+        methods (``start_camera`` / ``stop_camera``). A request thread
+        that fires ``on_camera_*`` simultaneously is safe — both paths
+        funnel through ``start_camera``/``stop_camera`` which use the
+        same lock.
+        """
+
+        report = {"started": 0, "stopped": 0, "config_updated": 0, "errors": 0}
+        with self._lock:
+            if not self._enabled:
+                return report
+
+        tenants = self._discover_tenants()
+        # desired[(t, c)] = (name, plain_url, capture_config, schema)
+        desired: dict[
+            WorkerKey, tuple[str, str, dict[str, Any], Optional[str]]
+        ] = {}
+        for tenant_id, schema in tenants:
+            try:
+                rows = self._select_active_cameras(
+                    get_engine(), tenant_id=tenant_id, schema=schema
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "reconcile: listing failed tenant=%s schema=%s: %s",
+                    tenant_id,
+                    schema,
+                    type(exc).__name__,
+                )
+                report["errors"] += 1
+                continue
+
+            for row in rows:
+                cam_id = int(row.id)
+                cam_name = str(row.name)
+                cam_config = camera_repo._normalise_capture_config(
+                    row.capture_config
+                )
+                try:
+                    plain_url = rtsp_io.decrypt_url(
+                        str(row.rtsp_url_encrypted)
+                    )
+                except Exception:  # noqa: BLE001
+                    # Per-row decrypt failure was audited by the boot
+                    # path; the reconcile tick swallows silently to
+                    # avoid spamming the audit log every 2 s.
+                    report["errors"] += 1
+                    continue
+                desired[(tenant_id, cam_id)] = (
+                    cam_name, plain_url, cam_config, schema
+                )
+
+        with self._lock:
+            current_keys = set(self._workers.keys())
+        desired_keys = set(desired.keys())
+
+        # Stop workers whose camera is no longer ``worker_enabled`` (or
+        # the row was deleted). The CRUD ``on_camera_*`` hooks fire
+        # synchronously on the request thread; this pass catches the
+        # cases where the hook didn't run (out-of-band DB write, hook
+        # crash) or where the worker died and needs restart.
+        for key in current_keys - desired_keys:
+            tid, cid = key
+            if self.stop_camera(tenant_id=tid, camera_id=cid):
+                report["stopped"] += 1
+
+        # Start workers for desired keys not currently running. This
+        # also catches the case where ``_workers[key]`` exists but
+        # ``is_alive()`` is False — start_camera's idempotency check
+        # only short-circuits on a *live* worker.
+        with self._lock:
+            current_workers = dict(self._workers)
+        for key in desired_keys:
+            name, plain_url, config, schema = desired[key]
+            tid, cid = key
+            existing = current_workers.get(key)
+            if existing is None or not existing.is_alive():
+                # If we have a stale-dead entry, drop it before spawn.
+                if existing is not None and not existing.is_alive():
+                    with self._lock:
+                        self._workers.pop(key, None)
+                if self.start_camera(
+                    tenant_id=tid,
+                    camera_id=cid,
+                    name=name,
+                    decrypted_url=plain_url,
+                    capture_config=config,
+                    schema=schema,
+                ):
+                    report["started"] += 1
+                continue
+
+            # Worker is alive — check for config drift. Comparing the
+            # full dict catches knob-only changes; we also check the
+            # name + URL (a name rename or URL rotation triggers a
+            # full restart via the CRUD path, but the periodic tick
+            # serves as a safety net for that too).
+            try:
+                current_config = existing.get_capture_config()
+                if current_config != config:
+                    existing.update_config(config)
+                    report["config_updated"] += 1
+                    self._audit_worker_event(
+                        tenant_id=tid,
+                        schema=schema,
+                        action="capture.worker.config_updated",
+                        entity_id=str(cid),
+                        payload={
+                            "before": current_config,
+                            "after": config,
+                        },
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "reconcile: config update failed tenant=%s "
+                    "camera_id=%s reason=%s",
+                    tid,
+                    cid,
+                    type(exc).__name__,
+                )
+                report["errors"] += 1
+
+        return report
+
+    # ------------------------------------------------------------------
 
     def _schema_for_tenant(self, tenant_id: int) -> Optional[str]:
         """Resolve a tenant's schema name from ``public.tenants``.

@@ -58,7 +58,7 @@ def test_create_returns_host_not_url_and_stores_ciphertext(
             "name": "Lobby",
             "location": "HQ · Lobby",
             "rtsp_url": PLAIN_URL,
-            "enabled": True,
+            "worker_enabled": True, "display_enabled": True,
         },
     )
     assert resp.status_code == 201, resp.text
@@ -89,7 +89,7 @@ def test_list_returns_host_only(
     for name, url in [("Lobby", PLAIN_URL), ("Gate", OTHER_HOST_URL)]:
         client.post(
             "/api/cameras",
-            json={"name": name, "location": "", "rtsp_url": url, "enabled": True},
+            json={"name": name, "location": "", "rtsp_url": url, "worker_enabled": True, "display_enabled": True},
         )
 
     body = client.get("/api/cameras").json()
@@ -115,7 +115,7 @@ def test_patch_without_rtsp_url_keeps_original_credential(
             "name": "Loading Dock",
             "location": "Warehouse A",
             "rtsp_url": PLAIN_URL,
-            "enabled": True,
+            "worker_enabled": True, "display_enabled": True,
         },
     ).json()
     original_cipher = _raw_cipher(admin_engine, create["id"])
@@ -143,7 +143,7 @@ def test_patch_with_new_rtsp_url_rotates_cipher(
             "name": "Loading Dock",
             "location": "Warehouse A",
             "rtsp_url": PLAIN_URL,
-            "enabled": True,
+            "worker_enabled": True, "display_enabled": True,
         },
     ).json()
     before_cipher = _raw_cipher(admin_engine, create["id"])
@@ -177,7 +177,7 @@ def test_audit_rows_never_contain_plain_url(
             "name": "Lobby",
             "location": "",
             "rtsp_url": PLAIN_URL,
-            "enabled": True,
+            "worker_enabled": True, "display_enabled": True,
         },
     ).json()
     client.patch(f"/api/cameras/{create['id']}", json={"location": "HQ"})
@@ -220,7 +220,7 @@ def test_preview_endpoint_streams_stubbed_jpeg(
             "name": "Lobby",
             "location": "",
             "rtsp_url": PLAIN_URL,
-            "enabled": True,
+            "worker_enabled": True, "display_enabled": True,
         },
     ).json()
 
@@ -256,7 +256,7 @@ def test_preview_504_on_timeout(
             "name": "Dead Camera",
             "location": "",
             "rtsp_url": PLAIN_URL,
-            "enabled": True,
+            "worker_enabled": True, "display_enabled": True,
         },
     ).json()
 

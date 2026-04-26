@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 (M2 core complete) + P23 + P24 + P25 + P26 + P27 + P28 (M3 hardening complete + sign-off run) + P28.5a (Live Capture viewer w/ reader+analyzer worker split, multi-tenant CaptureManager, sidebar v1.0 chip).**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 (M2 core complete) + P23 + P24 + P25 + P26 + P27 + P28 (M3 hardening complete + sign-off run) + P28.5a (Live Capture viewer + multi-tenant CaptureManager) + P28.5b (worker/display split + per-camera capture knobs + 2 s reconcile loop).**
 
 > **Tenant isolation is a P0 blocker.** The suites
 > `backend/tests/test_multi_tenant_isolation.py` (the P1 canary) and
@@ -748,6 +748,62 @@ of the Arabic translations before v1.0 launch** — see
   **Awaiting Suresh's physical-validation sign-off** in
   ``docs/phases/P28.5a.md`` before commit. Validation
   steps in ``docs/testing/pre-omran-validation.md §13a``.
+
+- **P28.5b** — Worker / display split + per-camera capture
+  knobs. Migration ``0027_cameras_capture_split`` renames
+  ``cameras.enabled`` → ``cameras.worker_enabled`` (data-
+  preserving 1:1 backfill), adds ``cameras.display_enabled``
+  (BOOL DEFAULT true) and ``cameras.capture_config`` (JSONB
+  with four prototype-tested defaults — max_faces_per_event=10,
+  max_event_duration_sec=60, min_face_quality_to_save=0.35,
+  save_full_frames=false). Camera CRUD accepts/returns the
+  three new fields and audits before/after with the full
+  operational state. ``CaptureManager`` gains a 2-second
+  reconcile tick (APScheduler ``BackgroundScheduler``,
+  ``coalesce + max_instances=1``) that catches drift on top of
+  the synchronous CRUD hooks: out-of-band row mutations,
+  worker crashes, and config-only changes that hot-reload via
+  the new ``CaptureWorker.update_config`` (no restart, no
+  dropped frames). Tracker gains ``max_duration_sec`` so a
+  single track can't span hours of footage. Face-save path
+  applies ``min_face_quality_to_save`` (cheap area + det-score
+  formula, prototype's pose-aware version pending — see
+  P28.5b.md "future work") before encode, and writes a
+  ``…_full.jpg`` sibling on ``save_full_frames=true``.
+  ``max_faces_per_event`` is stored, surfaced, and audited but
+  the single-row-per-track architecture caps the effective
+  value at 1 today; multi-face accumulation lands in a
+  follow-up phase. Live-capture endpoints honour
+  ``display_enabled``: MJPEG returns 503
+  ``camera_display_disabled``, WebSocket closes with code
+  1008. Worker keeps recording in the background — events
+  still flow into Camera Logs + attendance. Frontend
+  ``CameraDrawer`` adds two toggle rows + an expandable
+  Capture settings panel; ``CamerasPage`` table gains Worker +
+  Display badges; Live Capture page splits the camera list
+  into three groups (live / display-disabled / worker-disabled)
+  and renders explanatory empty states for the latter two
+  rather than "loading". en/ar locales gain a top-level
+  ``cameras.*`` block (drawer copy) + four new
+  ``liveCapture.*`` keys (Arabic Claude-generated, **pending
+  Omran HR native-speaker review** — same flag from P21).
+  Five new backend tests cover the reconcile-driven flows
+  (worker_enabled flip up/down via out-of-band write,
+  capture_config change without restart with audit
+  verification, quality-score arithmetic, tracker
+  max_duration_sec force-retire, per-tenant config isolation).
+  **470 backend tests pass** (was 461 in P28.5a; +5 new tests
+  + 4 baseline tests adapted for the new config knob).
+  Frontend typecheck clean. Live verification on the dev
+  stack: backend restart logs show
+  ``capture manager: reconcile scheduler started (interval=2s)``
+  and the tick runs every 2 s without errors.
+
+  **Awaiting Suresh's physical-validation sign-off** in
+  ``docs/phases/P28.5b.md``. The validation walkthrough is in
+  the prompt above (worker disable / re-enable, display
+  disable / re-enable, knob tests for max_faces and
+  min_face_quality, audit-log spot-check, tenant isolation).
 
 Next: **M4 launch** per `v1.0-phase-plan.md`. Wait for
 the user before starting. **Open critical item carries
