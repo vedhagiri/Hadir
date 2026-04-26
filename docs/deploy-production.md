@@ -66,19 +66,36 @@ git checkout v1.0   # or the latest release tag
 
 Hadir refuses to boot in production with the dev placeholder
 secrets in place (`hadir.security.check_production_config`).
-Generate a fresh value for each:
+Every command below uses **stdlib only** so a fresh Ubuntu
+22.04 host runs them without an extra `pip install`.
 
 ```sh
-python3 -c "import secrets; print(secrets.token_urlsafe(48))"   # HADIR_SESSION_SECRET
-python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"  # HADIR_FERNET_KEY
-python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"  # HADIR_AUTH_FERNET_KEY
-python3 -c "import secrets; print(secrets.token_urlsafe(48))"   # HADIR_REPORT_SIGNED_URL_SECRET
+python3 -c "import secrets; print(secrets.token_urlsafe(48))"                       # HADIR_SESSION_SECRET
+python3 -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"   # HADIR_FERNET_KEY
+python3 -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"   # HADIR_AUTH_FERNET_KEY
+python3 -c "import secrets; print(secrets.token_urlsafe(48))"                       # HADIR_REPORT_SIGNED_URL_SECRET
+python3 -c "import secrets; print(secrets.token_urlsafe(24))"                       # HADIR_APP_DB_PASSWORD
+python3 -c "import secrets; print(secrets.token_urlsafe(24))"                       # HADIR_ADMIN_DB_PASSWORD
+python3 -c "import secrets; print(secrets.token_urlsafe(20))"                       # HADIR_GRAFANA_ADMIN_PASSWORD
 ```
 
-Stash them in a password manager **before** putting them in
-`.env` — they're not recoverable, and rotating them invalidates
-every session, every encrypted RTSP/photo blob, and every signed
-report download URL respectively.
+The two Fernet lines produce 32-byte URL-safe-base64 keys —
+the exact shape `cryptography.fernet.Fernet` expects. The
+stdlib path means no `pip install cryptography` step on the
+host before deploy.
+
+Stash every value in a password manager **before** putting
+them in `.env` — they're not recoverable, and rotating them
+invalidates:
+
+* `HADIR_SESSION_SECRET` — every active session.
+* `HADIR_FERNET_KEY` — every encrypted RTSP credential, every
+  encrypted photo, every encrypted attachment.
+* `HADIR_AUTH_FERNET_KEY` — every encrypted OIDC client
+  secret, every encrypted email-config password, every
+  signed report download token.
+* `HADIR_REPORT_SIGNED_URL_SECRET` — every outstanding
+  signed-URL download.
 
 ---
 
@@ -238,15 +255,38 @@ curl -sIk -H "Host: ${HADIR_PUBLIC_HOSTNAME}" http://${HADIR_PUBLIC_HOSTNAME}/ap
 
 ## 6. Seed the first admin
 
+> **Pick a path before running step 6:**
+>
+> * **Single-tenant deployment** (one customer, e.g. Omran's
+>   pilot install): leave `HADIR_TENANT_MODE=single` (or
+>   unset — `single` is the default). The seed script below
+>   creates the first Admin user inside the legacy `main`
+>   schema. This is the simplest shape and matches the pilot.
+> * **Multi-tenant SaaS deployment** (multiple customers
+>   served from one host): set `HADIR_TENANT_MODE=multi` in
+>   `.env` *before* the first compose-up. Skip the seed
+>   script and use `scripts/provision_tenant.py` per
+>   tenant — see §6.5 below. The pilot Omran tenant is
+>   itself created via the provision script in this mode.
+>
+> The two modes can't be mixed in one deployment. Pick once,
+> per environment.
+
+### 6a. Single-tenant — seed the first admin
+
 ```sh
 docker compose \
   -f docker-compose.yml \
   -f docker-compose.prod.yml \
-  exec -e HADIR_SEED_PASSWORD='<pick a strong password>' backend \
+  exec -e HADIR_SEED_PASSWORD='<pick a strong password ≥ 12 chars>' backend \
   python -m scripts.seed_admin \
-    --email admin@<your-org>.com \
+    --email admin@example.com \
     --full-name 'Operator Name'
 ```
+
+The seed script enforces a 12-char minimum (P27 §1.1.2 floor).
+The email **must** use a public TLD — `.local` and other
+reserved TLDs are rejected by the email validator.
 
 Open `https://${HADIR_PUBLIC_HOSTNAME}` in a browser; sign in;
 verify the topbar shows the operator name + the locale switcher.
@@ -254,6 +294,46 @@ verify the topbar shows the operator name + the locale switcher.
 If your tenant uses Microsoft Entra ID, configure OIDC under
 `Settings → Authentication` next — see
 `docs/phases/P6.md` for the per-tenant config flow.
+
+### 6b. Multi-tenant — provision a tenant
+
+```sh
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.prod.yml \
+  exec -e HADIR_PROVISION_PASSWORD='<pick a strong password ≥ 12 chars>' backend \
+  python -m scripts.provision_tenant \
+    --slug tenant_<slug> \
+    --name '<Display Name>' \
+    --admin-email admin@example.com \
+    --admin-full-name 'Operator Name'
+```
+
+The CLI creates the schema, runs every migration on it, seeds
+the four roles + three departments + a default Fixed shift
+policy, and creates the first Admin user. The slug must match
+`^[A-Za-z_][A-Za-z0-9_]{0,62}$` (Postgres CHECK constraint
+mirrored in code) and is what the operator types into the
+"Workspace" field on the login page.
+
+Repeat per tenant. See `backend/CLAUDE.md "Tenant
+provisioning CLI"` for the full red-line list (rollback on
+failure, password handling, audit row).
+
+> **Today's caveat:** P28 surfaced two multi-mode rough edges
+> that v1.x will polish:
+>
+> 1. Creating non-Admin users (HR / Manager / Employee) for a
+>    new tenant currently requires SQL — the API doesn't
+>    expose a "create user" surface. Track on
+>    `docs/v1.x-backlog.md` (B-1).
+> 2. Background-job entry points use `TenantScope`'s default
+>    `tenant_schema='main'`. Production deployments work, but
+>    invoking jobs from the CLI on a non-`main` tenant
+>    requires explicit `tenant_context(...)` wrappers. Track
+>    on `docs/v1.x-backlog.md` (B-2).
+>
+> Neither blocks a single-tenant deployment.
 
 ---
 

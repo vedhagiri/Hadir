@@ -3,7 +3,13 @@ services:
     image: postgres:15
     environment:
       POSTGRES_USER: hadir
-      POSTGRES_PASSWORD: hadir
+      # P28: pick up the operator-supplied admin password from
+      # ``HADIR_ADMIN_DB_PASSWORD`` so the bootstrap superuser
+      # ``hadir`` and the URL Alembic uses
+      # (``HADIR_ADMIN_DATABASE_URL``) agree on day one. Falls
+      # back to the dev default ``hadir`` so an unconfigured
+      # ``docker compose up`` keeps working in development.
+      POSTGRES_PASSWORD: ${HADIR_ADMIN_DB_PASSWORD:-hadir}
       POSTGRES_DB: hadir
     volumes:
       - postgres_data:/var/lib/postgresql/data

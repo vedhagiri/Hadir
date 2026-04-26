@@ -1,7 +1,7 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 + P23 + P24 + P25 + P26 + P27 complete (M2 core + M3 hardening complete)**:
+Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 + P23 + P24 + P25 + P26 + P27 + P28 complete (M2 core + M3 hardening + sign-off run)**:
 pilot frozen at tag `v0.1-pilot` on branch `release/pilot`; multi-tenant
 routing wired up via a per-connection `SET search_path` driven by a
 ContextVar + SQLAlchemy `checkout` event; the global `tenants` registry
@@ -299,8 +299,30 @@ Manual checklist (auth, authz, IDOR, SSRF, XSS, CSRF,
 crypto rotation, secrets, tenant isolation, file
 uploads, audit-log immutability) — all clear. 0 critical
 + 0 high findings open. `docs/security-review.md` is the
-durable record. **v1.0 M3 hardening complete. M4 launch
-next.**
+durable record. **P28** ran the M3-gate second-tenant
+sign-off. Stood up Demo Co from scratch on a separate
+compose project (`-p hadirdemo`); Omran's `main` data
+untouched throughout. 3 critical fixes landed
+in-session: (1) `docker-compose.yml` `POSTGRES_PASSWORD`
+now interpolates `${HADIR_ADMIN_DB_PASSWORD:-hadir}` so
+the bootstrap superuser + `HADIR_ADMIN_DATABASE_URL`
+agree from boot zero; (2) `capture_manager.start()`
+iterates `public.tenants` per active tenant in multi-mode
++ opens per-tenant `tenant_context(schema)` so the
+fail-closed listener doesn't crash the FastAPI lifespan;
+(3) `/metrics` added to `_HTTPS_EXEMPT_PATHS` so
+Prometheus scrapes don't 421 in production (the path is
+internal-only by deployment topology — nginx never
+proxies it). 2 runbook patches: stdlib-only Fernet key
+generation in §2 (was `from cryptography.fernet import
+Fernet`, failed on a clean Ubuntu 22.04), and a new §6
+multi-tenant pick-a-path with `provision_tenant.py`
+flow. 6 polish items deferred to new
+`docs/v1.x-backlog.md`. Demo Co full-day walkthrough
+completed end-to-end (branding, users, policies,
+holidays, cameras, attendance, approvals, reports,
+notifications, metrics). **v1.0 M3 hardening complete +
+sign-off run done. M4 launch next.**
 
 ## Tenant routing (v1.0 P1)
 **Approach chosen: SQLAlchemy `checkout` event + Python ContextVar**,

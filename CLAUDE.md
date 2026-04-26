@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 (M2 core complete) + P23 + P24 + P25 + P26 + P27 (M3 hardening complete).**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 (M2 core complete) + P23 + P24 + P25 + P26 + P27 + P28 (M3 hardening complete + sign-off run).**
 
 > **Tenant isolation is a P0 blocker.** The suites
 > `backend/tests/test_multi_tenant_isolation.py` (the P1 canary) and
@@ -637,6 +637,52 @@ of the Arabic translations before v1.0 launch** — see
   + 8 H + 1 C in gosu (postgres-base) deferred to next
   refresh. **`docs/security-review.md`** is the durable
   record. **435 tests still green.**
+
+- **P28** — Second-tenant non-prod sign-off run.
+  Stood up Demo Co from scratch following
+  `docs/deploy-production.md` step-by-step on a separate
+  compose project (`-p hadirdemo`) with isolated volumes;
+  Omran's `main` data untouched throughout. Three CRITICAL
+  runbook gaps surfaced and fixed in the same session:
+  (1) `docker-compose.yml` `POSTGRES_PASSWORD` was
+  hard-coded so the bootstrap superuser and the
+  operator-supplied `HADIR_ADMIN_DB_PASSWORD` disagreed —
+  Alembic auth-failed on first boot. Fixed via
+  compose-level interpolation
+  `${HADIR_ADMIN_DB_PASSWORD:-hadir}`. (2)
+  `capture_manager.start()` issued `engine.begin()` without
+  a tenant context; the multi-mode fail-closed listener
+  raised. Fixed by iterating `public.tenants` per active
+  tenant + opening per-tenant `tenant_context(schema)`. (3)
+  `/metrics` was 421'd by the production HTTPS gate, so
+  Prometheus scrapes failed and every Grafana panel went
+  empty. Fixed by adding `/metrics` to
+  `_HTTPS_EXEMPT_PATHS` (internal-only is preserved by
+  nginx not proxying it). New regression test
+  `test_https_gate_exempts_metrics_for_prometheus`. Two
+  runbook-text patches: stdlib-only Fernet key generation
+  in §2 (was `from cryptography.fernet import Fernet`,
+  failed on a clean Ubuntu 22.04), and a new §6 pick-a-path
+  block + §6b multi-tenant flow that explains
+  `HADIR_TENANT_MODE` and shows the
+  `scripts/provision_tenant.py` invocation. Six deferred
+  polishes captured in new `docs/v1.x-backlog.md` (B-1
+  through B-9): operator-friendly user creation API
+  (medium), `TenantScope.for_tenant` classmethod for
+  background jobs (medium), runbook placeholder syntax
+  (low), email-validator `.local` TLD (low), debian-trixie
+  OS CVEs monthly rebuild (medium, no fix yet), gosu CVEs
+  in postgres-alpine base (medium), dev-only Python+npm
+  CVEs (low), Fernet two-key rotation tooling (medium).
+  Demo Co full-day walkthrough completed end-to-end:
+  branding (navy + lato), HR + Manager + 3 employees, Flex
+  policy + Ramadan policy + 3 holidays + 2 cameras,
+  attendance recompute (Anya: in 07:32, out 15:34, 482
+  min), Manager → HR approval, XLSX (5,140 B) + PDF
+  (16,420 B) reports, notifications pipeline emitted 5
+  rows across the 3 categories, Prometheus scraped
+  `tenant="2"` metrics. **436 backend tests still green**
+  (1 new regression test).
 
 Next: **M4 launch** per `v1.0-phase-plan.md`. Wait for
 the user before starting. **Open critical item carries

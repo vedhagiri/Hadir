@@ -41,26 +41,89 @@ class CaptureManager:
     # ------------------------------------------------------------------
 
     def start(self, *, config: Optional[ReaderConfig] = None) -> None:
-        """Start workers for all enabled cameras in the pilot tenant."""
+        """Start workers for every enabled camera, across every tenant.
+
+        Single-mode (pilot, ``HADIR_TENANT_MODE=single``): falls back
+        to the configured default tenant id and reads from the
+        legacy ``main`` schema. The SQLAlchemy ``checkout`` listener
+        defaults to ``main`` when no contextvar is set in single
+        mode, so a bare ``engine.begin()`` resolves correctly.
+
+        Multi-mode (``HADIR_TENANT_MODE=multi``, P28): iterates
+        ``public.tenants`` to discover every active tenant schema,
+        then opens a per-tenant ``tenant_context(schema)`` to
+        enumerate that tenant's cameras and spawn workers. Without
+        this, the listener fails-closed and the FastAPI lifespan
+        crashes during ``capture_manager.start()`` — the bug found
+        on the P28 sign-off run.
+        """
 
         with self._lock:
             if self._enabled:
                 return
             self._enabled = True
             self._config = config
-            tenant_id = get_settings().default_tenant_id
-            scope = TenantScope(tenant_id=tenant_id)
-            engine = get_engine()
 
-            logger.info("capture manager starting (tenant_id=%s)", tenant_id)
-            with engine.begin() as conn:
-                cams = camera_repo.list_cameras(conn, scope)
-            for cam in cams:
-                if cam.enabled:
-                    self._spawn_locked(cam.id)
+            settings = get_settings()
+            engine = get_engine()
+            tenants_to_scan: list[tuple[int, Optional[str]]]
+            if settings.tenant_mode == "multi":
+                from hadir.db import tenant_context, tenants  # noqa: PLC0415
+                from sqlalchemy import select  # noqa: PLC0415
+
+                with tenant_context("public"):
+                    with engine.begin() as conn:
+                        rows = conn.execute(
+                            select(tenants.c.id, tenants.c.schema_name).where(
+                                tenants.c.status == "active"
+                            )
+                        ).all()
+                tenants_to_scan = [
+                    (int(r.id), str(r.schema_name)) for r in rows
+                ]
+            else:
+                tenants_to_scan = [(settings.default_tenant_id, None)]
+
+            logger.info(
+                "capture manager starting (mode=%s tenants=%d)",
+                settings.tenant_mode,
+                len(tenants_to_scan),
+            )
+
+            for tenant_id, schema in tenants_to_scan:
+                scope = TenantScope(tenant_id=tenant_id)
+                cams = self._list_cameras_for_tenant(
+                    engine, scope, schema=schema
+                )
+                for cam in cams:
+                    if cam.enabled:
+                        # ``_spawn_locked`` already binds the
+                        # camera+tenant via ``camera_repo.get_camera``
+                        # inside its own per-tenant scope.
+                        self._spawn_locked(cam.id, tenant_id=tenant_id, schema=schema)
+
             logger.info(
                 "capture manager started with %d worker(s)", len(self._workers)
             )
+
+    def _list_cameras_for_tenant(
+        self,
+        engine,
+        scope: TenantScope,
+        *,
+        schema: Optional[str],
+    ):
+        """Read enabled cameras for one tenant, with the right
+        per-schema search path applied when in multi-mode."""
+
+        if schema is None:
+            with engine.begin() as conn:
+                return camera_repo.list_cameras(conn, scope)
+        from hadir.db import tenant_context  # noqa: PLC0415
+
+        with tenant_context(schema):
+            with engine.begin() as conn:
+                return camera_repo.list_cameras(conn, scope)
 
     def stop(self) -> None:
         """Stop every worker. Blocks until all threads unwind (bounded)."""
@@ -142,13 +205,38 @@ class CaptureManager:
 
             self._spawn_locked(camera_id)
 
-    def _spawn_locked(self, camera_id: int) -> None:
-        """Assumes the caller holds ``self._lock``."""
+    def _spawn_locked(
+        self,
+        camera_id: int,
+        *,
+        tenant_id: Optional[int] = None,
+        schema: Optional[str] = None,
+    ) -> None:
+        """Assumes the caller holds ``self._lock``.
 
-        scope = TenantScope(tenant_id=get_settings().default_tenant_id)
+        ``tenant_id`` + ``schema`` are P28 additions for multi-mode
+        starts, where the caller has already enumerated tenants
+        from ``public.tenants`` and knows which one this camera
+        belongs to. Single-mode (and the legacy hot-reload paths
+        in ``on_camera_*``) leave both at ``None`` so the call
+        falls back to the default-tenant + listener-default-schema
+        behaviour the pilot shipped.
+        """
+
+        if tenant_id is None:
+            tenant_id = get_settings().default_tenant_id
+        scope = TenantScope(tenant_id=tenant_id)
         engine = get_engine()
-        with engine.begin() as conn:
-            cam = camera_repo.get_camera(conn, scope, camera_id)
+
+        if schema is not None:
+            from hadir.db import tenant_context  # noqa: PLC0415
+
+            with tenant_context(schema):
+                with engine.begin() as conn:
+                    cam = camera_repo.get_camera(conn, scope, camera_id)
+        else:
+            with engine.begin() as conn:
+                cam = camera_repo.get_camera(conn, scope, camera_id)
         if cam is None or not cam.enabled:
             return
 

@@ -176,6 +176,28 @@ def test_https_gate_exempts_health_check() -> None:
     assert resp.status_code == 200
 
 
+def test_https_gate_exempts_metrics_for_prometheus() -> None:
+    """P28 regression: Prometheus scrapes ``/metrics`` over the
+    private docker network in plain HTTP. The HTTPS gate must
+    let it through, otherwise the dashboards go empty in
+    production."""
+
+    app = FastAPI()
+    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
+    app.add_middleware(HttpsEnforceMiddleware)
+    app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
+
+    @app.get("/metrics")
+    def metrics() -> dict[str, str]:
+        return {"hadir_test_metric": "1"}
+
+    client = TestClient(app)
+    resp = client.get("/metrics")
+    assert resp.status_code == 200
+    assert resp.json() == {"hadir_test_metric": "1"}
+
+
 # --- security headers ------------------------------------------
 
 

@@ -110,10 +110,21 @@ def check_production_config(settings: Settings) -> None:
         )
 
 
-# Paths exempt from the HTTPS gate. ``/api/health`` is reached by
-# the docker-compose healthcheck on the private network and by
-# load-balancer probes that may target HTTP intentionally.
-_HTTPS_EXEMPT_PATHS: frozenset[str] = frozenset({"/api/health"})
+# Paths exempt from the HTTPS gate. Reached over plain HTTP from
+# inside the private docker network (or by load-balancer probes
+# that may target HTTP intentionally) — both are internal-only by
+# the prod compose's port-mapping rules.
+#
+# ``/api/health``    — docker-compose + LB liveness probes.
+# ``/metrics``       — Prometheus scrapes (P26). Backend is on
+#                      the ``hadir-internal`` network only;
+#                      nginx never proxies this path. Without
+#                      this exemption, every scrape 421s in
+#                      production and the dashboards go empty
+#                      (caught on the P28 sign-off run).
+_HTTPS_EXEMPT_PATHS: frozenset[str] = frozenset(
+    {"/api/health", "/metrics"}
+)
 
 
 class HttpsEnforceMiddleware(BaseHTTPMiddleware):
