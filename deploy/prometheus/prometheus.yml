@@ -1,0 +1,43 @@
+# Hadir Prometheus config (v1.0 P26).
+#
+# 15-second scrape interval — fast enough that the Grafana
+# panels refresh "live" while a person walks past the camera,
+# slow enough that scraping doesn't itself become a hot path.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+
+# Alert rules + alertmanager wiring. The alertmanager service
+# is added to docker-compose.prod.yml alongside Prometheus +
+# Grafana so the routing topology is self-contained.
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+scrape_configs:
+  # Hadir backend exposes /metrics on the same FastAPI app.
+  # ``backend`` is the service name on the private docker
+  # network (``hadir-internal``); the path is intentionally
+  # NOT proxied by nginx so it stays internal-only.
+  - job_name: hadir-backend
+    metrics_path: /metrics
+    scheme: http
+    static_configs:
+      - targets:
+          - backend:8000
+        labels:
+          service: hadir-backend
+
+  # Self-scrape so Prometheus's own health is visible in
+  # Grafana alongside the application metrics.
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090

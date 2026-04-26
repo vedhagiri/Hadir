@@ -142,3 +142,47 @@ def recompute_attendance(user: Annotated[CurrentUser, ADMIN]) -> RecomputeRespon
     scope = TenantScope(tenant_id=user.tenant_id)
     upserted = recompute_today(scope)
     return RecomputeResponse(upserted=upserted)
+
+
+class TickMetricsResponse(BaseModel):
+    ticks: int
+
+
+@router.post("/tick_metrics", response_model=TickMetricsResponse)
+def tick_metrics(user: Annotated[CurrentUser, ADMIN]) -> TickMetricsResponse:
+    """P26 dev-only: bump every Hadir Prometheus counter once
+    so the dashboard demo doesn't depend on a live RTSP camera.
+
+    Mirrors what the real hot paths emit:
+      * 24 capture frames (1 second of video at 4 fps × 6 sec)
+      * 2 identified + 1 unidentified detection event
+      * 7 attendance records computed
+      * 2 sent / 1 failed email send (smtp provider)
+      * No reachability change — that's set by the camera
+        worker, not the test endpoint.
+    """
+
+    from hadir.metrics import (  # noqa: PLC0415
+        observe_attendance_recomputed,
+        observe_capture_frame,
+        observe_detection_event,
+        observe_email_send,
+    )
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    ticks = 0
+    for _ in range(24):
+        observe_capture_frame(scope.tenant_id, 99001)
+        ticks += 1
+    observe_detection_event(scope.tenant_id, identified=True)
+    observe_detection_event(scope.tenant_id, identified=True)
+    observe_detection_event(scope.tenant_id, identified=False)
+    ticks += 3
+    observe_attendance_recomputed(scope.tenant_id, 7)
+    ticks += 7
+    observe_email_send(scope.tenant_id, provider="smtp", status="sent")
+    observe_email_send(scope.tenant_id, provider="smtp", status="sent")
+    observe_email_send(scope.tenant_id, provider="smtp", status="failed")
+    ticks += 3
+    logger.info("_test/tick_metrics ticked %s metric updates", ticks)
+    return TickMetricsResponse(ticks=ticks)

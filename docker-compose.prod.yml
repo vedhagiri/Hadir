@@ -125,9 +125,77 @@ services:
       - hadir-internal
       - default
 
+  # P26: Prometheus scrapes ``backend:8000/metrics`` over the
+  # private docker network every 15s. Listens on :9090 only on
+  # the internal network — Grafana proxies to it. We do NOT
+  # expose :9090 on the host in production; an operator who
+  # needs ad-hoc PromQL access tunnels in via ``docker compose
+  # exec``. Same red line applies to Alertmanager (:9093).
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+      - --web.enable-lifecycle
+    networks:
+      - hadir-internal
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    volumes:
+      - ./deploy/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    environment:
+      HADIR_ALERTMANAGER_WEBHOOK_URL: ${HADIR_ALERTMANAGER_WEBHOOK_URL:-}
+      HADIR_ALERTMANAGER_SMTP_HOST: ${HADIR_ALERTMANAGER_SMTP_HOST:-}
+      HADIR_ALERTMANAGER_SMTP_FROM: ${HADIR_ALERTMANAGER_SMTP_FROM:-}
+      HADIR_ALERTMANAGER_ADMIN_EMAIL: ${HADIR_ALERTMANAGER_ADMIN_EMAIL:-}
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    networks:
+      - hadir-internal
+    restart: unless-stopped
+
+  # Grafana on :3000 — exposed off-host so operators can hit
+  # the dashboards directly. Authentication is the operator-set
+  # ``HADIR_GRAFANA_ADMIN_PASSWORD``; the default credential is
+  # rotated on first boot. Anonymous access is OFF.
+  grafana:
+    image: grafana/grafana:11.2.2
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${HADIR_GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${HADIR_GRAFANA_ADMIN_PASSWORD:?must be set in production}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: ${HADIR_GRAFANA_ROOT_URL:-http://localhost:3000}
+    ports:
+      - "${HADIR_GRAFANA_PORT:-3000}:3000"
+    networks:
+      - hadir-internal
+      - default
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
 volumes:
   certbot_webroot:
   backup_storage:
+  prometheus_data:
+  alertmanager_data:
+  grafana_data:
 
 networks:
   hadir-internal:

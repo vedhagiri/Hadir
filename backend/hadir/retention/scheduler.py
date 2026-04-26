@@ -65,6 +65,18 @@ class RetentionScheduler:
                 "retention scheduler started: 03:00 %s daily",
                 tz.key,
             )
+            try:
+                from hadir.metrics import (  # noqa: PLC0415
+                    install_scheduler_failure_listener,
+                )
+
+                install_scheduler_failure_listener(
+                    scheduler,
+                    job_name="retention_sweep",
+                    tenant_id=None,  # cross-tenant
+                )
+            except Exception:  # noqa: BLE001
+                pass
 
     def stop(self) -> None:
         with self._lock:

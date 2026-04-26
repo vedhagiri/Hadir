@@ -612,6 +612,18 @@ class ReportRunner:
                 "report runner started: interval=%ds",
                 settings.report_runner_poll_seconds,
             )
+            try:
+                from hadir.metrics import (  # noqa: PLC0415
+                    install_scheduler_failure_listener,
+                )
+
+                install_scheduler_failure_listener(
+                    scheduler,
+                    job_name="report_runner",
+                    tenant_id=None,
+                )
+            except Exception:  # noqa: BLE001
+                pass
 
     def stop(self) -> None:
         with self._lock:

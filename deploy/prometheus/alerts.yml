@@ -1,0 +1,116 @@
+# Hadir Prometheus alert rules (v1.0 P26).
+#
+# Four alerts cover the operational red lines BRD calls out:
+#
+#   * camera offline > 5 min       (warning)
+#   * capture rate too low > 10 min (warning)
+#   * scheduler job failed 3x      (critical)
+#   * email failure rate > 10% / 1h (warning)
+#
+# Routing + delivery (webhook OR per-tenant Admin email) lives
+# in deploy/alertmanager/alertmanager.yml. Operators wire the
+# webhook URL via ``HADIR_ALERTMANAGER_WEBHOOK`` at deploy time.
+
+groups:
+  - name: hadir.cameras
+    rules:
+      - alert: HadirCameraUnreachable
+        # ``hadir_camera_reachable`` is 1 when the latest
+        # health snapshot reported reachable=true. Down for
+        # five contiguous minutes is the BRD threshold for a
+        # warning page.
+        expr: hadir_camera_reachable == 0
+        for: 5m
+        labels:
+          severity: warning
+          component: capture
+        annotations:
+          summary: "Camera unreachable for >5 min (tenant {{ $labels.tenant }} camera {{ $labels.camera }})"
+          description: |
+            Hadir hasn't been able to read frames from camera
+            id={{ $labels.camera }} (tenant id={{ $labels.tenant }}) for
+            five consecutive minutes. Operators should verify the
+            RTSP credentials, network reachability, and the
+            camera's power state.
+
+      - alert: HadirCaptureRateLow
+        # Walking-past traffic should produce > 0 frames/sec
+        # while a real person is in front of the camera, but a
+        # quiet office lobby naturally drops to 0. The alert
+        # fires only when the camera is *reachable* (so we know
+        # this isn't already covered by HadirCameraUnreachable)
+        # AND the capture rate has been below 0.1 frames/sec
+        # over a 10-minute window — that's a stalled reader,
+        # not an empty hallway.
+        expr: |
+          rate(hadir_capture_frames_total[5m]) < 0.1
+          and on (tenant, camera) hadir_camera_reachable == 1
+        for: 10m
+        labels:
+          severity: warning
+          component: capture
+        annotations:
+          summary: "Capture rate below threshold for >10 min (tenant {{ $labels.tenant }} camera {{ $labels.camera }})"
+          description: |
+            Camera id={{ $labels.camera }} reports reachable=1 but
+            the capture rate has been < 0.1 frames/sec for ten
+            consecutive minutes. The reader thread has likely
+            stalled — bouncing the backend or
+            ``capture_manager.on_camera_updated`` will respawn
+            the worker.
+
+  - name: hadir.schedulers
+    rules:
+      - alert: HadirSchedulerJobFailing
+        # Three consecutive failures (i.e. the failure counter
+        # increases by ≥3 over the last 15 minutes — three
+        # 5-minute scrapes of the same scheduled run). Critical
+        # because a stuck scheduler quietly stops driving its
+        # downstream invariant (attendance, retention, email
+        # delivery, report runs).
+        expr: |
+          increase(hadir_scheduler_jobs_failed_total[15m]) >= 3
+        for: 0m
+        labels:
+          severity: critical
+          component: scheduler
+        annotations:
+          summary: "Scheduler job {{ $labels.job }} failed 3+ times in 15 min"
+          description: |
+            ``{{ $labels.job }}`` (tenant id={{ $labels.tenant }})
+            has produced three or more failures inside fifteen
+            minutes. Check ``backend/logs/app.log`` for the
+            stack trace.
+
+  - name: hadir.email
+    rules:
+      - alert: HadirEmailFailureRateHigh
+        # Failure rate over the last hour, computed only when
+        # there *was* email traffic (we use a min(>0) gate to
+        # avoid 0/0 = NaN). > 10% is the BRD threshold.
+        expr: |
+          (
+            sum by (tenant) (
+              rate(hadir_email_send_total{status="failed"}[1h])
+            )
+            /
+            (
+              sum by (tenant) (
+                rate(hadir_email_send_total{status=~"sent|failed"}[1h])
+              )
+              > 0
+            )
+          ) > 0.10
+        for: 5m
+        labels:
+          severity: warning
+          component: email
+        annotations:
+          summary: "Email failure rate >10% over the last hour (tenant {{ $labels.tenant }})"
+          description: |
+            More than 10% of email send attempts for tenant
+            id={{ $labels.tenant }} have failed in the last
+            hour. Likely causes: SMTP relay down, Microsoft
+            Graph credentials rotated without updating the
+            tenant config, or a recipient list with stale
+            addresses.

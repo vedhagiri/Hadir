@@ -186,6 +186,22 @@ class CaptureWorker:
                         )
                         break
                     frame_count_minute += 1
+                    # P26: frame counter — opaque tenant + camera
+                    # ids only. Walking past the camera ticks this
+                    # at ~4 Hz; a quiet camera ticks slowly. The
+                    # Grafana "Capture rate per camera" panel is
+                    # rate(hadir_capture_frames_total[5m]).
+                    try:
+                        from hadir.metrics import (  # noqa: PLC0415
+                            observe_capture_frame,
+                        )
+
+                        observe_capture_frame(
+                            self._scope.tenant_id, self.camera_id
+                        )
+                    except Exception:  # noqa: BLE001
+                        # Metrics must never sink the capture loop.
+                        pass
 
                     # Detect → track → emit one event per NEW track only.
                     try:

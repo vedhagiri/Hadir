@@ -43,6 +43,15 @@ dependencies = [
     # supports nested keys + Unicode without a build step;
     # operators editing translations don't need to escape quotes.
     "PyYAML==6.0.2",
+    # P26: Prometheus metrics. ``prometheus-client`` is the
+    # canonical Python client; ``prometheus-fastapi-instrumentator``
+    # wraps the request-duration / status-code histograms we'd
+    # otherwise have to write by hand. Both pinned because the
+    # /metrics output format is what Grafana panels match
+    # against — accidental upgrades during a CI run would shift
+    # the label set.
+    "prometheus-client==0.21.0",
+    "prometheus-fastapi-instrumentator==7.0.0",
 ]
 
 [project.optional-dependencies]

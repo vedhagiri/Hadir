@@ -135,6 +135,15 @@ def emit_detection_event(
             .returning(detection_events.c.id)
         ).scalar_one()
 
+    # P26: Prometheus counter — labelled by ``identified``
+    # (whether the matcher pinned an employee_id). Only the
+    # opaque tenant_id + the boolean go into labels — no PII.
+    from hadir.metrics import observe_detection_event  # noqa: PLC0415
+
+    observe_detection_event(
+        scope.tenant_id, identified=employee_id is not None
+    )
+
     return int(new_id)
 
 
@@ -162,6 +171,13 @@ def write_health_snapshot(
                 note=note,
             )
         )
+
+    # P26: reachability gauge. Updated on the same per-minute
+    # tick as the snapshot insert so a Prometheus scrape always
+    # reflects the freshest health-check result.
+    from hadir.metrics import set_camera_reachable  # noqa: PLC0415
+
+    set_camera_reachable(scope.tenant_id, camera_id, reachable=reachable)
 
 
 def bump_camera_last_seen(engine: Engine, scope: TenantScope, camera_id: int) -> None:

@@ -200,11 +200,20 @@ def drain_one_tenant(*, scope: TenantScope) -> dict:
     counts = {"sent": 0, "skipped_pref": 0, "skipped_no_email": 0, "failed": 0}
     engine = get_engine()
 
+    # P26: capture the provider label up-front so the metric
+    # buckets stay stable across the iteration. ``unknown`` is
+    # the dev/test placeholder; never an empty string.
+    from hadir.metrics import observe_email_send  # noqa: PLC0415
+
     with engine.begin() as conn:
         sender = _read_sender_config(conn, tenant_id=scope.tenant_id)
         tenant = _tenant_summary(conn, tenant_id=scope.tenant_id)
         branding = _branding_ctx(conn, tenant_id=scope.tenant_id)
         pending = list_pending_email(conn, scope, limit=200)
+
+    provider_label = (
+        sender.provider if sender is not None else "disabled"
+    )
 
     if not pending:
         return counts
@@ -222,6 +231,11 @@ def drain_one_tenant(*, scope: TenantScope) -> dict:
                     reason="email_config disabled",
                 )
                 counts["skipped_no_email"] += 1
+                observe_email_send(
+                    scope.tenant_id,
+                    provider=provider_label,
+                    status="skipped_no_email",
+                )
         return counts
 
     sender_obj = get_sender(sender)
@@ -245,6 +259,11 @@ def drain_one_tenant(*, scope: TenantScope) -> dict:
                     reason="user_pref_email_off",
                 )
             counts["skipped_pref"] += 1
+            observe_email_send(
+                scope.tenant_id,
+                provider=provider_label,
+                status="skipped_pref",
+            )
             continue
 
         if not recipient:
@@ -256,6 +275,11 @@ def drain_one_tenant(*, scope: TenantScope) -> dict:
                     reason="no_recipient_email",
                 )
             counts["skipped_no_email"] += 1
+            observe_email_send(
+                scope.tenant_id,
+                provider=provider_label,
+                status="skipped_no_email",
+            )
             continue
 
         # 2) Build + send.
@@ -277,11 +301,17 @@ def drain_one_tenant(*, scope: TenantScope) -> dict:
                     error=type(exc).__name__ + ": " + str(exc),
                 )
             counts["failed"] += 1
+            observe_email_send(
+                scope.tenant_id, provider=provider_label, status="failed"
+            )
             continue
 
         with engine.begin() as conn:
             mark_email_sent(conn, scope, notification_id=n.id)
         counts["sent"] += 1
+        observe_email_send(
+            scope.tenant_id, provider=provider_label, status="sent"
+        )
 
     return counts
 
@@ -305,6 +335,42 @@ def _tick() -> int:
             scope = TenantScope(tenant_id=int(tr.id))
             with tenant_context(str(tr.schema_name)):
                 counts = drain_one_tenant(scope=scope)
+                # P26: refresh ``hadir_active_sessions`` per
+                # tenant on the same 30-second tick. We're
+                # already inside the tenant context so a plain
+                # SELECT ON ``user_sessions`` resolves to the
+                # right schema. Active = ``expires_at >= now()``.
+                try:
+                    from datetime import datetime, timezone  # noqa: PLC0415
+                    from sqlalchemy import select as _select  # noqa: PLC0415
+
+                    from hadir.db import (  # noqa: PLC0415
+                        get_engine as _get_engine,
+                        user_sessions as _user_sessions,
+                    )
+                    from hadir.metrics import (  # noqa: PLC0415
+                        set_active_sessions,
+                    )
+
+                    with _get_engine().begin() as _conn:
+                        active = int(
+                            _conn.execute(
+                                _select(
+                                    _user_sessions.c.id
+                                ).where(
+                                    _user_sessions.c.tenant_id == int(tr.id),
+                                    _user_sessions.c.expires_at
+                                    >= datetime.now(timezone.utc),
+                                )
+                            ).rowcount or 0
+                        )
+                    set_active_sessions(int(tr.id), active)
+                except Exception:  # noqa: BLE001
+                    # Metrics refresh is best-effort.
+                    logger.debug(
+                        "active_sessions gauge refresh failed",
+                        exc_info=True,
+                    )
             if any(counts.values()):
                 logger.info(
                     "notifications drain tenant=%s %s",
@@ -341,6 +407,18 @@ class NotificationWorker:
             scheduler.start()
             self._scheduler = scheduler
             logger.info("notification email worker started: interval=30s")
+            try:
+                from hadir.metrics import (  # noqa: PLC0415
+                    install_scheduler_failure_listener,
+                )
+
+                install_scheduler_failure_listener(
+                    scheduler,
+                    job_name="notification_worker",
+                    tenant_id=None,
+                )
+            except Exception:  # noqa: BLE001
+                pass
 
     def stop(self) -> None:
         with self._lock:

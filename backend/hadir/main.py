@@ -155,6 +155,35 @@ def create_app() -> FastAPI:
 
     app.add_middleware(TenantScopeMiddleware)
 
+    # P26: Prometheus instrumentation. The instrumentator
+    # auto-wraps every handler with a request-duration histogram
+    # plus a status-code counter. ``/metrics`` is exposed on the
+    # same FastAPI app, but ``ops/nginx/hadir.conf.template`` does
+    # NOT proxy ``/metrics`` to the public internet — Prometheus
+    # scrapes it over the private ``hadir-internal`` docker
+    # network. Internal-only is the load-bearing red line.
+    try:
+        from prometheus_fastapi_instrumentator import (  # noqa: PLC0415
+            Instrumentator,
+        )
+
+        instrumentator = Instrumentator(
+            should_group_status_codes=True,
+            should_ignore_untemplated=True,
+            should_respect_env_var=False,
+            excluded_handlers=["/metrics"],
+        )
+        instrumentator.instrument(app).expose(
+            app,
+            endpoint="/metrics",
+            include_in_schema=False,
+            tags=["internal"],
+        )
+    except ImportError:
+        logging.getLogger(__name__).warning(
+            "prometheus-fastapi-instrumentator not installed; /metrics off"
+        )
+
     # Security headers stamp on every response (defence in depth —
     # nginx adds the same headers, but the backend stays safe even
     # if a future deployment fronts it differently).

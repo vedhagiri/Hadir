@@ -1,0 +1,73 @@
+# Hadir observability overlay (v1.0 P26).
+#
+# Lets operators bring Prometheus + Grafana + Alertmanager up
+# *alongside the dev stack* for local verification and
+# dashboard authoring:
+#
+#     docker compose \
+#         -f docker-compose.yml \
+#         -f docker-compose.observability.yml \
+#         up -d prometheus grafana alertmanager
+#
+# Production wiring (private network, persistent volumes,
+# Grafana admin secret) lives in docker-compose.prod.yml. This
+# overlay deliberately exposes :9090 + :9093 on the host so
+# the operator can poke at PromQL + alert routing during
+# development; production hides them.
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+      - --web.enable-lifecycle
+    ports:
+      - "9090:9090"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    volumes:
+      - ./deploy/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    environment:
+      HADIR_ALERTMANAGER_WEBHOOK_URL: ${HADIR_ALERTMANAGER_WEBHOOK_URL:-}
+      HADIR_ALERTMANAGER_SMTP_HOST: ${HADIR_ALERTMANAGER_SMTP_HOST:-}
+      HADIR_ALERTMANAGER_SMTP_FROM: ${HADIR_ALERTMANAGER_SMTP_FROM:-}
+      HADIR_ALERTMANAGER_ADMIN_EMAIL: ${HADIR_ALERTMANAGER_ADMIN_EMAIL:-}
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    ports:
+      - "9093:9093"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${HADIR_GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${HADIR_GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "${HADIR_GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  prometheus_data:
+  alertmanager_data:
+  grafana_data:

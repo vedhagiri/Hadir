@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 (M2 core complete) + P23 + P24 + P25 (M3 hardening — third phase).**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 (M2 core complete) + P23 + P24 + P25 + P26 (M3 hardening — fourth phase).**
 
 > **Tenant isolation is a P0 blocker.** The suites
 > `backend/tests/test_multi_tenant_isolation.py` (the P1 canary) and
@@ -561,7 +561,50 @@ of the Arabic translations before v1.0 launch** — see
   confirmed redact + audit trail; manual retention sweep
   ran clean across all 3 tenants.
 
-Next: **P26 (M3 hardening continues)** per
+- **P26** — Prometheus + Grafana. New `hadir/metrics.py`
+  defines seven custom metrics with opaque-only labels
+  (numeric tenant/camera/employee ids; provider + status
+  enums) — no PII red line.
+  `prometheus-fastapi-instrumentator==7.0.0` mounts on
+  `/metrics`; nginx in production does NOT proxy this path
+  (internal-only red line). Hot paths instrumented:
+  capture worker bumps `hadir_capture_frames_total` per
+  read, `events.emit_detection_event` bumps
+  `hadir_detection_events_total{identified}` per row,
+  `events.write_health_snapshot` sets
+  `hadir_camera_reachable` 0/1 per minute, attendance
+  scheduler bumps `hadir_attendance_records_computed_total`
+  by upsert count, notification worker bumps
+  `hadir_email_send_total{provider,status}` per attempt,
+  notification worker's 30 s tick refreshes
+  `hadir_active_sessions{tenant}`. Each scheduler's start()
+  installs an APScheduler `EVENT_JOB_ERROR` listener that
+  bumps `hadir_scheduler_jobs_failed_total{tenant,job}`.
+  New `deploy/prometheus/prometheus.yml` (15 s scrape) +
+  `deploy/prometheus/alerts.yml` (4 alerts:
+  HadirCameraUnreachable warning 5 min,
+  HadirCaptureRateLow warning 10 min,
+  HadirSchedulerJobFailing critical 3-in-15-min,
+  HadirEmailFailureRateHigh warning >10% over 1 hour).
+  `deploy/alertmanager/alertmanager.yml` fans alerts to a
+  webhook + Admin email (env-driven).
+  `deploy/grafana/{provisioning,dashboards}/` provisions
+  the Hadir — Operations dashboard with seven panels
+  (capture rate, identification rate, attendance per hour,
+  reachability matrix, HTTP p50/p95/p99, email success
+  rate, active sessions). New services in
+  `docker-compose.prod.yml` (internal-only ports) +
+  `docker-compose.observability.yml` (dev overlay with
+  exposed :9090/:9093/:3000). `docs/observability.md` is
+  the operator runbook. Live verification on the dev stack:
+  Prometheus targets up, all 4 alert rules loaded, dashboard
+  provisioned in Grafana, all 7 custom metrics emit non-
+  zero values (after `_test/tick_metrics`), simulated
+  unreachable camera transitions HadirCameraUnreachable to
+  `pending` (will fire after 5 min). 435 tests passing
+  (no regressions).
+
+Next: **P27 (M3 hardening continues)** per
 `v1.0-phase-plan.md`. Wait for the user before starting.
 **Open critical item carries over: Omran HR native-speaker
 review of the Arabic translations before v1.0 launch** — see

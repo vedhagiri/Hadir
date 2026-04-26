@@ -1,7 +1,7 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 + P23 + P24 + P25 complete (M2 core + third M3 hardening phase)**:
+Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 + P23 + P24 + P25 + P26 complete (M2 core + fourth M3 hardening phase)**:
 pilot frozen at tag `v0.1-pilot` on branch `release/pilot`; multi-tenant
 routing wired up via a per-connection `SET search_path` driven by a
 ContextVar + SQLAlchemy `checkout` event; the global `tenants` registry
@@ -268,8 +268,23 @@ confirmation phrase) drop photos + custom_field_values,
 redact PII (`full_name='[deleted]'`,
 `email='deleted-{id}@hadir.local'`), flip status, invalidate
 the matcher cache, and write an audit row carrying the
-previous PII so the right-to-erasure is verifiable. **v1.0
-M3 hardening continues with P26.**
+previous PII so the right-to-erasure is verifiable. **P26**
+added Prometheus + Grafana: new `hadir/metrics.py` defines
+seven custom metrics (capture frames, detection events,
+camera reachability, attendance computed, scheduler
+failures, email send, active sessions) with PDPL-safe
+opaque labels only. `prometheus-fastapi-instrumentator`
+mounts `/metrics` (internal-only red line — nginx does NOT
+proxy). Hot paths instrumented in capture, attendance,
+notification worker, and every scheduler's
+`EVENT_JOB_ERROR` listener. `deploy/prometheus/`,
+`deploy/grafana/`, `deploy/alertmanager/` ship the YAML +
+JSON dashboards; `docker-compose.prod.yml` adds the three
+services on the private network (Grafana the only port
+exposed); `docker-compose.observability.yml` is the dev
+overlay. Four alert rules + seven Grafana panels cover
+the operational view. **v1.0 M3 hardening continues with
+P27.**
 
 ## Tenant routing (v1.0 P1)
 **Approach chosen: SQLAlchemy `checkout` event + Python ContextVar**,

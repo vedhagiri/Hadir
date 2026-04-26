@@ -1,0 +1,53 @@
+# Hadir alertmanager config (v1.0 P26).
+#
+# Two delivery paths, both operator-configurable:
+#
+#   * webhook  — POSTs the JSON alert payload to a URL the
+#                operator owns. Most teams wire this to Slack,
+#                PagerDuty, or a tenant-specific incident bus.
+#   * email    — falls back to the operator-configured Admin
+#                inbox when no webhook is set.
+#
+# Both endpoints come from environment variables so the same
+# YAML works across environments without templating:
+#
+#   HADIR_ALERTMANAGER_WEBHOOK_URL   (e.g. https://hooks.slack.com/...)
+#   HADIR_ALERTMANAGER_SMTP_HOST     SMTP relay
+#   HADIR_ALERTMANAGER_SMTP_FROM     "Hadir Alerts <alerts@example.com>"
+#   HADIR_ALERTMANAGER_ADMIN_EMAIL   Admin inbox (comma-separated)
+#
+# Keep the routing tree shallow for the pilot: warnings + criticals
+# all fan out the same way. Per-tenant fan-out via Alertmanager
+# routes is M3 hardening territory once we know how Omran wants
+# to slice incidents across tenants.
+
+global:
+  resolve_timeout: 5m
+  smtp_smarthost: "${HADIR_ALERTMANAGER_SMTP_HOST:-}"
+  smtp_from: "${HADIR_ALERTMANAGER_SMTP_FROM:-alerts@hadir.local}"
+  smtp_require_tls: true
+
+route:
+  receiver: hadir-default
+  group_by: ["alertname", "tenant"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers:
+        - severity = critical
+      receiver: hadir-default
+      group_wait: 0s
+      repeat_interval: 1h
+
+receivers:
+  - name: hadir-default
+    webhook_configs:
+      - url: "${HADIR_ALERTMANAGER_WEBHOOK_URL:-http://localhost:5001/_devnull}"
+        send_resolved: true
+    email_configs:
+      - to: "${HADIR_ALERTMANAGER_ADMIN_EMAIL:-}"
+        send_resolved: true
+        # Fall back to "skip" when no SMTP is configured —
+        # Alertmanager refuses to send mail when smtp_smarthost
+        # is empty, so the empty-string defaults above are safe.

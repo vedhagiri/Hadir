@@ -271,6 +271,15 @@ def _recompute_today_inner(scope: TenantScope) -> int:
         today,
         upserted,
     )
+
+    # P26: Prometheus counter — opaque tenant id only.
+    try:
+        from hadir.metrics import observe_attendance_recomputed  # noqa: PLC0415
+
+        observe_attendance_recomputed(scope.tenant_id, upserted)
+    except Exception:  # noqa: BLE001
+        pass
+
     return upserted
 
 
@@ -302,6 +311,20 @@ class AttendanceScheduler:
                 "attendance scheduler started: interval=%dmin",
                 settings.attendance_recompute_minutes,
             )
+            # P26: bump ``hadir_scheduler_jobs_failed_total`` on
+            # any unhandled exception inside ``recompute_today``.
+            try:
+                from hadir.metrics import (  # noqa: PLC0415
+                    install_scheduler_failure_listener,
+                )
+
+                install_scheduler_failure_listener(
+                    scheduler,
+                    job_name="attendance_recompute",
+                    tenant_id=scope.tenant_id,
+                )
+            except Exception:  # noqa: BLE001
+                pass
 
             # Seed once on startup so a fresh boot has rows immediately.
             def _seed() -> None:

@@ -1,0 +1,16 @@
+# Hadir Grafana datasource provisioning (v1.0 P26).
+# Auto-loaded on Grafana startup so operators don't have to
+# click through the UI on first boot.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 15s
+      httpMethod: POST
