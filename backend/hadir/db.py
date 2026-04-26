@@ -1413,7 +1413,10 @@ employees = Table(
         server_default=func.now(),
     ),
     UniqueConstraint("tenant_id", "employee_code", name="uq_employees_tenant_code"),
-    CheckConstraint("status IN ('active','inactive')", name="ck_employees_status"),
+    CheckConstraint(
+        "status IN ('active','inactive','deleted')",
+        name="ck_employees_status",
+    ),
 )
 
 

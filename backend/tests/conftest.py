@@ -7,8 +7,15 @@ we can clean up ``audit_log`` rows we produced — the app role cannot.
 
 from __future__ import annotations
 
+import os as _os
 import secrets
 from typing import Iterator
+
+# P25: keep the file-rotating log handlers off in pytest — the
+# rotation thread would otherwise outlive a test and the temp
+# log dir vanishes from under it. ``configure_logging``
+# respects this env var.
+_os.environ.setdefault("HADIR_LOG_DISABLE_FILES", "1")
 
 import pytest
 from fastapi.testclient import TestClient
@@ -139,6 +146,26 @@ def _neutralise_notification_worker() -> Iterator[None]:
     finally:
         _worker.start = original_start  # type: ignore[assignment]
         _worker.stop = original_stop  # type: ignore[assignment]
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _neutralise_retention_scheduler() -> Iterator[None]:
+    """Block the daily 03:00 retention sweep from spinning up
+    during TestClient lifespan entries. The dedicated P25 tests
+    call ``run_retention_sweep`` directly so they don't depend
+    on the cron schedule."""
+
+    from hadir.retention import retention_scheduler as _ret  # noqa: PLC0415
+
+    original_start = _ret.start
+    original_stop = _ret.stop
+    _ret.start = lambda: None  # type: ignore[assignment]
+    _ret.stop = lambda: None  # type: ignore[assignment]
+    try:
+        yield
+    finally:
+        _ret.start = original_start  # type: ignore[assignment]
+        _ret.stop = original_stop  # type: ignore[assignment]
 
 
 @pytest.fixture(autouse=True, scope="session")

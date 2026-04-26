@@ -1,7 +1,7 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 + P23 + P24 complete (M2 core + second M3 hardening phase)**:
+Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 + P23 + P24 + P25 complete (M2 core + third M3 hardening phase)**:
 pilot frozen at tag `v0.1-pilot` on branch `release/pilot`; multi-tenant
 routing wired up via a per-connection `SET search_path` driven by a
 ContextVar + SQLAlchemy `checkout` event; the global `tenants` registry
@@ -246,8 +246,30 @@ New `ops/backup/` image (postgres-15-alpine + supercronic).
 `docker-compose.prod.yml` adds the `backup` service with
 the script bind-mounted in. Live DR rehearsal documented in
 `docs/dr-rehearsal.md`: 13 s RTO actual against 4 h target,
-P22 user prefs round-tripped intact. **v1.0 M3 hardening
-continues with P25.**
+P22 user prefs round-tripped intact. **P25** added log
+rotation + retention cleanup + PDPL delete-on-request.
+`hadir/logging_config.py` ships `GzipRotatingFileHandler`
+(daily, 30 backups, gzip-on-rotation) +
+`configure_logging()`. `backend/logs/app.log` is the root
+sink; `hadir.audit` logger writes to a separate
+`backend/logs/audit.log` with `propagate=False`. `hadir/
+retention/` runs an APScheduler cron at 03:00
+`HADIR_LOCAL_TIMEZONE` that DELETEs `camera_health_snapshots`
+(30d), `notifications` (90d), `report_runs` (90d, file
+first), `user_sessions` (7d post-expiry); cutoffs are
+env-overridable; the sweep **never** touches
+`audit_log`/`attendance_records`/`detection_events`/`employees`
+/`employee_photos`/`requests`/`approved_leaves` (red line
+asserted in tests). Migration 0024 widens
+`employees.status` CHECK to allow `deleted`.
+`hadir/employees/pdpl.py` + `POST
+/api/employees/{id}/gdpr-delete` (Admin-only, exact-match
+confirmation phrase) drop photos + custom_field_values,
+redact PII (`full_name='[deleted]'`,
+`email='deleted-{id}@hadir.local'`), flip status, invalidate
+the matcher cache, and write an audit row carrying the
+previous PII so the right-to-erasure is verifiable. **v1.0
+M3 hardening continues with P26.**
 
 ## Tenant routing (v1.0 P1)
 **Approach chosen: SQLAlchemy `checkout` event + Python ContextVar**,

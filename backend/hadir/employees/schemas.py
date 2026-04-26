@@ -13,7 +13,15 @@ from typing import Literal, Optional
 from pydantic import BaseModel, EmailStr, Field
 
 
+# Inbound (create/patch) — operators can only flip between
+# ``active`` and ``inactive``. The third value, ``deleted``,
+# is reachable only via the PDPL endpoint (P25) so the audit
+# trail there is the load-bearing record.
 Status = Literal["active", "inactive"]
+# Outbound (read) — must include ``deleted`` so post-PDPL
+# rows can serialise. Keep ``Status`` in sync with the DB
+# CHECK at migration 0024.
+StatusOut = Literal["active", "inactive", "deleted"]
 
 
 class DepartmentOut(BaseModel):
@@ -28,7 +36,7 @@ class EmployeeOut(BaseModel):
     full_name: str
     email: Optional[str] = None
     department: DepartmentOut
-    status: Status
+    status: StatusOut
     photo_count: int
     created_at: datetime
 

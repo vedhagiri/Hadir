@@ -30,6 +30,7 @@ from hadir.auth.dependencies import CurrentUser, require_role
 from hadir.custom_fields import repository as cf_repo
 from hadir.db import get_engine
 from hadir.employees import excel as excel_io
+from hadir.employees import pdpl as pdpl_module
 from hadir.employees import photos as photos_io
 from hadir.employees import repository as repo
 from hadir.identification import enrollment as id_enrollment
@@ -71,7 +72,7 @@ def _row_to_out(row: repo.EmployeeRow) -> EmployeeOut:
             "code": row.department_code,
             "name": row.department_name,
         },
-        status=row.status,  # type: ignore[arg-type]  -- DB CHECK limits to active|inactive
+        status=row.status,  # type: ignore[arg-type]  -- DB CHECK limits to active|inactive|deleted (P25)
         photo_count=row.photo_count,
         created_at=row.created_at,
     )
@@ -339,6 +340,92 @@ def soft_delete_employee_endpoint(
 
     response.status_code = status.HTTP_204_NO_CONTENT
     return response
+
+
+# ---- PDPL delete-on-request (v1.0 P25) -----------------------------
+#
+# BRD NFR-COMP-003 + FR-EMP-009. Admin-only. Requires a typed
+# confirmation phrase in the body — same shape as the restore
+# script's typed RESTORE prompt, except machine-readable so the
+# UI can render a "type the phrase" modal.
+
+from pydantic import BaseModel, Field as _PydField  # noqa: E402
+
+
+class PdplDeleteRequest(BaseModel):
+    confirmation: str = _PydField(
+        ...,
+        description=(
+            "Operator-typed confirmation phrase. Must equal "
+            f"{pdpl_module.PDPL_CONFIRMATION_PHRASE!r}."
+        ),
+        max_length=64,
+    )
+
+
+class PdplDeleteResponse(BaseModel):
+    employee_id: int
+    photo_rows_deleted: int
+    photo_files_deleted: int
+    custom_field_values_deleted: int
+    status: str = "deleted"
+
+
+@router.post(
+    "/{employee_id}/gdpr-delete",
+    response_model=PdplDeleteResponse,
+    status_code=status.HTTP_200_OK,
+)
+def pdpl_delete_employee_endpoint(
+    employee_id: int,
+    payload: PdplDeleteRequest,
+    user: Annotated[CurrentUser, ADMIN],
+) -> PdplDeleteResponse:
+    """PDPL right-to-erasure for a single employee.
+
+    Drops every photo (file + DB row), every custom_field_values
+    row, redacts ``full_name`` to ``[deleted]`` + ``email`` to
+    ``deleted-{id}@hadir.local``, and flips ``status='deleted'``.
+    Attendance, audit, and request rows stay (verifiable history
+    per BRD NFR-RET-004).
+
+    The confirmation phrase is the brake — a sloppy curl can't
+    accidentally invoke this endpoint. The phrase is exposed
+    via ``hadir.employees.pdpl.PDPL_CONFIRMATION_PHRASE`` for
+    the UI to render verbatim.
+    """
+
+    if payload.confirmation != pdpl_module.PDPL_CONFIRMATION_PHRASE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "confirmation phrase did not match (case + whitespace "
+                "sensitive)"
+            ),
+        )
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    with get_engine().begin() as conn:
+        try:
+            result = pdpl_module.pdpl_delete_employee(
+                conn,
+                scope,
+                employee_id=employee_id,
+                actor_user_id=user.id,
+                confirmation_phrase=payload.confirmation,
+            )
+        except ValueError as exc:
+            msg = str(exc)
+            if "not found" in msg:
+                raise HTTPException(status_code=404, detail=msg) from exc
+            raise HTTPException(status_code=409, detail=msg) from exc
+
+    return PdplDeleteResponse(
+        employee_id=result.employee_id,
+        photo_rows_deleted=result.photo_rows_deleted,
+        photo_files_deleted=result.photo_files_deleted,
+        custom_field_values_deleted=result.custom_field_values_deleted,
+    )
 
 
 @router.post("/import", response_model=ImportResult)

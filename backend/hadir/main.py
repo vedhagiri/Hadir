@@ -11,7 +11,6 @@ attendance, etc. under the same ``/api`` prefix.
 from __future__ import annotations
 
 import logging
-import sys
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -48,6 +47,7 @@ from hadir.notifications import (
     notification_worker,
     router as notifications_router,
 )
+from hadir.retention import retention_scheduler
 from hadir.scheduled_reports import (
     report_runner,
     router as scheduled_reports_router,
@@ -57,21 +57,19 @@ from hadir.system.router import router as system_router
 
 
 def _configure_logging() -> None:
-    """Send all logs to stdout in a uniform format.
+    """Configure root + audit loggers per ``hadir.logging_config``.
 
-    Docker captures stdout, so structured shipping (Loki/Cloud Logging) works
-    out of the box. We avoid logging sensitive fields (passwords, RTSP URLs)
-    anywhere in the codebase — see PROJECT_CONTEXT §12.
+    The implementation moved to ``hadir.logging_config`` in P25 so
+    log rotation + the dedicated audit file have a single owner.
+    Docker captures stdout regardless; the file handlers ship to
+    ``backend/logs/{app,audit}.log`` for off-container retention.
+    Sensitive fields (passwords, RTSP URLs) never reach any of
+    these handlers — see PROJECT_CONTEXT §12.
     """
 
-    root = logging.getLogger()
-    root.handlers.clear()
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(
-        logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
-    )
-    root.addHandler(handler)
-    root.setLevel(logging.INFO)
+    from hadir.logging_config import configure_logging  # noqa: PLC0415
+
+    configure_logging()
 
 
 @asynccontextmanager
@@ -111,6 +109,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     attendance_scheduler.start()
     report_runner.start()
     notification_worker.start()
+    retention_scheduler.start()
     try:
         yield
     finally:
@@ -120,6 +119,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         attendance_scheduler.stop()
         report_runner.stop()
         notification_worker.stop()
+        retention_scheduler.stop()
         limiter.stop()
 
 
