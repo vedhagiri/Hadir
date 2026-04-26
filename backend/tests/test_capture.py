@@ -14,12 +14,12 @@ from __future__ import annotations
 
 import shutil
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
 import pytest
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, insert, select
 
 from hadir.capture import manager as manager_mod
 from hadir.capture.analyzer import Detection
@@ -1042,3 +1042,306 @@ def test_per_tenant_config_changes_isolated(admin_engine) -> None:
     finally:
         manager_mod.CaptureWorker = original_default  # type: ignore[assignment]
         clear_analyzer_factory()
+
+
+# --- P28.5b orphan-row hardening: face-save invariants -------------------
+
+
+@pytest.mark.usefixtures("clean_capture")
+def test_emit_skips_row_and_file_when_quality_below_threshold(
+    admin_engine, monkeypatch, tmp_path
+) -> None:
+    """min_face_quality_to_save red line: detection below threshold
+    must produce NO row and NO file. Pure unit-y test on
+    emit_detection_event — no worker plumbing.
+    """
+
+    from hadir.capture import events as events_mod  # noqa: PLC0415
+    from hadir.capture.tracker import Bbox  # noqa: PLC0415
+
+    # Re-route the captures tree to a tmp dir for the duration of
+    # the test so we can scan it for files at the end.
+    monkeypatch.setattr(
+        events_mod, "captures_dir",
+        lambda tenant_id, camera_id, *, now=None:
+            tmp_path / "captures" / str(tenant_id) / str(camera_id),
+    )
+
+    cam_id = _seed_camera(
+        admin_engine, name="quality-gate", plain_url="rtsp://fake/qg"
+    )
+
+    # 60×60 face at det_score 0.9 → quality ≈ 0.29 (below 0.35).
+    bbox = Bbox(x=0, y=0, w=60, h=60)
+    frame = _blank_frame(w=320, h=240)
+
+    new_id = events_mod.emit_detection_event(
+        get_engine(),
+        TENANT,
+        camera_id=cam_id,
+        frame_bgr=frame,
+        bbox=bbox,
+        det_score=0.9,
+        track_id="t-quality-gate",
+        capture_config={"min_face_quality_to_save": 0.35},
+    )
+    assert new_id is None, "row should have been skipped (low quality)"
+
+    # No row, no file.
+    with admin_engine.begin() as conn:
+        count = conn.execute(
+            select(func.count())
+            .select_from(detection_events)
+            .where(detection_events.c.camera_id == cam_id)
+        ).scalar_one()
+    assert count == 0
+    assert not list(tmp_path.rglob("*.jpg"))
+
+
+@pytest.mark.usefixtures("clean_capture")
+def test_emit_skips_row_and_file_when_crop_size_zero(
+    admin_engine, monkeypatch, tmp_path
+) -> None:
+    """Empty-crop guard (mirroring prototype line 411). A bbox that
+    clamps to zero pixels OR a zero-byte JPEG buffer must skip the
+    INSERT and not leave a file."""
+
+    from hadir.capture import events as events_mod  # noqa: PLC0415
+    from hadir.capture.tracker import Bbox  # noqa: PLC0415
+
+    monkeypatch.setattr(
+        events_mod, "captures_dir",
+        lambda tenant_id, camera_id, *, now=None:
+            tmp_path / "captures" / str(tenant_id) / str(camera_id),
+    )
+
+    cam_id = _seed_camera(
+        admin_engine, name="zero-crop", plain_url="rtsp://fake/zc"
+    )
+
+    out_of_frame = Bbox(x=10000, y=10000, w=50, h=50)
+    frame = _blank_frame(w=320, h=240)
+    new_id = events_mod.emit_detection_event(
+        get_engine(),
+        TENANT,
+        camera_id=cam_id,
+        frame_bgr=frame,
+        bbox=out_of_frame,
+        det_score=0.9,
+        track_id="t-out-of-frame",
+        capture_config={"min_face_quality_to_save": 0.0},
+    )
+    assert new_id is None
+
+    zero_w = Bbox(x=10, y=10, w=0, h=20)
+    new_id2 = events_mod.emit_detection_event(
+        get_engine(),
+        TENANT,
+        camera_id=cam_id,
+        frame_bgr=frame,
+        bbox=zero_w,
+        det_score=0.9,
+        track_id="t-zero-w",
+        capture_config={"min_face_quality_to_save": 0.0},
+    )
+    assert new_id2 is None
+
+    with admin_engine.begin() as conn:
+        count = conn.execute(
+            select(func.count())
+            .select_from(detection_events)
+            .where(detection_events.c.camera_id == cam_id)
+        ).scalar_one()
+    assert count == 0
+    assert not list(tmp_path.rglob("*.jpg"))
+
+
+@pytest.mark.usefixtures("clean_capture")
+def test_emit_skips_row_when_file_write_raises(
+    admin_engine, monkeypatch, tmp_path
+) -> None:
+    """File-write-fail red line: if Path.write_bytes raises, the row
+    must NOT be inserted. This test fails on a pre-fix events.py
+    that didn't wrap write_bytes in try/except, and passes after.
+    """
+
+    from hadir.capture import events as events_mod  # noqa: PLC0415
+    from hadir.capture.tracker import Bbox  # noqa: PLC0415
+
+    monkeypatch.setattr(
+        events_mod, "captures_dir",
+        lambda tenant_id, camera_id, *, now=None:
+            tmp_path / "captures" / str(tenant_id) / str(camera_id),
+    )
+
+    real_write_bytes = Path.write_bytes
+
+    def fail_write(self, data):  # type: ignore[no-untyped-def]
+        raise OSError("simulated disk full")
+
+    monkeypatch.setattr(Path, "write_bytes", fail_write)
+
+    cam_id = _seed_camera(
+        admin_engine, name="disk-full", plain_url="rtsp://fake/df"
+    )
+
+    bbox = Bbox(x=0, y=0, w=200, h=200)
+    frame = _blank_frame(w=320, h=240)
+
+    new_id = events_mod.emit_detection_event(
+        get_engine(),
+        TENANT,
+        camera_id=cam_id,
+        frame_bgr=frame,
+        bbox=bbox,
+        det_score=0.9,
+        track_id="t-disk-full",
+        capture_config={"min_face_quality_to_save": 0.0},
+    )
+    assert new_id is None, "row must not be INSERTed when write fails"
+
+    monkeypatch.setattr(Path, "write_bytes", real_write_bytes)
+
+    with admin_engine.begin() as conn:
+        count = conn.execute(
+            select(func.count())
+            .select_from(detection_events)
+            .where(detection_events.c.camera_id == cam_id)
+        ).scalar_one()
+    assert count == 0
+
+
+@pytest.mark.usefixtures("clean_capture")
+def test_emit_writes_path_identical_to_inserted_value(
+    admin_engine, monkeypatch, tmp_path
+) -> None:
+    """The path passed to ``write_bytes`` and the path stored in
+    ``detection_events.face_crop_path`` must be byte-for-byte
+    identical (invariant 4)."""
+
+    from hadir.capture import events as events_mod  # noqa: PLC0415
+    from hadir.capture.tracker import Bbox  # noqa: PLC0415
+
+    monkeypatch.setattr(
+        events_mod, "captures_dir",
+        lambda tenant_id, camera_id, *, now=None:
+            tmp_path / "captures" / str(tenant_id) / str(camera_id),
+    )
+
+    written: list[str] = []
+    real_write_bytes = Path.write_bytes
+
+    def capture_and_write(self, data):  # type: ignore[no-untyped-def]
+        written.append(str(self))
+        return real_write_bytes(self, data)
+
+    monkeypatch.setattr(Path, "write_bytes", capture_and_write)
+
+    cam_id = _seed_camera(
+        admin_engine, name="path-identity", plain_url="rtsp://fake/pi"
+    )
+
+    bbox = Bbox(x=0, y=0, w=200, h=200)
+    frame = _blank_frame(w=320, h=240)
+
+    new_id = events_mod.emit_detection_event(
+        get_engine(),
+        TENANT,
+        camera_id=cam_id,
+        frame_bgr=frame,
+        bbox=bbox,
+        det_score=0.9,
+        track_id="t-path-identity",
+        capture_config={"min_face_quality_to_save": 0.0},
+    )
+    assert new_id is not None
+    assert len(written) == 1, written
+
+    with admin_engine.begin() as conn:
+        stored = conn.execute(
+            select(detection_events.c.face_crop_path).where(
+                detection_events.c.id == new_id
+            )
+        ).scalar_one()
+    assert stored == written[0]
+    assert Path(stored).exists()
+
+
+def test_orphan_cleanup_script_reclassifies_missing_files(
+    admin_engine,
+) -> None:
+    """The cleanup script sets face_crop_path = NULL + orphaned_at when
+    the file is missing on disk; healthy rows are untouched. Audit row
+    ``detection_events.orphan_swept`` carries the count.
+    """
+
+    from scripts.cleanup_orphan_detection_events import (  # noqa: PLC0415
+        _sweep_one_tenant,
+    )
+
+    cam_id = _seed_camera(
+        admin_engine, name="orphan-sweep-test", plain_url="rtsp://fake/os"
+    )
+    # Insert two rows: one with a missing path, one with an existing
+    # path. After the sweep: the missing one should be NULL +
+    # orphaned_at set; the existing one untouched.
+    healthy_path = Path("/tmp/healthy-orphan-test.jpg")
+    healthy_path.write_bytes(b"\xff\xd8\xff\xe0fake\xff\xd9")
+
+    with admin_engine.begin() as conn:
+        broken_id = conn.execute(
+            insert(detection_events)
+            .values(
+                tenant_id=TENANT.tenant_id,
+                camera_id=cam_id,
+                captured_at=datetime.now(timezone.utc),
+                bbox={"x": 0, "y": 0, "w": 50, "h": 50},
+                face_crop_path="/no/such/file.jpg",
+                track_id="orphan-broken",
+            )
+            .returning(detection_events.c.id)
+        ).scalar_one()
+        healthy_id = conn.execute(
+            insert(detection_events)
+            .values(
+                tenant_id=TENANT.tenant_id,
+                camera_id=cam_id,
+                captured_at=datetime.now(timezone.utc),
+                bbox={"x": 0, "y": 0, "w": 50, "h": 50},
+                face_crop_path=str(healthy_path),
+                track_id="orphan-healthy",
+            )
+            .returning(detection_events.c.id)
+        ).scalar_one()
+
+    try:
+        scanned, reclassified = _sweep_one_tenant(
+            admin_engine, tenant_id=1, schema="main"
+        )
+        assert scanned >= 2
+        assert reclassified >= 1
+
+        with admin_engine.begin() as conn:
+            broken_row = conn.execute(
+                select(
+                    detection_events.c.face_crop_path,
+                    detection_events.c.orphaned_at,
+                ).where(detection_events.c.id == broken_id)
+            ).one()
+            healthy_row = conn.execute(
+                select(
+                    detection_events.c.face_crop_path,
+                    detection_events.c.orphaned_at,
+                ).where(detection_events.c.id == healthy_id)
+            ).one()
+
+        assert broken_row.face_crop_path is None
+        assert broken_row.orphaned_at is not None
+        assert healthy_row.face_crop_path == str(healthy_path)
+        assert healthy_row.orphaned_at is None
+    finally:
+        # Best-effort cleanup of the temp file.
+        try:
+            healthy_path.unlink(missing_ok=True)
+        except OSError:
+            pass

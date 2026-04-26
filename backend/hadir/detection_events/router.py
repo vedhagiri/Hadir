@@ -191,6 +191,22 @@ def crop_endpoint(
             },
         )
 
+    # P28.5b orphan-row hardening: distinguish "row never had a crop"
+    # from "row had a crop but the file is gone now".
+    #
+    # ``face_crop_path IS NULL`` → the cleanup sweep reclassified this
+    # row as orphaned (or it was never assigned a path). Return
+    # **404 ``crop_unavailable``** — the UI shows a "Crop unavailable"
+    # placeholder, the operator knows it's a known-missing record,
+    # and we don't spam Sentry with 410s for legacy data.
+    #
+    # Path set but file missing → live failure path. Return
+    # **410 ``crop file missing``**. This shouldn't happen in
+    # practice with the post-P28.5b write invariants in
+    # ``hadir/capture/events.py``; if it does, the operator wants to
+    # know via the warning log + a future automatic sweep.
+    if row.face_crop_path is None:
+        raise HTTPException(status_code=404, detail="crop_unavailable")
     path = Path(str(row.face_crop_path))
     if not path.exists():
         logger.warning("detection event %s crop missing on disk: %s", event_id, path)

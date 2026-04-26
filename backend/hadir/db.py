@@ -1571,7 +1571,16 @@ detection_events = Table(
     ),
     # Bounding box in image pixel coordinates: {"x": int, "y": int, "w": int, "h": int}.
     Column("bbox", JSONB, nullable=False),
-    Column("face_crop_path", Text, nullable=False),
+    # P28.5b orphan-row hardening: face_crop_path is nullable so the
+    # cleanup script can clear pointers for rows whose file was lost.
+    # The detection itself (bbox, track, employee_id, confidence) is
+    # still real and historically meaningful — only the crop image is
+    # gone. UI surfaces NULL as "Crop unavailable".
+    Column("face_crop_path", Text, nullable=True),
+    # Set when the cleanup script (or a future automatic sweep)
+    # detected that ``face_crop_path`` pointed at a missing file and
+    # cleared it. NULL on healthy rows.
+    Column("orphaned_at", DateTime(timezone=True), nullable=True),
     # P9 fills these.
     Column("embedding", LargeBinary, nullable=True),
     Column(

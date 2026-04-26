@@ -942,6 +942,51 @@ One background worker thread per enabled camera. Spawned by the
 ``capture_manager`` singleton on FastAPI lifespan startup; hot-reloaded
 when the P7 router processes a camera create / update / delete.
 
+### Capture invariants (post-P28.5b orphan-row hardening)
+
+Every change to ``hadir/capture/events.py`` MUST preserve these four
+invariants. The pre-P28.5b code shipped a window where the file-write
+step was skipped without skipping the INSERT, leaving 251 orphan
+rows in ``tenant_mts_demo.detection_events``. The forward-going
+write path is now defensive; future regressions are caught by the
+five new tests in ``tests/test_capture.py`` (search for
+``test_emit_skips`` / ``test_emit_writes_path_identical``).
+
+1. **Quality gate first**. If
+   ``quality_score(bbox, det_score) < min_face_quality_to_save``,
+   ``emit_detection_event`` returns ``None`` immediately. No mkdir,
+   no JPEG encode, no INSERT. The threshold check is intentionally
+   the cheapest operation in the function — a low-quality detection
+   bypasses every subsequent cost.
+2. **Empty/invalid crop guard**. ``_encode_jpeg`` returns ``None``
+   when the bbox clamps to zero pixels, when ``crop.size == 0``
+   (numpy empty array — possible with degenerate bboxes that pass
+   the clamp), or when the cv2 buffer is zero-length. Mirrors the
+   prototype-reference ``capture.py`` line 411 defence.
+3. **File write before DB INSERT, with explicit verification**.
+   The mkdir + ``write_bytes`` block is wrapped in
+   ``except OSError`` (disk full, permissions, read-only mount) and
+   ``except RuntimeError`` (Fernet key missing/malformed). After
+   write, ``file_path.exists()`` and ``stat().st_size > 0`` are
+   checked. Any failure logs at ERROR and ``return None`` —
+   **never INSERT a row that points at a missing file**.
+4. **Path identity**. The ``Path`` object passed to ``write_bytes``
+   is the same Python object stringified for the INSERT's
+   ``face_crop_path=str(file_path)``. There is no helper that
+   could rebuild a different path — and a test
+   (``test_emit_writes_path_identical_to_inserted_value``) asserts
+   the stored value matches the captured write target byte for
+   byte.
+
+A row whose file is reclassified as missing (cleanup script:
+``backend/scripts/cleanup_orphan_detection_events.py``) carries
+``face_crop_path = NULL`` + ``orphaned_at = <timestamp>``. The
+detection-events crop endpoint returns **404 ``crop_unavailable``**
+for those (orphan, known-missing) and **410 ``crop file missing``**
+when the path is set but the file is gone (live failure path —
+should never happen with the post-P28.5b invariants).
+
+
 **Worker loop** (``hadir/capture/reader.py``):
 
 1. ``cv2.VideoCapture(plain_url)``; on failure record a health snapshot

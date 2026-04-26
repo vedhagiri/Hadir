@@ -154,7 +154,33 @@ export function CameraLogsPage() {
                       }}
                     />
                   ) : (
-                    <span className="text-xs text-dim">—</span>
+                    // P28.5b: rows with face_crop_path IS NULL are
+                    // orphans (file lost / never written). Show a
+                    // labelled placeholder rather than a hyphen so the
+                    // operator can tell apart "no crop ever" from
+                    // "broken image".
+                    <div
+                      title="Crop unavailable"
+                      aria-label="Crop unavailable"
+                      style={{
+                        display: "grid",
+                        placeItems: "center",
+                        width: 56,
+                        height: 56,
+                        borderRadius: "var(--radius-sm)",
+                        border: "1px dashed var(--border)",
+                        background: "var(--bg-sunken)",
+                        color: "var(--text-tertiary)",
+                        fontSize: 9,
+                        textAlign: "center",
+                        lineHeight: 1.1,
+                        padding: 4,
+                      }}
+                    >
+                      Crop
+                      <br />
+                      unavailable
+                    </div>
                   )}
                 </td>
                 <td className="mono text-sm">

@@ -5,13 +5,34 @@ match. The crop is Fernet-encrypted at rest (same key as P6 employee
 photos) and written under
 ``/data/faces/captures/{tenant_id}/{camera_id}/{YYYY-MM-DD}/{uuid}.jpg``.
 
-**Durability contract** (PROJECT_CONTEXT §12 + pilot-plan P8): the on-disk
-write happens first, then the DB row is inserted; both complete before
-the worker processes the next detection. The DB row's ``face_crop_path``
-is therefore always backed by a real file at commit time. If the process
-crashes between write and insert we lose an unreferenced file (acceptable
-pilot trade-off); crashes between successful insert and the next
-detection are safe — the inserted event survives and the worker resumes.
+**Durability contract / capture invariants** (PROJECT_CONTEXT §12 +
+pilot-plan P8 + post-P28.5b orphan-row hardening):
+
+1. **Quality gate first**. If ``quality_score(detection)`` falls below
+   the camera's ``min_face_quality_to_save``, return None at DEBUG.
+   No file write, no DB INSERT, no audit row.
+2. **Empty/invalid crop guard**. If the bbox clamps to zero pixels OR
+   the crop array is empty (``crop.size == 0``) OR the JPEG encode
+   returns False, return None. No file write, no DB INSERT.
+3. **File write before DB INSERT, with explicit verification**. After
+   ``write_bytes`` returns we explicitly call ``file_path.exists()``
+   and ``stat().st_size > 0``. If either fails the function logs at
+   ERROR and returns None — **never INSERT a row that points at a
+   missing file**. The whole-tree write_bytes call is wrapped in a
+   try/except so a permission/disk error logs cleanly.
+4. **Path identity**. The path passed to ``write_bytes`` and the path
+   stored in ``detection_events.face_crop_path`` are the same Python
+   object — no re-stringification, no helper that could rebuild a
+   different path. If the writer and the recorder disagreed once,
+   nothing else in the system would catch it.
+
+If the process crashes between successful write and successful INSERT,
+we leak an unreferenced file on disk (acceptable trade-off — orphan
+files are detectable by a sweep). The reverse — a row pointing at no
+file — used to silently happen pre-P28.5b-hardening and produced a
+batch of 251 orphan rows in the dev DB; the cleanup script
+``backend/scripts/cleanup_orphan_detection_events.py`` sets their
+``face_crop_path`` to NULL so the API can 404 them cleanly.
 """
 
 from __future__ import annotations
@@ -53,7 +74,12 @@ def captures_dir(tenant_id: int, camera_id: int, *, now: Optional[datetime] = No
 
 
 def _encode_jpeg(frame_bgr, bbox) -> Optional[bytes]:  # type: ignore[no-untyped-def]
-    """Crop the frame to the bbox and JPEG-encode the result."""
+    """Crop the frame to the bbox and JPEG-encode the result.
+
+    Returns None if any guard fails: bbox clamps to zero, crop array
+    is empty, or cv2 returns False. Callers MUST treat None as "skip
+    everything" — no DB INSERT, no file write.
+    """
 
     import cv2  # noqa: PLC0415 — keep optional at import time
 
@@ -65,10 +91,19 @@ def _encode_jpeg(frame_bgr, bbox) -> Optional[bytes]:  # type: ignore[no-untyped
     if x2 <= x1 or y2 <= y1:
         return None
     crop = frame_bgr[y1:y2, x1:x2]
+    # Defensive guard mirroring prototype-reference/backend/capture.py
+    # line 411: a numpy crop with size==0 is JPEG-encodable to a 2-byte
+    # buffer ("\\xff\\xd8") which still passes ``cv2.imencode`` ok
+    # check on some OpenCV builds. Refuse to write that.
+    if getattr(crop, "size", 0) == 0:
+        return None
     ok, buf = cv2.imencode(".jpg", crop)
     if not ok:
         return None
-    return bytes(buf.tobytes())
+    data = bytes(buf.tobytes())
+    if len(data) == 0:
+        return None
+    return data
 
 
 def _encode_jpeg_full(frame_bgr) -> Optional[bytes]:  # type: ignore[no-untyped-def]
@@ -177,14 +212,63 @@ def emit_detection_event(
     jpeg = _encode_jpeg(frame_bgr, bbox)
     if jpeg is None:
         logger.debug(
-            "crop skipped (invalid bbox): camera_id=%s track=%s", camera_id, track_id
+            "crop skipped (invalid bbox or empty crop): camera_id=%s track=%s",
+            camera_id, track_id,
         )
         return None
 
+    # Build the on-disk path. ``file_path`` is computed once and used
+    # for both the write target AND the DB INSERT — invariant 4.
     directory = captures_dir(scope.tenant_id, camera_id, now=captured_at)
-    directory.mkdir(parents=True, exist_ok=True)
     file_path = directory / f"{uuid.uuid4().hex}.jpg"
-    file_path.write_bytes(encrypt_bytes(jpeg))
+
+    # File write before DB INSERT. Wrap mkdir + write_bytes in
+    # try/except so a permission/disk error returns None cleanly
+    # rather than tunneling up through the worker as an
+    # uncaught exception (which would also abort the row, but
+    # without a clean log line for the operator).
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        encrypted = encrypt_bytes(jpeg)
+        file_path.write_bytes(encrypted)
+    except OSError as exc:
+        # Disk full, permission denied, read-only mount.
+        logger.error(
+            "crop write FAILED — skipping INSERT: camera_id=%s track=%s "
+            "path=%s reason=%s",
+            camera_id, track_id, file_path, type(exc).__name__,
+        )
+        return None
+    except RuntimeError as exc:
+        # Fernet missing / malformed key. Same red line — no INSERT.
+        logger.error(
+            "crop encrypt FAILED — skipping INSERT: camera_id=%s track=%s "
+            "reason=%s",
+            camera_id, track_id, type(exc).__name__,
+        )
+        return None
+
+    # Post-write verification (invariant 3). The cheap
+    # ``write_bytes`` doesn't return a status; an OS-level corner
+    # case (volume disappeared between mkdir and write, anti-virus
+    # quarantining the new file, etc.) could mean the file isn't
+    # actually there even though no exception fired. Verify
+    # explicitly before we let the INSERT proceed.
+    try:
+        if not file_path.exists() or file_path.stat().st_size == 0:
+            logger.error(
+                "crop write VERIFICATION failed — skipping INSERT: "
+                "camera_id=%s track=%s path=%s exists=%s",
+                camera_id, track_id, file_path, file_path.exists(),
+            )
+            return None
+    except OSError as exc:
+        logger.error(
+            "crop write stat() failed — skipping INSERT: camera_id=%s "
+            "path=%s reason=%s",
+            camera_id, file_path, type(exc).__name__,
+        )
+        return None
 
     # P28.5b: ``save_full_frames=True`` also persists the full
     # annotated frame at a sibling path. Same encrypted-at-rest
