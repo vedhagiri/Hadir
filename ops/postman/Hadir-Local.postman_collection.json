@@ -1,0 +1,1509 @@
+{
+  "info": {
+    "name": "Hadir v1.0 — Local Testing",
+    "description": "Comprehensive API collection for testing Hadir locally. Organized by role and capability.\n\n## Setup\n\n1. Import this collection into Postman.\n2. Import the matching environment file (`Hadir-Local.postman_environment.json`).\n3. Open `credentials.txt` from your repo root.\n4. Edit the environment variables and paste the actual passwords from credentials.txt:\n   - `super_admin_password`\n   - `admin_mts_demo_password`\n   - `hr_mts_demo_password`\n   - `manager_eng_mts_demo_password`\n   - `dual_role_mts_demo_password`\n   - `employee_mts_demo_password`\n   - `admin_inaisys_password`\n   - `employee_inaisys_password`\n5. Make sure your Hadir backend is running at `http://localhost:8000`.\n6. Run requests in order. Login requests automatically capture the session cookie into a Postman cookie jar; subsequent requests use it.\n\n## How to use\n\n- Each folder = a role or capability area.\n- Login folders set the active session. Switch sessions by re-running the relevant Login request.\n- Tests are attached to most requests — they auto-extract IDs (e.g. `tenant_id`, `employee_id`, `request_id`) into environment variables so later requests can chain.\n- Collection runner can execute each folder end-to-end as a regression check.\n\n## Conventions\n\n- All requests use `{{base_url}}` so you can swap localhost for a deployed instance.\n- Tenant slug is sent in the login body (`tenant_slug` field). Cookie carries it after login.\n- 401 from any non-login request means the session expired or the wrong role is active — re-run the relevant login.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "0. Health & Diagnostics",
+      "description": "Run these first to confirm the backend is alive and identify which endpoints exist.",
+      "item": [
+        {
+          "name": "Health check",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/health",
+              "host": ["{{base_url}}"],
+              "path": ["api", "health"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Returns ok', () => {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.status).to.eql('ok');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "OpenAPI schema (lists every endpoint)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/openapi.json",
+              "host": ["{{base_url}}"],
+              "path": ["api", "openapi.json"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Returns OpenAPI schema', () => {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.openapi).to.match(/^3/);",
+                  "  pm.expect(Object.keys(json.paths).length).to.be.greaterThan(20);",
+                  "});",
+                  "console.log('Endpoints found:', Object.keys(pm.response.json().paths).length);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Who am I (no auth — should 401)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/auth/me",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "me"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Returns 401 when not logged in', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "1. Super-Admin (MTS staff)",
+      "description": "Login at `/super-admin/login` is separate from tenant login. Super-Admin sees all tenants, provisions new ones, and can 'Access as' any tenant for support. Every cross-tenant action audit-logs to both the tenant log AND `public.super_admin_audit`.",
+      "item": [
+        {
+          "name": "Super-Admin login",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {
+              "raw": "{{base_url}}/api/super-admin/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "super-admin", "auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{super_admin_email}}\",\n  \"password\": \"{{super_admin_password}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds', () => pm.response.to.have.status(200));",
+                  "pm.test('Cookie set', () => {",
+                  "  const cookies = pm.cookies.toObject();",
+                  "  pm.expect(Object.keys(cookies).length).to.be.greaterThan(0);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List all tenants",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/super-admin/tenants",
+              "host": ["{{base_url}}"],
+              "path": ["api", "super-admin", "tenants"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Returns tenants', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('At least 2 tenants visible', () => {",
+                  "  const tenants = Array.isArray(json) ? json : json.tenants || json.items || [];",
+                  "  pm.expect(tenants.length).to.be.gte(2);",
+                  "});",
+                  "// capture tenant ids for later",
+                  "const tenants = Array.isArray(json) ? json : json.tenants || json.items || [];",
+                  "tenants.forEach(t => {",
+                  "  if (t.slug === 'mts_demo') pm.environment.set('mts_demo_tenant_id', t.id);",
+                  "  if (t.slug === pm.environment.get('inaisys_slug')) pm.environment.set('inaisys_tenant_id', t.id);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get tenant detail (mts_demo)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/super-admin/tenants/{{mts_demo_tenant_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "super-admin", "tenants", "{{mts_demo_tenant_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Access as tenant (mts_demo)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {
+              "raw": "{{base_url}}/api/super-admin/tenants/{{mts_demo_tenant_id}}/access-as",
+              "host": ["{{base_url}}"],
+              "path": ["api", "super-admin", "tenants", "{{mts_demo_tenant_id}}", "access-as"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"reason\": \"Postman: testing impersonation flow\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Impersonation starts', () => pm.response.to.have.status(200));",
+                  "console.log('Banner should now appear in UI. Audit log entry written to both tenant_mts_demo.audit_log and public.super_admin_audit.');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Exit impersonation",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/super-admin/access-as/exit",
+              "host": ["{{base_url}}"],
+              "path": ["api", "super-admin", "access-as", "exit"]
+            }
+          }
+        },
+        {
+          "name": "View Super-Admin audit log",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/super-admin/audit?limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "super-admin", "audit"],
+              "query": [{"key": "limit", "value": "20"}]
+            }
+          }
+        },
+        {
+          "name": "Super-Admin logout",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/super-admin/auth/logout",
+              "host": ["{{base_url}}"],
+              "path": ["api", "super-admin", "auth", "logout"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Admin (mts_demo tenant)",
+      "description": "Tenant Admin has the broadest tenant-level access: configures policies, manages employees, cameras, branding, custom fields, and overrides decisions.",
+      "item": [
+        {
+          "name": "Login as Admin",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {
+              "raw": "{{base_url}}/api/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{admin_mts_demo_email}}\",\n  \"password\": \"{{admin_mts_demo_password}}\",\n  \"tenant_slug\": \"mts_demo\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login 200', () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 401) {",
+                  "  console.error('Login failed. Verify password matches credentials.txt exactly. Verify tenant_slug is mts_demo.');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Who am I",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/auth/me",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "me"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Has Admin role', () => {",
+                  "  const json = pm.response.json();",
+                  "  const roles = json.roles || [];",
+                  "  pm.expect(roles).to.include('Admin');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List employees",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/employees?limit=50",
+              "host": ["{{base_url}}"],
+              "path": ["api", "employees"],
+              "query": [{"key": "limit", "value": "50"}]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "const items = json.items || json.results || json;",
+                  "console.log(`Employees in mts_demo: ${items.length}`);",
+                  "if (items.length) pm.environment.set('sample_employee_id', items[0].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Search employees by name",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/employees?q=Crossover",
+              "host": ["{{base_url}}"],
+              "path": ["api", "employees"],
+              "query": [{"key": "q", "value": "Crossover"}]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "const items = json.items || json.results || json;",
+                  "pm.test('Honeypot found in mts_demo (DEMO0099)', () => {",
+                  "  pm.expect(items.length).to.be.gte(1);",
+                  "  pm.expect(items[0].employee_code).to.match(/^DEMO/);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List departments",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/departments",
+              "host": ["{{base_url}}"],
+              "path": ["api", "departments"]
+            }
+          }
+        },
+        {
+          "name": "List cameras",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/cameras",
+              "host": ["{{base_url}}"],
+              "path": ["api", "cameras"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "const items = json.items || json;",
+                  "pm.test('No plain RTSP URL in response', () => {",
+                  "  const body = pm.response.text();",
+                  "  pm.expect(body).to.not.match(/rtsp:\\/\\/[^*]/);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List shift policies",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/shift-policies",
+              "host": ["{{base_url}}"],
+              "path": ["api", "shift-policies"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "const items = json.items || json;",
+                  "pm.test('All four policy types present', () => {",
+                  "  const types = items.map(p => p.type);",
+                  "  pm.expect(types).to.include.members(['Fixed', 'Flex', 'Ramadan', 'Custom']);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List leave types",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/leave-types",
+              "host": ["{{base_url}}"],
+              "path": ["api", "leave-types"]
+            }
+          }
+        },
+        {
+          "name": "List holidays (this year)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/holidays?year=2026",
+              "host": ["{{base_url}}"],
+              "path": ["api", "holidays"],
+              "query": [{"key": "year", "value": "2026"}]
+            }
+          }
+        },
+        {
+          "name": "List custom fields",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/custom-fields",
+              "host": ["{{base_url}}"],
+              "path": ["api", "custom-fields"]
+            }
+          }
+        },
+        {
+          "name": "View tenant branding",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/branding",
+              "host": ["{{base_url}}"],
+              "path": ["api", "branding"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('mts_demo branding is plum', () => {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.primary_color_key).to.eql('plum');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "View audit log (recent)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/audit-log?limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "audit-log"],
+              "query": [{"key": "limit", "value": "20"}]
+            }
+          }
+        },
+        {
+          "name": "Daily attendance — today",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/attendance?date={{today_iso}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "attendance"],
+              "query": [{"key": "date", "value": "{{today_iso}}"}]
+            }
+          }
+        },
+        {
+          "name": "Generate Excel report",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {
+              "raw": "{{base_url}}/api/reports/attendance.xlsx",
+              "host": ["{{base_url}}"],
+              "path": ["api", "reports", "attendance.xlsx"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date_from\": \"{{week_ago_iso}}\",\n  \"date_to\": \"{{today_iso}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Returns XLSX', () => {",
+                  "  pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheet');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Generate PDF report",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {
+              "raw": "{{base_url}}/api/reports/attendance.pdf",
+              "host": ["{{base_url}}"],
+              "path": ["api", "reports", "attendance.pdf"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date_from\": \"{{week_ago_iso}}\",\n  \"date_to\": \"{{today_iso}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Returns PDF', () => {",
+                  "  pm.expect(pm.response.headers.get('Content-Type')).to.include('pdf');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/auth/logout",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "logout"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. HR (mts_demo tenant)",
+      "description": "HR configures shift policies, holidays, leave types, and is the final approver in the workflow.",
+      "item": [
+        {
+          "name": "Login as HR",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {
+              "raw": "{{base_url}}/api/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{hr_mts_demo_email}}\",\n  \"password\": \"{{hr_mts_demo_password}}\",\n  \"tenant_slug\": \"mts_demo\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Who am I (expect HR role)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/auth/me",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "me"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const roles = pm.response.json().roles || [];",
+                  "pm.test('Has HR role', () => pm.expect(roles).to.include('HR'));",
+                  "pm.test('Does NOT have Admin role', () => pm.expect(roles).to.not.include('Admin'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List employees (HR sees all)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/employees?limit=50",
+              "host": ["{{base_url}}"],
+              "path": ["api", "employees"],
+              "query": [{"key": "limit", "value": "50"}]
+            }
+          }
+        },
+        {
+          "name": "Approvals queue (HR view)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/approvals?stage=hr&status=pending",
+              "host": ["{{base_url}}"],
+              "path": ["api", "approvals"],
+              "query": [
+                {"key": "stage", "value": "hr"},
+                {"key": "status", "value": "pending"}
+              ]
+            }
+          }
+        },
+        {
+          "name": "Cameras (HR — should be 403)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/cameras",
+              "host": ["{{base_url}}"],
+              "path": ["api", "cameras"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HR cannot read cameras (Admin-only)', () => pm.expect(pm.response.code).to.eql(403));",
+                  "// If this returns 200, role enforcement is broken — P0 bug."
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4. Manager (mts_demo tenant)",
+      "description": "Engineering Manager — sees only their department and direct assignees. First-level approver.",
+      "item": [
+        {
+          "name": "Login as Engineering Manager",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {
+              "raw": "{{base_url}}/api/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{manager_eng_mts_demo_email}}\",\n  \"password\": \"{{manager_eng_mts_demo_password}}\",\n  \"tenant_slug\": \"mts_demo\"\n}"
+            }
+          }
+        },
+        {
+          "name": "List employees (scoped to Engineering)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/employees?limit=50",
+              "host": ["{{base_url}}"],
+              "path": ["api", "employees"],
+              "query": [{"key": "limit", "value": "50"}]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "const items = json.items || json.results || json;",
+                  "console.log(`Employees Manager-Eng can see: ${items.length}`);",
+                  "pm.test('Should NOT see all 25 employees (scope enforcement)', () => {",
+                  "  pm.expect(items.length).to.be.lessThan(25);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Approvals queue (Manager view)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/approvals?stage=manager&status=pending",
+              "host": ["{{base_url}}"],
+              "path": ["api", "approvals"],
+              "query": [
+                {"key": "stage", "value": "manager"},
+                {"key": "status", "value": "pending"}
+              ]
+            }
+          }
+        },
+        {
+          "name": "Daily attendance — today (scoped)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/attendance?date={{today_iso}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "attendance"],
+              "query": [{"key": "date", "value": "{{today_iso}}"}]
+            }
+          }
+        },
+        {
+          "name": "Try to access another department (negative test)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/employees?department=Sales",
+              "host": ["{{base_url}}"],
+              "path": ["api", "employees"],
+              "query": [{"key": "department", "value": "Sales"}]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "const items = json.items || json.results || json;",
+                  "pm.test('Manager cannot see Sales employees', () => {",
+                  "  pm.expect(items.length).to.eql(0);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "5. Multi-role user (HR + Manager)",
+      "description": "`dual.role@mts-demo.example.com` holds both HR and Manager (Operations) roles. Tests the role switcher from P7.",
+      "item": [
+        {
+          "name": "Login as dual-role user",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {
+              "raw": "{{base_url}}/api/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{dual_role_mts_demo_email}}\",\n  \"password\": \"{{dual_role_mts_demo_password}}\",\n  \"tenant_slug\": \"mts_demo\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Who am I (expect 2 roles, active = HR)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/auth/me",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "me"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test('Has both HR and Manager roles', () => {",
+                  "  pm.expect(json.roles).to.include.members(['HR', 'Manager']);",
+                  "});",
+                  "pm.test('Active role defaults to HR (highest)', () => {",
+                  "  pm.expect(json.active_role).to.eql('HR');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Switch to Manager role",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {
+              "raw": "{{base_url}}/api/auth/switch-role",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "switch-role"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"role\": \"Manager\"}"
+            }
+          }
+        },
+        {
+          "name": "Who am I after switch (expect Manager active)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/auth/me",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "me"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Active role is now Manager', () => {",
+                  "  pm.expect(pm.response.json().active_role).to.eql('Manager');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Try to switch to a role user does NOT have",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {
+              "raw": "{{base_url}}/api/auth/switch-role",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "switch-role"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"role\": \"Admin\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Cannot switch to unheld role', () => {",
+                  "  pm.expect(pm.response.code).to.be.oneOf([400, 403]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "6. Employee — request workflow",
+      "description": "Full lifecycle of an exception/leave request: submit → manager → HR → (optional admin override).",
+      "item": [
+        {
+          "name": "Login as Employee",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {
+              "raw": "{{base_url}}/api/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{employee_mts_demo_email}}\",\n  \"password\": \"{{employee_mts_demo_password}}\",\n  \"tenant_slug\": \"mts_demo\"\n}"
+            }
+          }
+        },
+        {
+          "name": "View own attendance (today)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/attendance/me?date={{today_iso}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "attendance", "me"],
+              "query": [{"key": "date", "value": "{{today_iso}}"}]
+            }
+          }
+        },
+        {
+          "name": "Submit exception request",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {
+              "raw": "{{base_url}}/api/requests",
+              "host": ["{{base_url}}"],
+              "path": ["api", "requests"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"exception\",\n  \"reason_category\": \"Doctor\",\n  \"reason_text\": \"Postman test — doctor's appointment\",\n  \"target_date_start\": \"{{yesterday_iso}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Request created', () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "if (json.id) pm.environment.set('test_request_id', json.id);",
+                  "console.log('Request ID stored as test_request_id:', json.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "View own request",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/requests/{{test_request_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "requests", "{{test_request_id}}"]
+            }
+          }
+        },
+        {
+          "name": "List own requests",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/requests?scope=mine",
+              "host": ["{{base_url}}"],
+              "path": ["api", "requests"],
+              "query": [{"key": "scope", "value": "mine"}]
+            }
+          }
+        },
+        {
+          "name": "Logout (employee)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/auth/logout",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "logout"]
+            }
+          }
+        },
+        {
+          "name": "Login as Manager — to approve",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {
+              "raw": "{{base_url}}/api/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{manager_eng_mts_demo_email}}\",\n  \"password\": \"{{manager_eng_mts_demo_password}}\",\n  \"tenant_slug\": \"mts_demo\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Manager approves",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {
+              "raw": "{{base_url}}/api/requests/{{test_request_id}}/manager-decide",
+              "host": ["{{base_url}}"],
+              "path": ["api", "requests", "{{test_request_id}}", "manager-decide"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"decision\": \"approve\",\n  \"comment\": \"Postman test — looks reasonable\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Logout (manager)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/auth/logout",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "logout"]
+            }
+          }
+        },
+        {
+          "name": "Login as HR — to approve",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {
+              "raw": "{{base_url}}/api/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{hr_mts_demo_email}}\",\n  \"password\": \"{{hr_mts_demo_password}}\",\n  \"tenant_slug\": \"mts_demo\"\n}"
+            }
+          }
+        },
+        {
+          "name": "HR approves (final)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {
+              "raw": "{{base_url}}/api/requests/{{test_request_id}}/hr-decide",
+              "host": ["{{base_url}}"],
+              "path": ["api", "requests", "{{test_request_id}}", "hr-decide"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"decision\": \"approve\",\n  \"comment\": \"Postman test — final approval\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Final state is hr_approved', () => {",
+                  "  pm.expect(pm.response.json().status).to.eql('hr_approved');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "7. Inaisys (real corporate, real camera)",
+      "description": "Your office tenant. Use this folder while validating face capture against the real RTSP camera.",
+      "item": [
+        {
+          "name": "Login as Inaisys Admin",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {
+              "raw": "{{base_url}}/api/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{admin_inaisys_email}}\",\n  \"password\": \"{{admin_inaisys_password}}\",\n  \"tenant_slug\": \"{{inaisys_slug}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "List cameras",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/cameras",
+              "host": ["{{base_url}}"],
+              "path": ["api", "cameras"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const items = pm.response.json().items || pm.response.json();",
+                  "if (items[0]) pm.environment.set('inaisys_camera_id', items[0].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update camera with real RTSP URL",
+          "description": "Edit the URL inline before sending. Backend Fernet-encrypts before storage. **Never commit a populated version of this request.**",
+          "request": {
+            "method": "PATCH",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {
+              "raw": "{{base_url}}/api/cameras/{{inaisys_camera_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "cameras", "{{inaisys_camera_id}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rtsp_url\": \"rtsp://USER:PASS@192.168.1.50:554/stream1\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Trigger camera preview",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/cameras/{{inaisys_camera_id}}/preview",
+              "host": ["{{base_url}}"],
+              "path": ["api", "cameras", "{{inaisys_camera_id}}", "preview"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Returns image bytes', () => {",
+                  "  pm.expect(pm.response.headers.get('Content-Type')).to.include('image');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Recent detection events",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/detection-events?camera_id={{inaisys_camera_id}}&limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "detection-events"],
+              "query": [
+                {"key": "camera_id", "value": "{{inaisys_camera_id}}"},
+                {"key": "limit", "value": "20"}
+              ]
+            }
+          }
+        },
+        {
+          "name": "List employees",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/employees",
+              "host": ["{{base_url}}"],
+              "path": ["api", "employees"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const items = pm.response.json().items || pm.response.json();",
+                  "const test = items.find(e => e.employee_code === 'INAISYS0001');",
+                  "if (test) pm.environment.set('inaisys_test_employee_id', test.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Force identification re-embed",
+          "description": "Run this after uploading face photos for INAISYS0001.",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/identification/reembed",
+              "host": ["{{base_url}}"],
+              "path": ["api", "identification", "reembed"]
+            }
+          }
+        },
+        {
+          "name": "Force attendance recompute (today)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {
+              "raw": "{{base_url}}/api/attendance/recompute",
+              "host": ["{{base_url}}"],
+              "path": ["api", "attendance", "recompute"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"date\": \"{{today_iso}}\"}"
+            }
+          }
+        },
+        {
+          "name": "Daily attendance — today",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/attendance?date={{today_iso}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "attendance"],
+              "query": [{"key": "date", "value": "{{today_iso}}"}]
+            }
+          }
+        },
+        {
+          "name": "Camera health snapshots",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/cameras/{{inaisys_camera_id}}/health?limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "cameras", "{{inaisys_camera_id}}", "health"],
+              "query": [{"key": "limit", "value": "10"}]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Tenant isolation (cross-tenant negative tests)",
+      "description": "Critical: prove tenant_a cannot read tenant_b's data. Run this folder regularly. Any leak is a P0 bug.",
+      "item": [
+        {
+          "name": "Login as mts_demo Admin",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {
+              "raw": "{{base_url}}/api/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{admin_mts_demo_email}}\",\n  \"password\": \"{{admin_mts_demo_password}}\",\n  \"tenant_slug\": \"mts_demo\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Search employees for 'Crossover' (should NOT see Inaisys honeypot)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/employees?q=Crossover",
+              "host": ["{{base_url}}"],
+              "path": ["api", "employees"],
+              "query": [{"key": "q", "value": "Crossover"}]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const items = pm.response.json().items || pm.response.json();",
+                  "pm.test('Returns ONLY DEMO0099, not INAISYS0099', () => {",
+                  "  items.forEach(e => {",
+                  "    pm.expect(e.employee_code).to.match(/^DEMO/);",
+                  "    pm.expect(e.employee_code).to.not.match(/^INAISYS/);",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Try to access an Inaisys employee by ID (should 404)",
+          "description": "Set `inaisys_test_employee_id` first by running the Inaisys folder. This proves URL guessing fails.",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/employees/{{inaisys_test_employee_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "employees", "{{inaisys_test_employee_id}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Cross-tenant ID guess fails closed', () => {",
+                  "  pm.expect(pm.response.code).to.be.oneOf([404, 403]);",
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "  console.error('CRITICAL: tenant isolation broken. P0 bug.');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Try to access another camera by ID (should 404)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/cameras/{{inaisys_camera_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "cameras", "{{inaisys_camera_id}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Cross-tenant camera access fails', () => {",
+                  "  pm.expect(pm.response.code).to.be.oneOf([404, 403]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "9. Negative & security tests",
+      "description": "Failure modes that should fail. If any of these succeed, file a bug.",
+      "item": [
+        {
+          "name": "Login with wrong password (expect 401)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {
+              "raw": "{{base_url}}/api/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{admin_mts_demo_email}}\",\n  \"password\": \"definitely-not-the-password\",\n  \"tenant_slug\": \"mts_demo\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 on wrong password', () => pm.response.to.have.status(401));",
+                  "pm.test('No password leakage in error', () => {",
+                  "  pm.expect(pm.response.text()).to.not.include('definitely-not-the-password');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login with unknown email (expect 401)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {
+              "raw": "{{base_url}}/api/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"nobody@nowhere.test\",\n  \"password\": \"anything\",\n  \"tenant_slug\": \"mts_demo\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 on unknown email', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login with bad tenant_slug (expect 401)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {
+              "raw": "{{base_url}}/api/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{admin_mts_demo_email}}\",\n  \"password\": \"{{admin_mts_demo_password}}\",\n  \"tenant_slug\": \"does_not_exist\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 on bad tenant', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Brute-force protection — rapid wrong-password attempts",
+          "description": "Run via Collection Runner with 10 iterations. After ~5–10, pilot's rate limiter kicks in. Expect 429.",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {
+              "raw": "{{base_url}}/api/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{admin_mts_demo_email}}\",\n  \"password\": \"wrong-{{$randomInt}}\",\n  \"tenant_slug\": \"mts_demo\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Access /api/cameras without login (expect 401)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/cameras",
+              "host": ["{{base_url}}"],
+              "path": ["api", "cameras"]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Clear cookies for this request only",
+                  "pm.cookies.jar().clear(pm.environment.get('base_url'), function() {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Unauthenticated request rejected', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Set today/yesterday/week_ago dates fresh on every request",
+          "const fmt = d => d.toISOString().slice(0, 10);",
+          "const now = new Date();",
+          "const yesterday = new Date(now); yesterday.setDate(yesterday.getDate() - 1);",
+          "const weekAgo = new Date(now); weekAgo.setDate(weekAgo.getDate() - 7);",
+          "pm.environment.set('today_iso', fmt(now));",
+          "pm.environment.set('yesterday_iso', fmt(yesterday));",
+          "pm.environment.set('week_ago_iso', fmt(weekAgo));"
+        ]
+      }
+    }
+  ],
+  "variable": []
+}
