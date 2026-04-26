@@ -1163,6 +1163,66 @@ endpoint returns 503 ``camera_display_disabled`` when display
 is off; the WebSocket closes with code 1008. The frontend
 handles both with explanatory empty states.
 
+### Capture configuration precedence (post-P28.5c)
+
+Three knob bags drive the capture pipeline:
+
+| Layer | Storage | Edited where |
+| --- | --- | --- |
+| Per-camera ``capture_config`` | ``cameras.capture_config`` JSONB | Cameras → Capture settings |
+| Tenant ``detection_config`` | ``tenant_settings.detection_config`` | System Settings → Detection |
+| Tenant ``tracker_config`` | ``tenant_settings.tracker_config`` | System Settings → Tracker |
+
+Both ``capture_config`` (P28.5b) and ``tracker_config`` (P28.5c)
+carry ``max_event_duration_sec``. **The per-camera value wins.**
+A single high-traffic camera can keep tracks longer than the
+tenant default; quiet cameras inherit the tenant value. The
+``CaptureWorker`` constructor enforces this in
+``hadir/capture/reader.py``: the tracker is built with
+``max_duration_sec=self._capture_config["max_event_duration_sec"]``,
+NOT the tenant value. The reconcile loop's
+``capture.worker.tracker_config_updated`` audit only fires on
+``iou_threshold`` / ``timeout_sec`` drift; per-camera duration
+overrides land via the older ``capture.worker.config_updated``
+path.
+
+### Detection backend (P28.5c)
+
+Two detector modes share a common dict shape via
+``hadir/detection/detectors.py`` (ported from
+``prototype-reference/backend/detectors.py``):
+
+* ``insightface`` — full-frame face detection + recognition.
+  Default. ~80 ms per analyzer cycle at ``det_size=320`` on a
+  typical office laptop.
+* ``yolo+face`` — YOLO finds person boxes; InsightFace runs
+  inside each. ~150 ms per analyzer cycle at the same det_size.
+  Use for high-traffic / outdoor cameras.
+
+Mode + ``det_size`` change hot-reload via
+``CaptureWorker.update_detection_config`` → ``analyzer.update_config``.
+``det_size`` change triggers ``InsightFace.prepare(det_size=…)``;
+the next ``detect`` call uses the new size. Module-level
+``_detect_lock`` serialises every call (CPU-bound; serial is
+faster than parallel because parallel thrashes L1/L2 cache).
+
+YOLO model file: production stages ``yolov8n.pt`` at
+``/data/models/yolov8n.pt`` so the ultralytics first-use download
+doesn't fire when an operator flips the mode at runtime. Override
+the lookup path with ``hadir.detection.set_yolo_model_dir(Path)``;
+default is ``/data/models/``.
+
+### Performance (rough, det_size=320, office laptop)
+
+* InsightFace mode: ~80 ms / analyzer cycle at 1080p
+* YOLO+Face mode: ~150 ms / analyzer cycle at 1080p
+
+With ``analyzer_max_fps=6`` and motion-skip on (P28.5a), a quiet
+camera burns near-zero CPU. Active office camera with foot
+traffic burns ~10–20% of one core. Five cameras with mixed
+activity → ~30–50% of one core, well within budget on the pilot
+hardware target.
+
 ## Identification (P9)
 Every ``employee_photos`` row gets a Fernet-encrypted
 ``embedding BYTEA`` (512 × float32, L2-normalised) computed from the

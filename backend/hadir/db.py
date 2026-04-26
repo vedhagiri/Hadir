@@ -502,6 +502,34 @@ tenant_settings = Table(
         nullable=False,
         server_default="Asia/Muscat",
     ),
+    # P28.5c: system-wide detection + tracker config. Per-camera
+    # ``capture_config`` (P28.5b) carries ``max_event_duration_sec``
+    # too — per-camera value OVERRIDES the tenant default for shared
+    # keys (documented in backend/CLAUDE.md § "Capture configuration
+    # precedence").
+    Column(
+        "detection_config",
+        JSONB,
+        nullable=False,
+        server_default=(
+            '{"mode": "insightface", '
+            '"det_size": 320, '
+            '"min_det_score": 0.5, '
+            '"min_face_pixels": 3600, '
+            '"yolo_conf": 0.35, '
+            '"show_body_boxes": false}'
+        ),
+    ),
+    Column(
+        "tracker_config",
+        JSONB,
+        nullable=False,
+        server_default=(
+            '{"iou_threshold": 0.3, '
+            '"timeout_sec": 2.0, '
+            '"max_duration_sec": 60.0}'
+        ),
+    ),
     Column(
         "updated_at",
         DateTime(timezone=True),

@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 (M2 core complete) + P23 + P24 + P25 + P26 + P27 + P28 (M3 hardening complete + sign-off run) + P28.5a (Live Capture viewer + multi-tenant CaptureManager) + P28.5b (worker/display split + per-camera capture knobs + 2 s reconcile loop).**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 (M2 core complete) + P23 + P24 + P25 + P26 + P27 + P28 (M3 hardening complete + sign-off run) + P28.5a (Live Capture viewer + multi-tenant CaptureManager) + P28.5b (worker/display split + per-camera capture knobs + 2 s reconcile loop) + P28.5c (system-wide detection + tracker config; insightface + yolo+face detector ports).**
 
 > **Tenant isolation is a P0 blocker.** The suites
 > `backend/tests/test_multi_tenant_isolation.py` (the P1 canary) and
@@ -804,6 +804,64 @@ of the Arabic translations before v1.0 launch** — see
   the prompt above (worker disable / re-enable, display
   disable / re-enable, knob tests for max_faces and
   min_face_quality, audit-log spot-check, tenant isolation).
+
+- **P28.5c** — System-wide detection + tracker configuration.
+  Migration ``0029_tenant_settings_detection`` adds two JSONB
+  columns to ``tenant_settings``: ``detection_config`` (mode +
+  det_size + thresholds, defaults from
+  ``prototype-reference/backend/detectors.py``) and
+  ``tracker_config`` (iou_threshold + timeout_sec +
+  max_duration_sec). Both ports of the prototype's two detector
+  modes land in a new ``hadir/detection/`` package
+  (``insightface`` and ``yolo+face``); module-level ``_detect_lock``
+  serialises across cameras (CPU-bound, parallel thrashes
+  L1/L2). The analyzer (``hadir/capture/analyzer.py``) now reads
+  a ``DetectorConfig`` snapshot and delegates to
+  ``hadir.detection.detect``; mode + det_size hot-swap via
+  ``analyzer.update_config`` (det_size triggers
+  ``InsightFace.prepare(...)`` re-prep). The tracker keeps v1.0's
+  shape but gains ``from_tracker_config`` (JSONB → kwargs) and
+  ``update_tracker_config`` (hot-update, applies to NEW tracks
+  only — existing tracks keep original semantics; load-bearing
+  red line). ``CaptureWorker`` accepts ``tracker_config`` +
+  ``detection_config`` kwargs at construction; the manager's
+  reconcile loop diffs both against the DB row and audits each
+  separately (``capture.worker.tracker_config_updated`` /
+  ``capture.worker.detection_config_updated``). Four new
+  endpoints in ``hadir/system/router.py``:
+  ``GET/PUT /api/system/{detection,tracker}-config``, Admin-only,
+  manual validation with **400** on invalid + named offending
+  field (FastAPI's default 422 shaped through a small validator
+  helper); audit row carries before + after JSONB. Frontend ships
+  ``frontend/src/pages/SystemSettings/SystemSettingsPage.tsx``
+  (two cards: Detection + Tracker; mode radio with prototype's
+  performance hints, det_size dropdown with annotations,
+  thresholds via slider, body-box toggle visible only in YOLO
+  mode, Reset-to-defaults with confirmation modal); sidebar nav
+  item under System; en/ar i18n keys added (Arabic Claude-
+  generated, **pending Omran HR native-speaker review** — same
+  flag from P21). 23 new tests in
+  ``tests/test_p28_5c_detection_settings.py`` covering
+  ``DetectorConfig.from_dict`` defaults, ``quality_score``
+  weight match, ``IoUTracker.from_tracker_config`` /
+  ``update_tracker_config``, GET defaults, PUT round-trip with
+  audit verification, 12 parametrised validation-rejection
+  cases (one per knob × bound), Admin-only gate. **Capture
+  configuration precedence** — both ``capture_config`` and
+  ``tracker_config`` carry ``max_event_duration_sec``;
+  per-camera value wins. Documented in ``backend/CLAUDE.md``.
+  **498 backend tests pass + 1 skipped** (was 475; +23 P28.5c
+  tests, no regressions). Frontend typecheck clean. Live
+  verification on dev stack: GET returns seeded defaults; PUT
+  with ``mode=yolov12`` returns ``HTTP 400 detail.field=mode``;
+  PUT with valid payload returns 200 + echoes; audit row
+  carries before/after JSONB.
+
+  **Awaiting Suresh's physical-validation sign-off** in
+  ``docs/phases/P28.5c.md``. The walkthrough exercises mode
+  swap, det_size swap, min_face_pixels / iou_threshold knobs,
+  curl-side negative test, per-tenant isolation, audit-log
+  spot-check.
 
 Next: **M4 launch** per `v1.0-phase-plan.md`. Wait for
 the user before starting. **Open critical item carries

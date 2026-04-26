@@ -232,6 +232,8 @@ class CaptureManager:
         name: str,
         decrypted_url: str,
         capture_config: Optional[dict[str, Any]] = None,
+        tracker_config: Optional[dict[str, Any]] = None,
+        detection_config: Optional[dict[str, Any]] = None,
         schema: Optional[str] = None,
     ) -> bool:
         """Start a worker for ``(tenant_id, camera_id)`` with the given
@@ -240,8 +242,9 @@ class CaptureManager:
         ``capture.worker.start_failed`` with the failure reason.
 
         ``capture_config`` (P28.5b) is the per-camera face-save knob bag.
-        When ``None`` the worker uses its built-in defaults (matching
-        the prototype's tested constants).
+        ``tracker_config`` + ``detection_config`` (P28.5c) are the
+        tenant-level config blobs from ``tenant_settings``. When any
+        is ``None`` the worker falls back to its built-in defaults.
 
         Idempotent: if a live worker already exists for the key,
         returns True without restarting.
@@ -269,6 +272,8 @@ class CaptureManager:
                 analyzer=get_analyzer(),
                 config=self._config,
                 capture_config=capture_config,
+                tracker_config=tracker_config,
+                detection_config=detection_config,
             )
             worker.start()
         except Exception as exc:  # noqa: BLE001
@@ -499,6 +504,12 @@ class CaptureManager:
             )
             return 0
 
+        # P28.5c: tenant-level detection + tracker settings shared
+        # across this tenant's workers.
+        detection_config, tracker_config = self._load_tenant_capture_settings(
+            engine, tenant_id=tenant_id, schema=schema
+        )
+
         spawned = 0
         for row in rows:
             cam_id = int(row.id)
@@ -535,6 +546,8 @@ class CaptureManager:
                 name=cam_name,
                 decrypted_url=plain_url,
                 capture_config=cam_config,
+                tracker_config=tracker_config,
+                detection_config=detection_config,
                 schema=schema,
             )
             plain_url = ""  # noqa: F841
@@ -785,9 +798,14 @@ class CaptureManager:
                 return report
 
         tenants = self._discover_tenants()
-        # desired[(t, c)] = (name, plain_url, capture_config, schema)
+        # desired[(t, c)] = (name, plain_url, capture_config, tracker_config,
+        #                    detection_config, schema)
         desired: dict[
-            WorkerKey, tuple[str, str, dict[str, Any], Optional[str]]
+            WorkerKey,
+            tuple[
+                str, str, dict[str, Any],
+                dict[str, Any], dict[str, Any], Optional[str],
+            ],
         ] = {}
         for tenant_id, schema in tenants:
             try:
@@ -803,6 +821,13 @@ class CaptureManager:
                 )
                 report["errors"] += 1
                 continue
+
+            # P28.5c: tenant-level detection + tracker settings.
+            tenant_detection, tenant_tracker = (
+                self._load_tenant_capture_settings(
+                    get_engine(), tenant_id=tenant_id, schema=schema
+                )
+            )
 
             for row in rows:
                 cam_id = int(row.id)
@@ -821,7 +846,8 @@ class CaptureManager:
                     report["errors"] += 1
                     continue
                 desired[(tenant_id, cam_id)] = (
-                    cam_name, plain_url, cam_config, schema
+                    cam_name, plain_url, cam_config,
+                    tenant_tracker, tenant_detection, schema,
                 )
 
         with self._lock:
@@ -845,7 +871,14 @@ class CaptureManager:
         with self._lock:
             current_workers = dict(self._workers)
         for key in desired_keys:
-            name, plain_url, config, schema = desired[key]
+            (
+                name,
+                plain_url,
+                config,
+                tenant_tracker,
+                tenant_detection,
+                schema,
+            ) = desired[key]
             tid, cid = key
             existing = current_workers.get(key)
             if existing is None or not existing.is_alive():
@@ -859,16 +892,16 @@ class CaptureManager:
                     name=name,
                     decrypted_url=plain_url,
                     capture_config=config,
+                    tracker_config=tenant_tracker,
+                    detection_config=tenant_detection,
                     schema=schema,
                 ):
                     report["started"] += 1
                 continue
 
-            # Worker is alive — check for config drift. Comparing the
-            # full dict catches knob-only changes; we also check the
-            # name + URL (a name rename or URL rotation triggers a
-            # full restart via the CRUD path, but the periodic tick
-            # serves as a safety net for that too).
+            # Worker is alive — check for config drift across the
+            # three knob bags. Each compares the worker's snapshot to
+            # what the DB says now.
             try:
                 current_config = existing.get_capture_config()
                 if current_config != config:
@@ -884,6 +917,38 @@ class CaptureManager:
                             "after": config,
                         },
                     )
+
+                # P28.5c: tenant-level tracker_config drift.
+                current_tracker = existing.get_tracker_config()
+                if current_tracker != tenant_tracker:
+                    existing.update_tracker_config(tenant_tracker)
+                    report["config_updated"] += 1
+                    self._audit_worker_event(
+                        tenant_id=tid,
+                        schema=schema,
+                        action="capture.worker.tracker_config_updated",
+                        entity_id=str(cid),
+                        payload={
+                            "before": current_tracker,
+                            "after": tenant_tracker,
+                        },
+                    )
+
+                # P28.5c: tenant-level detection_config drift.
+                current_detection = existing.get_detection_config()
+                if current_detection != tenant_detection:
+                    existing.update_detection_config(tenant_detection)
+                    report["config_updated"] += 1
+                    self._audit_worker_event(
+                        tenant_id=tid,
+                        schema=schema,
+                        action="capture.worker.detection_config_updated",
+                        entity_id=str(cid),
+                        payload={
+                            "before": current_detection,
+                            "after": tenant_detection,
+                        },
+                    )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "reconcile: config update failed tenant=%s "
@@ -895,6 +960,80 @@ class CaptureManager:
                 report["errors"] += 1
 
         return report
+
+    # ------------------------------------------------------------------
+    # P28.5c: tenant-level detection + tracker config loader
+
+    # Mirror the migration's defaults so a tenant with no row, or a
+    # row missing keys, falls back cleanly.
+    _DEFAULT_DETECTION_CONFIG: dict = {
+        "mode": "insightface",
+        "det_size": 320,
+        "min_det_score": 0.5,
+        "min_face_pixels": 3600,
+        "yolo_conf": 0.35,
+        "show_body_boxes": False,
+    }
+    _DEFAULT_TRACKER_CONFIG: dict = {
+        "iou_threshold": 0.3,
+        "timeout_sec": 2.0,
+        "max_duration_sec": 60.0,
+    }
+
+    def _load_tenant_capture_settings(
+        self,
+        engine,
+        *,
+        tenant_id: int,
+        schema: Optional[str],
+    ) -> tuple[dict, dict]:
+        """Return ``(detection_config, tracker_config)`` for one tenant.
+
+        Both fall back to module-level defaults when the row is
+        missing or a key is absent — defence in depth on top of the
+        migration's server_default. The reconcile tick calls this
+        every pass; cheap raw SELECT, no model state involved.
+        """
+
+        from sqlalchemy import select  # noqa: PLC0415
+
+        from hadir.db import tenant_settings  # noqa: PLC0415
+
+        stmt = select(
+            tenant_settings.c.detection_config,
+            tenant_settings.c.tracker_config,
+        ).where(tenant_settings.c.tenant_id == tenant_id)
+
+        try:
+            if schema is None:
+                with engine.begin() as conn:
+                    row = conn.execute(stmt).first()
+            else:
+                from hadir.db import tenant_context  # noqa: PLC0415
+
+                with tenant_context(schema):
+                    with engine.begin() as conn:
+                        row = conn.execute(stmt).first()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "tenant_settings load failed tenant=%s schema=%s: %s",
+                tenant_id,
+                schema,
+                type(exc).__name__,
+            )
+            return (
+                dict(self._DEFAULT_DETECTION_CONFIG),
+                dict(self._DEFAULT_TRACKER_CONFIG),
+            )
+
+        detection = dict(self._DEFAULT_DETECTION_CONFIG)
+        tracker = dict(self._DEFAULT_TRACKER_CONFIG)
+        if row is not None:
+            if isinstance(row.detection_config, dict):
+                detection.update(row.detection_config)
+            if isinstance(row.tracker_config, dict):
+                tracker.update(row.tracker_config)
+        return detection, tracker
 
     # ------------------------------------------------------------------
 

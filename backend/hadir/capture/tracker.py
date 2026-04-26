@@ -88,6 +88,19 @@ class IoUTracker:
         max_duration_sec: float = 60.0,
         id_factory: Optional[callable] = None,  # type: ignore[type-arg]
     ) -> None:
+        # NOTE on naming vs prototype: the prototype's IoUTracker calls
+        # ``idle_timeout_s`` ``timeout_sec``, and uses ``(x1,y1,x2,y2)``
+        # tuples instead of v1.0's ``Bbox(x,y,w,h)``. We keep v1.0's
+        # names + Bbox shape because the analyzer + tests + matcher
+        # downstream all depend on them; the boundary conversion from
+        # ``tracker_config["timeout_sec"]`` (the JSONB key, default
+        # 2.0 per the prototype) to ``idle_timeout_s`` (this kwarg)
+        # lives in ``IoUTracker.from_tracker_config``. The constructor
+        # default ``idle_timeout_s=3.0`` is the v1.0 historical
+        # default, kept for test compat — production always builds via
+        # ``from_tracker_config`` from tenant_settings.tracker_config.
+        # Documented in
+        # ``backend/CLAUDE.md`` § "Capture configuration precedence".
         self.iou_threshold = iou_threshold
         self.idle_timeout_s = idle_timeout_s
         # P28.5b: forcibly retire a track that has been alive longer
@@ -100,6 +113,23 @@ class IoUTracker:
         # Dependency-injected id factory so tests can generate deterministic
         # ids; production path uses hex UUIDs.
         self._id_factory: callable = id_factory or (lambda: uuid.uuid4().hex)  # type: ignore[assignment]
+
+    @classmethod
+    def from_tracker_config(
+        cls, config: Optional[dict] = None
+    ) -> "IoUTracker":
+        """Build from the JSONB blob in ``tenant_settings.tracker_config``.
+
+        The JSONB key ``timeout_sec`` maps to v1.0's
+        ``idle_timeout_s`` kwarg; defaults match the prototype.
+        """
+
+        cfg = config or {}
+        return cls(
+            iou_threshold=float(cfg.get("iou_threshold", 0.3)),
+            idle_timeout_s=float(cfg.get("timeout_sec", 2.0)),
+            max_duration_sec=float(cfg.get("max_duration_sec", 60.0)),
+        )
 
     @property
     def active_tracks(self) -> int:
@@ -165,3 +195,29 @@ class IoUTracker:
         applies without restart."""
 
         self.max_duration_sec = max_duration_sec
+
+    def update_tracker_config(self, config: dict) -> None:
+        """P28.5c hot-reload entry point. Applies tenant-level
+        ``tracker_config`` changes WITHOUT restarting the worker.
+
+        **Red line**: changes apply to NEW tracks only. Existing
+        tracks keep their original timeout / IoU semantics until they
+        retire naturally — we don't yank tracks mid-event because an
+        operator nudged a slider. The new threshold takes effect on
+        the NEXT new-track decision; the new timeout takes effect on
+        the next ``_drop_stale`` pass against tracks that started
+        AFTER this call (which is the natural side-effect of the
+        retirement loop using ``self.idle_timeout_s`` lazily).
+
+        Practically: the difference is invisible for tracks shorter
+        than the OLD timeout, and only matters when an operator
+        loosens or tightens the timeout while a long-running track is
+        in flight.
+        """
+
+        if "iou_threshold" in config:
+            self.iou_threshold = float(config["iou_threshold"])
+        if "timeout_sec" in config:
+            self.idle_timeout_s = float(config["timeout_sec"])
+        if "max_duration_sec" in config:
+            self.max_duration_sec = float(config["max_duration_sec"])

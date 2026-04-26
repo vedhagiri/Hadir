@@ -33,6 +33,7 @@ import { EmployeesPage } from "./features/employees/EmployeesPage";
 import { ReportsPage } from "./features/reports/ReportsPage";
 import { SystemPage } from "./features/system/SystemPage";
 import { LiveCapturePage } from "./pages/LiveCapture/LiveCapture";
+import { SystemSettingsPage } from "./pages/SystemSettings/SystemSettingsPage";
 import { LeaveCalendarPage } from "./leave-calendar/LeaveCalendarPage";
 import { ManagerAssignmentsPage } from "./manager-assignments/ManagerAssignmentsPage";
 import { Placeholder } from "./pages/Placeholder";
@@ -93,6 +94,7 @@ export function App() {
         <Route path="camera-logs" element={<CameraLogsPage />} />
         <Route path="live" element={<LiveCapturePage />} />
         <Route path="system" element={<SystemPage />} />
+        <Route path="system-settings" element={<SystemSettingsPage />} />
         <Route path="audit" element={<AuditLogPage />} />
         <Route path="daily-attendance" element={<DailyAttendancePage />} />
         <Route path="team-attendance" element={<DailyAttendancePage />} />

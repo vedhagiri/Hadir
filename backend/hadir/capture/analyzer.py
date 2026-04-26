@@ -5,8 +5,17 @@ recognition module on so each detected face comes back with a
 512-float-32 L2-normalised embedding — the matcher consumes these to
 find the best-matching enrolled employee.
 
-We hide InsightFace behind an ``Analyzer`` protocol so tests can swap
-in a ``StubAnalyzer`` without dragging in the 250 MB model.
+P28.5c: the analyzer now reads a ``DetectorConfig`` (mode +
+``det_size`` + thresholds) sourced from
+``tenant_settings.detection_config`` and delegates to the
+``hadir.detection.detectors`` module that ships both
+``insightface`` and ``yolo+face`` backends. The analyzer holds a
+config snapshot that the worker hot-swaps via ``update_config`` —
+``det_size`` change re-prepares InsightFace; ``mode`` change is
+picked up on the next ``detect`` call.
+
+We hide all of this behind the ``Analyzer`` protocol so tests can
+swap in a ``StubAnalyzer`` without dragging in the 250 MB model.
 """
 
 from __future__ import annotations
@@ -19,6 +28,9 @@ from typing import Optional, Protocol
 import numpy as np
 
 from hadir.capture.tracker import Bbox
+from hadir.detection import DetectorConfig
+from hadir.detection import detect as detector_detect
+from hadir.detection import quality_score as detector_quality_score
 
 logger = logging.getLogger(__name__)
 
@@ -53,80 +65,90 @@ class Analyzer(Protocol):
         detected in the crop.
         """
 
+    def update_config(self, config: DetectorConfig) -> None:  # type: ignore[no-untyped-def]
+        """Hot-swap the detector knob bag. P28.5c — wired from the
+        worker's reconcile loop. ``det_size`` change re-preps
+        InsightFace; ``mode`` change activates on the next call.
+        Stub analyzers can no-op."""
 
-# --- Production InsightFace analyzer ---------------------------------------
 
-_insightface_lock = threading.Lock()
-_insightface_app = None  # lazy, shared across workers + enrollment
-
-
-def _get_insightface_app():  # type: ignore[no-untyped-def]
-    """Build (or return the cached) ``FaceAnalysis`` instance.
-
-    Detection **and** recognition — we drop the P8 ``allowed_modules``
-    restriction so ``face.normed_embedding`` is populated on every hit.
-    Model files download once to ``/root/.insightface`` (a named volume)
-    so restarts don't pay the 250 MB cost.
-    """
-
-    global _insightface_app
-    with _insightface_lock:
-        if _insightface_app is not None:
-            return _insightface_app
-
-        # Lazy import so environments without the wheel (tests that stub
-        # the analyzer) don't trigger the model download.
-        from insightface.app import FaceAnalysis  # noqa: PLC0415
-
-        app = FaceAnalysis(
-            name="buffalo_l",
-            # No allowed_modules → detection + recognition both loaded.
-            providers=["CPUExecutionProvider"],
-        )
-        # det_size: 640x640 is InsightFace's standard; ctx_id=-1 = CPU.
-        app.prepare(ctx_id=-1, det_size=(640, 640))
-        _insightface_app = app
-        logger.info("InsightFace buffalo_l detection+recognition ready (CPU)")
-        return app
+# --- Production analyzer (delegates to hadir.detection) -------------------
 
 
 class InsightFaceAnalyzer:
-    """Thin wrapper around ``insightface.app.FaceAnalysis``."""
+    """Thin wrapper around ``hadir.detection.detect``.
+
+    The class name is historical — pre-P28.5c this directly drove
+    InsightFace. Post-P28.5c it routes through ``hadir.detection``,
+    which dispatches on ``config.mode`` between ``insightface`` and
+    ``yolo+face``. Both modes return the same dict shape; the
+    ``Detection`` dataclass adaptation lives here.
+    """
+
+    def __init__(self, config: Optional[DetectorConfig] = None) -> None:
+        self._lock = threading.Lock()
+        self._config = config or DetectorConfig()
+
+    def update_config(self, config: DetectorConfig) -> None:
+        """Replace the runtime config snapshot. The next ``detect``
+        call uses the new mode + det_size; ``hadir.detection``
+        handles InsightFace re-prep when ``det_size`` changes."""
+
+        with self._lock:
+            self._config = config
+
+    def _snapshot_config(self) -> DetectorConfig:
+        with self._lock:
+            return self._config
 
     def detect(self, frame_bgr) -> list[Detection]:  # type: ignore[no-untyped-def]
-        app = _get_insightface_app()
-        faces = app.get(frame_bgr)
+        cfg = self._snapshot_config()
+        raw = detector_detect(frame_bgr, cfg)
         out: list[Detection] = []
-        for f in faces:
-            x1, y1, x2, y2 = f.bbox.astype(int).tolist()
-            x = max(0, x1)
-            y = max(0, y1)
-            w = max(0, x2 - x1)
-            h = max(0, y2 - y1)
-            # ``normed_embedding`` is produced by the recognition head and
-            # is already L2-normalised to unit length. Fall back to None
-            # defensively in case a future InsightFace version changes the
-            # attribute layout.
-            emb = getattr(f, "normed_embedding", None)
-            if emb is not None:
-                emb = np.asarray(emb, dtype=np.float32)
+        for d in raw:
+            x1, y1, x2, y2 = d["bbox"]
             out.append(
                 Detection(
-                    bbox=Bbox(x=x, y=y, w=w, h=h),
-                    det_score=float(f.det_score),
-                    embedding=emb,
+                    bbox=Bbox(
+                        x=int(x1), y=int(y1),
+                        w=max(0, int(x2 - x1)),
+                        h=max(0, int(y2 - y1)),
+                    ),
+                    det_score=float(d.get("det_score", 1.0)),
+                    embedding=d.get("embedding"),
                 )
             )
         return out
 
     def embed_crop(self, crop_bgr) -> Optional[np.ndarray]:  # type: ignore[no-untyped-def]
-        faces = self.detect(crop_bgr)
-        # Take the most confident face in the crop. Reference photos are
-        # framed on a single person so this is robust in practice.
-        if not faces:
+        cfg = self._snapshot_config()
+        # Embedding extraction is always InsightFace-driven, regardless
+        # of the configured ``mode`` for live capture — enrollment
+        # photos are pre-framed single-person crops, so we don't need
+        # the YOLO body box.
+        emb_cfg = DetectorConfig(
+            mode="insightface",
+            det_size=cfg.det_size,
+            min_det_score=cfg.min_det_score,
+            min_face_pixels=cfg.min_face_pixels,
+            yolo_conf=cfg.yolo_conf,
+        )
+        raw = detector_detect(crop_bgr, emb_cfg)
+        if not raw:
             return None
-        faces = sorted(faces, key=lambda f: f.det_score, reverse=True)
-        return faces[0].embedding
+        # Take the most confident face in the crop.
+        raw = sorted(
+            raw, key=lambda d: float(d.get("det_score", 0.0)), reverse=True
+        )
+        emb = raw[0].get("embedding")
+        if emb is None:
+            return None
+        return np.asarray(emb, dtype=np.float32)
+
+
+# Re-export the prototype's quality_score so callers don't need to
+# import from two places.
+quality_score = detector_quality_score
 
 
 # --- Test-stub hook --------------------------------------------------------

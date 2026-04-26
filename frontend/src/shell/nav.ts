@@ -39,6 +39,7 @@ export const NAV: Record<Role, NavItem[]> = {
     { id: "audit", label: "Audit Log", icon: "shield" },
     { section: "System" },
     { id: "system", label: "System & Infra", icon: "activity" },
+    { id: "system-settings", label: "Detection & Tracker", icon: "settings" },
     { id: "api-docs", label: "API Reference", icon: "fileText" },
     { id: "settings", label: "Settings & custom fields", icon: "settings" },
   ],
@@ -110,6 +111,7 @@ export const CRUMBS: Record<string, string[]> = {
   "mgr-assign": ["Hadir", "People", "Manager assignments"],
   pipeline: ["Hadir", "How it works"],
   system: ["Hadir", "System", "Infrastructure"],
+  "system-settings": ["Hadir", "System", "Detection & Tracker"],
   "api-docs": ["Hadir", "Developers", "API Reference"],
 };
 

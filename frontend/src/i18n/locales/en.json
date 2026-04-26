@@ -8,12 +8,15 @@
     "close": "Close",
     "delete": "Delete",
     "edit": "Edit",
+    "add": "Add",
+    "reset": "Reset",
     "yes": "Yes",
     "no": "No",
     "all": "All",
     "search": "Search…",
     "comingSoon": "Coming soon",
     "error": "Something went wrong.",
+    "errorGeneric": "Something went wrong.",
     "forbidden": "You don't have permission for that.",
     "networkError": "Network error.",
     "language": "Language",
@@ -72,6 +75,7 @@
       "mgr-assign": "Manager assignments",
       "audit": "Audit log",
       "system": "System & infrastructure",
+      "system-settings": "Detection & Tracker",
       "api-docs": "API reference",
       "settings": "Settings & custom fields",
       "my-attendance": "My attendance",
@@ -279,6 +283,72 @@
     "errors": {
       "rtspRequired": "RTSP URL is required.",
       "saveFailed": "Could not save camera. Check the RTSP URL and try again."
+    }
+  },
+  "systemSettings": {
+    "title": "Detection & Tracker",
+    "subtitle": "System-wide detector + tracker configuration. Changes apply to every camera in this tenant within 10 seconds, no restart required.",
+    "savedToast": "Settings updated — applying within 10 seconds.",
+    "resetButton": "Reset to defaults",
+    "resetConfirm": {
+      "title": "Reset to defaults?"
+    },
+    "detection": {
+      "title": "Detection",
+      "subtitle": "Backend, input size, confidence thresholds.",
+      "resetConfirm": "This will revert detection settings to the defaults (InsightFace, 320, score 0.50, min face 60×60).",
+      "mode": {
+        "label": "Detector backend",
+        "insightfaceLabel": "InsightFace (default, faster)",
+        "yoloLabel": "YOLO + Face (better for crowded scenes)",
+        "hint": {
+          "insightface": "Best for offices and clear face views. ~80 ms per analyzer cycle on a typical office laptop.",
+          "yolo+face": "Detects people first, then faces inside each body box. ~150 ms per analyzer cycle. Use for high-traffic areas."
+        }
+      },
+      "detSize": {
+        "label": "Detector input size (pixels)",
+        "hint": {
+          "160": "Fastest. May miss small faces.",
+          "224": "Faster than 320, slightly less recall.",
+          "320": "Default. Balanced speed and recall.",
+          "480": "Slower than 320, catches small faces.",
+          "640": "Slowest. Catches very small faces."
+        }
+      },
+      "minDetScore": {
+        "label": "Minimum detection confidence",
+        "hint": "Below this, detected faces are discarded as false positives."
+      },
+      "minFaceSize": {
+        "label": "Minimum face size (pixels per side)",
+        "hint": "Faces smaller than this are skipped. 60 = 60×60 pixels (default)."
+      },
+      "yoloConf": {
+        "label": "YOLO confidence",
+        "hint": "Person-detection confidence threshold for YOLO+Face mode only."
+      },
+      "showBodyBoxes": {
+        "label": "Show body boxes on preview",
+        "hint": "Debug aid — overlays the YOLO body box alongside the face box on Live Capture."
+      }
+    },
+    "tracker": {
+      "title": "Tracker",
+      "subtitle": "How the IoU tracker stitches detections into tracks. Per-camera Max event duration overrides the value here.",
+      "resetConfirm": "This will revert tracker settings to the defaults (IoU 0.30, idle timeout 2.0 s, max event 60 s).",
+      "iou": {
+        "label": "IoU threshold",
+        "hint": "Higher values require more frame-to-frame overlap to keep tracking the same person. Default 0.30 works for typical office cameras."
+      },
+      "timeout": {
+        "label": "Track timeout (seconds)",
+        "hint": "How long without seeing a face before considering them gone."
+      },
+      "maxDuration": {
+        "label": "Max event duration (seconds)",
+        "hint": "Stop saving new face crops after a person has been in frame this long. Per-camera setting (Cameras → Capture settings) overrides this default."
+      }
     }
   },
   "liveCapture": {

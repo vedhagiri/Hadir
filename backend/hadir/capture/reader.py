@@ -204,6 +204,8 @@ class CaptureWorker:
         capture_factory: VideoCaptureFactory = default_capture_factory,
         config: Optional[ReaderConfig] = None,
         capture_config: Optional[dict] = None,
+        tracker_config: Optional[dict] = None,
+        detection_config: Optional[dict] = None,
     ) -> None:
         self._engine = engine
         self._scope = scope
@@ -221,13 +223,54 @@ class CaptureWorker:
         if capture_config:
             self._capture_config.update(capture_config)
 
+        # P28.5c: tenant-level tracker + detection config snapshots.
+        # Kept under their own locks so the manager's reconcile tick
+        # can swap them without coordinating with the analyzer thread.
+        self._tracker_config_lock = threading.Lock()
+        self._tracker_config: dict = dict(tracker_config or {})
+        self._detection_config_lock = threading.Lock()
+        self._detection_config: dict = dict(detection_config or {})
+
+        # Tracker construction: prefer tenant_settings.tracker_config
+        # values when supplied, fall back to ReaderConfig defaults
+        # otherwise (test compat). Per-camera ``capture_config``
+        # overrides the tenant-level ``max_event_duration_sec`` —
+        # documented in backend/CLAUDE.md § "Capture configuration
+        # precedence".
+        tracker_iou = float(
+            self._tracker_config.get(
+                "iou_threshold", self._config.iou_threshold
+            )
+        )
+        tracker_timeout = float(
+            self._tracker_config.get(
+                "timeout_sec", self._config.track_idle_timeout_s
+            )
+        )
         self._tracker = IoUTracker(
-            iou_threshold=self._config.iou_threshold,
-            idle_timeout_s=self._config.track_idle_timeout_s,
+            iou_threshold=tracker_iou,
+            idle_timeout_s=tracker_timeout,
             max_duration_sec=float(
                 self._capture_config["max_event_duration_sec"]
             ),
         )
+
+        # P28.5c: hand the detection config to the analyzer so the
+        # first ``detect`` call uses the correct mode + det_size +
+        # thresholds. Stub analyzers (the test fixture's
+        # ``_NoopAnalyzer``) don't implement ``update_config`` —
+        # call it defensively.
+        if detection_config:
+            try:
+                from hadir.detection import DetectorConfig as _DC  # noqa: PLC0415
+
+                if hasattr(self._analyzer, "update_config"):
+                    self._analyzer.update_config(_DC.from_dict(detection_config))
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "analyzer update_config not supported on this analyzer "
+                    "(probably a stub) — skipping"
+                )
 
         # Reader → analyzer hand-off. The reader updates ``_latest_frame``
         # on every read and increments ``_frame_seq``; the analyzer
@@ -372,6 +415,65 @@ class CaptureWorker:
             "capture worker config updated: tenant=%s camera_id=%s",
             self._scope.tenant_id,
             self.camera_id,
+        )
+
+    # ------------------------------------------------------------------
+    # P28.5c: tenant-level tracker + detection config hot-reload
+
+    def get_tracker_config(self) -> dict:
+        with self._tracker_config_lock:
+            return dict(self._tracker_config)
+
+    def get_detection_config(self) -> dict:
+        with self._detection_config_lock:
+            return dict(self._detection_config)
+
+    def update_tracker_config(self, new_config: dict) -> None:
+        """Hot-reload entry point for tenant-level tracker_config
+        changes. Calls into ``IoUTracker.update_tracker_config`` which
+        applies to NEW tracks only (existing tracks keep their
+        original semantics — see tracker docstring)."""
+
+        new = dict(new_config or {})
+        with self._tracker_config_lock:
+            self._tracker_config = new
+        self._tracker.update_tracker_config(new)
+        logger.info(
+            "capture worker tracker_config updated: tenant=%s camera_id=%s",
+            self._scope.tenant_id,
+            self.camera_id,
+        )
+
+    def update_detection_config(self, new_config: dict) -> None:
+        """Hot-reload entry point for tenant-level detection_config
+        changes. Forwards to the analyzer's ``update_config`` which
+        triggers an InsightFace re-prep when ``det_size`` changes
+        and switches the active mode on the next ``detect`` call."""
+
+        new = dict(new_config or {})
+        with self._detection_config_lock:
+            self._detection_config = new
+        try:
+            from hadir.detection import DetectorConfig as _DC  # noqa: PLC0415
+
+            if hasattr(self._analyzer, "update_config"):
+                self._analyzer.update_config(_DC.from_dict(new))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "capture worker detection_config update failed: tenant=%s "
+                "camera_id=%s reason=%s",
+                self._scope.tenant_id,
+                self.camera_id,
+                type(exc).__name__,
+            )
+            return
+        logger.info(
+            "capture worker detection_config updated: tenant=%s camera_id=%s "
+            "mode=%s det_size=%s",
+            self._scope.tenant_id,
+            self.camera_id,
+            new.get("mode"),
+            new.get("det_size"),
         )
 
     # ------------------------------------------------------------------

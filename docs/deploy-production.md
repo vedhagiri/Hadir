@@ -427,6 +427,45 @@ docker compose up -d   # back to the regular dev stack
 
 ---
 
+## 9.5. Detection models — staging for production
+
+The capture pipeline supports two detector backends (P28.5c):
+
+* **InsightFace ``buffalo_l``** (default). The 250 MB model
+  downloads automatically on first use to the named volume
+  ``insightface_models`` (mounted at ``/root/.insightface`` in
+  the backend container). Survives image rebuilds.
+* **YOLO + Face** (``yolo+face`` mode). Uses ultralytics'
+  ``yolov8n.pt`` (~6 MB). The first ``detect`` call with this
+  mode fires a download from ultralytics' release CDN. In
+  production this is fragile — network policies may block the
+  download, and an operator switching the mode at runtime
+  shouldn't pay a model-download wait.
+
+**Pre-stage the YOLO model** so the first-use download never
+fires in production:
+
+```bash
+# On the host, with the backend container running:
+docker compose exec backend bash -c '
+  mkdir -p /data/models &&
+  curl -fSL -o /data/models/yolov8n.pt \
+    https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8n.pt &&
+  ls -la /data/models/
+'
+```
+
+The capture module reads from ``/data/models/`` by default; the
+default lookup path can be overridden via
+``hadir.detection.set_yolo_model_dir`` if your deploy stages the
+model elsewhere.
+
+If your production network blocks the download entirely, copy
+``yolov8n.pt`` from a pre-built artefact onto the host volume
+that mounts ``/data`` and verify with ``ls
+/data/models/yolov8n.pt`` inside the container before flipping
+the mode in System Settings.
+
 ## 10. Where things live
 
 | Purpose                    | Path                                       |

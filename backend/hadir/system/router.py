@@ -268,3 +268,282 @@ def camera_repo_list_cameras(conn, scope: TenantScope):  # type: ignore[no-untyp
     from hadir.cameras import repository as camera_repo  # noqa: PLC0415
 
     return camera_repo.list_cameras(conn, scope)
+
+
+# ---------------------------------------------------------------------------
+# P28.5c — Detection + Tracker configuration
+# ---------------------------------------------------------------------------
+#
+# Both endpoints are Admin-only and tenant-scoped (the row lives on
+# ``tenant_settings`` which is keyed by ``tenant_id``). Audit log
+# carries before/after JSONB so an auditor can reconstruct any
+# operator change.
+#
+# Validation is server-side, mirroring the client. Invalid values
+# return 400 with the offending field name.
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator  # noqa: E402
+
+from hadir.auth.audit import write_audit  # noqa: E402
+from hadir.db import tenant_settings  # noqa: E402
+from sqlalchemy import update as sql_update  # noqa: E402
+
+
+# Allowed detector input sizes — must match
+# ``hadir.detection.detectors._load_face_app`` re-prep behaviour.
+_ALLOWED_DET_SIZES: tuple[int, ...] = (160, 224, 320, 480, 640)
+
+# Min face dimension surfaced to the UI is 1-D; we square on the way
+# in for storage as ``min_face_pixels``. The UI's 20–300 range maps
+# here to 400 – 90,000 pixels.
+_MIN_FACE_PIXELS_LO = 400
+_MIN_FACE_PIXELS_HI = 90_000
+
+
+class DetectionConfigIn(BaseModel):
+    """Inbound shape for ``PUT /api/system/detection-config``.
+
+    All four canonical knobs required — partial updates aren't
+    supported (the UI sends the whole bag). Bounds match the
+    P28.5c spec; ``mode`` is an enum-as-string.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: str
+    det_size: int
+    min_det_score: float = Field(ge=0.0, le=1.0)
+    min_face_pixels: int = Field(
+        ge=_MIN_FACE_PIXELS_LO, le=_MIN_FACE_PIXELS_HI
+    )
+    yolo_conf: float = Field(ge=0.0, le=1.0)
+    show_body_boxes: bool
+
+    @field_validator("mode")
+    @classmethod
+    def _check_mode(cls, v: str) -> str:
+        if v not in ("insightface", "yolo+face"):
+            raise ValueError(
+                "mode must be one of: insightface, yolo+face"
+            )
+        return v
+
+    @field_validator("det_size")
+    @classmethod
+    def _check_det_size(cls, v: int) -> int:
+        if v not in _ALLOWED_DET_SIZES:
+            raise ValueError(
+                "det_size must be one of: " + ", ".join(
+                    str(x) for x in _ALLOWED_DET_SIZES
+                )
+            )
+        return v
+
+
+class DetectionConfigOut(DetectionConfigIn):
+    """Outbound shape — same fields as inbound."""
+
+    model_config = ConfigDict(extra="ignore")
+
+
+class TrackerConfigIn(BaseModel):
+    """Inbound shape for ``PUT /api/system/tracker-config``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    iou_threshold: float = Field(ge=0.05, le=0.95)
+    timeout_sec: float = Field(ge=0.5, le=30.0)
+    max_duration_sec: float = Field(ge=10.0, le=3600.0)
+
+
+class TrackerConfigOut(TrackerConfigIn):
+    model_config = ConfigDict(extra="ignore")
+
+
+# Defaults — mirror the migration's server_default and the manager's
+# fallback constants.
+_DETECTION_DEFAULTS = {
+    "mode": "insightface",
+    "det_size": 320,
+    "min_det_score": 0.5,
+    "min_face_pixels": 3600,
+    "yolo_conf": 0.35,
+    "show_body_boxes": False,
+}
+_TRACKER_DEFAULTS = {
+    "iou_threshold": 0.3,
+    "timeout_sec": 2.0,
+    "max_duration_sec": 60.0,
+}
+
+
+def _load_detection_row(scope: TenantScope) -> dict:
+    """Read the row + merge over defaults so missing keys are filled."""
+
+    engine = get_engine()
+    with engine.begin() as conn:
+        row = conn.execute(
+            select(
+                tenant_settings.c.detection_config,
+            ).where(tenant_settings.c.tenant_id == scope.tenant_id)
+        ).first()
+    out = dict(_DETECTION_DEFAULTS)
+    if row is not None and isinstance(row.detection_config, dict):
+        out.update(row.detection_config)
+    return out
+
+
+def _load_tracker_row(scope: TenantScope) -> dict:
+    engine = get_engine()
+    with engine.begin() as conn:
+        row = conn.execute(
+            select(
+                tenant_settings.c.tracker_config,
+            ).where(tenant_settings.c.tenant_id == scope.tenant_id)
+        ).first()
+    out = dict(_TRACKER_DEFAULTS)
+    if row is not None and isinstance(row.tracker_config, dict):
+        out.update(row.tracker_config)
+    return out
+
+
+def _ensure_tenant_settings_row(conn, tenant_id: int) -> None:
+    """Insert a default tenant_settings row when missing.
+
+    The pilot's ``main`` schema is seeded on migration; tenants
+    provisioned via the CLI also seed a row. But a future ad-hoc
+    tenant could lack one — this function makes the PUT path safe
+    in either case.
+    """
+
+    existing = conn.execute(
+        select(tenant_settings.c.tenant_id).where(
+            tenant_settings.c.tenant_id == tenant_id
+        )
+    ).first()
+    if existing is not None:
+        return
+    from sqlalchemy import insert as sql_insert  # noqa: PLC0415
+
+    conn.execute(
+        sql_insert(tenant_settings).values(tenant_id=tenant_id)
+    )
+
+
+@router.get(
+    "/detection-config", response_model=DetectionConfigOut
+)
+def get_detection_config(
+    user: Annotated[CurrentUser, ADMIN],
+) -> DetectionConfigOut:
+    scope = TenantScope(tenant_id=user.tenant_id)
+    return DetectionConfigOut.model_validate(_load_detection_row(scope))
+
+
+def _validation_to_400(model_cls, raw: dict):  # type: ignore[no-untyped-def]
+    """Validate manually so a Pydantic error returns 400 (not the
+    FastAPI default 422). The detail names the offending field via
+    ``loc``."""
+
+    from fastapi import HTTPException  # noqa: PLC0415
+
+    try:
+        return model_cls.model_validate(raw)
+    except ValidationError as exc:
+        # ``exc.errors()`` returns one entry per failure with a
+        # ``loc`` tuple — surface the first as the headline error
+        # plus full list for clients that want it.
+        errs = exc.errors()
+        first = errs[0] if errs else {"loc": ["body"], "msg": str(exc)}
+        field = ".".join(str(x) for x in first.get("loc", []) if x != "body")
+        msg = first.get("msg", "invalid value")
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "field": field or "body",
+                "message": msg,
+                "errors": [
+                    {
+                        "field": ".".join(
+                            str(x) for x in e.get("loc", []) if x != "body"
+                        ),
+                        "message": e.get("msg", "invalid"),
+                    }
+                    for e in errs
+                ],
+            },
+        ) from exc
+
+
+@router.put(
+    "/detection-config", response_model=DetectionConfigOut
+)
+def put_detection_config(
+    payload: dict,
+    user: Annotated[CurrentUser, ADMIN],
+) -> DetectionConfigOut:
+    parsed = _validation_to_400(DetectionConfigIn, payload)
+    scope = TenantScope(tenant_id=user.tenant_id)
+    new_config = parsed.model_dump()
+    before = _load_detection_row(scope)
+    engine = get_engine()
+    with engine.begin() as conn:
+        _ensure_tenant_settings_row(conn, scope.tenant_id)
+        conn.execute(
+            sql_update(tenant_settings)
+            .where(tenant_settings.c.tenant_id == scope.tenant_id)
+            .values(detection_config=new_config)
+        )
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="system.detection_config.updated",
+            entity_type="tenant_settings",
+            entity_id=str(scope.tenant_id),
+            before=before,
+            after=new_config,
+        )
+    return DetectionConfigOut.model_validate(new_config)
+
+
+@router.get(
+    "/tracker-config", response_model=TrackerConfigOut
+)
+def get_tracker_config(
+    user: Annotated[CurrentUser, ADMIN],
+) -> TrackerConfigOut:
+    scope = TenantScope(tenant_id=user.tenant_id)
+    return TrackerConfigOut.model_validate(_load_tracker_row(scope))
+
+
+@router.put(
+    "/tracker-config", response_model=TrackerConfigOut
+)
+def put_tracker_config(
+    payload: dict,
+    user: Annotated[CurrentUser, ADMIN],
+) -> TrackerConfigOut:
+    parsed = _validation_to_400(TrackerConfigIn, payload)
+    scope = TenantScope(tenant_id=user.tenant_id)
+    new_config = parsed.model_dump()
+    before = _load_tracker_row(scope)
+    engine = get_engine()
+    with engine.begin() as conn:
+        _ensure_tenant_settings_row(conn, scope.tenant_id)
+        conn.execute(
+            sql_update(tenant_settings)
+            .where(tenant_settings.c.tenant_id == scope.tenant_id)
+            .values(tracker_config=new_config)
+        )
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="system.tracker_config.updated",
+            entity_type="tenant_settings",
+            entity_id=str(scope.tenant_id),
+            before=before,
+            after=new_config,
+        )
+    return TrackerConfigOut.model_validate(new_config)
