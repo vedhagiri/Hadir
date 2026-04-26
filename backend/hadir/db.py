@@ -196,10 +196,22 @@ tenants = Table(
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("name", Text, nullable=False, unique=True),
-    # Postgres schema this tenant's data lives in. Pilot tenant uses
-    # ``main`` for backward compat; v1.0 provisioning creates
-    # ``tenant_<slug>`` schemas. Constrained server-side via the regex
-    # in migration 0007 to match ``_TENANT_SCHEMA_RE`` above.
+    # User-facing identifier. This is what API payloads call
+    # ``tenant_slug`` and what credentials.txt + the frontend tenant
+    # picker show operators. Stored as ``citext`` so the lookup is
+    # case-insensitive without ``LOWER()`` on every call site (mirrors
+    # ``users.email``). Format constrained by migration 0026 to
+    # ``^[a-z][a-z0-9_-]{1,39}$``. Provisioning derives ``schema_name``
+    # from this — never the other way round.
+    Column("slug", CITEXT, nullable=False, unique=True),
+    # Postgres schema this tenant's data lives in. Internal routing
+    # only — read out of the row after a slug match and fed to
+    # ``SET search_path``. Pilot tenant uses ``main`` for backward
+    # compat; v1.0 provisioning creates ``tenant_<slug>`` schemas
+    # (with hyphens in the slug rewritten to underscores so the
+    # schema name remains a bare Postgres identifier). Constrained
+    # server-side via the regex in migration 0007 to match
+    # ``_TENANT_SCHEMA_RE`` above.
     Column("schema_name", Text, nullable=False, server_default="main", unique=True),
     # P3: ``active`` or ``suspended``. Login and the request middleware
     # refuse a suspended tenant; the Super-Admin console can flip the

@@ -24,11 +24,11 @@ from __future__ import annotations
 # ║                                                                  ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-REAL_CORPORATE_NAME = "__CORPORATE_NAME_HERE__"  # e.g. "MTS Office"
-REAL_CORPORATE_SLUG = "__CORPORATE_SLUG_HERE__"  # e.g. "mts-office" (lowercase, hyphens)
-REAL_TEST_EMPLOYEE_NAME = "__EMPLOYEE_NAME_HERE__"  # the real human whose face will be enrolled
+REAL_CORPORATE_NAME = "Inaisys Solutions"  # e.g. "MTS Office"
+REAL_CORPORATE_SLUG = "inaisys"  # e.g. "mts-office" (lowercase, hyphens)
+REAL_TEST_EMPLOYEE_NAME = "Giri"  # the real human whose face will be enrolled
 # Optional: override the corporate email domain. Default derives from the slug.
-REAL_CORPORATE_DOMAIN: "str | None" = None  # e.g. "mts.local" — None auto-derives
+REAL_CORPORATE_DOMAIN: "str | None" = "inaisys.local"  # e.g. "mts.local" — None auto-derives
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -90,10 +90,21 @@ logger = logging.getLogger("hadir.pre_omran_reset_seed")
 # Constants — driving the seed shape
 # ────────────────────────────────────────────────────────────────────
 
-DEMO_SLUG = "tenant_mts_demo"
+DEMO_SLUG = "mts_demo"
 DEMO_NAME = "MTS Demo Co"
 DEMO_DOMAIN = "mts-demo.example.com"
 DEMO_BRANDING = {"primary_color_key": "plum", "font_key": "plus-jakarta-sans"}
+
+# Internal Postgres schema name the demo tenant lives in. Derived
+# from the friendly slug via ``schema_name_for_slug``; never typed
+# by an operator and never accepted as login input. We hold it as a
+# constant here only because seed code calls ``tenant_context(...)``
+# directly (which takes a schema, not a slug) — every other surface
+# routes through the friendly slug.
+def _demo_schema() -> str:
+    from hadir.tenants.slug import schema_name_for_slug  # noqa: PLC0415
+
+    return schema_name_for_slug(DEMO_SLUG)
 
 # Real-corporate branding — distinctly different from demo so the two
 # are immediately visually distinguishable in side-by-side windows.
@@ -199,10 +210,15 @@ def _placeholder_check() -> None:
 
 
 def _slug_check(slug: str) -> None:
-    if not re.fullmatch(r"[a-z][a-z0-9-]{0,62}", slug):
+    # Mirrors ``hadir.tenants.slug.SLUG_RE`` — the same CHECK
+    # migration 0026 enforces on ``public.tenants.slug``.
+    from hadir.tenants.slug import SLUG_RE  # noqa: PLC0415
+
+    if not SLUG_RE.match(slug):
         print(
-            "\n  ERROR: REAL_CORPORATE_SLUG must be lowercase a-z + digits + "
-            "hyphens (e.g. 'mts-office').\n",
+            f"\n  ERROR: REAL_CORPORATE_SLUG must match {SLUG_RE.pattern} "
+            "(lowercase a-z + digits + hyphens + underscores; start "
+            "with a letter; 2-40 chars; e.g. 'mts-office').\n",
             file=sys.stderr,
         )
         sys.exit(2)
@@ -413,12 +429,16 @@ def _set_branding(
 
 
 def _seed_demo_tenant(engine: Engine, *, tenant_id: int) -> TenantCredentials:
-    print(f"\n▸ Provisioning {DEMO_SLUG} (tenant_id={tenant_id})...")
+    demo_schema = _demo_schema()
+    print(
+        f"\n▸ Provisioning slug={DEMO_SLUG!r} schema={demo_schema!r} "
+        f"(tenant_id={tenant_id})..."
+    )
     creds = TenantCredentials(slug=DEMO_SLUG, display_name=DEMO_NAME)
 
     from hadir.db import tenant_context  # noqa: PLC0415
 
-    with tenant_context(DEMO_SLUG):
+    with tenant_context(demo_schema):
         # All seed work in one transaction.
         with engine.begin() as conn:
             print("  · departments (5)")
@@ -499,7 +519,8 @@ def _seed_demo_tenant(engine: Engine, *, tenant_id: int) -> TenantCredentials:
                 entity_type="tenant",
                 entity_id=str(tenant_id),
                 after={
-                    "schema": DEMO_SLUG,
+                    "slug": DEMO_SLUG,
+                    "schema": _demo_schema(),
                     "departments": len(DEMO_DEPARTMENTS),
                     "employees": 25,
                     "users": len(user_ids),
@@ -776,11 +797,12 @@ def _real_corporate_domain() -> str:
 
 
 def _real_corporate_schema() -> str:
-    # ``provision_tenant.py`` enforces ^[A-Za-z_][A-Za-z0-9_]{0,62}$
-    # on the schema name. The constant is a slug ("mts-office"); we
-    # convert dashes to underscores and prefix with ``tenant_`` so
-    # the slug stays human-friendly while the schema is valid.
-    return "tenant_" + REAL_CORPORATE_SLUG.replace("-", "_")
+    # Single derivation helper — same one ``provision_tenant`` uses
+    # so the schema name printed during a dry run matches the value
+    # that lands in ``public.tenants.schema_name``.
+    from hadir.tenants.slug import schema_name_for_slug  # noqa: PLC0415
+
+    return schema_name_for_slug(REAL_CORPORATE_SLUG)
 
 
 def _seed_real_corporate(
@@ -936,8 +958,15 @@ def _format_credentials(
 
     lines += [
         "",
-        f"── TENANT: {DEMO_SLUG} (synthetic test data) ──────────────",
-        f"URL: http://localhost:5173    Tenant slug: {DEMO_SLUG.removeprefix('tenant_')}",
+        f"── TENANT: {DEMO_NAME} (synthetic test data) ──────────────",
+        # The slug printed here is the friendly identifier from
+        # ``public.tenants.slug`` — what the API expects on
+        # ``POST /api/auth/login`` and what the frontend tenant
+        # picker collects from the operator. The internal Postgres
+        # schema name (``tenant_<slug>``) is deliberately not
+        # printed; it's a one-way derivation handled by
+        # provisioning.
+        f"URL: http://localhost:5173    Tenant slug: {DEMO_SLUG}",
         "",
     ]
     width = max((len(u.role_label) for u in demo.users), default=10) + 1
@@ -951,11 +980,10 @@ def _format_credentials(
         for n in demo.notes:
             lines.append(f"  · {n}")
 
-    real_label = REAL_CORPORATE_SLUG
     lines += [
         "",
-        f"── TENANT: {real_label} (real corporate, real camera) ──",
-        f"URL: http://localhost:5173    Tenant slug: {_real_corporate_schema().removeprefix('tenant_')}",
+        f"── TENANT: {REAL_CORPORATE_NAME} (real corporate, real camera) ──",
+        f"URL: http://localhost:5173    Tenant slug: {REAL_CORPORATE_SLUG}",
         "",
     ]
     width = max((len(u.role_label) for u in real.users), default=10) + 1
@@ -1107,24 +1135,30 @@ def main(argv: Optional[list[str]] = None) -> int:
     _migrate_public(backend_dir)
 
     # Phase 2: provision tenants. Each one gets its own engine cycle
-    # so a connection-pool quirk doesn't span the wipe.
-    print("\n▸ Provisioning tenant_mts_demo...")
+    # so a connection-pool quirk doesn't span the wipe. Pass the
+    # friendly slug; ``provision_tenant`` derives the schema name.
+    print(f"\n▸ Provisioning slug={DEMO_SLUG!r}...")
     demo_result = provision_tenant(
         slug=DEMO_SLUG, name=DEMO_NAME, skip_default_admin=True,
     )
-    print(f"  provisioned tenant_id={demo_result['tenant_id']}")
+    print(
+        f"  provisioned tenant_id={demo_result['tenant_id']} "
+        f"schema={demo_result['schema']}"
+    )
 
     real_result: dict[str, Any] = {}
     real_creds: Optional[TenantCredentials] = None
     if not args.skip_real:
-        real_schema = _real_corporate_schema()
-        print(f"\n▸ Provisioning {real_schema} ...")
+        print(f"\n▸ Provisioning slug={REAL_CORPORATE_SLUG!r} ...")
         real_result = provision_tenant(
-            slug=real_schema,
+            slug=REAL_CORPORATE_SLUG,
             name=REAL_CORPORATE_NAME,
             skip_default_admin=True,
         )
-        print(f"  provisioned tenant_id={real_result['tenant_id']}")
+        print(
+            f"  provisioned tenant_id={real_result['tenant_id']} "
+            f"schema={real_result['schema']}"
+        )
     else:
         print("\n▸ Skipping real corporate tenant per --skip-real")
 

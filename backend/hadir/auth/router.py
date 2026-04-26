@@ -36,12 +36,20 @@ from hadir.auth.sessions import (
     update_active_role,
 )
 from hadir.config import get_settings
-from hadir.db import _TENANT_SCHEMA_RE, get_engine, tenant_context, tenants, users
+from hadir.db import get_engine, tenant_context, tenants, users
 from hadir.tenants import TenantScope, get_tenant_scope
+from hadir.tenants.slug import SLUG_RE
 
 # Cookie that carries the tenant the session belongs to. Set alongside
 # ``hadir_session`` at login, read by ``TenantScopeMiddleware`` to
 # resolve which schema's ``user_sessions`` to look the cookie up in.
+#
+# Carries the **schema name** (e.g. ``tenant_mts_demo``), not the
+# friendly slug. The cookie is HttpOnly server-set / server-read
+# state — never user input — so it doesn't follow the slug-only
+# rule that login bodies do. Storing schema_name spares the
+# middleware a per-request slug→schema lookup against
+# ``public.tenants``.
 TENANT_COOKIE_NAME = "hadir_tenant"
 
 logger = logging.getLogger(__name__)
@@ -55,15 +63,24 @@ class LoginRequest(BaseModel):
     ``EmailStr`` validates the format; we lowercase the stored value so
     CITEXT's case-insensitive comparison matches every time.
 
-    ``tenant_slug`` (v1.0 P5) is the schema name of the tenant the
-    caller belongs to. Optional for backward compatibility with the
-    pilot's single-tenant flow — when omitted, login defaults to the
-    pilot's ``main`` schema. Required for any non-pilot tenant.
+    ``tenant_slug`` (v1.0 P5; reworked alongside migration 0026) is
+    the **friendly slug** of the tenant — the value an operator types
+    into the login form, what credentials.txt prints, and what
+    ``public.tenants.slug`` stores. The handler resolves the slug to
+    its row, reads ``schema_name`` from that row, and uses the
+    schema name for ``SET search_path``. The two identifiers must
+    not be confused: the schema name (``tenant_mts_demo``) is
+    internal; passing it as ``tenant_slug`` returns 401 — there's
+    exactly one valid identifier per tenant.
+
+    Optional for backward compatibility with the pilot's
+    single-tenant flow — when omitted in single mode, login defaults
+    to the pilot's tenant (``slug='main'``). Required in multi mode.
     """
 
     email: EmailStr
     password: str = Field(min_length=1, max_length=1024)
-    tenant_slug: str | None = Field(default=None, max_length=63)
+    tenant_slug: str | None = Field(default=None, max_length=40)
 
 
 class MeResponse(BaseModel):
@@ -129,16 +146,27 @@ def _resolve_login_target(
     """Return ``(tenant_id, tenant_schema)`` the login should run under.
 
     Path A — explicit ``tenant_slug`` (v1.0 multi-tenant): validate the
-    slug against the same regex Postgres CHECK enforces, then look up
-    the row in the global registry. Refuse suspended tenants. Refuse
-    unknown slugs.
+    slug against the friendly-slug regex (the same CHECK migration
+    0026 enforces), then look up the row in the global registry by
+    ``slug``. The row's ``schema_name`` is what we hand back for
+    ``SET search_path``. Refuse suspended tenants. Refuse unknown
+    slugs (401, not 404 — preventing tenant enumeration).
 
-    Path B — no slug (pilot single-tenant compatibility): use the
-    configured default tenant id and the conventional ``main`` schema.
+    The schema name (``tenant_mts_demo``) is **not** a valid
+    ``tenant_slug``: every Postgres schema name created post-pilot
+    starts with ``tenant_``, which fails the slug regex's
+    "must start with [a-z], not underscore" rule. Pass the friendly
+    slug (``mts_demo``) — there's exactly one valid identifier per
+    tenant by design.
+
+    Path B — no slug, ``HADIR_TENANT_MODE=single`` (pilot single-tenant
+    compatibility): use the configured default tenant id and the
+    conventional ``main`` schema. In ``multi`` mode an omitted slug
+    returns 400 — there is no defensible tenant to default to.
     """
 
     if tenant_slug is not None:
-        if not _TENANT_SCHEMA_RE.match(tenant_slug):
+        if not SLUG_RE.match(tenant_slug):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="invalid tenant_slug",
@@ -150,7 +178,7 @@ def _resolve_login_target(
                         tenants.c.id,
                         tenants.c.schema_name,
                         tenants.c.status,
-                    ).where(tenants.c.schema_name == tenant_slug)
+                    ).where(tenants.c.slug == tenant_slug)
                 ).first()
         if row is None:
             # Don't 404 — that leaks tenant existence by oracle. Treat
@@ -166,6 +194,11 @@ def _resolve_login_target(
             )
         return int(row.id), str(row.schema_name)
 
+    if settings.tenant_mode == "multi":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="tenant_slug is required",
+        )
     return settings.default_tenant_id, "main"
 
 
@@ -183,6 +216,17 @@ def login(
     ip = _client_ip(request)
     settings = get_settings()
     engine = get_engine()
+
+    # INFO log on every attempt so a tenant-routing failure is visible
+    # in the operator's log even when no audit row gets written (the
+    # unknown-tenant 401 happens before we have a tenant_id to scope
+    # the audit insert under). Never logs the password.
+    logger.info(
+        "login attempt email=%s tenant_slug=%s ip=%s",
+        email,
+        payload.tenant_slug or "<none>",
+        ip,
+    )
 
     target_tenant_id, target_schema = _resolve_login_target(
         tenant_slug=payload.tenant_slug, settings=settings, engine=engine
@@ -256,6 +300,13 @@ def login(
                         "attempts": attempts,
                     },
                 )
+            logger.info(
+                "login failed email=%s tenant_schema=%s reason=%s attempts=%d",
+                email,
+                target_schema,
+                failure_reason,
+                attempts,
+            )
             # Do not reveal which case fired — PROJECT_CONTEXT §12 red line.
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -305,6 +356,12 @@ def login(
                 user_id=int(user_row.id),
                 tenant_id=target_tenant_id,
             )
+        logger.info(
+            "login success email=%s tenant_schema=%s user_id=%d",
+            email,
+            target_schema,
+            int(user_row.id),
+        )
 
     # bundle can't be None here — we just authenticated the row.
     assert bundle is not None

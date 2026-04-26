@@ -230,16 +230,17 @@ def generate_attendance_pdf(
             department_label=department_label,
         )
 
-        # Schema name fuels the spec'd filename. Fall back to the
-        # tenant id if the row's missing (shouldn't happen — guarded
-        # by current_user already).
+        # Friendly slug fuels the spec'd filename
+        # (``hadir-attendance-{slug}-…``). Fall back to the tenant
+        # id if the row's missing (shouldn't happen — guarded by
+        # current_user already).
         slug_row = conn.execute(
-            sa_select(tenants.c.schema_name).where(
+            sa_select(tenants.c.slug).where(
                 tenants.c.id == scope.tenant_id
             )
         ).first()
         slug = (
-            str(slug_row.schema_name)
+            str(slug_row.slug)
             if slug_row is not None
             else f"tenant-{scope.tenant_id}"
         )
@@ -277,7 +278,7 @@ def generate_attendance_pdf(
     )
 
     filename = filename_for(
-        schema_name=slug, start=payload.start, end=payload.end
+        slug=slug, start=payload.start, end=payload.end
     )
     return StreamingResponse(
         BytesIO(data),
@@ -308,17 +309,17 @@ def _empty_pdf_response(
             generated_by_email="",
         )
         slug_row = conn.execute(
-            sa_select(tenants.c.schema_name).where(
+            sa_select(tenants.c.slug).where(
                 tenants.c.id == scope.tenant_id
             )
         ).first()
         slug = (
-            str(slug_row.schema_name)
+            str(slug_row.slug)
             if slug_row is not None
             else f"tenant-{scope.tenant_id}"
         )
     filename = filename_for(
-        schema_name=slug, start=payload.start, end=payload.end
+        slug=slug, start=payload.start, end=payload.end
     )
     return StreamingResponse(
         BytesIO(data),

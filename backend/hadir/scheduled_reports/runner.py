@@ -244,14 +244,15 @@ def _branding_for_email(conn: Connection, *, tenant_id: int) -> dict:
 
 def _tenant_summary(conn: Connection, *, tenant_id: int) -> dict:
     row = conn.execute(
-        select(tenants.c.id, tenants.c.name, tenants.c.schema_name).where(
-            tenants.c.id == tenant_id
-        )
+        select(
+            tenants.c.id, tenants.c.name, tenants.c.slug, tenants.c.schema_name
+        ).where(tenants.c.id == tenant_id)
     ).first()
     assert row is not None
     return {
         "id": int(row.id),
         "name": str(row.name),
+        "slug": str(row.slug),
         "schema_name": str(row.schema_name),
     }
 
@@ -333,7 +334,7 @@ def run_schedule_now(*, scope: TenantScope, schedule_id: int) -> RunResult:
                 conn,
                 scope,
                 schedule_row=sched,
-                tenant_slug=tenant_info["schema_name"],
+                tenant_slug=tenant_info["slug"],
             )
         size_bytes = len(built.bytes_)
         ext = built.filename.rsplit(".", 1)[-1]

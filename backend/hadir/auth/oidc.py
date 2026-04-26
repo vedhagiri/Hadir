@@ -84,6 +84,7 @@ from hadir.db import (
     tenants,
     users,
 )
+from hadir.tenants.slug import SLUG_RE
 
 logger = logging.getLogger(__name__)
 
@@ -425,7 +426,16 @@ def validate_id_token(
 
 
 def _resolve_tenant_by_slug(slug: str) -> Optional[tuple[int, str]]:
-    if not _TENANT_SCHEMA_RE.match(slug):
+    """Look up ``(tenant_id, schema_name)`` for the friendly slug.
+
+    Slug = the user-facing identifier from ``public.tenants.slug``
+    (matches the body field ``tenant_slug`` on local login). The
+    lookup column is ``slug``; ``schema_name`` is read out of the
+    matched row and used for ``SET search_path`` downstream — never
+    accepted as input.
+    """
+
+    if not SLUG_RE.match(slug):
         return None
     engine = get_engine()
     with tenant_context("public"):
@@ -435,7 +445,7 @@ def _resolve_tenant_by_slug(slug: str) -> Optional[tuple[int, str]]:
                     tenants.c.id,
                     tenants.c.schema_name,
                     tenants.c.status,
-                ).where(tenants.c.schema_name == slug)
+                ).where(tenants.c.slug == slug)
             ).first()
     if row is None or str(row.status) == "suspended":
         return None
@@ -509,8 +519,13 @@ def oidc_login(tenant: str, request: Request) -> Response:
 
     state = secrets.token_urlsafe(24)
     nonce = secrets.token_urlsafe(24)
+    # ``tenant_schema`` is the Postgres schema name, used by the
+    # callback to apply ``SET search_path`` while exchanging the
+    # code + creating the session. It's signed-and-server-set state,
+    # never user input — distinct from the ``tenant_slug`` that
+    # local-login takes in the request body.
     payload = {
-        "tenant_slug": schema,
+        "tenant_schema": schema,
         "tenant_id": tenant_id,
         "state": state,
         "nonce": nonce,
@@ -599,7 +614,10 @@ def oidc_callback(
     if state_payload is None:
         raise HTTPException(status_code=400, detail="invalid or expired oidc state")
 
-    schema = str(state_payload.get("tenant_slug") or "")
+    # ``tenant_schema`` is signed-server-set state from /login;
+    # ``_TENANT_SCHEMA_RE`` is the Postgres-identifier regex (correct
+    # here — the field carries a schema name, not the friendly slug).
+    schema = str(state_payload.get("tenant_schema") or "")
     tenant_id = state_payload.get("tenant_id")
     if not isinstance(tenant_id, int) or not _TENANT_SCHEMA_RE.match(schema):
         raise HTTPException(status_code=400, detail="malformed oidc state")

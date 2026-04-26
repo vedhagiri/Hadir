@@ -38,6 +38,10 @@ _WHITELIST: frozenset[str] = frozenset(
         # super_admin_sessions, super_admin_audit) — operating on
         # public is the migration's purpose, not an authoring shortcut.
         "0009_super_admin.py",
+        # 0026 adds public.tenants.slug — the user-facing identifier
+        # column is part of public.tenants by definition. Idempotency
+        # guards make per-tenant re-execution safe.
+        "0026_tenants_slug.py",
     }
 )
 

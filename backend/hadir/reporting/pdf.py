@@ -268,26 +268,33 @@ def _branding_for_tenant(conn: Connection, *, tenant_id: int) -> dict:
 def _tenant_summary(conn: Connection, *, tenant_id: int) -> dict:
     row = conn.execute(
         select(
-            tenants.c.id, tenants.c.name, tenants.c.schema_name
+            tenants.c.id, tenants.c.name, tenants.c.slug, tenants.c.schema_name
         ).where(tenants.c.id == tenant_id)
     ).first()
     assert row is not None, f"tenant id {tenant_id} not found"
     return {
         "id": int(row.id),
         "name": str(row.name),
+        "slug": str(row.slug),
         "schema_name": str(row.schema_name),
     }
 
 
 def filename_for(
-    *, schema_name: str, start: date, end: date
+    *, slug: str, start: date, end: date
 ) -> str:
     """Build the spec'd filename:
     ``hadir-attendance-{tenant_slug}-{from}-to-{to}.pdf``.
+
+    Uses the friendly slug from ``public.tenants.slug`` so the
+    download name matches what an operator sees elsewhere
+    (credentials.txt, login form, the super-admin console). The
+    Postgres schema name (``tenant_mts_demo``) is internal and
+    deliberately doesn't show up in user-visible artefacts.
     """
 
     return (
-        f"hadir-attendance-{schema_name}-{start.isoformat()}"
+        f"hadir-attendance-{slug}-{start.isoformat()}"
         f"-to-{end.isoformat()}.pdf"
     )
 

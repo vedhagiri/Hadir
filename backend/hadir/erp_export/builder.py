@@ -229,7 +229,14 @@ def filename_for(*, fmt: str, now: datetime) -> str:
 
 
 def get_tenant_slug(conn: Connection, *, tenant_id: int) -> str:
+    """Return the friendly slug from ``public.tenants.slug``.
+
+    The ERP file-drop schema (``docs/erp-file-drop-schema.md``)
+    surfaces ``tenant_slug`` to the integration team — they consume
+    the friendly identifier, not the internal Postgres schema name.
+    """
+
     row = conn.execute(
-        select(tenants.c.schema_name).where(tenants.c.id == tenant_id)
+        select(tenants.c.slug).where(tenants.c.id == tenant_id)
     ).first()
-    return str(row.schema_name) if row is not None else f"tenant-{tenant_id}"
+    return str(row.slug) if row is not None else f"tenant-{tenant_id}"

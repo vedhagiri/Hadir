@@ -41,10 +41,16 @@ from scripts.deprovision_tenant import deprovision
 from scripts.provision_tenant import provision
 
 # Slugs picked to be unmistakable and not collide with the dev DB's
-# pilot tenant (``main`` / id=1). The names are similarly distinct so a
-# UNIQUE collision in ``public.tenants`` doesn't fail the run.
-OMRAN_SLUG = "tenant_smoke_omran"
-DEMO_SLUG = "tenant_smoke_demo"
+# pilot tenant (``main`` / id=1). Friendly slugs (no ``tenant_``
+# prefix) — provisioning derives the schema name as
+# ``tenant_<slug>`` automatically. The names are similarly distinct
+# so a UNIQUE collision in ``public.tenants`` doesn't fail the run.
+OMRAN_SLUG = "smoke_omran"
+DEMO_SLUG = "smoke_demo"
+# The internal Postgres schemas the friendly slugs resolve to —
+# used only for direct-Postgres assertions; never as login input.
+OMRAN_SCHEMA = "tenant_smoke_omran"
+DEMO_SCHEMA = "tenant_smoke_demo"
 OMRAN_NAME = "Omran Smoke"
 DEMO_NAME = "Demo Smoke Co"
 OMRAN_ADMIN_EMAIL = "admin@omran.smoke"
@@ -153,7 +159,14 @@ def super_admin_creds(admin_engine: Engine) -> Iterator[dict]:
 # ---------------------------------------------------------------------------
 
 
-def _login_admin(client: TestClient, *, email: str, password: str, slug: str) -> None:
+def _login_admin(
+    client: TestClient,
+    *,
+    email: str,
+    password: str,
+    slug: str,
+    expected_schema: str,
+) -> None:
     resp = client.post(
         "/api/auth/login",
         json={"email": email, "password": password, "tenant_slug": slug},
@@ -161,8 +174,12 @@ def _login_admin(client: TestClient, *, email: str, password: str, slug: str) ->
     assert resp.status_code == 200, resp.text
     # Both cookies must be set so the next request resolves correctly.
     assert client.cookies.get("hadir_session"), "missing hadir_session"
-    assert client.cookies.get("hadir_tenant") == slug, (
-        f"hadir_tenant cookie {client.cookies.get('hadir_tenant')!r} != {slug!r}"
+    # ``hadir_tenant`` cookie carries the schema name (internal
+    # routing state, set by the server) — distinct from the friendly
+    # slug the body sent on the way in.
+    assert client.cookies.get("hadir_tenant") == expected_schema, (
+        f"hadir_tenant cookie {client.cookies.get('hadir_tenant')!r} "
+        f"!= expected schema {expected_schema!r}"
     )
 
 
@@ -212,25 +229,31 @@ def test_provision_creates_two_isolated_tenants(
     omran = two_smoke_tenants["omran"]
     demo = two_smoke_tenants["demo"]
 
-    # Both tenants registered in public.
+    # Both tenants registered in public — assert by friendly slug
+    # (the user-facing identifier; ``schema_name`` is internal).
     with tenant_context("public"):
         with admin_engine.begin() as conn:
             from hadir.db import tenants  # noqa: PLC0415
 
             rows = conn.execute(
-                select(tenants.c.id, tenants.c.name, tenants.c.schema_name).where(
-                    tenants.c.schema_name.in_([OMRAN_SLUG, DEMO_SLUG])
-                )
+                select(
+                    tenants.c.id,
+                    tenants.c.name,
+                    tenants.c.slug,
+                    tenants.c.schema_name,
+                ).where(tenants.c.slug.in_([OMRAN_SLUG, DEMO_SLUG]))
             ).all()
-    schemas = {r.schema_name for r in rows}
-    assert schemas == {OMRAN_SLUG, DEMO_SLUG}
+    slugs = {str(r.slug) for r in rows}
+    assert slugs == {OMRAN_SLUG, DEMO_SLUG}
+    schemas = {str(r.schema_name) for r in rows}
+    assert schemas == {OMRAN_SCHEMA, DEMO_SCHEMA}
 
     # Each tenant's schema has its own departments (independent ids).
-    for slug, expected in (
-        (OMRAN_SLUG, omran),
-        (DEMO_SLUG, demo),
+    for schema, expected in (
+        (OMRAN_SCHEMA, omran),
+        (DEMO_SCHEMA, demo),
     ):
-        with tenant_context(slug):
+        with tenant_context(schema):
             with admin_engine.begin() as conn:
                 deps = conn.execute(
                     select(departments.c.code).where(
@@ -253,6 +276,7 @@ def test_each_admin_logs_in_against_their_own_tenant(
             email=OMRAN_ADMIN_EMAIL,
             password=OMRAN_ADMIN_PW,
             slug=OMRAN_SLUG,
+            expected_schema=OMRAN_SCHEMA,
         )
         # Cross-tenant attempt with Omran's password against Demo's slug
         # must 401 — it's a "wrong tenant" credential.
@@ -276,6 +300,7 @@ def test_omran_admin_creates_employee_and_uploads_photo(
             email=OMRAN_ADMIN_EMAIL,
             password=OMRAN_ADMIN_PW,
             slug=OMRAN_SLUG,
+            expected_schema=OMRAN_SCHEMA,
         )
 
         emp = _create_employee(
@@ -304,6 +329,7 @@ def test_demo_admin_creates_distinct_employee(
             email=DEMO_ADMIN_EMAIL,
             password=DEMO_ADMIN_PW,
             slug=DEMO_SLUG,
+            expected_schema=DEMO_SCHEMA,
         )
         emp = _create_employee(
             client,
@@ -325,6 +351,7 @@ def test_omran_admin_cannot_see_demo_employees_via_list(
             email=OMRAN_ADMIN_EMAIL,
             password=OMRAN_ADMIN_PW,
             slug=OMRAN_SLUG,
+            expected_schema=OMRAN_SCHEMA,
         )
         resp = client.get("/api/employees")
         assert resp.status_code == 200, resp.text
@@ -346,6 +373,7 @@ def test_omran_admin_cannot_see_demo_employees_via_search(
             email=OMRAN_ADMIN_EMAIL,
             password=OMRAN_ADMIN_PW,
             slug=OMRAN_SLUG,
+            expected_schema=OMRAN_SCHEMA,
         )
         for query in ("worker@demo.smoke", "DM-SMOKE-001", "Demo Worker"):
             resp = client.get("/api/employees", params={"q": query})
@@ -365,6 +393,7 @@ def test_omran_audit_log_excludes_demo_actions(
             email=OMRAN_ADMIN_EMAIL,
             password=OMRAN_ADMIN_PW,
             slug=OMRAN_SLUG,
+            expected_schema=OMRAN_SCHEMA,
         )
         # Audit log API:
         resp = client.get("/api/audit-log", params={"action": "employee.created"})
@@ -374,15 +403,16 @@ def test_omran_audit_log_excludes_demo_actions(
         # Omran created exactly OM-SMOKE-001 (employee id 1 inside the
         # smoke schema). Demo's create row is in a separate schema and
         # must not be visible.
-    # Belt-and-braces DB-level check too.
-    with tenant_context(OMRAN_SLUG):
+    # Belt-and-braces DB-level check too. ``tenant_context`` takes a
+    # Postgres schema name, not the friendly slug.
+    with tenant_context(OMRAN_SCHEMA):
         with admin_engine.begin() as conn:
             omran_audit = conn.execute(
                 select(audit_log.c.entity_id, audit_log.c.action).where(
                     audit_log.c.action == "employee.created",
                 )
             ).all()
-    with tenant_context(DEMO_SLUG):
+    with tenant_context(DEMO_SCHEMA):
         with admin_engine.begin() as conn:
             demo_audit = conn.execute(
                 select(audit_log.c.entity_id, audit_log.c.action).where(
@@ -409,6 +439,7 @@ def test_demo_admin_sees_their_own_data(two_smoke_tenants: dict) -> None:
             email=DEMO_ADMIN_EMAIL,
             password=DEMO_ADMIN_PW,
             slug=DEMO_SLUG,
+            expected_schema=DEMO_SCHEMA,
         )
         resp = client.get("/api/employees")
         assert resp.status_code == 200

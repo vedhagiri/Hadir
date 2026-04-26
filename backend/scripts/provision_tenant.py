@@ -9,7 +9,15 @@ the first Admin user with an Argon2-hashed password.
 Usage::
 
     docker compose exec backend python -m scripts.provision_tenant \\
-        --slug tenant_omran --name 'Omran' --admin-email hr@omran.om
+        --slug omran --name 'Omran' --admin-email hr@omran.om
+
+``--slug`` is the **friendly slug** stored on ``public.tenants.slug``
+— what API payloads expose, what credentials.txt prints, and what an
+operator types into the login form. The Postgres schema name is
+derived (``tenant_<slug>`` with hyphens rewritten to underscores);
+callers cannot set ``schema_name`` directly anymore. The pilot's
+``main`` schema row pre-dates this convention and is never
+re-provisioned through this script.
 
 The password is read from ``$HADIR_PROVISION_PASSWORD`` if set; otherwise
 the script prompts for it on stdin (with confirmation). The plain
@@ -22,8 +30,10 @@ state on disk.
 
 Red lines (mirrored in ``backend/CLAUDE.md``):
 
-* The slug must match ``^[A-Za-z_][A-Za-z0-9_]{0,62}$`` — same regex
-  the DB enforces on ``public.tenants.schema_name``.
+* The slug must match the friendly-slug regex
+  ``^[a-z][a-z0-9_-]{1,39}$`` (migration 0026's CHECK).
+* The derived schema name is always ``tenant_<slug>`` — never
+  user-supplied. This keeps the slug ↔ schema mapping one-way.
 * The ``public`` schema is reserved for ``tenants`` and the global
   ``alembic_version`` only. This script never creates anything else
   there.
@@ -46,7 +56,6 @@ from sqlalchemy.engine import Connection, Engine
 
 from hadir.auth.passwords import hash_password
 from hadir.db import (
-    _TENANT_SCHEMA_RE,
     audit_log,
     departments,
     make_admin_engine,
@@ -60,6 +69,7 @@ from hadir.db import (
     user_roles,
     users,
 )
+from hadir.tenants.slug import SLUG_RE, schema_name_for_slug
 
 logger = logging.getLogger("hadir.provision_tenant")
 
@@ -130,7 +140,14 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Provision a new Hadir tenant.",
     )
-    parser.add_argument("--slug", required=True, help="Schema name (e.g. tenant_omran).")
+    parser.add_argument(
+        "--slug",
+        required=True,
+        help=(
+            "Friendly tenant slug (e.g. 'omran'). The Postgres schema "
+            "name is derived as 'tenant_<slug>'."
+        ),
+    )
     parser.add_argument("--name", required=True, help="Display name (e.g. 'Omran').")
     parser.add_argument(
         "--admin-email", required=True, help="First Admin user's email."
@@ -182,16 +199,22 @@ def _enforce_min_length(password: str) -> str:
     return password
 
 
-def _ensure_unique(conn: Connection, *, slug: str, name: str) -> None:
+def _ensure_unique(
+    conn: Connection, *, slug: str, schema_name: str, name: str
+) -> None:
     existing = conn.execute(
-        select(tenants.c.id, tenants.c.name, tenants.c.schema_name).where(
-            (tenants.c.schema_name == slug) | (tenants.c.name == name)
+        select(
+            tenants.c.id, tenants.c.name, tenants.c.slug, tenants.c.schema_name
+        ).where(
+            (tenants.c.slug == slug)
+            | (tenants.c.schema_name == schema_name)
+            | (tenants.c.name == name)
         )
     ).first()
     if existing is not None:
         raise ValueError(
             f"tenant already exists (id={existing.id}, name={existing.name!r}, "
-            f"schema_name={existing.schema_name!r})"
+            f"slug={existing.slug!r}, schema_name={existing.schema_name!r})"
         )
 
     schema_exists = conn.execute(
@@ -199,20 +222,20 @@ def _ensure_unique(conn: Connection, *, slug: str, name: str) -> None:
             "SELECT 1 FROM information_schema.schemata "
             "WHERE schema_name = :s"
         ),
-        {"s": slug},
+        {"s": schema_name},
     ).scalar()
     if schema_exists:
-        raise ValueError(f"schema {slug!r} already exists")
+        raise ValueError(f"schema {schema_name!r} already exists")
 
 
-def _create_per_tenant_tables(conn: Connection, *, slug: str) -> None:
-    """Materialise every per-tenant table inside ``slug``.
+def _create_per_tenant_tables(conn: Connection, *, schema_name: str) -> None:
+    """Materialise every per-tenant table inside ``schema_name``.
 
     Filters out tables with ``schema="public"`` (currently just the
     global ``tenants`` registry) so we don't try to recreate or
     re-grant the global table — that's owned by migration 0008.
-    Search_path on the connection already points at ``slug``, so
-    unqualified tables land there.
+    Search_path on the connection already points at ``schema_name``,
+    so unqualified tables land there.
     """
 
     per_tenant_tables = [
@@ -221,32 +244,32 @@ def _create_per_tenant_tables(conn: Connection, *, slug: str) -> None:
     metadata.create_all(bind=conn, tables=per_tenant_tables)
 
 
-def _apply_grants(conn: Connection, *, slug: str) -> None:
+def _apply_grants(conn: Connection, *, schema_name: str) -> None:
     """Mirror the grants that 0001-0006 applied to ``main`` for the new schema."""
 
-    conn.execute(text(f'ALTER SCHEMA "{slug}" OWNER TO hadir_admin'))
-    conn.execute(text(f'GRANT USAGE ON SCHEMA "{slug}" TO hadir_app'))
+    conn.execute(text(f'ALTER SCHEMA "{schema_name}" OWNER TO hadir_admin'))
+    conn.execute(text(f'GRANT USAGE ON SCHEMA "{schema_name}" TO hadir_app'))
 
     for tbl in _APP_CRUD_TABLES:
-        conn.execute(text(f'ALTER TABLE "{slug}"."{tbl}" OWNER TO hadir_admin'))
+        conn.execute(text(f'ALTER TABLE "{schema_name}"."{tbl}" OWNER TO hadir_admin'))
         conn.execute(
             text(
-                f'GRANT SELECT, INSERT, UPDATE, DELETE ON "{slug}"."{tbl}" TO hadir_app'
+                f'GRANT SELECT, INSERT, UPDATE, DELETE ON "{schema_name}"."{tbl}" TO hadir_app'
             )
         )
 
     # audit_log is append-only at the grant level — INSERT + SELECT only.
-    conn.execute(text(f'ALTER TABLE "{slug}"."audit_log" OWNER TO hadir_admin'))
+    conn.execute(text(f'ALTER TABLE "{schema_name}"."audit_log" OWNER TO hadir_admin'))
     conn.execute(
-        text(f'GRANT SELECT, INSERT ON "{slug}"."audit_log" TO hadir_app')
+        text(f'GRANT SELECT, INSERT ON "{schema_name}"."audit_log" TO hadir_app')
     )
 
     conn.execute(
-        text(f'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA "{slug}" TO hadir_app')
+        text(f'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA "{schema_name}" TO hadir_app')
     )
     conn.execute(
         text(
-            f'ALTER DEFAULT PRIVILEGES IN SCHEMA "{slug}" '
+            f'ALTER DEFAULT PRIVILEGES IN SCHEMA "{schema_name}" '
             "GRANT USAGE, SELECT ON SEQUENCES TO hadir_app"
         )
     )
@@ -256,7 +279,7 @@ def _seed_defaults(
     conn: Connection,
     *,
     tenant_id: int,
-    slug: str,
+    schema_name: str,
     admin_email: Optional[str],
     admin_password_hash: Optional[str],
     admin_full_name: Optional[str],
@@ -411,7 +434,7 @@ def _seed_defaults(
             entity_type="tenant",
             entity_id=str(tenant_id),
             after={
-                "schema_name": slug,
+                "schema_name": schema_name,
                 "admin_user_id": user_id,
                 "skip_default_admin": skip_default_admin,
             },
@@ -421,8 +444,8 @@ def _seed_defaults(
     return user_id
 
 
-def _stamp_alembic_head(slug: str) -> None:
-    """Run ``alembic -x schema=<slug> stamp head`` as a subprocess.
+def _stamp_alembic_head(schema_name: str) -> None:
+    """Run ``alembic -x schema=<schema_name> stamp head`` as a subprocess.
 
     Subprocess (rather than ``alembic.command.stamp``) so env.py reads
     the ``-x`` arg fresh and the stamp commits in its own transaction —
@@ -430,15 +453,16 @@ def _stamp_alembic_head(slug: str) -> None:
     by the time we get here.
     """
 
-    cmd = ["alembic", "-x", f"schema={slug}", "stamp", "head"]
+    cmd = ["alembic", "-x", f"schema={schema_name}", "stamp", "head"]
     completed = subprocess.run(cmd, cwd=_BACKEND_DIR, check=False)
     if completed.returncode != 0:
         raise RuntimeError(
-            f"alembic stamp failed for schema={slug} (exit={completed.returncode})"
+            f"alembic stamp failed for schema={schema_name} "
+            f"(exit={completed.returncode})"
         )
 
 
-def _cleanup(engine: Engine, *, slug: str) -> None:
+def _cleanup(engine: Engine, *, schema_name: str) -> None:
     """Drop the tenant schema and remove the public.tenants row.
 
     Runs as best-effort: each step is logged but not raised, so a
@@ -449,14 +473,14 @@ def _cleanup(engine: Engine, *, slug: str) -> None:
     try:
         try:
             with engine.begin() as conn:
-                conn.execute(text(f'DROP SCHEMA IF EXISTS "{slug}" CASCADE'))
+                conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))
         except Exception as exc:  # noqa: BLE001
             logger.warning("cleanup: drop schema failed: %s", type(exc).__name__)
         try:
             with engine.begin() as conn:
                 conn.execute(
                     text("DELETE FROM public.tenants WHERE schema_name = :s"),
-                    {"s": slug},
+                    {"s": schema_name},
                 )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
@@ -478,6 +502,12 @@ def provision(
 ) -> dict[str, object]:
     """Run every provisioning step in order, with cleanup on failure.
 
+    ``slug`` is the friendly identifier (``omran``); the Postgres
+    schema name is derived as ``schema_name_for_slug(slug)``
+    (``tenant_omran``). The two are stored on separate columns of
+    ``public.tenants`` and serve different audiences — see
+    ``backend/CLAUDE.md`` "Tenant identifiers".
+
     P28-followup: ``skip_default_admin=True`` lets a downstream
     seed script (e.g. ``pre_omran_reset_seed.py``) provision the
     tenant shell without an admin user, then create its own
@@ -485,10 +515,13 @@ def provision(
     ``admin_*`` args are optional.
     """
 
-    if not _TENANT_SCHEMA_RE.match(slug):
+    if not SLUG_RE.match(slug):
         raise ValueError(
-            f"invalid slug {slug!r}: must match ^[A-Za-z_][A-Za-z0-9_]{{0,62}}$"
+            f"invalid slug {slug!r}: must match {SLUG_RE.pattern} "
+            "(lowercase letters/digits/hyphens/underscores; start "
+            "with a letter; 2-40 chars)"
         )
+    schema_name = schema_name_for_slug(slug)
 
     admin_password_hash: Optional[str] = None
     if not skip_default_admin:
@@ -510,37 +543,39 @@ def provision(
         # Phase 1: register the tenant in public, create the schema +
         # tables, apply grants, seed defaults — all in one transaction
         # so a failure rolls everything back together.
-        token = set_tenant_schema(slug)
+        token = set_tenant_schema(schema_name)
         try:
             with engine.begin() as conn:
                 # Switch into "public" momentarily for the uniqueness
                 # check + the public.tenants insert. ``search_path``
                 # already has public on it, so this just ensures we
                 # touch the right registry table.
-                _ensure_unique(conn, slug=slug, name=name)
+                _ensure_unique(
+                    conn, slug=slug, schema_name=schema_name, name=name
+                )
 
                 tenant_id = conn.execute(
                     insert(tenants)
-                    .values(name=name, schema_name=slug)
+                    .values(name=name, slug=slug, schema_name=schema_name)
                     .returning(tenants.c.id)
                 ).scalar_one()
                 tenant_id = int(tenant_id)
 
-                conn.execute(text(f'CREATE SCHEMA "{slug}"'))
+                conn.execute(text(f'CREATE SCHEMA "{schema_name}"'))
                 schema_created = True
 
                 # Pin search_path on this connection to the new schema
                 # so unqualified tables in metadata.create_all land in
-                # ``slug``.
-                conn.execute(text(f'SET search_path TO "{slug}", public'))
+                # ``schema_name``.
+                conn.execute(text(f'SET search_path TO "{schema_name}", public'))
 
-                _create_per_tenant_tables(conn, slug=slug)
-                _apply_grants(conn, slug=slug)
+                _create_per_tenant_tables(conn, schema_name=schema_name)
+                _apply_grants(conn, schema_name=schema_name)
 
                 user_id = _seed_defaults(
                     conn,
                     tenant_id=tenant_id,
-                    slug=slug,
+                    schema_name=schema_name,
                     admin_email=admin_email,
                     admin_password_hash=admin_password_hash,
                     admin_full_name=admin_full_name,
@@ -551,12 +586,16 @@ def provision(
 
         # Phase 2: stamp alembic head outside the main transaction.
         # Failure here triggers the cleanup branch below.
-        _stamp_alembic_head(slug)
+        _stamp_alembic_head(schema_name)
 
     except Exception:
-        logger.exception("provisioning failed for slug=%s — rolling back", slug)
+        logger.exception(
+            "provisioning failed for slug=%s schema=%s — rolling back",
+            slug,
+            schema_name,
+        )
         if schema_created or tenant_id is not None:
-            _cleanup(engine, slug=slug)
+            _cleanup(engine, schema_name=schema_name)
         engine.dispose()
         raise
 
@@ -564,7 +603,8 @@ def provision(
 
     return {
         "tenant_id": tenant_id,
-        "schema": slug,
+        "slug": slug,
+        "schema": schema_name,
         "name": name,
         "admin_user_id": user_id,
         "admin_email": admin_email,
@@ -595,8 +635,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 1
 
     logger.info(
-        "provisioned tenant_id=%s schema=%s admin_user_id=%s admin_email=%s",
+        "provisioned tenant_id=%s slug=%s schema=%s admin_user_id=%s admin_email=%s",
         result["tenant_id"],
+        result["slug"],
         result["schema"],
         result["admin_user_id"],
         result["admin_email"],

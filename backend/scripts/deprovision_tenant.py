@@ -42,12 +42,12 @@ from sqlalchemy import select, text
 
 from hadir.config import get_settings
 from hadir.db import (
-    _TENANT_SCHEMA_RE,
     make_admin_engine,
     reset_tenant_schema,
     set_tenant_schema,
     tenants,
 )
+from hadir.tenants.slug import SLUG_RE
 
 logger = logging.getLogger("hadir.deprovision_tenant")
 
@@ -56,7 +56,11 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Deprovision a Hadir tenant (DESTRUCTIVE).",
     )
-    parser.add_argument("--slug", required=True, help="Schema name to drop.")
+    parser.add_argument(
+        "--slug",
+        required=True,
+        help="Friendly tenant slug (e.g. 'omran'). Looked up against public.tenants.slug.",
+    )
     parser.add_argument(
         "--confirm",
         action="store_true",
@@ -99,41 +103,44 @@ def _interactive_confirm(slug: str) -> bool:
 
 
 def deprovision(*, slug: str) -> dict[str, object]:
-    """Drop the schema and registry row for ``slug``.
+    """Drop the schema and registry row for the friendly ``slug``.
 
     Raises if the slug is invalid, the tenant doesn't exist, or it's
-    the protected ``main`` schema.
+    the protected pilot tenant (``slug='main'``).
     """
 
-    if not _TENANT_SCHEMA_RE.match(slug):
+    if not SLUG_RE.match(slug):
         raise ValueError(
-            f"invalid slug {slug!r}: must match ^[A-Za-z_][A-Za-z0-9_]{{0,62}}$"
+            f"invalid slug {slug!r}: must match {SLUG_RE.pattern}"
         )
     if slug == "main":
         raise ValueError(
-            "refusing to drop the pilot schema 'main' — this script "
-            "cannot remove the legacy tenant"
+            "refusing to drop the pilot tenant (slug='main') — this "
+            "script cannot remove the legacy tenant"
         )
 
     engine = make_admin_engine()
     token = set_tenant_schema("public")
     try:
         with engine.begin() as conn:
+            # Look up by friendly slug; the row's schema_name is the
+            # internal Postgres identifier we DROP.
             row = conn.execute(
-                select(tenants.c.id, tenants.c.name).where(
-                    tenants.c.schema_name == slug
+                select(tenants.c.id, tenants.c.name, tenants.c.schema_name).where(
+                    tenants.c.slug == slug
                 )
             ).first()
             if row is None:
-                raise ValueError(f"no tenant with schema_name={slug!r}")
+                raise ValueError(f"no tenant with slug={slug!r}")
 
             tenant_id = int(row.id)
             tenant_name = row.name
+            schema_name = str(row.schema_name)
 
             # CASCADE drops every per-tenant table along with FK
             # constraints from those tables to public.tenants — leaves
             # the registry row free to delete.
-            conn.execute(text(f'DROP SCHEMA "{slug}" CASCADE'))
+            conn.execute(text(f'DROP SCHEMA "{schema_name}" CASCADE'))
 
             conn.execute(
                 text("DELETE FROM public.tenants WHERE id = :tid"),
@@ -143,7 +150,8 @@ def deprovision(*, slug: str) -> dict[str, object]:
         return {
             "tenant_id": tenant_id,
             "tenant_name": tenant_name,
-            "schema": slug,
+            "slug": slug,
+            "schema": schema_name,
             "expected_face_crops_path": f"/data/faces/{tenant_id}/",
             "expected_capture_crops_path": f"/data/faces/captures/{tenant_id}/",
         }

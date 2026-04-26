@@ -35,6 +35,10 @@ from hadir.db import (
 class TenantSummary:
     id: int
     name: str
+    # Friendly identifier — what an operator types into login.
+    slug: str
+    # Internal Postgres schema. Operators see it for ops/troubleshooting
+    # but never need to type it.
     schema_name: str
     status: str
     created_at: str
@@ -46,6 +50,7 @@ class TenantSummary:
 class TenantDetail:
     id: int
     name: str
+    slug: str
     schema_name: str
     status: str
     created_at: str
@@ -67,6 +72,7 @@ def _list_tenant_rows(engine: Engine) -> list[dict]:
                 select(
                     tenants.c.id,
                     tenants.c.name,
+                    tenants.c.slug,
                     tenants.c.schema_name,
                     tenants.c.status,
                     tenants.c.created_at,
@@ -76,6 +82,7 @@ def _list_tenant_rows(engine: Engine) -> list[dict]:
         {
             "id": int(r.id),
             "name": str(r.name),
+            "slug": str(r.slug),
             "schema_name": str(r.schema_name),
             "status": str(r.status),
             "created_at": r.created_at.isoformat(),
@@ -130,6 +137,7 @@ def list_tenants(engine: Engine) -> list[TenantSummary]:
             TenantSummary(
                 id=row["id"],
                 name=row["name"],
+                slug=row["slug"],
                 schema_name=row["schema_name"],
                 status=row["status"],
                 created_at=row["created_at"],
@@ -149,6 +157,7 @@ def get_tenant_detail(engine: Engine, *, tenant_id: int) -> Optional[TenantDetai
                 select(
                     tenants.c.id,
                     tenants.c.name,
+                    tenants.c.slug,
                     tenants.c.schema_name,
                     tenants.c.status,
                     tenants.c.created_at,
@@ -229,6 +238,7 @@ def get_tenant_detail(engine: Engine, *, tenant_id: int) -> Optional[TenantDetai
     return TenantDetail(
         id=int(row.id),
         name=str(row.name),
+        slug=str(row.slug),
         schema_name=schema_name,
         status=str(row.status),
         created_at=row.created_at.isoformat(),

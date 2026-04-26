@@ -753,6 +753,78 @@ Audit actions emitted by this module (all INSERT only, via
 row, a log line, an exception message, or a response body. If you ever
 see it somewhere, that's a bug — fix it, don't justify it.
 
+### Tenant identifiers (slug vs schema_name)
+The pilot conflated two distinct concepts under
+`public.tenants.schema_name`. Migration 0026 splits them into two
+columns; the rest of the codebase honours the split:
+
+* **`slug`** is the **user-facing identifier**. It's what the API
+  payload calls `tenant_slug`, what credentials.txt prints, what
+  the frontend tenant picker collects, and what an operator types
+  into the login form. Stored as `citext` so the lookup is
+  case-insensitive. Format: `^[a-z][a-z0-9_-]{1,39}$` (lowercase
+  letters / digits / hyphens / underscores; start with a letter;
+  2-40 chars). Examples: `mts_demo`, `inaisys`, `acme-corp`.
+* **`schema_name`** is the **internal Postgres schema** the
+  tenant's data lives in. Used as the literal argument to
+  `SET search_path` and never accepted as input from the outside.
+  Provisioning derives `schema_name = "tenant_" + slug` (with
+  hyphens in the slug rewritten to underscores so the result is a
+  bare Postgres identifier). The pilot's row is the one
+  exception: `slug='main'`, `schema_name='main'`, pre-dating the
+  `tenant_<slug>` convention.
+
+The mapping is **one-way**: provisioning takes a slug and computes
+a schema name. Nothing in the codebase ever does the reverse — you
+can't take a schema name and recover the slug by string surgery
+(it would work for `tenant_<slug>` but break for `main`). When
+you need a tenant's slug, read it from the row.
+
+The single helper `hadir.tenants.slug.schema_name_for_slug` is
+the canonical derivation; both the regex (`SLUG_RE`) and the
+helper are re-used by `scripts/provision_tenant.py`,
+`scripts/pre_omran_reset_seed.py`, the super-admin provisioning
+endpoint, and the login validator.
+
+### Login tenant routing (multi-tenant)
+The login endpoint resolves the tenant **from the request body's
+`tenant_slug`**, not from `TenantScopeMiddleware`. The middleware's
+session-driven tenant resolution starts on the *next* request — at
+login time the request is anonymous, the `hadir_session` cookie
+doesn't exist yet, and the middleware leaves `_tenant_schema_var`
+unset. The handler covers the gap by:
+
+1. Validating `tenant_slug` against `SLUG_RE`.
+2. Looking up the row in `public.tenants` where `slug = :input`.
+3. Reading `schema_name` from the matched row.
+4. Wrapping the user lookup in `tenant_context(schema_name)` so
+   the SQLAlchemy `checkout` listener applies `SET search_path`.
+
+Routing rules:
+
+* In `HADIR_TENANT_MODE=multi` an omitted `tenant_slug` 400s — there
+  is no defensible default to fall back to.
+* `tenant_slug` must match the friendly slug exactly. The Postgres
+  schema name (`tenant_mts_demo`) is **not** a valid `tenant_slug`
+  — the regex rejects values starting with `tenant_` because every
+  schema name post-pilot starts that way and the regex requires
+  a leading lowercase letter that isn't followed by an underscore
+  prefix. (Concretely: `tenant_mts_demo` fails the slug lookup;
+  the friendly form `mts_demo` succeeds.) There is exactly one
+  valid identifier per tenant by design.
+* Unknown `tenant_slug` 401s as `invalid credentials` (not 404) so
+  attackers can't enumerate tenants by oracle.
+* `INFO` log on every attempt: `login attempt email=… tenant_slug=…
+  ip=…` (so a tenant-routing failure is visible even when the
+  audit insert can't fire — i.e. the unknown-tenant 401, which has
+  no `tenant_id` to scope the audit row under).
+* The `hadir_tenant` cookie set on success carries `schema_name`,
+  not the slug. It's HttpOnly server-set / server-read internal
+  routing state — `TenantScopeMiddleware` reads it directly as the
+  schema to scope the next request's session lookup. Storing slug
+  there would force a per-request slug→schema lookup against
+  `public.tenants` for no user benefit.
+
 ## Rate limiter (pilot-grade)
 In-memory `(email_lower, ip) -> count`, max attempts
 `HADIR_LOGIN_MAX_ATTEMPTS` (default 10), reset every

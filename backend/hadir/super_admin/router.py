@@ -46,12 +46,13 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/super-admin", tags=["super-admin"])
 
-# Slug rule shown in the UI: lowercase letters, digits, underscores; must
-# start with a letter or underscore; matches the DB CHECK on
-# ``public.tenants.schema_name``. Hyphens are intentionally disallowed
-# because Postgres schema names containing hyphens require quoting at
-# every reference site, which we'd rather not do.
-_SLUG_RE = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
+# Friendly-slug rule shown in the UI: lowercase letters, digits,
+# hyphens, underscores; must start with a letter; total length 2-40.
+# Mirrors migration 0026's CHECK on ``public.tenants.slug`` exactly
+# and is re-validated server-side regardless of any client gate.
+# Re-exported from the central ``hadir.tenants.slug`` module so call
+# sites stay in sync if the rule ever moves.
+from hadir.tenants.slug import SLUG_RE as _SLUG_RE  # noqa: E402
 
 
 def _client_ip(request: Request) -> str:
@@ -208,6 +209,7 @@ def me(
 class TenantSummaryResponse(BaseModel):
     id: int
     name: str
+    slug: str
     schema_name: str
     status: str
     created_at: str
@@ -224,6 +226,7 @@ def _summary_to_response(s: TenantSummary) -> TenantSummaryResponse:
     return TenantSummaryResponse(
         id=s.id,
         name=s.name,
+        slug=s.slug,
         schema_name=s.schema_name,
         status=s.status,
         created_at=s.created_at,
@@ -236,6 +239,7 @@ def _detail_to_response(d: TenantDetail) -> TenantDetailResponse:
     return TenantDetailResponse(
         id=d.id,
         name=d.name,
+        slug=d.slug,
         schema_name=d.schema_name,
         status=d.status,
         created_at=d.created_at,
@@ -290,11 +294,14 @@ def get_one_tenant(
 
 class ProvisionRequest(BaseModel):
     slug: str = Field(
-        min_length=1,
-        max_length=63,
+        min_length=2,
+        max_length=40,
         description=(
-            "Schema name for the tenant. Lowercase letters, digits, and "
-            "underscores; must start with a letter or underscore."
+            "Friendly tenant slug (e.g. 'omran'). Lowercase letters, "
+            "digits, hyphens, and underscores; must start with a "
+            "letter; total length 2-40. The Postgres schema name is "
+            "derived as 'tenant_<slug>' — callers cannot set it "
+            "directly."
         ),
     )
     name: str = Field(min_length=1, max_length=200)
@@ -305,6 +312,7 @@ class ProvisionRequest(BaseModel):
 
 class ProvisionResponse(BaseModel):
     tenant_id: int
+    slug: str
     schema_name: str
     name: str
     admin_user_id: int
@@ -323,8 +331,8 @@ def provision_tenant_endpoint(
         raise HTTPException(
             status_code=400,
             detail=(
-                "slug must be lowercase letters, digits, and underscores, "
-                "starting with a letter or underscore (no hyphens, no spaces)"
+                "slug must be lowercase letters, digits, hyphens, or "
+                "underscores; start with a letter; 2-40 chars"
             ),
         )
 
@@ -371,6 +379,7 @@ def provision_tenant_endpoint(
                 entity_type="tenant",
                 entity_id=str(result["tenant_id"]),
                 after={
+                    "slug": result["slug"],
                     "schema_name": result["schema"],
                     "name": result["name"],
                     "admin_user_id": result["admin_user_id"],
@@ -381,6 +390,7 @@ def provision_tenant_endpoint(
 
     return ProvisionResponse(
         tenant_id=int(result["tenant_id"]),
+        slug=str(result["slug"]),
         schema_name=str(result["schema"]),
         name=str(result["name"]),
         admin_user_id=int(result["admin_user_id"]),
@@ -530,6 +540,7 @@ def update_status(
     return TenantSummaryResponse(
         id=detail.id,
         name=detail.name,
+        slug=detail.slug,
         schema_name=detail.schema_name,
         status=detail.status,
         created_at=detail.created_at,

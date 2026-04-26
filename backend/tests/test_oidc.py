@@ -276,12 +276,17 @@ def test_login_404s_unknown_tenant(client: TestClient) -> None:
 
 
 def _seed_state_cookie(client: TestClient, *, schema: str = "main") -> tuple[str, str]:
-    """Plant a valid signed state cookie + return (state, nonce)."""
+    """Plant a valid signed state cookie + return (state, nonce).
+
+    The state cookie carries the **schema name** (server-set,
+    server-read internal routing state) — distinct from the
+    friendly slug callers use elsewhere.
+    """
 
     state = secrets.token_urlsafe(16)
     nonce = secrets.token_urlsafe(16)
     payload = {
-        "tenant_slug": schema,
+        "tenant_schema": schema,
         "tenant_id": 1,
         "state": state,
         "nonce": nonce,

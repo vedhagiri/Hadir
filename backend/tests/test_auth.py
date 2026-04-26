@@ -108,6 +108,108 @@ def test_me_without_cookie_is_401(client: TestClient) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Tenant routing on login
+# ---------------------------------------------------------------------------
+
+
+def test_login_with_friendly_slug_succeeds(
+    client: TestClient, admin_user: dict
+) -> None:
+    """The pilot tenant's friendly slug is ``main`` (backfilled by
+    migration 0026). Passing it as ``tenant_slug`` resolves the row,
+    reads its ``schema_name`` (also ``main``, by pilot pre-history),
+    and routes the user lookup under that schema."""
+
+    resp = client.post(
+        "/api/auth/login",
+        json={
+            "email": admin_user["email"],
+            "password": admin_user["password"],
+            "tenant_slug": "main",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    # The cookie carries the schema name (internal routing state) —
+    # for the pilot, slug == schema, so the assertion is the same
+    # value either way. For other tenants the cookie would hold
+    # ``tenant_<slug>`` while the body sent ``<slug>``.
+    assert client.cookies.get("hadir_tenant") == "main"
+
+
+def test_login_with_raw_schema_name_returns_401(
+    client: TestClient, admin_user: dict
+) -> None:
+    """Schema names ride a different namespace from friendly slugs.
+    Posting ``tenant_main`` (a schema-name-shaped string) must 401:
+    no row in ``public.tenants.slug`` carries that value, and the
+    handler rejects rather than silently accepting either form.
+
+    There is exactly one valid identifier per tenant (the friendly
+    slug); accepting both would make the API ambiguous."""
+
+    resp = client.post(
+        "/api/auth/login",
+        json={
+            "email": admin_user["email"],
+            "password": admin_user["password"],
+            "tenant_slug": "tenant_main",
+        },
+    )
+    assert resp.status_code == 401, resp.text
+    assert resp.json()["detail"] == "invalid credentials"
+
+
+def test_login_with_unknown_tenant_slug_returns_401(client: TestClient) -> None:
+    """Unknown slug must 401 ``invalid credentials`` — never 404 — so
+    attackers can't enumerate tenants by trying slugs."""
+
+    resp = client.post(
+        "/api/auth/login",
+        json={
+            "email": "anyone@example.com",
+            "password": "irrelevant",
+            "tenant_slug": "tenant_does_not_exist_xyz",
+        },
+    )
+    assert resp.status_code == 401, resp.text
+    assert resp.json()["detail"] == "invalid credentials"
+
+
+def test_login_with_invalid_tenant_slug_format_returns_400(
+    client: TestClient,
+) -> None:
+    """Slug must match the regex enforced by the Postgres CHECK; an
+    obviously-bad slug short-circuits to 400 before any DB hit."""
+
+    resp = client.post(
+        "/api/auth/login",
+        json={
+            "email": "anyone@example.com",
+            "password": "irrelevant",
+            "tenant_slug": "1bad slug!",
+        },
+    )
+    assert resp.status_code == 400, resp.text
+
+
+def test_login_in_multi_mode_requires_tenant_slug(
+    client: TestClient,
+    admin_user: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``HADIR_TENANT_MODE=multi`` removes the pilot's ``main`` fallback —
+    a missing ``tenant_slug`` must 400, not silently log into ``main``."""
+
+    monkeypatch.setenv("HADIR_TENANT_MODE", "multi")
+    resp = client.post(
+        "/api/auth/login",
+        json={"email": admin_user["email"], "password": admin_user["password"]},
+    )
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"] == "tenant_slug is required"
+
+
+# ---------------------------------------------------------------------------
 # Session expiry
 # ---------------------------------------------------------------------------
 
