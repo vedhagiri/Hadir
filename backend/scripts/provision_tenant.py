@@ -153,10 +153,10 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 def _resolve_password(cli_password: Optional[str]) -> str:
     if cli_password:
-        return cli_password
+        return _enforce_min_length(cli_password)
     env_password = os.environ.get("HADIR_PROVISION_PASSWORD")
     if env_password:
-        return env_password
+        return _enforce_min_length(env_password)
     # Interactive prompt with confirmation. getpass never echoes.
     pw1 = getpass.getpass("Admin password: ")
     pw2 = getpass.getpass("Confirm password: ")
@@ -164,7 +164,22 @@ def _resolve_password(cli_password: Optional[str]) -> str:
         raise ValueError("password must not be empty")
     if pw1 != pw2:
         raise ValueError("passwords do not match")
-    return pw1
+    return _enforce_min_length(pw1)
+
+
+# P27: minimum-length policy mirroring scripts/seed_admin.py.
+# 12 chars is the floor; OIDC is the recommended path for
+# user-added accounts post-pilot.
+_MIN_PASSWORD_LENGTH = 12
+
+
+def _enforce_min_length(password: str) -> str:
+    if len(password) < _MIN_PASSWORD_LENGTH:
+        raise ValueError(
+            f"password too short (need ≥ {_MIN_PASSWORD_LENGTH} chars; "
+            f"got {len(password)})"
+        )
+    return password
 
 
 def _ensure_unique(conn: Connection, *, slug: str, name: str) -> None:

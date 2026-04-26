@@ -66,6 +66,17 @@ def _resolve_password(cli_password: Optional[str]) -> str:
             "Seed aborted."
         )
         sys.exit(2)
+    # P27: minimum length policy — NIST SP 800-63B § 5.1.1.2
+    # recommends 8+ for human passwords; we go to 12 to stay
+    # comfortable above bcrypt rainbow-table coverage. The CLI
+    # is the only place pilot passwords land; OIDC is the
+    # recommended path for user-added accounts post-pilot.
+    if len(password) < 12:
+        logger.error(
+            "Password too short (need ≥ 12 chars; got %d). Seed aborted.",
+            len(password),
+        )
+        sys.exit(3)
     return password
 
 

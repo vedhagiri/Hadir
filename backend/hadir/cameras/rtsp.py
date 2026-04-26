@@ -99,11 +99,14 @@ def parse_rtsp_url(url: str) -> RtspParts:
     """
 
     parsed = urlparse(url.strip())
-    if parsed.scheme not in ("rtsp", "rtsps", "http", "https"):
-        # We allow http(s) so the preview works against HTTP MJPEG
-        # cameras too, but reject everything else to block ``file://``
-        # and friends.
-        raise ValueError("URL must be rtsp[s]:// or http[s]://")
+    # P27: dropped ``http``/``https`` from the allowlist. Cameras
+    # speak RTSP/RTSPS in every Hadir tenant we've seen; allowing
+    # http(s) opened a real SSRF surface (an Admin could point the
+    # preview-grab at ``http://169.254.169.254/...`` or any
+    # internal HTTP service). Operators with an HTTP-MJPEG camera
+    # bridge it through an RTSP proxy.
+    if parsed.scheme not in ("rtsp", "rtsps"):
+        raise ValueError("URL must be rtsp[s]://")
     if not parsed.hostname:
         raise ValueError("URL has no host")
     return RtspParts(host=rtsp_host(urlunparse(parsed)))

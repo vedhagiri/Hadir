@@ -23,7 +23,11 @@ COPY frontend/ ./
 RUN npm run build
 
 # --- 2. nginx ----------------------------------------------------------
-FROM nginx:1.27-alpine
+# P27: bumped from ``nginx:1.27-alpine`` (alpine 3.21.3, 28 HIGH +
+# 6 CRITICAL OS CVEs per Trivy) to ``nginx:stable-alpine``
+# (alpine 3.23.4, 0 HIGH/CRITICAL) — same nginx feature set,
+# fresher base.
+FROM nginx:stable-alpine
 
 RUN apk add --no-cache gettext
 

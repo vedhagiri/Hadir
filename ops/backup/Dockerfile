@@ -31,7 +31,9 @@ RUN apk add --no-cache \
 # security update; HTTPS + the GitHub release ASN provide the
 # integrity guarantee. The release artifact is a single static
 # binary so we only have to pick the right architecture suffix.
-ARG SUPERCRONIC_VERSION=v0.2.29
+# P27: 0.2.29 → 0.2.45 (clears the 11 HIGH + 2 CRITICAL Go
+# stdlib + dependency CVEs Trivy flagged on the older binary).
+ARG SUPERCRONIC_VERSION=v0.2.45
 RUN ARCH=$(uname -m) && case "${ARCH}" in \
         x86_64)  S=amd64 ;; \
         aarch64) S=arm64 ;; \

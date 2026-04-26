@@ -1,7 +1,7 @@
 # Hadir backend — Claude Code notes
 
 ## Status
-Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 + P23 + P24 + P25 + P26 complete (M2 core + fourth M3 hardening phase)**:
+Pilot P1–P13 complete + P14 prep delivered. **v1.0 P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 + P23 + P24 + P25 + P26 + P27 complete (M2 core + M3 hardening complete)**:
 pilot frozen at tag `v0.1-pilot` on branch `release/pilot`; multi-tenant
 routing wired up via a per-connection `SET search_path` driven by a
 ContextVar + SQLAlchemy `checkout` event; the global `tenants` registry
@@ -283,8 +283,24 @@ JSON dashboards; `docker-compose.prod.yml` adds the three
 services on the private network (Grafana the only port
 exposed); `docker-compose.observability.yml` is the dev
 overlay. Four alert rules + seven Grafana panels cover
-the operational view. **v1.0 M3 hardening continues with
-P27.**
+the operational view. **P27** ran the M3-gate security
+review pass: bandit/pip-audit/npm audit/Trivy on every
+artifact; bumped runtime libs (authlib 1.3.2 → 1.6.11,
+cryptography 43.0.1 → 46.0.7, jinja2 3.1.4 → 3.1.6,
+python-multipart 0.0.12 → 0.0.26, python-dotenv 1.0.1 →
+1.2.2, fastapi 0.115 → 0.124, weasyprint 62.3 → 68.0 +
+pydyf 0.10 → 0.12.1) to clear 20+ runtime CVEs; rebased
+nginx on `nginx:stable-alpine` (28 H + 6 C → 0/0); bumped
+supercronic to v0.2.45 (11 H + 2 C → 0/0). Code fixes:
+12-char minimum-length policy on `seed_admin.py` +
+`provision_tenant.py`; `parse_rtsp_url` scheme allowlist
+tightened to rtsp/rtsps only (closed an SSRF surface).
+Manual checklist (auth, authz, IDOR, SSRF, XSS, CSRF,
+crypto rotation, secrets, tenant isolation, file
+uploads, audit-log immutability) — all clear. 0 critical
++ 0 high findings open. `docs/security-review.md` is the
+durable record. **v1.0 M3 hardening complete. M4 launch
+next.**
 
 ## Tenant routing (v1.0 P1)
 **Approach chosen: SQLAlchemy `checkout` event + Python ContextVar**,

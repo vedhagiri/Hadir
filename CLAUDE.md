@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 (M2 core complete) + P23 + P24 + P25 + P26 (M3 hardening — fourth phase).**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 (M2 core complete) + P23 + P24 + P25 + P26 + P27 (M3 hardening complete).**
 
 > **Tenant isolation is a P0 blocker.** The suites
 > `backend/tests/test_multi_tenant_isolation.py` (the P1 canary) and
@@ -604,10 +604,44 @@ of the Arabic translations before v1.0 launch** — see
   `pending` (will fire after 5 min). 435 tests passing
   (no regressions).
 
-Next: **P27 (M3 hardening continues)** per
-`v1.0-phase-plan.md`. Wait for the user before starting.
-**Open critical item carries over: Omran HR native-speaker
-review of the Arabic translations before v1.0 launch** — see
+- **P27** — Security review pass. Audit + patch.
+  bandit/pip-audit/npm audit/Trivy on every artifact.
+  Bumped runtime deps to clear CVEs: authlib 1.3.2 →
+  1.6.11 (7 CVEs), cryptography 43.0.1 → 46.0.7 (4),
+  jinja2 3.1.4 → 3.1.6 (3), python-multipart 0.0.12 →
+  0.0.26 (3), python-dotenv 1.0.1 → 1.2.2,
+  fastapi 0.115.0 → 0.124.0 (pulls starlette ≥ 0.47),
+  weasyprint 62.3 → 68.0 + pydyf 0.10 → 0.12.1 (the
+  P17 upstream-incompatibility pin is gone). Frontend:
+  react-router-dom → 6.30.3 (XSS via open-redirect),
+  vite → 5.4.21 (server.fs.deny bypass), playwright →
+  1.59.1. Image bases: nginx 1.27-alpine →
+  stable-alpine (28 H + 6 C → 0/0); supercronic
+  v0.2.29 → v0.2.45 (11 H + 2 C → 0/0). Code fixes:
+  12-char minimum-length policy on `seed_admin.py` +
+  `provision_tenant.py`; `parse_rtsp_url` scheme
+  allowlist tightened from rtsp/rtsps/http/https to
+  rtsp/rtsps only (closed an SSRF surface). Manual
+  review: session fixation safe; brute-force protected;
+  OIDC state+nonce+JWKS validated; every endpoint
+  guarded; IDOR closed (every photo + request lookup
+  filters on tenant_id); SQL-injection probes returned
+  empty; branding CSS-injection safe (server-curated
+  palette, BRD FR-BRD-002 red line); SameSite=Lax +
+  CORS allow-list cover CSRF; secrets grep + git-log
+  search clean; tenant isolation 16/16; audit-log
+  immutability re-verified (DELETE/UPDATE/TRUNCATE
+  rejected for hadir_app). 0 critical, 0 high
+  findings open. 4 dev-only Python CVEs + 5 dev-only
+  npm CVEs + 142 unfixed-upstream debian-trixie CVEs
+  + 8 H + 1 C in gosu (postgres-base) deferred to next
+  refresh. **`docs/security-review.md`** is the durable
+  record. **435 tests still green.**
+
+Next: **M4 launch** per `v1.0-phase-plan.md`. Wait for
+the user before starting. **Open critical item carries
+over: Omran HR native-speaker review of the Arabic
+translations before v1.0 launch** — see
 `docs/phases/P21.md`.
 
 ---
