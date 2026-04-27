@@ -1670,6 +1670,11 @@ detection_events = Table(
         ForeignKey("employees.id", ondelete="SET NULL"),
         nullable=True,
     ),
+    # Per-row snapshot of which detector + recognition models produced
+    # this event and which package versions were running. JSONB so v1.x
+    # can extend without another migration. NULL on rows that pre-date
+    # migration 0032. See ``hadir/detection/metadata.py``.
+    Column("detection_metadata", JSONB, nullable=True),
     Index(
         "ix_detection_events_tenant_captured_at",
         "tenant_id",

@@ -256,6 +256,86 @@ worker's `capture_config` without a worker restart. First fresh
 detection_events rows landed within seconds with employee_id
 populated.
 
+## Layer 3 — per-event detection metadata (model + version)
+
+After Layer 2 unblocked capture, operator asked to record, for each
+captured photo, *which* model identified the face and *which* version
+was running, alongside the event time the Camera Logs page already
+shows. Use case: forensic audit ("the matcher missed someone six
+months ago — was the recogniser the same version we run today?") and
+operational debugging ("did the mode flip on Tuesday change which
+faces we're catching?").
+
+### Why per-row JSONB
+
+The `DetectorConfig` changes whenever an operator edits System
+Settings → Detection. The capture worker hot-reloads via
+`analyzer.update_config` rather than restart, so a single worker can
+produce events under two different configs in the same minute. A
+per-worker snapshot would be wrong after the first hot-reload; only
+per-row capture records the truth at event time. Stored as JSONB so
+v1.x can extend the field set (e.g. `pose_score` once kps land on
+`Detection`) without another migration.
+
+### What's stored
+
+```json
+{
+  "detector_mode": "insightface",
+  "detector_pack": "buffalo_l",
+  "recognition_model": "w600k_r50",
+  "det_size": 320,
+  "min_det_score": 0.5,
+  "insightface_version": "0.7.3",
+  "onnxruntime_version": "1.19.2",
+  "match_threshold": 0.45
+}
+```
+
+`ultralytics_version` is added when `detector_mode == "yolo+face"`.
+Versions come from `importlib.metadata` so they pick up image
+rebuilds without code change.
+
+### Implementation
+
+* `backend/alembic/versions/0032_detection_events_metadata.py` — adds
+  `detection_events.detection_metadata JSONB NULL`. Idempotent
+  (`_has_column` short-circuit) so re-running per tenant via the
+  orchestrator is safe.
+* `backend/hadir/db.py::detection_events` — column declaration.
+* `backend/hadir/detection/metadata.py` — `current_metadata(config,
+  match_threshold=)` helper. Single source of truth for the snapshot
+  shape.
+* `backend/hadir/capture/events.py::emit_detection_event` — accepts
+  `detector_config=` param. Computes metadata via the helper and
+  writes it on the same INSERT. Failure to compute is logged at
+  DEBUG and produces NULL — a version-probe error never sinks the
+  event write.
+* `backend/hadir/capture/reader.py::_analyzer_loop` — snapshots the
+  worker's current detection_config under the lock and passes a
+  `DetectorConfig` instance to `emit_detection_event` for every new
+  track.
+* `backend/hadir/detection_events/router.py::DetectionEventOut` —
+  surfaces `detection_metadata: Optional[dict]`. The list query
+  selects the column.
+* `frontend/src/features/camera-logs/types.ts` — `DetectionMetadata`
+  type + optional field on `DetectionEvent`.
+* `frontend/src/features/camera-logs/CameraLogsPage.tsx` — renders
+  `{detector_mode} · {detector_pack} · v{insightface_version}` in a
+  dim mono caption under the timestamp; hover shows full JSON via
+  `title` attribute.
+
+### Tests
+
+* `tests/test_capture.py::test_emit_writes_detection_metadata_when_detector_config_passed`
+  — passes a `DetectorConfig` to `emit_detection_event`, asserts the
+  resulting row's `detection_metadata` JSONB carries every fixed key
+  with the right values; version fields are best-effort (assert
+  string when present, don't pin specific versions).
+* Back-compat: every existing test that omits `detector_config`
+  continues to work (column stays NULL — verified by absence of
+  regressions across the 544-test suite).
+
 ## Validated by
 
 * **Layer 1 A — live recovery**: confirmed by Claude on
@@ -271,9 +351,9 @@ populated.
   gate). Several rows matched to `employee_id=27` (Vedhagiri) at
   confidence 0.48-0.54; unmatched rows have `employee_id=NULL`,
   `confidence=NULL` — matcher hard-threshold logic verified.
-* Backend full suite: 543 passed + 1 skipped (after Layer 2
-  cleanup; was the same count after Layer 1 — Layer 2 swapped one
-  test for a stronger inverted regression test).
+* Backend full suite (post-Layer 3): **544 passed + 1 skipped**
+  (Layer 2 swapped one test for a stronger inverted regression test;
+  Layer 3 added the metadata round-trip test).
 * Frontend typecheck: clean.
 
 Awaiting Suresh's full walk-past confirmation against the live

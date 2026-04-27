@@ -18,6 +18,22 @@ export interface DetectionEvent {
   former_match_employee_id?: number | null;
   former_match_employee_code?: string | null;
   former_match_employee_name?: string | null;
+  // Migration 0032: per-row snapshot of which detector + recognition
+  // models produced this event and which package versions were
+  // running. NULL on rows that pre-date the migration.
+  detection_metadata?: DetectionMetadata | null;
+}
+
+export interface DetectionMetadata {
+  detector_mode: string;
+  detector_pack: string;
+  recognition_model: string;
+  det_size: number;
+  min_det_score: number;
+  insightface_version?: string;
+  onnxruntime_version?: string;
+  ultralytics_version?: string;
+  match_threshold?: number;
 }
 
 export interface DetectionEventListResponse {

@@ -158,6 +158,7 @@ def emit_detection_event(
     pre_matched: Optional[tuple[int, float]] = None,
     annotated_frame_bgr=None,  # type: ignore[no-untyped-def]
     capture_config: Optional[dict] = None,
+    detector_config=None,  # type: ignore[no-untyped-def]
 ) -> Optional[int]:
     """Write the encrypted crop + insert the event row. Returns the new id,
     or ``None`` if the row was skipped (low quality below threshold or
@@ -329,6 +330,27 @@ def emit_detection_event(
                 # else classification == "future" — neither column set,
                 # treat as Unknown (per the locked decision).
 
+    # Build the per-row metadata snapshot. The DetectorConfig may have
+    # changed since the worker booted (System Settings hot-reload), so
+    # we capture it at emit time. ``detector_config=None`` (tests, ad-
+    # hoc callers) leaves the column NULL — the API renders "—".
+    detection_metadata: Optional[dict] = None
+    if detector_config is not None:
+        try:
+            from hadir.config import get_settings  # noqa: PLC0415
+            from hadir.detection.metadata import current_metadata  # noqa: PLC0415
+
+            detection_metadata = current_metadata(
+                detector_config,
+                match_threshold=get_settings().match_threshold,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # Metadata is auditing flair; never sink an event write
+            # because the version probe failed.
+            logger.debug(
+                "metadata snapshot failed: %s", type(exc).__name__
+            )
+
     with engine.begin() as conn:
         new_id = conn.execute(
             insert(detection_events)
@@ -344,6 +366,7 @@ def emit_detection_event(
                 track_id=track_id,
                 former_employee_match=former_employee_match,
                 former_match_employee_id=former_match_employee_id,
+                detection_metadata=detection_metadata,
             )
             .returning(detection_events.c.id)
         ).scalar_one()

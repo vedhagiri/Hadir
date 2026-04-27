@@ -773,10 +773,19 @@ class CaptureWorker:
                 self._publish_cached_boxes(detections, matches, per_detection_match)
 
             # One detection_events row per NEW track, never per frame.
-            # Snapshot the capture_config under the lock so a
-            # mid-iteration update_config doesn't change values
-            # half-way through the inner loop.
+            # Snapshot the capture_config + detection_config under the
+            # locks so a mid-iteration update_config doesn't change
+            # values half-way through the inner loop. detection_config
+            # rides into emit so each row carries a per-event
+            # ``detection_metadata`` snapshot (model + version).
             current_capture_config = self.get_capture_config()
+            current_detection_config = self.get_detection_config()
+            from hadir.detection import DetectorConfig as _DC  # noqa: PLC0415
+            current_detector_config = (
+                _DC.from_dict(current_detection_config)
+                if current_detection_config
+                else None
+            )
             for det, match, pm in zip(
                 detections, matches, per_detection_match
             ):
@@ -795,6 +804,7 @@ class CaptureWorker:
                         pre_matched=pm,
                         annotated_frame_bgr=frame,
                         capture_config=current_capture_config,
+                        detector_config=current_detector_config,
                     )
                     if new_id is not None:
                         # P28.8: a row + crop was actually written.

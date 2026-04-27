@@ -213,6 +213,18 @@ export function CameraLogsPage() {
                 </td>
                 <td className="mono text-sm">
                   {new Date(ev.captured_at).toLocaleString()}
+                  {ev.detection_metadata ? (
+                    <div
+                      className="mono text-xs text-dim"
+                      title={JSON.stringify(ev.detection_metadata, null, 2)}
+                      style={{ marginTop: 2 }}
+                    >
+                      {ev.detection_metadata.detector_mode}
+                      {ev.detection_metadata.insightface_version
+                        ? ` · ${ev.detection_metadata.detector_pack} · v${ev.detection_metadata.insightface_version}`
+                        : ` · ${ev.detection_metadata.detector_pack}`}
+                    </div>
+                  ) : null}
                 </td>
                 <td className="text-sm">{ev.camera_name}</td>
                 <td className="text-sm">

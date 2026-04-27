@@ -1277,6 +1277,73 @@ def test_emit_writes_path_identical_to_inserted_value(
     assert Path(stored).exists()
 
 
+@pytest.mark.usefixtures("clean_capture")
+def test_emit_writes_detection_metadata_when_detector_config_passed(
+    admin_engine, monkeypatch, tmp_path
+) -> None:
+    """Migration 0032 + the metadata helper: when ``emit_detection_event``
+    is called with ``detector_config=DetectorConfig(...)``, the row's
+    ``detection_metadata`` JSONB column carries a snapshot of the
+    detector mode + pack + recognition model + det_size + min_det_score
+    plus the runtime package versions.
+
+    Back-compat: when ``detector_config`` is omitted (existing test
+    callers, ad-hoc), the column stays NULL — verified by every other
+    test in this module that doesn't pass the param.
+    """
+
+    from hadir.capture import events as events_mod  # noqa: PLC0415
+    from hadir.capture.tracker import Bbox  # noqa: PLC0415
+    from hadir.detection import DetectorConfig  # noqa: PLC0415
+
+    monkeypatch.setattr(
+        events_mod, "captures_dir",
+        lambda tenant_id, camera_id, *, now=None:
+            tmp_path / "captures" / str(tenant_id) / str(camera_id),
+    )
+
+    cam_id = _seed_camera(
+        admin_engine, name="metadata-roundtrip", plain_url="rtsp://fake/m"
+    )
+
+    bbox = Bbox(x=0, y=0, w=120, h=120)
+    frame = _blank_frame(w=320, h=240)
+
+    cfg = DetectorConfig(mode="insightface", det_size=320, min_det_score=0.5)
+    new_id = events_mod.emit_detection_event(
+        get_engine(),
+        TENANT,
+        camera_id=cam_id,
+        frame_bgr=frame,
+        bbox=bbox,
+        det_score=0.9,
+        track_id="t-metadata",
+        detector_config=cfg,
+    )
+    assert new_id is not None
+
+    with admin_engine.begin() as conn:
+        row = conn.execute(
+            select(detection_events.c.detection_metadata).where(
+                detection_events.c.id == new_id
+            )
+        ).first()
+    assert row is not None
+    md = row.detection_metadata
+    assert isinstance(md, dict)
+    assert md["detector_mode"] == "insightface"
+    assert md["detector_pack"] == "buffalo_l"
+    assert md["recognition_model"] == "w600k_r50"
+    assert md["det_size"] == 320
+    assert md["min_det_score"] == 0.5
+    # Versions are best-effort (importlib.metadata) — assert only that
+    # they're strings when present, not specific values.
+    if "insightface_version" in md:
+        assert isinstance(md["insightface_version"], str)
+    if "onnxruntime_version" in md:
+        assert isinstance(md["onnxruntime_version"], str)
+
+
 def test_orphan_cleanup_script_reclassifies_missing_files(
     admin_engine,
 ) -> None:

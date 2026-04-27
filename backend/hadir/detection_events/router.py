@@ -57,6 +57,10 @@ class DetectionEventOut(BaseModel):
     former_match_employee_id: Optional[int] = None
     former_match_employee_code: Optional[str] = None
     former_match_employee_name: Optional[str] = None
+    # Migration 0032: per-row snapshot of detector + recognition models
+    # and package versions at event time. NULL on rows that pre-date
+    # the migration.
+    detection_metadata: Optional[dict] = None
 
 
 class DetectionEventListOut(BaseModel):
@@ -88,6 +92,7 @@ def _build_select(scope: TenantScope):
             detection_events.c.former_match_employee_id,
             former_emp.c.employee_code.label("former_match_employee_code"),
             former_emp.c.full_name.label("former_match_employee_name"),
+            detection_events.c.detection_metadata,
         )
         .select_from(
             detection_events.join(
@@ -189,6 +194,11 @@ def list_events(
             former_match_employee_name=(
                 str(r.former_match_employee_name)
                 if r.former_match_employee_name is not None
+                else None
+            ),
+            detection_metadata=(
+                dict(r.detection_metadata)
+                if r.detection_metadata is not None
                 else None
             ),
         )
