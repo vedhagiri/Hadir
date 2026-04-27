@@ -48,11 +48,25 @@ def _seed_three(client: TestClient) -> None:
 
 @pytest.fixture
 def clean_faces_dir() -> None:
-    """Wipe the configured faces storage directory for determinism."""
+    """Wipe the test tenant's faces tree for determinism.
 
+    Important: scoped to ``/data/faces/{TEST_TENANT_ID}/`` and
+    ``/data/faces/captures/{TEST_TENANT_ID}/`` rather than the whole
+    ``/data/faces`` tree. Earlier this fixture rmtree'd the entire
+    root, which on a shared dev volume also deleted prod tenants'
+    encrypted photos + capture crops every time anyone ran
+    ``pytest -q``. Camera Logs broke for the prod tenant because
+    ``detection_events`` rows survived (different schema) but the
+    files they referenced were gone. Future regression: never
+    broaden the rmtree target above the per-tenant subtree.
+    """
+
+    test_tenant_id = get_settings().default_tenant_id
     root = Path(get_settings().faces_storage_path)
-    if root.exists():
-        shutil.rmtree(root, ignore_errors=True)
+    targets = [root / str(test_tenant_id), root / "captures" / str(test_tenant_id)]
+    for target in targets:
+        if target.exists():
+            shutil.rmtree(target, ignore_errors=True)
 
 
 # A minimal valid JPEG — a 1x1 image. Good enough for a smoke test; P9

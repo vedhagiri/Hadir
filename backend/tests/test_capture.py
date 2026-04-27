@@ -80,20 +80,52 @@ class _StubAnalyzer:
 
 @pytest.fixture
 def clean_capture(admin_engine):  # type: ignore[no-untyped-def]
-    """Wipe detection_events + health snapshots + cameras + capture files."""
+    """Wipe the test tenant's detection_events + health snapshots +
+    cameras + on-disk captures.
 
-    with admin_engine.begin() as conn:
-        conn.execute(delete(detection_events))
-        conn.execute(delete(camera_health_snapshots))
-        conn.execute(delete(cameras))
+    Important: the row deletes are bounded by ``tenant_id`` in single-
+    mode dev (search_path defaults to ``main`` = test tenant 1), so
+    they don't touch other tenants' rows. The on-disk wipe is scoped
+    to the test tenant's subtree (``captures/1/``) for the same
+    reason — a previous version of this fixture rmtree'd the entire
+    ``/data/faces/captures`` tree which, on a shared dev volume, also
+    deleted prod tenants' files. Future regression: never broaden the
+    rmtree target above the per-tenant subtree.
+    """
+
     captures_root = Path(get_settings().faces_storage_path) / "captures"
-    shutil.rmtree(captures_root, ignore_errors=True)
+    test_tenant_captures = captures_root / str(TENANT.tenant_id)
+    with admin_engine.begin() as conn:
+        conn.execute(
+            delete(detection_events).where(
+                detection_events.c.tenant_id == TENANT.tenant_id
+            )
+        )
+        conn.execute(
+            delete(camera_health_snapshots).where(
+                camera_health_snapshots.c.tenant_id == TENANT.tenant_id
+            )
+        )
+        conn.execute(
+            delete(cameras).where(cameras.c.tenant_id == TENANT.tenant_id)
+        )
+    shutil.rmtree(test_tenant_captures, ignore_errors=True)
     yield
     with admin_engine.begin() as conn:
-        conn.execute(delete(detection_events))
-        conn.execute(delete(camera_health_snapshots))
-        conn.execute(delete(cameras))
-    shutil.rmtree(captures_root, ignore_errors=True)
+        conn.execute(
+            delete(detection_events).where(
+                detection_events.c.tenant_id == TENANT.tenant_id
+            )
+        )
+        conn.execute(
+            delete(camera_health_snapshots).where(
+                camera_health_snapshots.c.tenant_id == TENANT.tenant_id
+            )
+        )
+        conn.execute(
+            delete(cameras).where(cameras.c.tenant_id == TENANT.tenant_id)
+        )
+    shutil.rmtree(test_tenant_captures, ignore_errors=True)
 
 
 def _seed_camera(
