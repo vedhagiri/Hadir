@@ -1,0 +1,10 @@
+fastapi>=0.110
+uvicorn[standard]>=0.27
+python-multipart>=0.0.9
+opencv-python>=4.8
+insightface>=0.7
+onnxruntime>=1.17
+ultralytics>=8.1
+numpy>=1.24
+pydantic>=2.0
+openpyxl>=3.1

@@ -62,3 +62,9 @@ backend/data/
 
 # Local design archive (the unpacked design-reference is committed; the .zip is not)
 *.zip
+
+known_people/
+reports/
+captures/
+saved_crops/
+
