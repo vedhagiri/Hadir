@@ -21,6 +21,7 @@ from hadir.detection.detectors import (
     DetectorConfig,
     DetectorMode,
     detect,
+    is_mode_available,
     quality_score,
     set_yolo_model_dir,
 )
@@ -30,6 +31,7 @@ __all__ = [
     "DetectorConfig",
     "DetectorMode",
     "detect",
+    "is_mode_available",
     "quality_score",
     "set_yolo_model_dir",
 ]

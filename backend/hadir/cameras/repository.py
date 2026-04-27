@@ -33,7 +33,9 @@ from hadir.tenants.scope import TenantScope
 DEFAULT_CAPTURE_CONFIG: dict[str, Any] = {
     "max_faces_per_event": 10,
     "max_event_duration_sec": 60,
-    "min_face_quality_to_save": 0.35,
+    # Deprecated runtime no-op (see ``cameras/schemas.py``); kept for
+    # backward compat with migration 0027's JSONB shape.
+    "min_face_quality_to_save": 0.0,
     "save_full_frames": False,
 }
 

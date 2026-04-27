@@ -179,10 +179,9 @@ def test_worker_emits_one_event_per_new_track_not_per_frame(
             # skip-to-latest would otherwise drop intermediate frames).
             analyzer_consume_every_seq=True,
         ),
-        # P28.5b: default ``min_face_quality_to_save=0.35`` filters
-        # out the 50×50 test bboxes (quality ~0.29). Disable the
-        # threshold for tracker-shape tests so we observe the
-        # one-event-per-new-track invariant.
+        # Post-fix-detector-mode-preflight: the absolute quality gate
+        # is gone; this knob is now a no-op. Left in the dict for
+        # back-compat with pre-fix capture_config JSON shapes.
         capture_config={"min_face_quality_to_save": 0.0},
     )
 
@@ -909,23 +908,26 @@ def test_reconcile_propagates_capture_config_change_without_restart(
         clear_analyzer_factory()
 
 
-def test_quality_score_filters_low_quality_below_threshold() -> None:
-    """``min_face_quality_to_save`` gates whether a detection becomes
-    a row. Below threshold → ``emit_detection_event`` returns None
-    without writing to disk or DB. Pure unit test on the threshold
-    arithmetic; no DB or filesystem touched."""
+def test_quality_score_arithmetic() -> None:
+    """``quality_score(bbox, det_score)`` returns the documented
+    formula ``0.75 * area_norm + 0.25 * det_score`` with
+    ``area_norm = min(w*h / 200**2, 1.0)``. The score is no longer
+    used as a rejection threshold (the post-fix-detector-mode-preflight
+    cleanup removed the absolute gate; see Layer 2) but the function
+    stays around for v1.x ranking work once kps land in
+    ``Detection``."""
 
     from hadir.capture.events import quality_score
     from hadir.capture.tracker import Bbox
 
     # 60×60 face at det_score 0.9: area_norm = 3600/40000 = 0.09
-    #   → 0.75*0.09 + 0.25*0.9 = 0.0675 + 0.225 = 0.2925. Below 0.35.
+    #   → 0.75*0.09 + 0.25*0.9 = 0.0675 + 0.225 = 0.2925.
     small = Bbox(x=0, y=0, w=60, h=60)
-    assert quality_score(small, det_score=0.9) < 0.35
+    assert abs(quality_score(small, det_score=0.9) - 0.2925) < 1e-3
 
     # 200×200 face at det_score 0.9: area saturates → 0.75 + 0.225 = 0.975
     big = Bbox(x=0, y=0, w=200, h=200)
-    assert quality_score(big, det_score=0.9) > 0.35
+    assert abs(quality_score(big, det_score=0.9) - 0.975) < 1e-3
 
 
 def test_tracker_force_retires_after_max_duration_sec() -> None:
@@ -1048,19 +1050,22 @@ def test_per_tenant_config_changes_isolated(admin_engine) -> None:
 
 
 @pytest.mark.usefixtures("clean_capture")
-def test_emit_skips_row_and_file_when_quality_below_threshold(
+def test_emit_writes_low_quality_row_after_quality_gate_removal(
     admin_engine, monkeypatch, tmp_path
 ) -> None:
-    """min_face_quality_to_save red line: detection below threshold
-    must produce NO row and NO file. Pure unit-y test on
-    emit_detection_event — no worker plumbing.
+    """Regression test for the post-fix-detector-mode-preflight Layer
+    2 cleanup. Pre-fix: a 60×60 detection with ``det_score=0.9`` scored
+    ~0.29 on the v1.0 quality formula and got rejected by the absolute
+    ``min_face_quality_to_save=0.35`` gate. Post-fix: the gate is gone
+    (mirroring prototype-reference/backend/capture.py::_handle_face,
+    which has no absolute threshold), so the row + file MUST land. A
+    legacy ``min_face_quality_to_save=0.35`` value in the config dict
+    is now ignored at runtime.
     """
 
     from hadir.capture import events as events_mod  # noqa: PLC0415
     from hadir.capture.tracker import Bbox  # noqa: PLC0415
 
-    # Re-route the captures tree to a tmp dir for the duration of
-    # the test so we can scan it for files at the end.
     monkeypatch.setattr(
         events_mod, "captures_dir",
         lambda tenant_id, camera_id, *, now=None:
@@ -1068,10 +1073,11 @@ def test_emit_skips_row_and_file_when_quality_below_threshold(
     )
 
     cam_id = _seed_camera(
-        admin_engine, name="quality-gate", plain_url="rtsp://fake/qg"
+        admin_engine, name="quality-gate-removed", plain_url="rtsp://fake/qg"
     )
 
-    # 60×60 face at det_score 0.9 → quality ≈ 0.29 (below 0.35).
+    # 60×60 face at det_score 0.9 → quality formula ≈ 0.29 (below the
+    # legacy 0.35 threshold). Post-fix this still produces a row.
     bbox = Bbox(x=0, y=0, w=60, h=60)
     frame = _blank_frame(w=320, h=240)
 
@@ -1082,20 +1088,24 @@ def test_emit_skips_row_and_file_when_quality_below_threshold(
         frame_bgr=frame,
         bbox=bbox,
         det_score=0.9,
-        track_id="t-quality-gate",
+        track_id="t-quality-gate-removed",
+        # Legacy threshold value — must be ignored.
         capture_config={"min_face_quality_to_save": 0.35},
     )
-    assert new_id is None, "row should have been skipped (low quality)"
+    assert new_id is not None, (
+        "row must land — the absolute quality gate was removed in the "
+        "fix-detector-mode-preflight Layer 2 cleanup"
+    )
 
-    # No row, no file.
     with admin_engine.begin() as conn:
         count = conn.execute(
             select(func.count())
             .select_from(detection_events)
             .where(detection_events.c.camera_id == cam_id)
         ).scalar_one()
-    assert count == 0
-    assert not list(tmp_path.rglob("*.jpg"))
+    assert count == 1
+    files = list(tmp_path.rglob("*.jpg"))
+    assert len(files) == 1, files
 
 
 @pytest.mark.usefixtures("clean_capture")

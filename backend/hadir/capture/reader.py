@@ -202,7 +202,9 @@ class CaptureWorker:
     DEFAULT_CAPTURE_CONFIG: dict = {
         "max_faces_per_event": 10,
         "max_event_duration_sec": 60,
-        "min_face_quality_to_save": 0.35,
+        # Deprecated runtime no-op (see ``hadir/capture/events.py`` and
+        # docs/phases/fix-detector-mode-preflight.md Layer 2).
+        "min_face_quality_to_save": 0.0,
         "save_full_frames": False,
     }
 

@@ -282,33 +282,15 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
                 />
               </Field>
 
-              <Field
-                label={t("cameras.fields.minFaceQualityToSave")}
-                hint={t("cameras.hints.minFaceQualityToSave")}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={config.min_face_quality_to_save}
-                    onChange={(e) =>
-                      setConfig({
-                        ...config,
-                        min_face_quality_to_save: parseFloat(e.target.value),
-                      })
-                    }
-                    style={{ flex: 1 }}
-                  />
-                  <span
-                    className="mono text-sm"
-                    style={{ width: 40, textAlign: "end" }}
-                  >
-                    {config.min_face_quality_to_save.toFixed(2)}
-                  </span>
-                </div>
-              </Field>
+              {/* min_face_quality_to_save slider removed — runtime
+                  no-op since the fix-detector-mode-preflight cleanup.
+                  Detector-level filtering (min_det_score +
+                  min_face_pixels) already happens upstream; the
+                  absolute post-detection threshold rejected legitimate
+                  distant faces. The field stays on CaptureConfig for
+                  back-compat with shipped migration 0027 but no UI is
+                  surfaced. See docs/phases/fix-detector-mode-
+                  preflight.md Layer 2. */}
 
               <ToggleRow
                 checked={config.save_full_frames}

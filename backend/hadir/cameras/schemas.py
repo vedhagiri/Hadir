@@ -26,7 +26,11 @@ class CaptureConfig(BaseModel):
 
     max_faces_per_event: int = Field(default=10, ge=1, le=50)
     max_event_duration_sec: int = Field(default=60, ge=5, le=600)
-    min_face_quality_to_save: float = Field(default=0.35, ge=0.0, le=1.0)
+    # Deprecated (post-fix-detector-mode-preflight): runtime no-op.
+    # Kept on the schema so existing JSON validates; pose-aware quality
+    # ranking is reserved for v1.x. See docs/phases/
+    # fix-detector-mode-preflight.md Layer 2.
+    min_face_quality_to_save: float = Field(default=0.0, ge=0.0, le=1.0)
     save_full_frames: bool = False
 
 

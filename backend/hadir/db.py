@@ -1563,9 +1563,12 @@ cameras = Table(
         JSONB,
         nullable=False,
         server_default=(
+            # ``min_face_quality_to_save`` is a deprecated no-op kept
+            # for back-compat with migration 0027's JSONB shape.
+            # See docs/phases/fix-detector-mode-preflight.md Layer 2.
             '{"max_faces_per_event": 10, '
             '"max_event_duration_sec": 60, '
-            '"min_face_quality_to_save": 0.35, '
+            '"min_face_quality_to_save": 0.0, '
             '"save_full_frames": false}'
         ),
     ),

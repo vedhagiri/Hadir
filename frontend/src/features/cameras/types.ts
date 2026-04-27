@@ -12,10 +12,14 @@ export interface CaptureConfig {
   save_full_frames: boolean;
 }
 
+// ``min_face_quality_to_save`` is a deprecated runtime no-op (kept on
+// the type for back-compat with the migration-0027 JSONB shape; the
+// drawer no longer surfaces a slider for it). See
+// docs/phases/fix-detector-mode-preflight.md Layer 2.
 export const DEFAULT_CAPTURE_CONFIG: CaptureConfig = {
   max_faces_per_event: 10,
   max_event_duration_sec: 60,
-  min_face_quality_to_save: 0.35,
+  min_face_quality_to_save: 0.0,
   save_full_frames: false,
 };
 

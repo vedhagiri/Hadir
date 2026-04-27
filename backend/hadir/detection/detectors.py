@@ -215,6 +215,29 @@ def _load_face_app(det_size: int = DEFAULT_DET_SIZE):  # type: ignore[no-untyped
     return _face_app
 
 
+def is_mode_available(mode: DetectorMode) -> bool:
+    """Pre-flight check used by the System Settings PUT path.
+
+    Returns True iff the runtime image carries the deps a given
+    detector mode needs. ``insightface`` is mandatory and always
+    available (the package ships in ``pyproject.toml``); ``yolo+face``
+    additionally requires ``ultralytics``, which is optional. An
+    operator must not be allowed to save a mode that would crash the
+    analyzer thread on every cycle — ``put_detection_config`` calls
+    this and returns 400 when the answer is False.
+    """
+
+    if mode == "insightface":
+        return True
+    if mode == "yolo+face":
+        if _yolo_model is not None:
+            return True
+        from importlib.util import find_spec  # noqa: PLC0415
+
+        return find_spec("ultralytics") is not None
+    return False
+
+
 def _load_yolo():  # type: ignore[no-untyped-def]
     """Load (or return cached) Ultralytics YOLOv8n. First-use
     download from ultralytics; thereafter served from the model dir.

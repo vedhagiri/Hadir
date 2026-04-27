@@ -483,6 +483,26 @@ def put_detection_config(
     user: Annotated[CurrentUser, ADMIN],
 ) -> DetectionConfigOut:
     parsed = _validation_to_400(DetectionConfigIn, payload)
+    # Pre-flight: refuse to persist a mode whose runtime deps are
+    # missing. Without this guard, the worker's analyzer thread
+    # would log ``ModuleNotFoundError`` on every cycle (~6/s) and
+    # capture would silently brick — see docs/phases/fix-detector-
+    # mode-preflight.md.
+    from fastapi import HTTPException  # noqa: PLC0415
+
+    from hadir.detection import is_mode_available  # noqa: PLC0415
+
+    if not is_mode_available(parsed.mode):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "field": "mode",
+                "message": (
+                    f"detector mode '{parsed.mode}' is not available in "
+                    "this build (required runtime dependency missing)"
+                ),
+            },
+        )
     scope = TenantScope(tenant_id=user.tenant_id)
     new_config = parsed.model_dump()
     before = _load_detection_row(scope)

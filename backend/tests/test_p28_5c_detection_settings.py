@@ -249,8 +249,12 @@ def test_put_detection_config_round_trips(
     client: TestClient, admin_user: dict, admin_engine: Engine
 ) -> None:
     _login(client, admin_user)
+    # Use ``insightface`` mode for the round-trip — ``yolo+face``
+    # requires ``ultralytics`` to be installed and is now blocked by
+    # the pre-flight check (see ``test_put_detection_config_rejects_
+    # unavailable_mode``).
     new_config = {
-        "mode": "yolo+face",
+        "mode": "insightface",
         "det_size": 480,
         "min_det_score": 0.6,
         "min_face_pixels": 4900,  # 70×70
@@ -291,6 +295,49 @@ def test_put_detection_config_round_trips(
             "show_body_boxes": False,
         },
     )
+
+
+def test_put_detection_config_rejects_unavailable_mode(
+    client: TestClient,
+    admin_user: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pre-flight guard refuses to persist a mode whose runtime
+    deps aren't installed. Without it, the analyzer thread would
+    silently spam ``ModuleNotFoundError`` once per cycle and capture
+    would brick — see docs/phases/fix-detector-mode-preflight.md.
+    """
+
+    _login(client, admin_user)
+
+    def _fake_unavailable(mode: str) -> bool:
+        return mode != "yolo+face"
+
+    monkeypatch.setattr(
+        "hadir.system.router.is_mode_available", _fake_unavailable, raising=False
+    )
+    # The router imports lazily inside the handler — patch the symbol
+    # at its source too so the lookup hits the fake either way.
+    monkeypatch.setattr(
+        "hadir.detection.is_mode_available", _fake_unavailable
+    )
+
+    resp = client.put(
+        "/api/system/detection-config",
+        json={
+            "mode": "yolo+face",
+            "det_size": 320,
+            "min_det_score": 0.5,
+            "min_face_pixels": 3600,
+            "yolo_conf": 0.35,
+            "show_body_boxes": False,
+        },
+    )
+    assert resp.status_code == 400, resp.text
+    detail = resp.json()["detail"]
+    assert detail["field"] == "mode"
+    assert "yolo+face" in detail["message"]
+    assert "not available" in detail["message"]
 
 
 def test_put_tracker_config_round_trips_and_audits(

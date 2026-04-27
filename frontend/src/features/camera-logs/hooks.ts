@@ -22,7 +22,14 @@ export function useDetectionEvents(
   return useQuery({
     queryKey: ["detection-events", filters, options?.formerOnly ?? false],
     queryFn: () => api<DetectionEventListResponse>(path),
-    staleTime: 15 * 1000,
+    // Capture workers run independently of any viewer (worker_enabled
+    // gates the pipeline; live preview is a separate display surface).
+    // Camera Logs needs to surface fresh rows without the user
+    // navigating away — poll every 5 s, mirroring the Workers page
+    // (P28.8). Pause when the tab is in the background.
+    refetchInterval: 5000,
+    refetchIntervalInBackground: false,
+    staleTime: 5 * 1000,
   });
 }
 

@@ -8,12 +8,12 @@ photos) and written under
 **Durability contract / capture invariants** (PROJECT_CONTEXT §12 +
 pilot-plan P8 + post-P28.5b orphan-row hardening):
 
-1. **Quality gate first**. If ``quality_score(detection)`` falls below
-   the camera's ``min_face_quality_to_save``, return None at DEBUG.
-   No file write, no DB INSERT, no audit row.
-2. **Empty/invalid crop guard**. If the bbox clamps to zero pixels OR
+1. **Empty/invalid crop guard first**. If the bbox clamps to zero pixels OR
    the crop array is empty (``crop.size == 0``) OR the JPEG encode
-   returns False, return None. No file write, no DB INSERT.
+   returns False, return None. No file write, no DB INSERT. (The pre-
+   P28.5b absolute quality gate has been removed — see "Layer 2" in
+   ``docs/phases/fix-detector-mode-preflight.md`` for why.)
+2. *(reserved — was the empty-crop guard pre-fix, now combined into 1.)*
 3. **File write before DB INSERT, with explicit verification**. After
    ``write_bytes`` returns we explicitly call ``file_path.exists()``
    and ``stat().st_size > 0``. If either fails the function logs at
@@ -178,11 +178,13 @@ def emit_detection_event(
 
     P28.5b knobs (read from ``capture_config``):
 
-    * ``min_face_quality_to_save`` — skip if ``quality_score(bbox,
-      det_score)`` falls below the threshold. The single-face-per-
-      event architecture means a low-quality detection doesn't
-      become an event at all (rather than the multi-face semantics
-      where a row exists but the crop is omitted).
+    * ``min_face_quality_to_save`` — *deprecated, no-op*. Kept on the
+      ``cameras.capture_config`` JSONB for backward compat with
+      migration 0027; ignored at runtime since the post-fix-detector-
+      mode-preflight cleanup. Detector-level filtering already happens
+      via ``min_det_score`` + ``min_face_pixels`` upstream; the
+      absolute post-detection threshold rejected legitimate distant
+      faces. See docs/phases/fix-detector-mode-preflight.md Layer 2.
     * ``save_full_frames`` — when ``True``, also save the full
       annotated frame (passed via ``annotated_frame_bgr``) at a
       sibling ``_full.jpg`` path. Debug aid; increases disk usage
@@ -195,20 +197,20 @@ def emit_detection_event(
 
     captured_at = captured_at or datetime.now(tz=timezone.utc)
     config = capture_config or {}
-    min_quality = float(config.get("min_face_quality_to_save", 0.0))
     save_full = bool(config.get("save_full_frames", False))
 
-    # Apply the quality threshold BEFORE doing any disk or DB work —
-    # cheap to compute and avoids both the JPEG encode and the
-    # capture-tree mkdir for low-quality detections.
-    score = quality_score(bbox, det_score)
-    if score < min_quality:
-        logger.debug(
-            "crop skipped (quality %.2f < %.2f): camera_id=%s track=%s",
-            score, min_quality, camera_id, track_id,
-        )
-        return None
-
+    # Detection-level filtering (``min_det_score`` + ``min_face_pixels``)
+    # already happened in the analyzer's ``detect`` call. The post-detection
+    # quality gate that pre-P28.5b rejected on
+    # ``quality_score < min_face_quality_to_save`` is gone — it's an
+    # absolute threshold of a *non-pose-aware* formula and was rejecting
+    # legitimate distant-but-valid faces (e.g. an ~80×80 crop at
+    # det_score 0.7 scores ~0.30, below the 0.35 default). The prototype
+    # (prototype-reference/backend/capture.py::_handle_face) computes the
+    # same score but uses it only to *rank* faces within a multi-face-per-
+    # event row — never to reject. v1.0 is single-face-per-event today;
+    # the ranking is moot, and the rejection was just dropping captures.
+    # See docs/phases/fix-detector-mode-preflight.md "Layer 2".
     jpeg = _encode_jpeg(frame_bgr, bbox)
     if jpeg is None:
         logger.debug(
