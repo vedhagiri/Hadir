@@ -16,7 +16,7 @@ import {
   toggleSidebar,
   type SidebarState,
 } from "../sidebar";
-import type { MeResponse, Role } from "../types";
+import type { Role } from "../types";
 import { Icon } from "./Icon";
 import { NAV } from "./nav";
 
@@ -43,17 +43,9 @@ const SECTION_KEY: Record<string, string> = {
 
 interface Props {
   role: Role;
-  me: MeResponse;
 }
 
-function initialsFor(fullName: string): string {
-  const parts = fullName.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "??";
-  if (parts.length === 1) return (parts[0] ?? "").slice(0, 2).toUpperCase();
-  return ((parts[0] ?? "")[0]! + (parts[parts.length - 1] ?? "")[0]!).toUpperCase();
-}
-
-export function Sidebar({ role, me }: Props) {
+export function Sidebar({ role }: Props) {
   const { t } = useTranslation();
   const items = NAV[role];
   const sidebarState = useSidebarState();
@@ -166,21 +158,11 @@ export function Sidebar({ role, me }: Props) {
         );
       })}
 
-      <div className="sidebar-footer">
-        {/*
-          TODO(v1.0): restore the role switcher from design/shell.jsx.
-          Pilot uses the user's highest role only — PROJECT_CONTEXT §8.
-        */}
-        <div className="role-switcher" style={{ cursor: "default" }}>
-          <div className="avatar">{initialsFor(me.full_name)}</div>
-          <div className="role-col">
-            <span className="role-label">{me.full_name}</span>
-            <span className="role-sub">
-              {role.toUpperCase()} · {me.email}
-            </span>
-          </div>
-        </div>
-      </div>
+      {/* P28.5d: user identity + Settings + Logout moved to a Topbar
+          dropdown (``UserMenu`` in shell/Topbar.tsx). The sidebar
+          footer is gone — clearer hierarchy, matches the design
+          archive's intent of putting per-session controls on the
+          top bar rather than nested in the navigation. */}
     </aside>
   );
 }

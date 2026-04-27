@@ -44,7 +44,11 @@
   "topbar": {
     "logout": "تسجيل الخروج",
     "loggingOut": "جارٍ تسجيل الخروج…",
-    "switchRole": "تبديل الدور"
+    "switchRole": "تبديل الدور",
+    "switchFailed": "فشل التبديل.",
+    "active": "النشط",
+    "settings": "الإعدادات",
+    "userMenu": "قائمة المستخدم"
   },
   "nav": {
     "sections": {

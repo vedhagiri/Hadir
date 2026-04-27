@@ -44,7 +44,11 @@
   "topbar": {
     "logout": "Log out",
     "loggingOut": "Logging out…",
-    "switchRole": "Switch role"
+    "switchRole": "Switch role",
+    "switchFailed": "Switch failed.",
+    "active": "active",
+    "settings": "Settings",
+    "userMenu": "User menu"
   },
   "nav": {
     "sections": {

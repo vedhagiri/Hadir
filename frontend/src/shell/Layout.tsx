@@ -34,7 +34,7 @@ export function Layout() {
       {me.is_super_admin_impersonation && (
         <ImpersonationBanner superAdminUserId={me.super_admin_user_id ?? null} />
       )}
-      <Sidebar role={role} me={me} />
+      <Sidebar role={role} />
       <div className="main">
         <Topbar pageId={pageId} role={role} me={me} />
         <div className="content">
