@@ -544,6 +544,10 @@
     "photos": {
       "angleLabel": "الزاوية"
     },
+    "toast": {
+      "created": "تمت إضافة {{name}}.",
+      "updated": "تم تحديث {{name}}."
+    },
     "errors": {
       "codeAndNameRequired": "معرف الموظف والاسم الكامل مطلوبان.",
       "reasonRequired": "يجب إدخال سبب التعطيل (5 أحرف على الأقل) عند التغيير إلى غير نشط.",

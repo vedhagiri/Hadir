@@ -1,89 +1,124 @@
-/* Page-transition animation. Layered ON TOP of the design archive's
- * verbatim styles in ``frontend/src/styles/*.css`` (which the project
- * red-lines forbid us from editing).
+/* Reduced-motion safety net + drawer panel slide.
  *
- * Mechanic: the Layout's content wrapper is keyed on
- * ``location.pathname`` so React remounts the page subtree on every
- * navigation. The keyframe below runs once per mount — fade in + a
- * tiny upward slide. Sidebar + topbar + impersonation banner stay
- * stable (they're outside the keyed wrapper) so the animation feels
- * like just the content rotating in.
+ * Most page-level animation moved to Framer Motion (see
+ * ``frontend/src/motion/``). What stays in CSS:
  *
- * Accessibility: ``prefers-reduced-motion`` users get a near-instant
- * fade with no transform. WCAG 2.3.3 — motion can be a vestibular
- * trigger, so we honor the OS-level pref. */
+ * 1. Drawer panel slide-in. The panel renders inside the portal
+ *    (``#drawer-root``), outside any will-change ancestor that
+ *    could create a containing block. ``position: fixed`` on the
+ *    panel anchors to the viewport correctly; a single keyframe
+ *    on ``.drawer`` slides it in from the inline-end edge.
+ * 2. Drawer scrim fade. Same portal — fade from 0 → 1 over the
+ *    scrim's mount.
+ * 3. Reduced-motion safety net for design-CSS hover transitions.
+ *
+ * **Important context** (drawer-positioning fix):
+ * the prior ``.page-transition`` class with ``will-change: transform``
+ * was deleted because it created a containing block for fixed-position
+ * descendants, breaking the drawer scrim. Framer Motion handles
+ * compositing internally + only during active animations, so no
+ * will-change side effects.
+ */
 
-@keyframes hadir-page-enter {
+@keyframes hadir-drawer-slide-in {
   from {
-    opacity: 0;
-    transform: translateY(6px);
+    transform: translateX(100%);
   }
   to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.page-transition {
-  animation: hadir-page-enter 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  /* Hint to the compositor — keeps the animation on the GPU layer
-   * and avoids a paint reflow on the surrounding shell. */
-  will-change: opacity, transform;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .page-transition {
-    animation: hadir-page-enter 80ms linear both;
-    /* Keep the fade as a soft signal that something changed —
-     * remove the translate that triggers vestibular discomfort. */
-    transform: none !important;
-  }
-  @keyframes hadir-page-enter {
-    from {
-      opacity: 0;
-    }
-    to {
-      opacity: 1;
-    }
-  }
-}
-
-/* Drawer + modal entrances reuse the same easing curve so per-page
- * pop-overs feel like part of the same motion language. */
-@keyframes hadir-drawer-enter {
-  from {
-    opacity: 0;
-    transform: translateX(12px);
-  }
-  to {
-    opacity: 1;
     transform: translateX(0);
   }
 }
 
-[dir="rtl"] @keyframes hadir-drawer-enter {
+[dir="rtl"] @keyframes hadir-drawer-slide-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes hadir-scrim-fade-in {
   from {
     opacity: 0;
-    transform: translateX(-12px);
   }
   to {
     opacity: 1;
-    transform: translateX(0);
   }
 }
 
 .drawer {
-  animation: hadir-drawer-enter 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: hadir-drawer-slide-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .drawer-scrim {
-  animation: hadir-page-enter 160ms ease-out both;
+  animation: hadir-scrim-fade-in 160ms ease-out both;
+}
+
+/* Spinner keyframe used by the ``Button`` primitive's loading
+ * indicator. Fast enough to read as motion (not a static dot)
+ * without being distracting. */
+@keyframes hadir-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Button hover lift — the design CSS already animates background +
+ * border-color; we add a 1 px upward shift and a slight shadow so
+ * primary actions feel tactile. The design's verbatim ``.btn``
+ * shorthand transition only covers ``background`` and
+ * ``border-color``; this rule augments it without touching the
+ * design archive. */
+.btn {
+  transition:
+    background 120ms ease-out,
+    border-color 120ms ease-out,
+    transform 120ms ease-out,
+    box-shadow 120ms ease-out;
+}
+
+.btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(0);
+  transition: transform 50ms ease-out;
+}
+
+[data-theme="dark"] .btn:hover:not(:disabled) {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .drawer,
+  /* Drawer slide is part of the spatial model — without it the
+   * drawer just appears, confusingly. Keep the slide but shorten
+   * it so vestibular triggers are minimised. */
+  .drawer {
+    animation-duration: 100ms;
+  }
   .drawer-scrim {
-    animation: hadir-page-enter 80ms linear both;
+    animation-duration: 80ms;
+  }
+
+  /* Disable the design CSS's hover transitions + our hover-lift
+   * augmentation when the user opts out. Component-level Framer
+   * animations are gated in JS via ``useReducedMotion()``. */
+  .btn,
+  .icon-btn,
+  .nav-item,
+  .seg-btn,
+  .pill {
+    transition: none !important;
+  }
+  .btn:hover:not(:disabled),
+  .btn:active:not(:disabled) {
     transform: none !important;
+    box-shadow: var(--shadow-sm) !important;
   }
 }

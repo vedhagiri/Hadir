@@ -6,6 +6,7 @@ import { Outlet, useLocation } from "react-router-dom";
 
 import { useMe } from "../auth/AuthProvider";
 import { BrandingProvider } from "../branding/BrandingProvider";
+import { PageTransition } from "../motion/PageTransition";
 import { ImpersonationBanner } from "./ImpersonationBanner";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
@@ -39,19 +40,18 @@ export function Layout() {
       <div className="main">
         <Topbar pageId={pageId} role={role} me={me} />
         <div className="content">
-          {/* Keying on ``location.pathname`` remounts the page subtree
-              on every navigation — the ``.page-transition`` keyframe
-              in transitions.css runs once per mount, giving the
-              content area a fade + slight slide-in. Sidebar / topbar
-              / impersonation banner stay stable above this wrapper.
-              TanStack Query caches survive the remount because they
-              live above the route tree, so re-entering a page is
-              instant when the data is already hot. */}
-          <div
-            key={location.pathname}
-            className="content-wrap page-transition"
-          >
-            <Outlet />
+          {/* Framer Motion's AnimatePresence (in PageTransition)
+              detects path changes via location.pathname and runs
+              the outgoing-fade-out + incoming-fade-in. Sidebar /
+              topbar / impersonation banner sit outside this wrapper
+              and stay stable. TanStack Query caches survive the
+              remount — re-entering a page is instant when data is
+              hot. Reduced-motion preference disables the wrapper
+              entirely (pages snap instantly). */}
+          <div className="content-wrap">
+            <PageTransition>
+              <Outlet />
+            </PageTransition>
           </div>
         </div>
       </div>

@@ -22,6 +22,7 @@ import "./i18n";
 import "./theme";
 
 import { App } from "./App";
+import { Toaster } from "./shell/Toaster";
 
 const rootEl = document.getElementById("root");
 if (!rootEl) {
@@ -45,6 +46,11 @@ createRoot(rootEl).render(
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <App />
+        {/* Global toast container — fires from any component via
+            ``import { toast } from "./shell/Toaster"; toast.success(…)``.
+            Mounted alongside the app so it overlays every page +
+            persists across route changes. */}
+        <Toaster />
       </BrowserRouter>
     </QueryClientProvider>
   </StrictMode>,

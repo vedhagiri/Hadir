@@ -544,6 +544,10 @@
     "photos": {
       "angleLabel": "Angle"
     },
+    "toast": {
+      "created": "{{name}} added.",
+      "updated": "{{name}} updated."
+    },
     "errors": {
       "codeAndNameRequired": "Employee ID and full name are required.",
       "reasonRequired": "A deactivation reason (min 5 chars) is required when status is set to Inactive.",

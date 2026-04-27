@@ -8,11 +8,13 @@
 import { useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
+import { motion } from "framer-motion";
 import { NavLink } from "react-router-dom";
 
 import { api } from "../api/client";
 import type { CameraListResponse } from "../features/cameras/types";
 import type { EmployeeListResponse } from "../features/employees/types";
+import { SPRING } from "../motion/tokens";
 import { useInboxSummary } from "../requests/hooks";
 import {
   getSidebar,
@@ -174,28 +176,56 @@ export function Sidebar({ role }: Props) {
           <NavLink
             key={it.id}
             to={`/${it.id}`}
-            className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}
+            className={({ isActive }) =>
+              `nav-item${isActive ? " active" : ""}`
+            }
             // P28.5d: when the sidebar is collapsed the label is
             // hidden via CSS — surface it as a native tooltip so the
             // user can still tell what each icon does on hover.
             title={collapsed ? label : undefined}
+            style={{ position: "relative" }}
           >
-            <Icon name={it.icon} size={14} />
-            <span className="nav-label-text">{label}</span>
-            {badge && (
-              <span
-                className="nav-badge"
-                style={
-                  breached
-                    ? {
-                        background: "var(--danger-bg)",
-                        color: "var(--danger-text)",
-                      }
-                    : undefined
-                }
-              >
-                {badge}
-              </span>
+            {({ isActive }) => (
+              <>
+                {/* Active indicator — Framer's ``layoutId`` makes the
+                    bar slide between items rather than disappearing
+                    + reappearing. The single shared id is what does
+                    the magic. Always plays even with reduced motion
+                    (short, spatial cue — see useReducedMotion). */}
+                {isActive && (
+                  <motion.span
+                    layoutId="sidebar-active-indicator"
+                    aria-hidden
+                    style={{
+                      position: "absolute",
+                      insetInlineStart: 0,
+                      top: 4,
+                      bottom: 4,
+                      width: 3,
+                      background: "var(--accent)",
+                      borderRadius: "0 2px 2px 0",
+                    }}
+                    transition={SPRING.gentle}
+                  />
+                )}
+                <Icon name={it.icon} size={14} />
+                <span className="nav-label-text">{label}</span>
+                {badge && (
+                  <span
+                    className="nav-badge"
+                    style={
+                      breached
+                        ? {
+                            background: "var(--danger-bg)",
+                            color: "var(--danger-text)",
+                          }
+                        : undefined
+                    }
+                  >
+                    {badge}
+                  </span>
+                )}
+              </>
             )}
           </NavLink>
         );

@@ -28,6 +28,7 @@ import { useMe } from "../../auth/AuthProvider";
 import { primaryRole } from "../../types";
 import { DrawerShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
+import { toast } from "../../shell/Toaster";
 import { DeleteConfirmModal } from "./DeleteConfirmModal";
 import {
   useCreateEmployee,
@@ -210,20 +211,30 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
       if (isAddMode) {
         const created = await create.mutateAsync(payload);
         onSaved?.(created);
+        toast.success(
+          t("employees.toast.created", { name: created.full_name }) as string,
+        );
       } else {
         const updated = await update.mutateAsync({
           employeeId: employeeId!,
           payload,
         });
         onSaved?.(updated);
+        toast.success(
+          t("employees.toast.updated", { name: updated.full_name }) as string,
+        );
       }
       onClose();
     } catch (e) {
       if (e instanceof ApiError) {
         const detail = (e.body as { detail?: string })?.detail;
-        setServerError(typeof detail === "string" ? detail : `Error ${e.status}`);
+        const msg =
+          typeof detail === "string" ? detail : `Error ${e.status}`;
+        setServerError(msg);
+        toast.error(msg);
       } else {
         setServerError("Could not save");
+        toast.error("Could not save");
       }
     }
   };

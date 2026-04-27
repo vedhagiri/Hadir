@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next";
 
 import { useCameras } from "../../features/cameras/hooks";
 import type { Camera } from "../../features/cameras/types";
+import { RollingNumber } from "../../motion/RollingNumber";
 import { Icon } from "../../shell/Icon";
 import { useEventStream, useLiveStats } from "./hooks";
 import type { LiveEvent } from "./types";
@@ -310,7 +311,7 @@ export function LiveCapturePage() {
                   className="mono"
                   style={{ color: "var(--text)" }}
                 >
-                  {stats.data?.detections_last_10m ?? 0}
+                  <RollingNumber value={stats.data?.detections_last_10m ?? 0} />
                 </span>
               </span>
               <span className="text-xs text-dim">
@@ -320,7 +321,7 @@ export function LiveCapturePage() {
                   className="mono"
                   style={{ color: "var(--success-text)" }}
                 >
-                  {stats.data?.known_count ?? 0}
+                  <RollingNumber value={stats.data?.known_count ?? 0} />
                 </span>
                 {" · "}
                 {t("liveCapture.unknown")}{" "}
@@ -328,7 +329,7 @@ export function LiveCapturePage() {
                   className="mono"
                   style={{ color: "var(--warning-text)" }}
                 >
-                  {stats.data?.unknown_count ?? 0}
+                  <RollingNumber value={stats.data?.unknown_count ?? 0} />
                 </span>
               </span>
             </div>
