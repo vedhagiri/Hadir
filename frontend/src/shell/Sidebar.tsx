@@ -9,7 +9,6 @@ import { useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import { NavLink } from "react-router-dom";
 
-import { APP_VERSION_SHORT } from "../config";
 import { useInboxSummary } from "../requests/hooks";
 import {
   getSidebar,
@@ -75,7 +74,29 @@ export function Sidebar({ role, me }: Props) {
       <div className="sidebar-brand">
         <div className="brand-mark">ح</div>
         <div className="brand-name">Hadir</div>
-        <div className="brand-tag">{APP_VERSION_SHORT}</div>
+        {/* P28.5d: collapse/expand toggle in the top-right of the
+            brand row, replacing the version chip. ">" when expanded
+            (clicking collapses); "<" when collapsed (clicking
+            expands). Tooltip + aria-label carry the action verb so
+            screen readers and hover users get the same affordance. */}
+        <button
+          type="button"
+          className="sidebar-toggle"
+          onClick={toggleSidebar}
+          aria-pressed={collapsed}
+          aria-label={
+            collapsed
+              ? t("common.expandSidebar")
+              : t("common.collapseSidebar")
+          }
+          title={
+            collapsed
+              ? t("common.expandSidebar")
+              : t("common.collapseSidebar")
+          }
+        >
+          <Icon name={collapsed ? "chevronLeft" : "chevronRight"} size={12} />
+        </button>
       </div>
 
       {/* Search is decorative in P4 — real search lands with employees (P6). */}
@@ -144,35 +165,6 @@ export function Sidebar({ role, me }: Props) {
           </NavLink>
         );
       })}
-
-      {/* P28.5d: collapse / expand toggle. Lives above the footer so
-          it's reachable from anywhere. Chevron points "into" the
-          sidebar when expanded (= collapse) and "out" when collapsed
-          (= expand); RTL flips direction via the design's
-          ``[dir="rtl"] .icon-chevron-*`` rules. */}
-      <button
-        type="button"
-        className="sidebar-toggle"
-        onClick={toggleSidebar}
-        aria-pressed={collapsed}
-        aria-label={
-          collapsed
-            ? t("common.expandSidebar")
-            : t("common.collapseSidebar")
-        }
-        title={
-          collapsed
-            ? t("common.expandSidebar")
-            : t("common.collapseSidebar")
-        }
-      >
-        <Icon name={collapsed ? "chevronRight" : "chevronLeft"} size={14} />
-        <span className="nav-label-text">
-          {collapsed
-            ? t("common.expandSidebar")
-            : t("common.collapseSidebar")}
-        </span>
-      </button>
 
       <div className="sidebar-footer">
         {/*

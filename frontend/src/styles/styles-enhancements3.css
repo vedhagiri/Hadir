@@ -403,31 +403,28 @@ input[type="radio"]:focus-visible {
   transition: grid-template-columns 200ms ease;
 }
 
-/* Collapse / expand toggle button — looks like a nav-item but
-   sits between the nav list and the footer. Centred icon when
-   collapsed (the label is hidden along with every other
-   .nav-label-text). */
+/* Collapse / expand toggle button — small icon-only button in the
+   top-right of the brand row, replacing the version chip. Sized
+   to roughly match the chip's footprint so the brand row keeps its
+   ~30 px height regardless of state. */
 .sidebar-toggle {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 6px 8px;
-  margin-top: auto;
-  margin-bottom: 8px;
-  border-radius: 6px;
-  border: 1px dashed var(--border);
-  background: transparent;
+  margin-inline-start: auto;
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 12px;
-  font-weight: 450;
-  user-select: none;
-  white-space: nowrap;
+  flex-shrink: 0;
 }
 .sidebar-toggle:hover {
   background: var(--bg-hover);
   color: var(--text);
-  border-style: solid;
+  border-color: var(--border-strong);
 }
 
 /* --- Collapsed state -------------------------------------------- */
@@ -442,14 +439,26 @@ input[type="radio"]:focus-visible {
   padding: 12px 6px;
 }
 
-/* Hide the brand name + version chip; keep the brand mark. */
+/* Hide the brand name + version chip; keep the brand mark + the
+   toggle button. The brand mark stays so users still see the app
+   identity at a glance; the toggle stays so they can expand. */
 [data-sidebar="collapsed"] .brand-name,
 [data-sidebar="collapsed"] .brand-tag {
   display: none;
 }
 [data-sidebar="collapsed"] .sidebar-brand {
-  justify-content: center;
-  padding: 6px 0 14px;
+  /* Tighter layout for the 64 px column: stack the brand mark
+     above the toggle button so neither overflows nor crowds the
+     icon column. */
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px 0 12px;
+}
+[data-sidebar="collapsed"] .sidebar-toggle {
+  /* Cancel the ``margin-inline-start: auto`` from the expanded
+     state so the toggle centres in the column rather than
+     pinning to the right edge of a 64 px box. */
+  margin-inline-start: 0;
 }
 
 /* Hide the search box. (Search itself is decorative pre-P6, but
@@ -474,16 +483,6 @@ input[type="radio"]:focus-visible {
 [data-sidebar="collapsed"] .nav-item {
   justify-content: center;
   padding: 8px 6px;
-  gap: 0;
-}
-
-/* Toggle button: keep the icon, hide the label, centre. */
-[data-sidebar="collapsed"] .sidebar-toggle .nav-label-text {
-  display: none;
-}
-[data-sidebar="collapsed"] .sidebar-toggle {
-  justify-content: center;
-  padding: 6px;
   gap: 0;
 }
 
