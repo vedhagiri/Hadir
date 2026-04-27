@@ -234,6 +234,7 @@ class CaptureManager:
         capture_config: Optional[dict[str, Any]] = None,
         tracker_config: Optional[dict[str, Any]] = None,
         detection_config: Optional[dict[str, Any]] = None,
+        detection_enabled: bool = True,
         schema: Optional[str] = None,
     ) -> bool:
         """Start a worker for ``(tenant_id, camera_id)`` with the given
@@ -274,6 +275,7 @@ class CaptureManager:
                 capture_config=capture_config,
                 tracker_config=tracker_config,
                 detection_config=detection_config,
+                detection_enabled=detection_enabled,
             )
             worker.start()
         except Exception as exc:  # noqa: BLE001
@@ -490,6 +492,7 @@ class CaptureManager:
                             cameras_table.c.name,
                             cameras_table.c.rtsp_url_encrypted,
                             cameras_table.c.worker_enabled,
+                            cameras_table.c.detection_enabled,
                             cameras_table.c.capture_config,
                         ).where(
                             cameras_table.c.tenant_id == tenant_id,
@@ -537,6 +540,7 @@ class CaptureManager:
             capture_config=cam_row.capture_config,
             tracker_config=tracker_cfg,
             detection_config=detection_cfg,
+            detection_enabled=bool(cam_row.detection_enabled),
             schema=schema,
         )
 
@@ -812,6 +816,7 @@ class CaptureManager:
                 capture_config=cam_config,
                 tracker_config=tracker_config,
                 detection_config=detection_config,
+                detection_enabled=bool(getattr(row, "detection_enabled", True)),
                 schema=schema,
             )
             plain_url = ""  # noqa: F841
@@ -856,6 +861,7 @@ class CaptureManager:
             cameras_table.c.id,
             cameras_table.c.name,
             cameras_table.c.rtsp_url_encrypted,
+            cameras_table.c.detection_enabled,
             cameras_table.c.capture_config,
         ).where(
             cameras_table.c.tenant_id == tenant_id,
@@ -1111,7 +1117,9 @@ class CaptureManager:
                     continue
                 desired[(tenant_id, cam_id)] = (
                     cam_name, plain_url, cam_config,
-                    tenant_tracker, tenant_detection, schema,
+                    tenant_tracker, tenant_detection,
+                    bool(getattr(row, "detection_enabled", True)),
+                    schema,
                 )
 
         with self._lock:
@@ -1141,6 +1149,7 @@ class CaptureManager:
                 config,
                 tenant_tracker,
                 tenant_detection,
+                desired_detection_enabled,
                 schema,
             ) = desired[key]
             tid, cid = key
@@ -1158,6 +1167,7 @@ class CaptureManager:
                     capture_config=config,
                     tracker_config=tenant_tracker,
                     detection_config=tenant_detection,
+                    detection_enabled=desired_detection_enabled,
                     schema=schema,
                 ):
                     report["started"] += 1
@@ -1211,6 +1221,32 @@ class CaptureManager:
                         payload={
                             "before": current_detection,
                             "after": tenant_detection,
+                        },
+                    )
+
+                # Migration 0033: detection_enabled drift. Hot-swaps
+                # without restart so a UI flip takes effect on the
+                # next analyzer cycle (~167 ms at the default 6 fps
+                # cap). Audit row carries the boolean before/after so
+                # the operator's toggle history is queryable.
+                current_detection_enabled = existing.is_detection_enabled()
+                if current_detection_enabled != desired_detection_enabled:
+                    existing.update_detection_enabled(
+                        desired_detection_enabled
+                    )
+                    report["config_updated"] += 1
+                    self._audit_worker_event(
+                        tenant_id=tid,
+                        schema=schema,
+                        action="capture.worker.detection_enabled_updated",
+                        entity_id=str(cid),
+                        payload={
+                            "before": {
+                                "detection_enabled": current_detection_enabled
+                            },
+                            "after": {
+                                "detection_enabled": desired_detection_enabled
+                            },
                         },
                     )
             except Exception as exc:  # noqa: BLE001

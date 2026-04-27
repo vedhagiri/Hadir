@@ -49,6 +49,7 @@ def _row_to_out(row: repo.CameraRow) -> CameraOut:
         rtsp_host=row.rtsp_host,
         worker_enabled=row.worker_enabled,
         display_enabled=row.display_enabled,
+        detection_enabled=row.detection_enabled,
         capture_config=CaptureConfig.model_validate(row.capture_config),
         created_at=row.created_at,
         last_seen_at=row.last_seen_at,
@@ -79,6 +80,7 @@ def _audit_payload(row: repo.CameraRow) -> dict:
         "rtsp_host": row.rtsp_host,
         "worker_enabled": row.worker_enabled,
         "display_enabled": row.display_enabled,
+        "detection_enabled": row.detection_enabled,
         "capture_config": dict(row.capture_config),
     }
 
@@ -113,6 +115,7 @@ def create_camera_endpoint(
             rtsp_url_encrypted=encrypted,
             worker_enabled=payload.worker_enabled,
             display_enabled=payload.display_enabled,
+            detection_enabled=payload.detection_enabled,
             capture_config=payload.capture_config.model_dump(),
         )
         created = repo.get_camera(conn, scope, new_id)
@@ -159,6 +162,8 @@ def patch_camera_endpoint(
             values["worker_enabled"] = provided["worker_enabled"]
         if "display_enabled" in provided:
             values["display_enabled"] = provided["display_enabled"]
+        if "detection_enabled" in provided:
+            values["detection_enabled"] = provided["detection_enabled"]
         if "capture_config" in provided and provided["capture_config"] is not None:
             # CaptureConfig is a Pydantic model — model_dump() canonicalises
             # the JSONB shape so two writes of equivalent payloads produce

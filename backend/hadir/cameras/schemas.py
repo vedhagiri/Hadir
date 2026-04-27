@@ -41,6 +41,11 @@ class CameraOut(BaseModel):
     rtsp_host: str
     worker_enabled: bool
     display_enabled: bool
+    # Migration 0033 — when False the worker keeps reading frames but
+    # the analyzer skips ``detect`` and no detection_events are
+    # written. Default True (current behaviour). See
+    # docs/phases/cameras-detection-toggle.md.
+    detection_enabled: bool
     capture_config: CaptureConfig
     created_at: datetime
     last_seen_at: Optional[datetime] = None
@@ -67,6 +72,7 @@ class CameraCreateIn(BaseModel):
     rtsp_url: str = Field(min_length=8, max_length=2048)
     worker_enabled: bool = True
     display_enabled: bool = True
+    detection_enabled: bool = True
     capture_config: CaptureConfig = Field(default_factory=CaptureConfig)
 
 
@@ -79,6 +85,7 @@ class CameraPatchIn(BaseModel):
     rtsp_url: Optional[str] = Field(default=None, min_length=8, max_length=2048)
     worker_enabled: Optional[bool] = None
     display_enabled: Optional[bool] = None
+    detection_enabled: Optional[bool] = None
     # PATCH expects a complete CaptureConfig when present (UI sends
     # the whole bag). A future API version could accept partial
     # updates by switching to a dedicated CaptureConfigPatch model.

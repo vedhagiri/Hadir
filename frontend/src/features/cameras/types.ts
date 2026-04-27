@@ -32,6 +32,10 @@ export interface Camera {
   // pipeline on/off) + ``display_enabled`` (Live Capture surfacing).
   worker_enabled: boolean;
   display_enabled: boolean;
+  // Migration 0033 — third operational lever. When false, the worker
+  // keeps reading frames + driving live preview but the analyzer
+  // skips the expensive detect() call and writes no detection_events.
+  detection_enabled: boolean;
   capture_config: CaptureConfig;
   created_at: string;
   last_seen_at: string | null;
@@ -58,6 +62,7 @@ export interface CameraCreateInput {
   rtsp_url: string;
   worker_enabled: boolean;
   display_enabled: boolean;
+  detection_enabled: boolean;
   capture_config: CaptureConfig;
 }
 
@@ -67,5 +72,6 @@ export interface CameraPatchInput {
   rtsp_url?: string;
   worker_enabled?: boolean;
   display_enabled?: boolean;
+  detection_enabled?: boolean;
   capture_config?: CaptureConfig;
 }

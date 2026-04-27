@@ -73,6 +73,7 @@ class CameraRow:
     rtsp_host: str
     worker_enabled: bool
     display_enabled: bool
+    detection_enabled: bool = True
     capture_config: dict[str, Any] = field(default_factory=lambda: dict(DEFAULT_CAPTURE_CONFIG))
     created_at: datetime = field(default_factory=datetime.now)
     last_seen_at: Optional[datetime] = None
@@ -113,6 +114,7 @@ def _row_to_camera(row) -> CameraRow:
         rtsp_host=_decrypt_and_parse_host(row.rtsp_url_encrypted),
         worker_enabled=bool(row.worker_enabled),
         display_enabled=bool(row.display_enabled),
+        detection_enabled=bool(row.detection_enabled),
         capture_config=_normalise_capture_config(row.capture_config),
         created_at=row.created_at,
         last_seen_at=row.last_seen_at,
@@ -139,6 +141,7 @@ _SELECT_COLUMNS = (
     cameras.c.rtsp_url_encrypted,
     cameras.c.worker_enabled,
     cameras.c.display_enabled,
+    cameras.c.detection_enabled,
     cameras.c.capture_config,
     cameras.c.created_at,
     cameras.c.last_seen_at,
@@ -183,6 +186,7 @@ def create_camera(
     rtsp_url_encrypted: str,
     worker_enabled: bool = True,
     display_enabled: bool = True,
+    detection_enabled: bool = True,
     capture_config: Optional[dict[str, Any]] = None,
 ) -> int:
     values: dict[str, Any] = {
@@ -192,6 +196,7 @@ def create_camera(
         "rtsp_url_encrypted": rtsp_url_encrypted,
         "worker_enabled": worker_enabled,
         "display_enabled": display_enabled,
+        "detection_enabled": detection_enabled,
     }
     if capture_config is not None:
         # The DB has a server_default; only override when the caller

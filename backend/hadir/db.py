@@ -1554,6 +1554,14 @@ cameras = Table(
     # ``enabled`` column.
     Column("worker_enabled", Boolean, nullable=False, server_default="true"),
     Column("display_enabled", Boolean, nullable=False, server_default="true"),
+    # Migration 0033 — third operational lever: when False, the worker
+    # keeps reading frames + driving live preview but the analyzer
+    # thread skips the expensive detect call and no detection_events
+    # rows are produced. Default true preserves prior "worker on = full
+    # pipeline" behaviour. See docs/phases/cameras-detection-toggle.md.
+    Column(
+        "detection_enabled", Boolean, nullable=False, server_default="true"
+    ),
     # P28.5b: per-camera capture knob bag. Defaults match the
     # prototype's tested constants. Schema is open by design — the
     # set of knobs evolves between phases without a migration. The

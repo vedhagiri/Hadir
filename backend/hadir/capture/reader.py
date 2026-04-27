@@ -222,6 +222,7 @@ class CaptureWorker:
         capture_config: Optional[dict] = None,
         tracker_config: Optional[dict] = None,
         detection_config: Optional[dict] = None,
+        detection_enabled: bool = True,
     ) -> None:
         self._engine = engine
         self._scope = scope
@@ -238,6 +239,15 @@ class CaptureWorker:
         self._capture_config: dict = dict(self.DEFAULT_CAPTURE_CONFIG)
         if capture_config:
             self._capture_config.update(capture_config)
+
+        # Migration 0033 — detection toggle. The reader keeps reading
+        # frames + drives the live preview either way; the analyzer
+        # short-circuits the expensive ``detect`` call when this is
+        # False (saving ~80-150 ms/cycle). Reconcile loop hot-swaps
+        # via ``update_detection_enabled`` without restarting the
+        # worker.
+        self._detection_enabled_lock = threading.Lock()
+        self._detection_enabled = bool(detection_enabled)
 
         # P28.5c: tenant-level tracker + detection config snapshots.
         # Kept under their own locks so the manager's reconcile tick
@@ -506,6 +516,41 @@ class CaptureWorker:
             self.camera_id,
         )
 
+    def is_detection_enabled(self) -> bool:
+        """Read the live detection-toggle flag.
+
+        Migration 0033: when False, the analyzer thread skips the
+        expensive ``detect`` call but the reader thread keeps reading
+        frames + driving the live preview. Used inside the analyzer
+        loop's hot path so the read is lock-cheap.
+        """
+
+        with self._detection_enabled_lock:
+            return bool(self._detection_enabled)
+
+    def update_detection_enabled(self, enabled: bool) -> None:
+        """Hot-reload entry point for the per-camera detection toggle.
+
+        The reconcile loop diffs ``cameras.detection_enabled`` and
+        calls this when an operator flips the switch in the UI. No
+        worker restart, no dropped frames — the next analyzer cycle
+        observes the new value via ``is_detection_enabled``.
+        """
+
+        new = bool(enabled)
+        with self._detection_enabled_lock:
+            old = self._detection_enabled
+            self._detection_enabled = new
+        if old != new:
+            logger.info(
+                "capture worker detection_enabled updated: tenant=%s "
+                "camera_id=%s old=%s new=%s",
+                self._scope.tenant_id,
+                self.camera_id,
+                old,
+                new,
+            )
+
     def update_detection_config(self, new_config: dict) -> None:
         """Hot-reload entry point for tenant-level detection_config
         changes. Forwards to the analyzer's ``update_config`` which
@@ -715,9 +760,10 @@ class CaptureWorker:
 
             moved, prev_motion_gray = _check_motion(frame, prev_motion_gray)
             force = (now - last_detect_ts) >= self._config.force_detect_every_s
+            detection_enabled = self.is_detection_enabled()
 
             detections: list = []
-            if moved or force:
+            if (moved or force) and detection_enabled:
                 try:
                     detections = self._analyzer.detect(frame)
                     last_detect_ts = now
@@ -731,6 +777,15 @@ class CaptureWorker:
                         "analyzer", f"detect failed: {type(exc).__name__}"
                     )
                     detections = []
+            elif (moved or force) and not detection_enabled:
+                # Migration 0033: detection_enabled=False short-circuits
+                # the expensive ``detect`` call. Bump ``last_detect_ts``
+                # so the force-detect-every-Ns timer doesn't keep
+                # firing on every cycle while detection is paused —
+                # we'll resume cleanly when re-enabled. The tracker is
+                # still driven below with an empty detections list so
+                # any leftover tracks idle-expire on schedule.
+                last_detect_ts = now
             else:
                 with self._stats_lock:
                     cur = int(self._stats["motion_skipped"] or 0)

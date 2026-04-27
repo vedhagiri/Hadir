@@ -44,6 +44,12 @@ export function CamerasPage() {
       patch: { display_enabled: !cam.display_enabled },
     });
   };
+  const toggleDetectionEnabled = (cam: Camera) => {
+    patch.mutate({
+      id: cam.id,
+      patch: { detection_enabled: !cam.detection_enabled },
+    });
+  };
 
   return (
     <>
@@ -80,13 +86,14 @@ export function CamerasPage() {
               <th>Host</th>
               <th>Worker</th>
               <th>Display</th>
+              <th>Detection</th>
               <th style={{ textAlign: "right" }}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {list.isLoading && (
               <tr>
-                <td colSpan={6} className="text-sm text-dim" style={{ padding: 16 }}>
+                <td colSpan={7} className="text-sm text-dim" style={{ padding: 16 }}>
                   Loading…
                 </td>
               </tr>
@@ -94,7 +101,7 @@ export function CamerasPage() {
             {list.isError && (
               <tr>
                 <td
-                  colSpan={6}
+                  colSpan={7}
                   className="text-sm"
                   style={{ padding: 16, color: "var(--danger-text)" }}
                 >
@@ -147,6 +154,16 @@ export function CamerasPage() {
                   </button>
                 </td>
                 <td>
+                  <button
+                    className={`pill ${cam.detection_enabled ? "pill-success" : "pill-neutral"}`}
+                    onClick={() => toggleDetectionEnabled(cam)}
+                    style={{ cursor: "pointer", border: "none" }}
+                    title="Click to toggle face detection on/off (worker keeps streaming)"
+                  >
+                    {cam.detection_enabled ? "on" : "off"}
+                  </button>
+                </td>
+                <td>
                   <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                     <button
                       className="btn btn-sm"
@@ -175,7 +192,7 @@ export function CamerasPage() {
             })}
             {list.data && list.data.items.length === 0 && !list.isLoading && (
               <tr>
-                <td colSpan={6} className="text-sm text-dim" style={{ padding: 16 }}>
+                <td colSpan={7} className="text-sm text-dim" style={{ padding: 16 }}>
                   No cameras yet. Add one to see its preview frame.
                 </td>
               </tr>
