@@ -26,6 +26,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ApiError, api } from "../../api/client";
 import { useMe } from "../../auth/AuthProvider";
 import { primaryRole } from "../../types";
+import { DrawerShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
 import { DeleteConfirmModal } from "./DeleteConfirmModal";
 import {
@@ -278,8 +279,7 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
     isAdmin && !!pendingDelete.data && isDifferentAdminFromRequester;
 
   return (
-    <>
-      <div className="drawer-scrim" onClick={onClose} />
+    <DrawerShell onClose={onClose}>
       <div className="drawer">
         <div className="drawer-head">
           <div>
@@ -750,7 +750,7 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
           }}
         />
       )}
-    </>
+    </DrawerShell>
   );
 }
 

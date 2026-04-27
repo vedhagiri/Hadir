@@ -3,6 +3,7 @@
 // exception" CTA the request flow (P14) plugs into.
 
 import { useTranslation } from "react-i18next";
+import { DrawerShell } from "../../components/DrawerShell";
 
 import { Icon } from "../../shell/Icon";
 import { useDayDetail } from "./hooks";
@@ -29,8 +30,7 @@ export function DayDetailDrawer({
   )}&employee_id=${employeeId}&date=${isoDate}`;
 
   return (
-    <>
-      <div className="drawer-scrim" onClick={onClose} />
+    <DrawerShell onClose={onClose}>
       <div className="drawer">
         <div className="drawer-head">
           <div>
@@ -243,7 +243,7 @@ export function DayDetailDrawer({
           </button>
         </div>
       </div>
-    </>
+    </DrawerShell>
   );
 }
 

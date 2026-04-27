@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { ModalShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
 import type { Camera } from "./types";
 
@@ -60,20 +61,21 @@ export function PreviewModal({ camera, onClose }: Props) {
   }, [load]);
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(20,20,18,0.4)",
-        backdropFilter: "blur(3px)",
-        zIndex: 60,
-        display: "grid",
-        placeItems: "center",
-      }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
+    <ModalShell onClose={onClose}>
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          // Backdrop painted by ModalShell's scrim; this wrapper just
+          // handles centering layout.
+          zIndex: 60,
+          display: "grid",
+          placeItems: "center",
+        }}
+        onClick={(e) => {
+          if (e.target === e.currentTarget) onClose();
+        }}
+      >
       <div
         className="card"
         style={{
@@ -143,6 +145,7 @@ export function PreviewModal({ camera, onClose }: Props) {
           </button>
         </div>
       </div>
-    </div>
+      </div>
+    </ModalShell>
   );
 }

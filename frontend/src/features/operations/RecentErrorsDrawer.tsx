@@ -2,6 +2,7 @@
 // 20 audit_log rows tagged ``capture.worker.*``.
 
 import { useTranslation } from "react-i18next";
+import { DrawerShell } from "../../components/DrawerShell";
 
 import { Icon } from "../../shell/Icon";
 import { useWorkerErrors } from "./hooks";
@@ -17,8 +18,7 @@ export function RecentErrorsDrawer({ cameraId, cameraName, onClose }: Props) {
   const errors = useWorkerErrors(cameraId);
 
   return (
-    <>
-      <div className="drawer-scrim" onClick={onClose} />
+    <DrawerShell onClose={onClose}>
       <div className="drawer">
         <div className="drawer-head">
           <div>
@@ -163,7 +163,7 @@ export function RecentErrorsDrawer({ cameraId, cameraName, onClose }: Props) {
           </button>
         </div>
       </div>
-    </>
+    </DrawerShell>
   );
 }
 

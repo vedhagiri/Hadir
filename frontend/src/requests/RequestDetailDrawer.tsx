@@ -5,6 +5,7 @@
 // owned by the viewer.
 
 import { useState } from "react";
+import { DrawerShell } from "../components/DrawerShell";
 
 import { ApiError } from "../api/client";
 import { Icon } from "../shell/Icon";
@@ -119,8 +120,7 @@ export function RequestDetailDrawer({
   const r = detail.data;
 
   return (
-    <>
-      <div className="drawer-scrim" onClick={onClose} />
+    <DrawerShell onClose={onClose}>
       <div className="drawer">
         <div className="drawer-head">
           <div>
@@ -348,7 +348,7 @@ export function RequestDetailDrawer({
           )}
         </div>
       </div>
-    </>
+    </DrawerShell>
   );
 }
 

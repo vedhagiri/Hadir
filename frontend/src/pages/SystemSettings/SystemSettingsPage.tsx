@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../../api/client";
+import { ModalShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
 import {
   useDetectionConfig,
@@ -524,8 +525,7 @@ function ConfirmModal({
   onCancel: () => void;
 }) {
   return (
-    <>
-      <div className="drawer-scrim" onClick={onCancel} />
+    <ModalShell onClose={onCancel}>
       <div
         role="dialog"
         aria-label={title}
@@ -558,7 +558,7 @@ function ConfirmModal({
           </button>
         </div>
       </div>
-    </>
+    </ModalShell>
   );
 }
 

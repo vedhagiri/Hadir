@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { ApiError } from "../api/client";
+import { DrawerShell } from "../components/DrawerShell";
 import { useLeaveTypes } from "../leave-calendar/hooks";
 import { Icon } from "../shell/Icon";
 import {
@@ -167,8 +168,7 @@ export function NewRequestDrawer({
   };
 
   return (
-    <>
-      <div className="drawer-scrim" onClick={onClose} />
+    <DrawerShell onClose={onClose}>
       <div className="drawer">
         <div className="drawer-head">
           <div>
@@ -368,7 +368,7 @@ export function NewRequestDrawer({
           </div>
         </form>
       </div>
-    </>
+    </DrawerShell>
   );
 }
 

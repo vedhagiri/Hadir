@@ -11,6 +11,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import { ModalShell } from "../components/DrawerShell";
 import { SettingsTabs } from "../settings/SettingsTabs";
 import { Icon } from "../shell/Icon";
 import {
@@ -557,8 +558,7 @@ function DeleteConfirmModal({
   };
 
   return (
-    <>
-      <div className="drawer-scrim" onClick={onClose} />
+    <ModalShell onClose={onClose}>
       <div
         style={{
           position: "fixed",
@@ -622,7 +622,7 @@ function DeleteConfirmModal({
           </button>
         </div>
       </div>
-    </>
+    </ModalShell>
   );
 }
 

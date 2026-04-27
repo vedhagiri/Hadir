@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../../api/client";
 import { useMe } from "../../auth/AuthProvider";
+import { ModalShell } from "../../components/DrawerShell";
 import { primaryRole } from "../../types";
 import { Icon } from "../../shell/Icon";
 import { useSubmitDeleteRequest } from "./hooks";
@@ -59,12 +60,7 @@ export function DeleteConfirmModal({ employee, onClose, onSubmitted }: Props) {
   };
 
   return (
-    <>
-      <div
-        className="drawer-scrim"
-        onClick={onClose}
-        style={{ zIndex: 50 }}
-      />
+    <ModalShell onClose={onClose}>
       <div
         role="dialog"
         aria-modal="true"
@@ -182,6 +178,6 @@ export function DeleteConfirmModal({ employee, onClose, onSubmitted }: Props) {
           </button>
         </div>
       </div>
-    </>
+    </ModalShell>
   );
 }

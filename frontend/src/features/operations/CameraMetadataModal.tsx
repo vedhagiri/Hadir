@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../../api/client";
+import { ModalShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
 import { usePatchCameraMetadata } from "./hooks";
 
@@ -82,12 +83,7 @@ export function CameraMetadataModal({
   if (detected.fps) detectedSummary.push(`${detected.fps} fps`);
 
   return (
-    <>
-      <div
-        className="drawer-scrim"
-        onClick={onClose}
-        style={{ zIndex: 50 }}
-      />
+    <ModalShell onClose={onClose}>
       <div
         role="dialog"
         aria-modal="true"
@@ -231,7 +227,7 @@ export function CameraMetadataModal({
           </button>
         </div>
       </div>
-    </>
+    </ModalShell>
   );
 }
 

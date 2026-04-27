@@ -7,6 +7,7 @@
 import { useState } from "react";
 
 import { ApiError } from "../api/client";
+import { ModalShell } from "../components/DrawerShell";
 import { Icon } from "../shell/Icon";
 import { useAdminOverride } from "./hooks";
 import type { RequestRecord } from "./types";
@@ -67,8 +68,7 @@ export function OverrideModal({ request, onClose }: Props) {
   const stage = previousStageLabel(request);
 
   return (
-    <>
-      <div className="drawer-scrim" onClick={onClose} />
+    <ModalShell onClose={onClose}>
       <div
         role="dialog"
         aria-labelledby="override-title"
@@ -222,7 +222,7 @@ export function OverrideModal({ request, onClose }: Props) {
           </button>
         </div>
       </div>
-    </>
+    </ModalShell>
   );
 }
 

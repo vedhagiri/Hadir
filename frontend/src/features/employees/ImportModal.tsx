@@ -3,6 +3,7 @@
 
 import { useCallback, useState } from "react";
 
+import { ModalShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
 import { useImportEmployees } from "./hooks";
 import type { ImportResult } from "./types";
@@ -35,13 +36,13 @@ export function ImportModal({ onClose }: Props) {
   };
 
   return (
-    <>
+    <ModalShell onClose={onClose}>
       <div
         style={{
           position: "fixed",
           inset: 0,
-          background: "rgba(20,20,18,0.4)",
-          backdropFilter: "blur(3px)",
+          // Background painted by the ModalShell's scrim — keep this
+          // wrapper transparent so the two don't double-up.
           zIndex: 60,
           display: "grid",
           placeItems: "center",
@@ -224,6 +225,6 @@ export function ImportModal({ onClose }: Props) {
           </div>
         </div>
       </div>
-    </>
+    </ModalShell>
   );
 }

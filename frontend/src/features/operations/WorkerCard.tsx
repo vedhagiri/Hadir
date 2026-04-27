@@ -9,6 +9,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { ModalShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
 import { CameraMetadataModal } from "./CameraMetadataModal";
 import { PipelineStagesView } from "./PipelineStages";
@@ -280,8 +281,7 @@ function ConfirmRestartModal({
 }) {
   const { t } = useTranslation();
   return (
-    <>
-      <div className="drawer-scrim" onClick={onCancel} style={{ zIndex: 50 }} />
+    <ModalShell onClose={onCancel}>
       <div
         role="dialog"
         aria-modal="true"
@@ -323,6 +323,6 @@ function ConfirmRestartModal({
           </button>
         </div>
       </div>
-    </>
+    </ModalShell>
   );
 }

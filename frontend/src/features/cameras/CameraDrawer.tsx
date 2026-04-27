@@ -11,6 +11,7 @@
 
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { DrawerShell } from "../../components/DrawerShell";
 
 import { Icon } from "../../shell/Icon";
 import { useCreateCamera, usePatchCamera } from "./hooks";
@@ -115,8 +116,7 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
   };
 
   return (
-    <>
-      <div className="drawer-scrim" onClick={onClose} />
+    <DrawerShell onClose={onClose}>
       <div className="drawer">
         <div className="drawer-head">
           <div>
@@ -396,7 +396,7 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
           </button>
         </div>
       </div>
-    </>
+    </DrawerShell>
   );
 }
 

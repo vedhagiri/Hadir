@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { ModalShell } from "../../components/DrawerShell";
+
 interface Props {
   workerCount: number;
   onCancel: () => void;
@@ -23,12 +25,7 @@ export function RestartAllModal({
   const armed = typed.trim() === CONFIRM_PHRASE;
 
   return (
-    <>
-      <div
-        className="drawer-scrim"
-        onClick={onCancel}
-        style={{ zIndex: 50 }}
-      />
+    <ModalShell onClose={onCancel}>
       <div
         role="dialog"
         aria-modal="true"
@@ -116,6 +113,6 @@ export function RestartAllModal({
           </button>
         </div>
       </div>
-    </>
+    </ModalShell>
   );
 }

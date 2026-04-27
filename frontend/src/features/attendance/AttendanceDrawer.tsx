@@ -7,6 +7,7 @@
 import { Icon } from "../../shell/Icon";
 import { useEmployeeDayEvents } from "./hooks";
 import type { AttendanceItem } from "./types";
+import { DrawerShell } from "../../components/DrawerShell";
 
 interface Props {
   item: AttendanceItem;
@@ -66,8 +67,7 @@ export function AttendanceDrawer({ item, onClose }: Props) {
   ].filter((f): f is NonNullable<typeof f> => f !== null);
 
   return (
-    <>
-      <div className="drawer-scrim" onClick={onClose} />
+    <DrawerShell onClose={onClose}>
       <div className="drawer">
         <div className="drawer-head">
           <div>
@@ -241,7 +241,7 @@ export function AttendanceDrawer({ item, onClose }: Props) {
           </button>
         </div>
       </div>
-    </>
+    </DrawerShell>
   );
 }
 

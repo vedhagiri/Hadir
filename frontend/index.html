@@ -20,6 +20,13 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Portal target for every drawer + modal. Sibling to #root so
+         drawers escape any ancestor that creates a containing block
+         (e.g. ``will-change: transform`` on the page-transition
+         wrapper from P28.6 — that anchored ``position: fixed``
+         descendants to the page wrapper instead of the viewport).
+         Drawers render into this node via React Portal. -->
+    <div id="drawer-root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
