@@ -9,6 +9,7 @@ import { BrandingProvider } from "../branding/BrandingProvider";
 import { ImpersonationBanner } from "./ImpersonationBanner";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
+import "./transitions.css";
 
 export function Layout() {
   const { data: me } = useMe();
@@ -38,7 +39,18 @@ export function Layout() {
       <div className="main">
         <Topbar pageId={pageId} role={role} me={me} />
         <div className="content">
-          <div className="content-wrap">
+          {/* Keying on ``location.pathname`` remounts the page subtree
+              on every navigation — the ``.page-transition`` keyframe
+              in transitions.css runs once per mount, giving the
+              content area a fade + slight slide-in. Sidebar / topbar
+              / impersonation banner stay stable above this wrapper.
+              TanStack Query caches survive the remount because they
+              live above the route tree, so re-entering a page is
+              instant when the data is already hot. */}
+          <div
+            key={location.pathname}
+            className="content-wrap page-transition"
+          >
             <Outlet />
           </div>
         </div>

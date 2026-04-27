@@ -15,6 +15,7 @@ import { PipelinePage } from "./features/pipeline/PipelinePage";
 import { AuthenticationPage } from "./auth-oidc/AuthenticationPage";
 import { BrandingPage } from "./branding/BrandingPage";
 import { CustomFieldsPage } from "./custom-fields/CustomFieldsPage";
+import { DisplaySettingsPage } from "./settings/DisplaySettingsPage";
 import { ErpExportPage } from "./erp-export/ErpExportPage";
 import { NotificationsPage } from "./notifications/NotificationsPage";
 import { NotificationPreferencesPage } from "./notifications/PreferencesPage";
@@ -30,6 +31,7 @@ import { CameraLogsPage } from "./features/camera-logs/CameraLogsPage";
 import { CamerasPage } from "./features/cameras/CamerasPage";
 import { DashboardRouter } from "./features/dashboard/DashboardRouter";
 import { EmployeesPage } from "./features/employees/EmployeesPage";
+import { CalendarPage } from "./features/calendar/CalendarPage";
 import { ReportsPage } from "./features/reports/ReportsPage";
 import { SystemPage } from "./features/system/SystemPage";
 import { LiveCapturePage } from "./pages/LiveCapture/LiveCapture";
@@ -101,6 +103,7 @@ export function App() {
         <Route path="my-attendance" element={<MyAttendancePage />} />
         <Route path="attendance/me" element={<MyAttendancePage />} />
         <Route path="reports" element={<ReportsPage />} />
+        <Route path="calendar" element={<CalendarPage />} />
         <Route path="mgr-assign" element={<ManagerAssignmentsPage />} />
         <Route path="policies" element={<PoliciesPage />} />
         <Route path="leave-policy" element={<LeaveCalendarPage />} />
@@ -113,6 +116,7 @@ export function App() {
         <Route path="settings/schedules" element={<SchedulesPage />} />
         <Route path="settings/erp-export" element={<ErpExportPage />} />
         <Route path="settings/notifications" element={<NotificationPreferencesPage />} />
+        <Route path="settings/display" element={<DisplaySettingsPage />} />
         <Route path="notifications" element={<NotificationsPage />} />
         <Route path="my-requests" element={<MyRequestsPage />} />
         <Route path="approvals" element={<ApprovalsPage />} />
@@ -131,6 +135,7 @@ export function App() {
             id !== "team-attendance" &&
             id !== "my-attendance" &&
             id !== "reports" &&
+            id !== "calendar" &&
             id !== "settings" &&
             id !== "mgr-assign" &&
             id !== "policies" &&

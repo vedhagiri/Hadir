@@ -22,13 +22,22 @@ import type { RequestType } from "./types";
 interface Props {
   onClose: () => void;
   onCreated: (requestId: number) => void;
+  // P28.6: optional pre-fill so the calendar's day drawer can route
+  // straight into "+ Submit exception" with the right type + date.
+  initialType?: RequestType;
+  initialStartDate?: string;
 }
 
-export function NewRequestDrawer({ onClose, onCreated }: Props) {
-  const [type, setType] = useState<RequestType>("exception");
+export function NewRequestDrawer({
+  onClose,
+  onCreated,
+  initialType,
+  initialStartDate,
+}: Props) {
+  const [type, setType] = useState<RequestType>(initialType ?? "exception");
   const [reasonCategory, setReasonCategory] = useState("");
   const [reasonText, setReasonText] = useState("");
-  const [startDate, setStartDate] = useState("");
+  const [startDate, setStartDate] = useState(initialStartDate ?? "");
   const [endDate, setEndDate] = useState("");
   const [leaveTypeId, setLeaveTypeId] = useState<number | "">("");
   const [pendingFile, setPendingFile] = useState<File | null>(null);

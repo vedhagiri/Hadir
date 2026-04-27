@@ -187,7 +187,8 @@
       "email": "البريد الإلكتروني",
       "schedules": "الجداول",
       "erpExport": "تصدير ERP",
-      "notifications": "الإشعارات"
+      "notifications": "الإشعارات",
+      "display": "العرض"
     }
   },
   "language": {
@@ -197,13 +198,16 @@
   },
   "display": {
     "button": "إعدادات العرض",
+    "pageSub": "اضبط مظهر حاضر كما يناسبك. يتم الحفظ تلقائياً ويرافق حسابك عبر المتصفحات.",
     "themeLabel": "المظهر",
+    "themeDescription": "خيار «النظام» يتبع إعدادات نظامك. خيارا «فاتح» و«داكن» يفرضان لوحة محدّدة.",
     "theme": {
       "system": "النظام",
       "light": "فاتح",
       "dark": "داكن"
     },
     "densityLabel": "الكثافة",
+    "densityDescription": "خيار «مدمج» يقلّص تباعد الصفوف في الجداول والقوائم. «مريح» هو الافتراضي.",
     "density": {
       "compact": "مدمج",
       "comfortable": "مريح"
@@ -394,6 +398,56 @@
       "identified": "تم التعرّف",
       "confidence": "الثقة",
       "status": "الحالة"
+    }
+  },
+  "calendar": {
+    "title": "تقويم الحضور",
+    "companySub": "حضور الشركة بحسب اليوم",
+    "personSub": "موظف واحد، شهر واحد",
+    "tabCompany": "الشركة",
+    "tabPerson": "حسب الموظف",
+    "month": "الشهر",
+    "today": "اليوم",
+    "searchEmployee": "ابحث عن موظف…",
+    "pickEmployee": "— اختر موظفاً —",
+    "pickEmployeeHint": "اختر موظفاً لعرض شهره.",
+    "exportMonth": "تصدير الشهر",
+    "export": "تصدير",
+    "submitException": "تقديم استثناء",
+    "dayDetail": "تفاصيل اليوم",
+    "loading": "جاري التحميل…",
+    "loadFailed": "تعذر تحميل التقويم.",
+    "inTime": "وقت الدخول",
+    "outTime": "وقت الخروج",
+    "total": "الإجمالي",
+    "overtime": "العمل الإضافي",
+    "policyApplied": "السياسة المطبّقة",
+    "dayTimeline": "خط زمني لليوم",
+    "noTimeline": "لم تُسجَّل أي اكتشافات في هذا اليوم.",
+    "evidence": "الإثبات",
+    "noEvidence": "لا توجد لقطات وجه — إمّا لا اكتشافات أو أن اليوم عطلة/إجازة/نهاية أسبوع.",
+    "close": "إغلاق",
+    "holiday": "عطلة",
+    "weekend": "نهاية الأسبوع",
+    "companyHint": "اضغط أي يوم للانتقال إلى عرض الموظف للشهر {{month}}.",
+    "dow": {
+      "sun": "أحد",
+      "mon": "اثنين",
+      "tue": "ثلاثاء",
+      "wed": "أربعاء",
+      "thu": "خميس",
+      "fri": "جمعة",
+      "sat": "سبت"
+    },
+    "status": {
+      "present": "حاضر",
+      "late": "متأخر",
+      "absent": "غائب",
+      "leave": "إجازة",
+      "weekend": "نهاية الأسبوع",
+      "holiday": "عطلة رسمية",
+      "future": "مستقبلي",
+      "no_record": "لا يوجد سجل"
     }
   }
 }

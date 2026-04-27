@@ -14,9 +14,16 @@ import { useTranslation } from "react-i18next";
 
 import { setLanguage, type SupportedLanguage } from "../i18n";
 
-const OPTIONS: { code: SupportedLanguage; label: string }[] = [
-  { code: "en", label: "English" },
-  { code: "ar", label: "العربية" },
+// Flag rendering note: we use Unicode regional-indicator emoji
+// (🇬🇧 / 🇸🇦) rather than SVG assets — every modern browser on
+// macOS, iOS, Android, and Linux renders them as the country flag.
+// On Windows 10/11 without the optional "Segoe UI Emoji" font
+// pack, they fall back to two-letter abbreviations (e.g. "GB"),
+// which is a degraded-but-readable result. Switch to inline SVG
+// later if Windows fidelity becomes a pilot blocker.
+const OPTIONS: { code: SupportedLanguage; label: string; flag: string; short: string }[] = [
+  { code: "en", label: "English", flag: "🇬🇧", short: "EN" },
+  { code: "ar", label: "العربية", flag: "🇸🇦", short: "AR" },
 ];
 
 export function LanguageSwitcher() {
@@ -54,6 +61,8 @@ export function LanguageSwitcher() {
     }
   };
 
+  const activeOpt = OPTIONS.find((o) => o.code === active) ?? OPTIONS[0]!;
+
   return (
     <div
       ref={containerRef}
@@ -67,9 +76,18 @@ export function LanguageSwitcher() {
         aria-expanded={open}
         aria-label={t("common.language")}
         className="btn btn-sm"
-        style={{ minWidth: 44 }}
+        style={{
+          minWidth: 56,
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          lineHeight: 1,
+        }}
       >
-        {active === "ar" ? "ع" : "EN"}
+        <span aria-hidden style={{ fontSize: 14 }}>
+          {activeOpt.flag}
+        </span>
+        <span>{activeOpt.short}</span>
       </button>
       {open && (
         <ul
@@ -104,16 +122,23 @@ export function LanguageSwitcher() {
                   background:
                     opt.code === active ? "var(--accent-soft)" : "transparent",
                   border: "none",
-                  padding: "6px 10px",
+                  padding: "8px 10px",
                   fontSize: 12.5,
                   color:
                     opt.code === active ? "var(--accent-text)" : "var(--text)",
                   fontWeight: opt.code === active ? 600 : 500,
                   borderRadius: 4,
                   cursor: busy ? "wait" : "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 9,
+                  lineHeight: 1.2,
                 }}
               >
-                {opt.label}
+                <span aria-hidden style={{ fontSize: 16 }}>
+                  {opt.flag}
+                </span>
+                <span>{opt.label}</span>
               </button>
             </li>
           ))}

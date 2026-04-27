@@ -7,8 +7,12 @@
 
 import { useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 import { NavLink } from "react-router-dom";
 
+import { api } from "../api/client";
+import type { CameraListResponse } from "../features/cameras/types";
+import type { EmployeeListResponse } from "../features/employees/types";
 import { useInboxSummary } from "../requests/hooks";
 import {
   getSidebar,
@@ -61,6 +65,36 @@ export function Sidebar({ role }: Props) {
     : null;
   const inboxBreached =
     approvalsRoles && (inbox.data?.breached_count ?? 0) > 0;
+
+  // Live counts for the static design-archive badges (P28.6 follow-up:
+  // before this, the sidebar showed hard-coded numbers from
+  // ``frontend/src/shell/nav.ts`` — `8` cameras and `106` employees,
+  // ported verbatim from the design). Fetch only for roles whose nav
+  // actually carries the badge so other roles don't 403 on the
+  // request.
+  const seesCamerasBadge = role === "Admin";
+  const seesEmployeesBadge = role === "Admin" || role === "HR";
+
+  const cameras = useQuery({
+    queryKey: ["sidebar", "cameras-count"],
+    queryFn: () => api<CameraListResponse>("/api/cameras"),
+    enabled: seesCamerasBadge,
+    staleTime: 60 * 1000,
+  });
+  const camerasBadge = seesCamerasBadge && cameras.data
+    ? String(cameras.data.items.length)
+    : null;
+
+  const employees = useQuery({
+    queryKey: ["sidebar", "employees-count"],
+    queryFn: () =>
+      api<EmployeeListResponse>("/api/employees?page=1&page_size=1"),
+    enabled: seesEmployeesBadge,
+    staleTime: 60 * 1000,
+  });
+  const employeesBadge = seesEmployeesBadge && employees.data
+    ? String(employees.data.total)
+    : null;
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
@@ -115,10 +149,19 @@ export function Sidebar({ role }: Props) {
             </div>
           );
         }
-        // P15: live badge for the Approvals item (counts "pending my
-        // decision"). Falls back to the static design-archive value
-        // for everything else.
-        const liveBadge = it.id === "approvals" ? inboxBadge : null;
+        // Live badges override the static design-archive numbers from
+        // ``nav.ts``. Approvals (P15) counts pending decisions;
+        // Cameras + Employees count the visible row total. Anything
+        // not wired here falls back to the static badge (e.g. "LIVE"
+        // on Live Capture).
+        const liveBadge =
+          it.id === "approvals"
+            ? inboxBadge
+            : it.id === "cameras"
+              ? camerasBadge
+              : it.id === "employees"
+                ? employeesBadge
+                : null;
         const badge = liveBadge ?? it.badge ?? null;
         const breached = it.id === "approvals" && inboxBreached;
         // Translate the nav item via its id; fall back to the design

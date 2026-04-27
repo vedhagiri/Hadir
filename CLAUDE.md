@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 (M2 core complete) + P23 + P24 + P25 + P26 + P27 + P28 (M3 hardening complete + sign-off run) + P28.5a (Live Capture viewer + multi-tenant CaptureManager) + P28.5b (worker/display split + per-camera capture knobs + 2 s reconcile loop) + P28.5c (system-wide detection + tracker config; insightface + yolo+face detector ports).**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 (M2 core complete) + P23 + P24 + P25 + P26 + P27 + P28 (M3 hardening complete + sign-off run) + P28.5a (Live Capture viewer + multi-tenant CaptureManager) + P28.5b (worker/display split + per-camera capture knobs + 2 s reconcile loop) + P28.5c (system-wide detection + tracker config; insightface + yolo+face detector ports) + P28.6 (Attendance Calendar page).**
 
 > **Tenant isolation is a P0 blocker.** The suites
 > `backend/tests/test_multi_tenant_isolation.py` (the P1 canary) and
@@ -862,6 +862,45 @@ of the Arabic translations before v1.0 launch** — see
   swap, det_size swap, min_face_pixels / iou_threshold knobs,
   curl-side negative test, per-tenant isolation, audit-log
   spot-check.
+
+- **P28.6** — Attendance Calendar page. Replaces the
+  long-running placeholder behind sidebar nav id ``calendar``
+  with a real two-view month calendar: tenant-wide aggregate
+  for Admin/HR/Manager, plus a per-employee month with a
+  day-detail drawer carrying engine status, in/out times,
+  totals, day-timeline ribbon, policy applied, and up to 5
+  evidence crops. **No new tables** — the read-side
+  aggregator in ``hadir/attendance_calendar/queries.py`` runs
+  one ``GROUP BY date`` against ``attendance_records`` and
+  folds in P11 holidays + ``tenant_settings.weekend_days``.
+  Status enum (``present | late | absent | leave | weekend |
+  holiday | future | no_record``) is computed server-side; the
+  frontend stays dumb. Four endpoints under
+  ``/api/attendance/calendar`` (company / person / day /
+  export) — same role gates as the existing attendance
+  router; out-of-scope ``employee_id`` returns **404 not
+  403** (red line — 403 leaks scope). Manager scope uses
+  the P8 ``get_manager_visible_employee_ids`` union of
+  ``manager_assignments`` + ``user_departments``. Cross-
+  tenant ``employee_id`` returns 404 — guarded by a
+  ``WHERE tenant_id=:scope`` lookup before the role check
+  even runs (defence in depth on top of the P5 isolation
+  canary). Frontend ships
+  ``frontend/src/features/calendar/`` with
+  ``CompanyView`` + ``PersonView`` reusing the design's
+  ``cal-month-grid`` + ``status-{state}`` classes verbatim
+  (no CSS rewrites), a ``DayDetailDrawer`` with a 24-hour
+  SVG timeline ribbon and lazy evidence crops via
+  ``/api/detection-events/{id}/crop`` (P11), and a "+ Submit
+  exception" CTA that pre-fills the existing
+  ``NewRequestDrawer`` (P14) with ``initialType="exception"``
+  + ``initialStartDate=date``. en + ar locale bundles for
+  every label, status badge, and weekday header (Arabic
+  Claude-generated; the standing P21 review carry-over
+  applies). 16 new backend tests
+  (``tests/test_attendance_calendar.py``); P5 isolation
+  canary re-verified. **514 backend tests passing** (498
+  prior + 16 P28.6).
 
 Next: **M4 launch** per `v1.0-phase-plan.md`. Wait for
 the user before starting. **Open critical item carries

@@ -187,7 +187,8 @@
       "email": "Email",
       "schedules": "Schedules",
       "erpExport": "ERP export",
-      "notifications": "Notifications"
+      "notifications": "Notifications",
+      "display": "Display"
     }
   },
   "language": {
@@ -197,13 +198,16 @@
   },
   "display": {
     "button": "Display settings",
+    "pageSub": "Adjust how Hadir looks for you. Changes save automatically and follow your account across browsers.",
     "themeLabel": "Theme",
+    "themeDescription": "System follows your operating-system setting. Light and Dark force a specific palette.",
     "theme": {
       "system": "System",
       "light": "Light",
       "dark": "Dark"
     },
     "densityLabel": "Density",
+    "densityDescription": "Compact tightens row spacing across tables and lists. Comfortable is the default.",
     "density": {
       "compact": "Compact",
       "comfortable": "Comfortable"
@@ -394,6 +398,56 @@
       "identified": "Identified",
       "confidence": "Confidence",
       "status": "Status"
+    }
+  },
+  "calendar": {
+    "title": "Attendance calendar",
+    "companySub": "Company-wide presence by day",
+    "personSub": "One employee, one month",
+    "tabCompany": "Company",
+    "tabPerson": "Per person",
+    "month": "Month",
+    "today": "Today",
+    "searchEmployee": "Search employee…",
+    "pickEmployee": "— pick employee —",
+    "pickEmployeeHint": "Pick an employee to view their month.",
+    "exportMonth": "Export month",
+    "export": "Export",
+    "submitException": "Submit exception",
+    "dayDetail": "Day detail",
+    "loading": "Loading…",
+    "loadFailed": "Could not load calendar.",
+    "inTime": "In time",
+    "outTime": "Out time",
+    "total": "Total",
+    "overtime": "Overtime",
+    "policyApplied": "Policy applied",
+    "dayTimeline": "Day timeline",
+    "noTimeline": "No detection events recorded for this day.",
+    "evidence": "Evidence",
+    "noEvidence": "No face crops to show — either no detections, or this day was a holiday/leave/weekend.",
+    "close": "Close",
+    "holiday": "Holiday",
+    "weekend": "Weekend",
+    "companyHint": "Click any day to switch to per-person view for {{month}}.",
+    "dow": {
+      "sun": "Sun",
+      "mon": "Mon",
+      "tue": "Tue",
+      "wed": "Wed",
+      "thu": "Thu",
+      "fri": "Fri",
+      "sat": "Sat"
+    },
+    "status": {
+      "present": "Present",
+      "late": "Late",
+      "absent": "Absent",
+      "leave": "Leave",
+      "weekend": "Weekend",
+      "holiday": "Holiday",
+      "future": "Future",
+      "no_record": "No record"
     }
   }
 }

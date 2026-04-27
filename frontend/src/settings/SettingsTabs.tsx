@@ -14,6 +14,7 @@ const TABS = [
   { to: "/settings/schedules", key: "schedules" },
   { to: "/settings/erp-export", key: "erpExport" },
   { to: "/settings/notifications", key: "notifications" },
+  { to: "/settings/display", key: "display" },
 ] as const;
 
 export function SettingsTabs() {

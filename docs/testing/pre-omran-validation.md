@@ -530,6 +530,58 @@ camera (Office Camera 1 / Giri Home).
 
 ---
 
+## 13c. Attendance Calendar (P28.6)
+
+Open <http://localhost:5173/calendar> as the demo Admin.
+
+- [ ] **Company tab loads.** Default month is the current
+      one. The grid shows ~30 cells; weekend cells (Fri/Sat
+      in the demo tenant) render with the `status-weekend`
+      tinted class; any seeded holidays show
+      `status-holiday` + their name.
+- [ ] **Per-person tab.** Switch tabs, type a few letters
+      into "Search employee" — the dropdown filters in
+      real time. Pick an employee.
+- [ ] **Day-detail drawer.** Click a present day. Drawer
+      slides in with employee header, status pill,
+      In/Out/Total/Overtime tiles, day timeline ribbon
+      (one bar per detection cluster), policy applied
+      panel, and up to 5 evidence crops (lazy-loaded via
+      `/api/detection-events/{id}/crop`).
+- [ ] **Evidence is empty for absent / weekend / holiday
+      cells.** Drawer renders the "no face crops" hint.
+- [ ] **Submit exception.** Drawer's "+ Submit exception"
+      button opens the existing P14 NewRequestDrawer
+      pre-filled with `type=exception` + the day's date.
+- [ ] **Export.** Drawer's "Export" link downloads
+      `hadir-attendance-{code}-{date}.xlsx`. Page-level
+      "Export month" downloads either the per-person
+      month or the company aggregate.
+- [ ] **Manager scope.** Log in as a Manager assigned to
+      one department. Company tab's `active_employees`
+      reflects only their visible employee union (not the
+      tenant headcount). Per-person view of an
+      out-of-scope employee returns 404 (page shows the
+      "Could not load calendar" hint).
+- [ ] **Employee scope.** Log in as the Employee user.
+      Tab strip is hidden. The page auto-locks to their
+      own employee row.
+- [ ] **Cross-tenant isolation.** As demo Admin,
+      `curl -b cookies.txt
+      "http://localhost:8000/api/attendance/calendar/person/999999?month=2026-04"`
+      returns 404 with `{"detail":"employee not found"}`.
+- [ ] **Arabic.** Switch language to العربية. Every label
+      (tabs, month picker, status pills, drawer headers,
+      weekday strip) renders right-to-left in Arabic. No
+      hard-coded English leaks.
+- [ ] **Audit log.** Page-level Export creates one
+      `attendance_calendar.exported` row;
+      day-detail open creates one
+      `attendance_calendar.day_viewed` row. List views
+      do **not** audit (would flood).
+
+---
+
 ## 14. Pre-Omran issues
 
 For every problem found, add a row below. This is the

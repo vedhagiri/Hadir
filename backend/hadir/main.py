@@ -27,6 +27,7 @@ from hadir.branding.router import (
     router as branding_router,
     super_admin_router as branding_super_admin_router,
 )
+from hadir.attendance_calendar import router as attendance_calendar_router
 from hadir.cameras.router import router as cameras_router
 from hadir.capture import capture_manager
 from hadir.config import get_settings
@@ -239,6 +240,7 @@ def create_app() -> FastAPI:
     app.include_router(cameras_router)
     app.include_router(identification_router)
     app.include_router(attendance_router)
+    app.include_router(attendance_calendar_router)
     app.include_router(detection_events_router)
     app.include_router(system_router)
     app.include_router(audit_log_router)
