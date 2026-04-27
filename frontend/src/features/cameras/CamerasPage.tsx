@@ -102,9 +102,28 @@ export function CamerasPage() {
                 </td>
               </tr>
             )}
-            {list.data?.items.map((cam) => (
+            {list.data?.items.map((cam) => {
+              const metadataLine = [
+                cam.detected_resolution_w && cam.detected_resolution_h
+                  ? `${cam.detected_resolution_w}×${cam.detected_resolution_h}`
+                  : null,
+                cam.brand,
+              ]
+                .filter(Boolean)
+                .join(" · ");
+              return (
               <tr key={cam.id}>
-                <td style={{ fontWeight: 500 }}>{cam.name}</td>
+                <td>
+                  <div style={{ fontWeight: 500 }}>{cam.name}</div>
+                  {metadataLine && (
+                    <div
+                      className="text-xs text-dim mono"
+                      style={{ marginTop: 2 }}
+                    >
+                      {metadataLine}
+                    </div>
+                  )}
+                </td>
                 <td className="text-sm">{cam.location || "—"}</td>
                 <td className="mono text-sm">{cam.rtsp_host}</td>
                 <td>
@@ -152,7 +171,8 @@ export function CamerasPage() {
                   </div>
                 </td>
               </tr>
-            ))}
+              );
+            })}
             {list.data && list.data.items.length === 0 && !list.isLoading && (
               <tr>
                 <td colSpan={6} className="text-sm text-dim" style={{ padding: 16 }}>

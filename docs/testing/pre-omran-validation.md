@@ -704,6 +704,126 @@ mts_demo only for the cross-tenant isolation steps at the end.
 
 ---
 
+## 13e. Worker monitoring + camera metadata + pipeline health (P28.8)
+
+Use the **inaisys** tenant for happy-path testing (real RTSP needed
+to verify metadata auto-detection + the 4 stages turning green).
+Switch to mts_demo only for cross-tenant + restart-all.
+
+### Setup
+- [ ] `docker compose down && docker compose up --build`
+- [ ] Wait for "Application startup complete"
+- [ ] Confirm inaisys has at least one running camera
+
+### Camera metadata auto-detection
+- [ ] Log in as admin@inaisys.local. Cameras → restart Office Camera
+      1 (or wait for next worker startup).
+- [ ] Open the camera in the edit drawer. Hardware details footer
+      shows: detected resolution, fps, codec, with timestamp.
+- [ ] Cameras list now shows "1920×1080 · Hikvision" (or similar)
+      under the camera name.
+- [ ] Open Operations → Workers, click the pencil on a card.
+      Manually fill brand "Hikvision", model "Test Model", mount
+      location "Office entrance". Save.
+- [ ] List + drawer both reflect the new manual values.
+
+### Worker monitoring page — happy path
+- [ ] Sidebar shows OPERATIONS → Worker monitoring (Admin only).
+      Click it.
+- [ ] Page renders with summary strip (Running, Stages with
+      issues, Errors last 5 min, Detections last hour, Matches
+      last hour).
+- [ ] Each worker card has: header, 4-stage pipeline strip,
+      counters strip, metadata footer.
+- [ ] Wait 60+ seconds. All 4 stages show non-`unknown` indicators.
+- [ ] Walk past the camera. Within 5-10 seconds:
+      - RTSP green (frames flowing)
+      - Detection green (analyzer running)
+      - Matching green (last match Xs ago)
+      - Attendance green (last record Xm ago)
+
+### Failure cascades
+- [ ] Edit the camera, change RTSP URL to invalid one. Save.
+- [ ] Wait 30 seconds. Workers page shows:
+      - Worker status: reconnecting / failed
+      - RTSP red ("Disconnected — N reconnect attempts")
+      - Detection red (no frames)
+      - Matching unknown (correctly NOT red)
+      - Attendance unknown
+- [ ] Restore correct RTSP. Stages cascade back to green.
+
+### Conditional red
+- [ ] Force a matcher exception (or stop the matcher service).
+      Walk past the camera repeatedly so detection IS firing.
+- [ ] Workers page shows:
+      - RTSP green
+      - Detection green
+      - Matching red ("Detector firing but matcher silent")
+      - Attendance unknown (because matching is red)
+- [ ] Restore matcher. Walk past. Stages return to green.
+
+### Errors drawer
+- [ ] Click View errors icon on a card with failures. Drawer
+      lists recent error strings (timestamp + category +
+      message) plus the last 20 audit-log entries.
+
+### Single restart
+- [ ] Click Restart icon on a worker card. Confirmation modal.
+      Confirm.
+- [ ] Worker status flips starting → running. Audit log shows
+      `worker_restart_requested`.
+
+### Restart all
+- [ ] Click "Restart all workers". Modal opens with red warning.
+- [ ] Action button disabled until typed `RESTART ALL`.
+- [ ] Type the phrase, button enables. Click.
+- [ ] All workers restart in sequence. Audit log shows
+      `worker_restart_all_requested` with `restarted` /
+      `failed` / `total` counts.
+
+### Cross-tenant isolation
+- [ ] Log in as mts_demo Admin. Workers page shows mts_demo
+      workers only.
+- [ ] In dev tools, manually
+      `POST /api/operations/workers/<inaisys_camera_id>/restart`.
+      Must 404. (If it actually restarts inaisys, P0.)
+
+### Negative role tests
+- [ ] Log in as hr@inaisys.local. Sidebar does NOT show
+      OPERATIONS section. Direct URL `/operations/workers` →
+      page renders nothing useful (the API 403s).
+- [ ] Same for manager / employee.
+
+### Super-Admin system page
+- [ ] Log in as Super-Admin. Top nav shows System.
+- [ ] System page renders all metric cards.
+- [ ] CPU updates on each 5s poll. Per-core mini-bars reflect load.
+- [ ] Memory + disk match `docker compose exec backend free -m`
+      and `df -h /data` rough output.
+- [ ] Detector lock contention shows real number — walk past
+      cameras repeatedly to spike it.
+- [ ] Active viewers: open Live Capture in 3 tabs, "3 MJPEG"
+      shows; close, count drops.
+- [ ] Tenants summary lists both tenants with worker counts +
+      `any_stage_red` badge.
+- [ ] Scheduled jobs table shows `lifecycle_cron`,
+      `attendance_recompute`, `scheduled_reports`,
+      `notifications_worker`, `retention`.
+- [ ] `estimated_days_until_full` is `—` (we don't persist
+      growth history yet).
+
+### Negative role for Super-Admin page
+- [ ] Log in as inaisys Admin. Direct URL
+      `/super-admin/system` → 401/403 (no super-admin cookie).
+
+### Performance check
+- [ ] Workers page open with 5s polling for 5 minutes.
+- [ ] CPU overhead negligible (<1%).
+- [ ] Network tab: each refetch a few KB, fast response.
+- [ ] No visible flicker as numbers update on each poll.
+
+---
+
 ## 14. Pre-Omran issues
 
 For every problem found, add a row below. This is the

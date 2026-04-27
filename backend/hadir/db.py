@@ -51,6 +51,7 @@ from sqlalchemy import (
     Integer,
     LargeBinary,
     MetaData,
+    Numeric,
     String,
     Table,
     Text,
@@ -1581,6 +1582,19 @@ cameras = Table(
         nullable=False,
         server_default="0",
     ),
+    # P28.8: camera metadata. Auto-detected (read once on the
+    # worker's first successful RTSP read; never edited via the
+    # API). Detected_at is the timestamp of the latest detection
+    # so the UI can render "5 days ago" hints.
+    Column("detected_resolution_w", Integer, nullable=True),
+    Column("detected_resolution_h", Integer, nullable=True),
+    Column("detected_fps", Numeric(5, 2), nullable=True),
+    Column("detected_codec", Text, nullable=True),
+    Column("detected_at", DateTime(timezone=True), nullable=True),
+    # P28.8: manual fields. Admin fills via the cameras edit drawer.
+    Column("brand", Text, nullable=True),
+    Column("model", Text, nullable=True),
+    Column("mount_location", Text, nullable=True),
     UniqueConstraint("tenant_id", "name", name="uq_cameras_tenant_name"),
 )
 

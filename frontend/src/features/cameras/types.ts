@@ -32,6 +32,16 @@ export interface Camera {
   created_at: string;
   last_seen_at: string | null;
   images_captured_24h: number;
+  // P28.8 — auto-detected by the worker on first RTSP read.
+  detected_resolution_w: number | null;
+  detected_resolution_h: number | null;
+  detected_fps: number | null;
+  detected_codec: string | null;
+  detected_at: string | null;
+  // Manual fields edited by Admin.
+  brand: string | null;
+  model: string | null;
+  mount_location: string | null;
 }
 
 export interface CameraListResponse {

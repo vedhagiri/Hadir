@@ -75,6 +75,15 @@ class CameraRow:
     created_at: datetime = field(default_factory=datetime.now)
     last_seen_at: Optional[datetime] = None
     images_captured_24h: int = 0
+    # P28.8 metadata. Auto-detected (worker writes) + manual (Admin).
+    detected_resolution_w: Optional[int] = None
+    detected_resolution_h: Optional[int] = None
+    detected_fps: Optional[float] = None
+    detected_codec: Optional[str] = None
+    detected_at: Optional[datetime] = None
+    brand: Optional[str] = None
+    model: Optional[str] = None
+    mount_location: Optional[str] = None
 
 
 def _decrypt_and_parse_host(token: str) -> str:
@@ -106,6 +115,16 @@ def _row_to_camera(row) -> CameraRow:
         created_at=row.created_at,
         last_seen_at=row.last_seen_at,
         images_captured_24h=int(row.images_captured_24h),
+        detected_resolution_w=row.detected_resolution_w,
+        detected_resolution_h=row.detected_resolution_h,
+        detected_fps=(
+            float(row.detected_fps) if row.detected_fps is not None else None
+        ),
+        detected_codec=row.detected_codec,
+        detected_at=row.detected_at,
+        brand=row.brand,
+        model=row.model,
+        mount_location=row.mount_location,
     )
 
 
@@ -122,6 +141,14 @@ _SELECT_COLUMNS = (
     cameras.c.created_at,
     cameras.c.last_seen_at,
     cameras.c.images_captured_24h,
+    cameras.c.detected_resolution_w,
+    cameras.c.detected_resolution_h,
+    cameras.c.detected_fps,
+    cameras.c.detected_codec,
+    cameras.c.detected_at,
+    cameras.c.brand,
+    cameras.c.model,
+    cameras.c.mount_location,
 )
 
 

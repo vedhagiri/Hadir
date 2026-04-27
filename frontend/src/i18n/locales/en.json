@@ -86,6 +86,8 @@
       "system-settings": "Detection & Tracker",
       "api-docs": "API reference",
       "settings": "Settings & custom fields",
+      "operations/workers": "Worker monitoring",
+      "former-employees": "Former employees seen",
       "my-attendance": "My attendance",
       "my-requests": "My requests",
       "my-profile": "Profile & photo"
@@ -294,7 +296,10 @@
       "maxFacesPerEvent": "Max faces per event",
       "maxEventDurationSec": "Max event duration (seconds)",
       "minFaceQualityToSave": "Minimum face quality",
-      "saveFullFrames": "Save full annotated frames"
+      "saveFullFrames": "Save full annotated frames",
+      "hardwareDetails": "Hardware details",
+      "hardwareEmpty": "No hardware details recorded.",
+      "hardwareEditHint": "Edit on the Worker monitoring page (Operations → Workers)."
     },
     "hints": {
       "rtspEdit": "Stored value kept as-is unless you type a new URL here.",
@@ -587,6 +592,84 @@
       "confidence": "Confidence",
       "reason": "Deactivation reason",
       "deactivatedAt": "Deactivated at"
+    }
+  },
+  "operations": {
+    "workers": {
+      "title": "Worker monitoring",
+      "subtitle": "Real-time status of capture workers for your tenant",
+      "loadFailed": "Could not load workers.",
+      "empty": "No cameras configured yet. Add a camera to start capturing.",
+      "goToCameras": "Go to Cameras"
+    },
+    "actions": {
+      "refreshNow": "Refresh now",
+      "restartAll": "Restart all workers",
+      "restart": "Restart",
+      "viewErrors": "View errors",
+      "editMetadata": "Edit hardware details"
+    },
+    "summary": {
+      "running": "Running",
+      "stagesIssues": "Stages with issues",
+      "errors5min": "Errors last 5 min",
+      "detectionsLastHour": "Detections last hour",
+      "matchesLastHour": "Successful matches last hour"
+    },
+    "status": {
+      "starting": "Starting",
+      "running": "Running",
+      "reconnecting": "Reconnecting",
+      "stopped": "Stopped",
+      "failed": "Failed"
+    },
+    "stages": {
+      "rtsp": "RTSP",
+      "detection": "Detection",
+      "matching": "Matching",
+      "attendance": "Attendance"
+    },
+    "stageState": {
+      "green": "Healthy",
+      "amber": "Warning",
+      "red": "Failure",
+      "unknown": "Unknown"
+    },
+    "counters": {
+      "fpsReader": "Reader fps",
+      "fpsAnalyzer": "Analyzer fps",
+      "framesAnalyzed": "Frames analyzed (60s)",
+      "motionSkipped": "Motion-skipped (60s)",
+      "facesSaved": "Faces saved (60s)",
+      "matches": "Matches (60s)"
+    },
+    "metadata": {
+      "empty": "No hardware details recorded.",
+      "add": "+ Add camera details",
+      "detectedAt": "Detected",
+      "modalTitle": "Camera hardware details",
+      "autoDetected": "Auto-detected (read-only)",
+      "unavailable": "RTSP metadata unavailable",
+      "brand": "Brand",
+      "model": "Model",
+      "mountLocation": "Mount location"
+    },
+    "restart": {
+      "singleTitle": "Restart worker for {{name}}?",
+      "singleBody": "Briefly interrupts face capture for this camera (about 5 seconds).",
+      "allTitle": "Restart all {{count}} workers?",
+      "allWarning": "This will pause face capture for the entire tenant for approximately 10 seconds while workers reconnect. Anyone walking past a camera during this window will not be recorded for attendance.",
+      "typePhrase": "Type {{phrase}} to confirm",
+      "allConfirm": "Restart all anyway"
+    },
+    "errors": {
+      "title": "Recent errors",
+      "loadFailed": "Could not load errors.",
+      "recent": "Recent worker errors",
+      "noneRecent": "No recent worker errors.",
+      "auditLog": "Audit log entries",
+      "noneAudit": "No audit-log error entries for this camera.",
+      "viewFullLog": "View full audit log →"
     }
   }
 }

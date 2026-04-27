@@ -58,6 +58,9 @@ export function SuperAdminLayout() {
           <NavLink to="/super-admin/provision" style={navLinkStyle}>
             Provision tenant
           </NavLink>
+          <NavLink to="/super-admin/system" style={navLinkStyle}>
+            System
+          </NavLink>
         </nav>
         <div style={{ marginInlineStart: "auto", display: "flex", alignItems: "center", gap: 12, fontSize: 12.5 }}>
           <span style={{ color: "var(--text-secondary)" }}>{me.email}</span>

@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 (M2 core complete) + P23 + P24 + P25 + P26 + P27 + P28 (M3 hardening complete + sign-off run) + P28.5a (Live Capture viewer + multi-tenant CaptureManager) + P28.5b (worker/display split + per-camera capture knobs + 2 s reconcile loop) + P28.5c (system-wide detection + tracker config; insightface + yolo+face detector ports) + P28.6 (Attendance Calendar page) + P28.7 (Employee management Add/Edit/Delete + lifecycle automation).**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 (M2 core complete) + P23 + P24 + P25 + P26 + P27 + P28 (M3 hardening complete + sign-off run) + P28.5a (Live Capture viewer + multi-tenant CaptureManager) + P28.5b (worker/display split + per-camera capture knobs + 2 s reconcile loop) + P28.5c (system-wide detection + tracker config; insightface + yolo+face detector ports) + P28.6 (Attendance Calendar page) + P28.7 (Employee management Add/Edit/Delete + lifecycle automation) + P28.8 (Worker monitoring + camera metadata + pipeline health).**
 
 > **Tenant isolation is a P0 blocker.** The suites
 > `backend/tests/test_multi_tenant_isolation.py` (the P1 canary) and
@@ -963,6 +963,64 @@ of the Arabic translations before v1.0 launch** — see
   endpoint all live-verified. Awaiting Suresh's full validation
   walkthrough per ``docs/testing/pre-omran-validation.md §13d``
   before commit.
+
+- **P28.8** — Worker monitoring + camera metadata + pipeline
+  health. Three additive surfaces. Migration
+  ``0031_p28_8_camera_metadata`` adds eight nullable columns to
+  ``cameras`` (auto-detected: resolution_w/h, fps, codec,
+  detected_at; manual: brand, model, mount_location). Worker
+  reads RTSP properties via OpenCV's CAP_PROP_* on first
+  successful read + UPSERTs the row, once per worker start.
+  ``CaptureWorker`` extended with stage-state tracking
+  (``_last_frame_at``, ``_last_analyzer_cycle_at``,
+  ``_last_match_at``, recent-errors deque, rolling 60s
+  counters); new ``get_full_stats()`` returns the 4-stage
+  pipeline payload (``rtsp / detection / matching / attendance``),
+  each independently scored green/amber/red/unknown. Conditional
+  red logic — Matching is unknown when Detection is red,
+  Attendance is unknown when Matching is red/unknown — prevents
+  false-positive failures. Worker ``status`` enum normalised to
+  ``starting | running | reconnecting | stopped | failed``.
+  ``threading.Lock`` for the detector serialisation replaced
+  with a ``TimedLock`` that records held-time over a 600-entry
+  deque + exposes ``contention_pct_60s()`` for the Super-Admin
+  page. New ``CaptureManager.restart_camera`` /
+  ``restart_all_for_tenant`` /
+  ``get_full_worker_stats`` / ``get_subscriber_counts``. New
+  ``operations/router.py`` ships five Admin-only endpoints
+  (``GET workers``, ``POST workers/{id}/restart``,
+  ``POST workers/restart-all``, ``GET workers/{id}/errors``,
+  ``PATCH cameras/{id}/metadata``); restart-all is sequential
+  by design (keeps detector lock contention sane). Cross-
+  tenant ``camera_id`` returns 404. New
+  ``super_admin/system.py`` ships
+  ``GET /api/super-admin/system/metrics`` (psutil host CPU
+  per-core / memory / disk + DB pool + capture stats +
+  detector-lock contention + scheduled jobs from APScheduler)
+  and ``GET /api/super-admin/system/tenants-summary``
+  (per-tenant high-level counts with ``any_stage_red`` flag).
+  ``psutil==6.1.0`` added to ``pyproject.toml``. New backend
+  tests: 9 in ``tests/test_operations_workers.py`` (stage
+  state machine, conditional red, role 403s, cross-tenant
+  404), 7 in ``tests/test_super_admin_system.py`` (metrics
+  shape, role 401/403, tenants summary). Frontend ships a
+  ``features/operations/`` folder (WorkersPage + WorkerCard +
+  PipelineStages + RestartAllModal type-to-confirm +
+  RecentErrorsDrawer + CameraMetadataModal) polling every 5s
+  via TanStack Query ``refetchInterval``; cards sort
+  most-broken-first. Cameras list gains a metadata sub-line
+  under each name; CameraDrawer gains a read-only
+  hardware-details footer. Super-Admin shell adds a
+  ``/super-admin/system`` route + nav link. en + ar i18n
+  bundles for the new operations + cameras-hardware strings
+  (Arabic Claude-generated; standing P21 review carryover).
+  **542 backend tests passing** (526 prior + 16 P28.8).
+  Frontend typecheck clean. Live verification on dev stack:
+  workers endpoint returned shape with 2/2 running on
+  mts_demo, system metrics returned host CPU/memory/disk +
+  detector lock contention, tenants-summary returned both
+  tenants. Awaiting Suresh's full validation walkthrough per
+  ``docs/testing/pre-omran-validation.md §13e`` before commit.
 
 Next: **M4 launch** per `v1.0-phase-plan.md`. Wait for
 the user before starting. **Open critical item carries

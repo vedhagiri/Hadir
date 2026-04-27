@@ -68,7 +68,7 @@ class _FakeWorker:
             "fps_analyzer": 4.5,
             "active_tracks": 0,
             "motion_skipped": 0,
-            "status": "streaming",
+            "status": "running",
             "last_error": None,
         }
 

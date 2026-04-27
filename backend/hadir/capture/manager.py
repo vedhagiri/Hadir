@@ -398,6 +398,270 @@ class CaptureManager:
             return None
         return worker.get_stats()
 
+    # ------------------------------------------------------------------
+    # P28.8 — operations endpoints helpers
+
+    def get_full_worker_stats(
+        self, tenant_id: int, camera_id: int
+    ) -> Optional[dict]:
+        """Full operations payload (4-stage pipeline + counters +
+        metadata). Returns None when the worker isn't running for the
+        key — operations router uses that to fall back to the camera
+        row's last-known metadata + a synthetic ``stopped`` payload."""
+
+        with self._lock:
+            worker = self._workers.get((tenant_id, camera_id))
+        if worker is None:
+            return None
+        return worker.get_full_stats()
+
+    def get_worker(
+        self, tenant_id: int, camera_id: int
+    ) -> Optional["CaptureWorker"]:
+        """Direct access to a running worker. Used by the operations
+        router for the View Errors drawer (recent_errors deque)."""
+
+        with self._lock:
+            return self._workers.get((tenant_id, camera_id))
+
+    def workers_for_tenant(self, tenant_id: int) -> list[tuple[int, "CaptureWorker"]]:
+        """Snapshot of every (camera_id, worker) running for a tenant.
+        Order: stable by camera_id ascending so the operations page
+        UI stays visually stable across polls.
+        """
+
+        with self._lock:
+            items = [
+                (cid, w)
+                for (t, cid), w in self._workers.items()
+                if t == tenant_id and w.is_alive()
+            ]
+        items.sort(key=lambda pair: pair[0])
+        return items
+
+    def restart_camera(
+        self, *, tenant_id: int, camera_id: int
+    ) -> bool:
+        """Stop + restart one worker. Returns True if the camera now has
+        a running worker (idempotent: starts even if no worker was
+        running before, as long as the camera row says
+        worker_enabled=true).
+
+        Re-reads the camera row inside the same call — picks up any
+        URL or capture-config change without a separate
+        ``on_camera_updated`` step. The fresh metadata-detection cycle
+        runs naturally on the new worker's first frame.
+        """
+
+        # Re-read the row to pick up any DB-side changes (URL rotation,
+        # capture_config update). The worker spawn pulls the row's
+        # decrypted URL via the same path as boot-time auto-start.
+        engine = get_engine()
+        try:
+            from hadir.db import tenant_context  # noqa: PLC0415
+            from hadir.db import tenants as tenants_table  # noqa: PLC0415
+
+            with tenant_context("public"):
+                with engine.begin() as conn:
+                    row = conn.execute(
+                        select(
+                            tenants_table.c.schema_name,
+                            tenants_table.c.status,
+                        ).where(tenants_table.c.id == tenant_id)
+                    ).first()
+            if row is None or row.status != "active":
+                logger.warning(
+                    "restart_camera: tenant %s not active — refusing", tenant_id
+                )
+                return False
+            schema = str(row.schema_name)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "restart_camera: tenant lookup failed: %s", type(exc).__name__
+            )
+            return False
+
+        with tenant_context(schema):
+            try:
+                with engine.begin() as conn:
+                    cam_row = conn.execute(
+                        select(
+                            cameras_table.c.id,
+                            cameras_table.c.name,
+                            cameras_table.c.rtsp_url_encrypted,
+                            cameras_table.c.worker_enabled,
+                            cameras_table.c.capture_config,
+                        ).where(
+                            cameras_table.c.tenant_id == tenant_id,
+                            cameras_table.c.id == camera_id,
+                        )
+                    ).first()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "restart_camera: camera lookup failed: %s",
+                    type(exc).__name__,
+                )
+                return False
+
+        if cam_row is None:
+            return False
+
+        # Stop first regardless of whether worker_enabled. The next
+        # branch decides whether to start back up.
+        self.stop_camera(tenant_id=tenant_id, camera_id=camera_id)
+
+        if not bool(cam_row.worker_enabled):
+            # The operator can restart a disabled camera explicitly via
+            # the UI; we honour the persisted flag (don't auto-spawn).
+            return False
+
+        try:
+            decrypted = rtsp_io.decrypt_url(cam_row.rtsp_url_encrypted)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "restart_camera: decrypt failed: %s", type(exc).__name__
+            )
+            return False
+
+        # Reuse the existing tenant_settings detection / tracker
+        # config so a restart doesn't drop the tenant's choices.
+        tracker_cfg, detection_cfg = self._read_tenant_configs(
+            tenant_id=tenant_id, schema=schema
+        )
+
+        return self.start_camera(
+            tenant_id=tenant_id,
+            camera_id=camera_id,
+            name=str(cam_row.name),
+            decrypted_url=decrypted,
+            capture_config=cam_row.capture_config,
+            tracker_config=tracker_cfg,
+            detection_config=detection_cfg,
+            schema=schema,
+        )
+
+    def restart_all_for_tenant(self, tenant_id: int) -> dict:
+        """Sequential restart of every worker in a tenant. Returns
+        ``{restarted: N, failed: M, total: N+M}``.
+
+        Sequential by design — keeps detector lock contention sane on
+        a busy box. The reconcile loop (P28.5b) will pick up any
+        worker that fails this restart on the next 2 s tick anyway,
+        so a single failure here doesn't strand an enabled camera.
+        """
+
+        with self._lock:
+            keys = [
+                (t, cid) for (t, cid) in self._workers.keys() if t == tenant_id
+            ]
+
+        # Also include cameras that have ``worker_enabled=true`` but
+        # don't currently have a running worker — restart-all means
+        # "make every enabled camera fresh", not just "kick the ones
+        # that are running". This catches the case where one worker
+        # crashed half a minute ago + the operator hits Restart all.
+        try:
+            from hadir.db import tenant_context  # noqa: PLC0415
+            from hadir.db import tenants as tenants_table  # noqa: PLC0415
+
+            with tenant_context("public"):
+                with get_engine().begin() as conn:
+                    schema_row = conn.execute(
+                        select(tenants_table.c.schema_name).where(
+                            tenants_table.c.id == tenant_id
+                        )
+                    ).first()
+            schema = str(schema_row.schema_name) if schema_row else None
+            if schema is not None:
+                with tenant_context(schema):
+                    with get_engine().begin() as conn:
+                        enabled_rows = conn.execute(
+                            select(cameras_table.c.id).where(
+                                cameras_table.c.tenant_id == tenant_id,
+                                cameras_table.c.worker_enabled.is_(True),
+                            )
+                        ).all()
+                seen = {cid for (_t, cid) in keys}
+                for r in enabled_rows:
+                    if int(r.id) not in seen:
+                        keys.append((tenant_id, int(r.id)))
+        except Exception:  # noqa: BLE001
+            pass
+
+        restarted = 0
+        failed = 0
+        for tid, cid in keys:
+            try:
+                ok = self.restart_camera(tenant_id=tid, camera_id=cid)
+                if ok:
+                    restarted += 1
+                else:
+                    failed += 1
+            except Exception:  # noqa: BLE001
+                failed += 1
+
+        return {
+            "restarted": restarted,
+            "failed": failed,
+            "total": restarted + failed,
+        }
+
+    def get_subscriber_counts(self) -> dict[str, int]:
+        """Live-capture subscriber counts for the Super-Admin page.
+
+        Uses the existing ``hadir.capture.event_bus`` + the live-capture
+        router's MJPEG viewer registry. Defensive — returns zeros if
+        either module isn't available.
+        """
+
+        mjpeg = 0
+        ws = 0
+        try:
+            from hadir.live_capture import router as lc_router  # noqa: PLC0415
+
+            counter = getattr(lc_router, "active_mjpeg_count", None)
+            if callable(counter):
+                mjpeg = int(counter())
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            from hadir.capture.event_bus import event_bus  # noqa: PLC0415
+
+            counter = getattr(event_bus, "subscriber_count", None)
+            if callable(counter):
+                ws = int(counter())
+        except Exception:  # noqa: BLE001
+            pass
+        return {"mjpeg": mjpeg, "ws": ws}
+
+    def _read_tenant_configs(
+        self, *, tenant_id: int, schema: str
+    ) -> tuple[Optional[dict], Optional[dict]]:
+        """Read the tenant's ``tracker_config`` + ``detection_config`` for
+        a fresh worker spawn. Returns ``(None, None)`` on failure so the
+        worker uses its built-in defaults."""
+
+        try:
+            from hadir.db import tenant_context  # noqa: PLC0415
+            from hadir.db import tenant_settings as ts_table  # noqa: PLC0415
+
+            with tenant_context(schema):
+                with get_engine().begin() as conn:
+                    row = conn.execute(
+                        select(
+                            ts_table.c.tracker_config,
+                            ts_table.c.detection_config,
+                        ).where(ts_table.c.tenant_id == tenant_id)
+                    ).first()
+            if row is None:
+                return None, None
+            return (
+                dict(row.tracker_config) if row.tracker_config else None,
+                dict(row.detection_config) if row.detection_config else None,
+            )
+        except Exception:  # noqa: BLE001
+            return None, None
+
     def active_camera_ids(
         self, *, tenant_id: Optional[int] = None
     ) -> list[int]:

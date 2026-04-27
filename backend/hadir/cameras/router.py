@@ -53,6 +53,14 @@ def _row_to_out(row: repo.CameraRow) -> CameraOut:
         created_at=row.created_at,
         last_seen_at=row.last_seen_at,
         images_captured_24h=row.images_captured_24h,
+        detected_resolution_w=row.detected_resolution_w,
+        detected_resolution_h=row.detected_resolution_h,
+        detected_fps=row.detected_fps,
+        detected_codec=row.detected_codec,
+        detected_at=row.detected_at,
+        brand=row.brand,
+        model=row.model,
+        mount_location=row.mount_location,
     )
 
 

@@ -32,8 +32,10 @@ import { CamerasPage } from "./features/cameras/CamerasPage";
 import { DashboardRouter } from "./features/dashboard/DashboardRouter";
 import { EmployeesPage } from "./features/employees/EmployeesPage";
 import { CalendarPage } from "./features/calendar/CalendarPage";
+import { WorkersPage } from "./features/operations/WorkersPage";
 import { FormerEmployeesSeenReport } from "./features/reports/FormerEmployeesSeenReport";
 import { ReportsPage } from "./features/reports/ReportsPage";
+import { SystemPage as SuperAdminSystemPage } from "./super-admin/SystemPage";
 import { SystemPage } from "./features/system/SystemPage";
 import { LiveCapturePage } from "./pages/LiveCapture/LiveCapture";
 import { SystemSettingsPage } from "./pages/SystemSettings/SystemSettingsPage";
@@ -79,6 +81,7 @@ export function App() {
       >
         <Route index element={<Navigate to="/super-admin/tenants" replace />} />
         <Route path="tenants" element={<TenantsListPage />} />
+        <Route path="system" element={<SuperAdminSystemPage />} />
         <Route path="tenants/:tenantId" element={<TenantDetailPage />} />
         <Route path="provision" element={<ProvisionTenantPage />} />
       </Route>
@@ -106,6 +109,7 @@ export function App() {
         <Route path="reports" element={<ReportsPage />} />
         <Route path="former-employees" element={<FormerEmployeesSeenReport />} />
         <Route path="calendar" element={<CalendarPage />} />
+        <Route path="operations/workers" element={<WorkersPage />} />
         <Route path="mgr-assign" element={<ManagerAssignmentsPage />} />
         <Route path="policies" element={<PoliciesPage />} />
         <Route path="leave-policy" element={<LeaveCalendarPage />} />
@@ -139,6 +143,7 @@ export function App() {
             id !== "reports" &&
             id !== "calendar" &&
             id !== "former-employees" &&
+            id !== "operations/workers" &&
             id !== "settings" &&
             id !== "mgr-assign" &&
             id !== "policies" &&

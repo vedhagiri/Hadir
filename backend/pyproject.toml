@@ -65,6 +65,9 @@ dependencies = [
     # the label set.
     "prometheus-client==0.21.0",
     "prometheus-fastapi-instrumentator==7.0.0",
+    # P28.8: host CPU / memory / disk metrics for the Super-Admin
+    # System page. Cross-platform (Linux + macOS dev) and lightweight.
+    "psutil==6.1.0",
 ]
 
 [project.optional-dependencies]

@@ -41,6 +41,15 @@ class CameraOut(BaseModel):
     created_at: datetime
     last_seen_at: Optional[datetime] = None
     images_captured_24h: int
+    # P28.8 — auto-detected (worker writes) + manual (Admin writes).
+    detected_resolution_w: Optional[int] = None
+    detected_resolution_h: Optional[int] = None
+    detected_fps: Optional[float] = None
+    detected_codec: Optional[str] = None
+    detected_at: Optional[datetime] = None
+    brand: Optional[str] = None
+    model: Optional[str] = None
+    mount_location: Optional[str] = None
 
 
 class CameraListOut(BaseModel):

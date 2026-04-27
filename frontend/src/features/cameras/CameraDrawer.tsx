@@ -333,6 +333,53 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
               {error}
             </div>
           )}
+
+          {/* P28.8: read-only hardware details + auto-detected fields.
+              Edit-affordances live on the Operations / Workers page so
+              everything related to hardware sits in one place. */}
+          {mode === "edit" && initial && (
+            <div
+              style={{
+                marginTop: 8,
+                padding: "10px 12px",
+                background: "var(--bg-sunken)",
+                borderRadius: "var(--radius-sm)",
+                fontSize: 12,
+                color: "var(--text-secondary)",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 10.5,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                  fontWeight: 600,
+                  color: "var(--text-tertiary)",
+                  marginBottom: 4,
+                }}
+              >
+                {t("cameras.fields.hardwareDetails") as string}
+              </div>
+              <div className="mono text-xs">
+                {[
+                  initial.detected_resolution_w && initial.detected_resolution_h
+                    ? `${initial.detected_resolution_w}×${initial.detected_resolution_h}`
+                    : null,
+                  initial.detected_codec,
+                  initial.detected_fps ? `${initial.detected_fps} fps` : null,
+                  initial.brand
+                    ? initial.brand + (initial.model ? ` ${initial.model}` : "")
+                    : null,
+                  initial.mount_location,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || (t("cameras.fields.hardwareEmpty") as string)}
+              </div>
+              <div className="text-xs text-dim" style={{ marginTop: 4 }}>
+                {t("cameras.fields.hardwareEditHint") as string}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="drawer-foot">

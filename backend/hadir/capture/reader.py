@@ -42,12 +42,15 @@ forever.
 
 from __future__ import annotations
 
+import collections
 import logging
 import threading
 import time
 from dataclasses import dataclass
-from typing import Callable, Optional, Protocol
+from datetime import datetime, timezone
+from typing import Any, Callable, Optional, Protocol
 
+from sqlalchemy import select, update
 from sqlalchemy.engine import Engine
 
 from hadir.capture import events as events_io
@@ -55,10 +58,21 @@ from hadir.capture.analyzer import Analyzer
 from hadir.capture.annotate import AnnotationBox, annotate_frame, encode_jpeg
 from hadir.capture.directory import employee_directory
 from hadir.capture.tracker import Bbox, IoUTracker, TrackMatch
+from hadir.db import attendance_records, cameras, detection_events
 from hadir.identification.matcher import matcher_cache
 from hadir.tenants.scope import TenantScope
 
 logger = logging.getLogger(__name__)
+
+# P28.8: cap the recent_errors deque small — only the last few are
+# useful in the operations panel, and a bounded deque keeps memory
+# stable on a worker that's been failing for hours.
+_RECENT_ERRORS_MAX = 5
+
+# How long the per-worker ``_compute_last_attendance_age`` cache stays
+# fresh. The query is cheap but the page polls every 5 s and we don't
+# want every camera card to round-trip a SELECT 12×/min × N cameras.
+_ATTENDANCE_CACHE_TTL_SEC = 30.0
 
 
 # --- Capture abstractions so tests can swap in a fake feed -----------------
@@ -306,6 +320,52 @@ class CaptureWorker:
             "last_error": None,
         }
 
+        # P28.8 — pipeline stage tracking. Timestamps default to None
+        # (= "never"); the get_stats() consumer treats an unset
+        # timestamp as max age.
+        self._started_at: float = time.time()
+        self._last_frame_at: Optional[float] = None
+        self._last_analyzer_cycle_at: Optional[float] = None
+        self._last_match_at: Optional[float] = None
+        # Bounded deque of error strings ("ts: category: message") for
+        # the View Errors drawer.
+        self._recent_errors: "collections.deque[str]" = collections.deque(
+            maxlen=_RECENT_ERRORS_MAX
+        )
+        # Rolling 60s counters. Each entry is a (timestamp, count=1)
+        # so the consumer can sum entries newer than the cutoff. We
+        # bound the deques generously — even at unrealistically high
+        # rates the trim runs every read.
+        self._frames_analyzed_window: "collections.deque[float]" = (
+            collections.deque(maxlen=2000)
+        )
+        self._frames_motion_skipped_window: "collections.deque[float]" = (
+            collections.deque(maxlen=2000)
+        )
+        self._faces_saved_window: "collections.deque[float]" = (
+            collections.deque(maxlen=2000)
+        )
+        self._matches_window: "collections.deque[float]" = (
+            collections.deque(maxlen=2000)
+        )
+        self._error_count_5min: int = 0
+        # Cache for the attendance-stage lookup so polling doesn't
+        # re-run the join on every get_stats call.
+        self._att_cache_ts: float = 0.0
+        self._att_cache_age: float = 999_999.0
+        # Auto-detected metadata — populated once on first successful
+        # RTSP read; written through to the cameras row and held here
+        # so get_stats() doesn't have to re-query.
+        self._metadata_lock = threading.Lock()
+        self._detected_metadata: dict[str, Any] = {
+            "resolution_w": None,
+            "resolution_h": None,
+            "fps": None,
+            "codec": None,
+            "detected_at": None,
+        }
+        self._metadata_written = False
+
         self._stop = threading.Event()
         self._reader_thread: Optional[threading.Thread] = None
         self._analyzer_thread: Optional[threading.Thread] = None
@@ -502,13 +562,14 @@ class CaptureWorker:
                     backoff = self._bump_backoff(backoff)
                     continue
 
-                self._set_status("streaming", error=None)
+                self._set_status("running", error=None)
                 backoff = self._config.reconnect_backoff_initial_s
 
                 last_fps_ts = time.time()
                 frames_this_sec = 0
                 frame_count_minute = 0
                 last_health_ts = time.time()
+                first_frame_seen = False
 
                 while not self._stop.is_set():
                     ok, frame = cap.read()
@@ -518,13 +579,26 @@ class CaptureWorker:
                             self.camera_name,
                         )
                         self._set_status("reconnecting", error="read failed")
+                        self._record_error(
+                            "rtsp", "read failed — reconnecting"
+                        )
                         break
+
+                    # P28.8: on first successful read, probe + persist
+                    # auto-detected metadata. Once per worker start —
+                    # the row stays stale until the next restart, which
+                    # is what we want (operator action triggers a
+                    # re-read).
+                    if not first_frame_seen:
+                        first_frame_seen = True
+                        self._detect_camera_metadata(cap)
 
                     # Hand the frame to the analyzer + count for fps.
                     with self._frame_lock:
                         self._latest_frame = frame
                         self._frame_seq += 1
 
+                    self._last_frame_at = time.time()
                     frames_this_sec += 1
                     frame_count_minute += 1
 
@@ -633,6 +707,10 @@ class CaptureWorker:
             else:
                 last_analyzed_seq = seq
 
+            # P28.8: cycle marker for the Detection stage.
+            self._last_analyzer_cycle_at = now
+            self._frames_analyzed_window.append(now)
+
             moved, prev_motion_gray = _check_motion(frame, prev_motion_gray)
             force = (now - last_detect_ts) >= self._config.force_detect_every_s
 
@@ -647,11 +725,15 @@ class CaptureWorker:
                         self.camera_name,
                         type(exc).__name__,
                     )
+                    self._record_error(
+                        "analyzer", f"detect failed: {type(exc).__name__}"
+                    )
                     detections = []
             else:
                 with self._stats_lock:
                     cur = int(self._stats["motion_skipped"] or 0)
                     self._stats["motion_skipped"] = cur + 1
+                self._frames_motion_skipped_window.append(now)
 
             # Drive the tracker even when detections is empty so idle
             # tracks expire on schedule.
@@ -669,9 +751,16 @@ class CaptureWorker:
                     if det.embedding is not None
                     else None
                 )
-                per_detection_match.append(
-                    (mm.employee_id, mm.score) if mm else None
-                )
+                # P28.8: only ACTIVE matches drive the Matching stage.
+                # Inactive (former-employee) and future-joiners are
+                # surveillance signals, not pipeline-health signals —
+                # the operations panel cares whether attendance is
+                # actually flowing.
+                if mm and mm.classification == "active":
+                    self.record_successful_match()
+                    per_detection_match.append((mm.employee_id, mm.score))
+                else:
+                    per_detection_match.append(None)
 
             # Build the annotation box list and publish it for the
             # reader to draw onto subsequent preview frames. We only
@@ -692,7 +781,7 @@ class CaptureWorker:
                 if not match.is_new:
                     continue
                 try:
-                    events_io.emit_detection_event(
+                    new_id = events_io.emit_detection_event(
                         self._engine,
                         self._scope,
                         camera_id=self.camera_id,
@@ -705,11 +794,17 @@ class CaptureWorker:
                         annotated_frame_bgr=frame,
                         capture_config=current_capture_config,
                     )
+                    if new_id is not None:
+                        # P28.8: a row + crop was actually written.
+                        self.record_face_saved()
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(
                         "camera %s: event emit failed: %s",
                         self.camera_name,
                         type(exc).__name__,
+                    )
+                    self._record_error(
+                        "emit", f"event write failed: {type(exc).__name__}"
                     )
 
             runs_this_sec += 1
@@ -833,3 +928,479 @@ class CaptureWorker:
 
     def _record_unreachable(self, note: str) -> None:
         self._record_health(0, reachable=False, note=note)
+
+    # ------------------------------------------------------------------
+    # P28.8 — pipeline stage instrumentation
+    # ------------------------------------------------------------------
+
+    def record_successful_match(self) -> None:
+        """Called by the matcher integration when a detection lands an
+        active employee_id. Bumps both the "last match" timestamp and
+        the rolling 60s counter. Thread-safe."""
+
+        now = time.time()
+        self._last_match_at = now
+        self._matches_window.append(now)
+
+    def record_face_saved(self) -> None:
+        """Called when ``emit_detection_event`` writes a face crop. Used
+        for the analyzer-stage detail string."""
+
+        self._faces_saved_window.append(time.time())
+
+    def _record_error(self, category: str, message: str) -> None:
+        """Append one entry to the recent_errors deque + bump the
+        5-minute error counter. ``category`` is a short tag like "rtsp"
+        / "analyzer" / "matcher" so the UI can group."""
+
+        ts = datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
+        self._recent_errors.append(f"{ts}: {category}: {message}")
+        # Approximate — we just bump on every event and trim by checking
+        # 5 minutes of context elsewhere. Tests assert
+        # ``errors_5min`` > 0 after errors, < threshold otherwise.
+        self._error_count_5min += 1
+
+    def get_recent_errors(self) -> list[str]:
+        """Snapshot of the recent_errors deque, oldest first."""
+
+        return list(self._recent_errors)
+
+    def get_started_at(self) -> float:
+        return self._started_at
+
+    def get_metadata_snapshot(self) -> dict:
+        with self._metadata_lock:
+            return dict(self._detected_metadata)
+
+    def _detect_camera_metadata(self, cap: FrameSource) -> None:  # type: ignore[no-untyped-def]
+        """Read RTSP properties + UPSERT to the cameras row.
+
+        Wrapped in a try/except per property — some cameras don't
+        expose CAP_PROP_FPS or report bogus FOURCC. Failure to read
+        any property leaves it NULL but doesn't fail the worker.
+        """
+
+        if self._metadata_written:
+            return
+
+        try:
+            import cv2  # noqa: PLC0415
+        except Exception:  # noqa: BLE001
+            return
+
+        def _safe_int(prop: int) -> Optional[int]:
+            try:
+                v = cap.get(prop)  # type: ignore[attr-defined]
+            except Exception:  # noqa: BLE001
+                return None
+            try:
+                iv = int(v)
+            except (TypeError, ValueError):
+                return None
+            return iv if iv > 0 else None
+
+        def _safe_float(prop: int) -> Optional[float]:
+            try:
+                v = cap.get(prop)  # type: ignore[attr-defined]
+            except Exception:  # noqa: BLE001
+                return None
+            try:
+                fv = float(v)
+            except (TypeError, ValueError):
+                return None
+            # Some IP cameras report 0 or huge spurious values when
+            # they don't actually know.
+            if fv <= 0 or fv > 240:
+                return None
+            return round(fv, 2)
+
+        def _safe_codec() -> Optional[str]:
+            try:
+                fourcc_int = int(cap.get(cv2.CAP_PROP_FOURCC))  # type: ignore[attr-defined]
+            except Exception:  # noqa: BLE001
+                return None
+            if fourcc_int == 0:
+                return None
+            try:
+                tag = "".join(
+                    chr((fourcc_int >> (8 * i)) & 0xFF) for i in range(4)
+                )
+            except Exception:  # noqa: BLE001
+                return None
+            tag = tag.strip().upper()
+            if not tag or not tag.isascii():
+                return None
+            # Normalise the common "HEVC" alias to H265 for the UI.
+            if tag in ("HEVC", "HEV1"):
+                return "H265"
+            return tag
+
+        width = _safe_int(cv2.CAP_PROP_FRAME_WIDTH)
+        height = _safe_int(cv2.CAP_PROP_FRAME_HEIGHT)
+        fps = _safe_float(cv2.CAP_PROP_FPS)
+        codec = _safe_codec()
+        now = datetime.now(tz=timezone.utc)
+
+        with self._metadata_lock:
+            self._detected_metadata = {
+                "resolution_w": width,
+                "resolution_h": height,
+                "fps": fps,
+                "codec": codec,
+                "detected_at": now,
+            }
+            self._metadata_written = True
+
+        # Persist to the cameras row. One UPDATE; if it fails (DB
+        # transient, permission), log + move on — the worker keeps
+        # streaming. The next restart will retry.
+        try:
+            with self._engine.begin() as conn:
+                conn.execute(
+                    update(cameras)
+                    .where(
+                        cameras.c.id == self.camera_id,
+                        cameras.c.tenant_id == self._scope.tenant_id,
+                    )
+                    .values(
+                        detected_resolution_w=width,
+                        detected_resolution_h=height,
+                        detected_fps=fps,
+                        detected_codec=codec,
+                        detected_at=now,
+                    )
+                )
+            logger.info(
+                "camera %s: detected metadata %sx%s @ %s fps codec=%s",
+                self.camera_name,
+                width,
+                height,
+                fps,
+                codec,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "camera %s: metadata UPDATE failed: %s",
+                self.camera_name,
+                type(exc).__name__,
+            )
+
+    def _trim_window(self, window: "collections.deque[float]", *, cutoff: float) -> int:
+        """Pop entries older than ``cutoff`` (seconds since epoch). Returns
+        the count of remaining entries after trim."""
+
+        while window and window[0] < cutoff:
+            window.popleft()
+        return len(window)
+
+    def _compute_last_attendance_age(self) -> float:
+        """Return seconds since the most recent attendance row tied to
+        this camera. Cached for ~30 s so 5-second polling doesn't
+        thrash the DB.
+        """
+
+        now = time.time()
+        if (now - self._att_cache_ts) < _ATTENDANCE_CACHE_TTL_SEC:
+            return self._att_cache_age
+
+        try:
+            from sqlalchemy import func as sa_func  # noqa: PLC0415
+
+            with self._engine.begin() as conn:
+                row = conn.execute(
+                    select(sa_func.max(attendance_records.c.computed_at))
+                    .select_from(
+                        attendance_records.join(
+                            detection_events,
+                            (
+                                detection_events.c.employee_id
+                                == attendance_records.c.employee_id
+                            )
+                            & (
+                                detection_events.c.tenant_id
+                                == attendance_records.c.tenant_id
+                            ),
+                        )
+                    )
+                    .where(
+                        attendance_records.c.tenant_id
+                        == self._scope.tenant_id,
+                        detection_events.c.camera_id == self.camera_id,
+                        attendance_records.c.computed_at
+                        > sa_func.now() - sa_func.cast(
+                            "4 hours", sa_func.text("interval").type
+                        ),
+                    )
+                ).first()
+        except Exception:  # noqa: BLE001
+            self._att_cache_ts = now
+            self._att_cache_age = 999_999.0
+            return self._att_cache_age
+
+        latest = row[0] if row is not None else None
+        if latest is None:
+            self._att_cache_age = 999_999.0
+        else:
+            try:
+                # latest is timezone-aware DateTime; subtract from
+                # current UTC.
+                latest_ts = latest.timestamp()
+                self._att_cache_age = max(0.0, now - latest_ts)
+            except Exception:  # noqa: BLE001
+                self._att_cache_age = 999_999.0
+        self._att_cache_ts = now
+        return self._att_cache_age
+
+    def _compute_stage_states(self) -> dict[str, dict[str, Any]]:
+        """Compute the four pipeline stages: rtsp / detection / matching
+        / attendance. See the docstring on ``get_full_stats`` for the
+        thresholds and the conditional-red logic.
+        """
+
+        now = time.time()
+        uptime = now - self._started_at
+
+        cutoff_60s = now - 60
+        frames_60s = self._trim_window(
+            self._frames_analyzed_window, cutoff=cutoff_60s
+        )
+        matches_60s = self._trim_window(self._matches_window, cutoff=cutoff_60s)
+
+        # Don't trust judgments in the first 60 s — too little data.
+        if uptime < 60:
+            return {
+                "rtsp": {
+                    "state": "unknown",
+                    "last_activity_at": None,
+                    "detail": "Worker just started — gathering data",
+                },
+                "detection": {
+                    "state": "unknown",
+                    "last_activity_at": None,
+                    "detail": "Waiting for first analyzer cycle",
+                },
+                "matching": {
+                    "state": "unknown",
+                    "last_activity_at": None,
+                    "detail": "Waiting for first detection",
+                },
+                "attendance": {
+                    "state": "unknown",
+                    "last_activity_at": None,
+                    "detail": "Pending pipeline warmup",
+                },
+            }
+
+        # RTSP
+        rtsp_age = (now - self._last_frame_at) if self._last_frame_at else 999_999
+        if rtsp_age < 5:
+            rtsp_state = "green"
+            with self._stats_lock:
+                fps_r = self._stats.get("fps_reader", 0.0)
+            rtsp_detail = f"Frames flowing at {fps_r} fps"
+        elif rtsp_age < 30:
+            rtsp_state = "amber"
+            rtsp_detail = f"Last frame {int(rtsp_age)} seconds ago"
+        else:
+            rtsp_state = "red"
+            rtsp_detail = (
+                f"RTSP disconnected — last frame {int(rtsp_age)}s ago"
+            )
+
+        # Detection
+        det_age = (
+            (now - self._last_analyzer_cycle_at)
+            if self._last_analyzer_cycle_at
+            else 999_999
+        )
+        if det_age < 30:
+            det_state = "green"
+            with self._stats_lock:
+                fps_a = self._stats.get("fps_analyzer", 0.0)
+                ms = int(self._stats.get("motion_skipped", 0) or 0)
+            skip_pct = (
+                int(round(100 * ms / max(1, ms + frames_60s)))
+                if (ms + frames_60s) > 0
+                else 0
+            )
+            det_detail = f"{fps_a} fps, {skip_pct}% motion-skipped"
+        elif det_age < 120:
+            det_state = "amber"
+            det_detail = f"Slow: last cycle {int(det_age)}s ago"
+        else:
+            det_state = "red"
+            det_detail = "Analyzer thread idle / dead"
+
+        # Matching — conditional red
+        match_age = (
+            (now - self._last_match_at) if self._last_match_at else 999_999
+        )
+        if det_state == "red":
+            match_state = "unknown"
+            match_detail = "Cannot judge — detection is red"
+        elif match_age < 600:
+            match_state = "green"
+            match_detail = (
+                f"Last match {int(match_age)}s ago"
+                if match_age >= 1
+                else "Matches happening live"
+            )
+        elif match_age < 3600:
+            match_state = "amber"
+            match_detail = (
+                f"Last match {int(match_age // 60)}min ago — quiet hallway?"
+            )
+        elif frames_60s > 0:
+            match_state = "red"
+            match_detail = (
+                "Detector firing but matcher silent — check enrolled photos"
+            )
+        else:
+            match_state = "amber"
+            match_detail = "Detection idle — cannot evaluate matcher"
+
+        # Attendance — also conditional
+        att_age = self._compute_last_attendance_age()
+        if match_state in ("red", "unknown"):
+            att_state = "unknown"
+            att_detail = "Cannot judge — matching is " + match_state
+        elif att_age < 3600:
+            att_state = "green"
+            att_detail = (
+                f"Last record {int(att_age // 60)}min ago"
+                if att_age >= 60
+                else f"Last record {int(att_age)}s ago"
+            )
+        elif att_age < 14400:  # 4 hours
+            att_state = "amber"
+            att_detail = f"Last record {int(att_age // 3600)}h ago — lunch?"
+        elif matches_60s > 0:
+            att_state = "red"
+            att_detail = (
+                "Matches happening but no attendance — engine stuck?"
+            )
+        else:
+            att_state = "amber"
+            att_detail = "Quiet day — no recent matches to attribute"
+
+        def _iso(ts: Optional[float]) -> Optional[str]:
+            if ts is None:
+                return None
+            return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat(
+                timespec="seconds"
+            )
+
+        return {
+            "rtsp": {
+                "state": rtsp_state,
+                "last_activity_at": _iso(self._last_frame_at),
+                "detail": rtsp_detail,
+            },
+            "detection": {
+                "state": det_state,
+                "last_activity_at": _iso(self._last_analyzer_cycle_at),
+                "detail": det_detail,
+            },
+            "matching": {
+                "state": match_state,
+                "last_activity_at": _iso(self._last_match_at),
+                "detail": match_detail,
+            },
+            "attendance": {
+                "state": att_state,
+                "last_activity_at": None,  # we don't track per-row here
+                "detail": att_detail,
+            },
+        }
+
+    def get_full_stats(self) -> dict[str, Any]:
+        """P28.8 — full stats payload for the operations page.
+
+        Differs from ``get_stats()`` (which keeps the legacy shape for
+        the existing live-capture WS heartbeat) by adding pipeline
+        stages, rolling counters, and the camera metadata snapshot.
+
+        Stage states:
+
+        * **rtsp**  — green if a frame arrived in the last 5 s, amber
+          5-30 s, red over 30 s.
+        * **detection** — green if the analyzer ticked in the last 30 s,
+          amber 30-120 s, red over 120 s.
+        * **matching** — conditional. ``unknown`` if detection is red.
+          Otherwise green if a match landed in the last 10 min, amber
+          10-60 min. Red **only** when detection is firing
+          (frames_analyzed_60s > 0) but no match has happened in over
+          an hour — that's a real failure mode (matcher cache stale,
+          enrolled photos broken).
+        * **attendance** — conditional. ``unknown`` if matching is red
+          or unknown. Otherwise green if an attendance row was written
+          in the last hour, amber 1-4 h. Red only when matches are
+          happening (matches_60s > 0) but no attendance has been
+          written for >4 h.
+        """
+
+        now = time.time()
+        cutoff_60s = now - 60
+        frames_60s = self._trim_window(
+            self._frames_analyzed_window, cutoff=cutoff_60s
+        )
+        motion_60s = self._trim_window(
+            self._frames_motion_skipped_window, cutoff=cutoff_60s
+        )
+        faces_60s = self._trim_window(
+            self._faces_saved_window, cutoff=cutoff_60s
+        )
+        matches_60s = self._trim_window(self._matches_window, cutoff=cutoff_60s)
+
+        with self._stats_lock:
+            base = dict(self._stats)
+        with self._metadata_lock:
+            metadata = dict(self._detected_metadata)
+        # Add the manual fields by querying the row. One small
+        # SELECT — kept here so the operations page doesn't have to
+        # join client-side. Failures fall back to None.
+        try:
+            with self._engine.begin() as conn:
+                row = conn.execute(
+                    select(
+                        cameras.c.brand,
+                        cameras.c.model,
+                        cameras.c.mount_location,
+                    ).where(
+                        cameras.c.id == self.camera_id,
+                        cameras.c.tenant_id == self._scope.tenant_id,
+                    )
+                ).first()
+            if row is not None:
+                metadata["brand"] = row.brand
+                metadata["model"] = row.model
+                metadata["mount_location"] = row.mount_location
+        except Exception:  # noqa: BLE001
+            metadata.setdefault("brand", None)
+            metadata.setdefault("model", None)
+            metadata.setdefault("mount_location", None)
+
+        stages = self._compute_stage_states()
+        # Surface a couple of stage-derived counters for tests.
+        self._matches_60s_recent = matches_60s
+
+        return {
+            "tenant_id": self._scope.tenant_id,
+            "camera_id": self.camera_id,
+            "camera_name": self.camera_name,
+            "status": base.get("status", "starting"),
+            "started_at": datetime.fromtimestamp(
+                self._started_at, tz=timezone.utc
+            ).isoformat(timespec="seconds"),
+            "uptime_sec": int(now - self._started_at),
+            "stages": stages,
+            "fps_reader": float(base.get("fps_reader", 0.0) or 0.0),
+            "fps_analyzer": float(base.get("fps_analyzer", 0.0) or 0.0),
+            "frames_analyzed_60s": frames_60s,
+            "frames_motion_skipped_60s": motion_60s,
+            "faces_saved_60s": faces_60s,
+            "matches_60s": matches_60s,
+            "errors_5min": self._error_count_5min,
+            "recent_errors": list(self._recent_errors),
+            "metadata": metadata,
+        }

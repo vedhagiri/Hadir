@@ -26,8 +26,10 @@ ultralytics download survives container restarts. Documented in
 
 from __future__ import annotations
 
+import collections
 import logging
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Optional
@@ -41,11 +43,83 @@ logger = logging.getLogger(__name__)
 DetectorMode = Literal["insightface", "yolo+face"]
 
 
+class TimedLock:
+    """``threading.Lock`` with rolling held-time stats for contention reporting.
+
+    P28.8: every ``detect`` call across every camera worker funnels
+    through this single lock. Recording how long the lock has been
+    held in the last 60 s tells the Super-Admin System page exactly
+    how saturated the CPU detector is — useful for sizing capacity
+    before adding cameras.
+
+    The ``with`` protocol matches ``threading.Lock`` so caller code
+    (``with _detect_lock:``) doesn't change. Held intervals are
+    appended to a ``deque(maxlen=600)`` — 600 entries is comfortably
+    >> 60 s of work even at unrealistically high call rates.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._held_times: "collections.deque[tuple[float, float]]" = (
+            collections.deque(maxlen=600)
+        )
+        # Per-thread acquire timestamp so re-entrant ``__enter__`` from
+        # different threads doesn't trample one another. Mirrors the
+        # standard Lock contract (non-recursive — same thread can't
+        # acquire twice).
+        self._t_acquired_local = threading.local()
+
+    def __enter__(self) -> "TimedLock":
+        self._lock.acquire()
+        self._t_acquired_local.t = time.time()
+        return self
+
+    def __exit__(self, *exc: Any) -> None:  # type: ignore[override]
+        t = getattr(self._t_acquired_local, "t", None)
+        if t is not None:
+            held = time.time() - t
+            self._held_times.append((t, held))
+        self._lock.release()
+
+    def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
+        """Compatibility shim for callers that don't use the context
+        manager. The release timestamp is recorded only when ``release``
+        is paired with this thread's prior ``acquire``."""
+
+        ok = self._lock.acquire(blocking, timeout)
+        if ok:
+            self._t_acquired_local.t = time.time()
+        return ok
+
+    def release(self) -> None:
+        t = getattr(self._t_acquired_local, "t", None)
+        if t is not None:
+            held = time.time() - t
+            self._held_times.append((t, held))
+        self._lock.release()
+
+    def contention_pct_60s(self) -> float:
+        """Return the percentage of the last 60 s the lock was held.
+
+        Caps at 100. With one detector worker on the box, a value
+        above ~80 % suggests the detector is the bottleneck — adding
+        more cameras won't help and may make every camera's analyzer
+        starve. Below ~50 % the box has headroom.
+        """
+
+        cutoff = time.time() - 60
+        relevant = [(t, h) for (t, h) in self._held_times if t >= cutoff]
+        if not relevant:
+            return 0.0
+        total_held = sum(h for _, h in relevant)
+        return min(100.0, total_held / 60.0 * 100)
+
+
 # Module-level lock — every ``detect`` call across every camera worker
 # serialises through here. On CPU this is faster than parallel calls
 # (which thrash L1/L2 cache and slow each other down). Port verbatim
-# from the prototype.
-_detect_lock = threading.Lock()
+# from the prototype, now with held-time instrumentation (P28.8).
+_detect_lock = TimedLock()
 
 _face_app: Any = None
 _face_app_det_size: Optional[int] = None
