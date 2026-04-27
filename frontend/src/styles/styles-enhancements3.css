@@ -382,3 +382,121 @@ input[type="radio"]:focus-visible {
 [data-theme="dark"] a:focus-visible {
   outline-color: var(--accent-text);
 }
+
+
+/* ------------------------------------------------------------------
+   P28.5d — collapsible sidebar (icon-only mode)
+
+   ``data-sidebar="collapsed"`` on ``<html>`` (driven by
+   ``frontend/src/sidebar/index.ts``) shrinks the sidebar to a
+   ~64 px column showing icons only. Labels, search box, brand
+   name, version chip, and the role-switcher's text column hide;
+   nav badges hide too because they'd overlap the icon at this
+   width. Tooltips on each nav item (``title`` attribute set
+   in ``Sidebar.tsx``) keep the labels reachable on hover.
+
+   The grid columns transition for ~200 ms — modern Chrome /
+   Firefox / Safari support transitioning ``grid-template-columns``
+   directly. Older browsers snap, which is acceptable for a UI
+   preference. */
+.app {
+  transition: grid-template-columns 200ms ease;
+}
+
+/* Collapse / expand toggle button — looks like a nav-item but
+   sits between the nav list and the footer. Centred icon when
+   collapsed (the label is hidden along with every other
+   .nav-label-text). */
+.sidebar-toggle {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 8px;
+  margin-top: auto;
+  margin-bottom: 8px;
+  border-radius: 6px;
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 450;
+  user-select: none;
+  white-space: nowrap;
+}
+.sidebar-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+  border-style: solid;
+}
+
+/* --- Collapsed state -------------------------------------------- */
+
+[data-sidebar="collapsed"] .app {
+  /* 56 px icon-cell + 8 px gutter on each side ≈ 64 px total. */
+  grid-template-columns: 64px 1fr;
+}
+
+[data-sidebar="collapsed"] .sidebar {
+  /* Tighter padding so the icons don't crowd the right edge. */
+  padding: 12px 6px;
+}
+
+/* Hide the brand name + version chip; keep the brand mark. */
+[data-sidebar="collapsed"] .brand-name,
+[data-sidebar="collapsed"] .brand-tag {
+  display: none;
+}
+[data-sidebar="collapsed"] .sidebar-brand {
+  justify-content: center;
+  padding: 6px 0 14px;
+}
+
+/* Hide the search box. (Search itself is decorative pre-P6, but
+   the input element exists in the markup.) */
+[data-sidebar="collapsed"] .sidebar-search {
+  display: none;
+}
+
+/* Hide every section heading. */
+[data-sidebar="collapsed"] .nav-label {
+  display: none;
+}
+
+/* Hide the nav-item label text; centre the icon in the row.
+   Badges hide too because they overlap the icon at this width —
+   the topbar notification bell already surfaces urgent counts,
+   so a hidden sidebar badge isn't a regression. */
+[data-sidebar="collapsed"] .nav-item .nav-label-text,
+[data-sidebar="collapsed"] .nav-item .nav-badge {
+  display: none;
+}
+[data-sidebar="collapsed"] .nav-item {
+  justify-content: center;
+  padding: 8px 6px;
+  gap: 0;
+}
+
+/* Toggle button: keep the icon, hide the label, centre. */
+[data-sidebar="collapsed"] .sidebar-toggle .nav-label-text {
+  display: none;
+}
+[data-sidebar="collapsed"] .sidebar-toggle {
+  justify-content: center;
+  padding: 6px;
+  gap: 0;
+}
+
+/* Footer role-switcher: keep the avatar visible but hide the
+   name/email column. */
+[data-sidebar="collapsed"] .role-col {
+  display: none;
+}
+[data-sidebar="collapsed"] .role-switcher {
+  justify-content: center;
+  padding: 7px 4px;
+  gap: 0;
+}
+[data-sidebar="collapsed"] .sidebar-footer {
+  padding-top: 8px;
+}

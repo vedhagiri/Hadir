@@ -5,14 +5,26 @@
 // to v1.0 (PROJECT_CONTEXT §8) — we render a static identity card in its
 // place and put the logout button in the topbar.
 
+import { useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import { NavLink } from "react-router-dom";
 
 import { APP_VERSION_SHORT } from "../config";
 import { useInboxSummary } from "../requests/hooks";
+import {
+  getSidebar,
+  subscribeSidebar,
+  toggleSidebar,
+  type SidebarState,
+} from "../sidebar";
 import type { MeResponse, Role } from "../types";
 import { Icon } from "./Icon";
 import { NAV } from "./nav";
+
+
+function useSidebarState(): SidebarState {
+  return useSyncExternalStore(subscribeSidebar, getSidebar, getSidebar);
+}
 
 // Map English section labels (the design source) to i18n keys under
 // nav.sections. Anything not in the map falls back to its English
@@ -45,6 +57,8 @@ function initialsFor(fullName: string): string {
 export function Sidebar({ role, me }: Props) {
   const { t } = useTranslation();
   const items = NAV[role];
+  const sidebarState = useSidebarState();
+  const collapsed = sidebarState === "collapsed";
   // Only Manager / HR / Admin have an Approvals link; Employees don't,
   // so we skip the inbox query for them.
   const approvalsRoles = role === "Admin" || role === "HR" || role === "Manager";
@@ -65,7 +79,10 @@ export function Sidebar({ role, me }: Props) {
       </div>
 
       {/* Search is decorative in P4 — real search lands with employees (P6). */}
-      <div className="topbar-search" style={{ width: "100%", margin: "0 0 6px" }}>
+      <div
+        className="topbar-search sidebar-search"
+        style={{ width: "100%", margin: "0 0 6px" }}
+      >
         <Icon name="search" size={13} />
         <input placeholder={t("common.search")} />
         <span className="kbd">⌘K</span>
@@ -102,9 +119,13 @@ export function Sidebar({ role, me }: Props) {
             key={it.id}
             to={`/${it.id}`}
             className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}
+            // P28.5d: when the sidebar is collapsed the label is
+            // hidden via CSS — surface it as a native tooltip so the
+            // user can still tell what each icon does on hover.
+            title={collapsed ? label : undefined}
           >
             <Icon name={it.icon} size={14} />
-            <span>{label}</span>
+            <span className="nav-label-text">{label}</span>
             {badge && (
               <span
                 className="nav-badge"
@@ -123,6 +144,35 @@ export function Sidebar({ role, me }: Props) {
           </NavLink>
         );
       })}
+
+      {/* P28.5d: collapse / expand toggle. Lives above the footer so
+          it's reachable from anywhere. Chevron points "into" the
+          sidebar when expanded (= collapse) and "out" when collapsed
+          (= expand); RTL flips direction via the design's
+          ``[dir="rtl"] .icon-chevron-*`` rules. */}
+      <button
+        type="button"
+        className="sidebar-toggle"
+        onClick={toggleSidebar}
+        aria-pressed={collapsed}
+        aria-label={
+          collapsed
+            ? t("common.expandSidebar")
+            : t("common.collapseSidebar")
+        }
+        title={
+          collapsed
+            ? t("common.expandSidebar")
+            : t("common.collapseSidebar")
+        }
+      >
+        <Icon name={collapsed ? "chevronRight" : "chevronLeft"} size={14} />
+        <span className="nav-label-text">
+          {collapsed
+            ? t("common.expandSidebar")
+            : t("common.collapseSidebar")}
+        </span>
+      </button>
 
       <div className="sidebar-footer">
         {/*

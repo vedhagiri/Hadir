@@ -21,7 +21,9 @@
     "networkError": "خطأ في الشبكة.",
     "language": "اللغة",
     "languageEnglish": "English",
-    "languageArabic": "العربية"
+    "languageArabic": "العربية",
+    "collapseSidebar": "طيّ الشريط الجانبي",
+    "expandSidebar": "توسيع الشريط الجانبي"
   },
   "login": {
     "title": "تسجيل الدخول إلى حاضر",

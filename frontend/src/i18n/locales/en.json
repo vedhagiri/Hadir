@@ -21,7 +21,9 @@
     "networkError": "Network error.",
     "language": "Language",
     "languageEnglish": "English",
-    "languageArabic": "العربية"
+    "languageArabic": "العربية",
+    "collapseSidebar": "Collapse sidebar",
+    "expandSidebar": "Expand sidebar"
   },
   "login": {
     "title": "Sign in to Hadir",
