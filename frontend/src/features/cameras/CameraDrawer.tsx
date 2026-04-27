@@ -224,7 +224,7 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
               gap: 8,
             }}
           >
-            <Icon name={showSettings ? "chevron-down" : "chevron-right"} size={12} />
+            <Icon name={showSettings ? "chevronDown" : "chevronRight"} size={12} />
             {t("cameras.fields.captureSettings")}
           </button>
 

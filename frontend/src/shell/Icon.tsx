@@ -3,9 +3,19 @@
 // shape changes (typed props + export). Do not edit stroke data or add new
 // icons without touching the design reference first.
 
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties } from "react";
 
-const paths: Record<string, ReactNode> = {
+// NOTE: do NOT type this as ``Record<string, ReactNode>`` — that
+// collapses ``keyof typeof paths`` to ``string``, which silently
+// accepts any name at the ``<Icon name="…">`` call site and falls
+// back to a circle on render (the bug found during P28.5c
+// validation: Live Capture buttons looked icon-less because
+// "play" / "pause" / "refresh" / "filter" / "download" weren't
+// defined here but TypeScript didn't catch it). With ``as const``
+// stripped off and the explicit Record type removed,
+// ``IconName = keyof typeof paths`` resolves to the literal union
+// of every key below — typecheck rejects unknown names.
+const paths = {
   home: (
     <>
       <path d="M3 12 12 4l9 8" />
@@ -138,6 +148,76 @@ const paths: Record<string, ReactNode> = {
     <>
       <circle cx="12" cy="12" r="9" />
       <path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18" />
+    </>
+  ),
+
+  // P28.5c follow-up: icons used across the app that were silently
+  // falling back to ``circle`` because they hadn't been ported from
+  // the design archive yet. Path data copied verbatim from
+  // ``frontend/src/design/icons.jsx``.
+  play: <path d="M7 4v16l14-8L7 4z" />,
+  pause: (
+    <>
+      <rect x="6" y="4" width="4" height="16" />
+      <rect x="14" y="4" width="4" height="16" />
+    </>
+  ),
+  refresh: (
+    <>
+      <path d="M20 12a8 8 0 01-13.7 5.7L3 15M4 12a8 8 0 0113.7-5.7L21 9" />
+      <path d="M3 9V4M21 20v-5M21 15h-5M3 4h5" />
+    </>
+  ),
+  filter: <path d="M4 5h16l-6 8v6l-4-2v-4L4 5z" />,
+  download: <path d="M12 3v12M7 10l5 5 5-5M4 21h16" />,
+  edit: (
+    <>
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.1 2.1 0 113 3L7 19l-4 1 1-4L16.5 3.5z" />
+    </>
+  ),
+  trash: (
+    <path d="M3 6h18M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2M5 6l1 14a2 2 0 002 2h8a2 2 0 002-2l1-14M10 11v6M14 11v6" />
+  ),
+  excel: (
+    <>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M8 8l8 8M16 8l-8 8" />
+    </>
+  ),
+  mail: (
+    <>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M3 7l9 6 9-6" />
+    </>
+  ),
+  send: <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />,
+  zap: <path d="M13 2L4 14h8l-1 8 9-12h-8l1-8z" />,
+  more: (
+    <>
+      <circle cx="5" cy="12" r="1.3" />
+      <circle cx="12" cy="12" r="1.3" />
+      <circle cx="19" cy="12" r="1.3" />
+    </>
+  ),
+  menu: (
+    <>
+      <line x1="3" y1="6" x2="21" y2="6" />
+      <line x1="3" y1="12" x2="21" y2="12" />
+      <line x1="3" y1="18" x2="21" y2="18" />
+    </>
+  ),
+  chevronLeft: <path d="M15 6l-6 6 6 6" />,
+  eye: (
+    <>
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+      <circle cx="12" cy="12" r="3" />
+    </>
+  ),
+  database: (
+    <>
+      <ellipse cx="12" cy="5" rx="9" ry="3" />
+      <path d="M3 5v6c0 1.7 4 3 9 3s9-1.3 9-3V5M3 11v6c0 1.7 4 3 9 3s9-1.3 9-3v-6" />
     </>
   ),
 };
