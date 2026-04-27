@@ -19,6 +19,13 @@ export interface LiveStats {
 // emitted by the worker. ``employee_id === null`` → unknown face.
 export interface LiveEvent {
   type: "detection";
+  /**
+   * The detection_events row id. Lets the live viewer render the
+   * encrypted face crop via /api/detection-events/{event_id}/crop
+   * without a follow-up lookup. Null on rows from non-DB-backed
+   * publishers (tests, ad-hoc).
+   */
+  event_id: number | null;
   time: string; // ISO timestamp
   camera_id: number;
   employee_id: number | null;

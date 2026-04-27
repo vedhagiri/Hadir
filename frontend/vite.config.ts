@@ -29,6 +29,12 @@ export default defineConfig({
       "^/api/": {
         target: backendTarget,
         changeOrigin: true,
+        // Required for the Live Capture page's ``events.ws`` WebSocket
+        // endpoint. Without this the browser's WS handshake gets
+        // proxied as plain HTTP, the upgrade fails silently, and the
+        // page sees no detection events even though MJPEG (HTTP GET)
+        // works fine through the same proxy rule.
+        ws: true,
       },
     },
     watch: {

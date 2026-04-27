@@ -491,6 +491,13 @@ async def events_ws(websocket: WebSocket, camera_id: int) -> None:
                 await websocket.send_json(
                     {
                         "type": "detection",
+                        # The detection_events row id, when available.
+                        # Lets live viewers render the face crop via
+                        # ``/api/detection-events/{event_id}/crop``
+                        # without a follow-up lookup. Null on rows
+                        # emitted before migration 0032 / on
+                        # non-DB-backed publishers.
+                        "event_id": ev.event_id,
                         "time": datetime.fromtimestamp(
                             ev.captured_at, tz=timezone.utc
                         ).isoformat(),

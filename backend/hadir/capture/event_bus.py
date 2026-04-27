@@ -43,7 +43,15 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class DetectionEvent:
-    """One detection emitted by the capture pipeline."""
+    """One detection emitted by the capture pipeline.
+
+    ``event_id`` is the row id from the just-completed
+    ``detection_events`` INSERT — included so live viewers can fetch
+    the encrypted face crop via ``/api/detection-events/{id}/crop``
+    without an extra round trip to look up the row first. ``None`` is
+    permitted so non-DB-backed publishers (tests, ad-hoc) can still
+    use this dataclass.
+    """
 
     tenant_id: int
     camera_id: int
@@ -53,6 +61,7 @@ class DetectionEvent:
     employee_name: Optional[str]
     confidence: Optional[float]
     bbox: dict
+    event_id: Optional[int] = None
 
 
 @dataclass

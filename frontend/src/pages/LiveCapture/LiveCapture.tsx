@@ -7,7 +7,7 @@
 // baked into the JPEG by the capture worker, so there's no canvas
 // or SVG overlay layer.
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useCameras } from "../../features/cameras/hooks";
@@ -58,7 +58,6 @@ export function LiveCapturePage() {
   const [activeCamId, setActiveCamId] = useState<number | null>(null);
   const [paused, setPaused] = useState(false);
   const [showOnlyUnknown, setShowOnlyUnknown] = useState(false);
-  const [streamNonce, setStreamNonce] = useState(0);
   const imgRef = useRef<HTMLImageElement | null>(null);
 
   // The streams + stats hooks short-circuit when the active camera is
@@ -74,15 +73,10 @@ export function LiveCapturePage() {
   const stream = useEventStream(activeIsLive ? activeCamId : null);
 
   const onTogglePause = () => setPaused((p) => !p);
-  const onReconnect = () => {
-    setStreamNonce((n) => n + 1);
-    stream.reconnect();
-  };
   const onSelect = (id: number) => {
     if (id === activeCamId) return;
     setActiveCamId(id);
     setPaused(false);
-    setStreamNonce((n) => n + 1);
   };
 
   const onExport = () => {
@@ -121,6 +115,57 @@ export function LiveCapturePage() {
   const showWorkerDisabled =
     activeCam != null && !activeCam.worker_enabled;
 
+  // MJPEG (multipart/x-mixed-replace) cleanup is notoriously bad in
+  // browsers — Chromium keeps the TCP stream open for the lifetime
+  // of the page when the <img> element is unmounted, even if the
+  // element is removed from the DOM. Camera *switches* are easy
+  // (point src at an in-memory data URL — the browser supersedes
+  // the prior fetch for that element). But page *navigation* is
+  // harder because React's useEffect cleanup races with DOM removal,
+  // and the browser may never process the src change.
+  //
+  // Fix: render the <img> imperatively into a container ref. On
+  // every dep change OR unmount we (a) point src at a tiny data
+  // URL to abort the in-flight fetch and (b) physically detach the
+  // element from the DOM. Browsers close MJPEG fetches reliably
+  // when the owning element leaves the document.
+  //
+  // 1×1 transparent GIF — 43 bytes, parsed instantly, no network.
+  const ABORT_PIXEL =
+    "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+  const showLiveImg =
+    activeIsLive && !showOffline && !paused && activeCamId != null;
+  const streamingUrl = showLiveImg
+    ? `/api/cameras/${activeCamId}/live.mjpg`
+    : "";
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+
+    const img = document.createElement("img");
+    img.alt = "live camera";
+    img.style.cssText =
+      "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;";
+    img.src = streamingUrl || ABORT_PIXEL;
+    stage.appendChild(img);
+    imgRef.current = img;
+
+    return () => {
+      // Step 1: supersede the in-flight fetch for THIS element.
+      img.src = ABORT_PIXEL;
+      // Step 2: detach. Browser closes the MJPEG TCP fetch as soon
+      // as the owning element leaves the document — this is the
+      // fail-safe for page navigation, where useEffect cleanup
+      // races with DOM removal and the browser otherwise never
+      // sees the src change land before the element is gone.
+      if (img.parentNode) {
+        img.parentNode.removeChild(img);
+      }
+      if (imgRef.current === img) imgRef.current = null;
+    };
+  }, [streamingUrl]);
+
   return (
     <>
       <div className="page-header">
@@ -148,29 +193,38 @@ export function LiveCapturePage() {
             <Icon name={paused ? "play" : "pause"} size={12} />
             {paused ? t("liveCapture.resume") : t("liveCapture.pause")}
           </button>
-          <button
-            className="btn"
-            onClick={onReconnect}
-            disabled={activeCamId == null}
-          >
-            <Icon name="refresh" size={12} />
-            {t("liveCapture.reconnect")}
-          </button>
         </div>
       </div>
 
       <div
         className="grid"
         style={{
-          gridTemplateColumns: "2fr 1fr",
+          // Bumped from 2fr 1fr → 3fr 1fr so the player gets ~75 % of
+          // the row width (was 67 %). Combined with the taller aspect
+          // ratio below, the viewer is noticeably larger.
+          gridTemplateColumns: "3fr 1fr",
           gap: 16,
           marginBottom: 16,
         }}
       >
         {/* Viewer */}
         <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-          <div className="cam-stage" style={{ aspectRatio: "16 / 8.2" }}>
+          {/* Bumped from 16/8.2 → 16/9: same width yields ~10 % more
+              vertical space. */}
+          <div className="cam-stage" style={{ aspectRatio: "16 / 9" }}>
             <div className="cam-bg" />
+            {/* Stage container the imperative <img> attaches into.
+                Sits between cam-bg and the overlays so the DOM order
+                naturally puts overlays on top (siblings later in
+                document order paint on top under default CSS). */}
+            <div
+              ref={stageRef}
+              style={{
+                position: "absolute",
+                inset: 0,
+                pointerEvents: "none",
+              }}
+            />
             {activeCamId == null && (
               <div
                 style={{
@@ -185,21 +239,13 @@ export function LiveCapturePage() {
                 {t("liveCapture.selectCameraPrompt")}
               </div>
             )}
-            {activeIsLive && !paused && !showOffline && (
-              <img
-                ref={imgRef}
-                key={`${activeCamId}-${streamNonce}`}
-                src={`/api/cameras/${activeCamId}/live.mjpg?t=${streamNonce}`}
-                alt={t("liveCapture.viewerAlt")}
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  width: "100%",
-                  height: "100%",
-                  objectFit: "cover",
-                }}
-              />
-            )}
+            {/* The <img> element is created/destroyed imperatively
+                in the streamingUrl useEffect above (see ``stageRef``
+                + ``imgRef``). React doesn't manage it — physical
+                detach on cleanup is the only way to reliably close
+                MJPEG TCP fetches across browsers. The cam-stage
+                <div> here is the parent container the effect
+                appends to. */}
             {showDisplayDisabled && (
               <div
                 style={{
@@ -464,6 +510,7 @@ export function LiveCapturePage() {
         <table className="table">
           <thead>
             <tr>
+              <th style={{ width: 72 }}>{t("liveCapture.col.face")}</th>
               <th>{t("liveCapture.col.time")}</th>
               <th>{t("liveCapture.col.camera")}</th>
               <th>{t("liveCapture.col.identified")}</th>
@@ -475,7 +522,7 @@ export function LiveCapturePage() {
             {filteredEvents.length === 0 && (
               <tr>
                 <td
-                  colSpan={5}
+                  colSpan={6}
                   style={{
                     textAlign: "center",
                     padding: 18,
@@ -498,6 +545,44 @@ export function LiveCapturePage() {
                     animation: "fadeInRow 200ms ease",
                   }}
                 >
+                  <td>
+                    {ev.event_id != null ? (
+                      <img
+                        src={`/api/detection-events/${ev.event_id}/crop`}
+                        alt={`event ${ev.event_id}`}
+                        loading="lazy"
+                        style={{
+                          display: "block",
+                          width: 56,
+                          height: 56,
+                          objectFit: "cover",
+                          borderRadius: "var(--radius-sm)",
+                          border: "1px solid var(--border)",
+                        }}
+                      />
+                    ) : (
+                      <div
+                        title="No crop available"
+                        aria-label="No crop available"
+                        style={{
+                          display: "grid",
+                          placeItems: "center",
+                          width: 56,
+                          height: 56,
+                          borderRadius: "var(--radius-sm)",
+                          border: "1px dashed var(--border)",
+                          background: "var(--bg-sunken)",
+                          color: "var(--text-tertiary)",
+                          fontSize: 9,
+                          textAlign: "center",
+                          lineHeight: 1.1,
+                          padding: 4,
+                        }}
+                      >
+                        —
+                      </div>
+                    )}
+                  </td>
                   <td className="mono text-sm">{formatTime(ev.time)}</td>
                   <td>
                     <span className="pill pill-neutral">

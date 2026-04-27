@@ -420,6 +420,7 @@
     "eventsEmpty": "Select a camera to see live detections.",
     "eventsWaiting": "Waiting for the first detection…",
     "col": {
+      "face": "Face",
       "time": "Time",
       "camera": "Camera",
       "identified": "Identified",

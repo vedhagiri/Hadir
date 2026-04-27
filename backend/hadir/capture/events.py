@@ -399,6 +399,7 @@ def emit_detection_event(
             employee_name=name_label,
             confidence=confidence,
             bbox={"x": bbox.x, "y": bbox.y, "w": bbox.w, "h": bbox.h},
+            event_id=int(new_id),
         )
     )
 
