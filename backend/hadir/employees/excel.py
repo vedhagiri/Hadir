@@ -20,6 +20,7 @@ should still import.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date as _date
 from io import BytesIO
 from typing import Iterator, Optional
 
@@ -34,6 +35,19 @@ REQUIRED_COLUMNS: tuple[str, ...] = (
     "department_code",
 )
 
+# P28.7 added six optional columns. They land in the export and the
+# import accepts them; ``reports_to_email`` is resolved to a user_id at
+# import time. ``status`` was already exported but not parsed —
+# we still don't import status (operators set it via the API).
+P28_7_OPTIONAL_COLUMNS: tuple[str, ...] = (
+    "designation",
+    "phone",
+    "reports_to_email",
+    "joining_date",
+    "relieving_date",
+    "status",
+)
+
 EXPORT_COLUMNS: tuple[str, ...] = (
     "employee_code",
     "full_name",
@@ -41,12 +55,23 @@ EXPORT_COLUMNS: tuple[str, ...] = (
     "department_code",
     "status",
     "photo_count",
+    "designation",
+    "phone",
+    "reports_to_email",
+    "joining_date",
+    "relieving_date",
+    "deactivation_reason",
 )
 
 # Headers we recognise as part of the employee row itself — anything else
 # is treated as a candidate custom-field code on import.
 _KNOWN_HEADERS: frozenset[str] = frozenset(
-    {*REQUIRED_COLUMNS, "status", "photo_count"}
+    {
+        *REQUIRED_COLUMNS,
+        "photo_count",
+        "deactivation_reason",
+        *P28_7_OPTIONAL_COLUMNS,
+    }
 )
 
 
@@ -63,6 +88,14 @@ class ImportRow:
     full_name: str
     email: Optional[str]
     department_code: str
+    # P28.7 optional columns. Strings as the parser sees them; the
+    # router coerces (date parsing, manager lookup) and validates.
+    designation: Optional[str] = None
+    phone: Optional[str] = None
+    reports_to_email: Optional[str] = None
+    joining_date: Optional[str] = None
+    relieving_date: Optional[str] = None
+    status: Optional[str] = None
     # ``custom_values`` keys are the **raw** header strings as they
     # appeared in the spreadsheet (already lower-snake-cased). The
     # router decides which match a known custom-field code, which
@@ -116,6 +149,11 @@ def parse_import(stream: BytesIO) -> Iterator[ImportRow]:
             )
 
         idx = {name: headers.index(name) for name in REQUIRED_COLUMNS}
+        # P28.7 optional columns — pos lookup or None if not present.
+        opt_idx: dict[str, Optional[int]] = {
+            col: (headers.index(col) if col in headers else None)
+            for col in P28_7_OPTIONAL_COLUMNS
+        }
         # Index every non-required, non-blank column too — these are the
         # custom-field candidates.
         custom_idx: dict[str, int] = {}
@@ -131,6 +169,19 @@ def parse_import(stream: BytesIO) -> Iterator[ImportRow]:
                 # if applicable.
                 continue
             custom_idx[header] = pos
+
+        def _opt_cell(row, key: str) -> Optional[str]:
+            pos = opt_idx[key]
+            if pos is None or pos >= len(row):
+                return None
+            value = row[pos]
+            if value is None:
+                return None
+            if hasattr(value, "isoformat"):
+                text = value.isoformat()
+            else:
+                text = _cell_str(value)
+            return text or None
 
         for excel_row, row in enumerate(
             ws.iter_rows(min_row=2, values_only=True), start=2
@@ -168,6 +219,12 @@ def parse_import(stream: BytesIO) -> Iterator[ImportRow]:
                 full_name=name,
                 email=email_raw or None,
                 department_code=dept_code,
+                designation=_opt_cell(row, "designation"),
+                phone=_opt_cell(row, "phone"),
+                reports_to_email=_opt_cell(row, "reports_to_email"),
+                joining_date=_opt_cell(row, "joining_date"),
+                relieving_date=_opt_cell(row, "relieving_date"),
+                status=_opt_cell(row, "status"),
                 custom_values=cv,
             )
     finally:
@@ -179,6 +236,7 @@ def build_export(
     *,
     custom_field_codes: tuple[str, ...] = (),
     values_by_employee: Optional[dict[int, dict[str, str]]] = None,
+    reports_to_email_by_user: Optional[dict[int, str]] = None,
 ) -> BytesIO:
     """Produce an XLSX in-memory.
 
@@ -187,9 +245,14 @@ def build_export(
     (``display_order`` ascending). Cells lookup against
     ``values_by_employee[employee_id][code]`` — missing entries become
     empty cells.
+
+    P28.7 adds the lifecycle + HR org-chart columns. ``reports_to_email``
+    maps each ``reports_to_user_id`` to its email so re-importing the
+    same XLSX round-trips cleanly.
     """
 
     values_by_employee = values_by_employee or {}
+    reports_to_email_by_user = reports_to_email_by_user or {}
 
     wb = Workbook()
     ws = wb.active
@@ -199,6 +262,11 @@ def build_export(
     headers = list(EXPORT_COLUMNS) + list(custom_field_codes)
     ws.append(headers)
     for row in rows:
+        reports_to_email = (
+            reports_to_email_by_user.get(row.reports_to_user_id, "")
+            if row.reports_to_user_id is not None
+            else ""
+        )
         base = [
             row.employee_code,
             row.full_name,
@@ -206,6 +274,12 @@ def build_export(
             row.department_code,
             row.status,
             row.photo_count,
+            row.designation or "",
+            row.phone or "",
+            reports_to_email,
+            row.joining_date.isoformat() if row.joining_date else "",
+            row.relieving_date.isoformat() if row.relieving_date else "",
+            row.deactivation_reason or "",
         ]
         custom_cells = [
             values_by_employee.get(row.id, {}).get(code, "")
@@ -217,3 +291,20 @@ def build_export(
     wb.save(buf)
     buf.seek(0)
     return buf
+
+
+def parse_iso_date(value: Optional[str]) -> Optional[_date]:
+    """Parse a date cell value (already stringified by ``parse_import``).
+
+    Accepts ISO 8601 (``YYYY-MM-DD``) and the openpyxl-stringified
+    full-datetime form (``YYYY-MM-DDTHH:MM:SS``). Returns None on empty
+    input. Raises ``ValueError`` on a malformed value so the import
+    handler can convert it to a per-row error.
+    """
+
+    if value is None or not str(value).strip():
+        return None
+    s = str(value).strip()
+    if "T" in s:
+        s = s.split("T", 1)[0]
+    return _date.fromisoformat(s)

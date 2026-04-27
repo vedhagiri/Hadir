@@ -8,7 +8,9 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useMe } from "../auth/AuthProvider";
+import { useDeleteRequestList } from "../features/employees/hooks";
 import { Icon } from "../shell/Icon";
+import { DeleteRequestsTab } from "./DeleteRequestsTab";
 import { OverrideModal } from "./OverrideModal";
 import { RequestDetailDrawer } from "./RequestDetailDrawer";
 import type { DecisionRole } from "./RequestDetailDrawer";
@@ -20,7 +22,7 @@ import {
 } from "./hooks";
 import type { RequestRecord, RequestStatus } from "./types";
 
-type Tab = "pending" | "decided" | "all";
+type Tab = "pending" | "decided" | "all" | "delete-requests";
 
 const STAGE_KEY: Record<RequestStatus, string> = {
   submitted: "submitted",
@@ -46,6 +48,8 @@ export function ApprovalsPage() {
   const pending = useInboxPending();
   const decided = useInboxDecided();
   const all = useRequests();
+  const deleteRequests = useDeleteRequestList();
+  const showDeleteTab = role === "HR" || role === "Admin";
 
   const [tab, setTab] = useState<Tab>("pending");
   const [openId, setOpenId] = useState<number | null>(null);
@@ -135,8 +139,20 @@ export function ApprovalsPage() {
             onSelect={() => setTab("all")}
           />
         )}
+        {showDeleteTab && (
+          <Tab
+            label={`${t("approvals.tabs.deleteRequests")}${
+              deleteRequests.data ? ` · ${deleteRequests.data.items.length}` : ""
+            }`}
+            active={tab === "delete-requests"}
+            onSelect={() => setTab("delete-requests")}
+          />
+        )}
       </div>
 
+      {tab === "delete-requests" && showDeleteTab ? (
+        <DeleteRequestsTab role={role as "Admin" | "HR"} />
+      ) : (
       <div className="card">
         <table className="table">
           <thead>
@@ -176,6 +192,7 @@ export function ApprovalsPage() {
           </tbody>
         </table>
       </div>
+      )}
 
       {openId !== null && (
         <RequestDetailDrawer

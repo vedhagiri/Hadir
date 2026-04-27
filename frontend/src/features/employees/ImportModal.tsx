@@ -66,10 +66,18 @@ export function ImportModal({ onClose }: Props) {
             <div>
               <h3 className="card-title">Import employees</h3>
               <p className="card-sub">
-                Upload a .xlsx with columns: <span className="mono">employee_code</span>,
+                Required columns: <span className="mono">employee_code</span>,
                 <span className="mono"> full_name</span>,
                 <span className="mono"> email</span>,
                 <span className="mono"> department_code</span>.
+                {" "}Optional P28.7 columns:{" "}
+                <span className="mono">designation</span>,{" "}
+                <span className="mono">phone</span>,{" "}
+                <span className="mono">reports_to_email</span>,{" "}
+                <span className="mono">joining_date</span>,{" "}
+                <span className="mono">relieving_date</span>.
+                {" "}Bulk delete is not supported — use the per-row
+                Delete on the employees page.
               </p>
             </div>
             <button

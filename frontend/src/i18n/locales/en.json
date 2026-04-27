@@ -13,6 +13,8 @@
     "yes": "Yes",
     "no": "No",
     "all": "All",
+    "export": "Export",
+    "import": "Import",
     "search": "Search…",
     "comingSoon": "Coming soon",
     "error": "Something went wrong.",
@@ -95,7 +97,8 @@
     "tabs": {
       "pending": "Pending my decision",
       "decided": "Decided by me",
-      "all": "All"
+      "all": "All",
+      "deleteRequests": "Delete requests"
     },
     "columns": {
       "id": "ID",
@@ -120,6 +123,23 @@
       "adminApproved": "admin override · approved",
       "adminRejected": "admin override · rejected",
       "cancelled": "cancelled"
+    },
+    "deleteRequests": {
+      "title": "Pending delete requests",
+      "pendingSuffix": "pending",
+      "empty": "No pending delete requests.",
+      "approve": "Approve",
+      "reject": "Reject",
+      "review": "Review",
+      "confirmReject": "Confirm reject",
+      "rejectPlaceholder": "Reason for rejection (min 5 chars)",
+      "col": {
+        "employee": "Employee",
+        "requestedBy": "Requested by",
+        "reason": "Reason",
+        "submitted": "Submitted",
+        "action": "Action"
+      }
     }
   },
   "myRequests": {
@@ -448,6 +468,125 @@
       "holiday": "Holiday",
       "future": "Future",
       "no_record": "No record"
+    }
+  },
+  "employees": {
+    "title": "Employees",
+    "addButton": "Add employee",
+    "allEmployees": "All employees",
+    "allDepartments": "All departments",
+    "searchPlaceholder": "Search by id, name, email, department",
+    "loadFailed": "Could not load employees.",
+    "empty": "No employees match. Try clearing filters or import from Excel.",
+    "fullyEnrolledSuffix": "fully enrolled with reference photos",
+    "statusFilter": {
+      "active": "Active only",
+      "inactive": "Inactive only",
+      "all": "Show all"
+    },
+    "statusValue": {
+      "active": "Active",
+      "inactive": "Inactive",
+      "deleted": "Deleted"
+    },
+    "col": {
+      "employee": "Employee",
+      "id": "ID",
+      "email": "Email",
+      "department": "Department",
+      "status": "Status",
+      "photos": "Photos",
+      "actions": "Actions"
+    },
+    "action": {
+      "edit": "Edit",
+      "view": "View",
+      "delete": "Delete"
+    },
+    "drawer": {
+      "addTitle": "Add employee",
+      "editTitle": "Edit employee",
+      "newEmployee": "New employee",
+      "create": "Create",
+      "save": "Save changes",
+      "auditNote": "Changes audited & reversible for 24h"
+    },
+    "section": {
+      "identity": "Identity",
+      "assignment": "Assignment",
+      "lifecycle": "Joining & relieving",
+      "shiftPolicy": "Shift policy",
+      "referencePhotos": "Reference photos",
+      "status": "Status"
+    },
+    "field": {
+      "code": "Employee ID",
+      "fullName": "Full name",
+      "designation": "Designation",
+      "email": "Email",
+      "phone": "Phone",
+      "department": "Department",
+      "reportsTo": "Reports to",
+      "noManager": "— no manager —",
+      "joinDate": "Join date",
+      "relievingDate": "Relieving date",
+      "active": "Active",
+      "activeHint": "Inactive employees still appear in historical reports but are not tracked for new attendance.",
+      "deactivationReasonLabel": "Why is this employee being deactivated?",
+      "deactivationReasonPlaceholder": "Resigned, terminated, transferred, etc.",
+      "deactivatedAt": "Deactivated at"
+    },
+    "photos": {
+      "angleLabel": "Angle"
+    },
+    "errors": {
+      "codeAndNameRequired": "Employee ID and full name are required.",
+      "reasonRequired": "A deactivation reason (min 5 chars) is required when status is set to Inactive.",
+      "relievingBeforeJoining": "Relieving date cannot be before joining date.",
+      "overrideCommentMin": "Admin override comment must be at least 10 characters."
+    },
+    "delete": {
+      "hrTitle": "Delete employee",
+      "adminTitle": "Submit delete request to HR",
+      "hrBody": "Permanently delete {{name}}? This removes their reference photos, attendance, and identity. The action is audited but cannot be reversed.",
+      "adminBody": "This will create a pending delete request for HR to approve. {{name}} stays in the list with a Pending deletion badge until HR decides.",
+      "hrConfirm": "Delete now",
+      "adminConfirm": "Submit delete request",
+      "reasonLabel": "Reason",
+      "reasonPlaceholder": "Why is this employee being deleted? (min 10 chars)",
+      "reasonHint": "Recorded in the audit log alongside the actor and timestamp.",
+      "reasonMin": "Reason must be at least 10 characters.",
+      "rejectMin": "Comment must be at least 5 characters.",
+      "pendingBannerTitle": "Pending HR deletion approval",
+      "pendingBannerBody": "Submitted by {{name}} on {{date}}.",
+      "pendingBadge": "Pending deletion",
+      "pendingTooltip": "A delete request for this employee is awaiting HR approval.",
+      "approve": "Approve",
+      "reject": "Reject",
+      "rejectPromptComment": "Comment for rejection (min 5 chars):",
+      "overrideAndApprove": "Override and approve",
+      "overridePromptComment": "Required comment (min 10 chars) — this will be audit-logged with your identity.",
+      "confirmOverride": "Override + delete",
+      "unknownActor": "another admin"
+    }
+  },
+  "formerEmployees": {
+    "title": "Former employees seen",
+    "subtitle": "Detections of inactive employees on premises. Security signal — not attendance.",
+    "detections": "Sightings",
+    "from": "From",
+    "to": "To",
+    "exportXlsx": "Export XLSX",
+    "loadFailed": "Could not load report.",
+    "empty": "No former-employee sightings in this range.",
+    "col": {
+      "captured": "Captured at",
+      "camera": "Camera",
+      "code": "Code",
+      "name": "Name",
+      "confidence": "Confidence",
+      "reason": "Deactivation reason",
+      "deactivatedAt": "Deactivated at"
     }
   }
 }

@@ -292,6 +292,8 @@ def emit_detection_event(
 
     encrypted_embedding: Optional[bytes] = None
     employee_id: Optional[int] = None
+    former_match_employee_id: Optional[int] = None
+    former_employee_match = False
     confidence: Optional[float] = None
     if embedding is not None and embedding.size > 0:
         try:
@@ -299,12 +301,31 @@ def emit_detection_event(
         except (RuntimeError, ValueError) as exc:
             logger.debug("skipping embedding encryption: %s", exc)
         if pre_matched is not None:
+            # ``pre_matched`` from the live-capture annotation path
+            # (P28.5) is a plain (id, score) tuple — by definition the
+            # active path that already classified successfully.
             employee_id, confidence = pre_matched
         else:
             match = matcher_cache.match(scope, embedding)
             if match is not None:
-                employee_id = match.employee_id
                 confidence = match.score
+                # P28.7: branch on the lifecycle classification.
+                if match.classification == "active":
+                    employee_id = match.employee_id
+                elif match.classification == "inactive":
+                    former_match_employee_id = match.employee_id
+                    former_employee_match = True
+                    # Single INFO line per former-employee detection so
+                    # operators can see them in the audit trail without
+                    # crawling DEBUG output.
+                    logger.info(
+                        "former employee detected: code=%s name=%s confidence=%.2f",
+                        match.employee_code or "?",
+                        match.full_name or "?",
+                        match.score,
+                    )
+                # else classification == "future" — neither column set,
+                # treat as Unknown (per the locked decision).
 
     with engine.begin() as conn:
         new_id = conn.execute(
@@ -319,6 +340,8 @@ def emit_detection_event(
                 employee_id=employee_id,
                 confidence=confidence,
                 track_id=track_id,
+                former_employee_match=former_employee_match,
+                former_match_employee_id=former_match_employee_id,
             )
             .returning(detection_events.c.id)
         ).scalar_one()

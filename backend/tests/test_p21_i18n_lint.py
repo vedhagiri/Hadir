@@ -35,7 +35,10 @@ _FRONTEND_SRC: Path | None = next((p for p in _CANDIDATE_ROOTS if p.exists()), N
 _TRANSLATED_FILES = (
     "shell/Topbar.tsx",
     "shell/LanguageSwitcher.tsx",
-    "shell/DisplaySwitcher.tsx",
+    # P28.6 follow-up: DisplaySwitcher.tsx was retired when theme +
+    # density moved into Settings → Display. The new
+    # ``settings/DisplaySettingsPage.tsx`` replaces it on this list.
+    "settings/DisplaySettingsPage.tsx",
     "shell/Sidebar.tsx",
     "auth/LoginPage.tsx",
     "notifications/NotificationBell.tsx",

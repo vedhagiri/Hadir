@@ -50,6 +50,13 @@ class DetectionEventOut(BaseModel):
     confidence: Optional[float] = None
     track_id: str
     has_crop: bool
+    # P28.7 — set when the row was the result of a *former-employee*
+    # match. The snapshot triplet lets the Camera Logs UI render the
+    # red "Former employee" pill + tooltip without a second query.
+    former_employee_match: bool = False
+    former_match_employee_id: Optional[int] = None
+    former_match_employee_code: Optional[str] = None
+    former_match_employee_name: Optional[str] = None
 
 
 class DetectionEventListOut(BaseModel):
@@ -60,6 +67,11 @@ class DetectionEventListOut(BaseModel):
 
 
 def _build_select(scope: TenantScope):
+    # P28.7: alias employees twice so we can fetch the snapshot for
+    # both the live ``employee_id`` (active match) and the
+    # ``former_match_employee_id`` (former-employee match) without
+    # the SQL collapsing into a single join.
+    former_emp = employees.alias("former_emp")
     return (
         select(
             detection_events.c.id,
@@ -72,6 +84,10 @@ def _build_select(scope: TenantScope):
             detection_events.c.confidence,
             detection_events.c.track_id,
             detection_events.c.face_crop_path,
+            detection_events.c.former_employee_match,
+            detection_events.c.former_match_employee_id,
+            former_emp.c.employee_code.label("former_match_employee_code"),
+            former_emp.c.full_name.label("former_match_employee_name"),
         )
         .select_from(
             detection_events.join(
@@ -85,6 +101,13 @@ def _build_select(scope: TenantScope):
                 and_(
                     employees.c.id == detection_events.c.employee_id,
                     employees.c.tenant_id == detection_events.c.tenant_id,
+                ),
+            ).outerjoin(
+                former_emp,
+                and_(
+                    former_emp.c.id
+                    == detection_events.c.former_match_employee_id,
+                    former_emp.c.tenant_id == detection_events.c.tenant_id,
                 ),
             )
         )
@@ -101,6 +124,10 @@ def list_events(
         Optional[bool],
         Query(description="True → only identified events; False → only unknown."),
     ] = None,
+    former_only: Annotated[
+        bool,
+        Query(description="P28.7: True → only former-employee matches."),
+    ] = False,
     start: Annotated[Optional[datetime], Query()] = None,
     end: Annotated[Optional[datetime], Query()] = None,
     page: Annotated[int, Query(ge=1)] = 1,
@@ -117,6 +144,8 @@ def list_events(
         base = base.where(detection_events.c.employee_id.is_not(None))
     elif identified is False:
         base = base.where(detection_events.c.employee_id.is_(None))
+    if former_only:
+        base = base.where(detection_events.c.former_employee_match.is_(True))
     if start is not None:
         base = base.where(detection_events.c.captured_at >= start)
     if end is not None:
@@ -146,6 +175,22 @@ def list_events(
             confidence=float(r.confidence) if r.confidence is not None else None,
             track_id=str(r.track_id),
             has_crop=bool(r.face_crop_path),
+            former_employee_match=bool(r.former_employee_match),
+            former_match_employee_id=(
+                int(r.former_match_employee_id)
+                if r.former_match_employee_id is not None
+                else None
+            ),
+            former_match_employee_code=(
+                str(r.former_match_employee_code)
+                if r.former_match_employee_code is not None
+                else None
+            ),
+            former_match_employee_name=(
+                str(r.former_match_employee_name)
+                if r.former_match_employee_name is not None
+                else None
+            ),
         )
         for r in rows
     ]

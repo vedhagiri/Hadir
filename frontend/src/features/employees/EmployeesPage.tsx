@@ -1,48 +1,73 @@
-// Employees list page — Admin only.
-// Layout ported from frontend/src/design/pages.jsx (EmployeesPage) — page
-// header with Import/Export, card-wrapped table with search + department
-// filter in the card head. Rows are clickable and open the detail drawer.
+// Employees list page — Admin + HR.
+// P28.7 adds: Add Employee button, pencil/eye/trash row icons, pending-
+// deletion badge, Active/Inactive filter chip, greyed-out styling for
+// inactive rows.
 
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { Icon } from "../../shell/Icon";
 import { EmployeeDrawer } from "./EmployeeDrawer";
 import { ImportModal } from "./ImportModal";
-import { useEmployeeList } from "./hooks";
+import {
+  useDeleteRequestList,
+  useEmployeeList,
+} from "./hooks";
 import type { Department } from "./types";
 
-// Department codes come from the migration seed — keep them in one place
-// so the filter chip list is stable without a /api/departments endpoint
-// (not yet exposed; will land with P11's settings surface).
 const PILOT_DEPARTMENTS: Department[] = [
   { id: 1, code: "ENG", name: "Engineering" },
   { id: 2, code: "OPS", name: "Operations" },
   { id: 3, code: "ADM", name: "Administration" },
 ];
 
+type StatusFilter = "active" | "inactive" | "all";
+
 export function EmployeesPage() {
+  const { t } = useTranslation();
   const [q, setQ] = useState("");
   const [departmentId, setDepartmentId] = useState<number | null>(null);
-  const [includeInactive, setIncludeInactive] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
   const [importOpen, setImportOpen] = useState(false);
-  const [drawerId, setDrawerId] = useState<number | null>(null);
+  // ``drawerId`` semantics:
+  //   undefined → no drawer
+  //   null      → Add mode
+  //   number    → Edit mode for that id
+  const [drawerId, setDrawerId] = useState<number | null | undefined>(undefined);
 
   const filters = useMemo(
     () => ({
       q,
       department_id: departmentId,
-      include_inactive: includeInactive,
+      include_inactive: statusFilter !== "active",
       page: 1,
       page_size: 100,
     }),
-    [q, departmentId, includeInactive],
+    [q, departmentId, statusFilter],
   );
 
   const list = useEmployeeList(filters);
+  const pendingDeletes = useDeleteRequestList();
+  // Map employee_id → pending request id for the badge.
+  const pendingByEmployee = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const r of pendingDeletes.data?.items ?? []) {
+      m.set(r.employee_id, r.id);
+    }
+    return m;
+  }, [pendingDeletes.data]);
+
+  // Apply the inactive-only filter client-side (the backend's
+  // include_inactive returns BOTH active+inactive when true).
+  const visibleItems = useMemo(() => {
+    const items = list.data?.items ?? [];
+    if (statusFilter === "inactive") {
+      return items.filter((e) => e.status === "inactive");
+    }
+    return items;
+  }, [list.data, statusFilter]);
 
   const onExport = () => {
-    // Plain link — the browser downloads the XLSX; cookie auth flows via
-    // same-origin so no fetch() wrapper needed.
     window.location.assign("/api/employees/export");
   };
 
@@ -50,39 +75,49 @@ export function EmployeesPage() {
     <>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Employees</h1>
+          <h1 className="page-title">{t("employees.title") as string}</h1>
           <p className="page-sub">
             {list.data
               ? `${list.data.total} ${list.data.total === 1 ? "person" : "people"}`
               : "—"}
             {" · "}
-            <span className="mono">{fullyEnrolledPercentage(list.data?.items)}</span>
-            {" fully enrolled with reference photos"}
+            <span className="mono">
+              {fullyEnrolledPercentage(list.data?.items)}
+            </span>
+            {" "}
+            {t("employees.fullyEnrolledSuffix") as string}
           </p>
         </div>
         <div className="page-actions">
           <button className="btn" onClick={onExport}>
             <Icon name="download" size={12} />
-            Export
+            {t("common.export") as string}
           </button>
           <button
-            className="btn btn-primary"
+            className="btn"
             onClick={() => setImportOpen(true)}
           >
             <Icon name="upload" size={12} />
-            Import
+            {t("common.import") as string}
+          </button>
+          <button
+            className="btn btn-primary"
+            onClick={() => setDrawerId(null)}
+          >
+            <Icon name="plus" size={12} />
+            {t("employees.addButton") as string}
           </button>
         </div>
       </div>
 
       <div className="card">
         <div className="card-head">
-          <h3 className="card-title">All employees</h3>
+          <h3 className="card-title">{t("employees.allEmployees") as string}</h3>
           <div className="flex gap-2" style={{ alignItems: "center" }}>
-            <div className="topbar-search" style={{ width: 220 }}>
+            <div className="topbar-search" style={{ width: 240 }}>
               <Icon name="search" size={13} />
               <input
-                placeholder="Search by id, name, email, department"
+                placeholder={t("employees.searchPlaceholder") as string}
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
               />
@@ -90,81 +125,113 @@ export function EmployeesPage() {
             <select
               value={departmentId ?? ""}
               onChange={(e) =>
-                setDepartmentId(e.target.value === "" ? null : Number(e.target.value))
+                setDepartmentId(
+                  e.target.value === "" ? null : Number(e.target.value),
+                )
               }
               style={selectStyle}
             >
-              <option value="">All departments</option>
+              <option value="">{t("employees.allDepartments") as string}</option>
               {PILOT_DEPARTMENTS.map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.name}
                 </option>
               ))}
             </select>
-            <label
+            {/* Active/Inactive segmented chip */}
+            <div
               style={{
-                fontSize: 12,
-                color: "var(--text-secondary)",
                 display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
+                gap: 0,
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius-sm)",
+                padding: 2,
+                background: "var(--bg-sunken)",
               }}
             >
-              <input
-                type="checkbox"
-                checked={includeInactive}
-                onChange={(e) => setIncludeInactive(e.target.checked)}
-              />
-              Include inactive
-            </label>
+              {(["active", "inactive", "all"] as StatusFilter[]).map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => setStatusFilter(opt)}
+                  aria-pressed={statusFilter === opt}
+                  style={{
+                    padding: "4px 8px",
+                    fontSize: 11.5,
+                    border: "none",
+                    background:
+                      statusFilter === opt ? "var(--bg-elev)" : "transparent",
+                    color:
+                      statusFilter === opt
+                        ? "var(--text)"
+                        : "var(--text-secondary)",
+                    fontWeight: statusFilter === opt ? 600 : 500,
+                    cursor: "pointer",
+                    borderRadius: 3,
+                  }}
+                >
+                  {t(`employees.statusFilter.${opt}`) as string}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
         <table className="table">
           <thead>
             <tr>
-              <th>Employee</th>
-              <th>ID</th>
-              <th>Email</th>
-              <th>Department</th>
-              <th>Status</th>
-              <th style={{ width: 80 }}>Photos</th>
+              <th>{t("employees.col.employee") as string}</th>
+              <th>{t("employees.col.id") as string}</th>
+              <th>{t("employees.col.email") as string}</th>
+              <th>{t("employees.col.department") as string}</th>
+              <th>{t("employees.col.status") as string}</th>
+              <th style={{ width: 80 }}>{t("employees.col.photos") as string}</th>
+              <th style={{ width: 110, textAlign: "end" }}>
+                {t("employees.col.actions") as string}
+              </th>
             </tr>
           </thead>
           <tbody>
             {list.isLoading && (
               <tr>
-                <td colSpan={6} className="text-sm text-dim" style={{ padding: 16 }}>
-                  Loading…
+                <td colSpan={7} className="text-sm text-dim" style={{ padding: 16 }}>
+                  {t("common.loading") as string}
                 </td>
               </tr>
             )}
             {list.isError && (
               <tr>
-                <td colSpan={6} className="text-sm" style={{ padding: 16, color: "var(--danger-text)" }}>
-                  Could not load employees.
+                <td
+                  colSpan={7}
+                  className="text-sm"
+                  style={{ padding: 16, color: "var(--danger-text)" }}
+                >
+                  {t("employees.loadFailed") as string}
                 </td>
               </tr>
             )}
-            {list.data &&
-              list.data.items.map((e) => (
+            {visibleItems.map((e) => {
+              const pendingDeleteId = pendingByEmployee.get(e.id);
+              const inactive = e.status !== "active";
+              return (
                 <tr
                   key={e.id}
                   onClick={() => setDrawerId(e.id)}
-                  style={{ cursor: "pointer" }}
+                  style={{
+                    cursor: "pointer",
+                    opacity: inactive ? 0.6 : 1,
+                  }}
                 >
                   <td>
                     <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 10,
-                      }}
+                      style={{ display: "flex", alignItems: "center", gap: 10 }}
                     >
                       <div className="avatar">{initials(e.full_name)}</div>
                       <div>
                         <div style={{ fontWeight: 500 }}>{e.full_name}</div>
-                        <div className="text-xs text-dim">{e.department.name}</div>
+                        <div className="text-xs text-dim">
+                          {e.designation ?? e.department.name}
+                        </div>
                       </div>
                     </div>
                   </td>
@@ -174,25 +241,54 @@ export function EmployeesPage() {
                     <span className="pill pill-neutral">{e.department.code}</span>
                   </td>
                   <td>
-                    <span
-                      className={`pill ${e.status === "active" ? "pill-success" : "pill-warning"}`}
-                    >
-                      {e.status}
-                    </span>
+                    <div style={{ display: "flex", gap: 4 }}>
+                      <span
+                        className={`pill ${
+                          e.status === "active" ? "pill-success" : "pill-warning"
+                        }`}
+                      >
+                        {t(`employees.statusValue.${e.status}`) as string}
+                      </span>
+                      {pendingDeleteId !== undefined && (
+                        <span
+                          className="pill pill-danger"
+                          title={t("employees.delete.pendingTooltip") as string}
+                        >
+                          {t("employees.delete.pendingBadge") as string}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td>
                     <span
-                      className={`pill ${e.photo_count > 0 ? "pill-accent" : "pill-neutral"}`}
+                      className={`pill ${
+                        e.photo_count > 0 ? "pill-accent" : "pill-neutral"
+                      }`}
                     >
                       {e.photo_count}
                     </span>
                   </td>
+                  <td
+                    onClick={(ev) => ev.stopPropagation()}
+                    style={{ textAlign: "end" }}
+                  >
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      onClick={() => setDrawerId(e.id)}
+                      aria-label={t("employees.action.edit") as string}
+                      title={t("employees.action.edit") as string}
+                    >
+                      <Icon name="edit" size={13} />
+                    </button>
+                  </td>
                 </tr>
-              ))}
-            {list.data && list.data.items.length === 0 && !list.isLoading && (
+              );
+            })}
+            {!list.isLoading && visibleItems.length === 0 && (
               <tr>
-                <td colSpan={6} className="text-sm text-dim" style={{ padding: 16 }}>
-                  No employees match. Try clearing filters or import from Excel.
+                <td colSpan={7} className="text-sm text-dim" style={{ padding: 16 }}>
+                  {t("employees.empty") as string}
                 </td>
               </tr>
             )}
@@ -201,8 +297,11 @@ export function EmployeesPage() {
       </div>
 
       {importOpen && <ImportModal onClose={() => setImportOpen(false)} />}
-      {drawerId !== null && (
-        <EmployeeDrawer employeeId={drawerId} onClose={() => setDrawerId(null)} />
+      {drawerId !== undefined && (
+        <EmployeeDrawer
+          employeeId={drawerId}
+          onClose={() => setDrawerId(undefined)}
+        />
       )}
     </>
   );

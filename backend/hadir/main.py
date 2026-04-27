@@ -34,11 +34,14 @@ from hadir.config import get_settings
 from hadir.custom_fields import router as custom_fields_router
 from hadir.detection_events.router import router as detection_events_router
 from hadir.employees import router as employees_router
+from hadir.employees.delete_requests import router as delete_requests_router
+from hadir.employees.lifecycle_cron import lifecycle_scheduler
 from hadir.identification.router import router as identification_router
 from hadir.leave_calendar import router as leave_calendar_router
 from hadir.live_capture import router as live_capture_router
 from hadir.manager_assignments import router as manager_assignments_router
 from hadir.policies import router as policies_router
+from hadir.reporting.former_employees import router as former_employees_router
 from hadir.reporting.router import router as reporting_router
 from hadir.requests import (
     reason_categories_router as request_reason_categories_router,
@@ -56,6 +59,7 @@ from hadir.scheduled_reports import (
 )
 from hadir.super_admin import router as super_admin_router
 from hadir.system.router import router as system_router
+from hadir.users_lookup import router as users_lookup_router
 
 
 def _configure_logging() -> None:
@@ -112,6 +116,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     report_runner.start()
     notification_worker.start()
     retention_scheduler.start()
+    lifecycle_scheduler.start()
     try:
         yield
     finally:
@@ -122,6 +127,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         report_runner.stop()
         notification_worker.stop()
         retention_scheduler.stop()
+        lifecycle_scheduler.stop()
         limiter.stop()
 
 
@@ -237,14 +243,17 @@ def create_app() -> FastAPI:
 
     app.include_router(auth_router)
     app.include_router(employees_router)
+    app.include_router(delete_requests_router)
     app.include_router(cameras_router)
     app.include_router(identification_router)
     app.include_router(attendance_router)
     app.include_router(attendance_calendar_router)
     app.include_router(detection_events_router)
     app.include_router(system_router)
+    app.include_router(users_lookup_router)
     app.include_router(audit_log_router)
     app.include_router(reporting_router)
+    app.include_router(former_employees_router)
     app.include_router(super_admin_router)
     app.include_router(branding_router)
     app.include_router(branding_super_admin_router)

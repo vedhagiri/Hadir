@@ -9,13 +9,13 @@ filter, v1.0's multi-tenant cut-over will leak data across customers.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
 from sqlalchemy import and_, func, insert, or_, select, update
 from sqlalchemy.engine import Connection
 
-from hadir.db import departments, employee_photos, employees
+from hadir.db import departments, employee_photos, employees, users
 from hadir.tenants.scope import TenantScope
 
 
@@ -33,6 +33,15 @@ class EmployeeRow:
     status: str
     photo_count: int
     created_at: datetime
+    # P28.7 fields. All optional — pre-P28.7 rows are NULL.
+    designation: Optional[str] = None
+    phone: Optional[str] = None
+    reports_to_user_id: Optional[int] = None
+    reports_to_full_name: Optional[str] = None
+    joining_date: Optional[date] = None
+    relieving_date: Optional[date] = None
+    deactivated_at: Optional[datetime] = None
+    deactivation_reason: Optional[str] = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +67,10 @@ def _photo_count_subquery():
 
 def _employee_select(scope: TenantScope):
     photo_count = _photo_count_subquery().label("photo_count")
+    # P28.7: outerjoin to ``users`` so the response carries the
+    # reports_to manager's display name without a second query in
+    # the router.
+    reports_to = users.alias("reports_to_user")
     return (
         select(
             employees.c.id,
@@ -70,6 +83,14 @@ def _employee_select(scope: TenantScope):
             employees.c.status,
             photo_count,
             employees.c.created_at,
+            employees.c.designation,
+            employees.c.phone,
+            employees.c.reports_to_user_id,
+            reports_to.c.full_name.label("reports_to_full_name"),
+            employees.c.joining_date,
+            employees.c.relieving_date,
+            employees.c.deactivated_at,
+            employees.c.deactivation_reason,
         )
         .select_from(
             employees.join(
@@ -77,6 +98,12 @@ def _employee_select(scope: TenantScope):
                 and_(
                     departments.c.id == employees.c.department_id,
                     departments.c.tenant_id == employees.c.tenant_id,
+                ),
+            ).outerjoin(
+                reports_to,
+                and_(
+                    reports_to.c.id == employees.c.reports_to_user_id,
+                    reports_to.c.tenant_id == employees.c.tenant_id,
                 ),
             )
         )
@@ -96,6 +123,17 @@ def _row_to_employee(row) -> EmployeeRow:
         status=str(row.status),
         photo_count=int(row.photo_count),
         created_at=row.created_at,
+        designation=row.designation,
+        phone=row.phone,
+        reports_to_user_id=
+            int(row.reports_to_user_id)
+            if row.reports_to_user_id is not None
+            else None,
+        reports_to_full_name=row.reports_to_full_name,
+        joining_date=row.joining_date,
+        relieving_date=row.relieving_date,
+        deactivated_at=row.deactivated_at,
+        deactivation_reason=row.deactivation_reason,
     )
 
 
@@ -203,6 +241,13 @@ def create_employee(
     email: Optional[str],
     department_id: int,
     status: str = "active",
+    designation: Optional[str] = None,
+    phone: Optional[str] = None,
+    reports_to_user_id: Optional[int] = None,
+    joining_date: Optional[date] = None,
+    relieving_date: Optional[date] = None,
+    deactivated_at: Optional[datetime] = None,
+    deactivation_reason: Optional[str] = None,
 ) -> int:
     new_id = conn.execute(
         insert(employees)
@@ -213,10 +258,33 @@ def create_employee(
             email=email,
             department_id=department_id,
             status=status,
+            designation=designation,
+            phone=phone,
+            reports_to_user_id=reports_to_user_id,
+            joining_date=joining_date,
+            relieving_date=relieving_date,
+            deactivated_at=deactivated_at,
+            deactivation_reason=deactivation_reason,
         )
         .returning(employees.c.id)
     ).scalar_one()
     return int(new_id)
+
+
+def is_user_in_tenant(
+    conn: Connection, scope: TenantScope, user_id: int
+) -> bool:
+    """Check that a ``users.id`` belongs to this tenant — guards
+    ``reports_to_user_id`` so a cross-tenant id can't sneak in via
+    PATCH/POST."""
+
+    row = conn.execute(
+        select(users.c.id).where(
+            users.c.tenant_id == scope.tenant_id,
+            users.c.id == user_id,
+        )
+    ).first()
+    return row is not None
 
 
 def update_employee(

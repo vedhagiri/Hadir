@@ -7,10 +7,10 @@ appears in wire formats — it's derived from the session.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 
 # Inbound (create/patch) — operators can only flip between
@@ -39,6 +39,16 @@ class EmployeeOut(BaseModel):
     status: StatusOut
     photo_count: int
     created_at: datetime
+    # P28.7 lifecycle + HR org-chart fields. All optional / nullable —
+    # existing rows have NULL until HR backfills them.
+    designation: Optional[str] = None
+    phone: Optional[str] = None
+    reports_to_user_id: Optional[int] = None
+    reports_to_full_name: Optional[str] = None
+    joining_date: Optional[date] = None
+    relieving_date: Optional[date] = None
+    deactivated_at: Optional[datetime] = None
+    deactivation_reason: Optional[str] = None
 
 
 class EmployeeListOut(BaseModel):
@@ -58,6 +68,25 @@ class EmployeeCreateIn(BaseModel):
     department_code: Optional[str] = Field(default=None, min_length=1, max_length=32)
     department_id: Optional[int] = None
     status: Status = "active"
+    # P28.7 — extended fields.
+    designation: Optional[str] = Field(default=None, max_length=80)
+    phone: Optional[str] = Field(default=None, max_length=30)
+    reports_to_user_id: Optional[int] = None
+    joining_date: Optional[date] = None
+    relieving_date: Optional[date] = None
+    # When status='inactive' on create, server requires a reason
+    # (handled at the router; min_length=5 enforced there).
+    deactivation_reason: Optional[str] = Field(default=None, max_length=400)
+
+    @model_validator(mode="after")
+    def _date_order(self) -> "EmployeeCreateIn":
+        if (
+            self.joining_date is not None
+            and self.relieving_date is not None
+            and self.relieving_date < self.joining_date
+        ):
+            raise ValueError("relieving_date cannot be before joining_date")
+        return self
 
 
 class EmployeePatchIn(BaseModel):
@@ -68,6 +97,26 @@ class EmployeePatchIn(BaseModel):
     department_code: Optional[str] = Field(default=None, min_length=1, max_length=32)
     department_id: Optional[int] = None
     status: Optional[Status] = None
+    # P28.7
+    designation: Optional[str] = Field(default=None, max_length=80)
+    phone: Optional[str] = Field(default=None, max_length=30)
+    reports_to_user_id: Optional[int] = None
+    joining_date: Optional[date] = None
+    relieving_date: Optional[date] = None
+    deactivation_reason: Optional[str] = Field(default=None, max_length=400)
+
+    @model_validator(mode="after")
+    def _date_order(self) -> "EmployeePatchIn":
+        # Cross-field check: only fires when BOTH dates are set in this
+        # patch. The router does the rest of the cross-field check
+        # against the existing row's values.
+        if (
+            self.joining_date is not None
+            and self.relieving_date is not None
+            and self.relieving_date < self.joining_date
+        ):
+            raise ValueError("relieving_date cannot be before joining_date")
+        return self
 
 
 class ImportError(BaseModel):

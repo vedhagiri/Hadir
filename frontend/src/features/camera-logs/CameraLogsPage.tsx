@@ -21,9 +21,12 @@ export function CameraLogsPage() {
     page: 1,
     page_size: PAGE_SIZE,
   });
+  // P28.7: client-side toggle wired through to the new
+  // ``former_only=true`` query param.
+  const [formerOnly, setFormerOnly] = useState(false);
 
   const cameras = useCameraOptions();
-  const events = useDetectionEvents(filters);
+  const events = useDetectionEvents(filters, { formerOnly });
 
   const totalPages = useMemo(() => {
     if (!events.data) return 1;
@@ -89,6 +92,31 @@ export function CameraLogsPage() {
               <option value="unidentified">Unidentified</option>
             </select>
 
+            <label
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 12,
+                color: formerOnly
+                  ? "var(--danger-text)"
+                  : "var(--text-secondary)",
+                background: formerOnly ? "var(--danger-soft)" : "transparent",
+                padding: "4px 8px",
+                borderRadius: "var(--radius-sm)",
+                border: `1px solid ${
+                  formerOnly ? "var(--danger-text)" : "var(--border)"
+                }`,
+                cursor: "pointer",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={formerOnly}
+                onChange={(e) => setFormerOnly(e.target.checked)}
+              />
+              Former employees only
+            </label>
             <input
               type="datetime-local"
               value={filters.start ?? ""}
@@ -191,7 +219,22 @@ export function CameraLogsPage() {
                   {ev.employee_id ? (
                     <span>
                       <span style={{ fontWeight: 500 }}>{ev.employee_name}</span>{" "}
-                      <span className="mono text-xs text-dim">{ev.employee_code}</span>
+                      <span className="mono text-xs text-dim">
+                        {ev.employee_code}
+                      </span>
+                    </span>
+                  ) : ev.former_employee_match ? (
+                    <span
+                      title={
+                        ev.former_match_employee_name
+                          ? `Former: ${ev.former_match_employee_name}`
+                          : "Former employee"
+                      }
+                    >
+                      <span className="pill pill-danger">Former employee</span>{" "}
+                      <span className="mono text-xs text-dim">
+                        {ev.former_match_employee_code ?? "—"}
+                      </span>
                     </span>
                   ) : (
                     <span className="pill pill-warning">Unidentified</span>

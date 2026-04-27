@@ -13,6 +13,8 @@
     "yes": "نعم",
     "no": "لا",
     "all": "الكل",
+    "export": "تصدير",
+    "import": "استيراد",
     "search": "بحث…",
     "comingSoon": "قريباً",
     "error": "حدث خطأ ما.",
@@ -95,7 +97,8 @@
     "tabs": {
       "pending": "بانتظار قراري",
       "decided": "تم البت فيها بواسطتي",
-      "all": "الكل"
+      "all": "الكل",
+      "deleteRequests": "طلبات الحذف"
     },
     "columns": {
       "id": "المعرف",
@@ -120,6 +123,23 @@
       "adminApproved": "تجاوز المسؤول · موافقة",
       "adminRejected": "تجاوز المسؤول · رفض",
       "cancelled": "ملغى"
+    },
+    "deleteRequests": {
+      "title": "طلبات الحذف المعلّقة",
+      "pendingSuffix": "معلّقة",
+      "empty": "لا توجد طلبات حذف معلّقة.",
+      "approve": "موافقة",
+      "reject": "رفض",
+      "review": "مراجعة",
+      "confirmReject": "تأكيد الرفض",
+      "rejectPlaceholder": "سبب الرفض (5 أحرف على الأقل)",
+      "col": {
+        "employee": "الموظف",
+        "requestedBy": "بطلب من",
+        "reason": "السبب",
+        "submitted": "تاريخ الإرسال",
+        "action": "الإجراء"
+      }
     }
   },
   "myRequests": {
@@ -448,6 +468,125 @@
       "holiday": "عطلة رسمية",
       "future": "مستقبلي",
       "no_record": "لا يوجد سجل"
+    }
+  },
+  "employees": {
+    "title": "الموظفون",
+    "addButton": "إضافة موظف",
+    "allEmployees": "جميع الموظفين",
+    "allDepartments": "جميع الأقسام",
+    "searchPlaceholder": "ابحث بالمعرف أو الاسم أو البريد أو القسم",
+    "loadFailed": "تعذر تحميل قائمة الموظفين.",
+    "empty": "لا توجد نتائج. حاول مسح الفلاتر أو الاستيراد من Excel.",
+    "fullyEnrolledSuffix": "تم تسجيلهم بصور مرجعية كاملة",
+    "statusFilter": {
+      "active": "النشطون فقط",
+      "inactive": "غير النشطين فقط",
+      "all": "عرض الكل"
+    },
+    "statusValue": {
+      "active": "نشط",
+      "inactive": "غير نشط",
+      "deleted": "محذوف"
+    },
+    "col": {
+      "employee": "الموظف",
+      "id": "المعرف",
+      "email": "البريد الإلكتروني",
+      "department": "القسم",
+      "status": "الحالة",
+      "photos": "الصور",
+      "actions": "الإجراءات"
+    },
+    "action": {
+      "edit": "تعديل",
+      "view": "عرض",
+      "delete": "حذف"
+    },
+    "drawer": {
+      "addTitle": "إضافة موظف",
+      "editTitle": "تعديل الموظف",
+      "newEmployee": "موظف جديد",
+      "create": "إنشاء",
+      "save": "حفظ التغييرات",
+      "auditNote": "التغييرات مُدقَّقة وقابلة للتراجع خلال 24 ساعة"
+    },
+    "section": {
+      "identity": "الهوية",
+      "assignment": "التعيين",
+      "lifecycle": "تواريخ الانضمام والمغادرة",
+      "shiftPolicy": "سياسة الوردية",
+      "referencePhotos": "الصور المرجعية",
+      "status": "الحالة"
+    },
+    "field": {
+      "code": "معرف الموظف",
+      "fullName": "الاسم الكامل",
+      "designation": "المسمى الوظيفي",
+      "email": "البريد الإلكتروني",
+      "phone": "الهاتف",
+      "department": "القسم",
+      "reportsTo": "يتبع إلى",
+      "noManager": "— بدون مدير —",
+      "joinDate": "تاريخ الانضمام",
+      "relievingDate": "تاريخ المغادرة",
+      "active": "نشط",
+      "activeHint": "الموظفون غير النشطين يبقون في التقارير التاريخية، لكن لا يُسجَّل حضورهم الجديد.",
+      "deactivationReasonLabel": "لماذا يتم تعطيل هذا الموظف؟",
+      "deactivationReasonPlaceholder": "استقالة، إنهاء خدمة، نقل، إلخ.",
+      "deactivatedAt": "تاريخ التعطيل"
+    },
+    "photos": {
+      "angleLabel": "الزاوية"
+    },
+    "errors": {
+      "codeAndNameRequired": "معرف الموظف والاسم الكامل مطلوبان.",
+      "reasonRequired": "يجب إدخال سبب التعطيل (5 أحرف على الأقل) عند التغيير إلى غير نشط.",
+      "relievingBeforeJoining": "لا يمكن أن يكون تاريخ المغادرة قبل تاريخ الانضمام.",
+      "overrideCommentMin": "يجب أن يحتوي تعليق التجاوز على 10 أحرف على الأقل."
+    },
+    "delete": {
+      "hrTitle": "حذف الموظف",
+      "adminTitle": "إرسال طلب حذف إلى الموارد البشرية",
+      "hrBody": "هل تريد حذف {{name}} نهائياً؟ سيتم إزالة الصور المرجعية والحضور والهوية. الإجراء مُدقَّق ولا يمكن التراجع عنه.",
+      "adminBody": "سيتم إنشاء طلب حذف معلّق لتوافق عليه الموارد البشرية. يبقى {{name}} في القائمة مع شارة 'حذف معلّق' حتى تقرر الموارد البشرية.",
+      "hrConfirm": "حذف الآن",
+      "adminConfirm": "إرسال طلب الحذف",
+      "reasonLabel": "السبب",
+      "reasonPlaceholder": "لماذا يتم حذف هذا الموظف؟ (10 أحرف على الأقل)",
+      "reasonHint": "يُسجَّل في سجل التدقيق مع المُنفِّذ والوقت.",
+      "reasonMin": "يجب أن يحتوي السبب على 10 أحرف على الأقل.",
+      "rejectMin": "يجب أن يحتوي التعليق على 5 أحرف على الأقل.",
+      "pendingBannerTitle": "بانتظار موافقة الموارد البشرية على الحذف",
+      "pendingBannerBody": "أرسله {{name}} في {{date}}.",
+      "pendingBadge": "حذف معلّق",
+      "pendingTooltip": "هناك طلب حذف لهذا الموظف بانتظار موافقة الموارد البشرية.",
+      "approve": "موافقة",
+      "reject": "رفض",
+      "rejectPromptComment": "تعليق الرفض (5 أحرف على الأقل):",
+      "overrideAndApprove": "تجاوز والموافقة",
+      "overridePromptComment": "تعليق إلزامي (10 أحرف على الأقل) — سيُسجَّل في سجل التدقيق مع هويتك.",
+      "confirmOverride": "تجاوز + حذف",
+      "unknownActor": "مسؤول آخر"
+    }
+  },
+  "formerEmployees": {
+    "title": "ظهور الموظفين السابقين",
+    "subtitle": "اكتشافات للموظفين غير النشطين في الموقع. إشارة أمنية — وليست حضوراً.",
+    "detections": "الظهورات",
+    "from": "من",
+    "to": "إلى",
+    "exportXlsx": "تصدير XLSX",
+    "loadFailed": "تعذر تحميل التقرير.",
+    "empty": "لا توجد ظهورات لموظفين سابقين في هذا النطاق.",
+    "col": {
+      "captured": "وقت الالتقاط",
+      "camera": "الكاميرا",
+      "code": "المعرف",
+      "name": "الاسم",
+      "confidence": "الثقة",
+      "reason": "سبب التعطيل",
+      "deactivatedAt": "تاريخ التعطيل"
     }
   }
 }

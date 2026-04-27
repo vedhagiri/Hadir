@@ -532,13 +532,44 @@ def events_for(
 # --- Employees --------------------------------------------------------------
 
 
-def active_employee_ids(conn: Connection, scope: TenantScope) -> list[int]:
-    rows = conn.execute(
-        select(employees.c.id).where(
-            employees.c.tenant_id == scope.tenant_id,
-            employees.c.status == "active",
+def active_employee_ids(
+    conn: Connection,
+    scope: TenantScope,
+    *,
+    on_date: Optional[date] = None,
+) -> list[int]:
+    """Return employee_ids that are *attendance-eligible* on the given date.
+
+    P28.7: an employee is eligible iff:
+
+    * ``status='active'`` (the existing rule), AND
+    * ``joining_date IS NULL OR joining_date <= on_date`` (no rows
+      generated for days before they joined — no false "absent"),
+      AND
+    * ``relieving_date IS NULL OR relieving_date >= on_date`` (no
+      rows generated past their leaving date even if the cron hasn't
+      flipped status yet).
+
+    Historical attendance_records rows from before deactivation are
+    preserved — this filter only affects *which days get a NEW row*.
+    """
+
+    base = select(employees.c.id).where(
+        employees.c.tenant_id == scope.tenant_id,
+        employees.c.status == "active",
+    )
+    if on_date is not None:
+        base = base.where(
+            or_(
+                employees.c.joining_date.is_(None),
+                employees.c.joining_date <= on_date,
+            ),
+            or_(
+                employees.c.relieving_date.is_(None),
+                employees.c.relieving_date >= on_date,
+            ),
         )
-    ).all()
+    rows = conn.execute(base).all()
     return [int(r.id) for r in rows]
 
 

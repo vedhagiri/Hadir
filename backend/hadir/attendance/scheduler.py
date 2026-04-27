@@ -204,7 +204,11 @@ def _recompute_today_inner(scope: TenantScope) -> int:
     today = datetime.now(timezone.utc).astimezone(tz).date()
 
     with engine.begin() as conn:
-        employee_ids = attendance_repo.active_employee_ids(conn, scope)
+        # P28.7: pass today so employees whose joining_date is in the
+        # future or whose relieving_date has passed are excluded.
+        employee_ids = attendance_repo.active_employee_ids(
+            conn, scope, on_date=today
+        )
         # P9: resolve per-employee via the policy_assignments cascade.
         policy_map = attendance_repo.resolve_policies_for_employees(
             conn, scope, the_date=today, employee_ids=employee_ids

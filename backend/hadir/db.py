@@ -1457,6 +1457,22 @@ employees = Table(
         nullable=False,
         server_default=func.now(),
     ),
+    # P28.7: extended fields for lifecycle + HR org chart.
+    # ``reports_to_user_id`` is a separate concept from
+    # ``manager_assignments`` (which drives approval scope) — this one
+    # is the HR org chart for the Edit drawer's "Reports to" picker.
+    Column("designation", Text, nullable=True),
+    Column("phone", Text, nullable=True),
+    Column(
+        "reports_to_user_id",
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    Column("joining_date", Date, nullable=True),
+    Column("relieving_date", Date, nullable=True),
+    Column("deactivated_at", DateTime(timezone=True), nullable=True),
+    Column("deactivation_reason", Text, nullable=True),
     UniqueConstraint("tenant_id", "employee_code", name="uq_employees_tenant_code"),
     CheckConstraint(
         "status IN ('active','inactive','deleted')",
@@ -1619,6 +1635,24 @@ detection_events = Table(
     ),
     Column("confidence", Float, nullable=True),
     Column("track_id", Text, nullable=False),
+    # P28.7: when the matcher hits an *inactive* employee
+    # ``former_employee_match`` is set to true and ``employee_id``
+    # stays NULL — so attendance queries (which filter on
+    # ``employee_id IS NOT NULL``) automatically exclude former
+    # employees, while the Camera Logs / Former-employees-seen
+    # report can join via ``former_match_employee_id``.
+    Column(
+        "former_employee_match",
+        Boolean,
+        nullable=False,
+        server_default="false",
+    ),
+    Column(
+        "former_match_employee_id",
+        Integer,
+        ForeignKey("employees.id", ondelete="SET NULL"),
+        nullable=True,
+    ),
     Index(
         "ix_detection_events_tenant_captured_at",
         "tenant_id",
@@ -1764,6 +1798,75 @@ attendance_records = Table(
         "ix_attendance_records_tenant_date",
         "tenant_id",
         "date",
+    ),
+)
+
+
+# --- Delete requests (P28.7) -----------------------------------------------
+# Per-tenant queue of HR-approved hard-delete requests for employees.
+# Separate from ``requests`` (P13 attendance/leave exceptions) — different
+# state machine, different actor rules, different consequences.
+#
+# State machine:
+#   pending          → Admin filed it; HR has not decided
+#   approved         → HR (or HR self-file) approved → hard-delete fired
+#   rejected         → HR rejected (terminal)
+#   admin_override   → another Admin overrode + approved → hard-delete fired
+#   cancelled        → submitter withdrew (terminal)
+#
+# Partial unique index ``uq_delete_requests_pending_per_employee`` lives in
+# the migration (Postgres-only) — at most ONE pending row per employee.
+delete_requests = Table(
+    "delete_requests",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "employee_id",
+        Integer,
+        ForeignKey("employees.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "requested_by",
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    Column("reason", Text, nullable=False),
+    Column("status", Text, nullable=False, server_default="pending"),
+    Column(
+        "hr_decided_by",
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    Column("hr_decided_at", DateTime(timezone=True), nullable=True),
+    Column("hr_comment", Text, nullable=True),
+    Column(
+        "admin_override_by",
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    Column("admin_override_at", DateTime(timezone=True), nullable=True),
+    Column("admin_override_comment", Text, nullable=True),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    CheckConstraint(
+        "status IN ('pending','approved','rejected','admin_override','cancelled')",
+        name="ck_delete_requests_status",
     ),
 )
 

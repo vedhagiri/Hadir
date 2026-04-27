@@ -9,8 +9,11 @@ import type { UseQueryResult } from "@tanstack/react-query";
 
 import { api } from "../../api/client";
 import type {
+  DeleteRequest,
+  DeleteRequestListResponse,
   Employee,
   EmployeeListResponse,
+  EmployeeWritePayload,
   ImportResult,
   PhotoIngestResult,
   PhotoListResponse,
@@ -124,6 +127,137 @@ export function useEmployeePhotoUpload() {
         queryKey: ["employees", "detail", variables.employeeId],
       });
       qc.invalidateQueries({ queryKey: ["employees", "list"] });
+    },
+  });
+}
+
+// P28.7 — create + update employees with the extended field set.
+
+export function useCreateEmployee() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: EmployeeWritePayload): Promise<Employee> => {
+      return api<Employee>("/api/employees", {
+        method: "POST",
+        body: payload,
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["employees", "list"] });
+    },
+  });
+}
+
+export function useUpdateEmployee() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      employeeId: number;
+      payload: EmployeeWritePayload;
+    }): Promise<Employee> => {
+      return api<Employee>(`/api/employees/${args.employeeId}`, {
+        method: "PATCH",
+        body: args.payload,
+      });
+    },
+    onSuccess: (_result, variables) => {
+      qc.invalidateQueries({
+        queryKey: ["employees", "detail", variables.employeeId],
+      });
+      qc.invalidateQueries({ queryKey: ["employees", "list"] });
+    },
+  });
+}
+
+// P28.7 — delete-request workflow.
+
+export function useEmployeePendingDeleteRequest(
+  employeeId: number | null,
+): UseQueryResult<DeleteRequest | null, Error> {
+  return useQuery({
+    queryKey: ["delete-requests", "pending", employeeId],
+    queryFn: () =>
+      api<DeleteRequest | null>(
+        `/api/employees/${employeeId}/delete-request`,
+      ),
+    enabled: employeeId !== null,
+  });
+}
+
+export function useDeleteRequestList(): UseQueryResult<
+  DeleteRequestListResponse,
+  Error
+> {
+  return useQuery({
+    queryKey: ["delete-requests", "list"],
+    queryFn: () => api<DeleteRequestListResponse>("/api/delete-requests"),
+    refetchInterval: 30 * 1000,
+  });
+}
+
+export function useSubmitDeleteRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      employeeId: number;
+      reason: string;
+    }): Promise<DeleteRequest> => {
+      return api<DeleteRequest>(
+        `/api/employees/${args.employeeId}/delete-request`,
+        { method: "POST", body: { reason: args.reason } },
+      );
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["delete-requests"] });
+      qc.invalidateQueries({ queryKey: ["employees"] });
+    },
+  });
+}
+
+export function useDecideDeleteRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      employeeId: number;
+      requestId: number;
+      decision: "approve" | "reject";
+      comment?: string;
+    }): Promise<DeleteRequest> => {
+      return api<DeleteRequest>(
+        `/api/employees/${args.employeeId}/delete-request/${args.requestId}/decide`,
+        {
+          method: "POST",
+          body: { decision: args.decision, comment: args.comment },
+        },
+      );
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["delete-requests"] });
+      qc.invalidateQueries({ queryKey: ["employees"] });
+    },
+  });
+}
+
+export function useAdminOverrideDeleteRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      employeeId: number;
+      requestId: number;
+      decision: "approve" | "reject";
+      comment: string;
+    }): Promise<DeleteRequest> => {
+      return api<DeleteRequest>(
+        `/api/employees/${args.employeeId}/delete-request/${args.requestId}/admin-override`,
+        {
+          method: "POST",
+          body: { decision: args.decision, comment: args.comment },
+        },
+      );
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["delete-requests"] });
+      qc.invalidateQueries({ queryKey: ["employees"] });
     },
   });
 }

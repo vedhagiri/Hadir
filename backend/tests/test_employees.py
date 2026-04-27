@@ -139,13 +139,24 @@ def test_export_round_trip_contains_all_expected_columns(
     wb.close()
 
     header = list(rows[0])
-    assert header == [
+    # P28.7 added six optional columns to the export. Assert the
+    # core six come first (so the column order isn't subtly broken)
+    # and the new columns trail in the documented order.
+    assert header[:6] == [
         "employee_code",
         "full_name",
         "email",
         "department_code",
         "status",
         "photo_count",
+    ]
+    assert header[6:] == [
+        "designation",
+        "phone",
+        "reports_to_email",
+        "joining_date",
+        "relieving_date",
+        "deactivation_reason",
     ]
 
     by_code = {r[0]: r for r in rows[1:]}

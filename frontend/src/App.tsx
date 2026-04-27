@@ -32,6 +32,7 @@ import { CamerasPage } from "./features/cameras/CamerasPage";
 import { DashboardRouter } from "./features/dashboard/DashboardRouter";
 import { EmployeesPage } from "./features/employees/EmployeesPage";
 import { CalendarPage } from "./features/calendar/CalendarPage";
+import { FormerEmployeesSeenReport } from "./features/reports/FormerEmployeesSeenReport";
 import { ReportsPage } from "./features/reports/ReportsPage";
 import { SystemPage } from "./features/system/SystemPage";
 import { LiveCapturePage } from "./pages/LiveCapture/LiveCapture";
@@ -103,6 +104,7 @@ export function App() {
         <Route path="my-attendance" element={<MyAttendancePage />} />
         <Route path="attendance/me" element={<MyAttendancePage />} />
         <Route path="reports" element={<ReportsPage />} />
+        <Route path="former-employees" element={<FormerEmployeesSeenReport />} />
         <Route path="calendar" element={<CalendarPage />} />
         <Route path="mgr-assign" element={<ManagerAssignmentsPage />} />
         <Route path="policies" element={<PoliciesPage />} />
@@ -136,6 +138,7 @@ export function App() {
             id !== "my-attendance" &&
             id !== "reports" &&
             id !== "calendar" &&
+            id !== "former-employees" &&
             id !== "settings" &&
             id !== "mgr-assign" &&
             id !== "policies" &&

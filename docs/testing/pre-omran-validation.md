@@ -582,6 +582,128 @@ Open <http://localhost:5173/calendar> as the demo Admin.
 
 ---
 
+## 13d. Employee management + lifecycle (P28.7)
+
+Use the **inaisys** tenant for this whole block (real-camera testing
+requires the corporate tenant's connected RTSP stream). Switch to
+mts_demo only for the cross-tenant isolation steps at the end.
+
+### Setup
+- [ ] `docker compose down && docker compose up --build`
+- [ ] Migration runs cleanly:
+      `docker compose exec backend python -m scripts.migrate`
+- [ ] Confirm new columns exist on `tenant_inaisys.employees` and
+      `tenant_inaisys.detection_events`. Confirm
+      `tenant_inaisys.delete_requests` table exists.
+
+### Add new employee
+- [ ] Log in as admin@inaisys.local. Employees → Add employee.
+- [ ] Fill all fields: code, name, designation, phone, reports_to
+      (pick from list), join_date today, relieving_date next year,
+      shift policy, status active.
+- [ ] Save. New row appears in list with all data populated.
+
+### Edit existing employee
+- [ ] Click pencil on the new employee. Drawer opens with all data.
+- [ ] Change designation, save. Audit log shows the change with
+      before/after.
+
+### Photo upload integration (existing P6 flow)
+- [ ] In Edit drawer, upload 3 reference photos. Save.
+- [ ] Walk past camera. `detection_events` row has `employee_id`
+      populated for this person.
+
+### Inactive flow
+- [ ] Edit employee, toggle Active off. Inline reason textarea
+      appears, mandatory.
+- [ ] Try to save without reason → form blocks, shows error.
+- [ ] Add reason "Test deactivation", save. Drawer updates:
+      "Inactive" badge, deactivation reason shown, deactivated_at
+      populated.
+- [ ] Walk past camera as this person. Within 30 seconds, check
+      `detection_events`:
+      ```sql
+      SELECT id, employee_id, former_employee_match, captured_at
+      FROM tenant_inaisys.detection_events
+      ORDER BY captured_at DESC LIMIT 5;
+      ```
+      Latest row must have `employee_id IS NULL AND
+      former_employee_match=true`.
+- [ ] Daily Attendance for today → this employee does NOT show as
+      Present (because they're inactive).
+- [ ] Camera Logs → recent event for this person shows with red
+      "Former employee" badge.
+
+### Reactivate
+- [ ] Edit employee, toggle Active back on. Reason field hides.
+      Save.
+- [ ] Walk past camera. Latest `detection_events` row has
+      `employee_id` populated again, `former_employee_match=false`.
+
+### Admin → HR delete approval flow
+- [ ] As Admin, click delete on an employee. Modal: "Submit delete
+      request to HR". Mandatory reason. Submit.
+- [ ] Row in employee list shows "Pending deletion" badge.
+- [ ] HR (hr@inaisys.local) logs in. Approvals → Delete requests
+      tab. The pending request is there.
+- [ ] HR clicks Approve. Row disappears from approvals queue.
+      Employee no longer appears in employees list. Their face
+      crops on disk are gone (verify with
+      `ls /data/faces/{tenant_id}/{code}/`).
+- [ ] Walk past camera as the deleted person. Detection event
+      created but neither matched nor flagged former — they're
+      now genuinely Unknown (matcher cache no longer contains
+      their embeddings).
+
+### HR self-delete
+- [ ] HR clicks delete on a different employee. Modal: confirm.
+      Submit. Employee deleted immediately (no further approval).
+
+### Admin override
+- [ ] As Admin, submit a delete request for another employee. As a
+      different Admin (create one if needed), open the Edit drawer
+      for that pending employee. "Override and approve" button
+      visible.
+- [ ] Click Override. Modal: mandatory 10+ char comment. Submit.
+      Employee deleted. Audit log shows
+      `delete_request.admin_override_approve` entry.
+
+### Joining date future
+- [ ] Add employee with joining_date = +30 days. Save.
+- [ ] Walk past camera as that person. Daily Attendance: no row
+      generated for this employee for today.
+- [ ] `detection_events` row exists but `employee_id` is NULL.
+
+### Relieving date cron
+- [ ] Edit an employee, set relieving_date = yesterday. Save.
+      Status still active immediately.
+- [ ] Trigger the lifecycle cron manually:
+      `docker compose exec backend python -m scripts.run_lifecycle_cron`
+- [ ] Reload employee list. Employee is now Inactive with
+      deactivation_reason "Auto-deactivated: relieving_date
+      reached". Audit log shows `employee.auto_deactivated`.
+
+### Former employees report
+- [ ] Reports → Former employees seen. Date range last 7 days.
+      Verify deactivated employee's detections appear in the
+      report.
+- [ ] Export XLSX. Opens cleanly.
+
+### XLSX import
+- [ ] Import a small XLSX with the new columns
+      (`designation`, `phone`, `reports_to_email`, `joining_date`,
+      `relieving_date`). Verify all fields persist.
+- [ ] Import an XLSX with `relieving_date` < `joining_date` →
+      row error in preview.
+
+### Cross-tenant isolation
+- [ ] As mts_demo Admin, in browser dev tools, try to PATCH an
+      inaisys employee's data → 404.
+- [ ] As mts_demo HR, GET
+      `/api/employees/<inaisys_id>/delete-request` → 404.
+
+---
+
 ## 14. Pre-Omran issues
 
 For every problem found, add a row below. This is the

@@ -7,18 +7,20 @@ import type { DetectionEventFilters, DetectionEventListResponse } from "./types"
 
 export function useDetectionEvents(
   filters: DetectionEventFilters,
+  options?: { formerOnly?: boolean },
 ): UseQueryResult<DetectionEventListResponse, Error> {
   const params = new URLSearchParams();
   if (filters.camera_id !== null) params.set("camera_id", String(filters.camera_id));
   if (filters.employee_id !== null) params.set("employee_id", String(filters.employee_id));
   if (filters.identified !== null) params.set("identified", String(filters.identified));
+  if (options?.formerOnly) params.set("former_only", "true");
   if (filters.start) params.set("start", filters.start);
   if (filters.end) params.set("end", filters.end);
   params.set("page", String(filters.page));
   params.set("page_size", String(filters.page_size));
   const path = `/api/detection-events?${params.toString()}`;
   return useQuery({
-    queryKey: ["detection-events", filters],
+    queryKey: ["detection-events", filters, options?.formerOnly ?? false],
     queryFn: () => api<DetectionEventListResponse>(path),
     staleTime: 15 * 1000,
   });

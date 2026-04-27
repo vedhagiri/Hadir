@@ -1,13 +1,21 @@
-"""FastAPI router for ``/api/employees/*`` (Admin-only in the pilot).
+"""FastAPI router for ``/api/employees/*``.
 
 Every CRUD operation writes an audit row via the append-only ``write_audit``
 helper; the import path also writes a summary row with the import counts.
-HR read access (and Employee self-access on /me) land in later prompts.
+
+P28.7 opens read + write access to the **HR** role alongside **Admin**:
+
+* List / get / export / create / patch — Admin or HR.
+* Photo upload + delete — Admin or HR.
+* Hard-delete (PDPL right-to-erasure) — still Admin-only.
+* Lifecycle delete-request endpoints — see ``delete_requests.py`` for
+  per-route role rules (Admin or HR submits; HR decides; Admin overrides).
 """
 
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from io import BytesIO
 from typing import Annotated, Optional
 
@@ -23,10 +31,11 @@ from fastapi import (
     status,
 )
 from fastapi.responses import StreamingResponse
+from sqlalchemy import func
 from sqlalchemy.engine import Connection
 
 from hadir.auth.audit import write_audit
-from hadir.auth.dependencies import CurrentUser, require_role
+from hadir.auth.dependencies import CurrentUser, require_any_role, require_role
 from hadir.custom_fields import repository as cf_repo
 from hadir.db import get_engine
 from hadir.employees import excel as excel_io
@@ -55,10 +64,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/employees", tags=["employees"])
 
-# Pilot is Admin-only. HR read access opens up in a later prompt; until
-# then we import the guard once and reuse it as ``ADMIN`` so the route
-# definitions below read like documentation.
+# P28.7: most endpoints now accept Admin OR HR. PDPL hard-delete is
+# still Admin-only — see the comment on that handler.
 ADMIN = Depends(require_role("Admin"))
+ADMIN_OR_HR = Depends(require_any_role("Admin", "HR"))
 
 
 def _row_to_out(row: repo.EmployeeRow) -> EmployeeOut:
@@ -75,6 +84,14 @@ def _row_to_out(row: repo.EmployeeRow) -> EmployeeOut:
         status=row.status,  # type: ignore[arg-type]  -- DB CHECK limits to active|inactive|deleted (P25)
         photo_count=row.photo_count,
         created_at=row.created_at,
+        designation=row.designation,
+        phone=row.phone,
+        reports_to_user_id=row.reports_to_user_id,
+        reports_to_full_name=row.reports_to_full_name,
+        joining_date=row.joining_date,
+        relieving_date=row.relieving_date,
+        deactivated_at=row.deactivated_at,
+        deactivation_reason=row.deactivation_reason,
     )
 
 
@@ -111,7 +128,7 @@ def _resolve_department_id(
 
 @router.get("", response_model=EmployeeListOut)
 def list_employees_endpoint(
-    user: Annotated[CurrentUser, ADMIN],
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
     q: Annotated[Optional[str], Query(description="Text search")] = None,
     department_id: Annotated[Optional[int], Query()] = None,
     include_inactive: Annotated[bool, Query()] = False,
@@ -138,7 +155,7 @@ def list_employees_endpoint(
 
 
 @router.get("/export")
-def export_employees_endpoint(user: Annotated[CurrentUser, ADMIN]) -> StreamingResponse:
+def export_employees_endpoint(user: Annotated[CurrentUser, ADMIN_OR_HR]) -> StreamingResponse:
     """Full-tenant XLSX dump (active + inactive), one sheet named Employees."""
 
     scope = TenantScope(tenant_id=user.tenant_id)
@@ -151,6 +168,29 @@ def export_employees_endpoint(user: Annotated[CurrentUser, ADMIN]) -> StreamingR
         values_by_employee = cf_repo.values_for_employees(
             conn, scope, [r.id for r in rows]
         )
+        # P28.7: build the user_id → email map for the
+        # ``reports_to_email`` export column. One query, only the
+        # users referenced by these employees' reports_to_user_id.
+        from sqlalchemy import select as _select  # noqa: PLC0415
+
+        reports_to_ids = [
+            r.reports_to_user_id
+            for r in rows
+            if r.reports_to_user_id is not None
+        ]
+        reports_to_email_by_user: dict[int, str] = {}
+        if reports_to_ids:
+            from hadir.db import users as _users  # noqa: PLC0415
+
+            user_rows = conn.execute(
+                _select(_users.c.id, _users.c.email).where(
+                    _users.c.tenant_id == scope.tenant_id,
+                    _users.c.id.in_(reports_to_ids),
+                )
+            ).all()
+            reports_to_email_by_user = {
+                int(u.id): str(u.email) for u in user_rows
+            }
         write_audit(
             conn,
             tenant_id=scope.tenant_id,
@@ -167,6 +207,7 @@ def export_employees_endpoint(user: Annotated[CurrentUser, ADMIN]) -> StreamingR
         rows,
         custom_field_codes=custom_codes,
         values_by_employee=values_by_employee,
+        reports_to_email_by_user=reports_to_email_by_user,
     )
     return StreamingResponse(
         buf,
@@ -180,9 +221,21 @@ def export_employees_endpoint(user: Annotated[CurrentUser, ADMIN]) -> StreamingR
 @router.post("", response_model=EmployeeOut, status_code=status.HTTP_201_CREATED)
 def create_employee_endpoint(
     payload: EmployeeCreateIn,
-    user: Annotated[CurrentUser, ADMIN],
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
 ) -> EmployeeOut:
     scope = TenantScope(tenant_id=user.tenant_id)
+
+    # P28.7: status='inactive' on create requires a reason. The
+    # ``EmployeePatchIn`` schema can't enforce this server-side
+    # without two-way coupling between fields, so we validate here.
+    if payload.status == "inactive":
+        reason = (payload.deactivation_reason or "").strip()
+        if len(reason) < 5:
+            raise HTTPException(
+                status_code=400,
+                detail="deactivation_reason is required (min 5 chars) when status='inactive'",
+            )
+
     with get_engine().begin() as conn:
         dept_id = _resolve_department_id(
             conn,
@@ -190,6 +243,17 @@ def create_employee_endpoint(
             department_id=payload.department_id,
             department_code=payload.department_code,
         )
+
+        # Validate ``reports_to_user_id`` belongs to this tenant — guards
+        # against cross-tenant ID smuggling via the wire.
+        if payload.reports_to_user_id is not None:
+            if not repo.is_user_in_tenant(
+                conn, scope, payload.reports_to_user_id
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="reports_to_user_id is not a user in this tenant",
+                )
 
         # Duplicate employee_code → 409 so callers can tell it apart from
         # malformed input (400s).
@@ -199,6 +263,10 @@ def create_employee_endpoint(
                 detail=f"employee_code '{payload.employee_code}' already exists",
             )
 
+        deactivated_at = (
+            datetime.now(tz=timezone.utc) if payload.status == "inactive" else None
+        )
+
         new_id = repo.create_employee(
             conn,
             scope,
@@ -207,6 +275,15 @@ def create_employee_endpoint(
             email=payload.email,
             department_id=dept_id,
             status=payload.status,
+            designation=payload.designation,
+            phone=payload.phone,
+            reports_to_user_id=payload.reports_to_user_id,
+            joining_date=payload.joining_date,
+            relieving_date=payload.relieving_date,
+            deactivated_at=deactivated_at,
+            deactivation_reason=(
+                payload.deactivation_reason if payload.status == "inactive" else None
+            ),
         )
         created = repo.get_employee(conn, scope, new_id)
         assert created is not None
@@ -224,6 +301,19 @@ def create_employee_endpoint(
                 "email": created.email,
                 "department_code": created.department_code,
                 "status": created.status,
+                "designation": created.designation,
+                "phone": created.phone,
+                "reports_to_user_id": created.reports_to_user_id,
+                "joining_date": (
+                    created.joining_date.isoformat()
+                    if created.joining_date
+                    else None
+                ),
+                "relieving_date": (
+                    created.relieving_date.isoformat()
+                    if created.relieving_date
+                    else None
+                ),
             },
         )
     return _row_to_out(created)
@@ -232,7 +322,7 @@ def create_employee_endpoint(
 @router.get("/{employee_id}", response_model=EmployeeOut)
 def get_employee_endpoint(
     employee_id: int,
-    user: Annotated[CurrentUser, ADMIN],
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
 ) -> EmployeeOut:
     scope = TenantScope(tenant_id=user.tenant_id)
     with get_engine().begin() as conn:
@@ -246,25 +336,58 @@ def get_employee_endpoint(
 def patch_employee_endpoint(
     employee_id: int,
     payload: EmployeePatchIn,
-    user: Annotated[CurrentUser, ADMIN],
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
 ) -> EmployeeOut:
     scope = TenantScope(tenant_id=user.tenant_id)
+
+    provided = payload.model_dump(exclude_unset=True)
+
     with get_engine().begin() as conn:
         before = repo.get_employee(conn, scope, employee_id)
         if before is None:
             raise HTTPException(status_code=404, detail="employee not found")
 
-        # Translate the Pydantic patch into a column dict. We only include
+        # P28.7 cross-field validation against the EXISTING row:
+        # - relieving_date must remain >= joining_date even if only
+        #   one of the two is provided in the patch.
+        new_joining = provided.get("joining_date", before.joining_date)
+        new_relieving = provided.get("relieving_date", before.relieving_date)
+        if (
+            new_joining is not None
+            and new_relieving is not None
+            and new_relieving < new_joining
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="relieving_date cannot be before joining_date",
+            )
+
+        # P28.7 reports_to validation — must be a user in this tenant.
+        if "reports_to_user_id" in provided and provided["reports_to_user_id"] is not None:
+            if not repo.is_user_in_tenant(
+                conn, scope, int(provided["reports_to_user_id"])
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="reports_to_user_id is not a user in this tenant",
+                )
+
+        # Translate the patch into a column dict. We only include
         # keys the caller actually set, so omitted fields stay untouched.
         values: dict[str, object] = {}
-        provided = payload.model_dump(exclude_unset=True)
 
-        if "full_name" in provided:
-            values["full_name"] = provided["full_name"]
-        if "email" in provided:
-            values["email"] = provided["email"]
-        if "status" in provided:
-            values["status"] = provided["status"]
+        for key in (
+            "full_name",
+            "email",
+            "designation",
+            "phone",
+            "reports_to_user_id",
+            "joining_date",
+            "relieving_date",
+        ):
+            if key in provided:
+                values[key] = provided[key]
+
         if "department_id" in provided or "department_code" in provided:
             values["department_id"] = _resolve_department_id(
                 conn,
@@ -272,6 +395,49 @@ def patch_employee_endpoint(
                 department_id=provided.get("department_id"),
                 department_code=provided.get("department_code"),
             )
+
+        # P28.7 status flip rules:
+        # - active → inactive: requires deactivation_reason (min 5 chars,
+        #   trimmed) AND sets deactivated_at = now(). Triggers matcher
+        #   cache reload at the end so the next detection lands as a
+        #   former-employee match.
+        # - inactive → active: clears deactivated_at + deactivation_reason.
+        #   Also reloads matcher cache so the next detection lands as
+        #   a regular match again.
+        status_flipped = False
+        if "status" in provided:
+            new_status = provided["status"]
+            if new_status not in ("active", "inactive"):
+                raise HTTPException(
+                    status_code=400, detail="status must be 'active' or 'inactive'"
+                )
+            if new_status != before.status:
+                status_flipped = True
+                values["status"] = new_status
+                if new_status == "inactive":
+                    raw_reason = (
+                        provided.get("deactivation_reason")
+                        or payload.deactivation_reason
+                        or ""
+                    )
+                    reason = str(raw_reason).strip()
+                    if len(reason) < 5:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=(
+                                "deactivation_reason is required (min 5 chars) "
+                                "when status is set to 'inactive'"
+                            ),
+                        )
+                    values["deactivation_reason"] = reason
+                    values["deactivated_at"] = datetime.now(tz=timezone.utc)
+                else:  # → active
+                    values["deactivation_reason"] = None
+                    values["deactivated_at"] = None
+        elif "deactivation_reason" in provided and before.status == "inactive":
+            # Editing the reason while still inactive — keep
+            # deactivated_at, just update the text.
+            values["deactivation_reason"] = provided["deactivation_reason"]
 
         repo.update_employee(conn, scope, employee_id, values=values)
         after = repo.get_employee(conn, scope, employee_id)
@@ -289,24 +455,64 @@ def patch_employee_endpoint(
                 "email": before.email,
                 "department_code": before.department_code,
                 "status": before.status,
+                "designation": before.designation,
+                "phone": before.phone,
+                "reports_to_user_id": before.reports_to_user_id,
+                "joining_date": (
+                    before.joining_date.isoformat()
+                    if before.joining_date
+                    else None
+                ),
+                "relieving_date": (
+                    before.relieving_date.isoformat()
+                    if before.relieving_date
+                    else None
+                ),
+                "deactivation_reason": before.deactivation_reason,
             },
             after={
                 "full_name": after.full_name,
                 "email": after.email,
                 "department_code": after.department_code,
                 "status": after.status,
+                "designation": after.designation,
+                "phone": after.phone,
+                "reports_to_user_id": after.reports_to_user_id,
+                "joining_date": (
+                    after.joining_date.isoformat()
+                    if after.joining_date
+                    else None
+                ),
+                "relieving_date": (
+                    after.relieving_date.isoformat()
+                    if after.relieving_date
+                    else None
+                ),
+                "deactivation_reason": after.deactivation_reason,
             },
         )
+
+    # Cache reload happens AFTER the transaction commits — otherwise a
+    # rollback would leave the cache out of sync with the row.
+    if status_flipped:
+        matcher_cache.invalidate_employee(employee_id)
+
     return _row_to_out(after)
 
 
 @router.delete("/{employee_id}", status_code=status.HTTP_204_NO_CONTENT)
 def soft_delete_employee_endpoint(
     employee_id: int,
-    user: Annotated[CurrentUser, ADMIN],
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
     response: Response,
 ) -> Response:
-    """Soft delete. Hard delete is PDPL-only and not exposed in the pilot."""
+    """Soft delete (legacy) — sets ``status='inactive'``.
+
+    P28.7: prefer the delete-request workflow at
+    ``POST /api/employees/{id}/delete-request`` for hard-delete with
+    HR approval. This endpoint stays for backward compat + bulk
+    soft-deactivation scripts; it does NOT remove crops or rows.
+    """
 
     scope = TenantScope(tenant_id=user.tenant_id)
     with get_engine().begin() as conn:
@@ -430,7 +636,7 @@ def pdpl_delete_employee_endpoint(
 
 @router.post("/import", response_model=ImportResult)
 async def import_employees_endpoint(
-    user: Annotated[CurrentUser, ADMIN],
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
     file: UploadFile = File(...),
 ) -> ImportResult:
     """Upsert employees from an XLSX. Per-row errors are collected, not fatal."""
@@ -489,6 +695,38 @@ async def import_employees_endpoint(
             continue
         seen_codes.add(row.employee_code)
 
+        # P28.7 — date parsing happens before the transaction so a
+        # malformed cell becomes a per-row error without rolling back
+        # anything else.
+        try:
+            joining = excel_io.parse_iso_date(row.joining_date)
+        except ValueError:
+            errors.append(
+                ImportErrorSchema(
+                    row=row.excel_row,
+                    message=f"invalid joining_date {row.joining_date!r} (use YYYY-MM-DD)",
+                )
+            )
+            continue
+        try:
+            relieving = excel_io.parse_iso_date(row.relieving_date)
+        except ValueError:
+            errors.append(
+                ImportErrorSchema(
+                    row=row.excel_row,
+                    message=f"invalid relieving_date {row.relieving_date!r} (use YYYY-MM-DD)",
+                )
+            )
+            continue
+        if joining is not None and relieving is not None and relieving < joining:
+            errors.append(
+                ImportErrorSchema(
+                    row=row.excel_row,
+                    message="relieving_date is before joining_date",
+                )
+            )
+            continue
+
         # One transaction per row keeps the audit log accurate (a later
         # row's DB error doesn't roll back an earlier row's audit write)
         # and matches the partial-success contract of the response shape.
@@ -501,6 +739,28 @@ async def import_employees_endpoint(
                         f"unknown department_code '{row.department_code}'"
                     )
 
+                # P28.7: resolve reports_to_email → user_id within the
+                # tenant. Unknown email is a per-row error so the
+                # operator can fix the spelling without losing the rest
+                # of the file.
+                reports_to_id: Optional[int] = None
+                if row.reports_to_email:
+                    from sqlalchemy import select as _select  # noqa: PLC0415
+                    from hadir.db import users as _users  # noqa: PLC0415
+
+                    user_row = conn.execute(
+                        _select(_users.c.id).where(
+                            _users.c.tenant_id == scope.tenant_id,
+                            func.lower(_users.c.email)
+                            == row.reports_to_email.strip().lower(),
+                        )
+                    ).first()
+                    if user_row is None:
+                        raise _RowError(
+                            f"unknown reports_to_email '{row.reports_to_email}'"
+                        )
+                    reports_to_id = int(user_row.id)
+
                 existing = repo.get_employee_by_code(conn, scope, row.employee_code)
                 if existing is None:
                     new_id = repo.create_employee(
@@ -510,6 +770,11 @@ async def import_employees_endpoint(
                         full_name=row.full_name,
                         email=row.email,
                         department_id=dept.id,
+                        designation=row.designation,
+                        phone=row.phone,
+                        reports_to_user_id=reports_to_id,
+                        joining_date=joining,
+                        relieving_date=relieving,
                     )
                     write_audit(
                         conn,
@@ -523,21 +788,38 @@ async def import_employees_endpoint(
                             "full_name": row.full_name,
                             "email": row.email,
                             "department_code": row.department_code,
+                            "designation": row.designation,
+                            "phone": row.phone,
+                            "reports_to_user_id": reports_to_id,
+                            "joining_date": joining.isoformat() if joining else None,
+                            "relieving_date": relieving.isoformat() if relieving else None,
                             "source": "import",
                         },
                     )
                     created += 1
                     target_employee_id = new_id
                 else:
+                    update_values: dict[str, object] = {
+                        "full_name": row.full_name,
+                        "email": row.email,
+                        "department_id": dept.id,
+                    }
+                    # Only set the new fields when the row actually
+                    # provides a value — empty cells leave the existing
+                    # value alone (the import is upsert-friendly).
+                    if row.designation is not None:
+                        update_values["designation"] = row.designation
+                    if row.phone is not None:
+                        update_values["phone"] = row.phone
+                    if row.reports_to_email is not None:
+                        update_values["reports_to_user_id"] = reports_to_id
+                    if joining is not None:
+                        update_values["joining_date"] = joining
+                    if relieving is not None:
+                        update_values["relieving_date"] = relieving
+
                     repo.update_employee(
-                        conn,
-                        scope,
-                        existing.id,
-                        values={
-                            "full_name": row.full_name,
-                            "email": row.email,
-                            "department_id": dept.id,
-                        },
+                        conn, scope, existing.id, values=update_values
                     )
                     write_audit(
                         conn,
@@ -555,6 +837,11 @@ async def import_employees_endpoint(
                             "full_name": row.full_name,
                             "email": row.email,
                             "department_code": row.department_code,
+                            "designation": row.designation,
+                            "phone": row.phone,
+                            "reports_to_user_id": reports_to_id,
+                            "joining_date": joining.isoformat() if joining else None,
+                            "relieving_date": relieving.isoformat() if relieving else None,
                             "source": "import",
                         },
                     )
@@ -662,7 +949,7 @@ def _drop_file(path_str: str) -> None:
 
 @router.post("/photos/bulk", response_model=PhotoIngestResult)
 async def bulk_ingest_photos_endpoint(
-    user: Annotated[CurrentUser, ADMIN],
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
     files: list[UploadFile] = File(...),
 ) -> PhotoIngestResult:
     """Folder-dump ingest — filenames encode the ``employee_code`` and angle.
@@ -793,10 +1080,11 @@ async def bulk_ingest_photos_endpoint(
 @router.post("/{employee_id}/photos", response_model=PhotoIngestResult)
 async def upload_photos_endpoint(
     employee_id: int,
-    user: Annotated[CurrentUser, ADMIN],
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
     files: list[UploadFile] = File(...),
     angle: Annotated[str, Form()] = photos_io.DEFAULT_ANGLE,
 ) -> PhotoIngestResult:
+    """Upload one or more reference photos against an employee. Admin or HR."""
     """Upload one or more images against a specific employee.
 
     ``angle`` is a single form field applied to every file in this
@@ -887,7 +1175,7 @@ async def upload_photos_endpoint(
 @router.get("/{employee_id}/photos", response_model=PhotoListOut)
 def list_photos_endpoint(
     employee_id: int,
-    user: Annotated[CurrentUser, ADMIN],
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
 ) -> PhotoListOut:
     scope = TenantScope(tenant_id=user.tenant_id)
     with get_engine().begin() as conn:
@@ -907,7 +1195,7 @@ def list_photos_endpoint(
 def get_photo_image_endpoint(
     employee_id: int,
     photo_id: int,
-    user: Annotated[CurrentUser, ADMIN],
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
 ) -> Response:
     """Decrypt and stream the stored image bytes (auth-gated, audited)."""
 
@@ -943,7 +1231,7 @@ def get_photo_image_endpoint(
 def delete_photo_endpoint(
     employee_id: int,
     photo_id: int,
-    user: Annotated[CurrentUser, ADMIN],
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
     response: Response,
 ) -> Response:
     """Remove the DB row and best-effort delete the encrypted file on disk."""

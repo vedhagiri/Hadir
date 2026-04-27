@@ -33,7 +33,7 @@ To demo the pilot at any point: `git checkout v0.1-pilot`.
 To return to v1.0 work: `git checkout main`.
 
 ## Status
-**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 (M2 core complete) + P23 + P24 + P25 + P26 + P27 + P28 (M3 hardening complete + sign-off run) + P28.5a (Live Capture viewer + multi-tenant CaptureManager) + P28.5b (worker/display split + per-camera capture knobs + 2 s reconcile loop) + P28.5c (system-wide detection + tracker config; insightface + yolo+face detector ports) + P28.6 (Attendance Calendar page).**
+**v1.0 phases currently complete: P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8 + P9 + P10 + P11 + P12 + P13 + P14 + P15 + P16 + P17 + P18 + P19 + P20 + P21 + P22 (M2 core complete) + P23 + P24 + P25 + P26 + P27 + P28 (M3 hardening complete + sign-off run) + P28.5a (Live Capture viewer + multi-tenant CaptureManager) + P28.5b (worker/display split + per-camera capture knobs + 2 s reconcile loop) + P28.5c (system-wide detection + tracker config; insightface + yolo+face detector ports) + P28.6 (Attendance Calendar page) + P28.7 (Employee management Add/Edit/Delete + lifecycle automation).**
 
 > **Tenant isolation is a P0 blocker.** The suites
 > `backend/tests/test_multi_tenant_isolation.py` (the P1 canary) and
@@ -901,6 +901,68 @@ of the Arabic translations before v1.0 launch** — see
   (``tests/test_attendance_calendar.py``); P5 isolation
   canary re-verified. **514 backend tests passing** (498
   prior + 16 P28.6).
+
+- **P28.7** — Employee Management: Add / Edit / Delete +
+  lifecycle automation. Five additive surfaces beyond the BRD's
+  basic employee scope: per-employee Add/Edit drawer with
+  extended fields (designation, phone, reports-to, joining +
+  relieving dates), HR-approved hard-delete with mandatory
+  Admin-override comment, Active/Inactive toggle that flows
+  down to identification, former-employee detection (security
+  signal, not attendance), and a 00:01 tenant-local cron that
+  auto-flips employees to inactive when their relieving_date
+  passes. Migration ``0030_p28_7_employee_lifecycle`` adds 7
+  nullable columns to ``employees``, two columns to
+  ``detection_events`` (``former_employee_match`` boolean +
+  ``former_match_employee_id`` FK with ``ON DELETE SET NULL`` so
+  capture history survives anonymously after hard-delete), and
+  a per-tenant ``delete_requests`` table with a partial-unique
+  ``WHERE status='pending'`` index — at most one open request
+  per employee. ``delete_requests`` is **separate** from the
+  existing ``requests`` (P13) table; both surface in the same
+  Approvals UI but are queried separately. Delete-request
+  workflow: Admin submit → pending; HR submit → auto-approve +
+  immediate hard-delete; HR decide on pending → approve fires
+  hard-delete OR reject is terminal; Admin override on another
+  Admin's pending request requires a 10-char comment (cannot
+  override your own). Hard-delete is irreversible — drops face
+  crops on disk, cascade-deletes the row, leaves a single
+  ``employee.hard_deleted`` audit row as the verifiable record,
+  invalidates the matcher cache. Matcher cache extended to load
+  per-employee lifecycle state alongside embeddings; new
+  ``Match.classification`` field (``active | inactive |
+  future``) tells the event emitter which column to populate
+  (active → ``employee_id``; inactive → ``former_match_employee_id``
+  + ``former_employee_match=true``; future joining_date → both
+  NULL, treat as Unknown). Tenant-local timezone honored for
+  the date check. Capture events branches on classification and
+  emits an INFO log on every former-employee detection.
+  Lifecycle cron uses one APScheduler trigger per tenant
+  (timezones differ per P11 red line); manual trigger via
+  ``scripts/run_lifecycle_cron.py``. Attendance scheduler now
+  passes ``today`` to ``active_employee_ids`` so future-joiners
+  + post-relievers don't get attendance rows. New
+  ``GET /api/reports/former-employees-seen?from=&to=&format=json|xlsx``
+  endpoint (HR + Admin); audit-logged. Employees router
+  endpoints opened to **Admin OR HR** (PDPL hard-delete stays
+  Admin-only). New ``/api/users`` endpoint surfaces the
+  manager picker for the Edit drawer's "Reports to" dropdown.
+  Frontend ships a full editable drawer (Identity / Assignment /
+  Lifecycle / Reference photos / Status sections), pending-
+  delete yellow banner with role-aware approve/reject/override,
+  delete-confirm modal with role-aware copy, Approvals page
+  "Delete requests" tab, Camera Logs former-employee badge +
+  "Former employees only" filter, Former Employees Seen report
+  page mounted at ``/former-employees``, and an Active /
+  Inactive / All segmented filter chip on the employees list.
+  en + ar i18n bundles (Arabic Claude-generated; standing P21
+  carryover applies). Migration applied cleanly to all 3
+  schemas (main + mts_demo + inaisys); manual cron flipped
+  one test employee on mts_demo; CRUD round-trip + delete-
+  request submit + admin override + former-employees-seen
+  endpoint all live-verified. Awaiting Suresh's full validation
+  walkthrough per ``docs/testing/pre-omran-validation.md §13d``
+  before commit.
 
 Next: **M4 launch** per `v1.0-phase-plan.md`. Wait for
 the user before starting. **Open critical item carries
