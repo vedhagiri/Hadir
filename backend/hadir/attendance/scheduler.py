@@ -287,6 +287,79 @@ def _recompute_today_inner(scope: TenantScope) -> int:
     return upserted
 
 
+def _active_tenants() -> list[TenantScope]:
+    """Resolve every active tenant from ``public.tenants``.
+
+    Mirrors the CaptureManager fix from P28 — the recompute job has
+    to see every tenant on every tick, not just the configured
+    default. Per-tenant work happens in ``tenant_context(schema)``
+    so the SQLAlchemy ``checkout`` listener applies the right
+    ``search_path``.
+
+    Falls back to the configured ``default_tenant_id`` if the
+    ``public.tenants`` registry is unavailable for any reason
+    (single-mode pilot tenants).
+    """
+
+    from sqlalchemy import text  # noqa: PLC0415
+
+    from hadir.db import make_admin_engine, tenant_context  # noqa: PLC0415
+
+    settings = get_settings()
+    scopes: list[TenantScope] = []
+    try:
+        # ``public.tenants`` lives in the public schema and the
+        # registry probe goes through the admin engine to bypass
+        # tenant routing entirely.
+        with tenant_context("public"):
+            with make_admin_engine().begin() as conn:
+                rows = conn.execute(
+                    text(
+                        "SELECT id, schema_name FROM public.tenants "
+                        "WHERE status = 'active' ORDER BY id"
+                    )
+                ).all()
+        for r in rows:
+            scopes.append(
+                TenantScope(
+                    tenant_id=int(r.id), tenant_schema=str(r.schema_name)
+                )
+            )
+    except Exception as exc:  # noqa: BLE001
+        # Fallback for single-mode boots where public.tenants isn't
+        # populated yet (very early lifespans, fresh installs).
+        logger.warning(
+            "attendance: tenant registry probe failed (%s) — "
+            "falling back to default tenant",
+            type(exc).__name__,
+        )
+        return [TenantScope(tenant_id=settings.default_tenant_id)]
+    if not scopes:
+        return [TenantScope(tenant_id=settings.default_tenant_id)]
+    return scopes
+
+
+def recompute_today_all_tenants() -> int:
+    """Run ``recompute_today`` for every active tenant.
+
+    Returns the total rows upserted across all tenants. A single
+    tenant blowing up doesn't abort the others — each call is in
+    its own try/except.
+    """
+
+    total = 0
+    for scope in _active_tenants():
+        try:
+            total += recompute_today(scope)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "attendance: recompute_today failed for tenant %s: %s",
+                scope.tenant_id,
+                type(exc).__name__,
+            )
+    return total
+
+
 class AttendanceScheduler:
     """Thin supervisor for the periodic recompute job."""
 
@@ -299,24 +372,23 @@ class AttendanceScheduler:
             if self._scheduler is not None:
                 return
             settings = get_settings()
-            scope = TenantScope(tenant_id=settings.default_tenant_id)
             scheduler = BackgroundScheduler(daemon=True)
             scheduler.add_job(
-                recompute_today,
+                recompute_today_all_tenants,
                 "interval",
                 minutes=settings.attendance_recompute_minutes,
                 id=_JOB_ID,
                 replace_existing=True,
-                kwargs={"scope": scope},
             )
             scheduler.start()
             self._scheduler = scheduler
             logger.info(
-                "attendance scheduler started: interval=%dmin",
+                "attendance scheduler started: interval=%dmin "
+                "(multi-tenant fan-out)",
                 settings.attendance_recompute_minutes,
             )
             # P26: bump ``hadir_scheduler_jobs_failed_total`` on
-            # any unhandled exception inside ``recompute_today``.
+            # any unhandled exception inside the fan-out job.
             try:
                 from hadir.metrics import (  # noqa: PLC0415
                     install_scheduler_failure_listener,
@@ -325,18 +397,26 @@ class AttendanceScheduler:
                 install_scheduler_failure_listener(
                     scheduler,
                     job_name="attendance_recompute",
-                    tenant_id=scope.tenant_id,
+                    tenant_id=0,  # 0 = "all tenants"; per-tenant
+                                  # failures already log inline above.
                 )
             except Exception:  # noqa: BLE001
                 pass
 
-            # Seed once on startup so a fresh boot has rows immediately.
+            # Seed once on startup so a fresh boot has rows immediately
+            # for every active tenant.
             def _seed() -> None:
                 try:
-                    recompute_today(scope)
+                    n = recompute_today_all_tenants()
+                    logger.info(
+                        "attendance: startup seed upserted %d rows "
+                        "across all active tenants",
+                        n,
+                    )
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(
-                        "attendance: startup seed failed: %s", type(exc).__name__
+                        "attendance: startup seed failed: %s",
+                        type(exc).__name__,
                     )
 
             threading.Thread(

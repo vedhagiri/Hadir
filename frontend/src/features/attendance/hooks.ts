@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseQueryResult } from "@tanstack/react-query";
 
 import { api } from "../../api/client";
@@ -8,18 +8,37 @@ import type { AttendanceListResponse } from "./types";
 export function useAttendance(
   date: string | null,
   departmentId: number | null,
+  employeeId: number | null = null,
 ): UseQueryResult<AttendanceListResponse, Error> {
   const params = new URLSearchParams();
   if (date) params.set("date", date);
   if (departmentId !== null) params.set("department_id", String(departmentId));
+  if (employeeId !== null) params.set("employee_id", String(employeeId));
   const path =
     params.toString().length > 0
       ? `/api/attendance?${params.toString()}`
       : "/api/attendance";
   return useQuery({
-    queryKey: ["attendance", date, departmentId],
+    queryKey: ["attendance", date, departmentId, employeeId],
     queryFn: () => api<AttendanceListResponse>(path),
     staleTime: 30 * 1000,
+  });
+}
+
+export function useRegenerateAttendance() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (date: string | null) => {
+      const path = date
+        ? `/api/attendance/regenerate?date=${date}`
+        : "/api/attendance/regenerate";
+      return api<{ date: string; rows_upserted: number }>(path, {
+        method: "POST",
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["attendance"] });
+    },
   });
 }
 

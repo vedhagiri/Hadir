@@ -59,6 +59,7 @@ class AttendanceRow:
     short_hours: bool
     absent: bool
     overtime_minutes: int
+    leave_type_id: Optional[int]
 
 
 def local_tz() -> ZoneInfo:
@@ -670,6 +671,7 @@ def list_for_employee_range(
             attendance_records.c.short_hours,
             attendance_records.c.absent,
             attendance_records.c.overtime_minutes,
+            attendance_records.c.leave_type_id,
         )
         .select_from(
             attendance_records.join(
@@ -722,6 +724,11 @@ def list_for_employee_range(
             short_hours=bool(r.short_hours),
             absent=bool(r.absent),
             overtime_minutes=int(r.overtime_minutes),
+            leave_type_id=(
+                int(r.leave_type_id)
+                if getattr(r, "leave_type_id", None) is not None
+                else None
+            ),
         )
         for r in rows
     ]
@@ -768,6 +775,7 @@ def list_for_date(
             attendance_records.c.short_hours,
             attendance_records.c.absent,
             attendance_records.c.overtime_minutes,
+            attendance_records.c.leave_type_id,
         )
         .select_from(
             attendance_records.join(
@@ -831,6 +839,11 @@ def list_for_date(
             short_hours=bool(r.short_hours),
             absent=bool(r.absent),
             overtime_minutes=int(r.overtime_minutes),
+            leave_type_id=(
+                int(r.leave_type_id)
+                if getattr(r, "leave_type_id", None) is not None
+                else None
+            ),
         )
         for r in rows
     ]

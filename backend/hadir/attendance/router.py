@@ -53,6 +53,7 @@ class AttendanceItem(BaseModel):
     short_hours: bool
     absent: bool
     overtime_minutes: int
+    leave_type_id: Optional[int] = None
 
 
 class AttendanceListOut(BaseModel):
@@ -84,6 +85,7 @@ def _row_to_item(row: repo.AttendanceRow) -> AttendanceItem:
         short_hours=row.short_hours,
         absent=row.absent,
         overtime_minutes=row.overtime_minutes,
+        leave_type_id=row.leave_type_id,
     )
 
 
@@ -114,6 +116,10 @@ def list_attendance(
     user: Annotated[CurrentUser, Depends(current_user)],
     date: Annotated[Optional[date_type], Query(description="Local date; defaults to today.")] = None,
     department_id: Annotated[Optional[int], Query()] = None,
+    employee_id: Annotated[
+        Optional[int],
+        Query(description="Filter to a single employee (Admin/HR/Manager)."),
+    ] = None,
 ) -> AttendanceListOut:
     scope = TenantScope(tenant_id=user.tenant_id)
     from hadir.attendance.repository import local_tz  # noqa: PLC0415
@@ -162,6 +168,26 @@ def list_attendance(
         if employee_filter_id is None:
             return AttendanceListOut(date=the_date, items=[])
 
+    # Optional ``employee_id`` query narrows further (Admin/HR can pin
+    # to one row; Manager can do the same as long as the employee is
+    # in their visible set; Employee cannot widen past themselves).
+    if employee_id is not None:
+        if not is_admin_like and "Manager" in user.roles:
+            if employee_ids is None or employee_id not in employee_ids:
+                raise HTTPException(
+                    status_code=403,
+                    detail="employee not in manager scope",
+                )
+            employee_ids = [employee_id]
+        elif is_admin_like:
+            employee_filter_id = employee_id
+        else:
+            # Employee role: refuse to filter to a different employee.
+            if employee_filter_id is not None and employee_id != employee_filter_id:
+                raise HTTPException(
+                    status_code=403, detail="cannot filter another employee"
+                )
+
     with get_engine().begin() as conn:
         rows = repo.list_for_date(
             conn,
@@ -209,3 +235,64 @@ def my_recent_attendance(
     return AttendanceListOut(
         date=today, items=[_row_to_item(r) for r in rows]
     )
+
+
+class RegenerateOut(BaseModel):
+    date: date_type
+    rows_upserted: int
+
+
+@router.post("/regenerate", response_model=RegenerateOut)
+def regenerate_attendance(
+    user: Annotated[CurrentUser, Depends(current_user)],
+    target_date: Annotated[
+        Optional[date_type], Query(alias="date")
+    ] = None,
+) -> RegenerateOut:
+    """Recompute attendance from current detection events.
+
+    Admin/HR only. Defaults to today in the tenant's local timezone.
+    Wraps the same recompute_for_today helper the 15-minute scheduler
+    uses, so a manual regenerate produces identical rows.
+    """
+
+    if "Admin" not in user.roles and "HR" not in user.roles:
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    from hadir.attendance import scheduler as attendance_scheduler  # noqa: PLC0415
+    from hadir.attendance.repository import local_tz  # noqa: PLC0415
+
+    the_date = (
+        target_date
+        or datetime.now(timezone.utc).astimezone(local_tz()).date()
+    )
+
+    if the_date == datetime.now(timezone.utc).astimezone(local_tz()).date():
+        # Today — use the bulk helper that walks every active employee.
+        rows = attendance_scheduler.recompute_today(scope)
+    else:
+        # Historical day — walk every active employee through the
+        # single-row recompute. This is rare (operator triage) and
+        # the loop is bounded by tenant size.
+        from hadir.attendance import repository as attendance_repo  # noqa: PLC0415
+        from hadir.db import tenant_context  # noqa: PLC0415
+
+        rows = 0
+        with tenant_context(scope.tenant_schema):
+            with get_engine().begin() as conn:
+                emp_ids = attendance_repo.active_employee_ids(
+                    conn, scope, on_date=the_date
+                )
+            for eid in emp_ids:
+                if attendance_scheduler.recompute_for(
+                    scope, employee_id=eid, the_date=the_date
+                ):
+                    rows += 1
+    logger.info(
+        "attendance regenerate by user %s for %s — %d rows",
+        user.id,
+        the_date,
+        rows,
+    )
+    return RegenerateOut(date=the_date, rows_upserted=rows)

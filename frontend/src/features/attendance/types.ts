@@ -26,6 +26,7 @@ export interface AttendanceItem {
   short_hours: boolean;
   absent: boolean;
   overtime_minutes: number;
+  leave_type_id: number | null;
 }
 
 export interface AttendanceListResponse {

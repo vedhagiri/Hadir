@@ -1,17 +1,24 @@
-// Admin / HR / Manager Daily Attendance page (P12).
-// Date picker (defaults to today). Department filter for Admin/HR; the
-// backend auto-scopes Manager → assigned departments and 403s if a
-// Manager tries to filter outside that set, so the frontend doesn't
-// re-enforce scope (red line).
+// Admin / HR / Manager Daily Attendance page.
+// Layout matches docs/scripts/issues-screenshots/05-Daily_attendance_page.png:
+// page-header with regenerate + download buttons, a filter row with a
+// segmented scope picker, five stat cards, then a card-wrapped table
+// with avatars + status pills.
+//
+// Backend role-scoping is the source of truth — Manager sees the
+// union of department membership + manager_assignments (handled in
+// the router, not here).
 
 import { useMemo, useState } from "react";
 
 import { useMe } from "../../auth/AuthProvider";
 import { primaryRole } from "../../types";
 import { useDepartments } from "../departments/hooks";
+import { useEmployeeList } from "../employees/hooks";
 import { AttendanceDrawer } from "./AttendanceDrawer";
-import { useAttendance } from "./hooks";
+import { useAttendance, useRegenerateAttendance } from "./hooks";
 import type { AttendanceItem } from "./types";
+
+type ScopeMode = "company" | "department" | "team" | "individual";
 
 function todayIso(): string {
   const d = new Date();
@@ -27,91 +34,332 @@ export function DailyAttendancePage() {
   const isAdminLike = role === "Admin" || role === "HR";
 
   const [date, setDate] = useState<string>(todayIso());
+  const [scopeMode, setScopeMode] = useState<ScopeMode>("company");
   const [departmentId, setDepartmentId] = useState<number | null>(null);
+  const [employeeId, setEmployeeId] = useState<number | null>(null);
   const [drawerItem, setDrawerItem] = useState<AttendanceItem | null>(null);
+  const [regenInfo, setRegenInfo] = useState<string | null>(null);
 
-  const list = useAttendance(date, departmentId);
+  // Wire the active scope to backend filters. "Team" is a manager-team
+  // filter that we don't have a dedicated endpoint for yet — it falls
+  // back to "company" so the page still shows data; the UI surfaces a
+  // hint instead of pretending it filters.
+  const filterDeptId = scopeMode === "department" ? departmentId : null;
+  const filterEmpId = scopeMode === "individual" ? employeeId : null;
+
+  const list = useAttendance(date, filterDeptId, filterEmpId);
   const departmentsQuery = useDepartments();
+  const employeesQuery = useEmployeeList({
+    q: "",
+    department_id: null,
+    include_inactive: false,
+    page: 1,
+    page_size: 200,
+  });
+  const regenerate = useRegenerateAttendance();
 
   const stats = useMemo(() => {
     const items = list.data?.items ?? [];
-    const present = items.filter((it) => !it.absent).length;
+    const present = items.filter(
+      (it) => !it.absent && !it.late && it.leave_type_id === null,
+    ).length;
     const late = items.filter((it) => it.late && !it.absent).length;
-    const absent = items.filter((it) => it.absent).length;
-    const overtime = items.filter((it) => it.overtime_minutes > 0).length;
-    return { present, late, absent, overtime, total: items.length };
+    const onLeave = items.filter(
+      (it) => it.absent && it.leave_type_id !== null,
+    ).length;
+    const absent = items.filter(
+      (it) => it.absent && it.leave_type_id === null,
+    ).length;
+    return {
+      total: items.length,
+      present,
+      late,
+      absent,
+      onLeave,
+    };
   }, [list.data]);
+
+  const onRegenerate = () => {
+    setRegenInfo(null);
+    regenerate.mutate(date, {
+      onSuccess: (resp) => {
+        setRegenInfo(
+          `Regenerated ${resp.rows_upserted} row${
+            resp.rows_upserted === 1 ? "" : "s"
+          } for ${resp.date}.`,
+        );
+      },
+      onError: (err) => {
+        setRegenInfo(`Regenerate failed: ${(err as Error).message}`);
+      },
+    });
+  };
+
+  const downloadReport = async (format: "xlsx" | "pdf") => {
+    const path =
+      format === "pdf"
+        ? "/api/reports/attendance.pdf"
+        : "/api/reports/attendance.xlsx";
+    const body: Record<string, unknown> = { start: date, end: date };
+    if (filterDeptId !== null) body.department_id = filterDeptId;
+    if (filterEmpId !== null) body.employee_id = filterEmpId;
+    const resp = await fetch(path, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+      setRegenInfo(`Download failed (${resp.status}).`);
+      return;
+    }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `attendance_${date}.${format}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Daily Attendance</h1>
+          <h1 className="page-title">Daily attendance</h1>
           <p className="page-sub">
-            {list.data
-              ? `${stats.total} record${stats.total === 1 ? "" : "s"} for ${list.data.date}`
-              : "—"}
+            Generate today's attendance from camera events · download XLSX ·
+            filter by person, team or department
           </p>
         </div>
         <div className="page-actions">
+          <button
+            className="btn"
+            onClick={onRegenerate}
+            disabled={regenerate.isPending || !isAdminLike}
+            title={
+              isAdminLike
+                ? "Recompute today's attendance from current detection events"
+                : "Admin/HR only"
+            }
+          >
+            <span aria-hidden style={{ marginInlineEnd: 4 }}>↻</span>
+            {regenerate.isPending ? "Regenerating…" : "Regenerate from events"}
+          </button>
+          <button
+            className="btn btn-primary"
+            onClick={() => downloadReport("xlsx")}
+            disabled={!list.data}
+          >
+            <span aria-hidden style={{ marginInlineEnd: 4 }}>⬇</span>
+            Download XLSX
+          </button>
+        </div>
+      </div>
+
+      {regenInfo && (
+        <div
+          className="card"
+          style={{
+            padding: "10px 14px",
+            marginBottom: 12,
+            background: "var(--info-soft, var(--bg-sunken))",
+            borderColor: "var(--info, var(--border))",
+            fontSize: 13,
+          }}
+        >
+          {regenInfo}
+        </div>
+      )}
+
+      {/* Filter row */}
+      <div
+        className="card"
+        style={{
+          padding: "12px 14px",
+          marginBottom: 16,
+          display: "flex",
+          alignItems: "center",
+          gap: 14,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: "0.06em",
+              color: "var(--text-tertiary)",
+              textTransform: "uppercase",
+            }}
+          >
+            Date
+          </span>
           <input
             type="date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
             style={selectStyle}
           />
-          {isAdminLike && (
-            <select
-              value={departmentId ?? ""}
-              onChange={(e) =>
-                setDepartmentId(
-                  e.target.value === "" ? null : Number(e.target.value),
-                )
-              }
-              style={selectStyle}
-            >
-              <option value="">All departments</option>
-              {(departmentsQuery.data?.items ?? []).map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
-          )}
         </div>
+
+        <div className="seg" role="tablist" aria-label="Attendance scope">
+          <SegBtn
+            active={scopeMode === "company"}
+            onClick={() => setScopeMode("company")}
+            icon="◳"
+          >
+            Company
+          </SegBtn>
+          <SegBtn
+            active={scopeMode === "department"}
+            onClick={() => setScopeMode("department")}
+            icon="▦"
+          >
+            Department
+          </SegBtn>
+          <SegBtn
+            active={scopeMode === "team"}
+            onClick={() => setScopeMode("team")}
+            icon="◇"
+          >
+            Team
+          </SegBtn>
+          <SegBtn
+            active={scopeMode === "individual"}
+            onClick={() => setScopeMode("individual")}
+            icon="◯"
+          >
+            Individual
+          </SegBtn>
+        </div>
+
+        {scopeMode === "department" && isAdminLike && (
+          <select
+            value={departmentId ?? ""}
+            onChange={(e) =>
+              setDepartmentId(
+                e.target.value === "" ? null : Number(e.target.value),
+              )
+            }
+            style={selectStyle}
+          >
+            <option value="">All departments</option>
+            {(departmentsQuery.data?.items ?? []).map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+        )}
+
+        {scopeMode === "individual" && (
+          <select
+            value={employeeId ?? ""}
+            onChange={(e) =>
+              setEmployeeId(
+                e.target.value === "" ? null : Number(e.target.value),
+              )
+            }
+            style={{ ...selectStyle, minWidth: 220 }}
+          >
+            <option value="">Select employee…</option>
+            {(employeesQuery.data?.items ?? []).map((emp) => (
+              <option key={emp.id} value={emp.id}>
+                {emp.full_name} · {emp.employee_code}
+              </option>
+            ))}
+          </select>
+        )}
+
+        {scopeMode === "team" && (
+          <span
+            className="text-xs text-dim"
+            style={{ fontStyle: "italic" }}
+            title="Manager-team filter — currently shows the same as Company; manager picker arrives later."
+          >
+            Manager-team filter coming soon
+          </span>
+        )}
+
+        <div style={{ flex: 1 }} />
+
+        <span
+          className="text-xs text-dim"
+          style={{ whiteSpace: "nowrap" }}
+        >
+          {list.data
+            ? `${stats.total} employee${stats.total === 1 ? "" : "s"} in scope`
+            : "—"}
+        </span>
       </div>
 
-      {/* Tiny stat strip — derived client-side from the loaded rows. */}
-      <div className="grid grid-4" style={{ marginBottom: 16 }}>
-        <Tile label="Records" value={String(stats.total)} />
-        <Tile label="Present" value={String(stats.present)} />
-        <Tile label="Late" value={String(stats.late)} />
-        <Tile label="Absent" value={String(stats.absent)} />
+      {/* 5 stat cards */}
+      <div
+        className="grid"
+        style={{
+          gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+          gap: 10,
+          marginBottom: 16,
+        }}
+      >
+        <StatTile label="In scope" value={stats.total} />
+        <StatTile label="Present" value={stats.present} tone="success" />
+        <StatTile label="Late" value={stats.late} tone="warning" />
+        <StatTile label="Absent" value={stats.absent} tone="danger" />
+        <StatTile label="On leave" value={stats.onLeave} tone="info" />
       </div>
 
       <div className="card">
         <div className="card-head">
-          <h3 className="card-title">Records</h3>
-          <span className="text-xs text-dim">
-            click a row for the detail drawer
-          </span>
+          <div>
+            <h3 className="card-title">
+              Attendance for {list.data?.date ?? date}
+            </h3>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button
+              className="btn btn-sm"
+              onClick={() => downloadReport("pdf")}
+              disabled={!list.data}
+            >
+              <span aria-hidden style={{ marginInlineEnd: 4 }}>📄</span>
+              PDF
+            </button>
+            <button
+              className="btn btn-sm"
+              onClick={() => downloadReport("xlsx")}
+              disabled={!list.data}
+            >
+              <span aria-hidden style={{ marginInlineEnd: 4 }}>⬇</span>
+              XLSX
+            </button>
+          </div>
         </div>
         <table className="table">
           <thead>
             <tr>
               <th>Employee</th>
               <th>Department</th>
+              <th>Status</th>
               <th>In</th>
               <th>Out</th>
-              <th>Total</th>
+              <th>Hours</th>
+              <th>OT</th>
               <th>Flags</th>
-              <th>Policy</th>
             </tr>
           </thead>
           <tbody>
             {list.isLoading && (
               <tr>
-                <td colSpan={7} className="text-sm text-dim" style={{ padding: 16 }}>
+                <td
+                  colSpan={8}
+                  className="text-sm text-dim"
+                  style={{ padding: 16 }}
+                >
                   Loading…
                 </td>
               </tr>
@@ -119,7 +367,7 @@ export function DailyAttendancePage() {
             {list.isError && (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={8}
                   className="text-sm"
                   style={{ padding: 16, color: "var(--danger-text)" }}
                 >
@@ -134,30 +382,46 @@ export function DailyAttendancePage() {
                 style={{ cursor: "pointer" }}
               >
                 <td>
-                  <div style={{ fontWeight: 500 }}>{it.full_name}</div>
-                  <div className="mono text-xs text-dim">{it.employee_code}</div>
+                  <div
+                    style={{ display: "flex", alignItems: "center", gap: 10 }}
+                  >
+                    <Avatar name={it.full_name} seed={it.employee_code} />
+                    <div>
+                      <div style={{ fontWeight: 500, fontSize: 13 }}>
+                        {it.full_name}
+                      </div>
+                      <div className="mono text-xs text-dim">
+                        {it.employee_code}
+                      </div>
+                    </div>
+                  </div>
                 </td>
-                <td className="text-sm">
-                  <span className="pill pill-neutral">{it.department.code}</span>
+                <td className="text-sm">{it.department.name}</td>
+                <td>
+                  <StatusPill item={it} />
                 </td>
-                <td className="mono text-sm">{it.in_time ?? "—"}</td>
-                <td className="mono text-sm">{it.out_time ?? "—"}</td>
+                <td className="mono text-sm">{shortTime(it.in_time)}</td>
+                <td className="mono text-sm">{shortTime(it.out_time)}</td>
+                <td className="mono text-sm">{decimalHours(it.total_minutes)}</td>
                 <td className="mono text-sm">
-                  {it.total_minutes !== null
-                    ? `${(it.total_minutes / 60).toFixed(2)}h`
+                  {it.overtime_minutes > 0
+                    ? `${(it.overtime_minutes / 60).toFixed(1)}h`
                     : "—"}
                 </td>
                 <td>
-                  <FlagPills item={it} />
+                  <FlagText item={it} />
                 </td>
-                <td className="text-xs text-dim">{it.policy.name}</td>
               </tr>
             ))}
             {list.data && list.data.items.length === 0 && !list.isLoading && (
               <tr>
-                <td colSpan={7} className="text-sm text-dim" style={{ padding: 16 }}>
-                  No records yet for this date. The 15-minute scheduler
-                  will populate them as detections come in.
+                <td
+                  colSpan={8}
+                  className="text-sm text-dim"
+                  style={{ padding: 16 }}
+                >
+                  No records yet for this date. Hit{" "}
+                  <em>Regenerate from events</em> after detections come in.
                 </td>
               </tr>
             )}
@@ -172,34 +436,190 @@ export function DailyAttendancePage() {
   );
 }
 
-function Tile({ label, value }: { label: string; value: string }) {
+// ---------------------------------------------------------------------------
+// Subcomponents
+// ---------------------------------------------------------------------------
+
+function SegBtn({
+  active,
+  onClick,
+  icon,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="card" style={{ padding: 14 }}>
-      <div
-        className="text-xs text-dim"
-        style={{
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
-          fontWeight: 500,
-        }}
-      >
+    <button
+      type="button"
+      className={`seg-btn${active ? " active" : ""}`}
+      onClick={onClick}
+      role="tab"
+      aria-selected={active}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+      }}
+    >
+      <span aria-hidden style={{ fontSize: 11 }}>
+        {icon}
+      </span>
+      {children}
+    </button>
+  );
+}
+
+function StatTile({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone?: "success" | "warning" | "danger" | "info";
+}) {
+  const toneBg: Record<string, string> = {
+    success: "var(--success-soft)",
+    warning: "var(--warning-soft)",
+    danger: "var(--danger-soft)",
+    info: "var(--info-soft, var(--bg-sunken))",
+  };
+  const toneColor: Record<string, string> = {
+    success: "var(--success-text)",
+    warning: "var(--warning-text)",
+    danger: "var(--danger-text)",
+    info: "var(--info-text, var(--text-secondary))",
+  };
+  const bg = tone ? toneBg[tone] : "var(--bg-elev)";
+  const labelColor = tone ? toneColor[tone] : "var(--text-tertiary)";
+  return (
+    <div
+      className="stat"
+      style={{
+        background: bg,
+        border: tone ? "1px solid transparent" : undefined,
+      }}
+    >
+      <div className="stat-label" style={{ color: labelColor }}>
         {label}
       </div>
-      <div
-        style={{
-          fontFamily: "var(--font-display)",
-          fontSize: 26,
-          letterSpacing: "-0.01em",
-          marginTop: 4,
-        }}
-      >
-        {value}
-      </div>
+      <div className="stat-value">{value}</div>
     </div>
   );
 }
 
+function StatusPill({ item }: { item: AttendanceItem }) {
+  if (item.absent && item.leave_type_id !== null) {
+    return <span className="pill pill-info">On leave</span>;
+  }
+  if (item.absent) {
+    return <span className="pill pill-danger">Absent</span>;
+  }
+  if (item.late) {
+    return <span className="pill pill-warning">Late</span>;
+  }
+  return <span className="pill pill-success">Present</span>;
+}
+
+function FlagText({ item }: { item: AttendanceItem }) {
+  const parts: string[] = [];
+  if (item.early_out) parts.push("Early out");
+  if (item.short_hours) parts.push("Short hours");
+  if (item.overtime_minutes > 0) {
+    parts.push(`OT ${(item.overtime_minutes / 60).toFixed(1)}h`);
+  }
+  if (parts.length === 0) {
+    return <span className="text-xs text-dim">—</span>;
+  }
+  return <span className="text-xs">{parts.join(" · ")}</span>;
+}
+
+// Avatar — colored circle with up to two initials. Color is derived
+// deterministically from ``seed`` (employee_code) so the same person
+// gets the same colour across pages.
+function Avatar({ name, seed }: { name: string; seed: string }) {
+  const initials = (() => {
+    const parts = name.trim().split(/\s+/);
+    if (parts.length === 0) return "?";
+    const first = parts[0]?.[0] ?? "";
+    const last = parts.length > 1 ? parts[parts.length - 1]?.[0] ?? "" : "";
+    return (first + last).toUpperCase() || "?";
+  })();
+  const palette = [
+    "#1f7ae0",
+    "#0aa57c",
+    "#d97706",
+    "#c026d3",
+    "#dc2626",
+    "#0891b2",
+    "#7c3aed",
+    "#65a30d",
+    "#b45309",
+    "#be185d",
+  ];
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) | 0;
+  }
+  const bg = palette[Math.abs(hash) % palette.length] ?? palette[0];
+  return (
+    <span
+      aria-hidden
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: 36,
+        height: 36,
+        borderRadius: "50%",
+        background: bg,
+        color: "white",
+        fontSize: 12,
+        fontWeight: 600,
+        flexShrink: 0,
+        letterSpacing: "0.02em",
+      }}
+    >
+      {initials}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function shortTime(iso: string | null): string {
+  if (!iso) return "—";
+  // Server sends "HH:MM:SS"; trim seconds for display.
+  return iso.length >= 5 ? iso.slice(0, 5) : iso;
+}
+
+function decimalHours(minutes: number | null): string {
+  if (minutes === null) return "—";
+  return `${(minutes / 60).toFixed(1)}h`;
+}
+
+const selectStyle = {
+  padding: "6px 10px",
+  fontSize: 12.5,
+  border: "1px solid var(--border)",
+  borderRadius: "var(--radius-sm)",
+  background: "var(--bg-elev)",
+  color: "var(--text)",
+  fontFamily: "var(--font-sans)",
+  outline: "none",
+} as const;
+
+// Re-export FlagPills for any consumer that imports it from here
+// (the AttendanceDrawer used to use it).
 export function FlagPills({ item }: { item: AttendanceItem }) {
+  if (item.absent && item.leave_type_id !== null) {
+    return <span className="pill pill-info">on leave</span>;
+  }
   if (item.absent) {
     return <span className="pill pill-danger">absent</span>;
   }
@@ -222,14 +642,3 @@ export function FlagPills({ item }: { item: AttendanceItem }) {
     </div>
   );
 }
-
-const selectStyle = {
-  padding: "6px 10px",
-  fontSize: 12.5,
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius-sm)",
-  background: "var(--bg-elev)",
-  color: "var(--text)",
-  fontFamily: "var(--font-sans)",
-  outline: "none",
-} as const;
