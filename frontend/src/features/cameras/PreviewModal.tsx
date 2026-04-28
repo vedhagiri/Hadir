@@ -72,9 +72,8 @@ export function PreviewModal({ camera, onClose }: Props) {
           display: "grid",
           placeItems: "center",
         }}
-        onClick={(e) => {
-          if (e.target === e.currentTarget) onClose();
-        }}
+        // Backdrop is presentation-only — close via the X button.
+        // Operator-policy red line; see DrawerShell.
       >
       <div
         className="card"

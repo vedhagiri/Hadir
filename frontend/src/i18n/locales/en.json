@@ -570,10 +570,49 @@
     "selectRow": "Select row",
     "pageOfTotal": "Showing on this page / total matching",
     "pageNumber": "Page {{page}} of {{totalPages}}",
-    "action": {
-      "edit": "Edit",
-      "view": "View",
-      "delete": "Delete"
+    "view": {
+      "label": "Employee profile",
+      "tabs": "Profile tabs",
+      "tab": {
+        "details": "Details",
+        "attendance": "Attendance",
+        "events": "Camera events"
+      }
+    },
+    "attendance": {
+      "loadFailed": "Could not load attendance for this date.",
+      "inTime": "In time",
+      "outTime": "Out time",
+      "total": "Total",
+      "overtime": "Overtime",
+      "dayTimeline": "Day timeline",
+      "evidence": "Evidence · {{count}} face crops",
+      "policyApplied": "Policy applied",
+      "policyScope": "{{scope}}",
+      "weekend": "Weekend",
+      "holiday": "Holiday — {{name}}",
+      "leave": "Leave — {{name}}",
+      "status": {
+        "present": "Present",
+        "late": "Late",
+        "absent": "Absent",
+        "leave": "Leave",
+        "weekend": "Weekend",
+        "holiday": "Holiday",
+        "future": "Future",
+        "no_record": "No record"
+      }
+    },
+    "events": {
+      "loadFailed": "Could not load events.",
+      "empty": "No camera detections yet for this employee.",
+      "emptyForDate": "No detections on this date. Pick another date or toggle \"All dates\".",
+      "totalLabel": "{{count}} captures total",
+      "pageNumber": "Page {{page}} of {{totalPages}}",
+      "dateLabel": "Date",
+      "allDates": "All dates",
+      "today": "Today",
+      "resetToToday": "Reset to today's date"
     },
     "drawer": {
       "addTitle": "Add employee",
@@ -622,6 +661,10 @@
       "password": "12+ characters; click ↑ to generate"
     },
     "action": {
+      "edit": "Edit",
+      "view": "View",
+      "delete": "Delete",
+      "openMenu": "Row actions",
       "generatePassword": "Generate",
       "editRoles": "Edit roles",
       "resetPassword": "Reset password",
@@ -635,7 +678,17 @@
       "inactive": "Inactive"
     },
     "photos": {
-      "angleLabel": "Angle"
+      "angleLabel": "Photo position",
+      "uploadTitle": "Upload reference photos",
+      "uploadHint": "Multiple files share the same position. Switch the position above to add a different angle.",
+      "empty": "No reference photos yet. Use the upload panel below.",
+      "confirmDelete": "Delete this reference photo?",
+      "angles": {
+        "front": "Front",
+        "left": "Left",
+        "right": "Right",
+        "other": "Other"
+      }
     },
     "toast": {
       "created": "{{name}} added.",

@@ -260,9 +260,8 @@ function DepartmentImportModal({
           display: "grid",
           placeItems: "center",
         }}
-        onClick={(e) => {
-          if (e.target === e.currentTarget && !submitting) onClose();
-        }}
+        // Backdrop is presentation-only — close via the Cancel
+        // button. Operator-policy red line; see DrawerShell.
       >
         <div
           className="card"
@@ -449,9 +448,8 @@ function DepartmentFormModal({
           display: "grid",
           placeItems: "center",
         }}
-        onClick={(e) => {
-          if (e.target === e.currentTarget && !submitting) onClose();
-        }}
+        // Backdrop is presentation-only — close via the Cancel
+        // button. Operator-policy red line; see DrawerShell.
       >
       <div
         className="card"

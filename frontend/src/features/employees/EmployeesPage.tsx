@@ -16,17 +16,20 @@
 //     match an existing /api/departments row — otherwise the row
 //     errors with a per-row message.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Icon } from "../../shell/Icon";
 import { useDepartments } from "../departments/hooks";
+import { DeleteConfirmModal } from "./DeleteConfirmModal";
 import { EmployeeDrawer } from "./EmployeeDrawer";
+import { EmployeeViewDrawer } from "./EmployeeViewDrawer";
 import { ImportModal } from "./ImportModal";
 import {
   useDeleteRequestList,
   useEmployeeList,
 } from "./hooks";
+import type { Employee } from "./types";
 
 const PAGE_SIZE = 50;
 const SEARCH_MIN_CHARS = 3;
@@ -42,6 +45,8 @@ export function EmployeesPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
   const [importOpen, setImportOpen] = useState(false);
   const [drawerId, setDrawerId] = useState<number | null | undefined>(undefined);
+  const [viewId, setViewId] = useState<number | null>(null);
+  const [deletingEmployee, setDeletingEmployee] = useState<Employee | null>(null);
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
 
@@ -306,7 +311,7 @@ export function EmployeesPage() {
               return (
                 <tr
                   key={e.id}
-                  onClick={() => setDrawerId(e.id)}
+                  onClick={() => setViewId(e.id)}
                   style={{
                     cursor: "pointer",
                     opacity: inactive ? 0.6 : 1,
@@ -372,15 +377,11 @@ export function EmployeesPage() {
                         {t("employees.delete.pendingBadge") as string}
                       </span>
                     )}
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      onClick={() => setDrawerId(e.id)}
-                      aria-label={t("employees.action.edit") as string}
-                      title={t("employees.action.edit") as string}
-                    >
-                      <Icon name="edit" size={13} />
-                    </button>
+                    <RowActionsMenu
+                      onView={() => setViewId(e.id)}
+                      onEdit={() => setDrawerId(e.id)}
+                      onDelete={() => setDeletingEmployee(e)}
+                    />
                   </td>
                 </tr>
               );
@@ -434,13 +435,178 @@ export function EmployeesPage() {
       </div>
 
       {importOpen && <ImportModal onClose={() => setImportOpen(false)} />}
+      {viewId !== null && (
+        <EmployeeViewDrawer
+          employeeId={viewId}
+          onClose={() => setViewId(null)}
+          onEdit={() => setDrawerId(viewId)}
+        />
+      )}
       {drawerId !== undefined && (
         <EmployeeDrawer
           employeeId={drawerId}
           onClose={() => setDrawerId(undefined)}
         />
       )}
+      {deletingEmployee && (
+        <DeleteConfirmModal
+          employee={deletingEmployee}
+          onClose={() => setDeletingEmployee(null)}
+          onSubmitted={() => {
+            setDeletingEmployee(null);
+            list.refetch();
+            pendingDeletes.refetch();
+          }}
+        />
+      )}
     </>
+  );
+}
+
+/**
+ * Per-row kebab menu: vertical 3-dots trigger that opens a small
+ * dropdown of View / Edit / Delete actions. Click-outside + Esc
+ * dismiss; the trigger and menu both stop event propagation so
+ * neither bubbles up to the row click handler (which opens the
+ * drawer).
+ */
+function RowActionsMenu({
+  onView,
+  onEdit,
+  onDelete,
+}: {
+  onView: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        wrapRef.current &&
+        !wrapRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false);
+      }
+    };
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleEsc);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEsc);
+    };
+  }, [open]);
+
+  const pick = (fn: () => void) => () => {
+    setOpen(false);
+    fn();
+  };
+
+  return (
+    <div
+      ref={wrapRef}
+      style={{ position: "relative", display: "inline-block" }}
+    >
+      <button
+        type="button"
+        className="icon-btn"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((s) => !s);
+        }}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={t("employees.action.openMenu") as string}
+        title={t("employees.action.openMenu") as string}
+      >
+        <Icon name="moreVertical" size={14} />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          style={{
+            position: "absolute",
+            top: "100%",
+            insetInlineEnd: 0,
+            marginTop: 4,
+            minWidth: 160,
+            background: "var(--bg-elev)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-sm)",
+            boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+            zIndex: 30,
+            padding: 4,
+          }}
+        >
+          <MenuItem
+            icon="eye"
+            label={t("employees.action.view") as string}
+            onClick={pick(onView)}
+          />
+          <MenuItem
+            icon="edit"
+            label={t("employees.action.edit") as string}
+            onClick={pick(onEdit)}
+          />
+          <MenuItem
+            icon="trash"
+            label={t("employees.action.delete") as string}
+            onClick={pick(onDelete)}
+            danger
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MenuItem({
+  icon,
+  label,
+  onClick,
+  danger,
+}: {
+  icon: "eye" | "edit" | "trash";
+  label: string;
+  onClick: () => void;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        width: "100%",
+        padding: "7px 10px",
+        textAlign: "start",
+        background: "transparent",
+        color: danger ? "var(--danger-text)" : "var(--text)",
+        border: "none",
+        cursor: "pointer",
+        borderRadius: "var(--radius-sm)",
+        fontSize: 12.5,
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = "var(--bg-sunken)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "transparent";
+      }}
+    >
+      <Icon name={icon} size={12} />
+      {label}
+    </button>
   );
 }
 

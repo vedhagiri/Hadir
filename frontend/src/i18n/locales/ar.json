@@ -570,10 +570,49 @@
     "selectRow": "تحديد الصف",
     "pageOfTotal": "ظاهر في هذه الصفحة / إجمالي مطابق",
     "pageNumber": "صفحة {{page}} من {{totalPages}}",
-    "action": {
-      "edit": "تعديل",
-      "view": "عرض",
-      "delete": "حذف"
+    "view": {
+      "label": "ملف الموظف",
+      "tabs": "تبويبات الملف",
+      "tab": {
+        "details": "التفاصيل",
+        "attendance": "الحضور",
+        "events": "أحداث الكاميرا"
+      }
+    },
+    "attendance": {
+      "loadFailed": "تعذر تحميل بيانات الحضور لهذا التاريخ.",
+      "inTime": "وقت الدخول",
+      "outTime": "وقت الخروج",
+      "total": "الإجمالي",
+      "overtime": "العمل الإضافي",
+      "dayTimeline": "خط زمن اليوم",
+      "evidence": "الدليل · {{count}} لقطة",
+      "policyApplied": "السياسة المطبقة",
+      "policyScope": "{{scope}}",
+      "weekend": "عطلة نهاية الأسبوع",
+      "holiday": "عطلة — {{name}}",
+      "leave": "إجازة — {{name}}",
+      "status": {
+        "present": "حاضر",
+        "late": "متأخر",
+        "absent": "غائب",
+        "leave": "إجازة",
+        "weekend": "عطلة نهاية الأسبوع",
+        "holiday": "عطلة",
+        "future": "مستقبلي",
+        "no_record": "لا يوجد سجل"
+      }
+    },
+    "events": {
+      "loadFailed": "تعذر تحميل الأحداث.",
+      "empty": "لا توجد اكتشافات للكاميرا لهذا الموظف بعد.",
+      "emptyForDate": "لا توجد اكتشافات في هذا التاريخ. اختر تاريخاً آخر أو فعِّل \"كل التواريخ\".",
+      "totalLabel": "{{count}} لقطة إجمالاً",
+      "pageNumber": "صفحة {{page}} من {{totalPages}}",
+      "dateLabel": "التاريخ",
+      "allDates": "كل التواريخ",
+      "today": "اليوم",
+      "resetToToday": "إعادة إلى تاريخ اليوم"
     },
     "drawer": {
       "addTitle": "إضافة موظف",
@@ -622,6 +661,10 @@
       "password": "12 حرفاً أو أكثر؛ انقر للتوليد"
     },
     "action": {
+      "edit": "تعديل",
+      "view": "عرض",
+      "delete": "حذف",
+      "openMenu": "إجراءات الصف",
       "generatePassword": "توليد",
       "editRoles": "تعديل الأدوار",
       "resetPassword": "إعادة تعيين كلمة المرور",
@@ -635,7 +678,17 @@
       "inactive": "غير نشط"
     },
     "photos": {
-      "angleLabel": "الزاوية"
+      "angleLabel": "موضع الصورة",
+      "uploadTitle": "رفع الصور المرجعية",
+      "uploadHint": "تشترك الملفات المتعددة في الموضع نفسه. غيِّر الموضع أعلاه لإضافة زاوية مختلفة.",
+      "empty": "لا توجد صور مرجعية بعد. استخدم لوحة الرفع أدناه.",
+      "confirmDelete": "هل تريد حذف هذه الصورة المرجعية؟",
+      "angles": {
+        "front": "أمامي",
+        "left": "يسار",
+        "right": "يمين",
+        "other": "أخرى"
+      }
     },
     "toast": {
       "created": "تمت إضافة {{name}}.",

@@ -62,14 +62,25 @@ export function DeleteConfirmModal({ employee, onClose, onSubmitted }: Props) {
   return (
     <ModalShell onClose={onClose}>
       <div
+        // Fullscreen wrapper centers the modal card via grid. More
+        // robust than top:50%/transform:translate against parent
+        // stacking contexts; also gives us a backdrop-click target
+        // outside the card.
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 60,
+          display: "grid",
+          placeItems: "center",
+          padding: 16,
+        }}
+        // Backdrop is presentation-only — close via the Cancel
+        // button. Operator-policy red line; see DrawerShell.
+      >
+      <div
         role="dialog"
         aria-modal="true"
         style={{
-          position: "fixed",
-          top: "50%",
-          insetInlineStart: "50%",
-          transform: "translate(-50%, -50%)",
-          zIndex: 51,
           background: "var(--bg-elev)",
           border: "1px solid var(--border)",
           borderRadius: "var(--radius)",
@@ -177,6 +188,7 @@ export function DeleteConfirmModal({ employee, onClose, onSubmitted }: Props) {
               : (t("employees.delete.adminConfirm") as string)}
           </button>
         </div>
+      </div>
       </div>
     </ModalShell>
   );

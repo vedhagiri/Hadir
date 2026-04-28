@@ -810,127 +810,217 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
             </>
           )}
 
-          {/* Reference photos (Edit only) */}
+          {/* Reference photos (Edit only). Two distinct sub-sections:
+              "Existing" lists what's already on the employee with
+              position label + delete; "Upload" is a separate panel
+              with a position picker + file input. No more empty
+              placeholder slots — adding a photo is always explicit.*/}
           {!isAddMode && (
             <>
               <SectionLabel>
                 {t("employees.section.referencePhotos") as string}
               </SectionLabel>
+
+              {/* Existing photos — preview + delete + position label.*/}
+              {(photos.data?.items.length ?? 0) > 0 ? (
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns:
+                      "repeat(auto-fill, minmax(112px, 1fr))",
+                    gap: 8,
+                    marginBottom: 14,
+                  }}
+                >
+                  {(photos.data?.items ?? []).map((p) => (
+                    <div
+                      key={p.id}
+                      style={{
+                        border: "1px solid var(--border)",
+                        borderRadius: 8,
+                        overflow: "hidden",
+                        background: "var(--bg-sunken)",
+                        position: "relative",
+                      }}
+                    >
+                      <img
+                        src={`/api/employees/${employeeId}/photos/${p.id}/image`}
+                        alt={p.angle}
+                        onClick={() => setZoomPhotoId(p.id)}
+                        style={{
+                          display: "block",
+                          width: "100%",
+                          aspectRatio: "1 / 1",
+                          objectFit: "cover",
+                          cursor: "zoom-in",
+                        }}
+                      />
+                      {/* Position pill (top-left). Always visible so the
+                          operator can tell front/left/right at a glance. */}
+                      <span
+                        className="pill pill-accent mono text-xs"
+                        style={{
+                          position: "absolute",
+                          top: 6,
+                          insetInlineStart: 6,
+                          padding: "1px 6px",
+                          fontSize: 10,
+                        }}
+                      >
+                        {t(`employees.photos.angles.${p.angle}`, {
+                          defaultValue: p.angle,
+                        }) as string}
+                      </span>
+                      {/* Delete button (top-right). */}
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        style={{
+                          position: "absolute",
+                          top: 6,
+                          insetInlineEnd: 6,
+                          background: "rgba(0,0,0,0.55)",
+                          color: "white",
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (
+                            !confirm(
+                              t("employees.photos.confirmDelete", {
+                                defaultValue: "Delete this reference photo?",
+                              }) as string,
+                            )
+                          )
+                            return;
+                          deletePhoto.mutate({
+                            employeeId: employeeId!,
+                            photoId: p.id,
+                          });
+                        }}
+                        aria-label={t("common.delete") as string}
+                        title={t("common.delete") as string}
+                      >
+                        <Icon name="trash" size={11} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div
+                  className="text-sm text-dim"
+                  style={{
+                    padding: "10px 12px",
+                    border: "1px dashed var(--border)",
+                    borderRadius: 8,
+                    marginBottom: 14,
+                  }}
+                >
+                  {t("employees.photos.empty", {
+                    defaultValue:
+                      "No reference photos yet. Use the upload panel below.",
+                  }) as string}
+                </div>
+              )}
+
+              {/* Upload panel — explicit position picker + file input.
+                  No empty placeholder tiles; the operator always picks
+                  a position before adding files. */}
               <div
                 style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(5, 1fr)",
-                  gap: 8,
-                  marginBottom: 10,
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                  padding: 12,
+                  marginBottom: 16,
+                  background: "var(--bg-sunken)",
                 }}
               >
-                {(photos.data?.items ?? []).slice(0, 5).map((p) => (
-                  <div
-                    key={p.id}
-                    style={{
-                      border: "1px solid var(--border)",
-                      borderRadius: 8,
-                      overflow: "hidden",
-                      background: "var(--bg-sunken)",
-                      position: "relative",
-                    }}
-                  >
-                    <img
-                      src={`/api/employees/${employeeId}/photos/${p.id}/image`}
-                      alt={p.angle}
-                      onClick={() => setZoomPhotoId(p.id)}
-                      style={{
-                        display: "block",
-                        width: "100%",
-                        aspectRatio: "1 / 1",
-                        objectFit: "cover",
-                        cursor: "zoom-in",
-                      }}
-                    />
+                <div
+                  className="text-xs"
+                  style={{
+                    fontWeight: 600,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.04em",
+                    color: "var(--text-tertiary)",
+                    marginBottom: 8,
+                  }}
+                >
+                  {t("employees.photos.uploadTitle", {
+                    defaultValue: "Upload reference photos",
+                  }) as string}
+                </div>
+
+                <label
+                  className="text-xs text-dim"
+                  style={{ display: "block", marginBottom: 4 }}
+                >
+                  {t("employees.photos.angleLabel") as string}
+                </label>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 6,
+                    flexWrap: "wrap",
+                    marginBottom: 10,
+                  }}
+                >
+                  {ANGLES.map((a) => (
                     <button
                       type="button"
-                      className="icon-btn"
-                      style={{
-                        position: "absolute",
-                        top: 4,
-                        insetInlineEnd: 4,
-                        background: "rgba(0,0,0,0.4)",
-                        color: "white",
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deletePhoto.mutate({
-                          employeeId: employeeId!,
-                          photoId: p.id,
-                        });
-                      }}
-                      aria-label="Remove photo"
+                      key={a}
+                      onClick={() => setPhotoAngle(a)}
+                      className={`pill ${photoAngle === a ? "pill-accent" : "pill-neutral"}`}
+                      style={{ cursor: "pointer", border: "none" }}
                     >
-                      <Icon name="x" size={11} />
+                      {t(`employees.photos.angles.${a}`, {
+                        defaultValue: a,
+                      }) as string}
                     </button>
-                    <div className="text-xs mono" style={{ padding: "2px 6px" }}>
-                      {p.angle}
-                    </div>
+                  ))}
+                </div>
+
+                <div className="text-xs text-dim" style={{ marginBottom: 6 }}>
+                  {t("employees.photos.uploadHint", {
+                    defaultValue:
+                      "Multiple files share the same position. Switch the position above to add a different angle.",
+                  }) as string}
+                </div>
+
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  disabled={upload.isPending}
+                  onChange={(e) => {
+                    const files = Array.from(e.target.files ?? []);
+                    if (files.length > 0) {
+                      upload.mutate({
+                        employeeId: employeeId!,
+                        files,
+                        angle: photoAngle,
+                      });
+                      // Reset the input so re-selecting the same file
+                      // re-triggers onChange.
+                      e.target.value = "";
+                    }
+                  }}
+                  style={{
+                    fontSize: 12.5,
+                    padding: "6px 8px",
+                    border: "1px solid var(--border)",
+                    borderRadius: "var(--radius-sm)",
+                    background: "var(--bg-elev)",
+                    color: "var(--text)",
+                    width: "100%",
+                  }}
+                />
+                {upload.isPending && (
+                  <div
+                    className="text-xs text-dim"
+                    style={{ marginTop: 6 }}
+                  >
+                    {t("common.uploading") as string}…
                   </div>
-                ))}
-                {Array.from({
-                  length: Math.max(0, 5 - (photos.data?.items.length ?? 0)),
-                }).map((_, i) => (
-                  <label
-                    key={`slot-${i}`}
-                    style={{
-                      border: "1px dashed var(--border-strong)",
-                      borderRadius: 8,
-                      aspectRatio: "1 / 1",
-                      display: "grid",
-                      placeItems: "center",
-                      cursor: "pointer",
-                      fontSize: 11,
-                      color: "var(--text-tertiary)",
-                      background: "var(--bg-sunken)",
-                    }}
-                  >
-                    <input
-                      type="file"
-                      accept="image/*"
-                      style={{ display: "none" }}
-                      onChange={(e) => {
-                        const files = Array.from(e.target.files ?? []);
-                        if (files.length > 0) {
-                          upload.mutate({
-                            employeeId: employeeId!,
-                            files,
-                            angle: photoAngle,
-                          });
-                        }
-                      }}
-                    />
-                    <Icon name="plus" size={14} />
-                  </label>
-                ))}
-              </div>
-              <div
-                style={{
-                  display: "flex",
-                  gap: 6,
-                  marginBottom: 16,
-                  alignItems: "center",
-                }}
-              >
-                <span className="text-xs text-dim">
-                  {t("employees.photos.angleLabel") as string}:
-                </span>
-                {ANGLES.map((a) => (
-                  <button
-                    type="button"
-                    key={a}
-                    className={`pill ${photoAngle === a ? "pill-accent" : "pill-neutral"}`}
-                    onClick={() => setPhotoAngle(a)}
-                    style={{ cursor: "pointer", border: "none" }}
-                  >
-                    {a}
-                  </button>
-                ))}
+                )}
               </div>
             </>
           )}
@@ -1078,10 +1168,9 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
         <div
           role="dialog"
           aria-modal="true"
-          onClick={() => setZoomPhotoId(null)}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") setZoomPhotoId(null);
-          }}
+          // Backdrop / Esc no longer close — operator-policy red
+          // line. The X button in the top-right of the lightbox is
+          // the only close affordance.
           style={{
             position: "fixed",
             inset: 0,

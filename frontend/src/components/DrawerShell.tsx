@@ -55,7 +55,6 @@
 // own scrim line. Modal consumers do the same with ``ModalShell``.
 
 import {
-  useCallback,
   useEffect,
   useRef,
   type ReactNode,
@@ -92,11 +91,9 @@ interface ShellProps {
 
 function useDrawerLifecycle({
   open,
-  requestClose,
   hostRef,
 }: {
   open: boolean;
-  requestClose: () => void;
   hostRef: React.RefObject<HTMLDivElement>;
 }) {
   // Body scroll lock.
@@ -136,15 +133,15 @@ function useDrawerLifecycle({
     };
   }, [open, hostRef]);
 
-  // Escape closes; Tab/Shift-Tab cycles within the drawer.
+  // Tab / Shift-Tab cycles within the drawer to keep focus trapped.
+  // Esc no longer closes — operator-policy red line: drawers and
+  // modals close ONLY via the explicit Close button rendered by the
+  // wrapped panel. Same red line drops the backdrop-click handler in
+  // ``Shell`` below. ``requestClose`` is still wired so child Close
+  // buttons can call it programmatically.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        requestClose();
-        return;
-      }
       if (e.key !== "Tab") return;
       const node = hostRef.current;
       if (!node) return;
@@ -167,33 +164,25 @@ function useDrawerLifecycle({
     };
     document.addEventListener("keydown", onKey, true);
     return () => document.removeEventListener("keydown", onKey, true);
-  }, [open, requestClose, hostRef]);
+  }, [open, hostRef]);
 }
 
 function Shell({
   open = true,
-  onClose,
-  dirty = false,
+  // ``onClose`` and ``dirty`` are accepted for back-compat with
+  // every existing call site, but the Shell no longer triggers
+  // close itself. Each panel's explicit Close button calls
+  // ``onClose`` directly. The dirty-on-close confirm prompt that
+  // used to live here was removed alongside backdrop-click + Esc;
+  // a panel that needs the prompt should run it in its own button
+  // handler.
+  onClose: _onClose,
+  dirty: _dirty = false,
   children,
 }: ShellProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
-  // Latest dirty value via a ref so the close handler doesn't re-bind.
-  const dirtyRef = useRef(dirty);
-  useEffect(() => {
-    dirtyRef.current = dirty;
-  }, [dirty]);
 
-  const requestClose = useCallback(() => {
-    if (dirtyRef.current) {
-      const ok = window.confirm(
-        "You have unsaved changes. Discard and close?",
-      );
-      if (!ok) return;
-    }
-    onClose();
-  }, [onClose]);
-
-  useDrawerLifecycle({ open, requestClose, hostRef });
+  useDrawerLifecycle({ open, hostRef });
 
   if (!open) return null;
   const target =
@@ -211,11 +200,11 @@ function Shell({
       // ``position: fixed`` styles from the design CSS.
       style={{ display: "contents" }}
     >
-      <div
-        className="drawer-scrim"
-        onClick={requestClose}
-        aria-hidden="true"
-      />
+      {/* Backdrop is presentation-only — close happens via the
+          explicit Close button rendered by the wrapped panel. The
+          Esc key + outside-click affordances were removed alongside
+          this; both lived on the same red line. */}
+      <div className="drawer-scrim" aria-hidden="true" />
       {children}
     </div>,
     target,

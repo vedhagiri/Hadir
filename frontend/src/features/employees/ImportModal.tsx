@@ -47,13 +47,8 @@ export function ImportModal({ onClose }: Props) {
           display: "grid",
           placeItems: "center",
         }}
-        onClick={(e) => {
-          // Only dismiss by clicking outside the modal card when there's
-          // no in-progress import and no unacknowledged result.
-          if (e.target === e.currentTarget && !result && !importMutation.isPending) {
-            onClose();
-          }
-        }}
+        // Backdrop is presentation-only — close via Cancel/Done.
+        // Operator-policy red line; see DrawerShell.
       >
         <div
           className="card"
