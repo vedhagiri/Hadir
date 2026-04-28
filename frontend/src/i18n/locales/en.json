@@ -524,6 +524,8 @@
       "assignment": "Assignment",
       "lifecycle": "Joining & relieving",
       "shiftPolicy": "Shift policy",
+      "platformAccess": "Platform access (optional)",
+      "loginRoles": "Login & roles",
       "referencePhotos": "Reference photos",
       "status": "Status"
     },
@@ -542,20 +544,50 @@
       "activeHint": "Inactive employees still appear in historical reports but are not tracked for new attendance.",
       "deactivationReasonLabel": "Why is this employee being deactivated?",
       "deactivationReasonPlaceholder": "Resigned, terminated, transferred, etc.",
-      "deactivatedAt": "Deactivated at"
+      "deactivatedAt": "Deactivated at",
+      "createLogin": "Also create a platform login account for this employee",
+      "roles": "Roles",
+      "password": "Initial password"
+    },
+    "hint": {
+      "createLogin": "When on, the employee gets a login with the chosen roles using the email above. They can sign in immediately with the password you set; deliver it out-of-band.",
+      "password": "Minimum 12 characters. Stored hashed (Argon2id) — never echoed back.",
+      "resetPassword": "The new password is copied to your clipboard on apply. Deliver it out-of-band — it's never echoed back later."
+    },
+    "placeholder": {
+      "password": "12+ characters; click ↑ to generate"
+    },
+    "action": {
+      "generatePassword": "Generate",
+      "editRoles": "Edit roles",
+      "resetPassword": "Reset password",
+      "applyReset": "Apply reset"
+    },
+    "login": {
+      "notLinked": "No platform login linked to this employee.",
+      "notLinkedHint": "Use Add Employee → Platform access on creation, or contact your admin to provision a login.",
+      "userId": "User ID",
+      "active": "Active",
+      "inactive": "Inactive"
     },
     "photos": {
       "angleLabel": "Angle"
     },
     "toast": {
       "created": "{{name}} added.",
-      "updated": "{{name}} updated."
+      "updated": "{{name}} updated.",
+      "loginCreated": "Login account created.",
+      "rolesUpdated": "Roles updated.",
+      "passwordReset": "Password reset. Copied to clipboard — deliver out-of-band."
     },
     "errors": {
       "codeAndNameRequired": "Employee ID and full name are required.",
       "reasonRequired": "A deactivation reason (min 5 chars) is required when status is set to Inactive.",
       "relievingBeforeJoining": "Relieving date cannot be before joining date.",
-      "overrideCommentMin": "Admin override comment must be at least 10 characters."
+      "overrideCommentMin": "Admin override comment must be at least 10 characters.",
+      "emailRequiredForLogin": "An email is required to create a login account.",
+      "passwordTooShort": "Password must be at least 12 characters.",
+      "atLeastOneRole": "Select at least one role for the new login."
     },
     "delete": {
       "hrTitle": "Delete employee",

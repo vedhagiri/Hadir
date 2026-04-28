@@ -148,6 +148,72 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
   const [overrideOpen, setOverrideOpen] = useState(false);
   const [overrideComment, setOverrideComment] = useState("");
 
+  // "Platform access" — Add mode defaults this on so every imported
+  // or hand-added employee gets a login by default (operator can opt
+  // out per row). Defaults to the Employee role; Admin can promote
+  // to HR/Manager/Admin via the role chips. The password is auto-
+  // generated on mount but the operator can edit/regenerate it.
+  const [createLogin, setCreateLogin] = useState(true);
+  const [loginPassword, setLoginPassword] = useState("");
+  const [selectedRoleCodes, setSelectedRoleCodes] = useState<string[]>([
+    "Employee",
+  ]);
+  // Lightbox state for reference-photo zoom (click thumbnail → modal).
+  const [zoomPhotoId, setZoomPhotoId] = useState<number | null>(null);
+
+  const rolesQuery = useQuery({
+    queryKey: ["users", "roles"],
+    queryFn: () =>
+      api<{ items: { id: number; code: string; name: string }[] }>(
+        "/api/users/roles",
+      ),
+    staleTime: 10 * 60 * 1000,
+    enabled: isAdmin,
+  });
+
+  // Edit-mode: look up the linked user by email so we can show
+  // current roles + offer reset-password / edit-roles. 404 = no
+  // linked user (operator skipped login creation at Add time).
+  const linkedUserEmail = (detail.data?.email ?? "").trim().toLowerCase();
+  const linkedUser = useQuery({
+    queryKey: ["users", "by-email", linkedUserEmail],
+    queryFn: () =>
+      api<{
+        id: number;
+        email: string;
+        full_name: string;
+        is_active: boolean;
+        role_codes: string[];
+      }>(`/api/users/by-email/${encodeURIComponent(linkedUserEmail)}`),
+    enabled: !isAddMode && !!linkedUserEmail && (isAdmin || isHr),
+    retry: false,
+    staleTime: 30 * 1000,
+  });
+
+  const toggleRoleCode = (code: string) =>
+    setSelectedRoleCodes((cur) =>
+      cur.includes(code) ? cur.filter((c) => c !== code) : [...cur, code],
+    );
+
+  const generatePassword = () => {
+    // Operator-readable but not weak: 14 chars from a wide alphabet,
+    // skipping ambiguous lookalikes (0/O, 1/l/I).
+    const alpha =
+      "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+    const arr = new Uint32Array(14);
+    crypto.getRandomValues(arr);
+    setLoginPassword(
+      Array.from(arr, (n) => alpha[n % alpha.length]).join(""),
+    );
+  };
+
+  // Pre-fill an auto-generated password the moment Add mode mounts.
+  // Operator can edit/regenerate before submit.
+  useEffect(() => {
+    if (isAddMode && !loginPassword) generatePassword();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAddMode]);
+
   // Hydrate form when the detail loads (Edit mode).
   useEffect(() => {
     if (detail.data) {
@@ -207,9 +273,55 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
   const onSave = async () => {
     const payload = buildPayload();
     if (payload === null) return;
+    // Add-mode platform-access pre-flight: validate before we POST
+    // the employee, so a bad password doesn't leave a half-created
+    // state (employee yes, login no).
+    if (isAddMode && createLogin) {
+      if (!form.email.trim()) {
+        setServerError(t("employees.errors.emailRequiredForLogin") as string);
+        return;
+      }
+      if (loginPassword.length < 12) {
+        setServerError(t("employees.errors.passwordTooShort") as string);
+        return;
+      }
+      if (selectedRoleCodes.length === 0) {
+        setServerError(t("employees.errors.atLeastOneRole") as string);
+        return;
+      }
+    }
     try {
       if (isAddMode) {
         const created = await create.mutateAsync(payload);
+        // Step 2: create the platform login if requested. Failures
+        // here surface as a toast — the employee row is still
+        // created, the operator can retry login creation later.
+        if (createLogin && form.email.trim()) {
+          try {
+            await api("/api/users", {
+              method: "POST",
+              body: {
+                email: form.email.trim().toLowerCase(),
+                full_name: form.full_name.trim(),
+                password: loginPassword,
+                role_codes: selectedRoleCodes,
+              },
+            });
+            toast.success(
+              t("employees.toast.loginCreated") as string,
+            );
+          } catch (e) {
+            const msg =
+              e instanceof ApiError
+                ? typeof (e.body as { detail?: { message?: string } })?.detail
+                  === "object"
+                  ? ((e.body as { detail?: { message?: string } }).detail
+                      ?.message ?? `Login creation error ${e.status}`)
+                  : `Login creation error ${e.status}`
+                : "Could not create login";
+            toast.error(msg);
+          }
+        }
         onSaved?.(created);
         toast.success(
           t("employees.toast.created", { name: created.full_name }) as string,
@@ -505,6 +617,202 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
             )}
           </div>
 
+          {/* Platform access (Add mode + Admin only). Surfaces an
+              optional toggle that, when on, creates a login user with
+              the chosen roles right after the employee row is
+              persisted. */}
+          {isAddMode && isAdmin && (
+            <>
+              <SectionLabel>
+                {t("employees.section.platformAccess") as string}
+              </SectionLabel>
+              <div
+                style={{
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                  padding: 12,
+                  marginBottom: 16,
+                  background: "var(--bg-sunken)",
+                }}
+              >
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    cursor: "pointer",
+                    fontSize: 13,
+                    fontWeight: 500,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={createLogin}
+                    onChange={(e) => setCreateLogin(e.target.checked)}
+                  />
+                  {t("employees.field.createLogin") as string}
+                </label>
+                <div
+                  className="text-xs text-dim"
+                  style={{ marginTop: 4 }}
+                >
+                  {t("employees.hint.createLogin") as string}
+                </div>
+
+                {createLogin && (
+                  <div
+                    style={{
+                      marginTop: 12,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 12,
+                    }}
+                  >
+                    <div>
+                      <label
+                        className="text-xs text-dim"
+                        style={{ display: "block", marginBottom: 4 }}
+                      >
+                        {t("employees.field.roles") as string}
+                      </label>
+                      <div
+                        style={{
+                          display: "flex",
+                          flexWrap: "wrap",
+                          gap: 8,
+                        }}
+                      >
+                        {(rolesQuery.data?.items ?? []).map((role) => {
+                          const checked = selectedRoleCodes.includes(role.code);
+                          return (
+                            <label
+                              key={role.id}
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 6,
+                                padding: "4px 10px",
+                                borderRadius: "var(--radius-sm)",
+                                border: `1px solid ${checked ? "var(--accent)" : "var(--border)"}`,
+                                background: checked
+                                  ? "var(--accent-soft)"
+                                  : "transparent",
+                                color: checked
+                                  ? "var(--accent-text)"
+                                  : "var(--text)",
+                                fontSize: 12,
+                                cursor: "pointer",
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleRoleCode(role.code)}
+                              />
+                              {role.name}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label
+                        className="text-xs text-dim"
+                        style={{ display: "block", marginBottom: 4 }}
+                      >
+                        {t("employees.field.password") as string}
+                      </label>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <input
+                          type="text"
+                          value={loginPassword}
+                          onChange={(e) => setLoginPassword(e.target.value)}
+                          placeholder={
+                            t("employees.placeholder.password") as string
+                          }
+                          style={{
+                            flex: 1,
+                            fontFamily:
+                              "var(--font-mono, ui-monospace, monospace)",
+                            fontSize: 13,
+                            padding: "6px 10px",
+                            borderRadius: "var(--radius-sm)",
+                            border: "1px solid var(--border)",
+                            background: "var(--bg-elev)",
+                            color: "var(--text)",
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          onClick={generatePassword}
+                        >
+                          <Icon name="refresh" size={11} />
+                          {t("employees.action.generatePassword") as string}
+                        </button>
+                      </div>
+                      <div
+                        className="text-xs text-dim"
+                        style={{ marginTop: 4 }}
+                      >
+                        {t("employees.hint.password") as string}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* Login & Roles (Edit + Admin/HR only). Surfaces the linked
+              user's current roles, lets Admin add/remove roles, and
+              offers a Reset password action. */}
+          {!isAddMode && (isAdmin || isHr) && (
+            <>
+              <SectionLabel>
+                {t("employees.section.loginRoles") as string}
+              </SectionLabel>
+              <div
+                style={{
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                  padding: 12,
+                  marginBottom: 16,
+                  background: "var(--bg-sunken)",
+                }}
+              >
+                {linkedUser.isLoading && (
+                  <div className="text-sm text-dim">
+                    {t("common.loading") as string}…
+                  </div>
+                )}
+                {linkedUser.isError && (
+                  <div>
+                    <div
+                      className="text-sm"
+                      style={{ marginBottom: 6, fontWeight: 500 }}
+                    >
+                      {t("employees.login.notLinked") as string}
+                    </div>
+                    <div className="text-xs text-dim">
+                      {t("employees.login.notLinkedHint") as string}
+                    </div>
+                  </div>
+                )}
+                {linkedUser.data && (
+                  <LinkedUserPanel
+                    user={linkedUser.data}
+                    canEditRoles={isAdmin}
+                    canResetPassword={isAdmin}
+                    availableRoles={rolesQuery.data?.items ?? []}
+                    onChanged={() => linkedUser.refetch()}
+                  />
+                )}
+              </div>
+            </>
+          )}
+
           {/* Reference photos (Edit only) */}
           {!isAddMode && (
             <>
@@ -533,11 +841,13 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
                     <img
                       src={`/api/employees/${employeeId}/photos/${p.id}/image`}
                       alt={p.angle}
+                      onClick={() => setZoomPhotoId(p.id)}
                       style={{
                         display: "block",
                         width: "100%",
                         aspectRatio: "1 / 1",
                         objectFit: "cover",
+                        cursor: "zoom-in",
                       }}
                     />
                     <button
@@ -550,12 +860,13 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
                         background: "rgba(0,0,0,0.4)",
                         color: "white",
                       }}
-                      onClick={() =>
+                      onClick={(e) => {
+                        e.stopPropagation();
                         deletePhoto.mutate({
                           employeeId: employeeId!,
                           photoId: p.id,
-                        })
-                      }
+                        });
+                      }}
                       aria-label="Remove photo"
                     >
                       <Icon name="x" size={11} />
@@ -761,6 +1072,62 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
           }}
         />
       )}
+
+      {/* Photo zoom lightbox — clicking a thumbnail opens this; click
+          backdrop or Esc/Close to dismiss. The image element is the
+          same auth-gated /image endpoint as the thumbnail, so the
+          decrypt happens server-side either way. */}
+      {zoomPhotoId !== null && employeeId !== null && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setZoomPhotoId(null)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setZoomPhotoId(null);
+          }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.7)",
+            display: "grid",
+            placeItems: "center",
+            zIndex: 9999,
+            padding: 32,
+          }}
+        >
+          <div style={{ position: "relative", maxWidth: "90vw", maxHeight: "90vh" }}>
+            <img
+              src={`/api/employees/${employeeId}/photos/${zoomPhotoId}/image`}
+              alt="Reference photo"
+              style={{
+                maxWidth: "90vw",
+                maxHeight: "90vh",
+                objectFit: "contain",
+                borderRadius: 8,
+                boxShadow: "0 12px 48px rgba(0,0,0,0.5)",
+              }}
+            />
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                setZoomPhotoId(null);
+              }}
+              aria-label="Close photo viewer"
+              style={{
+                position: "absolute",
+                top: 8,
+                insetInlineEnd: 8,
+                background: "rgba(0,0,0,0.6)",
+                color: "white",
+              }}
+            >
+              <Icon name="x" size={14} />
+            </button>
+          </div>
+        </div>
+      )}
     </DrawerShell>
   );
 }
@@ -872,6 +1239,280 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
       }}
     >
       {children}
+    </div>
+  );
+}
+
+interface LinkedUser {
+  id: number;
+  email: string;
+  full_name: string;
+  is_active: boolean;
+  role_codes: string[];
+}
+
+function LinkedUserPanel({
+  user,
+  canEditRoles,
+  canResetPassword,
+  availableRoles,
+  onChanged,
+}: {
+  user: LinkedUser;
+  canEditRoles: boolean;
+  canResetPassword: boolean;
+  availableRoles: { id: number; code: string; name: string }[];
+  onChanged: () => void;
+}) {
+  const { t } = useTranslation();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<string[]>(user.role_codes);
+  const [saving, setSaving] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [resetting, setResetting] = useState(false);
+
+  // Re-sync the editor's draft if the parent reloads the user.
+  useEffect(() => {
+    setDraft(user.role_codes);
+  }, [user.role_codes]);
+
+  const generate = () => {
+    const alpha =
+      "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+    const arr = new Uint32Array(14);
+    crypto.getRandomValues(arr);
+    setNewPassword(Array.from(arr, (n) => alpha[n % alpha.length]).join(""));
+  };
+
+  const toggleDraft = (code: string) =>
+    setDraft((cur) =>
+      cur.includes(code) ? cur.filter((c) => c !== code) : [...cur, code],
+    );
+
+  const saveRoles = async () => {
+    if (draft.length === 0) {
+      toast.error(t("employees.errors.atLeastOneRole") as string);
+      return;
+    }
+    setSaving(true);
+    try {
+      await api(`/api/users/${user.id}`, {
+        method: "PATCH",
+        body: { role_codes: draft },
+      });
+      toast.success(t("employees.toast.rolesUpdated") as string);
+      setEditing(false);
+      onChanged();
+    } catch (e) {
+      const msg =
+        e instanceof ApiError
+          ? `Error ${e.status}: ${typeof e.body === "string" ? e.body : "could not save"}`
+          : "Could not save";
+      toast.error(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const submitReset = async () => {
+    if (newPassword.length < 12) {
+      toast.error(t("employees.errors.passwordTooShort") as string);
+      return;
+    }
+    setResetting(true);
+    try {
+      await api(`/api/users/${user.id}/password-reset`, {
+        method: "POST",
+        body: { password: newPassword },
+      });
+      try {
+        await navigator.clipboard.writeText(newPassword);
+      } catch {
+        /* clipboard write blocked; toast still tells the operator */
+      }
+      toast.success(t("employees.toast.passwordReset") as string);
+      setResetOpen(false);
+      setNewPassword("");
+    } catch (e) {
+      const msg =
+        e instanceof ApiError
+          ? `Error ${e.status}: ${typeof e.body === "string" ? e.body : "could not reset"}`
+          : "Could not reset password";
+      toast.error(msg);
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  return (
+    <div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+        }}
+      >
+        <div>
+          <div className="text-sm" style={{ fontWeight: 500 }}>
+            {user.email}
+          </div>
+          <div className="text-xs text-dim mono">
+            {t("employees.login.userId") as string}: #{user.id} ·{" "}
+            {user.is_active
+              ? (t("employees.login.active") as string)
+              : (t("employees.login.inactive") as string)}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          {canEditRoles && !editing && (
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => setEditing(true)}
+            >
+              <Icon name="settings" size={11} />
+              {t("employees.action.editRoles") as string}
+            </button>
+          )}
+          {canResetPassword && (
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => {
+                setResetOpen(true);
+                generate();
+              }}
+            >
+              <Icon name="refresh" size={11} />
+              {t("employees.action.resetPassword") as string}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Roles row — read-only chips by default; toggleable when editing */}
+      <div
+        style={{
+          marginTop: 10,
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 6,
+        }}
+      >
+        {(editing
+          ? availableRoles.map((r) => r.code)
+          : user.role_codes
+        ).map((code) => {
+          const isOn = editing ? draft.includes(code) : true;
+          return (
+            <span
+              key={code}
+              onClick={editing ? () => toggleDraft(code) : undefined}
+              className={`pill ${isOn ? "pill-success" : "pill-neutral"}`}
+              style={{
+                cursor: editing ? "pointer" : "default",
+                opacity: editing && !isOn ? 0.55 : 1,
+              }}
+            >
+              {availableRoles.find((r) => r.code === code)?.name ?? code}
+            </span>
+          );
+        })}
+      </div>
+
+      {editing && (
+        <div style={{ marginTop: 10, display: "flex", gap: 6 }}>
+          <button
+            type="button"
+            className="btn btn-sm btn-primary"
+            onClick={saveRoles}
+            disabled={saving}
+          >
+            {saving
+              ? (t("common.saving") as string)
+              : (t("common.save") as string)}
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => {
+              setDraft(user.role_codes);
+              setEditing(false);
+            }}
+          >
+            {t("common.cancel") as string}
+          </button>
+        </div>
+      )}
+
+      {resetOpen && (
+        <div
+          style={{
+            marginTop: 12,
+            padding: 10,
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            background: "var(--bg-elev)",
+          }}
+        >
+          <div className="text-sm" style={{ fontWeight: 500, marginBottom: 6 }}>
+            {t("employees.action.resetPassword") as string}
+          </div>
+          <div className="text-xs text-dim" style={{ marginBottom: 8 }}>
+            {t("employees.hint.resetPassword") as string}
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <input
+              type="text"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              style={{
+                flex: 1,
+                fontFamily: "var(--font-mono, ui-monospace, monospace)",
+                fontSize: 13,
+                padding: "6px 10px",
+                borderRadius: "var(--radius-sm)",
+                border: "1px solid var(--border)",
+                background: "var(--bg-elev)",
+                color: "var(--text)",
+              }}
+            />
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={generate}
+            >
+              <Icon name="refresh" size={11} />
+              {t("employees.action.generatePassword") as string}
+            </button>
+          </div>
+          <div style={{ marginTop: 8, display: "flex", gap: 6 }}>
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              onClick={submitReset}
+              disabled={resetting}
+            >
+              {resetting
+                ? (t("common.saving") as string)
+                : (t("employees.action.applyReset") as string)}
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => {
+                setResetOpen(false);
+                setNewPassword("");
+              }}
+            >
+              {t("common.cancel") as string}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
