@@ -30,6 +30,17 @@ const STATUS_PILL: Record<WorkerStatus, string> = {
   failed: "pill-danger",
 };
 
+// Left-edge stripe colour so the card itself reflects the worker's
+// status at a glance — the small header pill is easy to miss on a
+// page with multiple cards.
+const STATUS_STRIPE: Record<WorkerStatus, string> = {
+  starting: "var(--info, var(--accent))",
+  running: "var(--success)",
+  reconnecting: "var(--warning)",
+  stopped: "var(--text-tertiary)",
+  failed: "var(--danger)",
+};
+
 function formatUptime(secs: number): string {
   if (secs < 60) return `${secs}s`;
   if (secs < 3600) return `${Math.floor(secs / 60)}m ${secs % 60}s`;
@@ -73,7 +84,11 @@ export function WorkerCard({ worker, onRestart, restartPending }: Props) {
     <>
       <div
         className="card"
-        style={{ padding: 16, marginBottom: 12 }}
+        style={{
+          padding: 16,
+          marginBottom: 12,
+          borderInlineStart: `4px solid ${STATUS_STRIPE[worker.status]}`,
+        }}
       >
         {/* Header row */}
         <div

@@ -11,12 +11,22 @@ import { Icon } from "../../shell/Icon";
 import { CameraDrawer } from "./CameraDrawer";
 import { PreviewModal } from "./PreviewModal";
 import { useCameras, useDeleteCamera, usePatchCamera } from "./hooks";
+import { useWorkers } from "../operations/hooks";
+import type { WorkerStats } from "../operations/types";
 import type { Camera } from "./types";
 
 export function CamerasPage() {
   const list = useCameras();
+  const workers = useWorkers();
   const del = useDeleteCamera();
   const patch = usePatchCamera();
+  // Camera-id → worker payload, used by StatusDot so the pill reflects
+  // the same real-time state the Worker Monitoring page shows
+  // (status + RTSP stage), not the stale ``last_seen_at`` heuristic.
+  const workerByCamera: Record<number, WorkerStats> = {};
+  workers.data?.workers.forEach((w) => {
+    workerByCamera[w.camera_id] = w;
+  });
   const [drawerMode, setDrawerMode] = useState<"create" | "edit" | null>(null);
   const [editTarget, setEditTarget] = useState<Camera | null>(null);
   const [previewTarget, setPreviewTarget] = useState<Camera | null>(null);
@@ -151,7 +161,7 @@ export function CamerasPage() {
                 <td className="text-sm">{cam.location || "—"}</td>
                 <td className="mono text-sm">{cam.rtsp_host}</td>
                 <td>
-                  <StatusDot camera={cam} />
+                  <StatusDot camera={cam} worker={workerByCamera[cam.id]} />
                 </td>
                 <td className="mono text-sm">
                   {cam.images_captured_24h.toLocaleString()}
@@ -285,28 +295,124 @@ function Switch({
 }
 
 /**
- * Health pill — green when the camera is enabled AND its
- * ``last_seen_at`` is within the freshness window; red otherwise.
- * The freshness window is generous (3 minutes) so a brief network
- * blip doesn't flip the pill on a busy operator dashboard.
+ * Health pill — driven by the live ``capture_manager`` state surfaced
+ * via ``/api/operations/workers``. Green when the worker is actually
+ * running and its RTSP stage is healthy; amber while starting or
+ * reconnecting; red when stopped/failed/unreachable; grey when the
+ * operator has disabled the worker. This matches the colour the
+ * Worker Monitoring page shows for the same camera, so the two
+ * surfaces never disagree.
  */
-function StatusDot({ camera }: { camera: Camera }) {
-  const FRESH_MS = 3 * 60 * 1000;
-  const lastMs = camera.last_seen_at
-    ? new Date(camera.last_seen_at).getTime()
-    : null;
-  const fresh =
-    camera.worker_enabled && lastMs !== null && Date.now() - lastMs < FRESH_MS;
-  const label = !camera.worker_enabled
-    ? "Off"
-    : fresh
-      ? "Online"
-      : "Offline";
-  const color = fresh
-    ? "var(--success)"
-    : camera.worker_enabled
-      ? "var(--danger)"
-      : "var(--text-tertiary)";
+function StatusDot({
+  camera,
+  worker,
+}: {
+  camera: Camera;
+  worker: WorkerStats | undefined;
+}) {
+  // Worker disabled → grey, regardless of any stale row state.
+  if (!camera.worker_enabled) {
+    return (
+      <Pill
+        color="var(--text-tertiary)"
+        label="Off"
+        title="Worker is disabled"
+      />
+    );
+  }
+
+  // Worker enabled but the operations endpoint hasn't seen one yet.
+  // Either the reconcile tick (every 2 s) hasn't fired, or the
+  // workers query is still loading. Treat as starting rather than
+  // failed.
+  if (!worker) {
+    return (
+      <Pill
+        color="var(--warning)"
+        label="Starting"
+        title="Worker enabled — waiting for capture manager"
+      />
+    );
+  }
+
+  switch (worker.status) {
+    case "running": {
+      const rtsp = worker.stages.rtsp.state;
+      if (rtsp === "green") {
+        return (
+          <Pill
+            color="var(--success)"
+            label="Online"
+            title={
+              worker.fps_reader
+                ? `Reading ${worker.fps_reader} fps`
+                : "Worker running"
+            }
+          />
+        );
+      }
+      if (rtsp === "amber") {
+        return (
+          <Pill
+            color="var(--warning)"
+            label="Degraded"
+            title={worker.stages.rtsp.detail || "RTSP intermittent"}
+          />
+        );
+      }
+      return (
+        <Pill
+          color="var(--danger)"
+          label="Offline"
+          title={worker.stages.rtsp.detail || "RTSP not reading"}
+        />
+      );
+    }
+    case "starting":
+      return (
+        <Pill
+          color="var(--warning)"
+          label="Starting"
+          title="Worker is starting"
+        />
+      );
+    case "reconnecting":
+      return (
+        <Pill
+          color="var(--warning)"
+          label="Reconnecting"
+          title={worker.stages.rtsp.detail || "Trying to reconnect"}
+        />
+      );
+    case "failed":
+      return (
+        <Pill
+          color="var(--danger)"
+          label="Failed"
+          title={worker.stages.rtsp.detail || "Worker failed"}
+        />
+      );
+    case "stopped":
+    default:
+      return (
+        <Pill
+          color="var(--danger)"
+          label="Offline"
+          title={worker.stages.rtsp.detail || "Worker stopped"}
+        />
+      );
+  }
+}
+
+function Pill({
+  color,
+  label,
+  title,
+}: {
+  color: string;
+  label: string;
+  title: string;
+}) {
   return (
     <span
       style={{
@@ -317,11 +423,7 @@ function StatusDot({ camera }: { camera: Camera }) {
         color: "var(--text)",
         fontWeight: 500,
       }}
-      title={
-        camera.last_seen_at
-          ? `Last seen ${new Date(camera.last_seen_at).toLocaleString()}`
-          : "Never seen"
-      }
+      title={title}
     >
       <span
         aria-hidden

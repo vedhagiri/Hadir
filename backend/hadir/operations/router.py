@@ -144,9 +144,24 @@ class CameraMetadataOut(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _empty_stages() -> StageSet:
-    """Default 4-stage shape for a stopped worker."""
+def _empty_stages(*, worker_enabled: bool) -> StageSet:
+    """Default 4-stage shape for a worker that isn't running.
 
+    A *disabled* worker (``worker_enabled=false``) shows every stage
+    as ``unknown`` — the operator turned it off on purpose, RTSP red
+    would be a false alarm. A worker that *should* be running but
+    isn't (capture manager hasn't picked it up yet, or it crashed
+    before the manager re-started it) shows RTSP red so the
+    operator notices.
+    """
+
+    if not worker_enabled:
+        return StageSet(
+            rtsp=StageOut(state="unknown", detail="Worker disabled"),
+            detection=StageOut(state="unknown", detail="Worker disabled"),
+            matching=StageOut(state="unknown", detail="Worker disabled"),
+            attendance=StageOut(state="unknown", detail="Worker disabled"),
+        )
     return StageSet(
         rtsp=StageOut(state="red", detail="Worker not running"),
         detection=StageOut(state="unknown", detail="Worker not running"),
@@ -221,7 +236,7 @@ def _stopped_worker_payload(
         status="stopped",
         started_at=None,
         uptime_sec=0,
-        stages=_empty_stages(),
+        stages=_empty_stages(worker_enabled=bool(camera_row["worker_enabled"])),
         metadata=md,
     )
 
