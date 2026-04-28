@@ -142,16 +142,22 @@
   }
   .summary tr:last-child td { border-bottom: 0; }
 
-  /* Employee section */
+  /* Employee section. Sections flow naturally one after the other
+     so a five-person report still fits on a page or two. We keep
+     a single section together when possible (``page-break-inside:
+     avoid``) but no longer force a hard page break between
+     employees — the previous one-page-per-person layout was
+     wasteful for short reports. */
   .employee {
     page-break-inside: avoid;
-    margin-bottom: 18px;
+    margin-bottom: 14px;
+    border-bottom: 1px dashed #d6d6d6;
+    padding-bottom: 10px;
   }
-  /* Multi-employee reports get a page break BEFORE each employee
-     after the first. Single-employee output stays on one page. */
-  {% if employees|length > 1 %}
-  .employee + .employee { page-break-before: always; }
-  {% endif %}
+  .employee:last-child {
+    border-bottom: 0;
+    padding-bottom: 0;
+  }
 
   .employee-head {
     display: flex;
@@ -219,6 +225,33 @@
   .flag-no { color: #999; }
 
   .empty-day { color: #999; font-style: italic; }
+
+  /* Captured-face thumbnails for the In / Out columns. Embedded
+     as data: URLs so WeasyPrint never opens a network socket. */
+  .crop-cell {
+    text-align: center;
+    width: 56px;
+  }
+  .crop-thumb {
+    width: 44px;
+    height: 44px;
+    object-fit: cover;
+    border-radius: 4px;
+    border: 1px solid #e0e0e0;
+    background: #f5f5f5;
+  }
+  .crop-missing {
+    display: inline-block;
+    width: 44px;
+    height: 44px;
+    border-radius: 4px;
+    border: 1px dashed #d0d0d0;
+    background: #fafafa;
+    color: #aaa;
+    font-size: 7pt;
+    line-height: 44px;
+    text-align: center;
+  }
 </style>
 </head>
 <body>
@@ -280,7 +313,9 @@
       <thead>
         <tr>
           <th>Date</th>
+          <th class="center">In photo</th>
           <th>In</th>
+          <th class="center">Out photo</th>
           <th>Out</th>
           <th class="right">Hours</th>
           <th class="center">Late</th>
@@ -295,7 +330,21 @@
         {% for d in emp.days %}
         <tr>
           <td class="mono">{{ d.date }}</td>
+          <td class="crop-cell">
+            {% if d.in_crop_data_url %}
+              <img class="crop-thumb" src="{{ d.in_crop_data_url }}" alt="In crop {{ d.date }}" />
+            {% else %}
+              <span class="crop-missing">—</span>
+            {% endif %}
+          </td>
           <td class="mono">{{ d.in_time or "—" }}</td>
+          <td class="crop-cell">
+            {% if d.out_crop_data_url %}
+              <img class="crop-thumb" src="{{ d.out_crop_data_url }}" alt="Out crop {{ d.date }}" />
+            {% else %}
+              <span class="crop-missing">—</span>
+            {% endif %}
+          </td>
           <td class="mono">{{ d.out_time or "—" }}</td>
           <td class="right mono">{{ d.total_hours if d.total_hours is not none else "—" }}</td>
           <td class="center">{% if d.late %}<span class="flag-yes">Yes</span>{% else %}<span class="flag-no">—</span>{% endif %}</td>
@@ -306,7 +355,7 @@
           <td>{{ d.policy_name }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="10" class="empty-day">No attendance records in this range.</td></tr>
+        <tr><td colspan="12" class="empty-day">No attendance records in this range.</td></tr>
         {% endfor %}
       </tbody>
     </table>

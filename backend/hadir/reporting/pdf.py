@@ -18,7 +18,7 @@ from __future__ import annotations
 import base64
 import logging
 import mimetypes
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Iterator, Optional
 
@@ -35,10 +35,12 @@ from hadir.branding.repository import get_branding
 from hadir.db import (
     attendance_records,
     departments,
+    detection_events,
     employees,
     shift_policies,
     tenants,
 )
+from hadir.employees.photos import decrypt_bytes
 from hadir.tenants.scope import TenantScope
 
 logger = logging.getLogger(__name__)
@@ -97,6 +99,82 @@ def _logo_data_url(logo_path: Optional[str]) -> Optional[str]:
     if mime is None:
         mime = "image/png"
     return f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+
+
+# Widen the local-day window with one extra day of slop on each side
+# so events stored under a timezone offset still fall inside the date
+# we're rendering. The repository converts events to local time
+# elsewhere; here we just need a generous bound on captured_at.
+_LOCAL_TZ_OFFSET = timedelta(days=1)
+
+
+def _crop_to_data_url(file_path: Optional[str]) -> Optional[str]:
+    """Decrypt the on-disk Fernet crop and return a JPEG ``data:`` URL.
+
+    Failures (missing file, key rotation, decrypt error, IO error)
+    return ``None`` — the template falls back to a dashed-border
+    placeholder so a broken crop never breaks the whole render.
+    """
+
+    if not file_path:
+        return None
+    try:
+        p = Path(file_path)
+        if not p.is_file():
+            return None
+        cipher = p.read_bytes()
+        plain = decrypt_bytes(cipher)
+    except (OSError, RuntimeError) as exc:
+        logger.warning(
+            "could not decrypt crop %s for PDF: %s", file_path, exc
+        )
+        return None
+    return f"data:image/jpeg;base64,{base64.b64encode(plain).decode('ascii')}"
+
+
+def _crops_for_day(
+    conn: Connection,
+    scope: TenantScope,
+    *,
+    employee_id: int,
+    on_date: date,
+) -> tuple[Optional[str], Optional[str]]:
+    """Return ``(in_crop_data_url, out_crop_data_url)`` for one day.
+
+    ``in`` = first detection event of the day with a non-null
+    ``face_crop_path``; ``out`` = last such event. Both honour the
+    ``orphaned_at`` skip — orphan rows have ``face_crop_path = NULL``
+    by P28.5b convention so they're already filtered. If only one
+    event exists for the day (e.g. a brief appearance), ``in`` and
+    ``out`` collapse to the same crop.
+    """
+
+    rows = conn.execute(
+        select(detection_events.c.face_crop_path)
+        .where(
+            detection_events.c.tenant_id == scope.tenant_id,
+            detection_events.c.employee_id == employee_id,
+            detection_events.c.face_crop_path.isnot(None),
+            # Local-day window. ``captured_at`` is timestamptz; we
+            # compare against the local-day boundaries so events
+            # right at midnight don't drift off-by-one.
+            detection_events.c.captured_at
+            >= datetime.combine(on_date, time.min, tzinfo=timezone.utc)
+            - _LOCAL_TZ_OFFSET,
+            detection_events.c.captured_at
+            <= datetime.combine(on_date, time.max, tzinfo=timezone.utc)
+            + _LOCAL_TZ_OFFSET,
+        )
+        .order_by(detection_events.c.captured_at.asc())
+    ).all()
+    if not rows:
+        return None, None
+    in_path = rows[0].face_crop_path
+    out_path = rows[-1].face_crop_path
+    in_url = _crop_to_data_url(in_path)
+    if in_path == out_path:
+        return in_url, in_url
+    return in_url, _crop_to_data_url(out_path)
 
 
 def _query_rows(
@@ -168,8 +246,19 @@ def _query_rows(
     return list(conn.execute(stmt))
 
 
-def _build_employees(rows: list) -> list[dict]:
-    """Group flat rows by employee + compute per-employee totals."""
+def _build_employees(
+    rows: list,
+    conn: Connection,
+    scope: TenantScope,
+) -> list[dict]:
+    """Group flat rows by employee + compute per-employee totals.
+
+    Each day row is decorated with ``in_crop_data_url`` /
+    ``out_crop_data_url`` — the first / last detection event's
+    Fernet-encrypted crop, decrypted to a base64 ``data:`` URL.
+    Missing crops resolve to ``None`` so the template can swap to
+    a placeholder cell without breaking the layout.
+    """
 
     by_employee: dict[int, dict] = {}
     for r in rows:
@@ -197,11 +286,16 @@ def _build_employees(rows: list) -> list[dict]:
             if r.total_minutes is not None
             else None
         )
+        in_crop, out_crop = _crops_for_day(
+            conn, scope, employee_id=int(r.employee_id), on_date=r.date
+        )
         emp["days"].append(
             {
                 "date": r.date.isoformat(),
                 "in_time": _format_time(r.in_time),
                 "out_time": _format_time(r.out_time),
+                "in_crop_data_url": in_crop,
+                "out_crop_data_url": out_crop,
                 "total_hours": total_hours,
                 "late": bool(r.late),
                 "early_out": bool(r.early_out),
@@ -325,7 +419,7 @@ def build_pdf(
         department_ids=department_ids,
         employee_id=employee_id,
     )
-    employees_grouped = _build_employees(rows)
+    employees_grouped = _build_employees(rows, conn, scope)
 
     day_count = (end_date - start_date).days + 1
     summary = _summary(rows, employees_grouped, day_count=day_count)
