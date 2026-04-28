@@ -17,6 +17,7 @@ import { Icon } from "../../shell/Icon";
 import { useCreateCamera, usePatchCamera } from "./hooks";
 import {
   DEFAULT_CAPTURE_CONFIG,
+  ZONE_OPTIONS,
   type Camera,
   type CameraCreateInput,
   type CameraPatchInput,
@@ -45,6 +46,7 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
 
   const [name, setName] = useState(initial?.name ?? "");
   const [location, setLocation] = useState(initial?.location ?? "");
+  const [zone, setZone] = useState(initial?.zone ?? "");
   const [workerEnabled, setWorkerEnabled] = useState(
     initial?.worker_enabled ?? true,
   );
@@ -64,6 +66,7 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
   useEffect(() => {
     setName(initial?.name ?? "");
     setLocation(initial?.location ?? "");
+    setZone(initial?.zone ?? "");
     setWorkerEnabled(initial?.worker_enabled ?? true);
     setDisplayEnabled(initial?.display_enabled ?? true);
     setDetectionEnabled(initial?.detection_enabled ?? true);
@@ -86,6 +89,7 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
         const input: CameraCreateInput = {
           name: name.trim(),
           location: location.trim(),
+          zone: zone || null,
           rtsp_url: rtspUrl.trim(),
           worker_enabled: workerEnabled,
           display_enabled: displayEnabled,
@@ -98,6 +102,8 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
         const patchBody: CameraPatchInput = {};
         if (name.trim() !== initial.name) patchBody.name = name.trim();
         if (location.trim() !== initial.location) patchBody.location = location.trim();
+        const zoneNorm = zone || null;
+        if (zoneNorm !== (initial.zone ?? null)) patchBody.zone = zoneNorm;
         if (workerEnabled !== initial.worker_enabled) {
           patchBody.worker_enabled = workerEnabled;
         }
@@ -148,6 +154,26 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
           className="drawer-body"
           style={{ display: "flex", flexDirection: "column", gap: 12 }}
         >
+          {/* Running camera code — surfaced as a read-only mono badge
+              on edit (auto-assigned on create, immutable in this UI;
+              operators with the SQL key can rename via PATCH later
+              if needed). */}
+          {mode === "edit" && initial?.camera_code && (
+            <Field label={t("cameras.fields.cameraCode")}>
+              <div
+                className="mono"
+                style={{
+                  ...inputStyle,
+                  background: "var(--bg-sunken)",
+                  color: "var(--text-secondary)",
+                  fontWeight: 600,
+                }}
+              >
+                {initial.camera_code}
+              </div>
+            </Field>
+          )}
+
           <Field label={t("cameras.fields.name")}>
             <input
               value={name}
@@ -165,6 +191,24 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
               placeholder={t("cameras.placeholders.location")}
               style={inputStyle}
             />
+          </Field>
+
+          <Field
+            label={t("cameras.fields.zone")}
+            hint={t("cameras.hints.zone")}
+          >
+            <select
+              value={zone}
+              onChange={(e) => setZone(e.target.value)}
+              style={inputStyle}
+            >
+              <option value="">{t("cameras.fields.zoneNone") as string}</option>
+              {ZONE_OPTIONS.map((z) => (
+                <option key={z} value={z}>
+                  {t(`cameras.zone.${z}`, { defaultValue: z }) as string}
+                </option>
+              ))}
+            </select>
           </Field>
 
           <Field

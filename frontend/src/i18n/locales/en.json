@@ -344,6 +344,9 @@
     "editTitle": "Edit",
     "fields": {
       "name": "Name",
+      "cameraCode": "Camera ID",
+      "zone": "Zone",
+      "zoneNone": "— no zone —",
       "location": "Location",
       "rtspUrl": "RTSP URL",
       "workerEnabled": "Capture worker",
@@ -361,6 +364,7 @@
     "hints": {
       "rtspEdit": "Stored value kept as-is unless you type a new URL here.",
       "rtspCreate": "rtsp://user:pass@host:port/path",
+      "zone": "Where in the building this camera lives — used for grouping reports.",
       "workerEnabled": "When off, this camera stops detecting faces. No attendance impact for absent employees.",
       "displayEnabled": "When off, the worker keeps recording but this camera doesn't appear in Live Capture viewer.",
       "detectionEnabled": "When off, frames flow to the live preview but the analyzer skips detection — saves CPU when you only want monitoring without face capture.",
@@ -376,6 +380,15 @@
     "errors": {
       "rtspRequired": "RTSP URL is required.",
       "saveFailed": "Could not save camera. Check the RTSP URL and try again."
+    },
+    "zone": {
+      "Entry": "Entry",
+      "Exit": "Exit",
+      "Lobby": "Lobby",
+      "Parking": "Parking",
+      "Office": "Office",
+      "Outdoor": "Outdoor",
+      "Other": "Other"
     }
   },
   "systemSettings": {

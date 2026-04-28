@@ -18,6 +18,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import Response as BytesResponse
+from sqlalchemy.exc import IntegrityError
 
 from hadir.auth.audit import write_audit
 from hadir.auth.dependencies import CurrentUser, require_role
@@ -44,8 +45,10 @@ ADMIN = Depends(require_role("Admin"))
 def _row_to_out(row: repo.CameraRow) -> CameraOut:
     return CameraOut(
         id=row.id,
+        camera_code=row.camera_code,
         name=row.name,
         location=row.location,
+        zone=row.zone,
         rtsp_host=row.rtsp_host,
         worker_enabled=row.worker_enabled,
         display_enabled=row.display_enabled,
@@ -76,6 +79,8 @@ def _audit_payload(row: repo.CameraRow) -> dict:
 
     return {
         "name": row.name,
+        "camera_code": row.camera_code,
+        "zone": row.zone,
         "location": row.location,
         "rtsp_host": row.rtsp_host,
         "worker_enabled": row.worker_enabled,
@@ -107,17 +112,28 @@ def create_camera_endpoint(
     encrypted = rtsp_io.encrypt_url(payload.rtsp_url)
 
     with get_engine().begin() as conn:
-        new_id = repo.create_camera(
-            conn,
-            scope,
-            name=payload.name,
-            location=payload.location,
-            rtsp_url_encrypted=encrypted,
-            worker_enabled=payload.worker_enabled,
-            display_enabled=payload.display_enabled,
-            detection_enabled=payload.detection_enabled,
-            capture_config=payload.capture_config.model_dump(),
-        )
+        try:
+            new_id = repo.create_camera(
+                conn,
+                scope,
+                name=payload.name,
+                location=payload.location,
+                rtsp_url_encrypted=encrypted,
+                worker_enabled=payload.worker_enabled,
+                display_enabled=payload.display_enabled,
+                detection_enabled=payload.detection_enabled,
+                camera_code=payload.camera_code,
+                zone=payload.zone,
+                capture_config=payload.capture_config.model_dump(),
+            )
+        except IntegrityError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "field": "camera_code",
+                    "message": "camera code already exists",
+                },
+            ) from exc
         created = repo.get_camera(conn, scope, new_id)
         assert created is not None
         write_audit(
@@ -158,6 +174,10 @@ def patch_camera_endpoint(
             values["name"] = provided["name"]
         if "location" in provided:
             values["location"] = provided["location"]
+        if "camera_code" in provided:
+            values["camera_code"] = provided["camera_code"]
+        if "zone" in provided:
+            values["zone"] = provided["zone"]
         if "worker_enabled" in provided:
             values["worker_enabled"] = provided["worker_enabled"]
         if "display_enabled" in provided:

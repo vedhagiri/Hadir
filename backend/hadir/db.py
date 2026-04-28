@@ -1541,6 +1541,14 @@ cameras = Table(
     ),
     Column("name", Text, nullable=False),
     Column("location", Text, nullable=False, server_default=""),
+    # Migration 0034 — running human-readable code (CAM-001, CAM-002,
+    # …). Auto-assigned on create as the next sequence within the
+    # tenant; operator can rename later. Unique per tenant.
+    Column("camera_code", Text, nullable=True),
+    # Migration 0034 — zone tag (Entry / Exit / Lobby / Parking /
+    # Office / Outdoor / Other). Free text on the DB side; the form
+    # offers a curated list.
+    Column("zone", Text, nullable=True),
     # Fernet-encrypted text token. The plain URL (with credentials) lives
     # NOWHERE else — not in logs, API responses, audit rows, or error
     # messages. Decrypt happens only when a request needs to hit the

@@ -74,6 +74,10 @@ class CameraRow:
     worker_enabled: bool
     display_enabled: bool
     detection_enabled: bool = True
+    # Migration 0034 — running human-readable code (CAM-001 etc.).
+    camera_code: str = ""
+    # Migration 0034 — zone tag.
+    zone: Optional[str] = None
     capture_config: dict[str, Any] = field(default_factory=lambda: dict(DEFAULT_CAPTURE_CONFIG))
     created_at: datetime = field(default_factory=datetime.now)
     last_seen_at: Optional[datetime] = None
@@ -115,6 +119,8 @@ def _row_to_camera(row) -> CameraRow:
         worker_enabled=bool(row.worker_enabled),
         display_enabled=bool(row.display_enabled),
         detection_enabled=bool(row.detection_enabled),
+        camera_code=str(row.camera_code) if row.camera_code is not None else "",
+        zone=row.zone,
         capture_config=_normalise_capture_config(row.capture_config),
         created_at=row.created_at,
         last_seen_at=row.last_seen_at,
@@ -142,6 +148,8 @@ _SELECT_COLUMNS = (
     cameras.c.worker_enabled,
     cameras.c.display_enabled,
     cameras.c.detection_enabled,
+    cameras.c.camera_code,
+    cameras.c.zone,
     cameras.c.capture_config,
     cameras.c.created_at,
     cameras.c.last_seen_at,
@@ -155,6 +163,35 @@ _SELECT_COLUMNS = (
     cameras.c.model,
     cameras.c.mount_location,
 )
+
+
+def next_camera_code(conn: Connection, scope: TenantScope) -> str:
+    """Return the next ``CAM-{N:03d}`` code for the tenant.
+
+    Reads existing camera_code values, parses any that match the
+    canonical ``CAM-NNN`` pattern, and returns ``CAM-`` + (max+1)
+    zero-padded to 3 digits. Operator can override the format on
+    create — uniqueness is enforced by the per-tenant DB constraint.
+    """
+
+    import re as _re  # noqa: PLC0415
+
+    rows = conn.execute(
+        select(cameras.c.camera_code).where(
+            cameras.c.tenant_id == scope.tenant_id,
+        )
+    ).all()
+    pat = _re.compile(r"^CAM-(\d+)$", _re.IGNORECASE)
+    max_n = 0
+    for r in rows:
+        if r.camera_code is None:
+            continue
+        m = pat.match(str(r.camera_code))
+        if m is not None:
+            n = int(m.group(1))
+            if n > max_n:
+                max_n = n
+    return f"CAM-{max_n + 1:03d}"
 
 
 def list_cameras(conn: Connection, scope: TenantScope) -> list[CameraRow]:
@@ -187,21 +224,29 @@ def create_camera(
     worker_enabled: bool = True,
     display_enabled: bool = True,
     detection_enabled: bool = True,
+    camera_code: Optional[str] = None,
+    zone: Optional[str] = None,
     capture_config: Optional[dict[str, Any]] = None,
 ) -> int:
+    # Auto-generate the running code when the caller didn't supply
+    # one. ``next_camera_code`` reads the current MAX(code) for the
+    # tenant and returns "CAM-{N+1:03d}". Operator override stays
+    # subject to the unique constraint.
+    if not camera_code:
+        camera_code = next_camera_code(conn, scope)
+
     values: dict[str, Any] = {
         "tenant_id": scope.tenant_id,
         "name": name,
         "location": location,
+        "camera_code": camera_code,
+        "zone": zone,
         "rtsp_url_encrypted": rtsp_url_encrypted,
         "worker_enabled": worker_enabled,
         "display_enabled": display_enabled,
         "detection_enabled": detection_enabled,
     }
     if capture_config is not None:
-        # The DB has a server_default; only override when the caller
-        # actually supplied a value, so a missing key inherits the
-        # current server default rather than ours from this module.
         values["capture_config"] = _normalise_capture_config(capture_config)
 
     new_id = conn.execute(

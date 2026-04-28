@@ -57,6 +57,7 @@ def seeded_events(admin_engine, tmp_path):  # type: ignore[no-untyped-def]
             .values(
                 tenant_id=1,
                 name="P11-Cam-A",
+                camera_code="CAM-P11A",
                 location="Lobby",
                 rtsp_url_encrypted=rtsp_io.encrypt_url("rtsp://fake/a"),
                 worker_enabled=True,
@@ -68,6 +69,7 @@ def seeded_events(admin_engine, tmp_path):  # type: ignore[no-untyped-def]
             .values(
                 tenant_id=1,
                 name="P11-Cam-B",
+                camera_code="CAM-P11B",
                 location="Gate",
                 rtsp_url_encrypted=rtsp_io.encrypt_url("rtsp://fake/b"),
                 worker_enabled=True,

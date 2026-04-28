@@ -145,9 +145,16 @@ def _seed_camera(
     """
 
     encrypted = rtsp_io.encrypt_url(plain_url)
+    # Migration 0034 makes camera_code NOT NULL with a unique
+    # (tenant_id, camera_code) constraint. Generate a unique code per
+    # row by appending a random hex chunk so concurrent test runs don't
+    # collide.
+    import secrets as _secrets  # noqa: PLC0415
+    code = f"CAM-T-{_secrets.token_hex(3)}"
     values: dict[str, object] = {
         "tenant_id": TENANT.tenant_id,
         "name": name,
+        "camera_code": code,
         "location": "",
         "rtsp_url_encrypted": encrypted,
         "worker_enabled": worker_enabled,
@@ -591,12 +598,14 @@ def test_manager_continues_when_one_camera_fails_to_decrypt(
     )
     # Bad camera — write garbage into ``rtsp_url_encrypted`` so
     # rtsp_io.decrypt_url raises RuntimeError.
+    import secrets as _secrets_bad  # noqa: PLC0415
     with admin_engine.begin() as conn:
         bad_id = conn.execute(
             cameras.insert()
             .values(
                 tenant_id=TENANT.tenant_id,
                 name="bad",
+                camera_code=f"CAM-T-{_secrets_bad.token_hex(3)}",
                 location="",
                 rtsp_url_encrypted="not-a-fernet-token",
                 worker_enabled=True,

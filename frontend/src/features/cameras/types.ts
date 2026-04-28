@@ -25,8 +25,12 @@ export const DEFAULT_CAPTURE_CONFIG: CaptureConfig = {
 
 export interface Camera {
   id: number;
+  /** Migration 0034 — running human-readable code (CAM-001 etc.). */
+  camera_code: string;
   name: string;
   location: string;
+  /** Migration 0034 — Entry / Exit / Lobby / Parking / Office / Outdoor / Other. */
+  zone: string | null;
   rtsp_host: string;
   // P28.5b: ``enabled`` was split into ``worker_enabled`` (capture
   // pipeline on/off) + ``display_enabled`` (Live Capture surfacing).
@@ -59,6 +63,9 @@ export interface CameraListResponse {
 export interface CameraCreateInput {
   name: string;
   location: string;
+  zone?: string | null;
+  /** Optional — backend auto-generates next CAM-NNN when omitted. */
+  camera_code?: string;
   rtsp_url: string;
   worker_enabled: boolean;
   display_enabled: boolean;
@@ -69,9 +76,23 @@ export interface CameraCreateInput {
 export interface CameraPatchInput {
   name?: string;
   location?: string;
+  zone?: string | null;
+  camera_code?: string;
   rtsp_url?: string;
   worker_enabled?: boolean;
   display_enabled?: boolean;
   detection_enabled?: boolean;
   capture_config?: CaptureConfig;
 }
+
+export const ZONE_OPTIONS = [
+  "Entry",
+  "Exit",
+  "Lobby",
+  "Parking",
+  "Office",
+  "Outdoor",
+  "Other",
+] as const;
+
+export type Zone = (typeof ZONE_OPTIONS)[number];

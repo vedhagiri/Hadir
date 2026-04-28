@@ -36,8 +36,15 @@ class CaptureConfig(BaseModel):
 
 class CameraOut(BaseModel):
     id: int
+    # Migration 0034 — running human-readable code (CAM-001 etc.).
+    # Auto-assigned on create; uniquely scoped per tenant. Operator
+    # can rename later via PATCH.
+    camera_code: str
     name: str
     location: str
+    # Migration 0034 — zone tag (Entry / Exit / Lobby / Parking /
+    # Office / Outdoor / Other). Free text for forward compat.
+    zone: Optional[str] = None
     rtsp_host: str
     worker_enabled: bool
     display_enabled: bool
@@ -68,6 +75,14 @@ class CameraListOut(BaseModel):
 class CameraCreateIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     location: str = Field(default="", max_length=200)
+    # Optional zone tag. The form offers a curated list (Entry / Exit
+    # / Lobby / Parking / Office / Outdoor / Other) but the schema
+    # accepts any string ≤ 32 chars so future tenants can extend.
+    zone: Optional[str] = Field(default=None, max_length=32)
+    # Optional — when omitted the backend auto-generates the next
+    # sequential CAM-{N:03d}. Operator can override on add (e.g.
+    # match an external numbering scheme).
+    camera_code: Optional[str] = Field(default=None, min_length=1, max_length=32)
     # Accepted schemes validated in rtsp.parse_rtsp_url.
     rtsp_url: str = Field(min_length=8, max_length=2048)
     worker_enabled: bool = True
@@ -79,6 +94,8 @@ class CameraCreateIn(BaseModel):
 class CameraPatchIn(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=120)
     location: Optional[str] = Field(default=None, max_length=200)
+    zone: Optional[str] = Field(default=None, max_length=32)
+    camera_code: Optional[str] = Field(default=None, min_length=1, max_length=32)
     # Optional — present value replaces the encrypted token; omitted
     # value leaves the stored credential untouched. The UI's ``***``
     # placeholder on edit is the client half of this contract.

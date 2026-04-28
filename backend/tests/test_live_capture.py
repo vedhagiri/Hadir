@@ -164,12 +164,14 @@ def seeded_camera(admin_engine: Engine) -> Iterator[dict]:
 
     from hadir.cameras import rtsp as rtsp_io  # noqa: PLC0415
 
+    import secrets as _secrets  # noqa: PLC0415
     with admin_engine.begin() as conn:
         cam_id = conn.execute(
             insert(cameras)
             .values(
                 tenant_id=1,
                 name="P28.5a test camera",
+                camera_code=f"CAM-T-{_secrets.token_hex(3)}",
                 location="test rack",
                 rtsp_url_encrypted=rtsp_io.encrypt_url(
                     "rtsp://test:test@127.0.0.1:1/stream"
