@@ -8,17 +8,10 @@ import { useMemo, useState } from "react";
 
 import { useMe } from "../../auth/AuthProvider";
 import { primaryRole } from "../../types";
+import { useDepartments } from "../departments/hooks";
 import { AttendanceDrawer } from "./AttendanceDrawer";
 import { useAttendance } from "./hooks";
 import type { AttendanceItem } from "./types";
-
-// Pilot department list — same one the Employees page uses for its
-// dropdown. v1.0 will pull from /api/departments.
-const PILOT_DEPARTMENTS = [
-  { id: 1, code: "ENG", name: "Engineering" },
-  { id: 2, code: "OPS", name: "Operations" },
-  { id: 3, code: "ADM", name: "Administration" },
-];
 
 function todayIso(): string {
   const d = new Date();
@@ -38,6 +31,7 @@ export function DailyAttendancePage() {
   const [drawerItem, setDrawerItem] = useState<AttendanceItem | null>(null);
 
   const list = useAttendance(date, departmentId);
+  const departmentsQuery = useDepartments();
 
   const stats = useMemo(() => {
     const items = list.data?.items ?? [];
@@ -77,7 +71,7 @@ export function DailyAttendancePage() {
               style={selectStyle}
             >
               <option value="">All departments</option>
-              {PILOT_DEPARTMENTS.map((d) => (
+              {(departmentsQuery.data?.items ?? []).map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.name}
                 </option>

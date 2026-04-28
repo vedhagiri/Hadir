@@ -10,6 +10,8 @@
     "edit": "Edit",
     "add": "Add",
     "reset": "Reset",
+    "done": "Done",
+    "uploading": "Uploading…",
     "yes": "Yes",
     "no": "No",
     "all": "All",
@@ -204,6 +206,7 @@
     "tabs": {
       "branding": "Branding",
       "authentication": "Authentication",
+      "departments": "Departments",
       "customFields": "Custom fields",
       "reasonCategories": "Request reasons",
       "email": "Email",
@@ -211,6 +214,51 @@
       "erpExport": "ERP export",
       "notifications": "Notifications",
       "display": "Display"
+    }
+  },
+  "departments": {
+    "title": "Departments",
+    "subtitle": "Manage department codes and names. The Add Employee drawer and Excel import pull from this list.",
+    "deptCount_one": "department",
+    "deptCount_other": "departments",
+    "add": "Add department",
+    "import": "Import CSV",
+    "importTitle": "Import departments from CSV",
+    "importHint": "Upload a CSV with headers \"code,name\". New codes are created; existing codes are updated. Codes can be numeric (e.g. 001) or short alpha (e.g. ENG).",
+    "importAction": "Import",
+    "addTitle": "New department",
+    "editTitle": "Rename department",
+    "empty": "No departments yet — add the first one.",
+    "confirmDelete": "Delete \"{{name}}\"? This cannot be undone.",
+    "col": {
+      "code": "Code",
+      "name": "Name",
+      "employees": "Employees",
+      "actions": "Actions"
+    },
+    "field": {
+      "code": "Code",
+      "name": "Name"
+    },
+    "hint": {
+      "code": "1-16 chars: A-Z, 0-9, underscore. Used as the import column key — pick something stable."
+    },
+    "placeholder": {
+      "name": "e.g. Engineering"
+    },
+    "errors": {
+      "codeRequired": "Code is required.",
+      "nameRequired": "Name is required.",
+      "saveFailed": "Could not save department.",
+      "fileRequired": "Pick a CSV file first.",
+      "importFailed": "Import failed. Check the file and try again."
+    },
+    "toast": {
+      "created": "Department created.",
+      "updated": "Department renamed.",
+      "deleted": "Department deleted.",
+      "deleteFailed": "Could not delete department.",
+      "imported": "Imported {{created}} new, {{updated}} updated."
     }
   },
   "language": {

@@ -61,6 +61,7 @@ from hadir.scheduled_reports import (
 from hadir.super_admin import router as super_admin_router
 from hadir.super_admin.system import router as super_admin_system_router
 from hadir.system.router import router as system_router
+from hadir.departments_router import router as departments_router
 from hadir.users_lookup import router as users_lookup_router
 
 
@@ -253,6 +254,7 @@ def create_app() -> FastAPI:
     app.include_router(detection_events_router)
     app.include_router(system_router)
     app.include_router(users_lookup_router)
+    app.include_router(departments_router)
     app.include_router(audit_log_router)
     app.include_router(reporting_router)
     app.include_router(former_employees_router)

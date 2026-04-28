@@ -15,6 +15,7 @@ import { PipelinePage } from "./features/pipeline/PipelinePage";
 import { AuthenticationPage } from "./auth-oidc/AuthenticationPage";
 import { BrandingPage } from "./branding/BrandingPage";
 import { CustomFieldsPage } from "./custom-fields/CustomFieldsPage";
+import { DepartmentsPage } from "./settings/DepartmentsPage";
 import { DisplaySettingsPage } from "./settings/DisplaySettingsPage";
 import { ErpExportPage } from "./erp-export/ErpExportPage";
 import { NotificationsPage } from "./notifications/NotificationsPage";
@@ -116,6 +117,7 @@ export function App() {
         <Route path="settings" element={<Navigate to="/settings/branding" replace />} />
         <Route path="settings/branding" element={<BrandingPage />} />
         <Route path="settings/authentication" element={<AuthenticationPage />} />
+        <Route path="settings/departments" element={<DepartmentsPage />} />
         <Route path="settings/custom-fields" element={<CustomFieldsPage />} />
         <Route path="settings/reason-categories" element={<ReasonCategoriesPage />} />
         <Route path="settings/email" element={<EmailConfigPage />} />

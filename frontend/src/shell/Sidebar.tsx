@@ -137,6 +137,21 @@ export function Sidebar({ role }: Props) {
         <span className="kbd">⌘K</span>
       </div>
 
+      {/* Scrollable nav block — flex:1 grabs the remaining height,
+          overflow-y:auto lets long nav lists (e.g. Settings tabs)
+          scroll inside the sidebar without clipping the bottom items. */}
+      <div
+        className="sidebar-nav"
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: "auto",
+          overflowX: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          gap: 2,
+        }}
+      >
       {items.map((it, i) => {
         if ("section" in it) {
           const key = SECTION_KEY[it.section];
@@ -231,6 +246,7 @@ export function Sidebar({ role }: Props) {
         );
       })}
 
+      </div>
       {/* P28.5d: user identity + Settings + Logout moved to a Topbar
           dropdown (``UserMenu`` in shell/Topbar.tsx). The sidebar
           footer is gone — clearer hierarchy, matches the design

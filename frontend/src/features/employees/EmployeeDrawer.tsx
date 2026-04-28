@@ -29,6 +29,7 @@ import { primaryRole } from "../../types";
 import { DrawerShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
 import { toast } from "../../shell/Toaster";
+import { useDepartments } from "../departments/hooks";
 import { DeleteConfirmModal } from "./DeleteConfirmModal";
 import {
   useCreateEmployee,
@@ -44,11 +45,6 @@ import {
 import type { Employee, EmployeeWritePayload, PhotoAngle } from "./types";
 
 const ANGLES: PhotoAngle[] = ["front", "left", "right", "other"];
-const PILOT_DEPARTMENTS: { id: number; code: string; name: string }[] = [
-  { id: 1, code: "ENG", name: "Engineering" },
-  { id: 2, code: "OPS", name: "Operations" },
-  { id: 3, code: "ADM", name: "Administration" },
-];
 
 interface ManagerOption {
   id: number;
@@ -125,6 +121,7 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
 
   const detail = useEmployeeDetail(employeeId);
   const photos = useEmployeePhotos(employeeId);
+  const departmentsQuery = useDepartments();
   const pendingDelete = useEmployeePendingDeleteRequest(employeeId);
   const create = useCreateEmployee();
   const update = useUpdateEmployee();
@@ -577,7 +574,7 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
               label={t("employees.field.department") as string}
               value={String(form.department_id)}
               onChange={(v) => onField("department_id", Number(v))}
-              options={PILOT_DEPARTMENTS.map((d) => ({
+              options={(departmentsQuery.data?.items ?? []).map((d) => ({
                 value: String(d.id),
                 label: `${d.name} (${d.code})`,
               }))}
