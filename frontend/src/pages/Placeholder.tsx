@@ -17,7 +17,6 @@ const COMING_IN: Record<string, string> = {
   calendar: "v1.0",
   cameras: "P7",
   employees: "P6",
-  enrollment: "P6",
   policies: "v1.0",
   "leave-policy": "v1.0",
   "daily-attendance": "P12",
