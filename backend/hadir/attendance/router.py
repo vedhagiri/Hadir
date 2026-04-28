@@ -237,6 +237,82 @@ def my_recent_attendance(
     )
 
 
+@router.get("/employee/{employee_id}", response_model=AttendanceListOut)
+def employee_attendance_range(
+    employee_id: int,
+    user: Annotated[CurrentUser, Depends(current_user)],
+    start: Annotated[date_type, Query(description="Inclusive start date.")],
+    end: Annotated[date_type, Query(description="Inclusive end date.")],
+) -> AttendanceListOut:
+    """Attendance rows for one employee across a date range.
+
+    Role gating mirrors the daily list:
+
+    * Admin / HR can pin to any employee in the tenant.
+    * Manager can pin only to employees in their visible set
+      (``manager_assignments`` + ``user_departments``).
+    * Employee can only pin to themselves; widening 403s.
+
+    Returns the standard ``AttendanceListOut`` shape; ``date`` echoes
+    ``end`` for downstream callers that need a single anchor.
+    """
+
+    if start > end:
+        raise HTTPException(
+            status_code=400, detail="start must be <= end"
+        )
+    if (end - start).days > 366:
+        raise HTTPException(
+            status_code=400, detail="range too large (max 366 days)"
+        )
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    is_admin_like = "Admin" in user.roles or "HR" in user.roles
+
+    if is_admin_like:
+        pass  # any employee in tenant
+    elif "Manager" in user.roles:
+        with get_engine().begin() as conn:
+            visible = get_manager_visible_employee_ids(
+                conn, scope, manager_user_id=user.id
+            )
+        if employee_id not in visible:
+            raise HTTPException(
+                status_code=404, detail="employee not visible"
+            )
+    else:  # Employee role — must match own row.
+        own = _employee_row_id_for(user)
+        if own is None or employee_id != own:
+            raise HTTPException(
+                status_code=403, detail="cannot view another employee"
+            )
+
+    with get_engine().begin() as conn:
+        # Defence in depth — confirm the row is in this tenant before
+        # returning; cross-tenant ids 404 instead of leaking via empty.
+        from sqlalchemy import select  # noqa: PLC0415
+
+        match = conn.execute(
+            select(employees.c.id).where(
+                employees.c.tenant_id == scope.tenant_id,
+                employees.c.id == employee_id,
+            )
+        ).first()
+        if match is None:
+            raise HTTPException(status_code=404, detail="employee not found")
+
+        rows = repo.list_for_employee_range(
+            conn,
+            scope,
+            employee_id=employee_id,
+            start_date=start,
+            end_date=end,
+        )
+    return AttendanceListOut(
+        date=end, items=[_row_to_item(r) for r in rows]
+    )
+
+
 class RegenerateOut(BaseModel):
     date: date_type
     rows_upserted: int

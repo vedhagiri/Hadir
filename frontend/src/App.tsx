@@ -34,6 +34,7 @@ import { DashboardRouter } from "./features/dashboard/DashboardRouter";
 import { EmployeesPage } from "./features/employees/EmployeesPage";
 import { CalendarPage } from "./features/calendar/CalendarPage";
 import { WorkersPage } from "./features/operations/WorkersPage";
+import { EmployeeReportPage } from "./features/reports/EmployeeReportPage";
 import { FormerEmployeesSeenReport } from "./features/reports/FormerEmployeesSeenReport";
 import { ReportsPage } from "./features/reports/ReportsPage";
 import { SystemPage as SuperAdminSystemPage } from "./super-admin/SystemPage";
@@ -108,6 +109,7 @@ export function App() {
         <Route path="my-attendance" element={<MyAttendancePage />} />
         <Route path="attendance/me" element={<MyAttendancePage />} />
         <Route path="reports" element={<ReportsPage />} />
+        <Route path="employee-report" element={<EmployeeReportPage />} />
         <Route path="former-employees" element={<FormerEmployeesSeenReport />} />
         <Route path="calendar" element={<CalendarPage />} />
         <Route path="operations/workers" element={<WorkersPage />} />
@@ -143,6 +145,7 @@ export function App() {
             id !== "team-attendance" &&
             id !== "my-attendance" &&
             id !== "reports" &&
+            id !== "employee-report" &&
             id !== "calendar" &&
             id !== "former-employees" &&
             id !== "operations/workers" &&

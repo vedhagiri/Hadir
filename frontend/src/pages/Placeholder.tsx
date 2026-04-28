@@ -24,7 +24,6 @@ const COMING_IN: Record<string, string> = {
   pipeline: "v1.0",
   approvals: "v1.0",
   reports: "P13",
-  "employee-report": "P13",
   "mgr-assign": "v1.0",
   audit: "P11",
   system: "P11",
