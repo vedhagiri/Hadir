@@ -513,6 +513,24 @@
     "close": "Close",
     "holiday": "Holiday",
     "weekend": "Weekend",
+    "weekendShort": "Week off",
+    "absentShort": "Absent",
+    "lateShort": "Late",
+    "shiftLabel": "Shift",
+    "hrs": "hrs",
+    "countLetter": {
+      "present": "P",
+      "late": "L",
+      "absent": "A",
+      "leave": "Lv"
+    },
+    "statusShort": {
+      "present": "present",
+      "late": "late",
+      "absent": "absent",
+      "leave": "on leave",
+      "no_record": "No record"
+    },
     "companyHint": "Click any day to switch to per-person view for {{month}}.",
     "dow": {
       "sun": "Sun",

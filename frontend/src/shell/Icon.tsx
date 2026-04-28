@@ -76,6 +76,7 @@ const paths = {
   ),
   chevronRight: <path d="M9 6l6 6-6 6" />,
   chevronDown: <path d="M6 9l6 6 6-6" />,
+  chevronUp: <path d="M6 15l6-6 6 6" />,
   chevronsUpDown: <path d="M7 9l5-5 5 5M7 15l5 5 5-5" />,
   shield: <path d="M12 3l8 3v6c0 4-3.5 7.5-8 9-4.5-1.5-8-5-8-9V6l8-3z" />,
   clipboard: (

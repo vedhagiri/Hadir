@@ -1,9 +1,12 @@
-// Company-wide month view — % present per day with a mini stacked
-// bar revealing late + absent + leave counts on hover. Click any day
-// to drill into a per-person table for that date in the parent page.
+// Company-wide month view. Same cell shape as PersonView so the two
+// tabs feel like one calendar — flat tinted background per status,
+// day number top-right, four rows of icon+count (P/L/A/Lv) when
+// non-zero, and a status pill anchored to the bottom for weekend /
+// holiday / no-record days.
 
 import { useTranslation } from "react-i18next";
 
+import { Icon } from "../../shell/Icon";
 import type { CompanyDay } from "./types";
 
 interface Props {
@@ -15,13 +18,8 @@ interface Props {
 export function CompanyView({ month, days, onPickDate }: Props) {
   const { t } = useTranslation();
 
-  // ``date`` parses with ``new Date(`${month}-01`)`` — we use the first
-  // day's index in the week to pad leading cells so the month grid
-  // aligns with Sunday-first column headers (the design's pattern in
-  // ``employee.jsx``).
   const first = days[0] ? new Date(`${days[0].date}T00:00:00`) : new Date();
   const leadingPad = first.getDay();
-
   const todayIso = isoToday();
 
   return (
@@ -33,92 +31,255 @@ export function CompanyView({ month, days, onPickDate }: Props) {
           </div>
         ))}
       </div>
-      <div className="cal-month-grid">
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(7, 1fr)",
+          gap: 4,
+        }}
+      >
         {Array.from({ length: leadingPad }).map((_, i) => (
-          <div key={`pad-${i}`} className="cal-day other-month" aria-hidden />
+          <div
+            key={`pad-${i}`}
+            style={{ aspectRatio: "1 / 1.15", visibility: "hidden" }}
+            aria-hidden
+          />
         ))}
-        {days.map((d) => {
-          const status = pickStatus(d);
-          const isToday = d.date === todayIso;
-          const dayNum = parseInt(d.date.slice(8, 10), 10);
-          // Holiday + weekend share ``--bg-sunken`` in the design CSS,
-          // which makes them visually identical. Override here to give
-          // holidays a distinct cyan tint (the only soft token the
-          // calendar's status set leaves unused) while weekends stay
-          // on the muted sunken fill plus a diagonal-stripe pattern
-          // for at-a-glance "off day" semantics.
-          const fillOverride = d.is_holiday
-            ? { background: "var(--accent-soft)" }
-            : d.is_weekend
-              ? {
-                  background:
-                    "repeating-linear-gradient(135deg, var(--bg-sunken) 0 6px, var(--bg-elev) 6px 12px)",
-                }
-              : null;
-          return (
-            <button
-              key={d.date}
-              type="button"
-              onClick={() => onPickDate(d.date)}
-              className={[
-                "cal-day",
-                `status-${status}`,
-                isToday ? "today" : "",
-              ]
-                .filter(Boolean)
-                .join(" ")}
-              style={{
-                cursor: "pointer",
-                textAlign: "start",
-                font: "inherit",
-                ...(fillOverride ?? {}),
-              }}
-              title={tooltipFor(d)}
-            >
-              <div className="cal-day-num">{dayNum}</div>
-              {d.is_holiday ? (
-                <div className="cal-flag" style={{ fontSize: 10 }}>
-                  {(t("calendar.holiday") as string)}
-                </div>
-              ) : d.is_weekend ? (
-                <div className="cal-flag" style={{ fontSize: 10 }}>
-                  {(t("calendar.weekend") as string)}
-                </div>
-              ) : (
-                <>
-                  <div className="cal-hours">
-                    {d.percent_present}%
-                  </div>
-                  <StackedBar day={d} />
-                </>
-              )}
-            </button>
-          );
-        })}
+        {days.map((d) => (
+          <DayCell
+            key={d.date}
+            day={d}
+            isToday={d.date === todayIso}
+            onClick={() => onPickDate(d.date)}
+          />
+        ))}
       </div>
 
       <Legend />
-      <div
-        className="text-xs text-dim"
-        style={{ marginTop: 8 }}
-      >
+      <div className="text-xs text-dim" style={{ marginTop: 8 }}>
         {t("calendar.companyHint", { month }) as string}
       </div>
     </div>
   );
 }
 
-const DOW_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
+function DayCell({
+  day,
+  isToday,
+  onClick,
+}: {
+  day: CompanyDay;
+  isToday: boolean;
+  onClick: () => void;
+}) {
+  const { t } = useTranslation();
+  const dayNum = parseInt(day.date.slice(8, 10), 10);
 
-function pickStatus(d: CompanyDay): string {
-  if (d.is_holiday) return "holiday";
-  if (d.is_weekend) return "weekend";
-  if (d.absent_count > 0 && d.absent_count > d.late_count + d.present_count) {
-    return "absent";
+  // Same tinting palette as PersonView so the two views read as one
+  // calendar.
+  const bg = day.is_weekend
+    ? "var(--info-soft)"
+    : day.is_holiday
+      ? "var(--accent-soft)"
+      : "var(--bg-elev)";
+
+  const statusLabel = bottomLabel(day, t);
+
+  // Count rows — present, late, absent, leave. Skipped when 0 to keep
+  // the cell readable on uniform months. Each row uses the same
+  // icon + mono number convention as PersonView's in/out rows.
+  const counts = [
+    {
+      key: "present",
+      value: day.present_count,
+      label: t("calendar.statusShort.present", {
+        defaultValue: "Present",
+      }) as string,
+      color: "var(--success-text, var(--success))",
+    },
+    {
+      key: "late",
+      value: day.late_count,
+      label: t("calendar.statusShort.late", {
+        defaultValue: "Late",
+      }) as string,
+      color: "var(--warning-text, var(--warning))",
+    },
+    {
+      key: "absent",
+      value: day.absent_count,
+      label: t("calendar.statusShort.absent", {
+        defaultValue: "Absent",
+      }) as string,
+      color: "var(--danger-text, var(--danger))",
+    },
+    {
+      key: "leave",
+      value: day.leave_count,
+      label: t("calendar.statusShort.leave", {
+        defaultValue: "Leave",
+      }) as string,
+      color: "var(--info-text, var(--info))",
+    },
+  ].filter((c) => c.value > 0);
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={tooltipFor(day)}
+      style={{
+        appearance: "none",
+        textAlign: "start",
+        font: "inherit",
+        background: bg,
+        border: `1px solid ${isToday ? "var(--accent)" : "var(--border)"}`,
+        borderWidth: isToday ? 1.5 : 1,
+        borderRadius: 7,
+        padding: "6px 8px 8px",
+        position: "relative",
+        cursor: "pointer",
+        display: "flex",
+        flexDirection: "column",
+        gap: 3,
+        minHeight: 96,
+      }}
+    >
+      {/* Day number — top-right per the design. */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          marginBottom: 2,
+        }}
+      >
+        <span style={{ width: 14 }} aria-hidden />
+        <span
+          className="mono"
+          style={{
+            fontSize: 12.5,
+            fontWeight: 500,
+            color: "var(--text)",
+          }}
+        >
+          {dayNum}
+        </span>
+      </div>
+
+      {/* Per-status counts — match the time-row look from PersonView
+          (icon + mono number + small label). */}
+      {counts.map((c) => (
+        <div
+          key={c.key}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 5,
+            fontSize: 11,
+            color: c.color,
+          }}
+        >
+          <Icon name={iconForStatus(c.key)} size={10} />
+          <span
+            className="mono"
+            style={{ fontVariantNumeric: "tabular-nums", minWidth: 14 }}
+          >
+            {c.value}
+          </span>
+          <span
+            style={{
+              fontSize: 10,
+              color: "var(--text-tertiary)",
+              marginInlineStart: 2,
+              textTransform: "lowercase",
+            }}
+          >
+            {c.label}
+          </span>
+        </div>
+      ))}
+
+      {/* Status pill (bottom) — only when the day carries info to
+          surface beyond the counts: weekend / holiday / no-record. */}
+      <div style={{ marginTop: "auto", paddingTop: 4 }}>
+        {statusLabel && (
+          <span
+            style={{
+              display: "inline-block",
+              padding: "1px 6px",
+              fontSize: 10,
+              fontWeight: 500,
+              borderRadius: 3,
+              background: pillBg(day),
+              color: pillFg(day),
+              border: `1px solid ${pillBorder(day)}`,
+            }}
+          >
+            {statusLabel}
+          </span>
+        )}
+      </div>
+    </button>
+  );
+}
+
+function bottomLabel(
+  day: CompanyDay,
+  t: ReturnType<typeof useTranslation>["t"],
+): string | null {
+  if (day.is_weekend) {
+    return t("calendar.weekendShort", {
+      defaultValue: "Week off",
+    }) as string;
   }
-  if (d.late_count > 0 && d.late_count >= d.present_count) return "late";
-  if (d.present_count > 0 || d.leave_count > 0) return "present";
-  return "no_record";
+  if (day.holiday_name) return day.holiday_name;
+  if (day.is_holiday) return t("calendar.holiday") as string;
+  // No-counts day with active employees in the tenant — surface "no
+  // record" so the cell isn't visually empty.
+  if (
+    day.active_employees > 0 &&
+    day.present_count === 0 &&
+    day.late_count === 0 &&
+    day.absent_count === 0 &&
+    day.leave_count === 0
+  ) {
+    return t("calendar.statusShort.no_record", {
+      defaultValue: "No record",
+    }) as string;
+  }
+  return null;
+}
+
+function pillBg(day: CompanyDay): string {
+  if (day.is_weekend) return "var(--info-soft)";
+  if (day.is_holiday) return "var(--accent-soft)";
+  return "var(--bg-sunken)";
+}
+
+function pillFg(day: CompanyDay): string {
+  if (day.is_weekend) return "var(--info-text, var(--info))";
+  if (day.is_holiday) return "var(--accent-text)";
+  return "var(--text-secondary)";
+}
+
+function pillBorder(day: CompanyDay): string {
+  if (day.is_weekend) return "var(--info-text, var(--info))";
+  if (day.is_holiday) return "var(--accent-text)";
+  return "var(--border)";
+}
+
+function iconForStatus(key: string): "chevronUp" | "chevronDown" | "circle" {
+  // Match the PersonView convention: up = positive (present), down =
+  // negative (absent), circle = neutral (late / leave).
+  switch (key) {
+    case "present":
+      return "chevronUp";
+    case "absent":
+      return "chevronDown";
+    default:
+      return "circle";
+  }
 }
 
 function tooltipFor(d: CompanyDay): string {
@@ -132,52 +293,15 @@ function tooltipFor(d: CompanyDay): string {
   return parts.join(" — ");
 }
 
-function StackedBar({ day }: { day: CompanyDay }) {
-  const total = Math.max(
-    1,
-    day.present_count + day.late_count + day.absent_count + day.leave_count,
-  );
-  const seg = (n: number) => `${(100 * n) / total}%`;
-  return (
-    <div
-      style={{
-        display: "flex",
-        height: 4,
-        marginTop: "auto",
-        borderRadius: 2,
-        overflow: "hidden",
-        background: "var(--bg-sunken)",
-      }}
-      aria-hidden
-    >
-      <span style={{ width: seg(day.present_count), background: "var(--success)" }} />
-      <span style={{ width: seg(day.late_count), background: "var(--warning)" }} />
-      <span style={{ width: seg(day.absent_count), background: "var(--danger)" }} />
-      <span style={{ width: seg(day.leave_count), background: "var(--info)" }} />
-    </div>
-  );
-}
-
 function Legend() {
   const { t } = useTranslation();
-  // Swatches mirror the day-cell fills:
-  // - present/late/absent/leave use the design's solid accent colors
-  //   (deeper than the cell's soft tint, but the same hue family so a
-  //   reader maps swatch → cell at a glance).
-  // - holiday: cyan accent-soft (matches the cell override)
-  // - weekend: diagonal stripes (matches the cell override)
   const items = [
     { key: "present", color: "var(--success)" },
     { key: "late", color: "var(--warning)" },
     { key: "absent", color: "var(--danger)" },
     { key: "leave", color: "var(--info)" },
     { key: "holiday", color: "var(--accent-soft)", border: true },
-    {
-      key: "weekend",
-      color:
-        "repeating-linear-gradient(135deg, var(--bg-sunken) 0 4px, var(--bg-elev) 4px 8px)",
-      border: true,
-    },
+    { key: "weekend", color: "var(--info-soft)", border: true },
   ];
   return (
     <div
@@ -214,6 +338,8 @@ function Legend() {
     </div>
   );
 }
+
+const DOW_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
 
 function isoToday(): string {
   const d = new Date();

@@ -513,6 +513,24 @@
     "close": "إغلاق",
     "holiday": "عطلة",
     "weekend": "نهاية الأسبوع",
+    "weekendShort": "إجازة أسبوعية",
+    "absentShort": "غائب",
+    "lateShort": "متأخر",
+    "shiftLabel": "الوردية",
+    "hrs": "س",
+    "countLetter": {
+      "present": "ح",
+      "late": "م",
+      "absent": "غ",
+      "leave": "إج"
+    },
+    "statusShort": {
+      "present": "حضور",
+      "late": "متأخر",
+      "absent": "غائب",
+      "leave": "بإجازة",
+      "no_record": "لا يوجد سجل"
+    },
     "companyHint": "اضغط أي يوم للانتقال إلى عرض الموظف للشهر {{month}}.",
     "dow": {
       "sun": "أحد",

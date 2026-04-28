@@ -15,11 +15,14 @@ import { NewRequestDrawer } from "../../requests/NewRequestDrawer";
 import { useEmployeeList } from "../employees/hooks";
 import { CompanyView } from "./CompanyView";
 import { DayDetailDrawer } from "./DayDetailDrawer";
+import { PersonPickerGrid } from "./PersonPickerGrid";
 import { PersonView } from "./PersonView";
 import {
   useCompanyCalendar,
   usePersonCalendar,
 } from "./hooks";
+
+import { Icon } from "../../shell/Icon";
 
 type Tab = "company" | "person";
 
@@ -32,16 +35,19 @@ export function CalendarPage() {
   const [tab, setTab] = useState<Tab>(isCompanyAllowed ? "company" : "person");
   const [month, setMonth] = useState<string>(currentMonth());
 
-  // Per-person picker state.
-  const [employeeQuery, setEmployeeQuery] = useState<string>("");
+  // Per-person picker state. The card-grid component (PersonPickerGrid)
+  // owns its own search/department/page state — we only track the
+  // *selected* employee id here. The Employee-role auto-lock still
+  // needs a one-shot lookup against /api/employees to find the row
+  // tied to the user's email; the card grid is hidden in that case.
   const [employeeId, setEmployeeId] = useState<number | null>(null);
 
   const employees = useEmployeeList({
-    q: employeeQuery,
+    q: "",
     department_id: null,
     include_inactive: false,
     page: 1,
-    page_size: 25,
+    page_size: 200,
   });
 
   // Auto-lock Employee role to themselves — pick the first row in the
@@ -166,42 +172,25 @@ export function CalendarPage() {
         </div>
       )}
 
-      {tab === "person" && (
-        <div
-          className="card"
-          style={{
-            padding: 12,
-            marginBottom: 16,
-            display: "flex",
-            gap: 8,
-            alignItems: "center",
-          }}
-        >
-          <input
-            type="text"
-            placeholder={t("calendar.searchEmployee") as string}
-            value={employeeQuery}
-            onChange={(e) => setEmployeeQuery(e.target.value)}
-            disabled={role === "Employee"}
-            style={{ ...selectStyle, flex: 1, maxWidth: 320 }}
-          />
-          <select
-            value={employeeId ?? ""}
-            onChange={(e) =>
-              setEmployeeId(e.target.value === "" ? null : Number(e.target.value))
-            }
-            disabled={role === "Employee"}
-            style={selectStyle}
-          >
-            <option value="">{t("calendar.pickEmployee") as string}</option>
-            {(employees.data?.items ?? []).map((emp) => (
-              <option key={emp.id} value={emp.id}>
-                {emp.full_name} · {emp.employee_code}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
+      {/* Per-person tab now opens with a card grid. Operator picks
+          a card → calendar loads. A back-to-list button at the top
+          of the calendar card returns to the picker. */}
+      {tab === "person" &&
+        employeeId !== null &&
+        role !== "Employee" && (
+          <div style={{ marginBottom: 12 }}>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => setEmployeeId(null)}
+            >
+              <Icon name="chevronLeft" size={11} />
+              {t("calendar.backToList", {
+                defaultValue: "Back to employees",
+              }) as string}
+            </button>
+          </div>
+        )}
 
       {tab === "company" && isCompanyAllowed && (
         <>
@@ -225,7 +214,12 @@ export function CalendarPage() {
 
       {tab === "person" && (
         <>
-          {employeeId === null && (
+          {employeeId === null && role !== "Employee" && (
+            <PersonPickerGrid
+              onPickEmployee={(emp) => setEmployeeId(emp.id)}
+            />
+          )}
+          {employeeId === null && role === "Employee" && (
             <div className="card" style={{ padding: 16 }}>
               <div className="text-sm text-dim">
                 {t("calendar.pickEmployeeHint") as string}
