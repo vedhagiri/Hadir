@@ -28,6 +28,9 @@ export interface Employee {
   relieving_date?: string | null;
   deactivated_at?: string | null;
   deactivation_reason?: string | null;
+  // Role codes from the linked platform user (joined by email).
+  // Empty list = no platform login OR login with no roles assigned.
+  role_codes?: string[];
 }
 
 export interface EmployeeListResponse {

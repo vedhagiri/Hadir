@@ -12,6 +12,8 @@
     "reset": "Reset",
     "done": "Done",
     "uploading": "Uploading…",
+    "previous": "Previous",
+    "next": "Next",
     "yes": "Yes",
     "no": "No",
     "all": "All",
@@ -265,6 +267,12 @@
     "title": "Language",
     "english": "English",
     "arabic": "العربية"
+  },
+  "role": {
+    "Admin": "Admin",
+    "HR": "HR",
+    "Manager": "Manager",
+    "Employee": "Employee"
   },
   "display": {
     "button": "Display settings",
@@ -550,10 +558,18 @@
       "id": "ID",
       "email": "Email",
       "department": "Department",
+      "role": "Role",
+      "manager": "Manager",
       "status": "Status",
       "photos": "Photos",
       "actions": "Actions"
     },
+    "exportSelected": "Export {{count}} selected",
+    "importButton": "Import XLSX/CSV",
+    "selectAllOnPage": "Select all rows on this page",
+    "selectRow": "Select row",
+    "pageOfTotal": "Showing on this page / total matching",
+    "pageNumber": "Page {{page}} of {{totalPages}}",
     "action": {
       "edit": "Edit",
       "view": "View",

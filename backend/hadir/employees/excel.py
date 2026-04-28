@@ -231,6 +231,104 @@ def parse_import(stream: BytesIO) -> Iterator[ImportRow]:
         wb.close()
 
 
+def parse_csv_import(data: bytes) -> Iterator[ImportRow]:
+    """CSV variant of ``parse_import``. Same column contract: required
+    headers ``employee_code, full_name, email, department_code``;
+    optional headers from ``P28_7_OPTIONAL_COLUMNS``; any other header
+    becomes a custom-field candidate. Department codes must match an
+    existing department row — that validation lives in the router.
+
+    Accepts UTF-8 with optional BOM. Headers are case-and-whitespace-
+    normalised the same way as the XLSX parser. Per-row failures
+    surface in the router's response just like the XLSX path.
+    """
+
+    import csv as _csv  # noqa: PLC0415
+
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ImportParseError("file must be UTF-8 encoded") from exc
+
+    from io import StringIO  # noqa: PLC0415
+
+    reader = _csv.reader(StringIO(text))
+    iterator = iter(reader)
+    try:
+        header_row = next(iterator)
+    except StopIteration as exc:
+        raise ImportParseError("CSV is empty") from exc
+
+    headers = [_normalise_header(c) for c in header_row]
+    missing = [c for c in REQUIRED_COLUMNS if c not in headers]
+    if missing:
+        raise ImportParseError(
+            f"missing required column(s): {', '.join(missing)}"
+        )
+
+    idx = {name: headers.index(name) for name in REQUIRED_COLUMNS}
+    opt_idx: dict[str, Optional[int]] = {
+        col: (headers.index(col) if col in headers else None)
+        for col in P28_7_OPTIONAL_COLUMNS
+    }
+    custom_idx: dict[str, int] = {}
+    for pos, header in enumerate(headers):
+        if not header or header in _KNOWN_HEADERS or header in custom_idx:
+            continue
+        custom_idx[header] = pos
+
+    def _opt(row, key: str) -> Optional[str]:
+        pos = opt_idx[key]
+        if pos is None or pos >= len(row):
+            return None
+        v = row[pos].strip()
+        return v or None
+
+    for excel_row, row in enumerate(iterator, start=2):
+        if all((cell or "").strip() == "" for cell in row):
+            continue
+        code = (
+            row[idx["employee_code"]].strip()
+            if idx["employee_code"] < len(row)
+            else ""
+        )
+        name = (
+            row[idx["full_name"]].strip()
+            if idx["full_name"] < len(row)
+            else ""
+        )
+        email_raw = (
+            row[idx["email"]].strip() if idx["email"] < len(row) else ""
+        )
+        dept_code = (
+            row[idx["department_code"]].strip()
+            if idx["department_code"] < len(row)
+            else ""
+        )
+
+        cv: dict[str, str] = {}
+        for header, pos in custom_idx.items():
+            if pos < len(row):
+                v = row[pos].strip()
+                if v:
+                    cv[header] = v
+
+        yield ImportRow(
+            excel_row=excel_row,
+            employee_code=code,
+            full_name=name,
+            email=email_raw or None,
+            department_code=dept_code,
+            designation=_opt(row, "designation"),
+            phone=_opt(row, "phone"),
+            reports_to_email=_opt(row, "reports_to_email"),
+            joining_date=_opt(row, "joining_date"),
+            relieving_date=_opt(row, "relieving_date"),
+            status=_opt(row, "status"),
+            custom_values=cv,
+        )
+
+
 def build_export(
     rows: list[EmployeeRow],
     *,

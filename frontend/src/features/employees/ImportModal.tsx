@@ -115,7 +115,7 @@ export function ImportModal({ onClose }: Props) {
                     <Icon name="upload" size={20} />
                   </div>
                   <div>
-                    Drop an .xlsx here, or{" "}
+                    Drop an .xlsx or .csv here, or{" "}
                     <label
                       style={{
                         textDecoration: "underline",
@@ -126,7 +126,7 @@ export function ImportModal({ onClose }: Props) {
                       choose a file
                       <input
                         type="file"
-                        accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.csv,text/csv"
                         onChange={(e) => setFile(e.target.files?.[0] ?? null)}
                         style={{ display: "none" }}
                       />

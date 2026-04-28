@@ -49,6 +49,10 @@ class EmployeeOut(BaseModel):
     relieving_date: Optional[date] = None
     deactivated_at: Optional[datetime] = None
     deactivation_reason: Optional[str] = None
+    # Role codes from the linked platform user (joined by email).
+    # Empty list = no platform login OR login with no roles assigned.
+    # Surfaced for the employees-list ROLE column.
+    role_codes: list[str] = []
 
 
 class EmployeeListOut(BaseModel):

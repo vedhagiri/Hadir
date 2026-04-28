@@ -12,6 +12,8 @@
     "reset": "إعادة تعيين",
     "done": "تم",
     "uploading": "جارٍ الرفع…",
+    "previous": "السابق",
+    "next": "التالي",
     "yes": "نعم",
     "no": "لا",
     "all": "الكل",
@@ -265,6 +267,12 @@
     "title": "اللغة",
     "english": "English",
     "arabic": "العربية"
+  },
+  "role": {
+    "Admin": "مسؤول",
+    "HR": "موارد بشرية",
+    "Manager": "مدير",
+    "Employee": "موظف"
   },
   "display": {
     "button": "إعدادات العرض",
@@ -550,10 +558,18 @@
       "id": "المعرف",
       "email": "البريد الإلكتروني",
       "department": "القسم",
+      "role": "الدور",
+      "manager": "المدير",
       "status": "الحالة",
       "photos": "الصور",
       "actions": "الإجراءات"
     },
+    "exportSelected": "تصدير {{count}} محدد",
+    "importButton": "استيراد XLSX/CSV",
+    "selectAllOnPage": "تحديد كل صفوف هذه الصفحة",
+    "selectRow": "تحديد الصف",
+    "pageOfTotal": "ظاهر في هذه الصفحة / إجمالي مطابق",
+    "pageNumber": "صفحة {{page}} من {{totalPages}}",
     "action": {
       "edit": "تعديل",
       "view": "عرض",

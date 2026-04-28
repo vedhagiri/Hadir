@@ -42,6 +42,11 @@ class EmployeeRow:
     relieving_date: Optional[date] = None
     deactivated_at: Optional[datetime] = None
     deactivation_reason: Optional[str] = None
+    # The employees-list page's ROLE column. Populated by joining the
+    # linked ``users`` row by email (case-insensitive) and pulling
+    # role codes from ``user_roles``. Empty list = no platform login
+    # OR login exists but has no roles assigned.
+    role_codes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,7 +216,70 @@ def list_employees(
         .limit(page_size)
         .offset((page - 1) * page_size)
     ).all()
-    return [_row_to_employee(r) for r in rows], total
+    page_rows = [_row_to_employee(r) for r in rows]
+    role_map = _role_codes_by_email(
+        conn, scope, [e.email for e in page_rows if e.email]
+    )
+    page_rows = [
+        _replace_role_codes(e, role_map.get((e.email or "").lower(), ()))
+        for e in page_rows
+    ]
+    return page_rows, total
+
+
+def _role_codes_by_email(
+    conn: Connection, scope: TenantScope, emails: list[str]
+) -> dict[str, tuple[str, ...]]:
+    """Batch-resolve role codes for a list of emails, keyed by lower-
+    cased email. Single SQL hit regardless of page size — joins
+    users → user_roles → roles in one go and groups in Python."""
+
+    from hadir.db import roles as roles_t  # noqa: PLC0415
+    from hadir.db import user_roles as user_roles_t  # noqa: PLC0415
+    from hadir.db import users as users_t  # noqa: PLC0415
+
+    norm_emails = [e.lower() for e in emails if e]
+    if not norm_emails:
+        return {}
+    rows = conn.execute(
+        select(users_t.c.email, roles_t.c.code)
+        .select_from(
+            users_t.join(
+                user_roles_t,
+                and_(
+                    user_roles_t.c.user_id == users_t.c.id,
+                    user_roles_t.c.tenant_id == users_t.c.tenant_id,
+                ),
+            ).join(
+                roles_t,
+                and_(
+                    roles_t.c.id == user_roles_t.c.role_id,
+                    roles_t.c.tenant_id == user_roles_t.c.tenant_id,
+                ),
+            )
+        )
+        .where(
+            users_t.c.tenant_id == scope.tenant_id,
+            func.lower(users_t.c.email).in_(norm_emails),
+        )
+    ).all()
+    out: dict[str, list[str]] = {}
+    for r in rows:
+        key = str(r.email).lower()
+        out.setdefault(key, []).append(str(r.code))
+    return {k: tuple(sorted(v)) for k, v in out.items()}
+
+
+def _replace_role_codes(
+    e: EmployeeRow, role_codes: tuple[str, ...]
+) -> EmployeeRow:
+    """Frozen-dataclass replacement helper — return a new EmployeeRow
+    with ``role_codes`` populated. The list query has no role data;
+    the batch lookup above adds it after the page is fetched."""
+
+    from dataclasses import replace as dc_replace  # noqa: PLC0415
+
+    return dc_replace(e, role_codes=role_codes)
 
 
 def get_employee(
@@ -220,7 +288,15 @@ def get_employee(
     row = conn.execute(
         _employee_select(scope).where(employees.c.id == employee_id)
     ).first()
-    return _row_to_employee(row) if row is not None else None
+    if row is None:
+        return None
+    base = _row_to_employee(row)
+    if base.email:
+        roles_map = _role_codes_by_email(conn, scope, [base.email])
+        return _replace_role_codes(
+            base, roles_map.get(base.email.lower(), ())
+        )
+    return base
 
 
 def get_employee_by_code(

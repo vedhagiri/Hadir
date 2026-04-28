@@ -92,6 +92,7 @@ def _row_to_out(row: repo.EmployeeRow) -> EmployeeOut:
         relieving_date=row.relieving_date,
         deactivated_at=row.deactivated_at,
         deactivation_reason=row.deactivation_reason,
+        role_codes=list(row.role_codes),
     )
 
 
@@ -155,12 +156,31 @@ def list_employees_endpoint(
 
 
 @router.get("/export")
-def export_employees_endpoint(user: Annotated[CurrentUser, ADMIN_OR_HR]) -> StreamingResponse:
-    """Full-tenant XLSX dump (active + inactive), one sheet named Employees."""
+def export_employees_endpoint(
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
+    ids: Annotated[Optional[str], Query()] = None,
+) -> StreamingResponse:
+    """Full-tenant XLSX dump (active + inactive), one sheet named
+    Employees. ``?ids=1,2,3`` scopes the export to the listed
+    employee ids — used by the list page's "Export selected" path.
+    Unknown ids in the list are silently dropped."""
 
     scope = TenantScope(tenant_id=user.tenant_id)
+    selected_ids: Optional[set[int]] = None
+    if ids:
+        try:
+            selected_ids = {
+                int(part) for part in ids.split(",") if part.strip()
+            }
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="``ids`` must be a comma-separated list of integers",
+            )
     with get_engine().begin() as conn:
         rows = repo.list_all_for_export(conn, scope)
+        if selected_ids is not None:
+            rows = [r for r in rows if r.id in selected_ids]
         # P12: append one column per defined custom field, in
         # display_order. Empty cells where the employee has no value.
         custom_fields = cf_repo.list_fields(conn, scope)
@@ -651,8 +671,14 @@ async def import_employees_endpoint(
     warnings: list[ImportWarningSchema] = []
     seen_codes: set[str] = set()
 
+    # Auto-detect CSV vs XLSX by filename — XLSX is the historical
+    # default; CSV was added so operators can edit in any text editor.
+    is_csv = (file.filename or "").lower().endswith(".csv")
     try:
-        rows = list(excel_io.parse_import(BytesIO(data)))
+        if is_csv:
+            rows = list(excel_io.parse_csv_import(data))
+        else:
+            rows = list(excel_io.parse_import(BytesIO(data)))
     except excel_io.ImportParseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
