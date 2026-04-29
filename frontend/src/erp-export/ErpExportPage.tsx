@@ -82,8 +82,8 @@ export function ErpExportPage() {
       const cd = resp.headers.get("content-disposition") ?? "";
       const m = /filename="([^"]+)"/.exec(cd);
       const filename = m
-        ? m[1] ?? "hadir-attendance.csv"
-        : "hadir-attendance.csv";
+        ? m[1] ?? "maugood-attendance.csv"
+        : "maugood-attendance.csv";
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -127,7 +127,7 @@ export function ErpExportPage() {
           ERP file-drop export
         </h1>
         <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 13 }}>
-          Hadir writes a daily attendance file the client ERP polls.
+          Maugood writes a daily attendance file the client ERP polls.
           Output always lives under{" "}
           <span className="mono">{cfg.data.tenant_root}</span> — paths
           that escape that root are rejected on save. See{" "}

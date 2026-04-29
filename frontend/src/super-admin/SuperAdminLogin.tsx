@@ -128,7 +128,7 @@ export function SuperAdminLogin() {
           Super-Admin sign in
         </h1>
         <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 13 }}>
-          Hadir staff only. Every action you take here is audit-logged in the
+          Maugood staff only. Every action you take here is audit-logged in the
           tenant&apos;s own log and the global operator log.
         </p>
 

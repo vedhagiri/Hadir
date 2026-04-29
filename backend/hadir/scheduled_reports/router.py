@@ -257,8 +257,8 @@ def send_test_email(
     sender = get_sender(sender_cfg)
     html = render_report_email_html(
         context={
-            "subject": "Hadir test email",
-            "tenant": {"name": "Hadir"},
+            "subject": "Maugood test email",
+            "tenant": {"name": "Maugood"},
             "branding": {
                 "accent_hex": "#117a7a",
                 "accent_soft_hex": "#e6f5f5",
@@ -291,9 +291,9 @@ def send_test_email(
         }
     )
     message = EmailMessage(
-        subject="Hadir email configuration test",
+        subject="Maugood email configuration test",
         html=html,
-        text="This is a test from Hadir's email configuration page.",
+        text="This is a test from Maugood's email configuration page.",
         to=(payload.to,),
         from_address=sender_cfg.from_address,
         from_name=sender_cfg.from_name,

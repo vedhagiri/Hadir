@@ -17,6 +17,7 @@ import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { z } from "zod";
 
 import { ApiError } from "../api/client";
+import mtsLogo from "../assets/mts_logo.png";
 import { useOidcStatus } from "../auth-oidc/hooks";
 import { Icon } from "../shell/Icon";
 import { useLogin, useMe } from "./AuthProvider";
@@ -186,10 +187,11 @@ function Header({ tenantSlug }: { tenantSlug: string | null }) {
           marginBottom: 4,
         }}
       >
-        <div className="brand-mark" style={{ width: 28, height: 28, fontSize: 14 }}>
-          ح
-        </div>
-        <div style={{ fontWeight: 600, letterSpacing: "-0.01em" }}>Hadir</div>
+        <img
+          src={mtsLogo}
+          alt="Muscat Tech Solutions"
+          style={{ height: 32, width: "auto", objectFit: "contain" }}
+        />
         {tenantSlug && (
           <span
             style={{

@@ -89,8 +89,8 @@ export function AuthenticationPage() {
         </h1>
         <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 13 }}>
           Sign in with Microsoft (Entra ID OIDC). Users must already exist in
-          Hadir — Hadir does not auto-provision from claims, and roles are
-          managed only inside Hadir (BRD FR-AUTH-006).
+          Maugood — Maugood does not auto-provision from claims, and roles are
+          managed only inside Maugood (BRD FR-AUTH-006).
         </p>
       </header>
 

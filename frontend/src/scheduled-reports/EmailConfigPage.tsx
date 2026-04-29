@@ -287,7 +287,7 @@ export function EmailConfigPage() {
               className="input"
               value={fromName}
               onChange={(e) => setFromName(e.target.value)}
-              placeholder="Hadir Reports"
+              placeholder="Maugood Reports"
             />
           </Field>
         </div>

@@ -38,7 +38,7 @@ interface Props {
 export function Topbar({ pageId, role, me }: Props) {
   const navigate = useNavigate();
   const logout = useLogout();
-  const crumbs = CRUMBS[pageId] ?? ["Hadir", pageId];
+  const crumbs = CRUMBS[pageId] ?? ["Maugood", pageId];
 
   const onLogout = () => {
     logout.mutate(undefined, {

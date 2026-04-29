@@ -32,12 +32,12 @@
     "expandSidebar": "Expand sidebar"
   },
   "login": {
-    "title": "Sign in to Hadir",
-    "subtitle": "Use your Hadir account or your organisation's Microsoft sign-in.",
+    "title": "Sign in to Maugood",
+    "subtitle": "Use your Maugood account or your organisation's Microsoft sign-in.",
     "emailLabel": "Email",
     "emailPlaceholder": "you@your-domain.com",
     "passwordLabel": "Password",
-    "passwordPlaceholder": "Your Hadir password",
+    "passwordPlaceholder": "Your Maugood password",
     "submit": "Sign in",
     "submitting": "Signing in…",
     "wrongCredentials": "Email or password didn't match.",
@@ -276,7 +276,7 @@
   },
   "display": {
     "button": "Display settings",
-    "pageSub": "Adjust how Hadir looks for you. Changes save automatically and follow your account across browsers.",
+    "pageSub": "Adjust how Maugood looks for you. Changes save automatically and follow your account across browsers.",
     "themeLabel": "Theme",
     "themeDescription": "System follows your operating-system setting. Light and Dark force a specific palette.",
     "theme": {
@@ -292,8 +292,8 @@
     }
   },
   "pipeline": {
-    "title": "How Hadir works",
-    "subtitle": "From the moment a face crosses the camera to the moment a row lands in your monthly report — here's the path Hadir walks for every employee, every day.",
+    "title": "How Maugood works",
+    "subtitle": "From the moment a face crosses the camera to the moment a row lands in your monthly report — here's the path Maugood walks for every employee, every day.",
     "steps": {
       "camera": {
         "title": "Camera",
@@ -301,7 +301,7 @@
       },
       "capture": {
         "title": "Capture",
-        "body": "Hadir reads each enabled camera at four frames per second, runs face detection, and groups frames into tracks with an IoU tracker. One detection event lands in the database per track entry — not per frame — so a person standing in view doesn't flood the log."
+        "body": "Maugood reads each enabled camera at four frames per second, runs face detection, and groups frames into tracks with an IoU tracker. One detection event lands in the database per track entry — not per frame — so a person standing in view doesn't flood the log."
       },
       "detection": {
         "title": "Detection",
@@ -327,7 +327,7 @@
   },
   "apiDocs": {
     "title": "API Reference",
-    "subtitle": "Hadir's REST API. The reference below is generated from the same FastAPI handlers that serve every request — it's never out of date.",
+    "subtitle": "Maugood's REST API. The reference below is generated from the same FastAPI handlers that serve every request — it's never out of date.",
     "overview": {
       "title": "Overview",
       "auth": "Authentication uses an HttpOnly session cookie set by POST /api/auth/login. Cookies are SameSite=Lax and refresh sliding-expiry on every authenticated request.",

@@ -11,6 +11,7 @@ import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { NavLink } from "react-router-dom";
 
+import omranLogo from "../assets/omran_logo.png";
 import { api } from "../api/client";
 import { APP_VERSION_SHORT } from "../config";
 import type { CameraListResponse } from "../features/cameras/types";
@@ -102,8 +103,18 @@ export function Sidebar({ role }: Props) {
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
-        <div className="brand-mark">ح</div>
-        <div className="brand-name">Hadir</div>
+        <img
+          src={omranLogo}
+          alt="Omran"
+          className="brand-logo"
+          style={{
+            width: 28,
+            height: 28,
+            objectFit: "contain",
+            flexShrink: 0,
+          }}
+        />
+        <div className="brand-name">Omran</div>
         {/* P28.5d: collapse/expand toggle in the top-right of the
             brand row, replacing the version chip. ">" when expanded
             (clicking collapses); "<" when collapsed (clicking
@@ -258,7 +269,7 @@ export function Sidebar({ role }: Props) {
           <span style={{ fontWeight: 600 }}>Muscat Tech Solutions</span>
         </div>
         <div style={{ marginTop: 2, opacity: 0.8 }}>
-          <span className="nav-label-text">Hadir </span>
+          <span className="nav-label-text">Maugood </span>
           {APP_VERSION_SHORT}
         </div>
       </div>
