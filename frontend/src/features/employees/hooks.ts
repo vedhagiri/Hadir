@@ -7,7 +7,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseQueryResult } from "@tanstack/react-query";
 
-import { api } from "../../api/client";
+import { ApiError, api } from "../../api/client";
 import type {
   DeleteRequest,
   DeleteRequestListResponse,
@@ -54,6 +54,27 @@ export function useEmployeeDetail(
     queryKey: ["employees", "detail", employeeId],
     queryFn: () => api<Employee>(`/api/employees/${employeeId}`),
     enabled: employeeId !== null,
+  });
+}
+
+// Maps the logged-in user → their employee record by email match.
+// Returns ``null`` (not an error) when the account isn't linked to
+// an employee — common for Admin/HR accounts that exist purely as
+// operators. The 404 from the backend is treated as "no link" so
+// the self-view pages can render an empty state cleanly instead of
+// surfacing a query error.
+export function useMyEmployee(): UseQueryResult<Employee | null, Error> {
+  return useQuery({
+    queryKey: ["employees", "me"],
+    queryFn: async (): Promise<Employee | null> => {
+      try {
+        return await api<Employee>("/api/employees/me");
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) return null;
+        throw e;
+      }
+    },
+    staleTime: 5 * 60 * 1000,
   });
 }
 

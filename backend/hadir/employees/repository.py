@@ -308,6 +308,34 @@ def get_employee_by_code(
     return _row_to_employee(row) if row is not None else None
 
 
+def get_employee_by_email(
+    conn: Connection, scope: TenantScope, email: str
+) -> Optional[EmployeeRow]:
+    """Return the employee row whose email matches case-insensitively.
+
+    Used by ``GET /api/employees/me`` to map the authenticated user
+    to their own employee record without requiring a full list scan
+    on the client side. ``employees.email`` is CITEXT so the
+    comparison is implicitly case-insensitive at the DB layer; we
+    still ``lower()`` the input as defence in depth.
+    """
+
+    row = conn.execute(
+        _employee_select(scope).where(
+            employees.c.email == email.strip().lower()
+        )
+    ).first()
+    if row is None:
+        return None
+    base = _row_to_employee(row)
+    if base.email:
+        roles_map = _role_codes_by_email(conn, scope, [base.email])
+        return _replace_role_codes(
+            base, roles_map.get(base.email.lower(), ())
+        )
+    return base
+
+
 def create_employee(
     conn: Connection,
     scope: TenantScope,

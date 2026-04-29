@@ -12,7 +12,7 @@ import { useTranslation } from "react-i18next";
 import { useMe } from "../../auth/AuthProvider";
 import { primaryRole } from "../../types";
 import { NewRequestDrawer } from "../../requests/NewRequestDrawer";
-import { useEmployeeList } from "../employees/hooks";
+import { useMyEmployee } from "../employees/hooks";
 import { CompanyView } from "./CompanyView";
 import { DayDetailDrawer } from "./DayDetailDrawer";
 import { PersonPickerGrid } from "./PersonPickerGrid";
@@ -32,37 +32,28 @@ export function CalendarPage() {
   const role = me.data ? primaryRole(me.data.roles) : "Employee";
   const isCompanyAllowed = role === "Admin" || role === "HR" || role === "Manager";
 
-  const [tab, setTab] = useState<Tab>(isCompanyAllowed ? "company" : "person");
+  // Default to Per-person view scoped to the logged-in user. Admin/HR/
+  // Manager can still flip to the Company tab; Employee never sees the
+  // tab strip. This puts "my own calendar" in front of every role on
+  // first load, mirroring the My Attendance page's self-view.
+  const [tab, setTab] = useState<Tab>("person");
   const [month, setMonth] = useState<string>(currentMonth());
 
   // Per-person picker state. The card-grid component (PersonPickerGrid)
   // owns its own search/department/page state — we only track the
-  // *selected* employee id here. The Employee-role auto-lock still
-  // needs a one-shot lookup against /api/employees to find the row
-  // tied to the user's email; the card grid is hidden in that case.
+  // *selected* employee id here.
   const [employeeId, setEmployeeId] = useState<number | null>(null);
 
-  const employees = useEmployeeList({
-    q: "",
-    department_id: null,
-    include_inactive: false,
-    page: 1,
-    page_size: 200,
-  });
-
-  // Auto-lock Employee role to themselves — pick the first row in the
-  // /api/employees response (filtered by their own email at the
-  // backend won't help; this picks whatever row their account maps to).
+  // Auto-resolve the logged-in user to themselves for every role —
+  // Admin/HR/Manager get their own calendar pre-loaded; the picker
+  // stays one click away via the "Back to employees" button. The
+  // backend's GET /api/employees/me does the email match server-side
+  // so we don't ship the entire employee list to the client.
+  const myEmployee = useMyEmployee();
   useEffect(() => {
-    if (role !== "Employee") return;
     if (employeeId !== null) return;
-    if (!me.data?.email) return;
-    if (!employees.data) return;
-    const self = employees.data.items.find(
-      (e) => e.email && e.email.toLowerCase() === (me.data?.email ?? "").toLowerCase(),
-    );
-    if (self) setEmployeeId(self.id);
-  }, [role, employeeId, me.data?.email, employees.data]);
+    if (myEmployee.data) setEmployeeId(myEmployee.data.id);
+  }, [employeeId, myEmployee.data]);
 
   const company = useCompanyCalendar(
     month,

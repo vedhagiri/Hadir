@@ -499,3 +499,130 @@ input[type="radio"]:focus-visible {
 [data-sidebar="collapsed"] .sidebar-footer {
   padding-top: 8px;
 }
+
+/* ------------------------------------------------------------------
+   Sidebar visibility pass: the design's --bg and --bg-elev are within
+   1% lightness of each other, so the sidebar blended into the canvas
+   and the .active nav-item was indistinguishable from idle. Tint the
+   sidebar surface, pull the active state onto the accent palette,
+   and give hover a real lift.
+   ------------------------------------------------------------------ */
+.sidebar {
+  background: var(--bg-sunken);
+  border-inline-end-color: var(--border-strong);
+}
+
+.nav-item {
+  transition: background 120ms ease, color 120ms ease;
+}
+.nav-item:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.nav-item.active {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  border-color: var(--accent-border);
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+}
+.nav-item.active svg {
+  color: var(--accent-text);
+}
+.nav-item.active .nav-badge {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Dark theme: --accent-soft is too washed for a dark sidebar; use a
+   translucent accent tint that reads on the dark canvas. */
+[data-theme="dark"] .sidebar {
+  background: #14150f;
+  border-inline-end-color: var(--border-strong);
+}
+[data-theme="dark"] .nav-item.active {
+  background: color-mix(in oklab, var(--accent) 22%, transparent);
+  color: var(--text);
+  border-color: color-mix(in oklab, var(--accent) 45%, transparent);
+}
+[data-theme="dark"] .nav-item.active svg {
+  color: var(--accent);
+}
+[data-theme="dark"] .nav-item:hover {
+  background: color-mix(in oklab, var(--text) 8%, transparent);
+}
+
+/* Section headings: keep the original padding (4px 8px) so labels
+   stay aligned with the nav-item rows. Lift visual weight via
+   typography + an accent dot marker rather than a divider rule. */
+.sidebar .nav-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sidebar .nav-label::before {
+  content: "";
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+[data-theme="dark"] .sidebar .nav-label {
+  color: var(--text);
+  opacity: 0.85;
+}
+
+/* Nav items sit 16px deeper than the section heading so the visual
+   hierarchy reads heading → item without needing a divider. We use
+   margin-inline-start on the row (not padding) so the hover/active
+   selection box also shifts in — otherwise the highlight would span
+   16px of empty gutter to the icon's left and read awkwardly. */
+.sidebar .nav-item {
+  margin-inline-start: 16px;
+}
+[data-sidebar="collapsed"] .sidebar .nav-item {
+  margin-inline-start: 0;
+}
+
+/* ------------------------------------------------------------------
+   Primary buttons: the design archive painted .btn-primary in black
+   (--text) and reserved --accent for status pills. This deliberately
+   overrides that — Add Camera / Add Leave Policy / Download Reports
+   etc. all share .btn-primary, and the brand accent reads as the
+   real call-to-action. .btn-accent is left alone for legacy callers.
+   ------------------------------------------------------------------ */
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.btn-primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  opacity: 1;
+}
+.btn-primary:disabled,
+.btn-primary[aria-disabled="true"] {
+  background: color-mix(in oklab, var(--accent) 55%, var(--bg-sunken));
+  border-color: color-mix(in oklab, var(--accent) 55%, var(--bg-sunken));
+  color: #fff;
+  opacity: 0.7;
+}
+.btn-primary svg {
+  color: currentColor;
+}
+[data-theme="dark"] .btn-primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+[data-theme="dark"] .btn-primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}

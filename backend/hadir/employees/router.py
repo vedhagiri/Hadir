@@ -35,7 +35,12 @@ from sqlalchemy import func
 from sqlalchemy.engine import Connection
 
 from hadir.auth.audit import write_audit
-from hadir.auth.dependencies import CurrentUser, require_any_role, require_role
+from hadir.auth.dependencies import (
+    CurrentUser,
+    current_user,
+    require_any_role,
+    require_role,
+)
 from hadir.custom_fields import repository as cf_repo
 from hadir.db import get_engine
 from hadir.employees import excel as excel_io
@@ -337,6 +342,36 @@ def create_employee_endpoint(
             },
         )
     return _row_to_out(created)
+
+
+@router.get("/me", response_model=EmployeeOut)
+def get_my_employee_endpoint(
+    user: Annotated[CurrentUser, Depends(current_user)],
+) -> EmployeeOut:
+    """Return the employee record linked to the logged-in user.
+
+    Mapping is by lower-cased email (the same shortcut the frontend
+    "self-view" pages have been using inline). Open to every
+    authenticated role — Employees + Managers + HR + Admin all need
+    to see "themselves" on /my-attendance and /calendar without
+    pulling the entire employees list. 404 if no row matches.
+
+    Declared before ``/{employee_id}`` so FastAPI's static-path
+    matching wins over the dynamic int parameter.
+    """
+
+    if not user.email:
+        raise HTTPException(
+            status_code=404, detail="no employee linked to this account"
+        )
+    scope = TenantScope(tenant_id=user.tenant_id)
+    with get_engine().begin() as conn:
+        row = repo.get_employee_by_email(conn, scope, user.email)
+    if row is None:
+        raise HTTPException(
+            status_code=404, detail="no employee linked to this account"
+        )
+    return _row_to_out(row)
 
 
 @router.get("/{employee_id}", response_model=EmployeeOut)

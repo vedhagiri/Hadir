@@ -12,6 +12,7 @@ import { motion } from "framer-motion";
 import { NavLink } from "react-router-dom";
 
 import { api } from "../api/client";
+import { APP_VERSION_SHORT } from "../config";
 import type { CameraListResponse } from "../features/cameras/types";
 import type { EmployeeListResponse } from "../features/employees/types";
 import { SPRING } from "../motion/tokens";
@@ -45,6 +46,7 @@ const SECTION_KEY: Record<string, string> = {
   Team: "team",
   Personal: "personal",
   Me: "me",
+  Help: "help",
 };
 
 interface Props {
@@ -125,16 +127,6 @@ export function Sidebar({ role }: Props) {
         >
           <Icon name={collapsed ? "chevronLeft" : "chevronRight"} size={12} />
         </button>
-      </div>
-
-      {/* Search is decorative in P4 — real search lands with employees (P6). */}
-      <div
-        className="topbar-search sidebar-search"
-        style={{ width: "100%", margin: "0 0 6px" }}
-      >
-        <Icon name="search" size={13} />
-        <input placeholder={t("common.search")} />
-        <span className="kbd">⌘K</span>
       </div>
 
       {/* Scrollable nav block — flex:1 grabs the remaining height,
@@ -223,7 +215,7 @@ export function Sidebar({ role }: Props) {
                     transition={SPRING.gentle}
                   />
                 )}
-                <Icon name={it.icon} size={14} />
+                <Icon name={it.icon} size={17} />
                 <span className="nav-label-text">{label}</span>
                 {badge && (
                   <span
@@ -252,6 +244,24 @@ export function Sidebar({ role }: Props) {
           footer is gone — clearer hierarchy, matches the design
           archive's intent of putting per-session controls on the
           top bar rather than nested in the navigation. */}
+      <div
+        className="sidebar-footer"
+        style={{
+          fontSize: 11,
+          color: "var(--muted)",
+          textAlign: "center",
+          lineHeight: 1.4,
+        }}
+      >
+        <div className="nav-label-text">
+          Powered by{" "}
+          <span style={{ fontWeight: 600 }}>Muscat Tech Solutions</span>
+        </div>
+        <div style={{ marginTop: 2, opacity: 0.8 }}>
+          <span className="nav-label-text">Hadir </span>
+          {APP_VERSION_SHORT}
+        </div>
+      </div>
     </aside>
   );
 }
