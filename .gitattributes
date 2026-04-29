@@ -1,0 +1,45 @@
+# Paths excluded from `git archive` output. The release-packaging
+# script (scripts/package-release.sh) uses `git archive` to build the
+# customer-shippable zip; everything below is dropped from that bundle.
+# To check what a release will actually contain:
+#
+#     git archive --format=zip HEAD | unzip -l /dev/stdin
+#
+# The repo itself keeps every file — these rules only affect archives.
+
+# ---- Top-level project documentation (not for client zips) ----
+CLAUDE.md                 export-ignore
+PROJECT_CONTEXT.md        export-ignore
+pilot-plan.md             export-ignore
+v1.0-phase-plan.md        export-ignore
+*.docx                    export-ignore
+credentials.txt           export-ignore
+
+# ---- Repo-only directories ----
+docs/                     export-ignore
+design-reference/         export-ignore
+prototype-reference/      export-ignore
+.github/                  export-ignore
+
+# ---- Self-exclude (release recipients don't need our archive rules) ----
+.gitattributes            export-ignore
+
+# ---- Frontend: design archive + tests aren't shipped ----
+frontend/src/design/      export-ignore
+frontend/tests/           export-ignore
+frontend/playwright.config.ts   export-ignore
+frontend/CLAUDE.md        export-ignore
+
+# ---- Backend: tests + dev-only seed/smoke scripts not shipped ----
+backend/tests/            export-ignore
+backend/CLAUDE.md         export-ignore
+backend/scripts/_seed_data/         export-ignore
+backend/scripts/_seed_helpers.py    export-ignore
+backend/scripts/p[0-9]*_smoke.py    export-ignore
+backend/scripts/v*_smoke.py         export-ignore
+backend/scripts/pre_omran_reset_seed.py    export-ignore
+backend/scripts/seed_test_accounts.py      export-ignore
+backend/scripts/bootstrap_dev.py    export-ignore
+
+# ---- The packaging script itself doesn't need to ship ----
+scripts/package-release.sh  export-ignore
