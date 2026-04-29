@@ -27,8 +27,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, insert, select
 from sqlalchemy.engine import Engine
 
-from hadir.auth.passwords import hash_password
-from hadir.db import (
+from maugood.auth.passwords import hash_password
+from maugood.db import (
     approved_leaves,
     audit_log,
     employees,
@@ -83,7 +83,7 @@ def _make_user(
                 )
             )
         if department_codes:
-            from hadir.db import departments  # noqa: PLC0415
+            from maugood.db import departments  # noqa: PLC0415
 
             for d in department_codes:
                 dept_id = conn.execute(
@@ -134,10 +134,10 @@ def workflow_users(admin_engine: Engine) -> Iterator[dict]:
     """
 
     suffix = secrets.token_hex(4)
-    employee_email = f"emp-{suffix}@workflow.hadir"
-    manager_email = f"mgr-{suffix}@workflow.hadir"
-    hr_email = f"hr-{suffix}@workflow.hadir"
-    admin_email = f"adm-{suffix}@workflow.hadir"
+    employee_email = f"emp-{suffix}@workflow.maugood"
+    manager_email = f"mgr-{suffix}@workflow.maugood"
+    hr_email = f"hr-{suffix}@workflow.maugood"
+    admin_email = f"adm-{suffix}@workflow.maugood"
     password = "workflow-test-pw-" + secrets.token_hex(6)
 
     employee_user_id = _make_user(
@@ -172,7 +172,7 @@ def workflow_users(admin_engine: Engine) -> Iterator[dict]:
 
     # Provision the matching employees row for the Employee user, plus
     # the manager_assignment (primary).
-    from hadir.db import departments  # noqa: PLC0415
+    from maugood.db import departments  # noqa: PLC0415
 
     with admin_engine.begin() as conn:
         eng_dept_id = conn.execute(
@@ -239,7 +239,7 @@ def workflow_users(admin_engine: Engine) -> Iterator[dict]:
             )
             # Wipe attendance rows for the dummy employee so the
             # following test starts clean.
-            from hadir.db import attendance_records  # noqa: PLC0415
+            from maugood.db import attendance_records  # noqa: PLC0415
 
             conn.execute(
                 delete(attendance_records).where(
@@ -690,7 +690,7 @@ def test_employee_cannot_view_other_employees_requests(
 
     # Provision a second Employee user with a different employees row.
     suffix = secrets.token_hex(4)
-    other_email = f"other-emp-{suffix}@workflow.hadir"
+    other_email = f"other-emp-{suffix}@workflow.maugood"
     other_pw = "other-pw-" + secrets.token_hex(6)
     other_uid = _make_user(
         admin_engine,
@@ -699,7 +699,7 @@ def test_employee_cannot_view_other_employees_requests(
         role_codes=["Employee"],
         full_name="Other Employee",
     )
-    from hadir.db import departments  # noqa: PLC0415
+    from maugood.db import departments  # noqa: PLC0415
 
     with admin_engine.begin() as conn:
         eng_dept = conn.execute(
@@ -760,7 +760,7 @@ def test_manager_blocked_from_unassigned_employees_requests(
 
     # Provision a second Manager (no assignments).
     suffix = secrets.token_hex(4)
-    other_mgr_email = f"other-mgr-{suffix}@workflow.hadir"
+    other_mgr_email = f"other-mgr-{suffix}@workflow.maugood"
     other_pw = "other-mgr-pw-" + secrets.token_hex(6)
     other_mgr_uid = _make_user(
         admin_engine,

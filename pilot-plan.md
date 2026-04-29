@@ -1,4 +1,4 @@
-# Hadir — Pilot Plan (v0.1)
+# Maugood — Pilot Plan (v0.1)
 
 > **Historical (pilot delivered).** This plan describes the 5-day pilot
 > build, frozen at tag `v0.1-pilot` on branch `release/pilot`. Active
@@ -33,7 +33,7 @@
 These come from PROJECT_CONTEXT.md §12 and are non-negotiable throughout the pilot:
 
 - **Tenant plumbing from day 1.** `tenant_id` columns exist on every tenant-scoped table and are passed through every query, even though pilot is single-schema and `tenant_id = 1` always. This lets v1.0 add multi-tenancy without a rewrite.
-- **RTSP credentials encrypted with Fernet.** Key from `HADIR_FERNET_KEY` env var. Never in logs, never in API responses. On reads, return `***`.
+- **RTSP credentials encrypted with Fernet.** Key from `MAUGOOD_FERNET_KEY` env var. Never in logs, never in API responses. On reads, return `***`.
 - **Passwords never logged.** Argon2 hashes are fine in DB; plain passwords never appear anywhere.
 - **Audit log is append-only.** No UPDATE or DELETE from the application database user. Grant `INSERT, SELECT` only on `audit_log`.
 - **No speculative design improvements.** The design archive at `frontend/src/design/` is authoritative. Copy CSS verbatim. Do not "enhance" the look.
@@ -44,11 +44,11 @@ These come from PROJECT_CONTEXT.md §12 and are non-negotiable throughout the pi
 ## Pre-flight (Suresh does this BEFORE P1 — no Claude Code yet)
 
 1. Provision a dev machine (Ubuntu 22.04 or macOS) with Node 20+, Python 3.11, Docker + Docker Compose, Postgres client tools.
-2. Create GitHub repo `hadir` (private). Clone locally.
+2. Create GitHub repo `maugood` (private). Clone locally.
 3. Add these files to the repo root:
    - `PROJECT_CONTEXT.md` — from planning phase
    - `pilot-plan.md` — this file
-   - `Hadir_v1.0_BRD.docx` — optional, for reference
+   - `Maugood_v1.0_BRD.docx` — optional, for reference
    - Unzip `Globe_loader__3_.zip` into `design-reference/` at the repo root. Do **not** commit the archive itself; commit the unpacked files so Claude Code can read them.
 4. Prepare pilot test assets on the dev box:
    - One IP camera reachable by RTSP, credentials known
@@ -69,20 +69,20 @@ Proceed to P1 only when all of the above is done.
 
 ### P1 — Repo scaffold and skeleton apps (~3 hours)
 
-**Goal:** Monorepo boots with `docker compose up`. Backend serves `/api/health`. Frontend serves a placeholder page using the Hadir CSS verbatim.
+**Goal:** Monorepo boots with `docker compose up`. Backend serves `/api/health`. Frontend serves a placeholder page using the Maugood CSS verbatim.
 
 **Prompt:**
 
-> You are starting work on Hadir, a camera-based employee attendance platform built by Muscat Tech Solutions for Omran (Oman). Before writing anything, read `PROJECT_CONTEXT.md` and `pilot-plan.md` at the repo root. Confirm you understand that this session is **P1 — Repo scaffold and skeleton apps** and that its scope is exactly what is written here.
+> You are starting work on Maugood, a camera-based employee attendance platform built by Muscat Tech Solutions for Omran (Oman). Before writing anything, read `PROJECT_CONTEXT.md` and `pilot-plan.md` at the repo root. Confirm you understand that this session is **P1 — Repo scaffold and skeleton apps** and that its scope is exactly what is written here.
 >
 > In this session:
 >
 > 1. Create the monorepo structure exactly as specified in PROJECT_CONTEXT §7: `backend/`, `frontend/`, `docker-compose.yml`, root-level `CLAUDE.md`, `.gitignore`.
 > 2. **Backend skeleton:** Python 3.11, FastAPI, Uvicorn, SQLAlchemy 2.x Core, Pydantic v2 settings, Argon2-cffi, python-dotenv. Expose `GET /api/health` returning `{"status":"ok"}`. Log to stdout. Add a `backend/CLAUDE.md`. Dev tooling: ruff, black, mypy.
-> 3. **Frontend skeleton:** Vite + React 18 + TypeScript strict mode. Add React Router v6, TanStack Query, Zustand, React Hook Form, Zod. No Tailwind, no CSS-in-JS. Render a single page reading "Hadir" using `src/styles/` CSS. Add `frontend/CLAUDE.md`.
+> 3. **Frontend skeleton:** Vite + React 18 + TypeScript strict mode. Add React Router v6, TanStack Query, Zustand, React Hook Form, Zod. No Tailwind, no CSS-in-JS. Render a single page reading "Maugood" using `src/styles/` CSS. Add `frontend/CLAUDE.md`.
 > 4. **Design archive integration:** From `design-reference/` at the repo root, copy `styles.css`, `styles-enhancements.css`, `styles-enhancements2.css`, `styles-enhancements3.css` **verbatim** into `frontend/src/styles/`. Copy `icons.jsx`, `shell.jsx`, `ui.jsx`, `pages.jsx`, `dashboards.jsx`, `employee.jsx`, `data.jsx` into `frontend/src/design/` as read-only reference for later sessions. Import all four CSS files in order in `src/main.tsx`.
 > 5. **Docker Compose:** services `backend` (Python), `frontend` (Vite dev), `postgres` (15). Volumes for node_modules and Postgres data. Environment via `.env` at repo root and `.env.example` per service.
-> 6. **.env.example** at repo root with: `HADIR_DATABASE_URL`, `HADIR_SESSION_SECRET`, `HADIR_FERNET_KEY`, `HADIR_TENANT_MODE=single`, `HADIR_ENV=dev`.
+> 6. **.env.example** at repo root with: `MAUGOOD_DATABASE_URL`, `MAUGOOD_SESSION_SECRET`, `MAUGOOD_FERNET_KEY`, `MAUGOOD_TENANT_MODE=single`, `MAUGOOD_ENV=dev`.
 > 7. Write the root `CLAUDE.md` so a future Claude Code session can read it and understand the current state: tech stack summary, directory map, how to run, which pilot prompt is active.
 >
 > Red lines to respect: design files are copied verbatim — do not "fix", reformat, or convert anything. No Tailwind. No extra dependencies beyond what this prompt names.
@@ -92,7 +92,7 @@ Proceed to P1 only when all of the above is done.
 **Review checklist:**
 - [ ] `docker compose up` boots all three services without error
 - [ ] `curl http://localhost:8000/api/health` → 200
-- [ ] `http://localhost:5173` renders "Hadir" with the warm-neutral background from `styles.css`
+- [ ] `http://localhost:5173` renders "Maugood" with the warm-neutral background from `styles.css`
 - [ ] `frontend/src/design/` contains the archive files, untouched
 - [ ] `backend/`, `frontend/`, root `CLAUDE.md` all present and accurate
 - [ ] No Tailwind, no CSS-in-JS, no extra deps
@@ -109,7 +109,7 @@ Proceed to P1 only when all of the above is done.
 >
 > In this session:
 >
-> 1. Add Alembic to the backend. Configure it to target a schema named `main` in the Postgres URL from `HADIR_DATABASE_URL`.
+> 1. Add Alembic to the backend. Configure it to target a schema named `main` in the Postgres URL from `MAUGOOD_DATABASE_URL`.
 > 2. Create the initial migration with these tables, all under schema `main`:
 >    - `tenants` (id, name, created_at) — pilot seeds one row with id=1, name='Omran'
 >    - `users` (id, tenant_id, email [citext, unique per tenant], password_hash, full_name, is_active, created_at)
@@ -120,18 +120,18 @@ Proceed to P1 only when all of the above is done.
 >    - `user_sessions` (id, tenant_id, user_id, expires_at, data JSONB, created_at, last_seen_at)
 >    - `audit_log` (id, tenant_id, actor_user_id, action, entity_type, entity_id, before JSONB, after JSONB, created_at)
 > 3. **Multi-tenant plumbing:** every table above (except `tenants`) carries a non-null `tenant_id` with FK to `tenants(id)`. Create a `tenant_scope` dependency in the backend that reads `tenant_id` from the session (default 1 for pilot) and injects it into every repository function. Every SQL statement against these tables filters by `tenant_id`. This matters: the pilot runs fine on one tenant, but the plumbing has to be real so v1.0 multi-tenant migration is additive, not invasive.
-> 4. **Audit log append-only:** create two Postgres roles — `hadir_app` (INSERT, SELECT, UPDATE, DELETE on most tables; but **only INSERT + SELECT on audit_log**) and `hadir_admin` (full access, used only for migrations and manual ops). The app connects as `hadir_app`. Document this in `backend/CLAUDE.md`.
+> 4. **Audit log append-only:** create two Postgres roles — `maugood_app` (INSERT, SELECT, UPDATE, DELETE on most tables; but **only INSERT + SELECT on audit_log**) and `maugood_admin` (full access, used only for migrations and manual ops). The app connects as `maugood_app`. Document this in `backend/CLAUDE.md`.
 > 5. **Seed admin script** at `backend/scripts/seed_admin.py`: takes email + password from CLI args or env, creates a user with the Admin role in tenant 1, prints the result. Argon2 hash only; no plain-text password in logs.
 > 6. Update `backend/CLAUDE.md` with the schema map and the tenant plumbing pattern so future sessions keep following it.
 >
 > Red lines: no table without `tenant_id` plumbing (except `tenants` itself). No plain-text passwords in code, logs, or fixtures. `audit_log` grants must reject UPDATE and DELETE at the DB level, not just in code.
 >
-> When the migration runs cleanly from a fresh Postgres volume, the seed admin script creates a usable admin, and the grants are verified (try an UPDATE on audit_log as `hadir_app` — it must fail) — commit as `feat(P2): schema + migrations + tenant plumbing`, **stop, and show me**. Do not start P3.
+> When the migration runs cleanly from a fresh Postgres volume, the seed admin script creates a usable admin, and the grants are verified (try an UPDATE on audit_log as `maugood_app` — it must fail) — commit as `feat(P2): schema + migrations + tenant plumbing`, **stop, and show me**. Do not start P3.
 
 **Review checklist:**
 - [ ] `alembic upgrade head` creates all tables in schema `main`
 - [ ] `seed_admin.py` creates an admin user; password is hashed
-- [ ] `UPDATE audit_log SET action='x'` as `hadir_app` raises a permissions error
+- [ ] `UPDATE audit_log SET action='x'` as `maugood_app` raises a permissions error
 - [ ] Every tenant-scoped table has `tenant_id NOT NULL` with an FK
 
 ---
@@ -147,7 +147,7 @@ Proceed to P1 only when all of the above is done.
 > In this session:
 >
 > 1. Implement email + password login using Argon2-cffi. Email match is case-insensitive (store lowercased; use `citext` at the DB level per P2).
-> 2. Session storage in the `user_sessions` table (not JWT). Session cookie: `HttpOnly`, `SameSite=Lax`, `Secure` off in dev, path `/`. Idle timeout configurable via `HADIR_SESSION_IDLE_MINUTES` (default 60). Expiry sliding: refresh on every authenticated request.
+> 2. Session storage in the `user_sessions` table (not JWT). Session cookie: `HttpOnly`, `SameSite=Lax`, `Secure` off in dev, path `/`. Idle timeout configurable via `MAUGOOD_SESSION_IDLE_MINUTES` (default 60). Expiry sliding: refresh on every authenticated request.
 > 3. Endpoints:
 >    - `POST /api/auth/login` — body `{email, password}`, 200 on success with session cookie, 401 otherwise
 >    - `POST /api/auth/logout` — clears session
@@ -161,7 +161,7 @@ Proceed to P1 only when all of the above is done.
 > 6. Rate-limit login attempts by email+IP (simple in-memory counter for pilot; APScheduler reset every 10 minutes; note in `backend/CLAUDE.md` that this is pilot-grade and will be replaced).
 > 7. Backend pytest suite: happy path login, wrong password, expired session, role guard allow/deny, audit entries written.
 >
-> Red lines: plain passwords must never appear in request logs, response bodies, error messages, or audit entries. The audit log INSERT happens through the same `hadir_app` user with grants as defined in P2 — if UPDATE/DELETE ever appears in an audit flow, stop and fix it.
+> Red lines: plain passwords must never appear in request logs, response bodies, error messages, or audit entries. The audit log INSERT happens through the same `maugood_app` user with grants as defined in P2 — if UPDATE/DELETE ever appears in an audit flow, stop and fix it.
 >
 > When `curl`-based login produces a session cookie, `/api/auth/me` returns the admin seeded in P2, logout clears the session, and tests pass — commit as `feat(P3): local auth + sessions + role guards`, **stop, and show me**. Do not start P4.
 
@@ -200,7 +200,7 @@ Proceed to P1 only when all of the above is done.
 > When you can log in as the P2 admin, see the Admin sidebar matching the design, navigate to every placeholder page, and log out — commit as `feat(P4): frontend shell + login + role-aware nav`, **stop, and show me**. Do not start P5.
 
 **Review checklist:**
-- [ ] Login UI looks like the design (check against `design-reference/Hadir.standalone.html`)
+- [ ] Login UI looks like the design (check against `design-reference/Maugood.standalone.html`)
 - [ ] Admin sidebar matches `NAV.Admin` from `shell.jsx` in order and labels
 - [ ] Placeholder pages render for every nav item
 - [ ] Log out returns to `/login`
@@ -262,7 +262,7 @@ Proceed to P1 only when all of the above is done.
 > 4. **Photo ingestion:**
 >    - Frontend: drop zone on the detail drawer accepting multiple images at once.
 >    - Backend endpoint `POST /api/employees/{id}/photos` (multipart, multiple files). Also expose `POST /api/employees/photos/bulk` that accepts a folder-dump where filenames use the `OM0097.jpg` / `OM0097_front.jpg` / `OM0097_left.jpg` / `OM0097_right.jpg` convention from PROJECT_CONTEXT §3. Unlabelled = `front`. The backend parses the filename, resolves the employee by `employee_code`, and creates `employee_photos` rows. If the employee record does not exist → reject the photo (never auto-create employees).
->    - Storage: files written to `/data/faces/{tenant_id}/{employee_code}/{angle}/{uuid}.jpg`. Files on disk must be encrypted at rest — use Fernet from `HADIR_FERNET_KEY` to encrypt the image bytes before writing; decrypt on read.
+>    - Storage: files written to `/data/faces/{tenant_id}/{employee_code}/{angle}/{uuid}.jpg`. Files on disk must be encrypted at rest — use Fernet from `MAUGOOD_FERNET_KEY` to encrypt the image bytes before writing; decrypt on read.
 >    - No embeddings yet. That is P9. The DB row exists; the embedding column is null.
 > 5. Self-photo upload and Admin approval queue are **deferred** per PROJECT_CONTEXT §8. Do not build them. For pilot, all photos ingested by Admin are considered approved.
 > 6. Audit-log every photo ingestion and rejection.
@@ -330,7 +330,7 @@ Proceed to P1 only when all of the above is done.
 > 1. **Table** (new Alembic migration):
 >    - `detection_events` (id, tenant_id, camera_id, captured_at, bbox JSONB, face_crop_path, embedding BYTEA nullable, employee_id nullable, confidence float nullable, track_id)
 >    - `camera_health_snapshots` (id, tenant_id, camera_id, captured_at, frames_last_minute, reachable bool, note) — retained 30 days per PROJECT_CONTEXT §3
-> 2. **Capture pipeline** in `backend/hadir/capture/`:
+> 2. **Capture pipeline** in `backend/maugood/capture/`:
 >    - `reader.py` — per-camera OpenCV RTSP reader with reconnect-on-failure. Downsamples to a sane frame rate (e.g. 4 fps). Do NOT pull at full 25 fps — the CPU budget is for face detection downstream.
 >    - `analyzer.py` — InsightFace face detection only (not embeddings yet; embeddings happen in P9). Use `FaceAnalysis` with the detection model from `buffalo_l`, but skip the recognition step in this prompt.
 >    - `tracker.py` — port the IoU tracker from the `detection-app` prototype. If the prototype code is not in this repo, implement a minimal IoU-based tracker: assign a new `track_id` when a detection has IoU < 0.3 with all active tracks; otherwise continue the existing track. Drop tracks idle for >3 seconds.
@@ -363,13 +363,13 @@ Proceed to P1 only when all of the above is done.
 > In this session:
 >
 > 1. **Extend `capture/analyzer.py`:** enable InsightFace `buffalo_l` recognition (embedding) on detected faces. CPU-only. Handle the download/cache of model files on first run.
-> 2. **Enrollment backfill** in `backend/hadir/identification/enrollment.py`:
+> 2. **Enrollment backfill** in `backend/maugood/identification/enrollment.py`:
 >    - On first run, and on each new photo upload (P6), compute a normalised embedding per `employee_photos` row and store it. Embeddings stored as Fernet-encrypted BYTEA (biometric data is encrypted at rest).
 >    - Add an admin endpoint `POST /api/identification/reembed` that clears and recomputes all enrolled embeddings for the tenant. Useful when the model is upgraded.
-> 3. **Matcher** in `backend/hadir/identification/matcher.py`:
+> 3. **Matcher** in `backend/maugood/identification/matcher.py`:
 >    - Load all enrolled embeddings for the tenant into memory on startup (decrypted). Keyed by `employee_id` → list of angle embeddings.
 >    - On each detection event, compute cosine similarity against every enrolled embedding. The match is the employee with the highest mean-of-top-k similarity across their angles (k=1 fine for pilot).
->    - Threshold configurable via `HADIR_MATCH_THRESHOLD` (default 0.45). Below threshold → leave `employee_id` null and mark as `unidentified`.
+>    - Threshold configurable via `MAUGOOD_MATCH_THRESHOLD` (default 0.45). Below threshold → leave `employee_id` null and mark as `unidentified`.
 >    - Update the `detection_events` row in place with `embedding`, `employee_id`, `confidence`.
 > 4. **Cache invalidation:** when a photo is added/removed/approved (P6), invalidate the cache entry for that employee and re-load. Do NOT reload the entire cache.
 > 5. **Pilot threshold tuning:** log the top-3 matches per event at DEBUG so you can eyeball the distribution and adjust the threshold during the pilot.
@@ -402,7 +402,7 @@ Proceed to P1 only when all of the above is done.
 > 1. **Tables** (new Alembic migration):
 >    - `shift_policies` (id, tenant_id, name, type ['Fixed','Flex','Ramadan','Custom'], config JSONB, active_from, active_until nullable) — pilot seeds ONE row: type=Fixed, name='Default 07:30–15:30', config `{"start":"07:30","end":"15:30","grace_minutes":15,"required_hours":8}`, active_from today, active_until null.
 >    - `attendance_records` (id, tenant_id, employee_id, date, in_time nullable, out_time nullable, total_minutes nullable, policy_id, late bool, early_out bool, short_hours bool, absent bool, overtime_minutes int default 0, computed_at)
-> 2. **Engine** in `backend/hadir/attendance/engine.py`:
+> 2. **Engine** in `backend/maugood/attendance/engine.py`:
 >    - Pure function: `compute(employee_id, date, policy, events, leaves, holidays) -> AttendanceRecord`.
 >    - First event of day (by `captured_at`) → `in_time`. Last event → `out_time`. Intermediate events kept in `detection_events` but not used for summary (per PROJECT_CONTEXT §3).
 >    - `late = in_time > policy.start + grace`
@@ -411,7 +411,7 @@ Proceed to P1 only when all of the above is done.
 >    - `short_hours = total_minutes < policy.required_hours * 60` (only meaningful for Flex in v1.0; for Fixed, still compute for reporting)
 >    - `absent = no events at all AND no leave on this date` — leaves and holidays module is **deferred** per PROJECT_CONTEXT §8, so in the pilot `absent = (events.empty)` and leaves/holidays are always empty
 >    - `overtime_minutes = max(0, total_minutes - required_minutes)`
-> 3. **Scheduler** in `backend/hadir/attendance/scheduler.py`:
+> 3. **Scheduler** in `backend/maugood/attendance/scheduler.py`:
 >    - APScheduler job, interval 15 minutes. For each employee, recompute today's `attendance_records` row. Upsert by (employee_id, date).
 >    - On startup, recompute today once to seed.
 >    - Do NOT recompute historical days in the pilot (they are frozen once the date rolls over — in v1.0 this becomes a separate "late recompute" flow).
@@ -519,17 +519,17 @@ Proceed to P1 only when all of the above is done.
 >    - Date range picker, employee filter, department filter.
 >    - "Generate Excel" button — hits `POST /api/reports/attendance.xlsx` and downloads.
 >    - No scheduled reports, no PDF, no email delivery. All deferred per PROJECT_CONTEXT §8.
-> 2. **Backend reporter** at `backend/hadir/reporting/attendance.py`:
+> 2. **Backend reporter** at `backend/maugood/reporting/attendance.py`:
 >    - Query `attendance_records` for the range + filters.
 >    - Build XLSX with `openpyxl`: one sheet per week, columns employee_code, name, date, in_time, out_time, total_hours, late, early_out, short, overtime_minutes, policy.
 >    - Stream the response; do not buffer large files in memory.
 > 3. **Playwright smoke test** at `frontend/tests/pilot-smoke.spec.ts`:
 >    - Log in as admin → import sample Excel → upload sample photos → (seed a synthetic detection via a test-only backend endpoint to avoid needing a live camera in CI) → wait for attendance recompute → generate report → verify downloaded file has the expected employee row.
->    - Add a `/api/_test/seed_detection` endpoint guarded by `HADIR_ENV=dev` only. Document in `backend/CLAUDE.md` that this must NOT be present in production builds.
+>    - Add a `/api/_test/seed_detection` endpoint guarded by `MAUGOOD_ENV=dev` only. Document in `backend/CLAUDE.md` that this must NOT be present in production builds.
 > 4. **Pytest integration tests** covering: Excel report round-trip, role scoping on the report endpoint (Manager gets dept-only rows), 403 for Employee trying to hit the report endpoint for others.
 > 5. **Operational readiness checklist** — add `docs/pilot-deployment.md` covering env vars, volume mounts, Postgres setup, how to seed the first admin, how to add cameras, how to import employees, how to roll back. Short and specific.
 >
-> Red lines: the `/api/_test/` endpoints only mount when `HADIR_ENV=dev`. Not a single byte of test-seed data leaks into production.
+> Red lines: the `/api/_test/` endpoints only mount when `MAUGOOD_ENV=dev`. Not a single byte of test-seed data leaks into production.
 >
 > When the Playwright smoke test passes green in CI locally and you can generate a real Excel report from yesterday's data (or today's, seeded) — commit as `feat(P13): reports + smoke tests`, **stop, and show me**. Do not start P14 until you also do a final polish pass on the dev box: walk through the demo script below and note any UX papercuts.
 >
@@ -563,9 +563,9 @@ Proceed to P1 only when all of the above is done.
 >
 > 1. **Provision:** install Docker, Docker Compose, git. Clone the repo. Check out the P13 commit.
 > 2. **Configure env:**
->    - Generate a new `HADIR_FERNET_KEY` (do NOT reuse the dev key) and a new `HADIR_SESSION_SECRET`.
->    - Point `HADIR_DATABASE_URL` at the Postgres instance (containerised via compose is fine for pilot; Omran IT decides post-pilot).
->    - `HADIR_TENANT_MODE=single`, `HADIR_ENV=production`.
+>    - Generate a new `MAUGOOD_FERNET_KEY` (do NOT reuse the dev key) and a new `MAUGOOD_SESSION_SECRET`.
+>    - Point `MAUGOOD_DATABASE_URL` at the Postgres instance (containerised via compose is fine for pilot; Omran IT decides post-pilot).
+>    - `MAUGOOD_TENANT_MODE=single`, `MAUGOOD_ENV=production`.
 >    - Pilot runs on HTTP over the corporate LAN per PROJECT_CONTEXT §3. Do NOT wire HTTPS — it's deferred.
 > 3. **Bring up the stack:** `docker compose up -d`. Run Alembic migrations. Seed the first admin for a named Omran HR contact (not a shared account).
 > 4. **Configure cameras:** add Omran's real IP cameras via the Cameras page with their RTSP URLs. Verify previews.
@@ -579,7 +579,7 @@ Proceed to P1 only when all of the above is done.
 >    - Fixed policy (07:30–15:30) flagging in-time, out-time, late, early-out correctly ✓
 >    - Daily Attendance, Camera Logs, Audit Log, System page all render with live data ✓
 >    - On-demand Excel export ✓
->    - UI matches the Hadir design system in English, light mode ✓
+>    - UI matches the Maugood design system in English, light mode ✓
 >    - **Written acknowledgement from Omran that the deferred list (PROJECT_CONTEXT §8) is understood and expected for v1.0, not pilot.**
 > 9. **Document in `docs/pilot-signoff.md`:** what was deployed, what was demonstrated, what was signed off, what open items were raised, date, attendees.
 >

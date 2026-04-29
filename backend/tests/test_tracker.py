@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hadir.capture.tracker import Bbox, IoUTracker, iou
+from maugood.capture.tracker import Bbox, IoUTracker, iou
 
 
 def test_iou_non_overlapping_is_zero() -> None:

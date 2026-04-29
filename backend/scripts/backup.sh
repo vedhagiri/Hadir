@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Hadir backup — DB + on-disk artifacts (v1.0 P24).
+# Maugood backup — DB + on-disk artifacts (v1.0 P24).
 #
 # Produces a self-describing backup directory under
-# ``${HADIR_BACKUP_ROOT}/${TIMESTAMP}/`` containing:
+# ``${MAUGOOD_BACKUP_ROOT}/${TIMESTAMP}/`` containing:
 #
 #   db/<schema>.sql.gz      pg_dump per public.tenants schema +
 #                            public.sql.gz for the global registry
@@ -17,24 +17,24 @@
 #
 # After the local snapshot is written + verified the script
 # (optionally) ships it to a remote destination
-# (``HADIR_BACKUP_S3_URI`` for an S3-compatible bucket) and
+# (``MAUGOOD_BACKUP_S3_URI`` for an S3-compatible bucket) and
 # enforces the retention policy on the local copy.
 #
 # Pilot defaults: 30 daily / 12 weekly / 12 monthly. Override
-# via ``HADIR_BACKUP_RETAIN_*`` env vars.
+# via ``MAUGOOD_BACKUP_RETAIN_*`` env vars.
 #
 # Required env (defaults marked):
-#   HADIR_ADMIN_DATABASE_URL  Postgres URL (admin role).
-#   HADIR_BACKUP_ROOT         /backup     local root (default).
-#   HADIR_DATA_ROOT           /data       on-disk artifact root.
-#   HADIR_BACKUP_S3_URI       (optional)  s3://bucket/prefix/.
-#   HADIR_BACKUP_RETAIN_DAILY    30
-#   HADIR_BACKUP_RETAIN_WEEKLY   12
-#   HADIR_BACKUP_RETAIN_MONTHLY  12
+#   MAUGOOD_ADMIN_DATABASE_URL  Postgres URL (admin role).
+#   MAUGOOD_BACKUP_ROOT         /backup     local root (default).
+#   MAUGOOD_DATA_ROOT           /data       on-disk artifact root.
+#   MAUGOOD_BACKUP_S3_URI       (optional)  s3://bucket/prefix/.
+#   MAUGOOD_BACKUP_RETAIN_DAILY    30
+#   MAUGOOD_BACKUP_RETAIN_WEEKLY   12
+#   MAUGOOD_BACKUP_RETAIN_MONTHLY  12
 #
 # Usage:
 #   ./backup.sh                # full backup
-#   HADIR_BACKUP_DRY_RUN=1 ./backup.sh   # log only, no write
+#   MAUGOOD_BACKUP_DRY_RUN=1 ./backup.sh   # log only, no write
 #
 # The script is intentionally idempotent and safe to retry —
 # every output goes to a timestamped directory the script
@@ -67,15 +67,15 @@ require_bin gzip
 require_bin sha256sum
 require_bin jq
 
-require_env HADIR_ADMIN_DATABASE_URL
+require_env MAUGOOD_ADMIN_DATABASE_URL
 
-BACKUP_ROOT="${HADIR_BACKUP_ROOT:-/backup}"
-DATA_ROOT="${HADIR_DATA_ROOT:-/data}"
-S3_URI="${HADIR_BACKUP_S3_URI:-}"
-RETAIN_DAILY="${HADIR_BACKUP_RETAIN_DAILY:-30}"
-RETAIN_WEEKLY="${HADIR_BACKUP_RETAIN_WEEKLY:-12}"
-RETAIN_MONTHLY="${HADIR_BACKUP_RETAIN_MONTHLY:-12}"
-DRY_RUN="${HADIR_BACKUP_DRY_RUN:-0}"
+BACKUP_ROOT="${MAUGOOD_BACKUP_ROOT:-/backup}"
+DATA_ROOT="${MAUGOOD_DATA_ROOT:-/data}"
+S3_URI="${MAUGOOD_BACKUP_S3_URI:-}"
+RETAIN_DAILY="${MAUGOOD_BACKUP_RETAIN_DAILY:-30}"
+RETAIN_WEEKLY="${MAUGOOD_BACKUP_RETAIN_WEEKLY:-12}"
+RETAIN_MONTHLY="${MAUGOOD_BACKUP_RETAIN_MONTHLY:-12}"
+DRY_RUN="${MAUGOOD_BACKUP_DRY_RUN:-0}"
 
 TIMESTAMP="$(date -u +'%Y-%m-%d-%H%M%S')"
 TARGET_DIR="${BACKUP_ROOT}/${TIMESTAMP}"
@@ -83,7 +83,7 @@ TARGET_DIR="${BACKUP_ROOT}/${TIMESTAMP}"
 if [ "${DRY_RUN}" = "1" ]; then
     log "DRY RUN — would write to ${TARGET_DIR}"
     log "schemas would be:"
-    psql "${HADIR_ADMIN_DATABASE_URL}" -At -c \
+    psql "${MAUGOOD_ADMIN_DATABASE_URL}" -At -c \
         "SELECT 'main' UNION SELECT schema_name FROM public.tenants ORDER BY 1" \
         || die "psql probe failed"
     exit 0
@@ -94,7 +94,7 @@ log "writing backup to ${TARGET_DIR}"
 
 # ---- DB dump ---------------------------------------------------
 
-DB_VERSION=$(psql "${HADIR_ADMIN_DATABASE_URL}" -At -c 'SHOW server_version' \
+DB_VERSION=$(psql "${MAUGOOD_ADMIN_DATABASE_URL}" -At -c 'SHOW server_version' \
     || die "psql could not query server version")
 log "postgres server version: ${DB_VERSION}"
 
@@ -102,7 +102,7 @@ log "postgres server version: ${DB_VERSION}"
 # (always present); ``public`` carries the global tenant
 # registry + super-admin tables; per-tenant schemas live under
 # ``public.tenants.schema_name``.
-SCHEMAS_JSON=$(psql "${HADIR_ADMIN_DATABASE_URL}" -At -c \
+SCHEMAS_JSON=$(psql "${MAUGOOD_ADMIN_DATABASE_URL}" -At -c \
     "WITH s AS (
         SELECT 'public'   AS schema_name, 0 AS ord
         UNION ALL
@@ -120,7 +120,7 @@ log "schemas to dump: ${SCHEMAS_JSON}"
 # granular (an operator can restore a single tenant without
 # touching the rest). ``--no-owner --no-privileges`` strips
 # role assignments because the destination cluster will have
-# its own ``hadir_app`` / ``hadir_admin`` roles + grants from
+# its own ``maugood_app`` / ``maugood_admin`` roles + grants from
 # migration 0001.
 #
 # We deliberately do NOT pass ``--clean --if-exists`` — that
@@ -131,7 +131,7 @@ log "schemas to dump: ${SCHEMAS_JSON}"
 for schema in $(printf '%s' "${SCHEMAS_JSON}" | jq -r '.[]'); do
     out="${TARGET_DIR}/db/${schema}.sql.gz"
     log "pg_dump --schema=${schema} -> ${out}"
-    pg_dump "${HADIR_ADMIN_DATABASE_URL}" \
+    pg_dump "${MAUGOOD_ADMIN_DATABASE_URL}" \
         --schema="${schema}" \
         --no-owner \
         | gzip -c > "${out}" \
@@ -215,7 +215,7 @@ touch "${TARGET_DIR}/_complete"
 
 if [ -n "${S3_URI}" ]; then
     if ! command -v aws >/dev/null 2>&1; then
-        log "WARN: HADIR_BACKUP_S3_URI set but 'aws' CLI not installed; skipping upload"
+        log "WARN: MAUGOOD_BACKUP_S3_URI set but 'aws' CLI not installed; skipping upload"
     else
         dest="${S3_URI%/}/${TIMESTAMP}/"
         log "uploading to ${dest}"

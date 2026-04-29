@@ -1,4 +1,4 @@
-/* Hadir enhancements — new forms, calendar view, report builder, employee search,
+/* Maugood enhancements — new forms, calendar view, report builder, employee search,
    custom fields editor, mobile responsive helpers */
 
 /* ---------- shared drawer chrome (form style) ---------- */

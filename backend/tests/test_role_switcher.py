@@ -29,15 +29,15 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, insert, select
 from sqlalchemy.engine import Engine
 
-from hadir.auth.passwords import hash_password
-from hadir.db import audit_log, roles, user_roles, user_sessions, users
+from maugood.auth.passwords import hash_password
+from maugood.db import audit_log, roles, user_roles, user_sessions, users
 
 
 @pytest.fixture
 def admin_hr_user(admin_engine: Engine) -> Iterator[dict]:
     """Create a user with both Admin and HR roles (pilot tenant)."""
 
-    email = f"admin-hr-{secrets.token_hex(4)}@test.hadir"
+    email = f"admin-hr-{secrets.token_hex(4)}@test.maugood"
     password = "test-multi-role-" + secrets.token_hex(6)
     pwh = hash_password(password)
     with admin_engine.begin() as conn:
@@ -202,9 +202,9 @@ def test_switch_role_refuses_for_synthetic_super_admin(
 
     # Provision a super-admin staff user + login + access-as the
     # pilot tenant in this test for self-containment.
-    from hadir.db import mts_staff, super_admin_audit, super_admin_sessions, tenant_context
+    from maugood.db import mts_staff, super_admin_audit, super_admin_sessions, tenant_context
 
-    email = f"sa-rs-{secrets.token_hex(4)}@super.hadir"
+    email = f"sa-rs-{secrets.token_hex(4)}@super.maugood"
     password = "sa-rs-" + secrets.token_hex(6)
     pwh = hash_password(password)
     with tenant_context("public"):

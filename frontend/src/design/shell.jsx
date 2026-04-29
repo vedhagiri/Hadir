@@ -80,29 +80,29 @@ const ROLE_USER = {
 };
 
 const CRUMBS = {
-  dashboard: ['Hadir', 'Dashboard'],
-  live: ['Hadir', 'Live Capture'],
-  cameras: ['Hadir', 'Cameras'],
-  employees: ['Hadir', 'People', 'Employees'],
-  enrollment: ['Hadir', 'People', 'Enrollment'],
-  policies: ['Hadir', 'Configuration', 'Shift Policies'],
-  approvals: ['Hadir', 'Workflow', 'Approvals'],
-  reports: ['Hadir', 'Reports'],
-  audit: ['Hadir', 'System', 'Audit Log'],
-  settings: ['Hadir', 'System', 'Settings'],
-  'my-attendance': ['Hadir', 'Me', 'Attendance'],
-  'team-attendance': ['Hadir', 'Team', 'Attendance'],
-  'my-requests': ['Hadir', 'Me', 'Requests'],
-  'my-profile': ['Hadir', 'Me', 'Profile'],
-  'calendar': ['Hadir', 'Attendance', 'Calendar'],
-  'employee-report': ['Hadir', 'Reports', 'Employee report'],
-  'leave-policy': ['Hadir', 'Configuration', 'Leave & Calendar'],
-  'daily-attendance': ['Hadir', 'Attendance', 'Daily'],
-  'camera-logs': ['Hadir', 'Attendance', 'Camera logs'],
-  'mgr-assign': ['Hadir', 'People', 'Manager assignments'],
-  'pipeline': ['Hadir', 'How it works'],
-  'system': ['Hadir', 'System', 'Infrastructure'],
-  'api-docs': ['Hadir', 'Developers', 'API Reference'],
+  dashboard: ['Maugood', 'Dashboard'],
+  live: ['Maugood', 'Live Capture'],
+  cameras: ['Maugood', 'Cameras'],
+  employees: ['Maugood', 'People', 'Employees'],
+  enrollment: ['Maugood', 'People', 'Enrollment'],
+  policies: ['Maugood', 'Configuration', 'Shift Policies'],
+  approvals: ['Maugood', 'Workflow', 'Approvals'],
+  reports: ['Maugood', 'Reports'],
+  audit: ['Maugood', 'System', 'Audit Log'],
+  settings: ['Maugood', 'System', 'Settings'],
+  'my-attendance': ['Maugood', 'Me', 'Attendance'],
+  'team-attendance': ['Maugood', 'Team', 'Attendance'],
+  'my-requests': ['Maugood', 'Me', 'Requests'],
+  'my-profile': ['Maugood', 'Me', 'Profile'],
+  'calendar': ['Maugood', 'Attendance', 'Calendar'],
+  'employee-report': ['Maugood', 'Reports', 'Employee report'],
+  'leave-policy': ['Maugood', 'Configuration', 'Leave & Calendar'],
+  'daily-attendance': ['Maugood', 'Attendance', 'Daily'],
+  'camera-logs': ['Maugood', 'Attendance', 'Camera logs'],
+  'mgr-assign': ['Maugood', 'People', 'Manager assignments'],
+  'pipeline': ['Maugood', 'How it works'],
+  'system': ['Maugood', 'System', 'Infrastructure'],
+  'api-docs': ['Maugood', 'Developers', 'API Reference'],
 };
 
 function Sidebar({ role, setRole, page, setPage }) {
@@ -112,7 +112,7 @@ function Sidebar({ role, setRole, page, setPage }) {
     <aside className="sidebar">
       <div className="sidebar-brand">
         <div className="brand-mark">ح</div>
-        <div className="brand-name">Hadir</div>
+        <div className="brand-name">Maugood</div>
         <div className="brand-tag">v1.0</div>
       </div>
       <div className="topbar-search" style={{ width: '100%', margin: '0 0 6px' }}>
@@ -176,7 +176,7 @@ function RoleSwitcher({ role, setRole, user }) {
 }
 
 function Topbar({ page, role, rtl, setRtl, theme, setTheme, onOpenNew, onMobileNav }) {
-  const crumbs = CRUMBS[page] || ['Hadir', page];
+  const crumbs = CRUMBS[page] || ['Maugood', page];
   return (
     <div className="topbar">
       <button className="icon-btn mobile-only" onClick={onMobileNav} title="Menu">

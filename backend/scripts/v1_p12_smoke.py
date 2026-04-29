@@ -3,7 +3,7 @@
 Logs in as the seeded pilot Admin against the ``main`` tenant
 (Pydantic ``EmailStr`` rejects reserved TLDs like ``.test``, which the
 v1.0 seeded ``admin@omran.test`` accounts use; the pilot's
-``admin@pilot.hadir`` is the working credential set), defines two
+``admin@pilot.maugood`` is the working credential set), defines two
 custom fields (Badge Number text + Contract Type select), creates a
 fresh employee, sets values for both fields, exports the employee
 XLSX, and asserts the columns and per-employee values are present in
@@ -11,7 +11,7 @@ the file.
 
 Run inside the backend container:
 
-    docker compose exec -e HADIR_SMOKE_PASSWORD='…' backend \\
+    docker compose exec -e MAUGOOD_SMOKE_PASSWORD='…' backend \\
         python -m scripts.v1_p12_smoke
 
 Cleans up after itself so re-running starts clean.
@@ -28,15 +28,15 @@ from openpyxl import load_workbook
 
 
 BASE = "http://localhost:8000"
-ADMIN_EMAIL = "admin@pilot.hadir"
-ADMIN_PASSWORD = os.environ.get("HADIR_SMOKE_PASSWORD", "")
+ADMIN_EMAIL = "admin@pilot.maugood"
+ADMIN_PASSWORD = os.environ.get("MAUGOOD_SMOKE_PASSWORD", "")
 EMPLOYEE_CODE = "OM-P12-SMOKE"
 
 
 def main() -> int:
     if not ADMIN_PASSWORD:
         print(
-            "[p12] set HADIR_SMOKE_PASSWORD to the seeded pilot Admin password",
+            "[p12] set MAUGOOD_SMOKE_PASSWORD to the seeded pilot Admin password",
             file=sys.stderr,
         )
         return 1

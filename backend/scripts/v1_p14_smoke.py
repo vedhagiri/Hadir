@@ -6,7 +6,7 @@ request, attaches a real PNG, lists their requests + attachments
 
 Run inside the backend container:
 
-    docker compose exec -e HADIR_SMOKE_PASSWORD='…' backend \\
+    docker compose exec -e MAUGOOD_SMOKE_PASSWORD='…' backend \\
         python -m scripts.v1_p14_smoke
 """
 
@@ -21,8 +21,8 @@ from pathlib import Path
 import httpx
 from sqlalchemy import delete, insert, select
 
-from hadir.auth.passwords import hash_password
-from hadir.db import (
+from maugood.auth.passwords import hash_password
+from maugood.db import (
     audit_log,
     departments,
     employees,
@@ -139,12 +139,12 @@ def _cleanup(engine, user_id: int, emp_id: int) -> None:
 
 
 def main() -> int:
-    if not os.environ.get("HADIR_SMOKE_PASSWORD"):
-        print("[p14] set HADIR_SMOKE_PASSWORD", file=sys.stderr)
+    if not os.environ.get("MAUGOOD_SMOKE_PASSWORD"):
+        print("[p14] set MAUGOOD_SMOKE_PASSWORD", file=sys.stderr)
         return 1
 
     suffix = secrets.token_hex(4)
-    employee_email = f"emp-{suffix}@p14.hadir"
+    employee_email = f"emp-{suffix}@p14.maugood"
     pwd = "P14Smoke!" + secrets.token_hex(4)
 
     admin_engine = make_admin_engine()

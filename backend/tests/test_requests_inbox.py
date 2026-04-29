@@ -2,7 +2,7 @@
 
 Two suites:
 
-1. Pure SLA business-hours math from ``hadir.requests.sla``.
+1. Pure SLA business-hours math from ``maugood.requests.sla``.
 2. End-to-end inbox endpoints — `GET /api/requests/inbox/pending`,
    `/inbox/decided`, `/inbox/summary`, plus the widened manager
    scope and the manager-scope-vs-decision red lines.
@@ -19,8 +19,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, insert, select, update
 from sqlalchemy.engine import Engine
 
-from hadir.auth.passwords import hash_password
-from hadir.db import (
+from maugood.auth.passwords import hash_password
+from maugood.db import (
     approved_leaves,
     audit_log,
     departments,
@@ -34,7 +34,7 @@ from hadir.db import (
     user_sessions,
     users,
 )
-from hadir.requests import sla as sla_mod
+from maugood.requests import sla as sla_mod
 
 
 TENANT_ID = 1
@@ -212,10 +212,10 @@ def inbox_world(admin_engine: Engine) -> Iterator[dict]:
     """
 
     suffix = secrets.token_hex(4)
-    employee_email = f"emp-{suffix}@p15.hadir"
-    manager_email = f"mgr-{suffix}@p15.hadir"
-    hr_email = f"hr-{suffix}@p15.hadir"
-    admin_email = f"adm-{suffix}@p15.hadir"
+    employee_email = f"emp-{suffix}@p15.maugood"
+    manager_email = f"mgr-{suffix}@p15.maugood"
+    hr_email = f"hr-{suffix}@p15.maugood"
+    admin_email = f"adm-{suffix}@p15.maugood"
     pwd = "p15-pw-" + secrets.token_hex(4)
 
     employee_uid = _make_user(
@@ -306,7 +306,7 @@ def inbox_world(admin_engine: Engine) -> Iterator[dict]:
                     audit_log.c.entity_type == "request"
                 )
             )
-            from hadir.db import attendance_records  # noqa: PLC0415
+            from maugood.db import attendance_records  # noqa: PLC0415
 
             conn.execute(
                 delete(attendance_records).where(
@@ -389,7 +389,7 @@ def test_manager_outside_department_403_on_decide(
     rid = _submit_exception(client, when="2026-06-01")
 
     suffix = secrets.token_hex(3)
-    other_email = f"mgr-other-{suffix}@p15.hadir"
+    other_email = f"mgr-other-{suffix}@p15.maugood"
     other_pw = "other-" + secrets.token_hex(4)
     other_uid = _make_user(
         admin_engine,

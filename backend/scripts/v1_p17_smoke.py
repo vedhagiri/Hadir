@@ -7,7 +7,7 @@ flip back so the suite leaves no trace.
 
 Run inside the backend container:
 
-    docker compose exec -e HADIR_SMOKE_PASSWORD='…' backend \\
+    docker compose exec -e MAUGOOD_SMOKE_PASSWORD='…' backend \\
         python -m scripts.v1_p17_smoke
 """
 
@@ -20,7 +20,7 @@ from datetime import date, time, timedelta
 import httpx
 from sqlalchemy import delete, insert, select, update
 
-from hadir.db import (
+from maugood.db import (
     attendance_records,
     employees,
     make_admin_engine,
@@ -34,8 +34,8 @@ TENANT_ID = 1
 
 
 def main() -> int:
-    if not os.environ.get("HADIR_SMOKE_PASSWORD"):
-        print("[p17] set HADIR_SMOKE_PASSWORD", file=sys.stderr)
+    if not os.environ.get("MAUGOOD_SMOKE_PASSWORD"):
+        print("[p17] set MAUGOOD_SMOKE_PASSWORD", file=sys.stderr)
         return 1
 
     admin_engine = make_admin_engine()
@@ -71,7 +71,7 @@ def main() -> int:
                     tenant_id=TENANT_ID,
                     employee_code="P17-A",
                     full_name="P17 Smoke Alice",
-                    email="alice@p17.hadir",
+                    email="alice@p17.maugood",
                     department_id=1,
                 )
                 .returning(employees.c.id)
@@ -84,7 +84,7 @@ def main() -> int:
                     tenant_id=TENANT_ID,
                     employee_code="P17-B",
                     full_name="P17 Smoke Bob",
-                    email="bob@p17.hadir",
+                    email="bob@p17.maugood",
                     department_id=2,
                 )
                 .returning(employees.c.id)
@@ -129,8 +129,8 @@ def main() -> int:
             login = c.post(
                 "/api/auth/login",
                 json={
-                    "email": "admin@pilot.hadir",
-                    "password": os.environ["HADIR_SMOKE_PASSWORD"],
+                    "email": "admin@pilot.maugood",
+                    "password": os.environ["MAUGOOD_SMOKE_PASSWORD"],
                 },
             )
             login.raise_for_status()
@@ -154,7 +154,7 @@ def main() -> int:
                 f"[p17] teal render: {len(teal.content)}B  "
                 f"filename={teal.headers['content-disposition']}"
             )
-            assert "hadir-attendance-main-" in teal.headers["content-disposition"]
+            assert "maugood-attendance-main-" in teal.headers["content-disposition"]
 
             # 2) Swap to navy and re-render.
             with admin_engine.begin() as conn:

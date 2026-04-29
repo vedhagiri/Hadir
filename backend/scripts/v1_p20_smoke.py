@@ -22,11 +22,11 @@ from pathlib import Path
 
 from sqlalchemy import delete, insert, select, update
 
-from hadir.attendance.engine import AttendanceRecord
-from hadir.attendance import repository as attendance_repo
-from hadir.attendance.scheduler import _maybe_notify_overtime
-from hadir.auth.passwords import hash_password
-from hadir.db import (
+from maugood.attendance.engine import AttendanceRecord
+from maugood.attendance import repository as attendance_repo
+from maugood.attendance.scheduler import _maybe_notify_overtime
+from maugood.auth.passwords import hash_password
+from maugood.db import (
     attendance_records,
     audit_log,
     departments,
@@ -43,14 +43,14 @@ from hadir.db import (
     user_sessions,
     users,
 )
-from hadir.notifications.repository import list_for_user
-from hadir.notifications.worker import drain_one_tenant
-from hadir.notifications.producer import (
+from maugood.notifications.repository import list_for_user
+from maugood.notifications.worker import drain_one_tenant
+from maugood.notifications.producer import (
     notify_approval_assigned,
     notify_approval_decided,
     notify_overtime_flagged,
 )
-from hadir.tenants.scope import TenantScope
+from maugood.tenants.scope import TenantScope
 
 
 TENANT_ID = 1
@@ -116,15 +116,15 @@ def _cleanup_user(engine, uid):
 
 def main() -> int:
     recorder_path = os.environ.get(
-        "HADIR_EMAIL_RECORDER_PATH", "/tmp/hadir-p20-recorder.jsonl"
+        "MAUGOOD_EMAIL_RECORDER_PATH", "/tmp/maugood-p20-recorder.jsonl"
     )
     Path(recorder_path).unlink(missing_ok=True)
-    os.environ["HADIR_EMAIL_RECORDER_PATH"] = recorder_path
+    os.environ["MAUGOOD_EMAIL_RECORDER_PATH"] = recorder_path
 
     suffix = secrets.token_hex(3)
-    employee_email = f"emp-{suffix}@p20.hadir"
-    manager_email = f"mgr-{suffix}@p20.hadir"
-    hr_email = f"hr-{suffix}@p20.hadir"
+    employee_email = f"emp-{suffix}@p20.maugood"
+    manager_email = f"mgr-{suffix}@p20.maugood"
+    hr_email = f"hr-{suffix}@p20.maugood"
     pwd = "p20-smoke-" + secrets.token_hex(4)
 
     admin_engine = make_admin_engine()
@@ -190,7 +190,7 @@ def main() -> int:
                 smtp_host="smtp.test.example",
                 smtp_password_encrypted=None,
                 from_address="noreply@test.example",
-                from_name="Hadir",
+                from_name="Maugood",
                 enabled=True,
             )
         )
@@ -293,7 +293,7 @@ def main() -> int:
         # confirm the email is skipped.
         Path(recorder_path).unlink(missing_ok=True)
         with admin_engine.begin() as conn:
-            from hadir.notifications.repository import set_preference  # noqa: PLC0415
+            from maugood.notifications.repository import set_preference  # noqa: PLC0415
 
             set_preference(
                 conn,

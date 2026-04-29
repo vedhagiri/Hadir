@@ -142,16 +142,16 @@ def upgrade() -> None:
     #    cascade-drop it.
     op.execute("DROP TABLE main.tenants")
 
-    # 6. Grants. ``hadir_admin`` owns the table; ``hadir_app`` gets
+    # 6. Grants. ``maugood_admin`` owns the table; ``maugood_app`` gets
     #    the same CRUD it had on main.tenants, plus the sequence priv
     #    needed for inserts. ``public`` schema USAGE is granted by
     #    default to PUBLIC, so we don't need an explicit grant there.
-    op.execute("ALTER TABLE public.tenants OWNER TO hadir_admin")
+    op.execute("ALTER TABLE public.tenants OWNER TO maugood_admin")
     op.execute(
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON public.tenants TO hadir_app"
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON public.tenants TO maugood_app"
     )
     op.execute(
-        "GRANT USAGE, SELECT ON SEQUENCE public.tenants_id_seq TO hadir_app"
+        "GRANT USAGE, SELECT ON SEQUENCE public.tenants_id_seq TO maugood_app"
     )
 
 
@@ -250,7 +250,7 @@ def downgrade() -> None:
 
     op.execute("DROP TABLE public.tenants")
 
-    op.execute('ALTER TABLE "main"."tenants" OWNER TO hadir_admin')
+    op.execute('ALTER TABLE "main"."tenants" OWNER TO maugood_admin')
     op.execute(
-        'GRANT SELECT, INSERT, UPDATE, DELETE ON "main"."tenants" TO hadir_app'
+        'GRANT SELECT, INSERT, UPDATE, DELETE ON "main"."tenants" TO maugood_app'
     )

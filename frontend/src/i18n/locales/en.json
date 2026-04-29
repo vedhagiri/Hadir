@@ -331,7 +331,7 @@
     "overview": {
       "title": "Overview",
       "auth": "Authentication uses an HttpOnly session cookie set by POST /api/auth/login. Cookies are SameSite=Lax and refresh sliding-expiry on every authenticated request.",
-      "tenant": "The hadir_tenant cookie names the tenant schema. Most endpoints require an authenticated session and return 401 without one.",
+      "tenant": "The maugood_tenant cookie names the tenant schema. Most endpoints require an authenticated session and return 401 without one.",
       "roles": "Endpoints are role-scoped. Admin sees everything; HR sees most reads and request workflow; Manager sees their assigned employees and team-level views; Employee sees only their own data.",
       "rateLimits": "Login endpoints are rate-limited per (email, IP). Signed report download URLs are rate-limited per IP."
     },

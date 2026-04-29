@@ -12,7 +12,7 @@ import { useEffect } from "react";
 import { useBrandingOptions, useMyBranding } from "./hooks";
 import type { BrandingFontEntry, BrandingPaletteEntry } from "./types";
 
-const STYLE_TAG_ID = "hadir-branding-overrides";
+const STYLE_TAG_ID = "maugood-branding-overrides";
 
 function buildCss(
   palette: BrandingPaletteEntry,

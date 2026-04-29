@@ -1,5 +1,5 @@
 // Wire types for /api/attendance/calendar/*. Mirrors the Pydantic
-// response models in backend/hadir/attendance_calendar/router.py.
+// response models in backend/maugood/attendance_calendar/router.py.
 
 export type CalendarStatus =
   | "present"

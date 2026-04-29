@@ -1,4 +1,4 @@
-# Hadir Prometheus alert rules (v1.0 P26).
+# Maugood Prometheus alert rules (v1.0 P26).
 #
 # Four alerts cover the operational red lines BRD calls out:
 #
@@ -9,17 +9,17 @@
 #
 # Routing + delivery (webhook OR per-tenant Admin email) lives
 # in deploy/alertmanager/alertmanager.yml. Operators wire the
-# webhook URL via ``HADIR_ALERTMANAGER_WEBHOOK`` at deploy time.
+# webhook URL via ``MAUGOOD_ALERTMANAGER_WEBHOOK`` at deploy time.
 
 groups:
-  - name: hadir.cameras
+  - name: maugood.cameras
     rules:
-      - alert: HadirCameraUnreachable
-        # ``hadir_camera_reachable`` is 1 when the latest
+      - alert: MaugoodCameraUnreachable
+        # ``maugood_camera_reachable`` is 1 when the latest
         # health snapshot reported reachable=true. Down for
         # five contiguous minutes is the BRD threshold for a
         # warning page.
-        expr: hadir_camera_reachable == 0
+        expr: maugood_camera_reachable == 0
         for: 5m
         labels:
           severity: warning
@@ -27,24 +27,24 @@ groups:
         annotations:
           summary: "Camera unreachable for >5 min (tenant {{ $labels.tenant }} camera {{ $labels.camera }})"
           description: |
-            Hadir hasn't been able to read frames from camera
+            Maugood hasn't been able to read frames from camera
             id={{ $labels.camera }} (tenant id={{ $labels.tenant }}) for
             five consecutive minutes. Operators should verify the
             RTSP credentials, network reachability, and the
             camera's power state.
 
-      - alert: HadirCaptureRateLow
+      - alert: MaugoodCaptureRateLow
         # Walking-past traffic should produce > 0 frames/sec
         # while a real person is in front of the camera, but a
         # quiet office lobby naturally drops to 0. The alert
         # fires only when the camera is *reachable* (so we know
-        # this isn't already covered by HadirCameraUnreachable)
+        # this isn't already covered by MaugoodCameraUnreachable)
         # AND the capture rate has been below 0.1 frames/sec
         # over a 10-minute window — that's a stalled reader,
         # not an empty hallway.
         expr: |
-          rate(hadir_capture_frames_total[5m]) < 0.1
-          and on (tenant, camera) hadir_camera_reachable == 1
+          rate(maugood_capture_frames_total[5m]) < 0.1
+          and on (tenant, camera) maugood_camera_reachable == 1
         for: 10m
         labels:
           severity: warning
@@ -59,9 +59,9 @@ groups:
             ``capture_manager.on_camera_updated`` will respawn
             the worker.
 
-  - name: hadir.schedulers
+  - name: maugood.schedulers
     rules:
-      - alert: HadirSchedulerJobFailing
+      - alert: MaugoodSchedulerJobFailing
         # Three consecutive failures (i.e. the failure counter
         # increases by ≥3 over the last 15 minutes — three
         # 5-minute scrapes of the same scheduled run). Critical
@@ -69,7 +69,7 @@ groups:
         # downstream invariant (attendance, retention, email
         # delivery, report runs).
         expr: |
-          increase(hadir_scheduler_jobs_failed_total[15m]) >= 3
+          increase(maugood_scheduler_jobs_failed_total[15m]) >= 3
         for: 0m
         labels:
           severity: critical
@@ -82,21 +82,21 @@ groups:
             minutes. Check ``backend/logs/app.log`` for the
             stack trace.
 
-  - name: hadir.email
+  - name: maugood.email
     rules:
-      - alert: HadirEmailFailureRateHigh
+      - alert: MaugoodEmailFailureRateHigh
         # Failure rate over the last hour, computed only when
         # there *was* email traffic (we use a min(>0) gate to
         # avoid 0/0 = NaN). > 10% is the BRD threshold.
         expr: |
           (
             sum by (tenant) (
-              rate(hadir_email_send_total{status="failed"}[1h])
+              rate(maugood_email_send_total{status="failed"}[1h])
             )
             /
             (
               sum by (tenant) (
-                rate(hadir_email_send_total{status=~"sent|failed"}[1h])
+                rate(maugood_email_send_total{status=~"sent|failed"}[1h])
               )
               > 0
             )

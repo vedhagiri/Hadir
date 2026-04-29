@@ -20,7 +20,7 @@
 
 ## The prompt to paste into Claude Code
 
-> You are resuming work on Hadir, post-P28. The v1.0 build is complete and ready for pre-Omran validation. Read `CLAUDE.md`, `docs/testing/v1.0-m2-test-accounts.md`, and `v1.0-phase-plan.md` before doing anything.
+> You are resuming work on Maugood, post-P28. The v1.0 build is complete and ready for pre-Omran validation. Read `CLAUDE.md`, `docs/testing/v1.0-m2-test-accounts.md`, and `v1.0-phase-plan.md` before doing anything.
 >
 > In this session, build a single re-runnable script that wipes the local database, re-provisions everything, seeds rich dummy data, and onboards a real corporate tenant. Every credential the script creates must be printed to console and saved to a gitignored `credentials.txt` so Suresh can log in and validate.
 >
@@ -35,7 +35,7 @@
 >
 > ### What the script does
 >
-> 1. **Safety gate.** Refuse to run unless `HADIR_ENV=dev`. Refuse to run if any tenant in the DB has more than 50 employees (production heuristic). Print: "This script wipes all data. Type 'RESET' to continue:" and require typed confirmation. These three brakes together make it impossible to run accidentally against production.
+> 1. **Safety gate.** Refuse to run unless `MAUGOOD_ENV=dev`. Refuse to run if any tenant in the DB has more than 50 employees (production heuristic). Print: "This script wipes all data. Type 'RESET' to continue:" and require typed confirmation. These three brakes together make it impossible to run accidentally against production.
 >
 > 2. **Wipe.** Drop every tenant schema (anything matching `tenant_%`), drop the legacy pilot `main` schema if it exists, then drop and recreate `public`. Re-run all Alembic migrations on `public` to recreate the global `tenants` and `mts_staff` tables.
 >
@@ -105,7 +105,7 @@
 > 10. **Print credentials to console AND write to `credentials.txt` at repo root.** Format must be human-readable:
 >     ```
 >     ╔════════════════════════════════════════════════════════════╗
->     ║         HADIR v1.0 — PRE-OMRAN VALIDATION CREDENTIALS      ║
+>     ║         MAUGOOD v1.0 — PRE-OMRAN VALIDATION CREDENTIALS      ║
 >     ║         Generated: 2026-04-26 14:30 GST                    ║
 >     ║         WARNING: dev/test credentials only — DO NOT USE    ║
 >     ║         IN PRODUCTION. credentials.txt is gitignored.      ║
@@ -189,7 +189,7 @@
 >
 > ### Red lines
 >
-> - The script ONLY runs when `HADIR_ENV=dev` AND the typed-RESET confirmation passes. Both gates required.
+> - The script ONLY runs when `MAUGOOD_ENV=dev` AND the typed-RESET confirmation passes. Both gates required.
 > - `credentials.txt` is gitignored before it is written. Verify the gitignore entry took effect; if `git check-ignore credentials.txt` returns non-zero (file not ignored), abort and print a loud error.
 > - Never seed Omran. Omran's tenant gets clean real data at P29.
 > - Never store real RTSP URLs in the script or in seeded data. UI configures them with Fernet-encrypted at-rest storage per pilot P7.
@@ -201,7 +201,7 @@
 > ### When done
 >
 > Walk through the script once end-to-end yourself before handing it off:
-> 1. Set `HADIR_ENV=dev` in your env.
+> 1. Set `MAUGOOD_ENV=dev` in your env.
 > 2. Set the three constants at the top to test values: `REAL_CORPORATE_NAME = "Test Corp"`, `REAL_CORPORATE_SLUG = "test-corp"`, `REAL_TEST_EMPLOYEE_NAME = "Test User"`.
 > 3. Run the script, confirm the RESET prompt, watch it complete.
 > 4. Open `credentials.txt`, log in as Super-Admin, then as demo Admin, then as test corp Admin. Confirm everything works.
@@ -222,7 +222,7 @@
    REAL_TEST_EMPLOYEE_NAME = "Your Name"              # the person whose face gets enrolled
    REAL_CORPORATE_DOMAIN = "yourcorp.local"           # optional, defaults sensibly
    ```
-3. Make sure `HADIR_ENV=dev` is set in your `.env` (it should be from the dev setup).
+3. Make sure `MAUGOOD_ENV=dev` is set in your `.env` (it should be from the dev setup).
 4. Stop the running app: `docker compose down`.
 5. Run the script:
    ```bash

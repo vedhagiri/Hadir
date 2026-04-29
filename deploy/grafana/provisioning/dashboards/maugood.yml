@@ -1,0 +1,18 @@
+# Maugood Grafana dashboard provisioning (v1.0 P26).
+# Loads every JSON file under ``/var/lib/grafana/dashboards/``
+# at boot. The Maugood dashboard itself lives in
+# ``deploy/grafana/dashboards/maugood.json`` (mounted into the
+# Grafana container by docker-compose.prod.yml).
+
+apiVersion: 1
+
+providers:
+  - name: maugood
+    orgId: 1
+    folder: Maugood
+    type: file
+    disableDeletion: false
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

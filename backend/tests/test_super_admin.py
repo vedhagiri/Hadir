@@ -2,7 +2,7 @@
 
 Covers:
 
-* Login + logout + ``/me`` round-trip with ``hadir_super_session``.
+* Login + logout + ``/me`` round-trip with ``maugood_super_session``.
 * Bad credentials → 401, audit row written to
   ``public.super_admin_audit``.
 * Tenants list returns the seeded pilot tenant.
@@ -11,7 +11,7 @@ Covers:
 * Dual audit on tenant-context writes during impersonation: a row
   appears in BOTH ``main.audit_log`` and ``public.super_admin_audit``.
 * Super-Admin without impersonation cannot write to tenant data
-  (the tenant-side endpoints return 401 because no ``hadir_session``
+  (the tenant-side endpoints return 401 because no ``maugood_session``
   cookie is present).
 * Tenant suspension toggles the status column + emits an audit row.
 """
@@ -26,8 +26,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, insert, select
 from sqlalchemy.engine import Engine
 
-from hadir.auth.passwords import hash_password
-from hadir.db import (
+from maugood.auth.passwords import hash_password
+from maugood.db import (
     audit_log,
     mts_staff,
     super_admin_audit,
@@ -41,7 +41,7 @@ from hadir.db import (
 def super_admin_user(admin_engine: Engine) -> Iterator[dict]:
     """Create an MTS staff user, yield its credentials, then clean up."""
 
-    email = f"sa-{secrets.token_hex(4)}@super.hadir"
+    email = f"sa-{secrets.token_hex(4)}@super.maugood"
     password = "super-pw-" + secrets.token_hex(6)
     password_hash = hash_password(password)
 
@@ -87,7 +87,7 @@ def _login(client: TestClient, *, email: str, password: str) -> str:
         "/api/super-admin/login", json={"email": email, "password": password}
     )
     assert resp.status_code == 200, resp.text
-    cookie = client.cookies.get("hadir_super_session")
+    cookie = client.cookies.get("maugood_super_session")
     assert cookie, "expected super-session cookie"
     return cookie
 
@@ -215,7 +215,7 @@ def test_super_admin_dual_audit_on_tenant_write(
         json={
             "employee_code": f"SA{secrets.token_hex(2).upper()}",
             "full_name": "Audit Probe",
-            "email": "probe@test.hadir",
+            "email": "probe@test.maugood",
             "department_id": dept_id,
         },
     )
@@ -247,7 +247,7 @@ def test_super_admin_dual_audit_on_tenant_write(
 def test_super_admin_without_impersonation_cannot_write(
     client: TestClient, super_admin_user: dict
 ) -> None:
-    """No impersonation, no hadir_session → tenant write endpoints reject."""
+    """No impersonation, no maugood_session → tenant write endpoints reject."""
 
     _login(client, email=super_admin_user["email"], password=super_admin_user["password"])
     # Note: we deliberately did NOT call /access-as.
@@ -257,7 +257,7 @@ def test_super_admin_without_impersonation_cannot_write(
         json={
             "employee_code": "NOWRITE",
             "full_name": "Should not land",
-            "email": "x@test.hadir",
+            "email": "x@test.maugood",
             "department_id": 1,
         },
     )

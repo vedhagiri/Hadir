@@ -8,9 +8,9 @@ from fastapi import APIRouter, Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import update
 
-from hadir.auth import require_any_role, require_department, require_role
-from hadir.db import user_sessions
-from hadir.main import app
+from maugood.auth import require_any_role, require_department, require_role
+from maugood.db import user_sessions
+from maugood.main import app
 from tests.conftest import audit_rows_for_email, audit_rows_for_user
 
 
@@ -32,8 +32,8 @@ def test_login_happy_path_sets_cookie_and_me_returns_profile(
     assert body["roles"] == ["Admin"]
     assert body["departments"] == []
 
-    assert "hadir_session" in client.cookies
-    cookie = client.cookies.get("hadir_session")
+    assert "maugood_session" in client.cookies
+    cookie = client.cookies.get("maugood_session")
     assert cookie and len(cookie) > 40  # token is base64url of 48 bytes
 
     # /me reflects the same user and works with the cookie jar.
@@ -74,7 +74,7 @@ def test_login_wrong_password_returns_401_and_audits(
         json={"email": admin_user["email"], "password": "wrong-password"},
     )
     assert resp.status_code == 401
-    assert "hadir_session" not in client.cookies
+    assert "maugood_session" not in client.cookies
 
     # Exactly one failure row, referencing the email but not the password.
     rows = audit_rows_for_email(admin_engine, admin_user["email"])
@@ -90,7 +90,7 @@ def test_login_unknown_email_returns_401_and_audits(
     client: TestClient, admin_engine
 ) -> None:
     # Unique bogus email so the assertion doesn't collide with other test runs.
-    bogus = "does-not-exist-p3@test.hadir"
+    bogus = "does-not-exist-p3@test.maugood"
     resp = client.post(
         "/api/auth/login",
         json={"email": bogus, "password": "irrelevant"},
@@ -133,7 +133,7 @@ def test_login_with_friendly_slug_succeeds(
     # for the pilot, slug == schema, so the assertion is the same
     # value either way. For other tenants the cookie would hold
     # ``tenant_<slug>`` while the body sent ``<slug>``.
-    assert client.cookies.get("hadir_tenant") == "main"
+    assert client.cookies.get("maugood_tenant") == "main"
 
 
 def test_login_with_raw_schema_name_returns_401(
@@ -197,10 +197,10 @@ def test_login_in_multi_mode_requires_tenant_slug(
     admin_user: dict,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``HADIR_TENANT_MODE=multi`` removes the pilot's ``main`` fallback —
+    """``MAUGOOD_TENANT_MODE=multi`` removes the pilot's ``main`` fallback —
     a missing ``tenant_slug`` must 400, not silently log into ``main``."""
 
-    monkeypatch.setenv("HADIR_TENANT_MODE", "multi")
+    monkeypatch.setenv("MAUGOOD_TENANT_MODE", "multi")
     resp = client.post(
         "/api/auth/login",
         json={"email": admin_user["email"], "password": admin_user["password"]},
@@ -223,7 +223,7 @@ def test_expired_session_is_rejected_and_audited(
         json={"email": admin_user["email"], "password": admin_user["password"]},
     )
     assert resp.status_code == 200
-    session_id = client.cookies.get("hadir_session")
+    session_id = client.cookies.get("maugood_session")
     assert session_id
 
     # Poke ``expires_at`` into the past. Admin engine — app can't UPDATE
@@ -260,7 +260,7 @@ def test_logout_clears_session_and_cookie(
         json={"email": admin_user["email"], "password": admin_user["password"]},
     )
     assert resp.status_code == 200
-    session_id = client.cookies.get("hadir_session")
+    session_id = client.cookies.get("maugood_session")
     assert session_id
 
     out = client.post("/api/auth/logout")

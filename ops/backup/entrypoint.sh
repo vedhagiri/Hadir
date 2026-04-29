@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hadir backup container entrypoint (v1.0 P24).
+# Maugood backup container entrypoint (v1.0 P24).
 #
 # Two run modes:
 #

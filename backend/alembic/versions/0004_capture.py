@@ -129,12 +129,12 @@ def upgrade() -> None:
 
     # --- Grants -------------------------------------------------------------
     for table in ("detection_events", "camera_health_snapshots"):
-        op.execute(f'ALTER TABLE "{SCHEMA}"."{table}" OWNER TO hadir_admin')
+        op.execute(f'ALTER TABLE "{SCHEMA}"."{table}" OWNER TO maugood_admin')
         op.execute(
-            f'GRANT SELECT, INSERT, UPDATE, DELETE ON "{SCHEMA}"."{table}" TO hadir_app'
+            f'GRANT SELECT, INSERT, UPDATE, DELETE ON "{SCHEMA}"."{table}" TO maugood_app'
         )
     op.execute(
-        f'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA "{SCHEMA}" TO hadir_app'
+        f'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA "{SCHEMA}" TO maugood_app'
     )
 
 

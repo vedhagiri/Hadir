@@ -4,7 +4,7 @@ Adds one per-tenant table — ``tenant_branding`` — that records the
 tenant's chosen primary colour, font, and (optional) logo path. The
 options are **curated**: ``primary_color_key`` and ``font_key`` are
 both CHECK-constrained against the BRAND_PALETTE / FONT_OPTIONS maps
-in ``hadir/branding/constants.py``. There is no free-form hex entry
+in ``maugood/branding/constants.py``. There is no free-form hex entry
 and no custom font upload — those are explicit BRD red lines
 (FR-BRD-002, also called out in PROJECT_CONTEXT §"Tenant branding").
 
@@ -69,7 +69,7 @@ def upgrade() -> None:
             server_default=sa.func.now(),
         ),
         # Curated palette + font list. Mirrored in
-        # hadir/branding/constants.py — change both together.
+        # maugood/branding/constants.py — change both together.
         sa.CheckConstraint(
             "primary_color_key IN ("
             "'teal','navy','slate','forest','plum','clay','rose','amber'"
@@ -83,9 +83,9 @@ def upgrade() -> None:
     )
 
     # Grants — same pattern as every other per-tenant table.
-    op.execute('ALTER TABLE tenant_branding OWNER TO hadir_admin')
+    op.execute('ALTER TABLE tenant_branding OWNER TO maugood_admin')
     op.execute(
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON tenant_branding TO hadir_app"
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON tenant_branding TO maugood_app"
     )
 
     # Seed defaults for the tenant whose schema is being migrated.

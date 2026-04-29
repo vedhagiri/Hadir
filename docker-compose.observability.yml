@@ -1,4 +1,4 @@
-# Hadir observability overlay (v1.0 P26).
+# Maugood observability overlay (v1.0 P26).
 #
 # Lets operators bring Prometheus + Grafana + Alertmanager up
 # *alongside the dev stack* for local verification and
@@ -39,10 +39,10 @@ services:
       - ./deploy/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager_data:/alertmanager
     environment:
-      HADIR_ALERTMANAGER_WEBHOOK_URL: ${HADIR_ALERTMANAGER_WEBHOOK_URL:-}
-      HADIR_ALERTMANAGER_SMTP_HOST: ${HADIR_ALERTMANAGER_SMTP_HOST:-}
-      HADIR_ALERTMANAGER_SMTP_FROM: ${HADIR_ALERTMANAGER_SMTP_FROM:-}
-      HADIR_ALERTMANAGER_ADMIN_EMAIL: ${HADIR_ALERTMANAGER_ADMIN_EMAIL:-}
+      MAUGOOD_ALERTMANAGER_WEBHOOK_URL: ${MAUGOOD_ALERTMANAGER_WEBHOOK_URL:-}
+      MAUGOOD_ALERTMANAGER_SMTP_HOST: ${MAUGOOD_ALERTMANAGER_SMTP_HOST:-}
+      MAUGOOD_ALERTMANAGER_SMTP_FROM: ${MAUGOOD_ALERTMANAGER_SMTP_FROM:-}
+      MAUGOOD_ALERTMANAGER_ADMIN_EMAIL: ${MAUGOOD_ALERTMANAGER_ADMIN_EMAIL:-}
     command:
       - --config.file=/etc/alertmanager/alertmanager.yml
       - --storage.path=/alertmanager
@@ -57,12 +57,12 @@ services:
       - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana
     environment:
-      GF_SECURITY_ADMIN_USER: ${HADIR_GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${HADIR_GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_SECURITY_ADMIN_USER: ${MAUGOOD_GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${MAUGOOD_GRAFANA_ADMIN_PASSWORD:-admin}
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_USERS_ALLOW_SIGN_UP: "false"
     ports:
-      - "${HADIR_GRAFANA_PORT:-3000}:3000"
+      - "${MAUGOOD_GRAFANA_PORT:-3000}:3000"
     depends_on:
       - prometheus
     restart: unless-stopped

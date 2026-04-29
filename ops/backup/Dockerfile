@@ -1,4 +1,4 @@
-# Hadir backup container (v1.0 P24).
+# Maugood backup container (v1.0 P24).
 #
 # Postgres 15 client tools + tar/gzip/jq/sha256sum + supercronic
 # for Docker-friendly cron. Runs ``backup.sh`` under
@@ -59,7 +59,7 @@ ENV TZ=Asia/Muscat
 WORKDIR /app
 
 COPY ops/backup/crontab /etc/supercronic/crontab
-COPY ops/backup/entrypoint.sh /usr/local/bin/hadir-backup-entrypoint
-RUN chmod +x /usr/local/bin/hadir-backup-entrypoint
+COPY ops/backup/entrypoint.sh /usr/local/bin/maugood-backup-entrypoint
+RUN chmod +x /usr/local/bin/maugood-backup-entrypoint
 
-ENTRYPOINT ["/usr/local/bin/hadir-backup-entrypoint"]
+ENTRYPOINT ["/usr/local/bin/maugood-backup-entrypoint"]

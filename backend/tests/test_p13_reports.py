@@ -10,9 +10,9 @@ from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 from sqlalchemy import delete, insert, select
 
-from hadir.cameras import rtsp as rtsp_io
-from hadir.config import get_settings
-from hadir.db import (
+from maugood.cameras import rtsp as rtsp_io
+from maugood.config import get_settings
+from maugood.db import (
     attendance_records,
     cameras,
     detection_events,
@@ -208,7 +208,7 @@ def test_manager_scoped_to_assigned_departments(
     """
 
     from sqlalchemy import insert as _insert
-    from hadir.db import roles, user_roles
+    from maugood.db import roles, user_roles
 
     with admin_engine.begin() as conn:
         # Drop the Admin role and grant Manager.
@@ -305,7 +305,7 @@ def test_report_rejects_excessive_range(
 def test_dev_only_endpoints_are_mounted_when_env_is_dev(
     client: TestClient, admin_user: dict, seeded_attendance
 ) -> None:
-    """Smoke that POST /api/_test/seed_detection works (HADIR_ENV=dev in this stack)."""
+    """Smoke that POST /api/_test/seed_detection works (MAUGOOD_ENV=dev in this stack)."""
 
     assert get_settings().env == "dev"
     _login(client, admin_user)

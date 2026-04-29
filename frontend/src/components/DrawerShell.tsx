@@ -3,7 +3,7 @@
 //
 // **Why this exists**
 //
-// Every drawer in Hadir was rendered inside the route's JSX tree:
+// Every drawer in Maugood was rendered inside the route's JSX tree:
 //
 //   <Layout>
 //     <Sidebar />
@@ -62,7 +62,7 @@ import {
 import { createPortal } from "react-dom";
 
 // Selector that captures every realistically focusable element in
-// the drawer body. Trimmed to the subset Hadir actually uses (no
+// the drawer body. Trimmed to the subset Maugood actually uses (no
 // contenteditable, no audio/video controls).
 const FOCUSABLE_SELECTOR = [
   "a[href]",

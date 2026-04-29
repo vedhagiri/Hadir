@@ -17,11 +17,11 @@ navigation:
 ```css
 /* frontend/src/shell/transitions.css */
 .page-transition {
-  animation: hadir-page-enter 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: maugood-page-enter 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
   will-change: opacity, transform;
 }
 
-@keyframes hadir-page-enter {
+@keyframes maugood-page-enter {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
@@ -32,7 +32,7 @@ Per the CSS Positioning spec, **any ancestor with a non-``none``
 becomes the containing block for ``position: fixed`` descendants**
 ([MDN: position](https://developer.mozilla.org/en-US/docs/Web/CSS/position#fixed)).
 
-Every drawer in Hadir is rendered inside the route subtree:
+Every drawer in Maugood is rendered inside the route subtree:
 
 ```
 <Layout>

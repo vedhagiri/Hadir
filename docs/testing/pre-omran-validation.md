@@ -17,7 +17,7 @@ section is a numbered checklist you tick off; problems land in
 
 1. Run the seed script first:
    ```sh
-   cd /opt/hadir   # or your local checkout
+   cd /opt/maugood   # or your local checkout
    $EDITOR backend/scripts/pre_omran_reset_seed.py    # set the 3 constants
    docker compose up -d
    docker compose exec backend python -m scripts.pre_omran_reset_seed
@@ -105,9 +105,9 @@ tenant; visually compare branding and behaviour.
       endpoint (or wait for the 15-minute scheduler):
       ```sh
       docker compose exec backend python -c \
-          "from hadir.attendance.scheduler import recompute_today; \
-           from hadir.tenants.scope import TenantScope; \
-           from hadir.db import tenant_context; \
+          "from maugood.attendance.scheduler import recompute_today; \
+           from maugood.tenants.scope import TenantScope; \
+           from maugood.db import tenant_context; \
            import sys; \
            with tenant_context('tenant_mts_demo'): \
                print(recompute_today(TenantScope(tenant_id=2, tenant_schema='tenant_mts_demo')))"
@@ -259,7 +259,7 @@ compare aggressively.
 - [ ] Verify the embedding generated:
       ```sh
       docker compose exec backend python -c \
-          "from hadir.db import get_engine, employee_photos, tenant_context; \
+          "from maugood.db import get_engine, employee_photos, tenant_context; \
            from sqlalchemy import select; \
            with tenant_context('<tenant_schema>'): \
                with get_engine().begin() as c: \
@@ -326,11 +326,11 @@ Run the §7 SQL queries from
       matrix + dual + 5 employee logins), 4 in real-corp.
 - [ ] Password hashes start with `$argon2id$v=19$…`. **Never
       plaintext.**
-- [ ] `hadir_app` has INSERT+SELECT only on `audit_log`:
+- [ ] `maugood_app` has INSERT+SELECT only on `audit_log`:
       ```sql
       SELECT grantee, privilege_type
       FROM information_schema.table_privileges
-      WHERE table_name = 'audit_log' AND grantee = 'hadir_app';
+      WHERE table_name = 'audit_log' AND grantee = 'maugood_app';
       ```
       Two rows, both INSERT or SELECT. No UPDATE, no DELETE.
 
@@ -427,7 +427,7 @@ LAN camera). Watch for "perceived latency" specifically.
       frames, **STOP** — that's a P0 cross-tenant leak.
 
 - [ ] **Audit volume sane.** Stream for one minute, then
-      `psql -U hadir -d hadir -c "SELECT action, count(*) FROM
+      `psql -U maugood -d maugood -c "SELECT action, count(*) FROM
       tenant_inaisys.audit_log WHERE action LIKE
       'live_capture%' AND created_at > now() - interval '5
       minutes' GROUP BY 1 ORDER BY 1"`. Expected: one
@@ -445,7 +445,7 @@ LAN camera). Watch for "perceived latency" specifically.
       snappy.
 
 - [ ] **(P28.5a) Quiet-camera CPU near zero.** Point the camera
-      at an empty wall for 30 s. `docker stats hadir-backend-1`
+      at an empty wall for 30 s. `docker stats maugood-backend-1`
       should show the backend container's CPU drop to near
       idle (<5%). Then walk past — CPU jumps. Motion-skip
       working as intended.
@@ -554,7 +554,7 @@ Open <http://localhost:5173/calendar> as the demo Admin.
       button opens the existing P14 NewRequestDrawer
       pre-filled with `type=exception` + the day's date.
 - [ ] **Export.** Drawer's "Export" link downloads
-      `hadir-attendance-{code}-{date}.xlsx`. Page-level
+      `maugood-attendance-{code}-{date}.xlsx`. Page-level
       "Export month" downloads either the per-person
       month or the company aggregate.
 - [ ] **Manager scope.** Log in as a Manager assigned to

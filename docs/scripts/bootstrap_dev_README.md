@@ -1,4 +1,4 @@
-# Bootstrap a fresh Hadir machine
+# Bootstrap a fresh Maugood machine
 
 The `backend/scripts/bootstrap_dev.py` script gets a clean machine to "I can log in" state in under 30 seconds.
 
@@ -6,7 +6,7 @@ The `backend/scripts/bootstrap_dev.py` script gets a clean machine to "I can log
 
 Use this when:
 - You've just cloned the repo on a new laptop
-- A teammate is setting up Hadir for the first time
+- A teammate is setting up Maugood for the first time
 - You wiped Postgres and need to start over but don't want the full demo dataset
 - You're setting up a new corporate tenant for a customer (edit the `TENANTS` list first)
 
@@ -63,7 +63,7 @@ Looks like this:
 
 ```
 ==============================================================================
-Hadir bootstrap credentials
+Maugood bootstrap credentials
 Generated: 2026-04-27T08:30:00+00:00
 ==============================================================================
 
@@ -124,7 +124,7 @@ If you change the `slug` of an existing tenant, the next run treats it as a new 
 
 **"could not connect to server"** — Postgres isn't up. `docker compose up postgres` first.
 
-**"HADIR_DATABASE_URL is not set"** — env var missing. Check `docker-compose.yml` and your `.env` file.
+**"MAUGOOD_DATABASE_URL is not set"** — env var missing. Check `docker-compose.yml` and your `.env` file.
 
 **"could not write /data/credentials.txt"** — the `/data` volume isn't mounted, or has wrong perms. Script falls back to `credentials.txt` in the repo root. Both locations are gitignored.
 
@@ -134,7 +134,7 @@ docker compose exec backend python -c "
 from argon2 import PasswordHasher
 from sqlalchemy import create_engine, text
 import os
-engine = create_engine(os.environ['HADIR_DATABASE_URL'])
+engine = create_engine(os.environ['MAUGOOD_DATABASE_URL'])
 with engine.connect() as conn:
     row = conn.execute(text(
         \"SELECT password_hash FROM tenant_mts_demo.users WHERE email='admin@mts-demo.example.com'\"

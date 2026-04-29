@@ -13,7 +13,7 @@ Mirrors the P13 Excel suite where it makes sense:
   cross-department filter returns 403.
 * Date range guards (start > end, span > max_days) match the Excel
   endpoint.
-* Filename encodes ``hadir-attendance-{tenant_slug}-{from}-to-{to}.pdf``.
+* Filename encodes ``maugood-attendance-{tenant_slug}-{from}-to-{to}.pdf``.
 * Branding swap — flipping ``tenant_branding.primary_color_key`` to
   ``navy`` changes the rendered hex from ``#117a7a`` (teal) to
   ``#1e3a8a`` (navy).
@@ -30,7 +30,7 @@ from sqlalchemy import delete, insert, select, update
 def _is_pdf(pdf_bytes: bytes) -> bool:
     return pdf_bytes.startswith(b"%PDF-") and b"%%EOF" in pdf_bytes[-32:]
 
-from hadir.db import (
+from maugood.db import (
     attendance_records,
     cameras,
     detection_events,
@@ -68,7 +68,7 @@ def test_pdf_round_trip_contains_seeded_employee_section(
     assert resp.status_code == 200, resp.text
     assert resp.headers["content-type"].startswith("application/pdf")
     cd = resp.headers["content-disposition"]
-    assert "hadir-attendance-main-" in cd
+    assert "maugood-attendance-main-" in cd
     assert cd.endswith('.pdf"')
 
     body = resp.content
@@ -91,7 +91,7 @@ def test_pdf_filename_encodes_tenant_slug_and_dates(
     assert resp.status_code == 200
     cd = resp.headers["content-disposition"]
     expected = (
-        f'attachment; filename="hadir-attendance-main-'
+        f'attachment; filename="maugood-attendance-main-'
         f'{start.isoformat()}-to-{today.isoformat()}.pdf"'
     )
     assert cd == expected, cd
@@ -148,8 +148,8 @@ def test_pdf_manager_cross_department_403(
     """Manager assigned to ENG asking for OPS rows → 403."""
 
     import secrets  # noqa: PLC0415
-    from hadir.auth.passwords import hash_password  # noqa: PLC0415
-    from hadir.db import (  # noqa: PLC0415
+    from maugood.auth.passwords import hash_password  # noqa: PLC0415
+    from maugood.db import (  # noqa: PLC0415
         audit_log,
         manager_assignments,
         roles,
@@ -159,7 +159,7 @@ def test_pdf_manager_cross_department_403(
     )
 
     suffix = secrets.token_hex(3)
-    email = f"mgr-pdf-{suffix}@p17.hadir"
+    email = f"mgr-pdf-{suffix}@p17.maugood"
     password = "p17-pw-" + secrets.token_hex(6)
 
     with admin_engine.begin() as conn:

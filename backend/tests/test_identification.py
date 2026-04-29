@@ -13,15 +13,15 @@ import numpy as np
 import pytest
 from sqlalchemy import delete, insert, select
 
-from hadir.config import get_settings
-from hadir.db import employee_photos, employees
-from hadir.identification.embeddings import (
+from maugood.config import get_settings
+from maugood.db import employee_photos, employees
+from maugood.identification.embeddings import (
     EMBEDDING_DIM,
     decrypt_embedding,
     encrypt_embedding,
 )
-from hadir.identification.matcher import matcher_cache
-from hadir.tenants.scope import TenantScope
+from maugood.identification.matcher import matcher_cache
+from maugood.tenants.scope import TenantScope
 
 TENANT = TenantScope(tenant_id=1)
 

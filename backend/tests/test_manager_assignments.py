@@ -29,8 +29,8 @@ from sqlalchemy import delete, insert, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
-from hadir.auth.passwords import hash_password
-from hadir.db import (
+from maugood.auth.passwords import hash_password
+from maugood.db import (
     attendance_records,
     audit_log,
     departments,
@@ -54,7 +54,7 @@ def manager_user(admin_engine: Engine) -> Iterator[dict]:
     """A Manager-role user assigned to the Engineering department."""
 
     eng_id = department_id_by_code(admin_engine, "ENG")
-    email = f"mgr-{secrets.token_hex(4)}@test.hadir"
+    email = f"mgr-{secrets.token_hex(4)}@test.maugood"
     password = "test-mgr-pw-" + secrets.token_hex(6)
     pwh = hash_password(password)
     with admin_engine.begin() as conn:
@@ -125,7 +125,7 @@ def two_employees(admin_engine: Engine) -> Iterator[dict]:
                     tenant_id=TENANT_ID,
                     employee_code=f"MGREE{suffix}",
                     full_name="Eng Worker",
-                    email=f"eng-{suffix.lower()}@test.hadir",
+                    email=f"eng-{suffix.lower()}@test.maugood",
                     department_id=eng_id,
                     status="active",
                 )
@@ -139,7 +139,7 @@ def two_employees(admin_engine: Engine) -> Iterator[dict]:
                     tenant_id=TENANT_ID,
                     employee_code=f"MGROO{suffix}",
                     full_name="Ops Worker",
-                    email=f"ops-{suffix.lower()}@test.hadir",
+                    email=f"ops-{suffix.lower()}@test.maugood",
                     department_id=ops_id,
                     status="active",
                 )
@@ -267,7 +267,7 @@ def test_set_primary_clears_prior_primary(
                 insert(users)
                 .values(
                     tenant_id=TENANT_ID,
-                    email=f"mgr2-{secrets.token_hex(4)}@test.hadir",
+                    email=f"mgr2-{secrets.token_hex(4)}@test.maugood",
                     password_hash=hash_password("x"),
                     full_name="Other Manager",
                     is_active=True,
@@ -326,7 +326,7 @@ def test_partial_unique_index_rejects_two_primaries_at_db_level(
     """A direct INSERT that bypasses the API still hits the index."""
 
     employee_id = two_employees["eng_employee_id"]
-    other_email = f"mgr3-{secrets.token_hex(4)}@test.hadir"
+    other_email = f"mgr3-{secrets.token_hex(4)}@test.maugood"
     with admin_engine.begin() as conn:
         # Insert primary #1 via the manager_user fixture's user.
         conn.execute(
@@ -480,14 +480,14 @@ def test_manager_attendance_includes_directly_assigned_out_of_dept(
 
     # Seed an attendance row for today for the Ops employee so the
     # GET /api/attendance has something to return.
-    from hadir.attendance.repository import local_tz  # noqa: PLC0415
+    from maugood.attendance.repository import local_tz  # noqa: PLC0415
 
     today = datetime.now(timezone.utc).astimezone(local_tz()).date()
     with admin_engine.begin() as conn:
         # Pull any policy id for the pilot tenant. P9 may have left
         # additional rows behind during a parallel test, so don't
         # assume scalar_one().
-        from hadir.db import shift_policies  # noqa: PLC0415
+        from maugood.db import shift_policies  # noqa: PLC0415
 
         policy_id = conn.execute(
             select(shift_policies.c.id)

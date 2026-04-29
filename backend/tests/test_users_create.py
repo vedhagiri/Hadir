@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
 from sqlalchemy.engine import Engine
 
-from hadir.db import audit_log, user_roles, users
+from maugood.db import audit_log, user_roles, users
 
 
 @pytest.fixture

@@ -1,4 +1,4 @@
-# Hadir — observability stack
+# Maugood — observability stack
 
 Production deployments ship a Prometheus + Grafana +
 Alertmanager trio alongside the FastAPI app. Prometheus
@@ -7,9 +7,9 @@ the dashboards Omran IT watches; Alertmanager fans alerts
 out to a webhook + an Admin email.
 
 The stack is internal-only — `/metrics` is **never** proxied
-by nginx (`ops/nginx/hadir.conf.template` doesn't list it),
+by nginx (`ops/nginx/maugood.conf.template` doesn't list it),
 and Prometheus + Alertmanager bind only on the private
-``hadir-internal`` docker network. Grafana is the only
+``maugood-internal`` docker network. Grafana is the only
 component exposed off-host, gated by an operator-set admin
 password.
 
@@ -23,17 +23,17 @@ Out of the box (via ``prometheus-fastapi-instrumentator``):
 | ``http_requests_total``                        | counter   |
 | Process / GC / fd / mem standard collectors    | various   |
 
-P26 custom metrics (``backend/hadir/metrics.py``):
+P26 custom metrics (``backend/maugood/metrics.py``):
 
 | Metric                                       | Type    | Labels                       | What it counts                                                          |
 | -------------------------------------------- | ------- | ---------------------------- | ----------------------------------------------------------------------- |
-| ``hadir_capture_frames_total``               | counter | tenant, camera               | Frames pulled from a camera and offered to the analyzer.                |
-| ``hadir_detection_events_total``             | counter | tenant, identified           | One per detection-event row written; ``identified`` is "true"/"false".  |
-| ``hadir_camera_reachable``                   | gauge   | tenant, camera               | 1 when the latest health snapshot was reachable, 0 otherwise.            |
-| ``hadir_attendance_records_computed_total``  | counter | tenant                       | Increments by the number of attendance rows the recompute job upserts. |
-| ``hadir_scheduler_jobs_failed_total``        | counter | tenant, job                  | Bumps on every APScheduler ``EVENT_JOB_ERROR``.                         |
-| ``hadir_email_send_total``                   | counter | tenant, provider, status     | One per email send attempt; ``status`` ∈ {sent, failed, skipped_*}.    |
-| ``hadir_active_sessions``                    | gauge   | tenant                       | Non-expired ``user_sessions`` rows; refreshed on the 30 s worker tick.  |
+| ``maugood_capture_frames_total``               | counter | tenant, camera               | Frames pulled from a camera and offered to the analyzer.                |
+| ``maugood_detection_events_total``             | counter | tenant, identified           | One per detection-event row written; ``identified`` is "true"/"false".  |
+| ``maugood_camera_reachable``                   | gauge   | tenant, camera               | 1 when the latest health snapshot was reachable, 0 otherwise.            |
+| ``maugood_attendance_records_computed_total``  | counter | tenant                       | Increments by the number of attendance rows the recompute job upserts. |
+| ``maugood_scheduler_jobs_failed_total``        | counter | tenant, job                  | Bumps on every APScheduler ``EVENT_JOB_ERROR``.                         |
+| ``maugood_email_send_total``                   | counter | tenant, provider, status     | One per email send attempt; ``status`` ∈ {sent, failed, skipped_*}.    |
+| ``maugood_active_sessions``                    | gauge   | tenant                       | Non-expired ``user_sessions`` rows; refreshed on the 30 s worker tick.  |
 
 **PDPL red line**: every label value is opaque (numeric ids,
 provider names, status enums). No employee names, no email
@@ -47,11 +47,11 @@ metrics, attach the numeric ``employee_id`` — never the name.
 * **From the host in dev**: `http://localhost:8000/metrics`
   because the dev compose maps backend's :8000.
 * **From the public internet in production**: NEVER.
-  ``ops/nginx/hadir.conf.template`` proxies ``/api/`` only.
+  ``ops/nginx/maugood.conf.template`` proxies ``/api/`` only.
   ``/metrics`` is on the same FastAPI app but lives outside
   the proxy's location block so it 404s for any request that
   comes in over nginx. Prometheus scrapes the backend
-  directly on ``hadir-internal``.
+  directly on ``maugood-internal``.
 
 ## Compose layout
 
@@ -61,7 +61,7 @@ Two ways to run the observability stack:
   `prometheus`, `alertmanager`, and `grafana` services
   alongside the rest of the stack. Prometheus + Alertmanager
   are not exposed off-host; Grafana is on
-  ``${HADIR_GRAFANA_PORT:-3000}``. TSDB volume
+  ``${MAUGOOD_GRAFANA_PORT:-3000}``. TSDB volume
   ``prometheus_data`` retains 30 days by default
   (configurable via Prometheus' ``--storage.tsdb.retention.time``).
 * **Dev** — `docker-compose.observability.yml` is an overlay
@@ -84,9 +84,9 @@ boot:
 
 * `deploy/grafana/provisioning/datasources/prometheus.yml`
   declares the Prometheus datasource as the default.
-* `deploy/grafana/provisioning/dashboards/hadir.yml` declares
-  the Hadir dashboard provider.
-* `deploy/grafana/dashboards/hadir.json` is the dashboard
+* `deploy/grafana/provisioning/dashboards/maugood.yml` declares
+  the Maugood dashboard provider.
+* `deploy/grafana/dashboards/maugood.json` is the dashboard
   source-of-truth — operators editing in the UI should export
   back into this file rather than persisting the change in
   Grafana's DB. ``allowUiUpdates: false`` in the provider
@@ -94,10 +94,10 @@ boot:
 
 ## Dashboards
 
-`Hadir → Hadir — Operations` (uid `hadir-ops`) ships seven
+`Maugood → Maugood — Operations` (uid `maugood-ops`) ships seven
 panels:
 
-1. **Capture rate per camera** — ``rate(hadir_capture_frames_total[1m])``.
+1. **Capture rate per camera** — ``rate(maugood_capture_frames_total[1m])``.
    Walking past a camera ticks this at ~4 Hz; a quiet camera
    sits near 0.
 2. **Identification rate (% events with employee_id)** —
@@ -106,18 +106,18 @@ panels:
    photos; drops are a hint that someone's photo set has
    gone stale.
 3. **Attendance records computed (per hour)** — bar chart of
-   ``increase(hadir_attendance_records_computed_total[1h])``.
+   ``increase(maugood_attendance_records_computed_total[1h])``.
    The recompute scheduler fires every 15 minutes; expect 4
    ticks per hour times the active-employee headcount.
 4. **Camera reachability matrix** — colour-coded stat panel
-   reading the live ``hadir_camera_reachable`` gauge.
+   reading the live ``maugood_camera_reachable`` gauge.
 5. **HTTP latency p50/p95/p99** — quantiles over the
    instrumentator histogram. p99 above ~250 ms on the report
    endpoints is normal (PDF generation); anywhere else is a
    smell.
 6. **Email delivery success rate** — sent / (sent + failed)
    over a 15-minute window per tenant.
-7. **Active sessions** — ``hadir_active_sessions`` per
+7. **Active sessions** — ``maugood_active_sessions`` per
    tenant.
 
 ## Alerts
@@ -126,18 +126,18 @@ Four rules live in `deploy/prometheus/alerts.yml`:
 
 | Alert                            | Severity | When                                                  |
 | -------------------------------- | -------- | ----------------------------------------------------- |
-| ``HadirCameraUnreachable``       | warning  | ``hadir_camera_reachable == 0`` for 5 minutes.       |
-| ``HadirCaptureRateLow``          | warning  | Capture rate < 0.1 frames/sec while reachable=1, 10m. |
-| ``HadirSchedulerJobFailing``     | critical | ≥ 3 failures of the same job inside 15 minutes.       |
-| ``HadirEmailFailureRateHigh``    | warning  | > 10% of sends failed in the last hour.              |
+| ``MaugoodCameraUnreachable``       | warning  | ``maugood_camera_reachable == 0`` for 5 minutes.       |
+| ``MaugoodCaptureRateLow``          | warning  | Capture rate < 0.1 frames/sec while reachable=1, 10m. |
+| ``MaugoodSchedulerJobFailing``     | critical | ≥ 3 failures of the same job inside 15 minutes.       |
+| ``MaugoodEmailFailureRateHigh``    | warning  | > 10% of sends failed in the last hour.              |
 
 Routing + delivery is in `deploy/alertmanager/alertmanager.yml`.
 The receiver fans every alert to:
 
-* a webhook at ``HADIR_ALERTMANAGER_WEBHOOK_URL`` (Slack,
+* a webhook at ``MAUGOOD_ALERTMANAGER_WEBHOOK_URL`` (Slack,
   PagerDuty, Microsoft Teams — operator's choice);
-* the Admin email at ``HADIR_ALERTMANAGER_ADMIN_EMAIL`` via
-  the SMTP relay at ``HADIR_ALERTMANAGER_SMTP_HOST``.
+* the Admin email at ``MAUGOOD_ALERTMANAGER_ADMIN_EMAIL`` via
+  the SMTP relay at ``MAUGOOD_ALERTMANAGER_SMTP_HOST``.
 
 Either path can be left unset; the unset path is a no-op.
 Production deploys with ONLY the email path see the same
@@ -157,9 +157,9 @@ curl -s http://localhost:9090/api/v1/alerts \
 
 # PromQL spot-check from the CLI.
 curl -s -G http://localhost:9090/api/v1/query \
-  --data-urlencode 'query=sum by (tenant) (rate(hadir_capture_frames_total[5m]))'
+  --data-urlencode 'query=sum by (tenant) (rate(maugood_capture_frames_total[5m]))'
 
-# Force-fire all custom metrics in dev (HADIR_ENV=dev only).
+# Force-fire all custom metrics in dev (MAUGOOD_ENV=dev only).
 curl -s -b $C -X POST http://localhost:8000/api/_test/tick_metrics \
   -H 'Content-Type: application/json' -d '{}'
 ```

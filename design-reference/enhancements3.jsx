@@ -1,4 +1,4 @@
-/* Hadir enhancements v3 — reports inline preview, employee CRUD, API docs, system monitoring */
+/* Maugood enhancements v3 — reports inline preview, employee CRUD, API docs, system monitoring */
 
 /* ---------------- Reports inline preview ---------------- */
 
@@ -461,7 +461,7 @@ function ApiDocsPage() {
       <div className="page-header">
         <div>
           <h1 className="page-title">API reference</h1>
-          <p className="page-sub">REST API for integrating Hadir with payroll, HRIS, and other systems · v1 · base URL <code className="mono">https://api.hadir.om</code></p>
+          <p className="page-sub">REST API for integrating Maugood with payroll, HRIS, and other systems · v1 · base URL <code className="mono">https://api.maugood.om</code></p>
         </div>
         <div className="page-actions">
           <button className="btn"><Icon name="download" size={12} />OpenAPI 3.0</button>
@@ -504,13 +504,13 @@ function OverviewDoc({ section }) {
     return (
       <div className="docs-content">
         <h2 className="docs-h1">Overview</h2>
-        <p className="docs-p">The Hadir API is organized around REST. It accepts JSON-encoded request bodies, returns JSON-encoded responses, and uses standard HTTP response codes and verbs.</p>
+        <p className="docs-p">The Maugood API is organized around REST. It accepts JSON-encoded request bodies, returns JSON-encoded responses, and uses standard HTTP response codes and verbs.</p>
         <div className="docs-callout">
           <div className="dc-label">Base URL</div>
-          <code className="mono docs-code-inline">https://api.hadir.om/v1</code>
+          <code className="mono docs-code-inline">https://api.maugood.om/v1</code>
         </div>
         <h3 className="docs-h2">Quick start</h3>
-        <CodeBlock lang="bash" code={`curl https://api.hadir.om/v1/attendance \\
+        <CodeBlock lang="bash" code={`curl https://api.maugood.om/v1/attendance \\
   -H "Authorization: Bearer HDR_sk_live_a3f9...de21" \\
   -H "Content-Type: application/json" \\
   -G --data-urlencode "from=2026-04-01" \\
@@ -529,9 +529,9 @@ function OverviewDoc({ section }) {
     return (
       <div className="docs-content">
         <h2 className="docs-h1">Authentication</h2>
-        <p className="docs-p">Hadir uses API keys tied to a workspace and a role. Send your key in the <code className="docs-code-inline">Authorization</code> header as a Bearer token.</p>
+        <p className="docs-p">Maugood uses API keys tied to a workspace and a role. Send your key in the <code className="docs-code-inline">Authorization</code> header as a Bearer token.</p>
         <CodeBlock lang="http" code={`GET /v1/attendance HTTP/1.1
-Host: api.hadir.om
+Host: api.maugood.om
 Authorization: Bearer HDR_sk_live_a3f9...de21`} />
         <h3 className="docs-h2">Key types</h3>
         <table className="table table-compact" style={{ marginTop: 12 }}>
@@ -560,7 +560,7 @@ X-RateLimit-Reset: 1745367240`} />
   return (
     <div className="docs-content">
       <h2 className="docs-h1">Webhooks</h2>
-      <p className="docs-p">Subscribe to events and receive POST callbacks. Each delivery is signed with <code className="docs-code-inline">X-Hadir-Signature</code> using HMAC-SHA256.</p>
+      <p className="docs-p">Subscribe to events and receive POST callbacks. Each delivery is signed with <code className="docs-code-inline">X-Maugood-Signature</code> using HMAC-SHA256.</p>
       <h3 className="docs-h2">Event types</h3>
       <ul className="docs-list">
         <li><code className="docs-code-inline">attendance.recorded</code> — a new attendance entry was committed</li>
@@ -581,7 +581,7 @@ function EndpointDoc({ ep }) {
         { n: 'from', t: 'date', req: false, d: 'Start date, inclusive · default: 30d ago' },
         { n: 'to', t: 'date', req: false, d: 'End date, inclusive · default: today' },
       ],
-      sample: `curl https://api.hadir.om/v1/attendance/OM0045 \\
+      sample: `curl https://api.maugood.om/v1/attendance/OM0045 \\
   -H "Authorization: Bearer HDR_sk_live_..." \\
   -G --data-urlencode "from=2026-04-01"`,
       response: `{

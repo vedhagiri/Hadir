@@ -1,6 +1,6 @@
 // Reduced-motion gate.
 //
-// Hadir's policy (compromise tier — short spatial cues stay):
+// Maugood's policy (compromise tier — short spatial cues stay):
 // * Page transitions + list staggers — DISABLED when this returns true.
 // * Hover effects, button feedback, sidebar active-indicator slide —
 //   ALWAYS on (short, not vestibular triggers).

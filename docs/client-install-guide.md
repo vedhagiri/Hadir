@@ -162,18 +162,18 @@ Python — no `pip install` needed:
 
 ```sh
 cd /opt/maugood
-python3 -c "import secrets; print(secrets.token_urlsafe(48))"                                                # HADIR_SESSION_SECRET
-python3 -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"        # HADIR_FERNET_KEY
-python3 -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"        # HADIR_AUTH_FERNET_KEY
-python3 -c "import secrets; print(secrets.token_urlsafe(48))"                                                # HADIR_REPORT_SIGNED_URL_SECRET
-python3 -c "import secrets; print(secrets.token_urlsafe(24))"                                                # HADIR_APP_DB_PASSWORD
-python3 -c "import secrets; print(secrets.token_urlsafe(24))"                                                # HADIR_ADMIN_DB_PASSWORD
-python3 -c "import secrets; print(secrets.token_urlsafe(20))"                                                # HADIR_GRAFANA_ADMIN_PASSWORD
+python3 -c "import secrets; print(secrets.token_urlsafe(48))"                                                # MAUGOOD_SESSION_SECRET
+python3 -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"        # MAUGOOD_FERNET_KEY
+python3 -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"        # MAUGOOD_AUTH_FERNET_KEY
+python3 -c "import secrets; print(secrets.token_urlsafe(48))"                                                # MAUGOOD_REPORT_SIGNED_URL_SECRET
+python3 -c "import secrets; print(secrets.token_urlsafe(24))"                                                # MAUGOOD_APP_DB_PASSWORD
+python3 -c "import secrets; print(secrets.token_urlsafe(24))"                                                # MAUGOOD_ADMIN_DB_PASSWORD
+python3 -c "import secrets; print(secrets.token_urlsafe(20))"                                                # MAUGOOD_GRAFANA_ADMIN_PASSWORD
 ```
 
 > **Save every value into the customer's password manager
 > immediately**. They are not recoverable. Rotating
-> `HADIR_FERNET_KEY` invalidates every encrypted RTSP credential
+> `MAUGOOD_FERNET_KEY` invalidates every encrypted RTSP credential
 > + face crop + attachment in the database — a full re-enrolment
 > is required.
 
@@ -192,39 +192,39 @@ identifiers. **Required minimum**:
 
 ```bash
 # ---- Secrets (from §5) ----
-HADIR_SESSION_SECRET=<paste>
-HADIR_FERNET_KEY=<paste>
-HADIR_AUTH_FERNET_KEY=<paste>
-HADIR_REPORT_SIGNED_URL_SECRET=<paste>
+MAUGOOD_SESSION_SECRET=<paste>
+MAUGOOD_FERNET_KEY=<paste>
+MAUGOOD_AUTH_FERNET_KEY=<paste>
+MAUGOOD_REPORT_SIGNED_URL_SECRET=<paste>
 
 # ---- Database role passwords ----
-HADIR_APP_DB_PASSWORD=<paste>
-HADIR_ADMIN_DB_PASSWORD=<paste>
-HADIR_DATABASE_URL=postgresql+psycopg://hadir_app:<HADIR_APP_DB_PASSWORD>@postgres:5432/hadir
-HADIR_ADMIN_DATABASE_URL=postgresql+psycopg://hadir:<HADIR_ADMIN_DB_PASSWORD>@postgres:5432/hadir
+MAUGOOD_APP_DB_PASSWORD=<paste>
+MAUGOOD_ADMIN_DB_PASSWORD=<paste>
+MAUGOOD_DATABASE_URL=postgresql+psycopg://maugood_app:<MAUGOOD_APP_DB_PASSWORD>@postgres:5432/maugood
+MAUGOOD_ADMIN_DATABASE_URL=postgresql+psycopg://maugood:<MAUGOOD_ADMIN_DB_PASSWORD>@postgres:5432/maugood
 
 # ---- Production hardening ----
-HADIR_ENV=production
-HADIR_TENANT_MODE=multi
-HADIR_BEHIND_PROXY=true
-HADIR_SESSION_COOKIE_SECURE=true
-HADIR_FORWARDED_ALLOW_IPS=*
-HADIR_HSTS_MAX_AGE_SECONDS=31536000
+MAUGOOD_ENV=production
+MAUGOOD_TENANT_MODE=multi
+MAUGOOD_BEHIND_PROXY=true
+MAUGOOD_SESSION_COOKIE_SECURE=true
+MAUGOOD_FORWARDED_ALLOW_IPS=*
+MAUGOOD_HSTS_MAX_AGE_SECONDS=31536000
 
 # ---- Public-facing config (replace with customer hostname) ----
-HADIR_PUBLIC_HOSTNAME=attendance.acme.local
-HADIR_ALLOWED_ORIGINS=https://attendance.acme.local
-HADIR_OIDC_REDIRECT_BASE_URL=https://attendance.acme.local
+MAUGOOD_PUBLIC_HOSTNAME=attendance.acme.local
+MAUGOOD_ALLOWED_ORIGINS=https://attendance.acme.local
+MAUGOOD_OIDC_REDIRECT_BASE_URL=https://attendance.acme.local
 
 # ---- Local timezone (camera timestamps + reports use this) ----
-HADIR_LOCAL_TIMEZONE=Asia/Muscat
+MAUGOOD_LOCAL_TIMEZONE=Asia/Muscat
 
 # ---- Observability (optional) ----
-HADIR_GRAFANA_ADMIN_PASSWORD=<paste from §5>
-HADIR_GRAFANA_ROOT_URL=http://localhost:3000
+MAUGOOD_GRAFANA_ADMIN_PASSWORD=<paste from §5>
+MAUGOOD_GRAFANA_ROOT_URL=http://localhost:3000
 ```
 
-Substitute `<HADIR_APP_DB_PASSWORD>` and `<HADIR_ADMIN_DB_PASSWORD>`
+Substitute `<MAUGOOD_APP_DB_PASSWORD>` and `<MAUGOOD_ADMIN_DB_PASSWORD>`
 inline in the two `*_DATABASE_URL` lines — the value, not the
 literal placeholder.
 
@@ -344,13 +344,13 @@ If you see `{"status":"ok"}`, the stack is up.
 
 ## 10. Provision the first tenant + Admin
 
-`HADIR_TENANT_MODE=multi` means the app is ready to host
+`MAUGOOD_TENANT_MODE=multi` means the app is ready to host
 multiple customers, but ships with zero. Create the first one:
 
 ```sh
 cd /opt/maugood
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec \
-    -e HADIR_PROVISION_PASSWORD='ChooseAStrongPassword#1' backend \
+    -e MAUGOOD_PROVISION_PASSWORD='ChooseAStrongPassword#1' backend \
     python -m scripts.provision_tenant \
         --slug acme \
         --name 'Acme Corp' \
@@ -363,7 +363,7 @@ Replace:
 * `--name` with the display name shown in PDF letterheads + emails.
 * `--admin-email` with the customer's first Admin user's email.
 * `--admin-full-name` with that user's full name.
-* `HADIR_PROVISION_PASSWORD` with a strong password — minimum 12
+* `MAUGOOD_PROVISION_PASSWORD` with a strong password — minimum 12
   characters, mix of cases + digits + a special character.
 
 The script:
@@ -461,7 +461,7 @@ schema + tarballed face crops + a SHA-256 manifest). For the
 disaster-recovery procedure see
 [`disaster-recovery.md`](disaster-recovery.md).
 
-> **Off-site copy**: configure `HADIR_BACKUP_S3_URI` in `.env`
+> **Off-site copy**: configure `MAUGOOD_BACKUP_S3_URI` in `.env`
 > and rebuild the `backup` image with `INCLUDE_AWS_CLI=1` to
 > push every backup to an S3-compatible store. Default is
 > on-disk only — the customer must arrange external backup
@@ -481,7 +481,7 @@ first** (above) — schema migrations are forward-only.
 
 ### Provision a second tenant on the same machine
 
-`HADIR_TENANT_MODE=multi` already supports it. Re-run §10 with
+`MAUGOOD_TENANT_MODE=multi` already supports it. Re-run §10 with
 a different slug + name + Admin email. Each tenant gets an
 isolated Postgres schema; data is invisible across tenants.
 
@@ -520,9 +520,9 @@ backlog in the capture worker logs.
 
 ### `docker compose up` fails with `must be set in production`
 
-`HADIR_ENV=production` means every secret and hostname must be
+`MAUGOOD_ENV=production` means every secret and hostname must be
 set in `.env`. The error names the missing variable. Re-check
-§6 — the most common omission is `HADIR_GRAFANA_ADMIN_PASSWORD`
+§6 — the most common omission is `MAUGOOD_GRAFANA_ADMIN_PASSWORD`
 or one of the `*_DATABASE_URL` lines (where the password
 substitution wasn't done).
 
@@ -537,11 +537,11 @@ Read the bottom of the log. Common causes:
 
 * **Migration failure** — usually a hand-edit broke the schema.
   Restore from the most recent backup (§12).
-* **Bad `HADIR_FERNET_KEY`** — the key must be exactly 32 bytes
+* **Bad `MAUGOOD_FERNET_KEY`** — the key must be exactly 32 bytes
   base64-URL-safe (44 characters ending in `=`). Re-generate
   per §5.
-* **Database password mismatch** — `HADIR_APP_DB_PASSWORD` and
-  the password embedded in `HADIR_DATABASE_URL` must match
+* **Database password mismatch** — `MAUGOOD_APP_DB_PASSWORD` and
+  the password embedded in `MAUGOOD_DATABASE_URL` must match
   byte-for-byte.
 
 ### nginx exits with `SSL_CTX_use_PrivateKey_file`

@@ -18,8 +18,8 @@ export type Density = "compact" | "comfortable";
 export const THEMES: readonly Theme[] = ["system", "light", "dark"] as const;
 export const DENSITIES: readonly Density[] = ["compact", "comfortable"] as const;
 
-const THEME_KEY = "hadir-theme";
-const DENSITY_KEY = "hadir-density";
+const THEME_KEY = "maugood-theme";
+const DENSITY_KEY = "maugood-density";
 const DEFAULT_THEME: Theme = "system";
 const DEFAULT_DENSITY: Density = "comfortable";
 

@@ -1,4 +1,4 @@
-# Hadir alertmanager config (v1.0 P26).
+# Maugood alertmanager config (v1.0 P26).
 #
 # Two delivery paths, both operator-configurable:
 #
@@ -11,10 +11,10 @@
 # Both endpoints come from environment variables so the same
 # YAML works across environments without templating:
 #
-#   HADIR_ALERTMANAGER_WEBHOOK_URL   (e.g. https://hooks.slack.com/...)
-#   HADIR_ALERTMANAGER_SMTP_HOST     SMTP relay
-#   HADIR_ALERTMANAGER_SMTP_FROM     "Hadir Alerts <alerts@example.com>"
-#   HADIR_ALERTMANAGER_ADMIN_EMAIL   Admin inbox (comma-separated)
+#   MAUGOOD_ALERTMANAGER_WEBHOOK_URL   (e.g. https://hooks.slack.com/...)
+#   MAUGOOD_ALERTMANAGER_SMTP_HOST     SMTP relay
+#   MAUGOOD_ALERTMANAGER_SMTP_FROM     "Maugood Alerts <alerts@example.com>"
+#   MAUGOOD_ALERTMANAGER_ADMIN_EMAIL   Admin inbox (comma-separated)
 #
 # Keep the routing tree shallow for the pilot: warnings + criticals
 # all fan out the same way. Per-tenant fan-out via Alertmanager
@@ -23,12 +23,12 @@
 
 global:
   resolve_timeout: 5m
-  smtp_smarthost: "${HADIR_ALERTMANAGER_SMTP_HOST:-}"
-  smtp_from: "${HADIR_ALERTMANAGER_SMTP_FROM:-alerts@hadir.local}"
+  smtp_smarthost: "${MAUGOOD_ALERTMANAGER_SMTP_HOST:-}"
+  smtp_from: "${MAUGOOD_ALERTMANAGER_SMTP_FROM:-alerts@maugood.local}"
   smtp_require_tls: true
 
 route:
-  receiver: hadir-default
+  receiver: maugood-default
   group_by: ["alertname", "tenant"]
   group_wait: 30s
   group_interval: 5m
@@ -36,17 +36,17 @@ route:
   routes:
     - matchers:
         - severity = critical
-      receiver: hadir-default
+      receiver: maugood-default
       group_wait: 0s
       repeat_interval: 1h
 
 receivers:
-  - name: hadir-default
+  - name: maugood-default
     webhook_configs:
-      - url: "${HADIR_ALERTMANAGER_WEBHOOK_URL:-http://localhost:5001/_devnull}"
+      - url: "${MAUGOOD_ALERTMANAGER_WEBHOOK_URL:-http://localhost:5001/_devnull}"
         send_resolved: true
     email_configs:
-      - to: "${HADIR_ALERTMANAGER_ADMIN_EMAIL:-}"
+      - to: "${MAUGOOD_ALERTMANAGER_ADMIN_EMAIL:-}"
         send_resolved: true
         # Fall back to "skip" when no SMTP is configured —
         # Alertmanager refuses to send mail when smtp_smarthost

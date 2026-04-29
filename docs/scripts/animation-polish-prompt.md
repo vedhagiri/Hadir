@@ -2,7 +2,7 @@
 
 **Status:** Pre-Omran polish phase. Optional but high-impact.
 
-**Why now:** Hadir works correctly after P28.5/.6/.7/.8. What's missing is the *feel* — the small-scale animations that separate "functional SaaS" from "premium SaaS." This phase doesn't add features; it adds craft.
+**Why now:** Maugood works correctly after P28.5/.6/.7/.8. What's missing is the *feel* — the small-scale animations that separate "functional SaaS" from "premium SaaS." This phase doesn't add features; it adds craft.
 
 **Decisions locked:**
 - Sidebar: subtle hover + active-indicator slide between items. **No entrance animation** on app load.
@@ -25,7 +25,7 @@
 
 ## The prompt to paste into Claude Code
 
-> You are working on Hadir polish phase. The product works correctly. This phase adds Linear/Vercel-level animation polish. Do not change any behavior — only add motion.
+> You are working on Maugood polish phase. The product works correctly. This phase adds Linear/Vercel-level animation polish. Do not change any behavior — only add motion.
 >
 > Read these before writing anything:
 >
@@ -86,7 +86,7 @@
 > /**
 >  * Returns true if the user has prefers-reduced-motion set.
 >  *
->  * Hadir's animation policy (compromise tier):
+>  * Maugood's animation policy (compromise tier):
 >  * - Page transitions and list staggers: DISABLED when this returns true
 >  * - Hover effects, button feedback, active-indicator slide: ALWAYS on
 >  *   (short and don't trigger vestibular issues)
@@ -484,7 +484,7 @@
 >
 > #### Page transitions
 > 3. Click between Dashboard → Employees → Calendar in sidebar. Each transition fades the outgoing page out and fades the new page in with a slight upward slide. Total time per transition feels under 300ms.
-> 4. Open System Preferences → Accessibility → enable "Reduce motion" (macOS) or equivalent on your OS. Reload Hadir. Click between pages. **Page transitions no longer animate** — pages snap instantly. But sidebar hover effects still work.
+> 4. Open System Preferences → Accessibility → enable "Reduce motion" (macOS) or equivalent on your OS. Reload Maugood. Click between pages. **Page transitions no longer animate** — pages snap instantly. But sidebar hover effects still work.
 > 5. Disable reduce-motion preference. Reload. Animations resume.
 >
 > #### Sidebar active indicator
@@ -545,7 +545,7 @@
 
 ## What this is NOT doing
 
-- Not animating between unrelated routes with shared elements (like Linear's issue → project transitions). That's view-transition-API territory and not worth the complexity for Hadir's scope.
+- Not animating between unrelated routes with shared elements (like Linear's issue → project transitions). That's view-transition-API territory and not worth the complexity for Maugood's scope.
 - Not adding sound effects or haptic feedback.
 - Not animating chart data transitions in reports — those need their own treatment, separately.
 - Not animating face crop thumbnails as they appear — they're already small and fade-in via image load.

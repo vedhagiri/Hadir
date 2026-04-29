@@ -1,4 +1,4 @@
-"""Deprovision a Hadir tenant: drop the schema, remove the registry row.
+"""Deprovision a Maugood tenant: drop the schema, remove the registry row.
 
 **This is destructive.** It runs ``DROP SCHEMA <slug> CASCADE`` and
 deletes the corresponding ``public.tenants`` row. Every employee record,
@@ -15,7 +15,7 @@ Required guardrails:
 * Refuses to run without ``--confirm`` *and* a typed re-confirmation
   on stdin matching the slug. ``--confirm`` alone isn't enough — an
   operator must read the slug back to the prompt.
-* Refuses to run in production (``HADIR_ENV=production``) unless
+* Refuses to run in production (``MAUGOOD_ENV=production``) unless
   ``--backup-taken`` is passed. The flag asserts that the operator has
   taken a fresh DB backup *in this same session* — there is no way for
   the script to verify that, so the assertion is a hard checkpoint
@@ -40,21 +40,21 @@ from typing import Optional
 
 from sqlalchemy import select, text
 
-from hadir.config import get_settings
-from hadir.db import (
+from maugood.config import get_settings
+from maugood.db import (
     make_admin_engine,
     reset_tenant_schema,
     set_tenant_schema,
     tenants,
 )
-from hadir.tenants.slug import SLUG_RE
+from maugood.tenants.slug import SLUG_RE
 
-logger = logging.getLogger("hadir.deprovision_tenant")
+logger = logging.getLogger("maugood.deprovision_tenant")
 
 
 def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Deprovision a Hadir tenant (DESTRUCTIVE).",
+        description="Deprovision a Maugood tenant (DESTRUCTIVE).",
     )
     parser.add_argument(
         "--slug",
@@ -74,7 +74,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         action="store_true",
         help=(
             "Assert that a fresh DB backup was taken in this same session. "
-            "Required when HADIR_ENV=production."
+            "Required when MAUGOOD_ENV=production."
         ),
     )
     parser.add_argument(

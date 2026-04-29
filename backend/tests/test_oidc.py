@@ -6,7 +6,7 @@ red-line refusals: no auto-provision, no secret in API responses, no
 secret in audit rows.
 
 We never hit Microsoft. The ``set_test_oidc_provider`` hook in
-``hadir.auth.oidc`` lets us swap the discover / JWKS / token-exchange
+``maugood.auth.oidc`` lets us swap the discover / JWKS / token-exchange
 calls for an in-process fake that mints ID tokens with a test RSA
 keypair generated per test session.
 """
@@ -29,7 +29,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import update
 from sqlalchemy.engine import Engine
 
-from hadir.auth.oidc import (
+from maugood.auth.oidc import (
     STATE_COOKIE_NAME,
     _DiscoveryDoc,
     _sign_state,
@@ -37,7 +37,7 @@ from hadir.auth.oidc import (
     encrypt_secret,
     set_test_oidc_provider,
 )
-from hadir.db import audit_log, tenant_context, tenant_oidc_config
+from maugood.db import audit_log, tenant_context, tenant_oidc_config
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +65,7 @@ _TEST_JWK["alg"] = "RS256"
 
 @dataclass(frozen=True, slots=True)
 class FakeProvider:
-    """Stub for ``hadir.auth.oidc._test_oidc_provider``."""
+    """Stub for ``maugood.auth.oidc._test_oidc_provider``."""
 
     issuer: str = "https://login.microsoftonline.com/test-entra/v2.0"
     authorization_endpoint: str = "https://example.test/authorize"
@@ -329,8 +329,8 @@ def test_callback_happy_path_creates_session(
     )
     assert resp.status_code == 302, resp.text
     assert resp.headers["location"] == "/"
-    assert client.cookies.get("hadir_session"), "session cookie should be set"
-    assert client.cookies.get("hadir_tenant") == "main"
+    assert client.cookies.get("maugood_session"), "session cookie should be set"
+    assert client.cookies.get("maugood_tenant") == "main"
 
     # /api/auth/me must work with the new session cookie.
     me = client.get("/api/auth/me")
@@ -348,7 +348,7 @@ def test_callback_refuses_unknown_email_with_prescribed_message(
         issuer="https://login.microsoftonline.com/test-entra/v2.0",
         audience="test-client-id",
         nonce=nonce,
-        email="not-in-hadir@whatever.example",
+        email="not-in-maugood@whatever.example",
     )
     set_test_oidc_provider(_FakeProviderForCallback(id_token=id_token))
 
@@ -358,9 +358,9 @@ def test_callback_refuses_unknown_email_with_prescribed_message(
         follow_redirects=False,
     )
     assert resp.status_code == 403
-    assert "not registered in Hadir" in resp.json()["detail"]
+    assert "not registered in Maugood" in resp.json()["detail"]
     assert "Contact your administrator" in resp.json()["detail"]
-    assert not client.cookies.get("hadir_session"), "must NOT set session"
+    assert not client.cookies.get("maugood_session"), "must NOT set session"
 
     # Failure audit row written.
     with tenant_context("main"):
@@ -376,7 +376,7 @@ def test_callback_refuses_unknown_email_with_prescribed_message(
             ).all()
     assert rows
     assert rows[0].after.get("reason") == "no_user_match"
-    assert rows[0].after.get("email_attempted") == "not-in-hadir@whatever.example"
+    assert rows[0].after.get("email_attempted") == "not-in-maugood@whatever.example"
 
 
 def test_callback_rejects_state_mismatch(
@@ -411,7 +411,7 @@ def test_callback_rejects_id_token_with_wrong_nonce(
         issuer="https://login.microsoftonline.com/test-entra/v2.0",
         audience="test-client-id",
         nonce="completely-different-nonce",
-        email="any@hadir.test",
+        email="any@maugood.test",
     )
     set_test_oidc_provider(_FakeProviderForCallback(id_token=id_token))
 

@@ -1,5 +1,5 @@
 // Wire types for /api/manager-assignments — mirrors the Pydantic
-// shapes in hadir/manager_assignments/schemas.py.
+// shapes in maugood/manager_assignments/schemas.py.
 
 export interface EmployeeChip {
   employee_id: number;

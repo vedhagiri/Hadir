@@ -32,13 +32,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, insert, select
 from sqlalchemy.engine import Engine
 
-from hadir.db import (
+from maugood.db import (
     delete_requests as t_delete_requests,
     employees as t_employees,
     roles,
     user_roles,
 )
-from hadir.employees.lifecycle_cron import run_for_tenant
+from maugood.employees.lifecycle_cron import run_for_tenant
 
 
 TENANT_ID = 1

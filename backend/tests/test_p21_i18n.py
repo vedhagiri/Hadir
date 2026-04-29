@@ -12,8 +12,8 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import select
 
-from hadir.db import get_engine, users
-from hadir.i18n import (
+from maugood.db import get_engine, users
+from maugood.i18n import (
     DEFAULT_LANGUAGE,
     SUPPORTED_LANGUAGES,
     parse_accept_language,
@@ -68,7 +68,7 @@ def test_t_unknown_key_returns_key_itself():
 def test_t_format_kwargs_applied():
     # ``submitter_name`` / ``request_type`` / ``stage`` are the
     # placeholders the producer for ``approval_assigned`` actually
-    # passes in. See backend/hadir/notifications/producer.py.
+    # passes in. See backend/maugood/notifications/producer.py.
     out = t(
         "notifications.approval_assigned.subject",
         "en",

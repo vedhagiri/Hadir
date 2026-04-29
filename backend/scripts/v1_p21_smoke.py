@@ -22,8 +22,8 @@ from pathlib import Path
 
 from sqlalchemy import delete, insert, select, update
 
-from hadir.auth.passwords import hash_password
-from hadir.db import (
+from maugood.auth.passwords import hash_password
+from maugood.db import (
     departments,
     email_config,
     employees,
@@ -34,9 +34,9 @@ from hadir.db import (
     user_roles,
     users,
 )
-from hadir.notifications.producer import notify_approval_assigned
-from hadir.notifications.worker import drain_one_tenant
-from hadir.tenants.scope import TenantScope
+from maugood.notifications.producer import notify_approval_assigned
+from maugood.notifications.worker import drain_one_tenant
+from maugood.tenants.scope import TenantScope
 
 
 TENANT_ID = 1
@@ -87,14 +87,14 @@ def _cleanup_user(engine, uid: int) -> None:
 def main() -> int:
     suffix = secrets.token_hex(3)
     recorder_path = os.environ.get(
-        "HADIR_EMAIL_RECORDER_PATH", "/tmp/hadir-p21-recorder.jsonl"
+        "MAUGOOD_EMAIL_RECORDER_PATH", "/tmp/maugood-p21-recorder.jsonl"
     )
     Path(recorder_path).unlink(missing_ok=True)
-    os.environ["HADIR_EMAIL_RECORDER_PATH"] = recorder_path
+    os.environ["MAUGOOD_EMAIL_RECORDER_PATH"] = recorder_path
 
     engine = make_admin_engine()
 
-    # Make sure email is wired up. ``HADIR_EMAIL_RECORDER_PATH`` makes
+    # Make sure email is wired up. ``MAUGOOD_EMAIL_RECORDER_PATH`` makes
     # ``get_sender`` short-circuit to the file recorder regardless of
     # ``provider``; we just need the row to exist + ``enabled=True``.
     with engine.begin() as conn:
@@ -109,8 +109,8 @@ def main() -> int:
                     tenant_id=TENANT_ID,
                     provider="smtp",
                     smtp_host="recorder.local",
-                    from_address="hadir-smoke@example.com",
-                    from_name="Hadir P21 smoke",
+                    from_address="maugood-smoke@example.com",
+                    from_name="Maugood P21 smoke",
                     enabled=True,
                 )
             )

@@ -154,12 +154,12 @@ def upgrade() -> None:
         "requests",
         ["tenant_id", "manager_user_id", "status"],
     )
-    op.execute('ALTER TABLE requests OWNER TO hadir_admin')
+    op.execute('ALTER TABLE requests OWNER TO maugood_admin')
     op.execute(
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON requests TO hadir_app"
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON requests TO maugood_app"
     )
     op.execute(
-        "GRANT USAGE, SELECT ON SEQUENCE requests_id_seq TO hadir_app"
+        "GRANT USAGE, SELECT ON SEQUENCE requests_id_seq TO maugood_app"
     )
 
     # ----- request_attachments --------------------------------------------
@@ -193,12 +193,12 @@ def upgrade() -> None:
             server_default=sa.func.now(),
         ),
     )
-    op.execute('ALTER TABLE request_attachments OWNER TO hadir_admin')
+    op.execute('ALTER TABLE request_attachments OWNER TO maugood_admin')
     op.execute(
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON request_attachments TO hadir_app"
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON request_attachments TO maugood_app"
     )
     op.execute(
-        "GRANT USAGE, SELECT ON SEQUENCE request_attachments_id_seq TO hadir_app"
+        "GRANT USAGE, SELECT ON SEQUENCE request_attachments_id_seq TO maugood_app"
     )
 
 

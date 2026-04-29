@@ -1,4 +1,4 @@
-// Shared TypeScript types for the Hadir frontend.
+// Shared TypeScript types for the Maugood frontend.
 
 export type Role = "Admin" | "HR" | "Manager" | "Employee";
 

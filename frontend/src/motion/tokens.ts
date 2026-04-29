@@ -1,5 +1,5 @@
 // Motion tokens — the single source of truth for animation timing
-// across Hadir. Tune the whole app's feel from this file.
+// across Maugood. Tune the whole app's feel from this file.
 
 export const DURATION = {
   /** ~100 ms — for button presses and other "just barely felt" feedback. */

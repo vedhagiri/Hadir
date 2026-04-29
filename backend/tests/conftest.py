@@ -1,7 +1,7 @@
-"""Shared pytest fixtures for the Hadir backend.
+"""Shared pytest fixtures for the Maugood backend.
 
 Tests assume the compose Postgres is running and at head revision. The
-test user lifecycle is done through the admin engine (``hadir_admin``) so
+test user lifecycle is done through the admin engine (``maugood_admin``) so
 we can clean up ``audit_log`` rows we produced — the app role cannot.
 """
 
@@ -15,22 +15,22 @@ from typing import Iterator
 # rotation thread would otherwise outlive a test and the temp
 # log dir vanishes from under it. ``configure_logging``
 # respects this env var.
-_os.environ.setdefault("HADIR_LOG_DISABLE_FILES", "1")
+_os.environ.setdefault("MAUGOOD_LOG_DISABLE_FILES", "1")
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, insert, select
 from sqlalchemy.engine import Engine
 
-from hadir.attendance import attendance_scheduler as _attendance_scheduler
-from hadir.auth.passwords import hash_password
-from hadir.auth.ratelimit import reset_rate_limiter
-from hadir.capture import capture_manager as _capture_manager
-from hadir.capture.analyzer import (
+from maugood.attendance import attendance_scheduler as _attendance_scheduler
+from maugood.auth.passwords import hash_password
+from maugood.auth.ratelimit import reset_rate_limiter
+from maugood.capture import capture_manager as _capture_manager
+from maugood.capture.analyzer import (
     clear_analyzer_factory as _clear_analyzer_factory,
     set_analyzer_factory as _set_analyzer_factory,
 )
-from hadir.db import (
+from maugood.db import (
     audit_log,
     cameras,
     departments,
@@ -42,14 +42,14 @@ from hadir.db import (
     user_sessions,
     users,
 )
-from hadir.main import app
+from maugood.main import app
 
 TENANT_ID = 1
 
 
 @pytest.fixture(scope="session")
 def admin_engine() -> Engine:
-    """Engine running as ``hadir_admin`` — used for test fixtures only."""
+    """Engine running as ``maugood_admin`` — used for test fixtures only."""
 
     return make_admin_engine()
 
@@ -115,7 +115,7 @@ def _neutralise_report_runner() -> Iterator[None]:
     The dedicated P18 tests call ``run_schedule_now`` directly, so
     they don't depend on the background loop."""
 
-    from hadir.scheduled_reports import report_runner as _runner  # noqa: PLC0415
+    from maugood.scheduled_reports import report_runner as _runner  # noqa: PLC0415
 
     original_start = _runner.start
     original_stop = _runner.stop
@@ -135,7 +135,7 @@ def _neutralise_notification_worker() -> Iterator[None]:
     tests call ``drain_one_tenant`` directly when they need to
     exercise the worker."""
 
-    from hadir.notifications import notification_worker as _worker  # noqa: PLC0415
+    from maugood.notifications import notification_worker as _worker  # noqa: PLC0415
 
     original_start = _worker.start
     original_stop = _worker.stop
@@ -155,7 +155,7 @@ def _neutralise_retention_scheduler() -> Iterator[None]:
     call ``run_retention_sweep`` directly so they don't depend
     on the cron schedule."""
 
-    from hadir.retention import retention_scheduler as _ret  # noqa: PLC0415
+    from maugood.retention import retention_scheduler as _ret  # noqa: PLC0415
 
     original_start = _ret.start
     original_stop = _ret.stop
@@ -240,7 +240,7 @@ def _cleanup_user(engine: Engine, user_id: int) -> None:
 def admin_user(admin_engine: Engine) -> Iterator[dict]:
     """Create an Admin user, yield its credentials, then clean up."""
 
-    email = f"admin-{secrets.token_hex(4)}@test.hadir"
+    email = f"admin-{secrets.token_hex(4)}@test.maugood"
     password = "test-admin-pw-" + secrets.token_hex(6)
     user_id = _create_user(
         admin_engine,
@@ -259,7 +259,7 @@ def admin_user(admin_engine: Engine) -> Iterator[dict]:
 def employee_user(admin_engine: Engine) -> Iterator[dict]:
     """Create an Employee user, yield its credentials, then clean up."""
 
-    email = f"emp-{secrets.token_hex(4)}@test.hadir"
+    email = f"emp-{secrets.token_hex(4)}@test.maugood"
     password = "test-emp-pw-" + secrets.token_hex(6)
     user_id = _create_user(
         admin_engine,

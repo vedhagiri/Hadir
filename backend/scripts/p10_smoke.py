@@ -17,18 +17,18 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, insert, select
 
-from hadir.attendance import repository as attendance_repo
-from hadir.attendance.scheduler import recompute_today
-from hadir.cameras import rtsp as rtsp_io
-from hadir.config import get_settings
-from hadir.db import (
+from maugood.attendance import repository as attendance_repo
+from maugood.attendance.scheduler import recompute_today
+from maugood.cameras import rtsp as rtsp_io
+from maugood.config import get_settings
+from maugood.db import (
     attendance_records,
     cameras,
     detection_events,
     employees,
     make_admin_engine,
 )
-from hadir.tenants.scope import TenantScope
+from maugood.tenants.scope import TenantScope
 
 
 def main() -> int:

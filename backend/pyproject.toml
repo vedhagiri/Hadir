@@ -1,7 +1,7 @@
 [project]
-name = "hadir"
+name = "maugood"
 version = "1.0.1"
-description = "Hadir — camera-based employee attendance platform (backend)"
+description = "Maugood — camera-based employee attendance platform (backend)"
 requires-python = ">=3.11,<3.12"
 dependencies = [
     # P27: bumped to ship the post-0.115 starlette (CVE-2024-47874,
@@ -85,7 +85,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["hadir*"]
+include = ["maugood*"]
 
 [tool.ruff]
 line-length = 100

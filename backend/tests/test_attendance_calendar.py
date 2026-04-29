@@ -32,12 +32,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, insert, select
 from sqlalchemy.engine import Engine
 
-from hadir.attendance_calendar.queries import (
+from maugood.attendance_calendar.queries import (
     TIMELINE_GAP_MINUTES,
     collapse_timeline,
     parse_month,
 )
-from hadir.db import (
+from maugood.db import (
     approved_leaves,
     attendance_records,
     cameras,

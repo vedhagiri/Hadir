@@ -1,8 +1,8 @@
-// Tiny fetch wrapper used by all Hadir frontend API calls.
+// Tiny fetch wrapper used by all Maugood frontend API calls.
 //
 // The dev server at :5173 proxies `/api/*` to the FastAPI backend at :8000
 // (see vite.config.ts), so the browser sees everything as same-origin and
-// the `hadir_session` cookie flows without any CORS handling. We still set
+// the `maugood_session` cookie flows without any CORS handling. We still set
 // `credentials: "same-origin"` explicitly so future reviewers don't have
 // to re-derive that property from defaults.
 

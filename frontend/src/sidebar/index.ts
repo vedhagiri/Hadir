@@ -16,7 +16,7 @@ export const SIDEBAR_STATES: readonly SidebarState[] = [
   "collapsed",
 ] as const;
 
-const STORAGE_KEY = "hadir-sidebar";
+const STORAGE_KEY = "maugood-sidebar";
 const DEFAULT_STATE: SidebarState = "expanded";
 
 let _state: SidebarState = readStored();

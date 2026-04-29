@@ -1,4 +1,4 @@
-# Hadir — DR rehearsal log
+# Maugood — DR rehearsal log
 
 This file is the durable record of every disaster-recovery
 rehearsal we run. Each entry below documents one full
@@ -18,7 +18,7 @@ pilot defaults).
 | Date (UTC)             | 2026-04-25 19:30 — 19:38                            |
 | Operator               | Suresh (MTS) via Claude Code                        |
 | Source stack           | local docker compose (dev), `tenant_mode=single`   |
-| Target stack           | fresh docker compose project `-p hadirdr`          |
+| Target stack           | fresh docker compose project `-p maugooddr`          |
 | Backup script          | `backend/scripts/backup.sh`                         |
 | Restore script         | `backend/scripts/restore.sh`                        |
 | Backup version         | manifest_version=1                                  |
@@ -41,13 +41,13 @@ pilot defaults).
 
 ```
 $ docker run --rm \
-    --network hadir_default \
+    --network maugood_default \
     --entrypoint /app/scripts/backup.sh \
-    -e HADIR_ADMIN_DATABASE_URL='postgresql://hadir:hadir@postgres:5432/hadir' \
-    -v hadir_faces_data:/data:ro \
-    -v hadir_backup_dr:/backup \
+    -e MAUGOOD_ADMIN_DATABASE_URL='postgresql://maugood:maugood@postgres:5432/maugood' \
+    -v maugood_faces_data:/data:ro \
+    -v maugood_backup_dr:/backup \
     -v "$PWD/backend/scripts:/app/scripts:ro" \
-    hadir-backup:latest
+    maugood-backup:latest
 
 [backup ...] schemas to dump: ["public", "main", "tenant_demo", "tenant_omran"]
 [backup ...] manifest written (1433 bytes, 7 files)
@@ -64,19 +64,19 @@ $ docker run --rm \
 ### Restore on the throwaway target
 
 ```
-$ docker compose --env-file /tmp/p24-dr.env -p hadirdr up -d postgres backend
+$ docker compose --env-file /tmp/p24-dr.env -p maugooddr up -d postgres backend
    ... (initial migration runs, 1 seeded tenant exists)
 
-$ docker compose -p hadirdr stop backend           # operator step
+$ docker compose -p maugooddr stop backend           # operator step
 
 $ docker run --rm \
-    --network hadirdr_default \
+    --network maugooddr_default \
     --entrypoint /app/scripts/restore.sh \
-    -e HADIR_ADMIN_DATABASE_URL='postgresql://hadir:hadir@postgres:5432/hadir' \
-    -v hadir_backup_dr:/backup:ro \
-    -v hadirdr_faces_data:/data \
+    -e MAUGOOD_ADMIN_DATABASE_URL='postgresql://maugood:maugood@postgres:5432/maugood' \
+    -v maugood_backup_dr:/backup:ro \
+    -v maugooddr_faces_data:/data \
     -v "$PWD/backend/scripts:/app/scripts:ro" \
-    hadir-backup:latest \
+    maugood-backup:latest \
         --backup-manifest /backup/2026-04-25-193647/manifest.json \
         --yes-i-have-a-backup-of-the-target
 
@@ -90,14 +90,14 @@ $ docker run --rm \
 [restore ...] DROP SCHEMA tenant_omran CASCADE
 [restore ...] DROP SCHEMA tenant_demo CASCADE
 [restore ...] DROP SCHEMA main CASCADE
-[restore ...] drop public.* (Hadir tables only, not the schema)
+[restore ...] drop public.* (Maugood tables only, not the schema)
 [restore ...] restoring schema=public ... main ... tenant_demo ... tenant_omran
 [restore ...] restoring faces / attachments / reports
 [restore ...] restored tenants: 3
 [restore ...] restored active users in main: 7
 [restore ...] restore complete
 
-$ docker compose --env-file /tmp/p24-dr.env -p hadirdr start backend
+$ docker compose --env-file /tmp/p24-dr.env -p maugooddr start backend
 ```
 
 | Phase                     | Wall-clock |
@@ -115,8 +115,8 @@ port:
 
 ```
 $ curl -c $C -X POST http://localhost:8000/api/auth/login \
-    -d '{"email":"admin@pilot.hadir","password":"admin123"}'
-{"id":2,"email":"admin@pilot.hadir","active_role":"Admin", ...}
+    -d '{"email":"admin@pilot.maugood","password":"admin123"}'
+{"id":2,"email":"admin@pilot.maugood","active_role":"Admin", ...}
 
 $ curl -b $C http://localhost:8000/api/auth/me
 { ..., "preferred_theme": "dark", "preferred_density": "compact" }
@@ -154,9 +154,9 @@ the source.
    `public` last failed with "constraint X depends on this
    index". **Fix:** `restore.sh` drops every schema in the
    manifest **upfront**, in reverse dependency order
-   (per-tenant first, then `main`, then Hadir tables on
+   (per-tenant first, then `main`, then Maugood tables on
    `public`), before applying any of the dump files.
-3. **`pg_dump --no-privileges` stripped the `hadir_app`
+3. **`pg_dump --no-privileges` stripped the `maugood_app`
    grants.** The backend's runtime role couldn't see the
    restored tables ("permission denied for schema main").
    **Fix:** dropped `--no-privileges` from `pg_dump`; grants
@@ -179,8 +179,8 @@ try.
 ### Rehearsal teardown
 
 ```
-$ docker compose -p hadirdr down -v   # nuke the throwaway target
-$ docker volume rm hadir_backup_dr     # nuke the backup volume
+$ docker compose -p maugooddr down -v   # nuke the throwaway target
+$ docker volume rm maugood_backup_dr     # nuke the backup volume
 $ docker compose up -d                 # restore the dev stack
 ```
 

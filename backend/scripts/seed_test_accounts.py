@@ -14,7 +14,7 @@ the tenant is skipped. Same for employees (matched by ``employee_code``)
 and Super-Admin staff (matched by email in ``public.mts_staff``).
 
 **Production red line.** These passwords are documented dev-only
-defaults (``Hadir!2026`` / ``Superadmin!2026``). The deploy pipeline
+defaults (``Maugood!2026`` / ``Superadmin!2026``). The deploy pipeline
 must NOT package this script for production — see
 ``docs/testing/v1.0-m2-test-accounts.md §9``.
 """
@@ -30,8 +30,8 @@ from typing import Optional
 from sqlalchemy import insert, select
 from sqlalchemy.engine import Connection, Engine
 
-from hadir.auth.passwords import hash_password
-from hadir.db import (
+from maugood.auth.passwords import hash_password
+from maugood.db import (
     departments,
     employees,
     make_admin_engine,
@@ -44,7 +44,7 @@ from hadir.db import (
     users,
 )
 
-logger = logging.getLogger("hadir.seed_test_accounts")
+logger = logging.getLogger("maugood.seed_test_accounts")
 
 
 # --------------------------------------------------------------------------
@@ -54,7 +54,7 @@ logger = logging.getLogger("hadir.seed_test_accounts")
 # Dev-only password convention. Easy to type during demos, throwaway by
 # design. Production users get real credentials at P29 cutover; this
 # script doesn't ship there.
-TENANT_PASSWORD = "Hadir!2026"
+TENANT_PASSWORD = "Maugood!2026"
 SUPER_PASSWORD = "Superadmin!2026"
 
 

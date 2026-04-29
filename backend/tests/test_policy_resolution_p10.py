@@ -17,15 +17,15 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, insert
 from sqlalchemy.engine import Engine
 
-from hadir.attendance.repository import resolve_policies_for_employees
-from hadir.db import (
+from maugood.attendance.repository import resolve_policies_for_employees
+from maugood.db import (
     attendance_records,
     departments,
     employees,
     policy_assignments,
     shift_policies,
 )
-from hadir.tenants.scope import TenantScope
+from maugood.tenants.scope import TenantScope
 from tests.conftest import TENANT_ID, department_id_by_code
 
 
@@ -81,7 +81,7 @@ def one_employee(admin_engine: Engine) -> Iterator[int]:
                     tenant_id=TENANT_ID,
                     employee_code=f"P10E{suffix}",
                     full_name="P10 Worker",
-                    email=f"p10-{suffix.lower()}@test.hadir",
+                    email=f"p10-{suffix.lower()}@test.maugood",
                     department_id=eng_id,
                     status="active",
                 )

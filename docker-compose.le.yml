@@ -11,7 +11,7 @@
 #
 # Adds a ``certbot`` sidecar that reads the ACME HTTP-01
 # challenge from the ``/.well-known/acme-challenge`` path nginx
-# already serves on :80 (see hadir.conf.template). On first run
+# already serves on :80 (see maugood.conf.template). On first run
 # it requests a cert; on every restart it tries to renew.
 #
 # Operators choosing the operator-provided cert path (the
@@ -29,11 +29,11 @@ services:
     volumes:
       # Persist the issued cert to the same path nginx reads
       # from (mounted read-only there).
-      - ${HADIR_TLS_CERT_DIR:-./ops/certs}:/etc/letsencrypt/live/hadir
+      - ${MAUGOOD_TLS_CERT_DIR:-./ops/certs}:/etc/letsencrypt/live/maugood
       - certbot_webroot:/var/www/certbot
     environment:
-      HADIR_LE_EMAIL: ${HADIR_LE_EMAIL:?ACME email required (e.g. ops@example.com)}
-      HADIR_PUBLIC_HOSTNAME: ${HADIR_PUBLIC_HOSTNAME:?must match the nginx server_name}
+      MAUGOOD_LE_EMAIL: ${MAUGOOD_LE_EMAIL:?ACME email required (e.g. ops@example.com)}
+      MAUGOOD_PUBLIC_HOSTNAME: ${MAUGOOD_PUBLIC_HOSTNAME:?must match the nginx server_name}
     # Run-once at compose-up: register an account, request the
     # cert, then exit. After issuance the operator either
     # bounces nginx (``docker compose restart nginx``) or runs
@@ -46,11 +46,11 @@ services:
       - >
         certbot certonly --webroot --webroot-path /var/www/certbot
         --non-interactive --agree-tos
-        --email "$$HADIR_LE_EMAIL"
-        -d "$$HADIR_PUBLIC_HOSTNAME"
+        --email "$$MAUGOOD_LE_EMAIL"
+        -d "$$MAUGOOD_PUBLIC_HOSTNAME"
         --keep-until-expiring
-        && cp /etc/letsencrypt/live/$$HADIR_PUBLIC_HOSTNAME/fullchain.pem /etc/letsencrypt/live/hadir/fullchain.pem
-        && cp /etc/letsencrypt/live/$$HADIR_PUBLIC_HOSTNAME/privkey.pem   /etc/letsencrypt/live/hadir/privkey.pem
+        && cp /etc/letsencrypt/live/$$MAUGOOD_PUBLIC_HOSTNAME/fullchain.pem /etc/letsencrypt/live/maugood/fullchain.pem
+        && cp /etc/letsencrypt/live/$$MAUGOOD_PUBLIC_HOSTNAME/privkey.pem   /etc/letsencrypt/live/maugood/privkey.pem
     depends_on:
       - nginx
     networks:

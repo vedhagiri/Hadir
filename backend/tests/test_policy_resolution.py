@@ -23,15 +23,15 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, insert, select
 from sqlalchemy.engine import Engine
 
-from hadir.attendance.repository import resolve_policies_for_employees
-from hadir.db import (
+from maugood.attendance.repository import resolve_policies_for_employees
+from maugood.db import (
     audit_log,
     departments,
     employees,
     policy_assignments,
     shift_policies,
 )
-from hadir.tenants.scope import TenantScope
+from maugood.tenants.scope import TenantScope
 from tests.conftest import TENANT_ID, department_id_by_code
 
 
@@ -57,7 +57,7 @@ def two_employees(admin_engine: Engine) -> Iterator[dict]:
                     tenant_id=TENANT_ID,
                     employee_code=f"P9E{suffix}",
                     full_name="P9 Eng",
-                    email=f"p9e-{suffix.lower()}@test.hadir",
+                    email=f"p9e-{suffix.lower()}@test.maugood",
                     department_id=eng_id,
                     status="active",
                 )
@@ -71,7 +71,7 @@ def two_employees(admin_engine: Engine) -> Iterator[dict]:
                     tenant_id=TENANT_ID,
                     employee_code=f"P9O{suffix}",
                     full_name="P9 Ops",
-                    email=f"p9o-{suffix.lower()}@test.hadir",
+                    email=f"p9o-{suffix.lower()}@test.maugood",
                     department_id=ops_id,
                     status="active",
                 )
@@ -145,7 +145,7 @@ def two_policies(admin_engine: Engine) -> Iterator[dict]:
     try:
         yield {"fixed_id": fixed_id, "flex_id": flex_id}
     finally:
-        from hadir.db import attendance_records  # noqa: PLC0415
+        from maugood.db import attendance_records  # noqa: PLC0415
 
         with admin_engine.begin() as conn:
             # Drop assignments first, then any attendance_records
@@ -419,7 +419,7 @@ def test_create_flex_policy_and_assign_to_department(
         # Cleanup so the API-created policy doesn't leak into other
         # tests that assume a single policy in tenant_id=1.
         if policy_id is not None:
-            from hadir.db import attendance_records  # noqa: PLC0415
+            from maugood.db import attendance_records  # noqa: PLC0415
 
             with admin_engine.begin() as conn:
                 conn.execute(

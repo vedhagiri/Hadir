@@ -39,9 +39,9 @@ from pathlib import Path
 
 from sqlalchemy import text
 
-from hadir.db import make_admin_engine, set_tenant_schema, reset_tenant_schema
+from maugood.db import make_admin_engine, set_tenant_schema, reset_tenant_schema
 
-logger = logging.getLogger("hadir.migrate")
+logger = logging.getLogger("maugood.migrate")
 logging.basicConfig(level=logging.INFO, format="[migrate] %(message)s")
 
 
@@ -83,7 +83,7 @@ def _iter_tenant_schemas() -> list[str]:
     """Return every non-main tenant schema_name from the public registry.
 
     Connects via the admin engine because the orchestrator runs as
-    ``hadir_admin`` (request-path role doesn't exist yet at first
+    ``maugood_admin`` (request-path role doesn't exist yet at first
     boot). Single-tenant deployments return an empty list and the
     caller skips the loop.
     """

@@ -19,13 +19,13 @@ from openpyxl import Workbook
 from sqlalchemy import delete, insert, select
 from sqlalchemy.engine import Engine
 
-from hadir.attendance.engine import compute, policy_from_row
-from hadir.attendance.repository import (
+from maugood.attendance.engine import compute, policy_from_row
+from maugood.attendance.repository import (
     holidays_on,
     leaves_for_employee_on,
     load_tenant_settings,
 )
-from hadir.db import (
+from maugood.db import (
     approved_leaves,
     audit_log,
     employees,
@@ -34,7 +34,7 @@ from hadir.db import (
     shift_policies,
     tenant_settings,
 )
-from hadir.tenants.scope import TenantScope
+from maugood.tenants.scope import TenantScope
 from tests.conftest import TENANT_ID, department_id_by_code
 
 
@@ -55,7 +55,7 @@ def smoke_employee(admin_engine: Engine) -> Iterator[int]:
                     tenant_id=TENANT_ID,
                     employee_code=f"P11E{suffix}",
                     full_name="P11 Worker",
-                    email=f"p11-{suffix.lower()}@test.hadir",
+                    email=f"p11-{suffix.lower()}@test.maugood",
                     department_id=eng_id,
                     status="active",
                 )

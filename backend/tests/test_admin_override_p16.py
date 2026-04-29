@@ -26,8 +26,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, insert, select
 from sqlalchemy.engine import Engine
 
-from hadir.auth.passwords import hash_password
-from hadir.db import (
+from maugood.auth.passwords import hash_password
+from maugood.db import (
     approved_leaves,
     audit_log,
     departments,
@@ -129,10 +129,10 @@ def _cleanup_user(engine: Engine, user_id: int) -> None:
 @pytest.fixture
 def world(admin_engine: Engine) -> Iterator[dict]:
     suffix = secrets.token_hex(4)
-    employee_email = f"emp-{suffix}@p16.hadir"
-    manager_email = f"mgr-{suffix}@p16.hadir"
-    hr_email = f"hr-{suffix}@p16.hadir"
-    admin_email = f"adm-{suffix}@p16.hadir"
+    employee_email = f"emp-{suffix}@p16.maugood"
+    manager_email = f"mgr-{suffix}@p16.maugood"
+    hr_email = f"hr-{suffix}@p16.maugood"
+    admin_email = f"adm-{suffix}@p16.maugood"
     pwd = "p16-pw-" + secrets.token_hex(6)
 
     employee_uid = _make_user(
@@ -224,7 +224,7 @@ def world(admin_engine: Engine) -> Iterator[dict]:
             conn.execute(
                 delete(audit_log).where(audit_log.c.entity_type == "request")
             )
-            from hadir.db import attendance_records  # noqa: PLC0415
+            from maugood.db import attendance_records  # noqa: PLC0415
 
             conn.execute(
                 delete(attendance_records).where(

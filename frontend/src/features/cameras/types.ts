@@ -1,4 +1,4 @@
-// Wire types for /api/cameras — mirror hadir/cameras/schemas.py.
+// Wire types for /api/cameras — mirror maugood/cameras/schemas.py.
 // ``rtsp_url`` is outbound-only (POST/PATCH bodies). Responses carry
 // ``rtsp_host`` only.
 

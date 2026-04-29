@@ -1,5 +1,5 @@
 // Wire shapes returned by the P28.5a live-capture endpoints. Mirrors
-// what ``hadir/live_capture/router.py`` actually emits — keep these
+// what ``maugood/live_capture/router.py`` actually emits — keep these
 // in sync with the backend Pydantic responses.
 
 export interface LiveStats {

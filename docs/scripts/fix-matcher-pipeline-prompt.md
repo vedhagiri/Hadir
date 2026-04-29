@@ -37,7 +37,7 @@ These three files implement the full known-faces pipeline that we know works. v1
 
 ## The prompt to paste into Claude Code
 
-> A bug in Hadir's matching pipeline: faces are being detected on cameras, but employees with enrolled reference photos are not being identified. The Workers page (from P28.8) shows the Matching stage as red/amber even though Detection is green and the inaisys tenant has employees with reference photos enrolled.
+> A bug in Maugood's matching pipeline: faces are being detected on cameras, but employees with enrolled reference photos are not being identified. The Workers page (from P28.8) shows the Matching stage as red/amber even though Detection is green and the inaisys tenant has employees with reference photos enrolled.
 >
 > Read these files completely before diagnosing:
 >
@@ -45,10 +45,10 @@ These three files implement the full known-faces pipeline that we know works. v1
 > 2. `prototype-reference/backend/detectors.py` — particularly the function that produces the `embedding` field on each detected face
 > 3. `prototype-reference/backend/known_people.py` — `KnownPeopleCache.reload()` and the per-photo (not averaged) embedding storage pattern
 > 4. `prototype-reference/backend/identify.py` — the matching algorithm itself, the threshold value, the matmul approach
-> 5. `backend/hadir/identification/` — v1.0's matching code. Whatever exists here is the broken thing.
-> 6. `backend/hadir/employees/photos.py` (or wherever photo upload lives) — verify whether embedding computation happens at upload
-> 7. `backend/hadir/capture/worker.py` — find the analyzer cycle, see whether/where it calls the matcher
-> 8. `backend/hadir/capture/events.py` — verify whether matcher result populates `employee_id` on `detection_events`
+> 5. `backend/maugood/identification/` — v1.0's matching code. Whatever exists here is the broken thing.
+> 6. `backend/maugood/employees/photos.py` (or wherever photo upload lives) — verify whether embedding computation happens at upload
+> 7. `backend/maugood/capture/worker.py` — find the analyzer cycle, see whether/where it calls the matcher
+> 8. `backend/maugood/capture/events.py` — verify whether matcher result populates `employee_id` on `detection_events`
 >
 > ### Diagnose first — do NOT fix blindly
 >
@@ -223,6 +223,6 @@ These three files implement the full known-faces pipeline that we know works. v1
 
 ## Why this is worth fixing carefully
 
-The matcher is the core of Hadir's value. Without it, Hadir is a fancy face-detection logger, not an attendance system. The prototype proves the algorithm works — the bug is in how v1.0 wired it up. Find the actual broken wire, fix that one wire, don't rewrite the algorithm.
+The matcher is the core of Maugood's value. Without it, Maugood is a fancy face-detection logger, not an attendance system. The prototype proves the algorithm works — the bug is in how v1.0 wired it up. Find the actual broken wire, fix that one wire, don't rewrite the algorithm.
 
 The diagnostic-first approach produces the matcher-health endpoint as a side benefit. That's the operational visibility that catches this class of bug at Omran's site before HR notices missing attendance a week later.

@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
 
-from hadir.config import get_settings
+from maugood.config import get_settings
 
 
 def _login(client: TestClient, user: dict) -> None:

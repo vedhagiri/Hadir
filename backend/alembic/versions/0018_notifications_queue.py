@@ -41,7 +41,7 @@ def upgrade() -> None:
             index=True,
         ),
         # ``recipient_user_id`` is nullable so we can queue a row for
-        # an Employee who isn't a Hadir login user (the lower-cased
+        # an Employee who isn't a Maugood login user (the lower-cased
         # email match might miss). Delivery in P20 falls back to the
         # ``payload.recipient_email`` we copy in below.
         sa.Column(
@@ -82,13 +82,13 @@ def upgrade() -> None:
         "notifications_queue",
         ["tenant_id", "sent_at"],
     )
-    op.execute('ALTER TABLE notifications_queue OWNER TO hadir_admin')
+    op.execute('ALTER TABLE notifications_queue OWNER TO maugood_admin')
     op.execute(
         "GRANT SELECT, INSERT, UPDATE, DELETE ON notifications_queue "
-        "TO hadir_app"
+        "TO maugood_app"
     )
     op.execute(
-        "GRANT USAGE, SELECT ON SEQUENCE notifications_queue_id_seq TO hadir_app"
+        "GRANT USAGE, SELECT ON SEQUENCE notifications_queue_id_seq TO maugood_app"
     )
 
 

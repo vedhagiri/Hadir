@@ -1,5 +1,5 @@
 // Wire types for the Super-Admin console (v1.0 P3). Mirrors the
-// Pydantic responses in ``hadir/super_admin/router.py``.
+// Pydantic responses in ``maugood/super_admin/router.py``.
 
 export interface SuperAdminMe {
   id: number;

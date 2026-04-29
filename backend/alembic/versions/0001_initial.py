@@ -2,15 +2,15 @@
 
 Also provisions the two Postgres cluster roles the app relies on:
 
-* ``hadir_admin`` — owner of the ``main`` schema; used by Alembic and the
+* ``maugood_admin`` — owner of the ``main`` schema; used by Alembic and the
   seed scripts. Full CRUD on every table.
-* ``hadir_app`` — request-path connection. Full CRUD on everything **except**
+* ``maugood_app`` — request-path connection. Full CRUD on everything **except**
   ``audit_log``, where it only has ``INSERT`` and ``SELECT``. This makes the
   audit log append-only at the database grant level, not just in code
   (per pilot-plan Red Lines).
 
 Role passwords default to the role name for dev. Override in
-``HADIR_APP_DB_PASSWORD`` / ``HADIR_ADMIN_DB_PASSWORD`` when moving to any
+``MAUGOOD_APP_DB_PASSWORD`` / ``MAUGOOD_ADMIN_DB_PASSWORD`` when moving to any
 shared environment — they are CREATEd idempotently so a re-run only updates
 the password if the value changes (see ``ALTER ROLE`` calls below).
 
@@ -37,7 +37,7 @@ depends_on: Union[str, Sequence[str], None] = None
 SCHEMA = "main"
 
 
-# Tables that ``hadir_app`` operates on with full CRUD. ``audit_log`` is
+# Tables that ``maugood_app`` operates on with full CRUD. ``audit_log`` is
 # deliberately excluded — its grants are narrower.
 _APP_CRUD_TABLES = (
     "tenants",
@@ -72,8 +72,8 @@ def upgrade() -> None:
     op.execute(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"')
 
     # --- Roles --------------------------------------------------------------
-    app_password = os.environ.get("HADIR_APP_DB_PASSWORD", "hadir_app")
-    admin_password = os.environ.get("HADIR_ADMIN_DB_PASSWORD", "hadir_admin")
+    app_password = os.environ.get("MAUGOOD_APP_DB_PASSWORD", "maugood_app")
+    admin_password = os.environ.get("MAUGOOD_ADMIN_DB_PASSWORD", "maugood_admin")
 
     app_pw_literal = _quote_literal(app_password)
     admin_pw_literal = _quote_literal(admin_password)
@@ -82,15 +82,15 @@ def upgrade() -> None:
         f"""
         DO $$
         BEGIN
-          IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'hadir_admin') THEN
-            CREATE ROLE hadir_admin LOGIN PASSWORD {admin_pw_literal};
+          IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'maugood_admin') THEN
+            CREATE ROLE maugood_admin LOGIN PASSWORD {admin_pw_literal};
           ELSE
-            ALTER ROLE hadir_admin WITH LOGIN PASSWORD {admin_pw_literal};
+            ALTER ROLE maugood_admin WITH LOGIN PASSWORD {admin_pw_literal};
           END IF;
-          IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'hadir_app') THEN
-            CREATE ROLE hadir_app LOGIN PASSWORD {app_pw_literal};
+          IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'maugood_app') THEN
+            CREATE ROLE maugood_app LOGIN PASSWORD {app_pw_literal};
           ELSE
-            ALTER ROLE hadir_app WITH LOGIN PASSWORD {app_pw_literal};
+            ALTER ROLE maugood_app WITH LOGIN PASSWORD {app_pw_literal};
           END IF;
         END
         $$;
@@ -287,32 +287,32 @@ def upgrade() -> None:
     )
 
     # --- Grants -------------------------------------------------------------
-    # Ownership: hadir_admin owns the schema and everything in it. The app
+    # Ownership: maugood_admin owns the schema and everything in it. The app
     # role gets narrower grants, and audit_log is narrower still.
-    op.execute(f'ALTER SCHEMA "{SCHEMA}" OWNER TO hadir_admin')
+    op.execute(f'ALTER SCHEMA "{SCHEMA}" OWNER TO maugood_admin')
 
     for table in (*_APP_CRUD_TABLES, "audit_log"):
-        op.execute(f'ALTER TABLE "{SCHEMA}"."{table}" OWNER TO hadir_admin')
+        op.execute(f'ALTER TABLE "{SCHEMA}"."{table}" OWNER TO maugood_admin')
 
-    # hadir_app needs to USE the schema at all.
-    op.execute(f'GRANT USAGE ON SCHEMA "{SCHEMA}" TO hadir_app')
+    # maugood_app needs to USE the schema at all.
+    op.execute(f'GRANT USAGE ON SCHEMA "{SCHEMA}" TO maugood_app')
 
     # Full CRUD on non-audit tables.
     for table in _APP_CRUD_TABLES:
         op.execute(
-            f'GRANT SELECT, INSERT, UPDATE, DELETE ON "{SCHEMA}"."{table}" TO hadir_app'
+            f'GRANT SELECT, INSERT, UPDATE, DELETE ON "{SCHEMA}"."{table}" TO maugood_app'
         )
 
     # Audit log: INSERT + SELECT only. No UPDATE, no DELETE, no TRUNCATE.
-    op.execute(f'GRANT SELECT, INSERT ON "{SCHEMA}"."audit_log" TO hadir_app')
+    op.execute(f'GRANT SELECT, INSERT ON "{SCHEMA}"."audit_log" TO maugood_app')
 
     # Sequences (used by SERIAL PKs) need USAGE + SELECT for inserts to work.
     op.execute(
-        f'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA "{SCHEMA}" TO hadir_app'
+        f'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA "{SCHEMA}" TO maugood_app'
     )
     op.execute(
         f'ALTER DEFAULT PRIVILEGES IN SCHEMA "{SCHEMA}" '
-        "GRANT USAGE, SELECT ON SEQUENCES TO hadir_app"
+        "GRANT USAGE, SELECT ON SEQUENCES TO maugood_app"
     )
 
     # --- Seed data ----------------------------------------------------------
@@ -340,5 +340,5 @@ def downgrade() -> None:
     # Dropping the schema CASCADEs the tables and their constraints. Sequences
     # follow. We leave the DB roles in place because they are cluster-wide
     # and may be in use by parallel test databases — operators can drop them
-    # manually with ``DROP ROLE hadir_app, hadir_admin;`` when truly unused.
+    # manually with ``DROP ROLE maugood_app, maugood_admin;`` when truly unused.
     op.execute(f'DROP SCHEMA IF EXISTS "{SCHEMA}" CASCADE')

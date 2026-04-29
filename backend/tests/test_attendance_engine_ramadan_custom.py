@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time
 
-from hadir.attendance.engine import ShiftPolicy, compute
+from maugood.attendance.engine import ShiftPolicy, compute
 
 
 # A typical Ramadan policy — short day, 08:00 → 14:00 with 6h

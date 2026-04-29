@@ -12,7 +12,7 @@ override (approve), and asserts:
 
 Run inside the backend container:
 
-    docker compose exec -e HADIR_SMOKE_PASSWORD='…' backend \\
+    docker compose exec -e MAUGOOD_SMOKE_PASSWORD='…' backend \\
         python -m scripts.v1_p16_smoke
 """
 
@@ -26,8 +26,8 @@ from datetime import date, timedelta
 import httpx
 from sqlalchemy import delete, insert, select
 
-from hadir.auth.passwords import hash_password
-from hadir.db import (
+from maugood.auth.passwords import hash_password
+from maugood.db import (
     approved_leaves,
     audit_log,
     departments,
@@ -129,15 +129,15 @@ def _cleanup_user(engine, user_id):
 
 
 def main() -> int:
-    if not os.environ.get("HADIR_SMOKE_PASSWORD"):
-        print("[p16] set HADIR_SMOKE_PASSWORD", file=sys.stderr)
+    if not os.environ.get("MAUGOOD_SMOKE_PASSWORD"):
+        print("[p16] set MAUGOOD_SMOKE_PASSWORD", file=sys.stderr)
         return 1
 
     suffix = secrets.token_hex(4)
-    employee_email = f"emp-{suffix}@p16.hadir"
-    manager_email = f"mgr-{suffix}@p16.hadir"
-    hr_email = f"hr-{suffix}@p16.hadir"
-    admin_email = f"adm-{suffix}@p16.hadir"
+    employee_email = f"emp-{suffix}@p16.maugood"
+    manager_email = f"mgr-{suffix}@p16.maugood"
+    hr_email = f"hr-{suffix}@p16.maugood"
+    admin_email = f"adm-{suffix}@p16.maugood"
     pwd = "P16Smoke!" + secrets.token_hex(4)
 
     admin_engine = make_admin_engine()
@@ -346,7 +346,7 @@ def main() -> int:
             conn.execute(
                 delete(audit_log).where(audit_log.c.entity_type == "request")
             )
-            from hadir.db import attendance_records  # noqa: PLC0415
+            from maugood.db import attendance_records  # noqa: PLC0415
 
             conn.execute(
                 delete(attendance_records).where(

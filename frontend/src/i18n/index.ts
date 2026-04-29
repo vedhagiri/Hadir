@@ -35,7 +35,7 @@ i18n
     interpolation: { escapeValue: false }, // React already escapes
     detection: {
       order: ["localStorage", "navigator", "htmlTag"],
-      lookupLocalStorage: "hadir-language",
+      lookupLocalStorage: "maugood-language",
       caches: ["localStorage"],
     },
   });

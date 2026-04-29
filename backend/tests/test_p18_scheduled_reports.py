@@ -21,8 +21,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, insert, select, update
 from sqlalchemy.engine import Engine
 
-from hadir.config import get_settings
-from hadir.db import (
+from maugood.config import get_settings
+from maugood.db import (
     attendance_records,
     email_config,
     employees,
@@ -31,15 +31,15 @@ from hadir.db import (
     report_schedules,
     shift_policies,
 )
-from hadir.emailing import (
+from maugood.emailing import (
     EmailMessage,
     RecordingSender,
     clear_sender_factory,
     set_sender_factory,
 )
-from hadir.emailing.secrets import decrypt_secret, encrypt_secret
-from hadir.scheduled_reports.runner import compute_next_run
-from hadir.scheduled_reports.signed_url import (
+from maugood.emailing.secrets import decrypt_secret, encrypt_secret
+from maugood.scheduled_reports.runner import compute_next_run
+from maugood.scheduled_reports.signed_url import (
     TokenError,
     make_token,
     validate_token,
@@ -129,10 +129,10 @@ def test_email_config_patch_rotates_secret_and_sets_flag(
         json={
             "provider": "smtp",
             "smtp_host": "smtp.test.example",
-            "smtp_username": "hadir@test.example",
+            "smtp_username": "maugood@test.example",
             "smtp_password": "rotation-1",
             "from_address": "noreply@test.example",
-            "from_name": "Hadir",
+            "from_name": "Maugood",
         },
     )
     assert resp.status_code == 200, resp.text
@@ -187,7 +187,7 @@ def test_email_config_test_endpoint_uses_recording_sender(
         json={
             "provider": "smtp",
             "from_address": "noreply@test.example",
-            "from_name": "Hadir",
+            "from_name": "Maugood",
             "enabled": True,
         },
     )
@@ -205,7 +205,7 @@ def test_email_config_test_endpoint_uses_recording_sender(
     assert len(recorder.messages) == 1
     msg = recorder.messages[0]
     assert msg.to == ("you@example.com",)
-    assert "Hadir" in msg.subject
+    assert "Maugood" in msg.subject
 
 
 # ---------------------------------------------------------------------------
@@ -343,7 +343,7 @@ def test_run_now_attached_path_records_run_and_email(
             "smtp_host": "smtp.test.example",
             "smtp_password": "ignored-by-recorder",
             "from_address": "noreply@test.example",
-            "from_name": "Hadir",
+            "from_name": "Maugood",
             "enabled": True,
         },
     )
@@ -446,7 +446,7 @@ def test_run_now_link_path_when_over_threshold(
 
     # ``get_settings()`` rebuilds from env per call; setting the env
     # var here flips the threshold for the runner's read.
-    monkeypatch.setenv("HADIR_EMAIL_ATTACHMENT_MAX_MB", "0")
+    monkeypatch.setenv("MAUGOOD_EMAIL_ATTACHMENT_MAX_MB", "0")
     recorder = RecordingSender()
     set_sender_factory(lambda _cfg: recorder)
     try:
@@ -502,7 +502,7 @@ def test_signed_url_download_endpoint_streams_file(
     )
     schedule_id = create.json()["id"]
 
-    monkeypatch.setenv("HADIR_EMAIL_ATTACHMENT_MAX_MB", "0")
+    monkeypatch.setenv("MAUGOOD_EMAIL_ATTACHMENT_MAX_MB", "0")
     recorder = RecordingSender()
     set_sender_factory(lambda _cfg: recorder)
     try:
@@ -556,7 +556,7 @@ def test_audit_for_email_patch_does_not_carry_secret(
         },
     )
     assert resp.status_code == 200
-    from hadir.db import audit_log  # noqa: PLC0415
+    from maugood.db import audit_log  # noqa: PLC0415
 
     with admin_engine.begin() as conn:
         rows = conn.execute(

@@ -2,7 +2,7 @@
 
 One row per tenant in each tenant schema. Stores the Entra tenant id,
 client id, the **encrypted** client secret (Fernet, separate key from
-RTSP/photos — see ``HADIR_AUTH_FERNET_KEY``), an enable flag, and a
+RTSP/photos — see ``MAUGOOD_AUTH_FERNET_KEY``), an enable flag, and a
 last-updated timestamp. Toggling ``enabled`` is what flips the tenant
 shell's login page from local password to "Sign in with Microsoft".
 
@@ -45,7 +45,7 @@ def upgrade() -> None:
         # Microsoft tenant GUID. Free-form text because Entra also
         # accepts the canonical names (``common``, ``organizations``,
         # ``consumers``) for multi-tenant apps; we don't use those for
-        # Hadir, but keeping the column free-form means we don't have
+        # Maugood, but keeping the column free-form means we don't have
         # to reach for a UUID type.
         sa.Column("entra_tenant_id", sa.Text(), nullable=False, server_default=""),
         sa.Column("client_id", sa.Text(), nullable=False, server_default=""),
@@ -67,9 +67,9 @@ def upgrade() -> None:
         ),
     )
 
-    op.execute('ALTER TABLE tenant_oidc_config OWNER TO hadir_admin')
+    op.execute('ALTER TABLE tenant_oidc_config OWNER TO maugood_admin')
     op.execute(
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON tenant_oidc_config TO hadir_app"
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON tenant_oidc_config TO maugood_app"
     )
 
     # Seed an empty disabled row for the tenant whose schema is being

@@ -25,9 +25,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, insert, select, update
 from sqlalchemy.engine import Engine
 
-from hadir.attendance.engine import AttendanceRecord
-from hadir.auth.passwords import hash_password
-from hadir.db import (
+from maugood.attendance.engine import AttendanceRecord
+from maugood.auth.passwords import hash_password
+from maugood.db import (
     attendance_records,
     audit_log,
     email_config,
@@ -42,25 +42,25 @@ from hadir.db import (
     user_sessions,
     users,
 )
-from hadir.emailing import (
+from maugood.emailing import (
     RecordingSender,
     clear_sender_factory,
     set_sender_factory,
 )
-from hadir.notifications.categories import ALL_CATEGORIES
-from hadir.notifications.producer import (
+from maugood.notifications.categories import ALL_CATEGORIES
+from maugood.notifications.producer import (
     notify_overtime_flagged,
     notify_user,
 )
-from hadir.notifications.repository import (
+from maugood.notifications.repository import (
     list_for_user,
     list_preferences,
     resolve_preference,
     set_preference,
     unread_count_for_user,
 )
-from hadir.notifications.worker import drain_one_tenant
-from hadir.tenants.scope import TenantScope
+from maugood.notifications.worker import drain_one_tenant
+from maugood.tenants.scope import TenantScope
 
 from tests.test_p13_reports import _login  # noqa: F401
 
@@ -159,7 +159,7 @@ def _clean_notifications(admin_engine: Engine) -> Iterator[None]:
 @pytest.fixture
 def employee_with_login(admin_engine: Engine) -> Iterator[dict]:
     suffix = secrets.token_hex(3)
-    email = f"emp-{suffix}@p20.hadir"
+    email = f"emp-{suffix}@p20.maugood"
     password = "p20-pw-" + secrets.token_hex(4)
     uid = _make_user(
         admin_engine,
@@ -342,10 +342,10 @@ def _enable_email(admin_engine: Engine) -> None:
             .values(
                 provider="smtp",
                 smtp_host="smtp.test.example",
-                smtp_username="hadir",
+                smtp_username="maugood",
                 smtp_password_encrypted=None,
                 from_address="noreply@test.example",
-                from_name="Hadir",
+                from_name="Maugood",
                 enabled=True,
             )
         )
@@ -468,9 +468,9 @@ def test_worker_skips_when_email_disabled_for_tenant(
 @pytest.fixture
 def request_world(admin_engine: Engine) -> Iterator[dict]:
     suffix = secrets.token_hex(3)
-    employee_email = f"emp-req-{suffix}@p20.hadir"
-    manager_email = f"mgr-req-{suffix}@p20.hadir"
-    hr_email = f"hr-req-{suffix}@p20.hadir"
+    employee_email = f"emp-req-{suffix}@p20.maugood"
+    manager_email = f"mgr-req-{suffix}@p20.maugood"
+    hr_email = f"hr-req-{suffix}@p20.maugood"
     pwd = "p20-req-" + secrets.token_hex(4)
 
     employee_uid = _make_user(
@@ -495,7 +495,7 @@ def request_world(admin_engine: Engine) -> Iterator[dict]:
         full_name="P20 Req HR",
     )
 
-    from hadir.db import departments  # noqa: PLC0415
+    from maugood.db import departments  # noqa: PLC0415
 
     with admin_engine.begin() as conn:
         eng_dept = int(

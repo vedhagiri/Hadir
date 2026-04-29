@@ -27,8 +27,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, insert, select
 from sqlalchemy.engine import Engine
 
-from hadir.auth.passwords import hash_password
-from hadir.db import (
+from maugood.auth.passwords import hash_password
+from maugood.db import (
     audit_log,
     departments,
     mts_staff,
@@ -36,7 +36,7 @@ from hadir.db import (
     super_admin_sessions,
     tenant_context,
 )
-from hadir.main import app
+from maugood.main import app
 from scripts.deprovision_tenant import deprovision
 from scripts.provision_tenant import provision
 
@@ -121,7 +121,7 @@ def two_smoke_tenants(admin_engine: Engine) -> Iterator[dict]:
 def super_admin_creds(admin_engine: Engine) -> Iterator[dict]:
     """An MTS staff user the suite uses for the Access-as test."""
 
-    email = f"sa-smoke-{secrets.token_hex(4)}@super.hadir"
+    email = f"sa-smoke-{secrets.token_hex(4)}@super.maugood"
     password = "super-smoke-pw-" + secrets.token_hex(6)
     password_hash = hash_password(password)
     with tenant_context("public"):
@@ -173,12 +173,12 @@ def _login_admin(
     )
     assert resp.status_code == 200, resp.text
     # Both cookies must be set so the next request resolves correctly.
-    assert client.cookies.get("hadir_session"), "missing hadir_session"
-    # ``hadir_tenant`` cookie carries the schema name (internal
+    assert client.cookies.get("maugood_session"), "missing maugood_session"
+    # ``maugood_tenant`` cookie carries the schema name (internal
     # routing state, set by the server) — distinct from the friendly
     # slug the body sent on the way in.
-    assert client.cookies.get("hadir_tenant") == expected_schema, (
-        f"hadir_tenant cookie {client.cookies.get('hadir_tenant')!r} "
+    assert client.cookies.get("maugood_tenant") == expected_schema, (
+        f"maugood_tenant cookie {client.cookies.get('maugood_tenant')!r} "
         f"!= expected schema {expected_schema!r}"
     )
 
@@ -233,7 +233,7 @@ def test_provision_creates_two_isolated_tenants(
     # (the user-facing identifier; ``schema_name`` is internal).
     with tenant_context("public"):
         with admin_engine.begin() as conn:
-            from hadir.db import tenants  # noqa: PLC0415
+            from maugood.db import tenants  # noqa: PLC0415
 
             rows = conn.execute(
                 select(

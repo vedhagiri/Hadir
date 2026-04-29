@@ -1,4 +1,4 @@
-# Hadir — Claude Code project notes
+# Maugood — Claude Code project notes
 
 > **v1.0 in development.** Pilot frozen at tag `v0.1-pilot` on branch
 > `release/pilot`.
@@ -12,7 +12,7 @@
 > confirming which prompt is active.
 
 ## What this is
-Hadir is a camera-based employee attendance platform built by Muscat Tech
+Maugood is a camera-based employee attendance platform built by Muscat Tech
 Solutions for Omran (Oman). IP cameras detect employees by face, the system
 computes attendance against shift policies, and reports are delivered out.
 The pilot (v0.1) was delivered to Omran on the corporate LAN; v1.0 is the
@@ -70,10 +70,10 @@ To return to v1.0 work: `git checkout main`.
 - **P3** — Super-Admin role + console. Migration `0009_super_admin`
   adds three global tables in `public` (`mts_staff`,
   `super_admin_sessions`, `super_admin_audit`) plus a `status` column
-  on `public.tenants`. New `hadir/super_admin/` package + `/api/super-admin/*`
+  on `public.tenants`. New `maugood/super_admin/` package + `/api/super-admin/*`
   endpoints (login, tenants list/detail, in-process provisioning,
   Access-as start/end, suspend/unsuspend). `TenantScopeMiddleware`
-  honours the `hadir_super_session` cookie and applies impersonation;
+  honours the `maugood_super_session` cookie and applies impersonation;
   `current_user` returns a synthetic Super-Admin during impersonation
   with all four roles; `auth.audit.write_audit` dual-logs to
   `public.super_admin_audit` whenever an impersonation context is
@@ -85,7 +85,7 @@ To return to v1.0 work: `git checkout main`.
   adds one per-tenant table (`tenant_branding`) with curated CHECK
   constraints on `primary_color_key` (8 OKLCH options) and
   `font_key` (Inter / Lato / Plus Jakarta Sans). New
-  `hadir/branding/` package owns `/api/branding/*` (tenant Admin)
+  `maugood/branding/` package owns `/api/branding/*` (tenant Admin)
   and `/api/super-admin/tenants/{id}/branding/*` (operator).
   Logos are PNG/SVG ≤200KB validated by magic bytes, stored at
   `/data/branding/{tenant_id}/logo.{ext}`, served via auth-required
@@ -99,7 +99,7 @@ To return to v1.0 work: `git checkout main`.
   `POST /api/auth/login` accepts an optional `tenant_slug`,
   resolves the schema from `public.tenants`, and runs the user
   lookup + session creation under that tenant's schema. Login sets
-  both `hadir_session` (opaque token) and `hadir_tenant` (slug)
+  both `maugood_session` (opaque token) and `maugood_tenant` (slug)
   cookies; `TenantScopeMiddleware` reads the slug to pick which
   schema's `user_sessions` to look the token up in. The new
   end-to-end suite `tests/test_two_tenant_isolation.py` provisions
@@ -113,8 +113,8 @@ To return to v1.0 work: `git checkout main`.
 - **P6** — Entra ID OIDC. Migration `0011_oidc_config` adds a
   per-tenant `tenant_oidc_config` table (entra_tenant_id, client_id,
   Fernet-encrypted client_secret, enabled, updated_at). New env vars
-  `HADIR_AUTH_FERNET_KEY` (separate from photo/RTSP key) and
-  `HADIR_OIDC_REDIRECT_BASE_URL`. `hadir/auth/oidc.py` owns the
+  `MAUGOOD_AUTH_FERNET_KEY` (separate from photo/RTSP key) and
+  `MAUGOOD_OIDC_REDIRECT_BASE_URL`. `maugood/auth/oidc.py` owns the
   whole flow: `/api/auth/oidc/login` redirects to Entra with a
   signed state+nonce cookie, `/api/auth/oidc/callback` validates the
   signed state, exchanges the code, validates the ID token against
@@ -187,7 +187,7 @@ To return to v1.0 work: `git checkout main`.
   collapses to a single overtime treatment. **Per-tenant timezone**
   is the load-bearing red line — `load_tenant_settings(conn, scope)`
   + `local_tz_for(settings)` replaces the server-scoped
-  `HADIR_LOCAL_TIMEZONE` on the hot path; legacy `local_tz()`
+  `MAUGOOD_LOCAL_TIMEZONE` on the hot path; legacy `local_tz()`
   remains only as a fallback. Admin/HR CRUD on `/api/leave-types`,
   `/api/holidays` (+ .xlsx import), `/api/approved-leaves`,
   `/api/tenant-settings`. Frontend Leave & Calendar page at
@@ -218,7 +218,7 @@ To return to v1.0 work: `git checkout main`.
   + comment trios, submitted_at, created_at, updated_at; CHECK on
   the eight status values + leave-type/exception consistency) and
   `request_attachments` (schema only; the upload route lands in
-  P14). Pure state machine `hadir.requests.state_machine` enforces
+  P14). Pure state machine `maugood.requests.state_machine` enforces
   the transitions; the router translates `InvalidTransition` to
   HTTP 409 with the exact reason. Manager rejection is terminal
   (HR-decide on it 409s — load-bearing red line). HR rejection is
@@ -237,12 +237,12 @@ To return to v1.0 work: `git checkout main`.
   with the BRD §FR-REQ-008 list (Doctor / Family / Traffic /
   Official / Other; Annual / Sick / Emergency / Unpaid). Reads open
   to every authenticated role; writes Admin-only.
-  `hadir/requests/attachments.py` validates uploads via **explicit
+  `maugood/requests/attachments.py` validates uploads via **explicit
   magic-byte sniff** — JPEG/PNG/GIF/WEBP/PDF allowed; ZIP only
   passes when the operator-supplied content-type or filename
   declares `.docx` (the load-bearing P14 red line: extension is
   not enough). Per-tenant size cap configured by
-  `HADIR_REQUEST_ATTACHMENT_MAX_MB` (default 5MB), enforced
+  `MAUGOOD_REQUEST_ATTACHMENT_MAX_MB` (default 5MB), enforced
   server-side regardless of any client check. Attachments are
   Fernet-encrypted at rest at
   `/data/attachments/{tenant_id}/requests/{uuid}.{ext}`.
@@ -260,10 +260,10 @@ To return to v1.0 work: `git checkout main`.
   (`get_manager_visible_employee_ids` from P8) — both `_can_view`
   and the `manager_decide` gate use the wider set; explicit
   assignments still drive primary-manager auto-routing on
-  submission. New `hadir/requests/sla.py` (pure) computes
+  submission. New `maugood/requests/sla.py` (pure) computes
   business-hours-open against the tenant's weekend list (P11);
-  thresholds via `HADIR_REQUEST_SLA_BUSINESS_HOURS` (default 48,
-  BRD Open Item Q6) + `HADIR_REQUEST_SLA_BUSINESS_DAY_HOURS`
+  thresholds via `MAUGOOD_REQUEST_SLA_BUSINESS_HOURS` (default 48,
+  BRD Open Item Q6) + `MAUGOOD_REQUEST_SLA_BUSINESS_DAY_HOURS`
   (default 8). Three new endpoints — `GET /api/requests/inbox/{pending,decided,summary}`
   — declared before `/{request_id}` so the static paths route
   cleanly. Every request response now carries
@@ -299,19 +299,19 @@ To return to v1.0 work: `git checkout main`.
   shared-mime-info / fonts-liberation); `pyproject.toml` adds
   `weasyprint==62.3` + `jinja2==3.1.4` + `pydyf==0.10.0` (pinned —
   upstream issue #2129 broke WeasyPrint 62 with pydyf 0.11+).
-  `hadir/reporting/templates/attendance.html` is a single-file
+  `maugood/reporting/templates/attendance.html` is a single-file
   Jinja template with a tenant-branded letterhead, summary block,
   and one section per employee with daily rows + totals; multi-
   employee reports get `page-break-before: always` between each
   section, and the `@page` rule paints "Generated …" + "Page x of
-  y" on every page via CSS counters. `hadir/reporting/pdf.py`
+  y" on every page via CSS counters. `maugood/reporting/pdf.py`
   groups query rows by employee, lazy-creates a `tenant_branding`
   row when missing, picks an accent hex per `primary_color_key`
   via the new `HEX_PALETTE` (deliberate parallel to the OKLCH
   set), and inlines the logo as a `data:` URL so the renderer
   never opens a network socket. New `POST /api/reports/attendance.pdf`
   mirrors the Excel endpoint's body + role gates + manager scoping
-  + date guards; filename `hadir-attendance-{tenant_slug}-{from}-to-{to}.pdf`
+  + date guards; filename `maugood-attendance-{tenant_slug}-{from}-to-{to}.pdf`
   per spec. Frontend Reports page gains a "Generate PDF" button
   alongside the existing Excel one — same filter form, per-format
   loading states.
@@ -321,16 +321,16 @@ To return to v1.0 work: `git checkout main`.
   enabled flag), `report_schedules` (cron, recipients, filter,
   format, bookkeeping), and `report_runs` (one row per execution
   with status, file_path, recipients_delivered_to, delivery_mode).
-  New `hadir/emailing/` ships providers (SMTP via `smtplib`,
+  New `maugood/emailing/` ships providers (SMTP via `smtplib`,
   Microsoft Graph via two `httpx` REST calls — no `msal` SDK), a
   Jinja-rendered HTML template that honours tenant branding, and a
   pluggable factory so tests + the live smoke can capture outbound
-  emails. New `hadir/scheduled_reports/` ships an APScheduler
+  emails. New `maugood/scheduled_reports/` ships an APScheduler
   60-second scan that scopes per tenant via `tenant_context("public")`
   for the registry lookup and `tenant_context(slug)` for the
   per-schedule work; the engine inserts a running row before doing
   anything, picks attach-vs-link based on
-  `HADIR_EMAIL_ATTACHMENT_MAX_MB` (default 10), and rotates
+  `MAUGOOD_EMAIL_ATTACHMENT_MAX_MB` (default 10), and rotates
   `next_run_at` via `croniter`. Signed-URL download is HMAC-token
   gated, per-IP rate-limited, anonymous, and audited
   (`report.signed_url_downloaded`). Settings → Email surfaces
@@ -340,7 +340,7 @@ To return to v1.0 work: `git checkout main`.
 - **P19** — ERP file-drop export. Migration 0020 adds per-tenant
   `erp_export_config` (tenant_id PK, enabled, format ['csv','json'],
   output_path, schedule_cron, window_days, bookkeeping). New
-  `hadir/erp_export/` ships a path resolver (`resolve_safe_dir`
+  `maugood/erp_export/` ships a path resolver (`resolve_safe_dir`
   enforces the load-bearing P19 red line — every output stays
   strictly under `/data/erp/{tenant_id}/`, `..` and outside-root
   absolute paths raise `UnsafeOutputPath`); CSV + JSON builders that
@@ -361,7 +361,7 @@ To return to v1.0 work: `git checkout main`.
   + history with `email_sent_at`, `email_attempts`,
   `email_failed_at`) + `notification_preferences` (composite PK
   user × tenant × category, defaults to both true when no row).
-  New `hadir/notifications/` ships the producer wrappers, the
+  New `maugood/notifications/` ships the producer wrappers, the
   repository (resolve / list / mark-read / set-preference), the
   email-rendering template (`notification.html`, tenant branded),
   the 30-second worker tick that re-resolves preferences per row
@@ -377,7 +377,7 @@ To return to v1.0 work: `git checkout main`.
   channel) with default-true semantics.
 - **P21** — Arabic + RTL. Migration 0022 adds nullable
   `users.preferred_language` (CHECK locked to en/ar/null);
-  schema-agnostic. New `hadir/i18n/` module ships `t()` (dotted-
+  schema-agnostic. New `maugood/i18n/` module ships `t()` (dotted-
   key + `str.format` + missing-key-returns-key fallback),
   Accept-Language q-weighted parser with regional sub-tag
   folding, and `resolve_language(user_pref, accept_language)`
@@ -446,10 +446,10 @@ of the Arabic translations before v1.0 launch** — see
   triggers, ``aria-pressed`` on segmented controls. The lint
   test from P21 covers the two new translated pages.
 
-- **P23** — HTTPS + reverse proxy. New `hadir/security.py`
+- **P23** — HTTPS + reverse proxy. New `maugood/security.py`
   ships `check_production_config(settings)` (fail-fast
   ``ProductionConfigError`` at app boot when
-  ``HADIR_ENV=production`` and any of cookie-secure /
+  ``MAUGOOD_ENV=production`` and any of cookie-secure /
   behind-proxy / allowed-origins / https OIDC base URL /
   rotated secrets is missing — listed in one log line),
   ``HttpsEnforceMiddleware`` (refuses plain HTTP with 421
@@ -468,7 +468,7 @@ of the Arabic translations before v1.0 launch** — see
   Vite bundle and serves it from the nginx image. New
   ``docker-compose.prod.yml`` removes the dev frontend service,
   drops the backend host port, attaches every service to a new
-  ``hadir-internal`` network, and adds the nginx service.
+  ``maugood-internal`` network, and adds the nginx service.
   Optional ``docker-compose.le.yml`` overlays a Let's Encrypt
   certbot sidecar (HTTP-01 against the ACME-challenge carve-out
   in nginx). Default cert handling is operator-provided certs
@@ -487,8 +487,8 @@ of the Arabic translations before v1.0 launch** — see
   `pg_server_version`, and marks the run complete only at
   the end so partial runs aren't swept by retention.
   Retention: 30 daily / 12 weekly / 12 monthly (configurable
-  via `HADIR_BACKUP_RETAIN_*`). Optional off-site upload to
-  S3-compatible storage via `HADIR_BACKUP_S3_URI` (requires
+  via `MAUGOOD_BACKUP_RETAIN_*`). Optional off-site upload to
+  S3-compatible storage via `MAUGOOD_BACKUP_S3_URI` (requires
   `INCLUDE_AWS_CLI=1` at image build; default OFF — local
   NAS is the BRD Open Item Q4 default). New
   `backend/scripts/restore.sh` validates every checksum
@@ -505,14 +505,14 @@ of the Arabic translations before v1.0 launch** — see
   `docker-compose.prod.yml` adds the `backup` service with
   the script bind-mounted in (updates ship without rebuild)
   and `/data` mounted read-only. Live DR rehearsal cycle
-  ran end-to-end on a throwaway `-p hadirdr` project: backup
+  ran end-to-end on a throwaway `-p maugooddr` project: backup
   in 1 s, restore in 1 s, backend cold-boot in 11 s — total
   RTO actual ~13 s against a 4-hour target. P22 user
   preferences (theme=dark, density=compact) round-tripped
   through the cycle. Three issues surfaced and fixed in the
   same session (`pg_dump --clean --if-exists` conflicting
   with citext, cross-schema FKs blocking per-schema drops,
-  `--no-privileges` stripping the `hadir_app` grants — see
+  `--no-privileges` stripping the `maugood_app` grants — see
   `docs/dr-rehearsal.md`). New `docs/disaster-recovery.md`
   states pilot RTO 4 h / RPO 24 h with future-work path to
   RTO 1 h / RPO 5 min via wal-g. New `docs/dr-rehearsal.md`
@@ -520,22 +520,22 @@ of the Arabic translations before v1.0 launch** — see
   rehearsal due 2026-07-25.
 
 - **P25** — Log rotation + retention cleanup + PDPL delete.
-  New `hadir/logging_config.py` ships
+  New `maugood/logging_config.py` ships
   `GzipRotatingFileHandler` (daily at midnight UTC, 30
   backups, gzip-on-rotation) + `configure_logging()` that
   sets up the root file handler at `backend/logs/app.log`
-  and a *separate* `hadir.audit` logger at
+  and a *separate* `maugood.audit` logger at
   `backend/logs/audit.log` (`propagate=False` so audit
   breadcrumbs don't echo to root). `main.create_app` calls
   it at boot; tests opt out via
-  `HADIR_LOG_DISABLE_FILES=1` so the rotation thread
-  doesn't outlive a temp dir. New `hadir/retention/` ships
+  `MAUGOOD_LOG_DISABLE_FILES=1` so the rotation thread
+  doesn't outlive a temp dir. New `maugood/retention/` ships
   a sweep + APScheduler cron at 03:00 Asia/Muscat that
   iterates `public.tenants` and DELETEs four tables per
   tenant: `camera_health_snapshots` (30d, BRD FR-CAM-007),
   `notifications` (90d), `report_runs` (90d, file first
   then row), `user_sessions` (7d post-expiry). Cutoffs
-  env-overridable via `HADIR_RETENTION_*_DAYS`. Each
+  env-overridable via `MAUGOOD_RETENTION_*_DAYS`. Each
   tenant's sweep writes one `audit_log` row
   (`retention.swept`) + one line to `audit.log`.
   **Load-bearing red line**: the sweep never queries
@@ -544,12 +544,12 @@ of the Arabic translations before v1.0 launch** — see
   `approved_leaves` — a dedicated test snapshots their row
   counts and asserts no shrinkage. Migration 0024 widens
   the `employees.status` CHECK to allow `deleted` (PDPL
-  terminal state). New `hadir/employees/pdpl.py` +
+  terminal state). New `maugood/employees/pdpl.py` +
   `POST /api/employees/{id}/gdpr-delete` (Admin-only,
   body `{confirmation:"I CONFIRM PDPL DELETION"}` —
   exact match) drops every photo (file + row), every
   custom_field_values row, redacts `full_name='[deleted]'`
-  + `email='deleted-{id}@hadir.local'`, flips
+  + `email='deleted-{id}@maugood.local'`, flips
   `status='deleted'`, invalidates the matcher cache, and
   writes an `audit_log` row carrying the previous PII
   in the payload (verifiable-records audit). Schemas
@@ -561,35 +561,35 @@ of the Arabic translations before v1.0 launch** — see
   confirmed redact + audit trail; manual retention sweep
   ran clean across all 3 tenants.
 
-- **P26** — Prometheus + Grafana. New `hadir/metrics.py`
+- **P26** — Prometheus + Grafana. New `maugood/metrics.py`
   defines seven custom metrics with opaque-only labels
   (numeric tenant/camera/employee ids; provider + status
   enums) — no PII red line.
   `prometheus-fastapi-instrumentator==7.0.0` mounts on
   `/metrics`; nginx in production does NOT proxy this path
   (internal-only red line). Hot paths instrumented:
-  capture worker bumps `hadir_capture_frames_total` per
+  capture worker bumps `maugood_capture_frames_total` per
   read, `events.emit_detection_event` bumps
-  `hadir_detection_events_total{identified}` per row,
+  `maugood_detection_events_total{identified}` per row,
   `events.write_health_snapshot` sets
-  `hadir_camera_reachable` 0/1 per minute, attendance
-  scheduler bumps `hadir_attendance_records_computed_total`
+  `maugood_camera_reachable` 0/1 per minute, attendance
+  scheduler bumps `maugood_attendance_records_computed_total`
   by upsert count, notification worker bumps
-  `hadir_email_send_total{provider,status}` per attempt,
+  `maugood_email_send_total{provider,status}` per attempt,
   notification worker's 30 s tick refreshes
-  `hadir_active_sessions{tenant}`. Each scheduler's start()
+  `maugood_active_sessions{tenant}`. Each scheduler's start()
   installs an APScheduler `EVENT_JOB_ERROR` listener that
-  bumps `hadir_scheduler_jobs_failed_total{tenant,job}`.
+  bumps `maugood_scheduler_jobs_failed_total{tenant,job}`.
   New `deploy/prometheus/prometheus.yml` (15 s scrape) +
   `deploy/prometheus/alerts.yml` (4 alerts:
-  HadirCameraUnreachable warning 5 min,
-  HadirCaptureRateLow warning 10 min,
-  HadirSchedulerJobFailing critical 3-in-15-min,
-  HadirEmailFailureRateHigh warning >10% over 1 hour).
+  MaugoodCameraUnreachable warning 5 min,
+  MaugoodCaptureRateLow warning 10 min,
+  MaugoodSchedulerJobFailing critical 3-in-15-min,
+  MaugoodEmailFailureRateHigh warning >10% over 1 hour).
   `deploy/alertmanager/alertmanager.yml` fans alerts to a
   webhook + Admin email (env-driven).
   `deploy/grafana/{provisioning,dashboards}/` provisions
-  the Hadir — Operations dashboard with seven panels
+  the Maugood — Operations dashboard with seven panels
   (capture rate, identification rate, attendance per hour,
   reachability matrix, HTTP p50/p95/p99, email success
   rate, active sessions). New services in
@@ -600,7 +600,7 @@ of the Arabic translations before v1.0 launch** — see
   Prometheus targets up, all 4 alert rules loaded, dashboard
   provisioned in Grafana, all 7 custom metrics emit non-
   zero values (after `_test/tick_metrics`), simulated
-  unreachable camera transitions HadirCameraUnreachable to
+  unreachable camera transitions MaugoodCameraUnreachable to
   `pending` (will fire after 5 min). 435 tests passing
   (no regressions).
 
@@ -631,7 +631,7 @@ of the Arabic translations before v1.0 launch** — see
   CORS allow-list cover CSRF; secrets grep + git-log
   search clean; tenant isolation 16/16; audit-log
   immutability re-verified (DELETE/UPDATE/TRUNCATE
-  rejected for hadir_app). 0 critical, 0 high
+  rejected for maugood_app). 0 critical, 0 high
   findings open. 4 dev-only Python CVEs + 5 dev-only
   npm CVEs + 142 unfixed-upstream debian-trixie CVEs
   + 8 H + 1 C in gosu (postgres-base) deferred to next
@@ -641,15 +641,15 @@ of the Arabic translations before v1.0 launch** — see
 - **P28** — Second-tenant non-prod sign-off run.
   Stood up Demo Co from scratch following
   `docs/deploy-production.md` step-by-step on a separate
-  compose project (`-p hadirdemo`) with isolated volumes;
+  compose project (`-p maugooddemo`) with isolated volumes;
   Omran's `main` data untouched throughout. Three CRITICAL
   runbook gaps surfaced and fixed in the same session:
   (1) `docker-compose.yml` `POSTGRES_PASSWORD` was
   hard-coded so the bootstrap superuser and the
-  operator-supplied `HADIR_ADMIN_DB_PASSWORD` disagreed —
+  operator-supplied `MAUGOOD_ADMIN_DB_PASSWORD` disagreed —
   Alembic auth-failed on first boot. Fixed via
   compose-level interpolation
-  `${HADIR_ADMIN_DB_PASSWORD:-hadir}`. (2)
+  `${MAUGOOD_ADMIN_DB_PASSWORD:-maugood}`. (2)
   `capture_manager.start()` issued `engine.begin()` without
   a tenant context; the multi-mode fail-closed listener
   raised. Fixed by iterating `public.tenants` per active
@@ -664,7 +664,7 @@ of the Arabic translations before v1.0 launch** — see
   in §2 (was `from cryptography.fernet import Fernet`,
   failed on a clean Ubuntu 22.04), and a new §6 pick-a-path
   block + §6b multi-tenant flow that explains
-  `HADIR_TENANT_MODE` and shows the
+  `MAUGOOD_TENANT_MODE` and shows the
   `scripts/provision_tenant.py` invocation. Six deferred
   polishes captured in new `docs/v1.x-backlog.md` (B-1
   through B-9): operator-friendly user creation API
@@ -689,7 +689,7 @@ of the Arabic translations before v1.0 launch** — see
   ``CaptureManager`` keying. Replaces the original P28.5
   in-place (P28.5 was uncommitted at the time of this
   refactor; nothing in main shipped its single-thread
-  4 fps design). Capture worker (``hadir/capture/reader.py``)
+  4 fps design). Capture worker (``maugood/capture/reader.py``)
   is now two threads: **reader** runs the RTSP loop at the
   camera's native fps, hands frames to the analyzer via
   a shared ``_latest_frame`` reference + writes the
@@ -708,7 +708,7 @@ of the Arabic translations before v1.0 launch** — see
   defence-in-depth on top of the router's
   ``WHERE tenant_id = …`` filter. ``frame_buffer.py``
   deleted; the per-worker slot replaces it. Live-capture
-  router (``hadir/live_capture/router.py``) consumes
+  router (``maugood/live_capture/router.py``) consumes
   ``capture_manager.get_preview`` + ``get_worker_stats``;
   MJPEG paces at 25 fps to bound bandwidth without
   throwing away the smoothness gain; idle-bail at ~10 s
@@ -812,12 +812,12 @@ of the Arabic translations before v1.0 launch** — see
   ``prototype-reference/backend/detectors.py``) and
   ``tracker_config`` (iou_threshold + timeout_sec +
   max_duration_sec). Both ports of the prototype's two detector
-  modes land in a new ``hadir/detection/`` package
+  modes land in a new ``maugood/detection/`` package
   (``insightface`` and ``yolo+face``); module-level ``_detect_lock``
   serialises across cameras (CPU-bound, parallel thrashes
-  L1/L2). The analyzer (``hadir/capture/analyzer.py``) now reads
+  L1/L2). The analyzer (``maugood/capture/analyzer.py``) now reads
   a ``DetectorConfig`` snapshot and delegates to
-  ``hadir.detection.detect``; mode + det_size hot-swap via
+  ``maugood.detection.detect``; mode + det_size hot-swap via
   ``analyzer.update_config`` (det_size triggers
   ``InsightFace.prepare(...)`` re-prep). The tracker keeps v1.0's
   shape but gains ``from_tracker_config`` (JSONB → kwargs) and
@@ -828,7 +828,7 @@ of the Arabic translations before v1.0 launch** — see
   reconcile loop diffs both against the DB row and audits each
   separately (``capture.worker.tracker_config_updated`` /
   ``capture.worker.detection_config_updated``). Four new
-  endpoints in ``hadir/system/router.py``:
+  endpoints in ``maugood/system/router.py``:
   ``GET/PUT /api/system/{detection,tracker}-config``, Admin-only,
   manual validation with **400** on invalid + named offending
   field (FastAPI's default 422 shaped through a small validator
@@ -870,7 +870,7 @@ of the Arabic translations before v1.0 launch** — see
   day-detail drawer carrying engine status, in/out times,
   totals, day-timeline ribbon, policy applied, and up to 5
   evidence crops. **No new tables** — the read-side
-  aggregator in ``hadir/attendance_calendar/queries.py`` runs
+  aggregator in ``maugood/attendance_calendar/queries.py`` runs
   one ``GROUP BY date`` against ``attendance_records`` and
   folds in P11 holidays + ``tenant_settings.weekend_days``.
   Status enum (``present | late | absent | leave | weekend |
@@ -1043,7 +1043,7 @@ corporate office. The tooling for that lives at:
   rich dummy data on the demo tenant + minimal real data
   on the corporate tenant, and writes a fresh
   ``credentials.txt`` at the repo root. Three brakes:
-  HADIR_ENV must equal ``dev``, no tenant may carry > 50
+  MAUGOOD_ENV must equal ``dev``, no tenant may carry > 50
   employees, operator must type ``RESET``. Refuses to run
   unless the operator has filled in
   ``REAL_CORPORATE_NAME`` / ``REAL_CORPORATE_SLUG`` /
@@ -1074,7 +1074,7 @@ Run it:
 
 ```sh
 $EDITOR backend/scripts/pre_omran_reset_seed.py    # set the 3 constants
-docker compose exec -T -e HADIR_ENV=dev backend \
+docker compose exec -T -e MAUGOOD_ENV=dev backend \
     python -m scripts.pre_omran_reset_seed
 ```
 
@@ -1097,7 +1097,7 @@ What P1 built:
   settings, SQLAlchemy 2.x engine factory, Argon2-cffi installed,
   ruff/black/mypy/pytest dev deps
 - Frontend: Vite + React 18 + TS strict, React Router / TanStack Query /
-  Zustand / RHF / Zod installed, single page rendering "Hadir" using the
+  Zustand / RHF / Zod installed, single page rendering "Maugood" using the
   design system CSS, all four design CSS files imported in order
 - Design archive: `styles*.css` (4 files) verbatim into `frontend/src/styles/`,
   `icons/shell/ui/pages/dashboards/employee/data.jsx` verbatim into
@@ -1113,28 +1113,28 @@ What P2 built:
 - Eight tables in `main`: `tenants`, `users`, `roles`, `user_roles`,
   `departments`, `user_departments`, `user_sessions`, `audit_log`. Every
   tenant-scoped table carries `tenant_id NOT NULL` with a FK to `tenants.id`
-- Two Postgres cluster roles — `hadir_admin` (owner, full CRUD) and
-  `hadir_app` (app runtime; INSERT+SELECT only on `audit_log`, full CRUD
+- Two Postgres cluster roles — `maugood_admin` (owner, full CRUD) and
+  `maugood_app` (app runtime; INSERT+SELECT only on `audit_log`, full CRUD
   elsewhere). Append-only enforcement is at the DB grant level, verified
   by attempting UPDATE/DELETE/TRUNCATE and receiving "permission denied"
 - Seed data: tenant `(1, 'Omran')`; four roles (Admin/HR/Manager/Employee)
   for tenant 1
-- `hadir/tenants/scope.py` — `TenantScope` dataclass + `get_tenant_scope`
-  FastAPI dependency. Resolution: session → `HADIR_DEFAULT_TENANT_ID` (1)
+- `maugood/tenants/scope.py` — `TenantScope` dataclass + `get_tenant_scope`
+  FastAPI dependency. Resolution: session → `MAUGOOD_DEFAULT_TENANT_ID` (1)
 - `backend/scripts/seed_admin.py` — CLI/env-driven admin seeder using
   Argon2; idempotent; never logs the password
 - Backend container entrypoint runs `alembic upgrade head` before
   launching Uvicorn
-- New env vars: `HADIR_ADMIN_DATABASE_URL`, `HADIR_APP_DB_PASSWORD`,
-  `HADIR_ADMIN_DB_PASSWORD`
+- New env vars: `MAUGOOD_ADMIN_DATABASE_URL`, `MAUGOOD_APP_DB_PASSWORD`,
+  `MAUGOOD_ADMIN_DB_PASSWORD`
 
 What P3 built:
-- `hadir/auth/` package — argon2id passwords, server-side sessions in
+- `maugood/auth/` package — argon2id passwords, server-side sessions in
   `main.user_sessions`, append-only audit writer, in-memory rate limiter
   (APScheduler reset every 10 min), FastAPI deps and router
 - Endpoints `/api/auth/login`, `/api/auth/logout`, `/api/auth/me`
-- Session cookie `hadir_session`: HttpOnly, SameSite=Lax, Secure=False in
-  dev, Path=/, Max-Age from `HADIR_SESSION_IDLE_MINUTES` (default 60)
+- Session cookie `maugood_session`: HttpOnly, SameSite=Lax, Secure=False in
+  dev, Path=/, Max-Age from `MAUGOOD_SESSION_IDLE_MINUTES` (default 60)
 - Sliding expiry — every authenticated request refreshes `expires_at`
   and cookie Max-Age
 - Dependencies: `current_user`, `require_role`, `require_any_role`,
@@ -1142,17 +1142,17 @@ What P3 built:
   so the P2 tenant scope dependency picks it up
 - Audit actions: `auth.login.success`, `auth.login.failure`,
   `auth.login.rate_limited`, `auth.logout`, `auth.session.expired` —
-  all INSERT-only via hadir_app
+  all INSERT-only via maugood_app
 - pytest suite (13 tests): happy path, wrong password, unknown email,
   case-insensitive email, expired session, logout, role guard allow/deny
   for Admin/Employee on role + any_role + department deps
-- New env vars: `HADIR_SESSION_IDLE_MINUTES`, `HADIR_SESSION_COOKIE_NAME`,
-  `HADIR_SESSION_COOKIE_SECURE`, `HADIR_LOGIN_MAX_ATTEMPTS`,
-  `HADIR_LOGIN_RATE_LIMIT_RESET_MINUTES`
+- New env vars: `MAUGOOD_SESSION_IDLE_MINUTES`, `MAUGOOD_SESSION_COOKIE_NAME`,
+  `MAUGOOD_SESSION_COOKIE_SECURE`, `MAUGOOD_LOGIN_MAX_ATTEMPTS`,
+  `MAUGOOD_LOGIN_RATE_LIMIT_RESET_MINUTES`
 
 What P4 built:
 - `src/api/client.ts` — fetch wrapper with `ApiError`; same-origin
-  credentials so `hadir_session` flows through the Vite proxy
+  credentials so `maugood_session` flows through the Vite proxy
 - `src/auth/` — `AuthProvider` (TanStack Query `useMe`/`useLogin`/
   `useLogout`), `ProtectedRoute` (redirect to /login on 401),
   `LoginPage` (RHF + Zod, email+password only, surfaces 401/429 distinctly)
@@ -1177,7 +1177,7 @@ What P5 built:
   (photos schema-only in P5; file ingestion + Fernet encryption land in
   P6). Three seed departments (ENG/OPS/ADM). Ownership + grants parity
   with P2 tables.
-- `hadir/employees/` package: tenant-scoped repository, openpyxl-backed
+- `maugood/employees/` package: tenant-scoped repository, openpyxl-backed
   parse_import/build_export, Pydantic schemas, Admin-only router
 - Endpoints: `GET/POST /api/employees`, `GET/PATCH/DELETE /api/employees/{id}`,
   `POST /api/employees/import`, `GET /api/employees/export`
@@ -1197,7 +1197,7 @@ What P6 built:
   `POST /api/employees/photos/bulk` (filename → employee_code + angle),
   decrypt stream `GET /api/employees/{id}/photos/{photo_id}/image`,
   list `GET /api/employees/{id}/photos`, hard delete per photo.
-- Encrypted-at-rest: bytes Fernet-encrypted using `HADIR_FERNET_KEY`
+- Encrypted-at-rest: bytes Fernet-encrypted using `MAUGOOD_FERNET_KEY`
   before writing to `/data/faces/{tenant}/{code}/{angle}/{uuid}.jpg`.
   Inspected on disk: files start with `674141` (Fernet base64url
   'gAA…'), **not** the JPEG magic `ffd8ff`.
@@ -1220,10 +1220,10 @@ What P6 built:
 What P7 built:
 - Alembic migration `0003_cameras` creates the `cameras` table
   (id, tenant_id, name, location, rtsp_url_encrypted, enabled,
-  created_at, last_seen_at, images_captured_24h) owned by hadir_admin
-  with full CRUD granted to hadir_app. Unique on `(tenant_id, name)`.
-- `hadir/cameras/` package: Fernet encrypt/decrypt of the RTSP URL
-  (same `HADIR_FERNET_KEY` as photos), host-only parser that strips
+  created_at, last_seen_at, images_captured_24h) owned by maugood_admin
+  with full CRUD granted to maugood_app. Unique on `(tenant_id, name)`.
+- `maugood/cameras/` package: Fernet encrypt/decrypt of the RTSP URL
+  (same `MAUGOOD_FERNET_KEY` as photos), host-only parser that strips
   userinfo, thread-guarded single-frame grab via OpenCV
   (`opencv-python-headless`) with a 5-second hard wall-clock timeout.
 - Endpoints (all Admin-only, audit-logged):
@@ -1264,7 +1264,7 @@ What P8 built:
   minute per camera, with `frames_last_minute` + `reachable` + optional
   `note`). Indexes on `(tenant_id, captured_at)` plus camera + employee
   partitioned variants for P11/P12.
-- `hadir/capture/` package: pure IoU tracker (threshold 0.3, idle
+- `maugood/capture/` package: pure IoU tracker (threshold 0.3, idle
   timeout 3s, greedy association with no double-claim), InsightFace
   `buffalo_l` detection wrapper (recognition skipped; lazy-imported so
   tests don't trigger the 250 MB model download), event emitter that
@@ -1312,10 +1312,10 @@ What P9 built:
 - Alembic migration `0005_photo_embeddings` adds
   `employee_photos.embedding BYTEA NULL` — Fernet-encrypted 512-float32
   InsightFace buffalo_l recognition vectors.
-- `hadir/capture/analyzer.py` no longer restricts to detection-only;
+- `maugood/capture/analyzer.py` no longer restricts to detection-only;
   recognition is loaded and `Detection.embedding` is populated on
   every detected face.
-- `hadir/identification/` package: `embeddings.py` (Fernet-encrypt
+- `maugood/identification/` package: `embeddings.py` (Fernet-encrypt
   vectors, with a shape-check guardrail), `enrollment.py`
   (`compute_embedding_for_file`, `enroll_photo`,
   `enroll_missing`, `clear_all_embeddings`, `reembed_all`),
@@ -1332,7 +1332,7 @@ What P9 built:
   and `matcher_cache.invalidate_employee` on delete; the FastAPI
   lifespan kicks off `enroll_missing` on a daemon thread so startup
   isn't blocked.
-- New env var: `HADIR_MATCH_THRESHOLD` (default 0.45). The threshold
+- New env var: `MAUGOOD_MATCH_THRESHOLD` (default 0.45). The threshold
   is hard — below it, the matcher refuses to assign an employee.
 - Pytest coverage: +9 new tests (65 total). Synthetic-vector matcher
   tests cover the Fernet embedding round-trip, happy-path match,
@@ -1368,17 +1368,17 @@ What P10 built:
   `active_from = CURRENT_DATE`. Indexes on `(tenant_id, date)` plus
   the unique constraint `(tenant_id, employee_id, date)` so the
   scheduler upsert is single-row.
-- `hadir/attendance/engine.py` — **pure** computation. ``compute()``
+- `maugood/attendance/engine.py` — **pure** computation. ``compute()``
   takes employee_id, the_date, ShiftPolicy, events, leaves, holidays
   and returns an ``AttendanceRecord`` value object. No DB, no
   network — the v1.0 multi-policy engine plugs in additively.
-- `hadir/attendance/repository.py` — tenant-scoped DB layer. Loads
+- `maugood/attendance/repository.py` — tenant-scoped DB layer. Loads
   the active policy for a date, converts UTC `detection_events`
-  timestamps to `HADIR_LOCAL_TIMEZONE` (default `Asia/Muscat`)
+  timestamps to `MAUGOOD_LOCAL_TIMEZONE` (default `Asia/Muscat`)
   before handing to the engine, and persists via
   Postgres `ON CONFLICT (tenant_id, employee_id, date)` upsert.
-- `hadir/attendance/scheduler.py` — APScheduler interval job every
-  `HADIR_ATTENDANCE_RECOMPUTE_MINUTES` (default 15). On `start()`
+- `maugood/attendance/scheduler.py` — APScheduler interval job every
+  `MAUGOOD_ATTENDANCE_RECOMPUTE_MINUTES` (default 15). On `start()`
   fires an immediate seed so a fresh boot has rows ready before any
   HTTP request arrives. Pilot does not recompute historical days.
 - `GET /api/attendance?date=&department_id=` — role-scoped list.
@@ -1390,8 +1390,8 @@ What P10 built:
   raw `INSERT`; SQLAlchemy's pyformat paramstyle then read `:15`
   inside `"grace_minutes":15` as a bind marker. Fixed by using
   `sa.text(...).bindparams(config=json.dumps(...))`.
-- New env vars: `HADIR_LOCAL_TIMEZONE` (default `Asia/Muscat`),
-  `HADIR_ATTENDANCE_RECOMPUTE_MINUTES` (default 15).
+- New env vars: `MAUGOOD_LOCAL_TIMEZONE` (default `Asia/Muscat`),
+  `MAUGOOD_ATTENDANCE_RECOMPUTE_MINUTES` (default 15).
 - Pytest coverage: +12 new tests (now 68 total). The engine suite
   exercises absent (with and without leave), single-event in-time,
   on-time-no-flags, late at and one minute past grace, early-out
@@ -1421,7 +1421,7 @@ What P10 built:
 
 ## Directory map
 ```
-hadir/
+maugood/
   backend/                  # Python service — see backend/CLAUDE.md
     pyproject.toml
     Dockerfile
@@ -1432,10 +1432,10 @@ hadir/
       versions/
         0001_initial.py     # schema, citext, DB roles, grants, seed
     .env.example
-    hadir/
+    maugood/
       __init__.py
       main.py               # FastAPI app + create_app()
-      config.py             # Pydantic Settings (HADIR_* env vars)
+      config.py             # Pydantic Settings (MAUGOOD_* env vars)
       db.py                 # metadata (schema=main) + all 8 tables + engines
       tenants/              # TenantScope + get_tenant_scope
     scripts/
@@ -1450,7 +1450,7 @@ hadir/
     .env.example
     src/
       main.tsx              # entry; imports CSS + mounts <App/>
-      App.tsx               # P1 placeholder ("Hadir")
+      App.tsx               # P1 placeholder ("Maugood")
       styles/               # design CSS, copied verbatim
       design/               # design JSX reference, read-only
   design-reference/         # unpacked design archive (input source)
@@ -1460,7 +1460,7 @@ hadir/
   CLAUDE.md                 # this file
   PROJECT_CONTEXT.md        # decisions log
   pilot-plan.md             # the 5-day pilot plan
-  Hadir_v1.0_BRD.docx       # business requirements
+  Maugood_v1.0_BRD.docx       # business requirements
 ```
 
 ## How to run
@@ -1469,7 +1469,7 @@ hadir/
    cp .env.example .env
    cp backend/.env.example backend/.env
    cp frontend/.env.example frontend/.env
-   # Generate a Fernet key for HADIR_FERNET_KEY:
+   # Generate a Fernet key for MAUGOOD_FERNET_KEY:
    python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
    ```
 2. **Bring up the stack:**
@@ -1481,15 +1481,15 @@ hadir/
    ```
 3. **Seed the pilot admin:**
    ```sh
-   docker compose exec -e HADIR_SEED_PASSWORD='pick-something-real' backend \
-     python -m scripts.seed_admin --email admin@pilot.hadir --full-name "Pilot Admin"
+   docker compose exec -e MAUGOOD_SEED_PASSWORD='pick-something-real' backend \
+     python -m scripts.seed_admin --email admin@pilot.maugood --full-name "Pilot Admin"
    ```
 4. **Verify:**
    - Backend health: `curl http://localhost:8000/api/health` → `{"status":"ok"}`
-   - Frontend: open `http://localhost:5173` → renders "Hadir" on the
+   - Frontend: open `http://localhost:5173` → renders "Maugood" on the
      warm-neutral background using the display serif
-   - Postgres (admin): reachable on `localhost:5432` as `hadir/hadir/hadir`
-   - Postgres (app): `hadir_app/hadir_app` — has INSERT+SELECT only on
+   - Postgres (admin): reachable on `localhost:5432` as `maugood/maugood/maugood`
+   - Postgres (app): `maugood_app/maugood_app` — has INSERT+SELECT only on
      `main.audit_log`; UPDATE/DELETE/TRUNCATE are rejected
 5. **Stop:** `docker compose down`. Add `-v` to also drop the postgres
    volume (do this only when you want a clean DB).

@@ -1,5 +1,5 @@
 // Wire types for /api/operations/* + the camera-metadata PATCH.
-// Mirror the Pydantic shapes in backend/hadir/operations/router.py.
+// Mirror the Pydantic shapes in backend/maugood/operations/router.py.
 
 export type StageState = "green" | "amber" | "red" | "unknown";
 export type WorkerStatus =

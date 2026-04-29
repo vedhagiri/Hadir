@@ -5,7 +5,7 @@ Walks the prompt's verification scenario:
   1. Configure email_config (provider=smtp, enabled=true).
   2. Create a weekly attendance schedule (PDF, recipients).
   3. Invoke ``run_schedule_now`` in-process so the file-recorder env
-     (``HADIR_EMAIL_RECORDER_PATH``) is honoured by the same Python
+     (``MAUGOOD_EMAIL_RECORDER_PATH``) is honoured by the same Python
      process that creates the email message. (The HTTP run-now
      endpoint runs inside uvicorn, which doesn't share env with this
      script.)
@@ -29,7 +29,7 @@ from typing import Optional
 import httpx
 from sqlalchemy import delete, insert, select, update
 
-from hadir.db import (
+from maugood.db import (
     attendance_records,
     audit_log,
     email_config,
@@ -41,9 +41,9 @@ from hadir.db import (
     shift_policies,
     user_sessions,
 )
-from hadir.scheduled_reports.runner import run_schedule_now
-from hadir.scheduled_reports.signed_url import make_token
-from hadir.tenants.scope import TenantScope
+from maugood.scheduled_reports.runner import run_schedule_now
+from maugood.scheduled_reports.signed_url import make_token
+from maugood.tenants.scope import TenantScope
 
 
 BASE = "http://localhost:8000"
@@ -79,7 +79,7 @@ def _provision_attendance(admin_engine) -> tuple[int, int]:
                     tenant_id=TENANT_ID,
                     employee_code="P18-A",
                     full_name="P18 Smoke A",
-                    email="a@p18.hadir",
+                    email="a@p18.maugood",
                     department_id=1,
                 )
                 .returning(employees.c.id)
@@ -92,7 +92,7 @@ def _provision_attendance(admin_engine) -> tuple[int, int]:
                     tenant_id=TENANT_ID,
                     employee_code="P18-B",
                     full_name="P18 Smoke B",
-                    email="b@p18.hadir",
+                    email="b@p18.maugood",
                     department_id=2,
                 )
                 .returning(employees.c.id)
@@ -189,15 +189,15 @@ def _cleanup(admin_engine, a: int, b: int) -> None:
 
 
 def main() -> int:
-    if not os.environ.get("HADIR_SMOKE_PASSWORD"):
-        print("[p18] set HADIR_SMOKE_PASSWORD", file=sys.stderr)
+    if not os.environ.get("MAUGOOD_SMOKE_PASSWORD"):
+        print("[p18] set MAUGOOD_SMOKE_PASSWORD", file=sys.stderr)
         return 1
 
     # File recorder path the running backend will pick up via
-    # ``HADIR_EMAIL_RECORDER_PATH``. The docker compose exec command
+    # ``MAUGOOD_EMAIL_RECORDER_PATH``. The docker compose exec command
     # sets the env when running the smoke; we read the file back here.
     recorder_path = os.environ.get(
-        "HADIR_EMAIL_RECORDER_PATH", "/tmp/hadir-p18-recorder.jsonl"
+        "MAUGOOD_EMAIL_RECORDER_PATH", "/tmp/maugood-p18-recorder.jsonl"
     )
     Path(recorder_path).unlink(missing_ok=True)
 
@@ -210,8 +210,8 @@ def main() -> int:
             login = c.post(
                 "/api/auth/login",
                 json={
-                    "email": "admin@pilot.hadir",
-                    "password": os.environ["HADIR_SMOKE_PASSWORD"],
+                    "email": "admin@pilot.maugood",
+                    "password": os.environ["MAUGOOD_SMOKE_PASSWORD"],
                 },
             )
             login.raise_for_status()
@@ -223,10 +223,10 @@ def main() -> int:
                 json={
                     "provider": "smtp",
                     "smtp_host": "smtp.test.example",
-                    "smtp_username": "hadir-smoke",
+                    "smtp_username": "maugood-smoke",
                     "smtp_password": "rotate-me",
                     "from_address": "noreply@test.example",
-                    "from_name": "Hadir",
+                    "from_name": "Maugood",
                     "enabled": True,
                 },
             )
@@ -246,8 +246,8 @@ def main() -> int:
                     "format": "pdf",
                     "filter_config": {"window_days": 7},
                     "recipients": [
-                        "admin@pilot.hadir",
-                        "hr@pilot.hadir",
+                        "admin@pilot.maugood",
+                        "hr@pilot.maugood",
                     ],
                     "schedule_cron": "0 8 * * 1",
                 },

@@ -19,8 +19,8 @@ import sys
 
 from sqlalchemy import select
 
-from hadir.db import make_admin_engine, tenant_context, tenants as t_tenants
-from hadir.employees.lifecycle_cron import run_all_tenants, run_for_tenant
+from maugood.db import make_admin_engine, tenant_context, tenants as t_tenants
+from maugood.employees.lifecycle_cron import run_all_tenants, run_for_tenant
 
 
 def _resolve_one_tenant(slug: str) -> tuple[int, str]:

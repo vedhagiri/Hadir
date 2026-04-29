@@ -108,12 +108,12 @@ def upgrade() -> None:
     )
 
     # --- Grants -------------------------------------------------------------
-    # Ownership goes to hadir_admin for parity with P2 tables; hadir_app gets
+    # Ownership goes to maugood_admin for parity with P2 tables; maugood_app gets
     # full CRUD. Neither table has the audit-log restriction.
     for table in ("employees", "employee_photos"):
-        op.execute(f'ALTER TABLE "{SCHEMA}"."{table}" OWNER TO hadir_admin')
+        op.execute(f'ALTER TABLE "{SCHEMA}"."{table}" OWNER TO maugood_admin')
         op.execute(
-            f'GRANT SELECT, INSERT, UPDATE, DELETE ON "{SCHEMA}"."{table}" TO hadir_app'
+            f'GRANT SELECT, INSERT, UPDATE, DELETE ON "{SCHEMA}"."{table}" TO maugood_app'
         )
 
     # Re-grant sequence privs — the new SERIAL PKs introduced sequences the
@@ -121,7 +121,7 @@ def upgrade() -> None:
     # covered future sequences, but a bulk grant is cheap and keeps this
     # migration self-contained.
     op.execute(
-        f'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA "{SCHEMA}" TO hadir_app'
+        f'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA "{SCHEMA}" TO maugood_app'
     )
 
     # --- Seed departments ---------------------------------------------------

@@ -1,7 +1,7 @@
-"""Provision a new Hadir tenant from scratch.
+"""Provision a new Maugood tenant from scratch.
 
 Creates the Postgres schema, materialises every per-tenant table inside
-it, wires the grants ``hadir_app`` needs, stamps the schema's
+it, wires the grants ``maugood_app`` needs, stamps the schema's
 ``alembic_version`` at head so future migrations apply incrementally,
 seeds the default roles + departments + Fixed shift policy, and creates
 the first Admin user with an Argon2-hashed password.
@@ -19,7 +19,7 @@ callers cannot set ``schema_name`` directly anymore. The pilot's
 ``main`` schema row pre-dates this convention and is never
 re-provisioned through this script.
 
-The password is read from ``$HADIR_PROVISION_PASSWORD`` if set; otherwise
+The password is read from ``$MAUGOOD_PROVISION_PASSWORD`` if set; otherwise
 the script prompts for it on stdin (with confirmation). The plain
 password never appears on the command line, in logs, or in stdout.
 
@@ -54,8 +54,8 @@ from typing import Optional
 from sqlalchemy import insert, select, text
 from sqlalchemy.engine import Connection, Engine
 
-from hadir.auth.passwords import hash_password
-from hadir.db import (
+from maugood.auth.passwords import hash_password
+from maugood.db import (
     audit_log,
     departments,
     make_admin_engine,
@@ -69,9 +69,9 @@ from hadir.db import (
     user_roles,
     users,
 )
-from hadir.tenants.slug import SLUG_RE, schema_name_for_slug
+from maugood.tenants.slug import SLUG_RE, schema_name_for_slug
 
-logger = logging.getLogger("hadir.provision_tenant")
+logger = logging.getLogger("maugood.provision_tenant")
 
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
 
@@ -96,7 +96,7 @@ _DEFAULT_POLICY = {
     },
 }
 
-# Tables that ``hadir_app`` operates on with full CRUD inside the new
+# Tables that ``maugood_app`` operates on with full CRUD inside the new
 # tenant schema. ``audit_log`` is excluded — its grants are narrower.
 _APP_CRUD_TABLES = (
     "users",
@@ -138,7 +138,7 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Provision a new Hadir tenant.",
+        description="Provision a new Maugood tenant.",
     )
     parser.add_argument(
         "--slug",
@@ -161,7 +161,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         "--admin-password",
         default=None,
         help=(
-            "Admin password. If omitted, reads $HADIR_PROVISION_PASSWORD or "
+            "Admin password. If omitted, reads $MAUGOOD_PROVISION_PASSWORD or "
             "prompts on stdin."
         ),
     )
@@ -171,7 +171,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 def _resolve_password(cli_password: Optional[str]) -> str:
     if cli_password:
         return _enforce_min_length(cli_password)
-    env_password = os.environ.get("HADIR_PROVISION_PASSWORD")
+    env_password = os.environ.get("MAUGOOD_PROVISION_PASSWORD")
     if env_password:
         return _enforce_min_length(env_password)
     # Interactive prompt with confirmation. getpass never echoes.
@@ -247,30 +247,30 @@ def _create_per_tenant_tables(conn: Connection, *, schema_name: str) -> None:
 def _apply_grants(conn: Connection, *, schema_name: str) -> None:
     """Mirror the grants that 0001-0006 applied to ``main`` for the new schema."""
 
-    conn.execute(text(f'ALTER SCHEMA "{schema_name}" OWNER TO hadir_admin'))
-    conn.execute(text(f'GRANT USAGE ON SCHEMA "{schema_name}" TO hadir_app'))
+    conn.execute(text(f'ALTER SCHEMA "{schema_name}" OWNER TO maugood_admin'))
+    conn.execute(text(f'GRANT USAGE ON SCHEMA "{schema_name}" TO maugood_app'))
 
     for tbl in _APP_CRUD_TABLES:
-        conn.execute(text(f'ALTER TABLE "{schema_name}"."{tbl}" OWNER TO hadir_admin'))
+        conn.execute(text(f'ALTER TABLE "{schema_name}"."{tbl}" OWNER TO maugood_admin'))
         conn.execute(
             text(
-                f'GRANT SELECT, INSERT, UPDATE, DELETE ON "{schema_name}"."{tbl}" TO hadir_app'
+                f'GRANT SELECT, INSERT, UPDATE, DELETE ON "{schema_name}"."{tbl}" TO maugood_app'
             )
         )
 
     # audit_log is append-only at the grant level — INSERT + SELECT only.
-    conn.execute(text(f'ALTER TABLE "{schema_name}"."audit_log" OWNER TO hadir_admin'))
+    conn.execute(text(f'ALTER TABLE "{schema_name}"."audit_log" OWNER TO maugood_admin'))
     conn.execute(
-        text(f'GRANT SELECT, INSERT ON "{schema_name}"."audit_log" TO hadir_app')
+        text(f'GRANT SELECT, INSERT ON "{schema_name}"."audit_log" TO maugood_app')
     )
 
     conn.execute(
-        text(f'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA "{schema_name}" TO hadir_app')
+        text(f'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA "{schema_name}" TO maugood_app')
     )
     conn.execute(
         text(
             f'ALTER DEFAULT PRIVILEGES IN SCHEMA "{schema_name}" '
-            "GRANT USAGE, SELECT ON SEQUENCES TO hadir_app"
+            "GRANT USAGE, SELECT ON SEQUENCES TO maugood_app"
         )
     )
 
@@ -331,7 +331,7 @@ def _seed_defaults(
     # Default OIDC config row (P6) — disabled, empty fields. The
     # tenant Admin opts in by entering Entra credentials and toggling
     # ``enabled`` on the Authentication settings page.
-    from hadir.db import (  # noqa: PLC0415
+    from maugood.db import (  # noqa: PLC0415
         email_config as _email_config,
         erp_export_config as _erp_export_config,
         leave_types as _leave_types,

@@ -1,6 +1,6 @@
 """Pure state-machine tests for v1.0 P13.
 
-Hits ``hadir.requests.state_machine`` directly — no DB, no HTTP.
+Hits ``maugood.requests.state_machine`` directly — no DB, no HTTP.
 Fast, focused, exhaustive over the eight states.
 """
 
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from hadir.requests import state_machine as sm
+from maugood.requests import state_machine as sm
 
 
 # ---------------------------------------------------------------------------

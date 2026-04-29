@@ -14,7 +14,7 @@ in any tenant schema:
   any tenant via the impersonation hook.
 * ``public.super_admin_audit`` — append-only log of every Super-Admin
   action. Tenant-context actions also write a row to the tenant's
-  own ``audit_log`` (see ``hadir.auth.audit``) — this duplication is
+  own ``audit_log`` (see ``maugood.auth.audit``) — this duplication is
   deliberate so tenants can see they were accessed without needing
   cross-tenant read access to the operator log.
 
@@ -152,25 +152,25 @@ def upgrade() -> None:
     # --- Ownership + grants -------------------------------------------------
     # GRANT statements are idempotent in Postgres so re-running them across
     # tenant iterations is safe.
-    op.execute("ALTER TABLE public.mts_staff OWNER TO hadir_admin")
-    op.execute("ALTER TABLE public.super_admin_sessions OWNER TO hadir_admin")
-    op.execute("ALTER TABLE public.super_admin_audit OWNER TO hadir_admin")
+    op.execute("ALTER TABLE public.mts_staff OWNER TO maugood_admin")
+    op.execute("ALTER TABLE public.super_admin_sessions OWNER TO maugood_admin")
+    op.execute("ALTER TABLE public.super_admin_audit OWNER TO maugood_admin")
 
     op.execute(
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON public.mts_staff TO hadir_app"
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON public.mts_staff TO maugood_app"
     )
     op.execute(
         "GRANT SELECT, INSERT, UPDATE, DELETE ON public.super_admin_sessions "
-        "TO hadir_app"
+        "TO maugood_app"
     )
-    # Append-only: no UPDATE, no DELETE, no TRUNCATE for hadir_app.
-    op.execute("GRANT SELECT, INSERT ON public.super_admin_audit TO hadir_app")
+    # Append-only: no UPDATE, no DELETE, no TRUNCATE for maugood_app.
+    op.execute("GRANT SELECT, INSERT ON public.super_admin_audit TO maugood_app")
 
     op.execute(
-        "GRANT USAGE, SELECT ON SEQUENCE public.mts_staff_id_seq TO hadir_app"
+        "GRANT USAGE, SELECT ON SEQUENCE public.mts_staff_id_seq TO maugood_app"
     )
     op.execute(
-        "GRANT USAGE, SELECT ON SEQUENCE public.super_admin_audit_id_seq TO hadir_app"
+        "GRANT USAGE, SELECT ON SEQUENCE public.super_admin_audit_id_seq TO maugood_app"
     )
 
 

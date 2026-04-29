@@ -1,5 +1,5 @@
 // Wire types for /api/system/{detection,tracker}-config — mirror
-// hadir/system/router.py's Pydantic models.
+// maugood/system/router.py's Pydantic models.
 
 export type DetectorMode = "insightface" | "yolo+face";
 

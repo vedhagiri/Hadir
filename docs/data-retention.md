@@ -1,12 +1,12 @@
-# Hadir — data retention policy
+# Maugood — data retention policy
 
 This document is the durable, per-table reference for what
-Hadir keeps, what it sweeps, and why. Operators consulting it
+Maugood keeps, what it sweeps, and why. Operators consulting it
 should be able to answer "where does my X go" in one lookup.
 
 The mechanism is the daily 03:00 (Asia/Muscat) APScheduler job
-`hadir.retention.run_retention_sweep`, started by the FastAPI
-lifespan. Source of truth is `backend/hadir/retention/sweep.py`.
+`maugood.retention.run_retention_sweep`, started by the FastAPI
+lifespan. Source of truth is `backend/maugood/retention/sweep.py`.
 
 The PDPL right-to-erasure flow is the only path that mutates
 PII outside of the standard CRUD surfaces; see the bottom of
@@ -33,10 +33,10 @@ this doc.
 | Other operational tables    | indefinitely          | Reviewed per-phase; no automatic sweep today.                 | —                                     |
 
 The four sweeping rules are all overrideable via env var:
-`HADIR_RETENTION_CAMERA_HEALTH_DAYS`,
-`HADIR_RETENTION_NOTIFICATIONS_DAYS`,
-`HADIR_RETENTION_REPORT_RUNS_DAYS`,
-`HADIR_RETENTION_USER_SESSIONS_DAYS`. Setting any to 0 (or a
+`MAUGOOD_RETENTION_CAMERA_HEALTH_DAYS`,
+`MAUGOOD_RETENTION_NOTIFICATIONS_DAYS`,
+`MAUGOOD_RETENTION_REPORT_RUNS_DAYS`,
+`MAUGOOD_RETENTION_USER_SESSIONS_DAYS`. Setting any to 0 (or a
 non-numeric value) falls back to the BRD default.
 
 ---
@@ -44,7 +44,7 @@ non-numeric value) falls back to the BRD default.
 ## Red lines
 
 * **`audit_log` is never purged.** It's append-only at the
-  database grant level (the `hadir_app` role has INSERT +
+  database grant level (the `maugood_app` role has INSERT +
   SELECT only). Anything that *appears* to delete from it is
   a bug — file an issue.
 * **Attendance + detection events stay indefinitely.** They
@@ -54,7 +54,7 @@ non-numeric value) falls back to the BRD default.
   removes photos and custom-field values, but the employee
   row + their attendance, detection events, requests, and
   audit trail remain. The employee row is updated with
-  `full_name='[deleted]'` and `email='deleted-{id}@hadir.local'`
+  `full_name='[deleted]'` and `email='deleted-{id}@maugood.local'`
   so the historical records reference a non-PII placeholder.
 
 ---
@@ -67,11 +67,11 @@ land in two separate files (P25):
 | File                          | Purpose                                                         | Retention                              |
 | ----------------------------- | --------------------------------------------------------------- | -------------------------------------- |
 | `backend/logs/app.log`        | Root logger — INFO+ across the whole app, including stdlib.    | Daily rotation, 30 backups, gzip.      |
-| `backend/logs/audit.log`      | `hadir.audit` logger — operator breadcrumbs (PDPL, retention sweeps, etc.) | Daily rotation, 30 backups, gzip. |
+| `backend/logs/audit.log`      | `maugood.audit` logger — operator breadcrumbs (PDPL, retention sweeps, etc.) | Daily rotation, 30 backups, gzip. |
 
-Rotation is handled by `hadir.logging_config.GzipRotatingFileHandler`,
+Rotation is handled by `maugood.logging_config.GzipRotatingFileHandler`,
 which rotates at midnight UTC and gzips each rotated copy in
-place. Backup count is overrideable via `HADIR_LOG_BACKUP_COUNT`.
+place. Backup count is overrideable via `MAUGOOD_LOG_BACKUP_COUNT`.
 
 Both files are operator-facing breadcrumbs only. The DB-side
 `audit_log` table is the source of truth for cryptographic-
@@ -90,7 +90,7 @@ Request body:
 
 The phrase is exact — case- and whitespace-sensitive — so a
 fat-fingered curl can't accidentally invoke this. The phrase
-is exposed via `hadir.employees.pdpl.PDPL_CONFIRMATION_PHRASE`
+is exposed via `maugood.employees.pdpl.PDPL_CONFIRMATION_PHRASE`
 for the UI to render verbatim.
 
 What runs (single transaction):
@@ -103,7 +103,7 @@ What runs (single transaction):
 2. Drop every `custom_field_values` row for the employee.
 3. Update the employees row:
    * `full_name = '[deleted]'`
-   * `email = 'deleted-{id}@hadir.local'`
+   * `email = 'deleted-{id}@maugood.local'`
    * `status = 'deleted'`
 4. Invalidate the in-memory `MatcherCache` entry for the
    employee so a captured face never re-matches against
@@ -142,8 +142,8 @@ when a request is repeated.
 ```sh
 # See what the daily sweep would drop right now (read-only):
 docker compose exec backend python -c "
-from hadir.retention.sweep import run_retention_sweep
-from hadir.db import make_admin_engine
+from maugood.retention.sweep import run_retention_sweep
+from maugood.db import make_admin_engine
 res = run_retention_sweep(make_admin_engine())
 for p in res.per_tenant:
     print(p)
@@ -156,5 +156,5 @@ docker compose exec backend tail -f /app/logs/audit.log
 curl -s -b $COOKIE -X POST \
   -H 'Content-Type: application/json' \
   -d '{"confirmation":"I CONFIRM PDPL DELETION"}' \
-  https://hadir.example.com/api/employees/123/gdpr-delete
+  https://maugood.example.com/api/employees/123/gdpr-delete
 ```

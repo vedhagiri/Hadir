@@ -10,7 +10,7 @@
 //   7. parse the downloaded XLSX and assert the expected row landed
 //   8. clean up the seeded employee + camera + events
 //
-// Requires the live compose stack and HADIR_ENV=dev. Run with:
+// Requires the live compose stack and MAUGOOD_ENV=dev. Run with:
 //   docker compose up -d
 //   cd frontend && npm install && npx playwright install chromium
 //   npm run smoke
@@ -21,8 +21,8 @@ import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const ADMIN_EMAIL = process.env.HADIR_SMOKE_EMAIL ?? "admin@pilot.hadir";
-const ADMIN_PASSWORD = process.env.HADIR_SMOKE_PASSWORD ?? "pilot-admin-pw-8f2a";
+const ADMIN_EMAIL = process.env.MAUGOOD_SMOKE_EMAIL ?? "admin@pilot.maugood";
+const ADMIN_PASSWORD = process.env.MAUGOOD_SMOKE_PASSWORD ?? "pilot-admin-pw-8f2a";
 const SAMPLE_EMPLOYEE_CODE = "P13-SMOKE";
 const SAMPLE_EMPLOYEE_NAME = "Pilot Smoke";
 

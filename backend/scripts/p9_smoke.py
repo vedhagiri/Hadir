@@ -15,10 +15,10 @@ import cv2
 import numpy as np
 from sqlalchemy import delete, insert, select
 
-from hadir.cameras import rtsp as rtsp_io
-from hadir.capture.events import emit_detection_event
-from hadir.capture.tracker import Bbox
-from hadir.db import (
+from maugood.cameras import rtsp as rtsp_io
+from maugood.capture.events import emit_detection_event
+from maugood.capture.tracker import Bbox
+from maugood.db import (
     cameras,
     detection_events,
     employee_photos,
@@ -26,9 +26,9 @@ from hadir.db import (
     make_admin_engine,
     make_engine,
 )
-from hadir.identification.embeddings import encrypt_embedding
-from hadir.identification.matcher import matcher_cache
-from hadir.tenants.scope import TenantScope
+from maugood.identification.embeddings import encrypt_embedding
+from maugood.identification.matcher import matcher_cache
+from maugood.tenants.scope import TenantScope
 
 
 def main() -> int:

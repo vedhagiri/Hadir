@@ -32,9 +32,9 @@
 #       postgres:
 #         image: postgres:15
 #         env:
-#           POSTGRES_USER: hadir
-#           POSTGRES_PASSWORD: hadir
-#           POSTGRES_DB: hadir
+#           POSTGRES_USER: maugood
+#           POSTGRES_PASSWORD: maugood
+#           POSTGRES_DB: maugood
 #         ports:
 #           - 5432:5432
 #         options: >-
@@ -46,22 +46,22 @@
 #     env:
 #       # Match the dev compose so the orchestrator + auth code see the
 #       # same shape of environment in CI as a developer's laptop.
-#       HADIR_ENV: dev
-#       HADIR_TENANT_MODE: single
-#       HADIR_DEFAULT_TENANT_ID: "1"
-#       HADIR_DATABASE_URL: postgresql+psycopg://hadir_app:hadir_app@localhost:5432/hadir
-#       HADIR_ADMIN_DATABASE_URL: postgresql+psycopg://hadir:hadir@localhost:5432/hadir
-#       HADIR_APP_DB_PASSWORD: hadir_app
-#       HADIR_ADMIN_DB_PASSWORD: hadir_admin
-#       HADIR_FERNET_KEY: zE3rJWRZ2y6q5FyzsnktOUFP7fnNBp8R3LU6azcs4VQ=
-#       HADIR_LOCAL_TIMEZONE: Asia/Muscat
-#       HADIR_SESSION_IDLE_MINUTES: "60"
-#       HADIR_SESSION_COOKIE_NAME: hadir_session
-#       HADIR_SESSION_COOKIE_SECURE: "false"
-#       HADIR_LOGIN_MAX_ATTEMPTS: "10"
-#       HADIR_LOGIN_RATE_LIMIT_RESET_MINUTES: "10"
-#       HADIR_MATCH_THRESHOLD: "0.45"
-#       HADIR_ATTENDANCE_RECOMPUTE_MINUTES: "15"
+#       MAUGOOD_ENV: dev
+#       MAUGOOD_TENANT_MODE: single
+#       MAUGOOD_DEFAULT_TENANT_ID: "1"
+#       MAUGOOD_DATABASE_URL: postgresql+psycopg://maugood_app:maugood_app@localhost:5432/maugood
+#       MAUGOOD_ADMIN_DATABASE_URL: postgresql+psycopg://maugood:maugood@localhost:5432/maugood
+#       MAUGOOD_APP_DB_PASSWORD: maugood_app
+#       MAUGOOD_ADMIN_DB_PASSWORD: maugood_admin
+#       MAUGOOD_FERNET_KEY: zE3rJWRZ2y6q5FyzsnktOUFP7fnNBp8R3LU6azcs4VQ=
+#       MAUGOOD_LOCAL_TIMEZONE: Asia/Muscat
+#       MAUGOOD_SESSION_IDLE_MINUTES: "60"
+#       MAUGOOD_SESSION_COOKIE_NAME: maugood_session
+#       MAUGOOD_SESSION_COOKIE_SECURE: "false"
+#       MAUGOOD_LOGIN_MAX_ATTEMPTS: "10"
+#       MAUGOOD_LOGIN_RATE_LIMIT_RESET_MINUTES: "10"
+#       MAUGOOD_MATCH_THRESHOLD: "0.45"
+#       MAUGOOD_ATTENDANCE_RECOMPUTE_MINUTES: "15"
 
 #     steps:
 #       - uses: actions/checkout@v4
@@ -81,7 +81,7 @@
 #       - name: Bootstrap DB roles + run migrations
 #         working-directory: backend
 #         run: |
-#           # The initial migration creates hadir_app/hadir_admin roles
+#           # The initial migration creates maugood_app/maugood_admin roles
 #           # using the env-provided passwords; the orchestrator then
 #           # advances every schema to head.
 #           python -m scripts.migrate

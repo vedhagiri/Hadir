@@ -22,16 +22,16 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, select, update
 
-from hadir.config import get_settings
-from hadir.db import audit_log, attendance_records, erp_export_config
-from hadir.erp_export.builder import (
+from maugood.config import get_settings
+from maugood.db import audit_log, attendance_records, erp_export_config
+from maugood.erp_export.builder import (
     CSV_COLUMNS,
     ExportRow,
     filename_for,
     render_csv,
     render_json,
 )
-from hadir.erp_export.paths import (
+from maugood.erp_export.paths import (
     UnsafeOutputPath,
     resolve_safe_dir,
     tenant_root,
@@ -50,7 +50,7 @@ from tests.test_p13_reports import _login, seeded_attendance  # noqa: F401
 def test_path_resolver_empty_collapses_to_tenant_root(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv("HADIR_ERP_EXPORT_ROOT", str(tmp_path))
+    monkeypatch.setenv("MAUGOOD_ERP_EXPORT_ROOT", str(tmp_path))
     resolved = resolve_safe_dir(tenant_id=1, raw="")
     assert resolved == (tmp_path / "1").resolve()
 
@@ -58,7 +58,7 @@ def test_path_resolver_empty_collapses_to_tenant_root(
 def test_path_resolver_traversal_rejected(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv("HADIR_ERP_EXPORT_ROOT", str(tmp_path))
+    monkeypatch.setenv("MAUGOOD_ERP_EXPORT_ROOT", str(tmp_path))
     with pytest.raises(UnsafeOutputPath):
         resolve_safe_dir(tenant_id=1, raw="../../etc")
     with pytest.raises(UnsafeOutputPath):
@@ -68,7 +68,7 @@ def test_path_resolver_traversal_rejected(
 def test_path_resolver_absolute_outside_root_rejected(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv("HADIR_ERP_EXPORT_ROOT", str(tmp_path))
+    monkeypatch.setenv("MAUGOOD_ERP_EXPORT_ROOT", str(tmp_path))
     with pytest.raises(UnsafeOutputPath):
         resolve_safe_dir(tenant_id=1, raw="/tmp/elsewhere")
 
@@ -76,7 +76,7 @@ def test_path_resolver_absolute_outside_root_rejected(
 def test_path_resolver_absolute_inside_root_accepted(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv("HADIR_ERP_EXPORT_ROOT", str(tmp_path))
+    monkeypatch.setenv("MAUGOOD_ERP_EXPORT_ROOT", str(tmp_path))
     target = tmp_path / "1" / "incoming"
     resolved = resolve_safe_dir(tenant_id=1, raw=str(target))
     assert resolved == target.resolve()
@@ -147,7 +147,7 @@ def test_filename_format() -> None:
     fname = filename_for(
         fmt="csv", now=datetime(2026, 4, 25, 8, 30, 5, tzinfo=timezone.utc)
     )
-    assert fname == "hadir-attendance-20260425-083005.csv"
+    assert fname == "maugood-attendance-20260425-083005.csv"
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +161,7 @@ def _reset_erp_config(admin_engine, monkeypatch: pytest.MonkeyPatch, tmp_path: P
     erp_export_config row. We point the tenant root at ``tmp_path``
     so the suite never writes into ``/data/erp``."""
 
-    monkeypatch.setenv("HADIR_ERP_EXPORT_ROOT", str(tmp_path))
+    monkeypatch.setenv("MAUGOOD_ERP_EXPORT_ROOT", str(tmp_path))
 
     def _reset() -> None:
         with admin_engine.begin() as conn:
@@ -250,7 +250,7 @@ def test_run_now_writes_csv_and_streams_bytes(
     assert resp.status_code == 200, resp.text
     assert resp.headers["content-type"].startswith("text/csv")
     cd = resp.headers["content-disposition"]
-    assert "hadir-attendance-" in cd and cd.endswith('.csv"')
+    assert "maugood-attendance-" in cd and cd.endswith('.csv"')
 
     body_text = resp.content.decode("utf-8")
     assert body_text.splitlines()[0] == ",".join(CSV_COLUMNS)
@@ -262,7 +262,7 @@ def test_run_now_writes_csv_and_streams_bytes(
 
     # File landed on disk under {tmp_path}/1/incoming/{filename}.csv
     drop_dir = tmp_path / "1" / "incoming"
-    files = list(drop_dir.glob("hadir-attendance-*.csv"))
+    files = list(drop_dir.glob("maugood-attendance-*.csv"))
     assert len(files) == 1, files
     assert files[0].read_bytes() == resp.content
 

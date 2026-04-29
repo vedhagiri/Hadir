@@ -8,7 +8,7 @@ bytes back.
 
 Run inside the backend container:
 
-    docker compose exec -e HADIR_SMOKE_PASSWORD='…' backend \\
+    docker compose exec -e MAUGOOD_SMOKE_PASSWORD='…' backend \\
         python -m scripts.v1_p19_smoke
 """
 
@@ -23,7 +23,7 @@ from pathlib import Path
 import httpx
 from sqlalchemy import delete, insert, select, update
 
-from hadir.db import (
+from maugood.db import (
     attendance_records,
     audit_log,
     employees,
@@ -31,7 +31,7 @@ from hadir.db import (
     make_admin_engine,
     shift_policies,
 )
-from hadir.erp_export.builder import CSV_COLUMNS
+from maugood.erp_export.builder import CSV_COLUMNS
 
 
 BASE = "http://localhost:8000"
@@ -66,7 +66,7 @@ def _seed_attendance(admin_engine) -> tuple[int, int]:
                     tenant_id=TENANT_ID,
                     employee_code="P19-A",
                     full_name="P19 Smoke Alice",
-                    email="alice@p19.hadir",
+                    email="alice@p19.maugood",
                     department_id=1,
                 )
                 .returning(employees.c.id)
@@ -79,7 +79,7 @@ def _seed_attendance(admin_engine) -> tuple[int, int]:
                     tenant_id=TENANT_ID,
                     employee_code="P19-B",
                     full_name="P19 Smoke Bob",
-                    email="bob@p19.hadir",
+                    email="bob@p19.maugood",
                     department_id=2,
                 )
                 .returning(employees.c.id)
@@ -153,12 +153,12 @@ def _cleanup(admin_engine, a: int, b: int) -> None:
 
 
 def main() -> int:
-    if not os.environ.get("HADIR_SMOKE_PASSWORD"):
-        print("[p19] set HADIR_SMOKE_PASSWORD", file=sys.stderr)
+    if not os.environ.get("MAUGOOD_SMOKE_PASSWORD"):
+        print("[p19] set MAUGOOD_SMOKE_PASSWORD", file=sys.stderr)
         return 1
 
     # The smoke runs against the live uvicorn process, which uses
-    # the default ``HADIR_ERP_EXPORT_ROOT`` (``/data/erp``) — setting
+    # the default ``MAUGOOD_ERP_EXPORT_ROOT`` (``/data/erp``) — setting
     # the env in this process wouldn't reach it. We just read the
     # tenant_root the API reports back and cleanup that subtree.
     admin_engine = make_admin_engine()
@@ -170,8 +170,8 @@ def main() -> int:
             login = c.post(
                 "/api/auth/login",
                 json={
-                    "email": "admin@pilot.hadir",
-                    "password": os.environ["HADIR_SMOKE_PASSWORD"],
+                    "email": "admin@pilot.maugood",
+                    "password": os.environ["MAUGOOD_SMOKE_PASSWORD"],
                 },
             )
             login.raise_for_status()
@@ -211,7 +211,7 @@ def main() -> int:
             tenant_root = Path(cfg.json()["tenant_root"])
             drop_dir = tenant_root / "incoming" / "attendance"
             if drop_dir.is_dir():
-                for f in drop_dir.glob("hadir-attendance-*"):
+                for f in drop_dir.glob("maugood-attendance-*"):
                     try:
                         f.unlink()
                     except OSError:
@@ -230,7 +230,7 @@ def main() -> int:
 
             # The runner says it sent the bytes back; confirm a real
             # file landed under the tenant root with the same bytes.
-            files = list(drop_dir.glob("hadir-attendance-*.csv"))
+            files = list(drop_dir.glob("maugood-attendance-*.csv"))
             assert len(files) == 1, files
             on_disk = files[0].read_bytes()
             assert on_disk == run.content
@@ -292,7 +292,7 @@ def main() -> int:
         # Best-effort cleanup of the file-drop subtree we wrote into.
         try:
             import shutil  # noqa: PLC0415
-            from hadir.config import get_settings  # noqa: PLC0415
+            from maugood.config import get_settings  # noqa: PLC0415
 
             root = Path(get_settings().erp_export_root) / str(TENANT_ID)
             shutil.rmtree(root, ignore_errors=True)

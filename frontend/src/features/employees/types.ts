@@ -1,5 +1,5 @@
 // Wire types for /api/employees.* — the backend serialises these directly
-// from the Pydantic schemas in hadir/employees/schemas.py.
+// from the Pydantic schemas in maugood/employees/schemas.py.
 
 export interface Department {
   id: number;

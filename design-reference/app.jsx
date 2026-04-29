@@ -6,7 +6,7 @@ function LoginScreen({ onLogin }) {
       <div style={{ background: 'var(--bg)', display: 'flex', flexDirection: 'column', padding: '48px 64px' }}>
         <div className="flex items-center gap-2">
           <div className="brand-mark" style={{ width: 30, height: 30, borderRadius: 8 }}>ح</div>
-          <div style={{ fontSize: 17, fontWeight: 600, letterSpacing: '-0.01em' }}>Hadir</div>
+          <div style={{ fontSize: 17, fontWeight: 600, letterSpacing: '-0.01em' }}>Maugood</div>
         </div>
         <div style={{ margin: 'auto 0', maxWidth: 400 }}>
           <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 500, fontSize: 38, letterSpacing: '-0.02em', lineHeight: 1.1, margin: 0 }}>
@@ -206,7 +206,7 @@ function App() {
       {openForm === 'request' && <NewRequestDrawer role={role} currentUserId={role === 'Employee' ? 'OM0045' : null} onClose={() => setOpenForm(null)} />}
       {openForm === 'report' && <NewReportDrawer onClose={() => setOpenForm(null)} />}
       {mgrAssignOpen && <ManagerAssignDrawer onClose={() => setMgrAssignOpen(false)} />}
-      <HadirTweaks tweaks={tweaks} setTweaks={setTweaks} />
+      <MaugoodTweaks tweaks={tweaks} setTweaks={setTweaks} />
     </div>
   );
 }
@@ -296,7 +296,7 @@ function AuditStub() {
   );
 }
 
-function HadirTweaks({ tweaks, setTweaks }) {
+function MaugoodTweaks({ tweaks, setTweaks }) {
   const T = window.TweaksPanel;
   const { TweakSection, TweakRadio, TweakToggle, TweakSelect } = window;
   return (

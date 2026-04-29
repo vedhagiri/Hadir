@@ -91,12 +91,12 @@ def upgrade() -> None:
             name="ck_custom_fields_select_options",
         ),
     )
-    op.execute('ALTER TABLE custom_fields OWNER TO hadir_admin')
+    op.execute('ALTER TABLE custom_fields OWNER TO maugood_admin')
     op.execute(
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON custom_fields TO hadir_app"
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON custom_fields TO maugood_app"
     )
     op.execute(
-        "GRANT USAGE, SELECT ON SEQUENCE custom_fields_id_seq TO hadir_app"
+        "GRANT USAGE, SELECT ON SEQUENCE custom_fields_id_seq TO maugood_app"
     )
 
     # ----- custom_field_values --------------------------------------------
@@ -138,12 +138,12 @@ def upgrade() -> None:
             name="uq_custom_field_values_tenant_emp_field",
         ),
     )
-    op.execute('ALTER TABLE custom_field_values OWNER TO hadir_admin')
+    op.execute('ALTER TABLE custom_field_values OWNER TO maugood_admin')
     op.execute(
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON custom_field_values TO hadir_app"
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON custom_field_values TO maugood_app"
     )
     op.execute(
-        "GRANT USAGE, SELECT ON SEQUENCE custom_field_values_id_seq TO hadir_app"
+        "GRANT USAGE, SELECT ON SEQUENCE custom_field_values_id_seq TO maugood_app"
     )
 
 

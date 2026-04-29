@@ -9,11 +9,11 @@ Pre-requisites:
 * The ``main`` schema is at head; provisions a fresh Employee +
   Manager + HR + Admin user with non-reserved TLDs (Pydantic
   EmailStr rejects ``.test``).
-* ``HADIR_SMOKE_PASSWORD`` must equal the seeded pilot Admin password.
+* ``MAUGOOD_SMOKE_PASSWORD`` must equal the seeded pilot Admin password.
 
 Run inside the backend container:
 
-    docker compose exec -e HADIR_SMOKE_PASSWORD='…' backend \\
+    docker compose exec -e MAUGOOD_SMOKE_PASSWORD='…' backend \\
         python -m scripts.v1_p13_smoke
 """
 
@@ -27,8 +27,8 @@ from datetime import date, timedelta
 import httpx
 from sqlalchemy import delete, insert, select
 
-from hadir.auth.passwords import hash_password
-from hadir.db import (
+from maugood.auth.passwords import hash_password
+from maugood.db import (
     approved_leaves,
     attendance_records,
     audit_log,
@@ -101,15 +101,15 @@ def _cleanup_user(engine, user_id: int) -> None:
 
 
 def main() -> int:
-    if not os.environ.get("HADIR_SMOKE_PASSWORD"):
-        print("[p13] set HADIR_SMOKE_PASSWORD", file=sys.stderr)
+    if not os.environ.get("MAUGOOD_SMOKE_PASSWORD"):
+        print("[p13] set MAUGOOD_SMOKE_PASSWORD", file=sys.stderr)
         return 1
 
     suffix = secrets.token_hex(4)
-    employee_email = f"emp-{suffix}@p13.hadir"
-    manager_email = f"mgr-{suffix}@p13.hadir"
-    hr_email = f"hr-{suffix}@p13.hadir"
-    admin_email = f"adm-{suffix}@p13.hadir"
+    employee_email = f"emp-{suffix}@p13.maugood"
+    manager_email = f"mgr-{suffix}@p13.maugood"
+    hr_email = f"hr-{suffix}@p13.maugood"
+    admin_email = f"adm-{suffix}@p13.maugood"
     pwd = "P13Smoke!" + secrets.token_hex(4)
 
     admin_engine = make_admin_engine()

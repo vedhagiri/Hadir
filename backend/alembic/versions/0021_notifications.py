@@ -105,12 +105,12 @@ def upgrade() -> None:
         "notifications",
         ["tenant_id", "email_sent_at", "email_failed_at"],
     )
-    op.execute('ALTER TABLE notifications OWNER TO hadir_admin')
+    op.execute('ALTER TABLE notifications OWNER TO maugood_admin')
     op.execute(
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON notifications TO hadir_app"
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON notifications TO maugood_app"
     )
     op.execute(
-        "GRANT USAGE, SELECT ON SEQUENCE notifications_id_seq TO hadir_app"
+        "GRANT USAGE, SELECT ON SEQUENCE notifications_id_seq TO maugood_app"
     )
 
     op.create_table(
@@ -151,10 +151,10 @@ def upgrade() -> None:
             name="ck_notification_preferences_category",
         ),
     )
-    op.execute('ALTER TABLE notification_preferences OWNER TO hadir_admin')
+    op.execute('ALTER TABLE notification_preferences OWNER TO maugood_admin')
     op.execute(
         "GRANT SELECT, INSERT, UPDATE, DELETE ON notification_preferences "
-        "TO hadir_app"
+        "TO maugood_app"
     )
 
     # The P16 stub queue is no longer written to. Drop it now —
@@ -206,12 +206,12 @@ def downgrade() -> None:
         ),
         sa.Column("sent_at", sa.DateTime(timezone=True), nullable=True),
     )
-    op.execute('ALTER TABLE notifications_queue OWNER TO hadir_admin')
+    op.execute('ALTER TABLE notifications_queue OWNER TO maugood_admin')
     op.execute(
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON notifications_queue TO hadir_app"
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON notifications_queue TO maugood_app"
     )
     op.execute(
-        "GRANT USAGE, SELECT ON SEQUENCE notifications_queue_id_seq TO hadir_app"
+        "GRANT USAGE, SELECT ON SEQUENCE notifications_queue_id_seq TO maugood_app"
     )
 
     op.drop_index(

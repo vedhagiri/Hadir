@@ -29,9 +29,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, insert
 from sqlalchemy.engine import Engine
 
-from hadir.capture.reader import CaptureWorker, ReaderConfig
-from hadir.db import cameras, detection_events
-from hadir.tenants.scope import TenantScope
+from maugood.capture.reader import CaptureWorker, ReaderConfig
+from maugood.db import cameras, detection_events
+from maugood.tenants.scope import TenantScope
 
 
 TENANT_ID = 1

@@ -84,12 +84,12 @@ def upgrade() -> None:
             name="ck_request_reason_categories_request_type",
         ),
     )
-    op.execute('ALTER TABLE request_reason_categories OWNER TO hadir_admin')
+    op.execute('ALTER TABLE request_reason_categories OWNER TO maugood_admin')
     op.execute(
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON request_reason_categories TO hadir_app"
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON request_reason_categories TO maugood_app"
     )
     op.execute(
-        "GRANT USAGE, SELECT ON SEQUENCE request_reason_categories_id_seq TO hadir_app"
+        "GRANT USAGE, SELECT ON SEQUENCE request_reason_categories_id_seq TO maugood_app"
     )
 
     # Seed the BRD §FR-REQ-008 defaults for whichever tenant's schema

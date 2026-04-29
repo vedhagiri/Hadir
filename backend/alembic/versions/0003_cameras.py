@@ -3,7 +3,7 @@
 One row per IP camera on the customer LAN. The RTSP URL (including
 credentials) is Fernet-encrypted in ``rtsp_url_encrypted`` and never
 returned by any API endpoint — callers only see a parsed host/port
-through ``rtsp_host``. See ``hadir.cameras.rtsp`` for the encryption
+through ``rtsp_host``. See ``maugood.cameras.rtsp`` for the encryption
 helpers and the red-line enforcement.
 
 Revision ID: 0003_cameras
@@ -59,12 +59,12 @@ def upgrade() -> None:
         schema=SCHEMA,
     )
 
-    op.execute(f'ALTER TABLE "{SCHEMA}"."cameras" OWNER TO hadir_admin')
+    op.execute(f'ALTER TABLE "{SCHEMA}"."cameras" OWNER TO maugood_admin')
     op.execute(
-        f'GRANT SELECT, INSERT, UPDATE, DELETE ON "{SCHEMA}"."cameras" TO hadir_app'
+        f'GRANT SELECT, INSERT, UPDATE, DELETE ON "{SCHEMA}"."cameras" TO maugood_app'
     )
     op.execute(
-        f'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA "{SCHEMA}" TO hadir_app'
+        f'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA "{SCHEMA}" TO maugood_app'
     )
 
 

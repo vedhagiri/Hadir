@@ -24,7 +24,7 @@ In broad terms: drawer slides in from the right edge of the **viewport** (not th
 
 ## The prompt to paste into Claude Code
 
-> A bug affects every drawer/modal panel in the Hadir frontend. The Add Employee panel renders inside the main content container instead of as a viewport-level overlay. The sidebar isn't dimmed. The form footer is cut off. The same defect almost certainly affects every other drawer-style panel built in P28.5/P28.6/P28.7 because they all share the same primitive.
+> A bug affects every drawer/modal panel in the Maugood frontend. The Add Employee panel renders inside the main content container instead of as a viewport-level overlay. The sidebar isn't dimmed. The form footer is cut off. The same defect almost certainly affects every other drawer-style panel built in P28.5/P28.6/P28.7 because they all share the same primitive.
 >
 > Read these files in order before writing anything:
 >

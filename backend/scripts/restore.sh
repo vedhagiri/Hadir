@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hadir restore — pair with ``backup.sh`` (v1.0 P24).
+# Maugood restore — pair with ``backup.sh`` (v1.0 P24).
 #
 # Reads a manifest produced by ``backup.sh``, validates every
 # referenced file's sha256 checksum, and (after a typed
@@ -12,8 +12,8 @@
 #   restore.sh --backup-manifest <path> --yes-i-have-a-backup-of-the-target
 #
 # Required env (defaults marked):
-#   HADIR_ADMIN_DATABASE_URL   Postgres URL (admin role).
-#   HADIR_DATA_ROOT            /data (default).
+#   MAUGOOD_ADMIN_DATABASE_URL   Postgres URL (admin role).
+#   MAUGOOD_DATA_ROOT            /data (default).
 #
 # Red lines:
 #   * Refuses to run against a non-empty target cluster
@@ -25,7 +25,7 @@
 #   * Verifies every checksum in the manifest. A single
 #     mismatch aborts the run with a non-zero exit before any
 #     destructive SQL is issued.
-#   * Refuses to run when ``HADIR_ENV=production`` unless the
+#   * Refuses to run when ``MAUGOOD_ENV=production`` unless the
 #     operator passes ``--yes-i-have-a-backup-of-the-target``.
 
 set -euo pipefail
@@ -82,9 +82,9 @@ require_bin tar
 require_bin sha256sum
 require_bin jq
 
-require_env HADIR_ADMIN_DATABASE_URL
+require_env MAUGOOD_ADMIN_DATABASE_URL
 
-DATA_ROOT="${HADIR_DATA_ROOT:-/data}"
+DATA_ROOT="${MAUGOOD_DATA_ROOT:-/data}"
 BACKUP_DIR=$(dirname "${MANIFEST}")
 
 log "manifest: ${MANIFEST}"
@@ -117,12 +117,12 @@ log "checksum verification ok (all $(jq '.files|length' "${MANIFEST}") files)"
 
 log "probing target cluster..."
 TARGET_TENANT_COUNT=$(
-    psql "${HADIR_ADMIN_DATABASE_URL}" -At -c \
+    psql "${MAUGOOD_ADMIN_DATABASE_URL}" -At -c \
         "SELECT count(*) FROM public.tenants" 2>/dev/null \
         || echo "0"
 )
 TARGET_SCHEMAS=$(
-    psql "${HADIR_ADMIN_DATABASE_URL}" -At -c \
+    psql "${MAUGOOD_ADMIN_DATABASE_URL}" -At -c \
         "SELECT string_agg(schema_name, ',') FROM information_schema.schemata
          WHERE schema_name NOT IN ('pg_catalog','pg_toast','information_schema','public')" \
         2>/dev/null || echo ""
@@ -142,8 +142,8 @@ if [ "${NON_EMPTY}" = "1" ]; then
     log "WARNING: target cluster is NOT empty. Restore will DROP and RECREATE every schema in the manifest."
     log "         tenants: ${TARGET_TENANT_COUNT}"
     log "         schemas: ${TARGET_SCHEMAS:-<none>}"
-    if [ "${HADIR_ENV:-dev}" = "production" ] && [ "${ASSUME_YES}" != "1" ]; then
-        die "HADIR_ENV=production with non-empty target — pass --yes-i-have-a-backup-of-the-target after taking a confirmed backup of the target"
+    if [ "${MAUGOOD_ENV:-dev}" = "production" ] && [ "${ASSUME_YES}" != "1" ]; then
+        die "MAUGOOD_ENV=production with non-empty target — pass --yes-i-have-a-backup-of-the-target after taking a confirmed backup of the target"
     fi
     if [ "${ASSUME_YES}" != "1" ]; then
         # Read the typed confirmation. Bash ``read`` on non-tty
@@ -195,7 +195,7 @@ log "schemas to restore: ${SCHEMAS[*]}"
 # recreate everything cleanly.
 #
 # We deliberately exclude ``public`` from the cascade list and
-# instead drop only the Hadir tables on it — Postgres rejects
+# instead drop only the Maugood tables on it — Postgres rejects
 # ``DROP SCHEMA public CASCADE`` on a freshly-initdb'd cluster
 # because system catalogs live there.
 
@@ -214,19 +214,19 @@ log "dropping schemas (reverse dependency order)..."
 for (( idx=${#ordered_schemas[@]}-1; idx>=0; idx-- )); do
     schema="${ordered_schemas[$idx]}"
     if [ "${schema}" = "public" ]; then
-        # Don't drop the schema itself — drop the tables Hadir
+        # Don't drop the schema itself — drop the tables Maugood
         # owns inside it (every dependent FK from main and the
         # tenant schemas is gone by now).
-        log "drop public.* (Hadir tables only, not the schema)"
-        psql "${HADIR_ADMIN_DATABASE_URL}" --set ON_ERROR_STOP=1 -c \
+        log "drop public.* (Maugood tables only, not the schema)"
+        psql "${MAUGOOD_ADMIN_DATABASE_URL}" --set ON_ERROR_STOP=1 -c \
             "DROP TABLE IF EXISTS public.tenants CASCADE;
              DROP TABLE IF EXISTS public.mts_staff CASCADE;
              DROP TABLE IF EXISTS public.super_admin_sessions CASCADE;
              DROP TABLE IF EXISTS public.super_admin_audit CASCADE;" \
-            || die "drop public Hadir tables failed"
+            || die "drop public Maugood tables failed"
     else
         log "DROP SCHEMA ${schema} CASCADE"
-        psql "${HADIR_ADMIN_DATABASE_URL}" --set ON_ERROR_STOP=1 -c \
+        psql "${MAUGOOD_ADMIN_DATABASE_URL}" --set ON_ERROR_STOP=1 -c \
             "DROP SCHEMA IF EXISTS \"${schema}\" CASCADE" \
             || die "drop ${schema} failed"
     fi
@@ -246,11 +246,11 @@ for schema in "${ordered_schemas[@]}"; do
         # strip it (and its companion COMMENT) before applying.
         gunzip -c "${dump}" \
             | sed -E '/^CREATE SCHEMA public;/d; /^COMMENT ON SCHEMA public IS/d' \
-            | psql "${HADIR_ADMIN_DATABASE_URL}" --set ON_ERROR_STOP=1 -v ON_ERROR_STOP=on \
+            | psql "${MAUGOOD_ADMIN_DATABASE_URL}" --set ON_ERROR_STOP=1 -v ON_ERROR_STOP=on \
             || die "psql restore failed for ${schema}"
     else
         gunzip -c "${dump}" \
-            | psql "${HADIR_ADMIN_DATABASE_URL}" --set ON_ERROR_STOP=1 -v ON_ERROR_STOP=on \
+            | psql "${MAUGOOD_ADMIN_DATABASE_URL}" --set ON_ERROR_STOP=1 -v ON_ERROR_STOP=on \
             || die "psql restore failed for ${schema}"
     fi
 done
@@ -281,14 +281,14 @@ fi
 
 log "post-restore probe..."
 RESTORED_TENANTS=$(
-    psql "${HADIR_ADMIN_DATABASE_URL}" -At -c \
+    psql "${MAUGOOD_ADMIN_DATABASE_URL}" -At -c \
         "SELECT count(*) FROM public.tenants" \
         || echo "?"
 )
 log "restored tenants: ${RESTORED_TENANTS}"
 
 RESTORED_USERS=$(
-    psql "${HADIR_ADMIN_DATABASE_URL}" -At -c \
+    psql "${MAUGOOD_ADMIN_DATABASE_URL}" -At -c \
         "SELECT count(*) FROM main.users WHERE is_active" \
         2>/dev/null || echo "?"
 )

@@ -67,12 +67,12 @@ def upgrade() -> None:
             "tenant_id", "code", name="uq_leave_types_tenant_code"
         ),
     )
-    op.execute('ALTER TABLE leave_types OWNER TO hadir_admin')
+    op.execute('ALTER TABLE leave_types OWNER TO maugood_admin')
     op.execute(
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON leave_types TO hadir_app"
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON leave_types TO maugood_app"
     )
     op.execute(
-        "GRANT USAGE, SELECT ON SEQUENCE leave_types_id_seq TO hadir_app"
+        "GRANT USAGE, SELECT ON SEQUENCE leave_types_id_seq TO maugood_app"
     )
 
     # ----- holidays -------------------------------------------------------
@@ -101,12 +101,12 @@ def upgrade() -> None:
             "tenant_id", "date", name="uq_holidays_tenant_date"
         ),
     )
-    op.execute('ALTER TABLE holidays OWNER TO hadir_admin')
+    op.execute('ALTER TABLE holidays OWNER TO maugood_admin')
     op.execute(
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON holidays TO hadir_app"
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON holidays TO maugood_app"
     )
     op.execute(
-        "GRANT USAGE, SELECT ON SEQUENCE holidays_id_seq TO hadir_app"
+        "GRANT USAGE, SELECT ON SEQUENCE holidays_id_seq TO maugood_app"
     )
 
     # ----- approved_leaves ------------------------------------------------
@@ -165,12 +165,12 @@ def upgrade() -> None:
         "approved_leaves",
         ["tenant_id", "employee_id", "start_date", "end_date"],
     )
-    op.execute('ALTER TABLE approved_leaves OWNER TO hadir_admin')
+    op.execute('ALTER TABLE approved_leaves OWNER TO maugood_admin')
     op.execute(
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON approved_leaves TO hadir_app"
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON approved_leaves TO maugood_app"
     )
     op.execute(
-        "GRANT USAGE, SELECT ON SEQUENCE approved_leaves_id_seq TO hadir_app"
+        "GRANT USAGE, SELECT ON SEQUENCE approved_leaves_id_seq TO maugood_app"
     )
 
     # ----- tenant_settings ------------------------------------------------
@@ -203,9 +203,9 @@ def upgrade() -> None:
             server_default=sa.func.now(),
         ),
     )
-    op.execute('ALTER TABLE tenant_settings OWNER TO hadir_admin')
+    op.execute('ALTER TABLE tenant_settings OWNER TO maugood_admin')
     op.execute(
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON tenant_settings TO hadir_app"
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON tenant_settings TO maugood_app"
     )
 
     # ----- attendance_records.leave_type_id ------------------------------

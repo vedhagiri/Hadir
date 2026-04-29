@@ -22,8 +22,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import insert
 from sqlalchemy.engine import Engine
 
-from hadir.capture.manager import CaptureManager, capture_manager
-from hadir.db import cameras
+from maugood.capture.manager import CaptureManager, capture_manager
+from maugood.db import cameras
 from tests.conftest import audit_rows_for_user
 
 
@@ -162,7 +162,7 @@ def test_manager_active_camera_ids_supports_tenant_scope() -> None:
 def seeded_camera(admin_engine: Engine) -> Iterator[dict]:
     """Insert a tenant-1 camera; clean up the row after."""
 
-    from hadir.cameras import rtsp as rtsp_io  # noqa: PLC0415
+    from maugood.cameras import rtsp as rtsp_io  # noqa: PLC0415
 
     import secrets as _secrets  # noqa: PLC0415
     with admin_engine.begin() as conn:
@@ -236,7 +236,7 @@ def test_mjpg_cross_tenant_returns_404(
     Defence in depth on top of the WHERE tenant_id = … filter.
     """
 
-    from hadir.cameras import rtsp as rtsp_io  # noqa: PLC0415
+    from maugood.cameras import rtsp as rtsp_io  # noqa: PLC0415
 
     # Plant a worker for tenant 99, camera 1234 (wrong tenant). Plant
     # the bytes too, to prove the bytes never leak even when present.
@@ -340,7 +340,7 @@ def test_mjpg_concurrent_viewer_cap_helpers() -> None:
     # gets aliased to the package's ``router`` APIRouter attribute by
     # ``__init__.py``'s re-export, so ``from … import``-by-symbol is
     # the unambiguous path.
-    from hadir.live_capture.router import (  # noqa: PLC0415
+    from maugood.live_capture.router import (  # noqa: PLC0415
         _mjpeg_counts,
         _mjpeg_lock,
         _release_mjpeg,
@@ -370,7 +370,7 @@ def test_mjpg_concurrent_viewer_cap_helpers() -> None:
 def test_ws_concurrent_subscriber_cap_helpers() -> None:
     """Same shape, this time for the WebSocket subscriber cap."""
 
-    from hadir.live_capture.router import (  # noqa: PLC0415
+    from maugood.live_capture.router import (  # noqa: PLC0415
         _release_ws,
         _try_acquire_ws,
         _ws_counts,

@@ -1,5 +1,5 @@
 // Wire types for the branding API. Mirrors the Pydantic responses in
-// ``hadir/branding/router.py`` and ``hadir/branding/schemas.py``.
+// ``maugood/branding/router.py`` and ``maugood/branding/schemas.py``.
 
 export type BrandingPaletteKey =
   | "teal"

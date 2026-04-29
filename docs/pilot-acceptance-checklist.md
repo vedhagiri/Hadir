@@ -1,4 +1,4 @@
-# Hadir pilot — acceptance checklist (printable)
+# Maugood pilot — acceptance checklist (printable)
 
 > **Print two copies.** One stays with the Omran sponsor; one comes
 > back with MTS for `docs/pilot-signoff.md`. The sponsor signs each
@@ -11,7 +11,7 @@
 
 **Location:** Omran HQ, `_______________________________________________`
 
-**Hadir build:** pilot v0.1 · git commit `_______________`
+**Maugood build:** pilot v0.1 · git commit `_______________`
 
 **Engineer (MTS):** `_______________________________________________`
 
@@ -34,7 +34,7 @@ sponsor confirms it does what the BRD claims, the sponsor initials.
 | 4 | Fixed policy 07:30–15:30 flagging in/out/late/early-out correctly | Daily Attendance for today | flags reviewed live with sponsor | `____` |
 | 5 | Daily Attendance, Camera Logs, Audit Log, System pages render with live data | All four pages navigated | live data, not mock | `____` |
 | 6 | On-demand Excel export | Reports → Generate Excel; opened on the sponsor's laptop | file generated `_______________.xlsx`, columns verified | `____` |
-| 7 | UI matches the Hadir design system in English, light mode | Whole shell + every page above | brand / type / color match design proposals | `____` |
+| 7 | UI matches the Maugood design system in English, light mode | Whole shell + every page above | brand / type / color match design proposals | `____` |
 
 ---
 

@@ -19,8 +19,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, insert, select
 from sqlalchemy.engine import Engine
 
-from hadir.auth.passwords import hash_password
-from hadir.db import (
+from maugood.auth.passwords import hash_password
+from maugood.db import (
     mts_staff,
     super_admin_audit,
     super_admin_sessions,
@@ -37,7 +37,7 @@ from hadir.db import (
 def super_admin_creds(admin_engine: Engine) -> Iterator[dict]:
     """Create an MTS staff user, log them in, return the cookies dict."""
 
-    email = f"sa-p288-{secrets.token_hex(4)}@super.hadir"
+    email = f"sa-p288-{secrets.token_hex(4)}@super.maugood"
     password = "p288-super-pw-" + secrets.token_hex(6)
     pwd_hash = hash_password(password)
     with tenant_context("public"):

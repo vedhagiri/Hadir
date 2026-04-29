@@ -3,7 +3,7 @@
 Background: P28.5b validation surfaced 251 ``detection_events`` rows in
 ``tenant_mts_demo`` whose ``face_crop_path`` column pointed at files that
 weren't on disk. The file-write invariants in
-``hadir/capture/events.py`` were tightened in the same commit so the
+``maugood/capture/events.py`` were tightened in the same commit so the
 forward path can no longer produce orphans, but the existing rows can't
 just be DELETEd — Camera Logs / attendance / audit history all
 reference them. Instead this migration:

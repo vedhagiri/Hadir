@@ -7,8 +7,8 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from hadir.cameras import rtsp as rtsp_io
-from hadir.db import cameras
+from maugood.cameras import rtsp as rtsp_io
+from maugood.db import cameras
 
 
 def _login(client: TestClient, user: dict) -> None:
@@ -19,7 +19,7 @@ def _login(client: TestClient, user: dict) -> None:
     assert resp.status_code == 200, resp.text
 
 
-PLAIN_URL = "rtsp://hadir_admin:supersecret@10.0.0.50:8554/stream/main"
+PLAIN_URL = "rtsp://maugood_admin:supersecret@10.0.0.50:8554/stream/main"
 OTHER_HOST_URL = "rtsp://other:pw@10.0.0.99:8554/stream/main"
 
 
@@ -168,7 +168,7 @@ def test_patch_with_new_rtsp_url_rotates_cipher(
 def test_audit_rows_never_contain_plain_url(
     client: TestClient, admin_user: dict, admin_engine
 ) -> None:
-    from hadir.db import audit_log
+    from maugood.db import audit_log
 
     _login(client, admin_user)
     create = client.post(

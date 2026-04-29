@@ -1,4 +1,4 @@
-# Hadir production overlay (v1.0 P23).
+# Maugood production overlay (v1.0 P23).
 #
 # Layered on top of ``docker-compose.yml``:
 #
@@ -14,10 +14,10 @@
 #   * the frontend service is *removed* — the frontend bundle is
 #     built into the nginx image and served as static files.
 #   * the backend port is no longer exposed on the host; only
-#     nginx reaches it on the private ``hadir-internal`` network.
-#   * production env vars (``HADIR_ENV=production``,
-#     ``HADIR_BEHIND_PROXY=true``,
-#     ``HADIR_SESSION_COOKIE_SECURE=true``, etc.) are wired
+#     nginx reaches it on the private ``maugood-internal`` network.
+#   * production env vars (``MAUGOOD_ENV=production``,
+#     ``MAUGOOD_BEHIND_PROXY=true``,
+#     ``MAUGOOD_SESSION_COOKIE_SECURE=true``, etc.) are wired
 #     through.
 #
 # See ``docs/deploy-production.md`` for the full runbook.
@@ -25,29 +25,29 @@
 services:
   postgres:
     networks:
-      - hadir-internal
+      - maugood-internal
     # Don't expose the DB port off-host in prod.
     ports: !reset []
 
   backend:
     environment:
-      HADIR_ENV: production
-      HADIR_BEHIND_PROXY: "true"
-      HADIR_FORWARDED_ALLOW_IPS: "*"
-      HADIR_SESSION_COOKIE_SECURE: "true"
+      MAUGOOD_ENV: production
+      MAUGOOD_BEHIND_PROXY: "true"
+      MAUGOOD_FORWARDED_ALLOW_IPS: "*"
+      MAUGOOD_SESSION_COOKIE_SECURE: "true"
       # Compose-level interpolation pulls these from the ``.env``
       # file you point ``docker compose --env-file`` at. The
       # ``:?`` syntax errors out at compose-up time if any are
       # missing — the production startup check would then catch
       # placeholders that survive, defence-in-depth.
-      HADIR_ALLOWED_ORIGINS: ${HADIR_ALLOWED_ORIGINS:?must be set in production}
-      HADIR_OIDC_REDIRECT_BASE_URL: ${HADIR_OIDC_REDIRECT_BASE_URL:?must be set in production}
-      HADIR_SESSION_SECRET: ${HADIR_SESSION_SECRET:?rotate before production}
-      HADIR_FERNET_KEY: ${HADIR_FERNET_KEY:?rotate before production}
-      HADIR_AUTH_FERNET_KEY: ${HADIR_AUTH_FERNET_KEY:?rotate before production}
-      HADIR_REPORT_SIGNED_URL_SECRET: ${HADIR_REPORT_SIGNED_URL_SECRET:?rotate before production}
+      MAUGOOD_ALLOWED_ORIGINS: ${MAUGOOD_ALLOWED_ORIGINS:?must be set in production}
+      MAUGOOD_OIDC_REDIRECT_BASE_URL: ${MAUGOOD_OIDC_REDIRECT_BASE_URL:?must be set in production}
+      MAUGOOD_SESSION_SECRET: ${MAUGOOD_SESSION_SECRET:?rotate before production}
+      MAUGOOD_FERNET_KEY: ${MAUGOOD_FERNET_KEY:?rotate before production}
+      MAUGOOD_AUTH_FERNET_KEY: ${MAUGOOD_AUTH_FERNET_KEY:?rotate before production}
+      MAUGOOD_REPORT_SIGNED_URL_SECRET: ${MAUGOOD_REPORT_SIGNED_URL_SECRET:?rotate before production}
     networks:
-      - hadir-internal
+      - maugood-internal
     # Backend port is internal-only in production; nginx reaches
     # it on the private network.
     ports: !reset []
@@ -62,29 +62,29 @@ services:
   # ``backend/scripts/backup.sh`` at 02:00 Asia/Muscat by default
   # (override via ``TZ`` if you ever move tenants to another
   # region). The script writes to the ``backup_storage`` named
-  # volume; an operator can also point ``HADIR_BACKUP_S3_URI``
+  # volume; an operator can also point ``MAUGOOD_BACKUP_S3_URI``
   # at an S3-compatible bucket for off-site copies. See
   # ``docs/disaster-recovery.md`` and ``docs/dr-rehearsal.md``.
   backup:
     build:
       context: .
       dockerfile: ops/backup/Dockerfile
-    image: hadir-backup:latest
+    image: maugood-backup:latest
     environment:
-      HADIR_ADMIN_DATABASE_URL: ${HADIR_ADMIN_DATABASE_URL:?must be set in production}
-      HADIR_BACKUP_ROOT: /backup
-      HADIR_DATA_ROOT: /data
-      HADIR_BACKUP_S3_URI: ${HADIR_BACKUP_S3_URI:-}
-      HADIR_BACKUP_RETAIN_DAILY: ${HADIR_BACKUP_RETAIN_DAILY:-30}
-      HADIR_BACKUP_RETAIN_WEEKLY: ${HADIR_BACKUP_RETAIN_WEEKLY:-12}
-      HADIR_BACKUP_RETAIN_MONTHLY: ${HADIR_BACKUP_RETAIN_MONTHLY:-12}
-      TZ: ${HADIR_BACKUP_TZ:-Asia/Muscat}
+      MAUGOOD_ADMIN_DATABASE_URL: ${MAUGOOD_ADMIN_DATABASE_URL:?must be set in production}
+      MAUGOOD_BACKUP_ROOT: /backup
+      MAUGOOD_DATA_ROOT: /data
+      MAUGOOD_BACKUP_S3_URI: ${MAUGOOD_BACKUP_S3_URI:-}
+      MAUGOOD_BACKUP_RETAIN_DAILY: ${MAUGOOD_BACKUP_RETAIN_DAILY:-30}
+      MAUGOOD_BACKUP_RETAIN_WEEKLY: ${MAUGOOD_BACKUP_RETAIN_WEEKLY:-12}
+      MAUGOOD_BACKUP_RETAIN_MONTHLY: ${MAUGOOD_BACKUP_RETAIN_MONTHLY:-12}
+      TZ: ${MAUGOOD_BACKUP_TZ:-Asia/Muscat}
     volumes:
       # Backup output. ``backup_storage`` is a named volume so
       # the destination survives container rebuilds without
       # bind-mount path drift on the host. Operators who prefer
       # a host bind-mount can override via the env file.
-      - ${HADIR_BACKUP_DIR:-backup_storage}:/backup
+      - ${MAUGOOD_BACKUP_DIR:-backup_storage}:/backup
       # Read-only mount of the data dirs so tar can snapshot
       # them. Read-only is the load-bearing red line —
       # supercronic should never mutate the source artifacts.
@@ -95,24 +95,24 @@ services:
     depends_on:
       - postgres
     networks:
-      - hadir-internal
+      - maugood-internal
     restart: unless-stopped
 
   nginx:
     build:
       context: .
       dockerfile: ops/nginx/Dockerfile
-    image: hadir-nginx:latest
+    image: maugood-nginx:latest
     environment:
-      HADIR_PUBLIC_HOSTNAME: ${HADIR_PUBLIC_HOSTNAME:?must be set (e.g. hadir.example.com)}
-      HADIR_TLS_CERT: /etc/nginx/certs/fullchain.pem
-      HADIR_TLS_KEY: /etc/nginx/certs/privkey.pem
+      MAUGOOD_PUBLIC_HOSTNAME: ${MAUGOOD_PUBLIC_HOSTNAME:?must be set (e.g. maugood.example.com)}
+      MAUGOOD_TLS_CERT: /etc/nginx/certs/fullchain.pem
+      MAUGOOD_TLS_KEY: /etc/nginx/certs/privkey.pem
     volumes:
       # Operator-supplied certs. Default is the layout in
       # ops/certs/ — generate or copy ``fullchain.pem`` +
       # ``privkey.pem`` there before bringing the stack up.
       # Paths are configurable via the env file.
-      - ${HADIR_TLS_CERT_DIR:-./ops/certs}:/etc/nginx/certs:ro
+      - ${MAUGOOD_TLS_CERT_DIR:-./ops/certs}:/etc/nginx/certs:ro
       # ACME challenge directory — only consumed if you layer
       # docker-compose.le.yml on top.
       - certbot_webroot:/var/www/certbot
@@ -122,7 +122,7 @@ services:
     depends_on:
       - backend
     networks:
-      - hadir-internal
+      - maugood-internal
       - default
 
   # P26: Prometheus scrapes ``backend:8000/metrics`` over the
@@ -143,7 +143,7 @@ services:
       - --storage.tsdb.retention.time=30d
       - --web.enable-lifecycle
     networks:
-      - hadir-internal
+      - maugood-internal
     depends_on:
       - backend
     restart: unless-stopped
@@ -154,20 +154,20 @@ services:
       - ./deploy/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager_data:/alertmanager
     environment:
-      HADIR_ALERTMANAGER_WEBHOOK_URL: ${HADIR_ALERTMANAGER_WEBHOOK_URL:-}
-      HADIR_ALERTMANAGER_SMTP_HOST: ${HADIR_ALERTMANAGER_SMTP_HOST:-}
-      HADIR_ALERTMANAGER_SMTP_FROM: ${HADIR_ALERTMANAGER_SMTP_FROM:-}
-      HADIR_ALERTMANAGER_ADMIN_EMAIL: ${HADIR_ALERTMANAGER_ADMIN_EMAIL:-}
+      MAUGOOD_ALERTMANAGER_WEBHOOK_URL: ${MAUGOOD_ALERTMANAGER_WEBHOOK_URL:-}
+      MAUGOOD_ALERTMANAGER_SMTP_HOST: ${MAUGOOD_ALERTMANAGER_SMTP_HOST:-}
+      MAUGOOD_ALERTMANAGER_SMTP_FROM: ${MAUGOOD_ALERTMANAGER_SMTP_FROM:-}
+      MAUGOOD_ALERTMANAGER_ADMIN_EMAIL: ${MAUGOOD_ALERTMANAGER_ADMIN_EMAIL:-}
     command:
       - --config.file=/etc/alertmanager/alertmanager.yml
       - --storage.path=/alertmanager
     networks:
-      - hadir-internal
+      - maugood-internal
     restart: unless-stopped
 
   # Grafana on :3000 — exposed off-host so operators can hit
   # the dashboards directly. Authentication is the operator-set
-  # ``HADIR_GRAFANA_ADMIN_PASSWORD``; the default credential is
+  # ``MAUGOOD_GRAFANA_ADMIN_PASSWORD``; the default credential is
   # rotated on first boot. Anonymous access is OFF.
   grafana:
     image: grafana/grafana:11.2.2
@@ -176,15 +176,15 @@ services:
       - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana
     environment:
-      GF_SECURITY_ADMIN_USER: ${HADIR_GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${HADIR_GRAFANA_ADMIN_PASSWORD:?must be set in production}
+      GF_SECURITY_ADMIN_USER: ${MAUGOOD_GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${MAUGOOD_GRAFANA_ADMIN_PASSWORD:?must be set in production}
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_USERS_ALLOW_SIGN_UP: "false"
-      GF_SERVER_ROOT_URL: ${HADIR_GRAFANA_ROOT_URL:-http://localhost:3000}
+      GF_SERVER_ROOT_URL: ${MAUGOOD_GRAFANA_ROOT_URL:-http://localhost:3000}
     ports:
-      - "${HADIR_GRAFANA_PORT:-3000}:3000"
+      - "${MAUGOOD_GRAFANA_PORT:-3000}:3000"
     networks:
-      - hadir-internal
+      - maugood-internal
       - default
     depends_on:
       - prometheus
@@ -198,6 +198,6 @@ volumes:
   grafana_data:
 
 networks:
-  hadir-internal:
+  maugood-internal:
     driver: bridge
     internal: false

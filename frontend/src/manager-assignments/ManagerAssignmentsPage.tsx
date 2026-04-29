@@ -26,7 +26,7 @@ interface DragPayload {
   source_assignment_id: number | null;
 }
 
-const MIME = "application/x-hadir-manager-chip";
+const MIME = "application/x-maugood-manager-chip";
 
 export function ManagerAssignmentsPage() {
   const list = useAssignments();

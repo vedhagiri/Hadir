@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// Vite config for Hadir's frontend dev server.
+// Vite config for Maugood's frontend dev server.
 // `/api` is proxied to the FastAPI backend so cookies and same-origin auth
 // work without CORS gymnastics. In docker-compose the backend is reachable
 // at `backend:8000`; on the host it's `localhost:8000`.

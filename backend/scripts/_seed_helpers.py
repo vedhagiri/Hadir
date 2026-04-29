@@ -3,7 +3,7 @@
 Factored out of ``seed_test_accounts.py`` + the new
 ``pre_omran_reset_seed.py`` so both scripts agree on:
 
-* the Argon2 hashing path (always via ``hadir.auth.passwords.hash_password``);
+* the Argon2 hashing path (always via ``maugood.auth.passwords.hash_password``);
 * role + department + manager-assignment INSERT shapes;
 * the ``system_seed`` audit-row convention (post-P28 ``actor_label``
   column on ``audit_log``).
@@ -20,8 +20,8 @@ from typing import Iterable, Optional
 from sqlalchemy import insert, select
 from sqlalchemy.engine import Connection
 
-from hadir.auth.passwords import hash_password
-from hadir.db import (
+from maugood.auth.passwords import hash_password
+from maugood.db import (
     audit_log,
     departments,
     employees,
@@ -246,7 +246,7 @@ def write_seed_audit(
 ) -> None:
     """Write an audit row tagged ``actor_label='system_seed'``.
 
-    Use this from any seed/reset script — never the ``hadir.auth.audit``
+    Use this from any seed/reset script — never the ``maugood.auth.audit``
     helper, which expects an authenticated request scope. The
     ``actor_user_id=NULL`` + ``actor_label='system_seed'`` combo is
     how a future auditor distinguishes seed activity from real

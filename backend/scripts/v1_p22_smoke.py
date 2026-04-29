@@ -20,14 +20,14 @@ import sys
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, insert, select
 
-from hadir.auth.passwords import hash_password
-from hadir.db import (
+from maugood.auth.passwords import hash_password
+from maugood.db import (
     make_admin_engine,
     roles,
     user_roles,
     users,
 )
-from hadir.main import app
+from maugood.main import app
 
 
 TENANT_ID = 1
@@ -77,7 +77,7 @@ def _cleanup(engine, uid: int) -> None:
 
 def main() -> int:
     suffix = secrets.token_hex(3)
-    email = f"p22-{suffix}@smoke.hadir"
+    email = f"p22-{suffix}@smoke.maugood"
     password = "p22-smoke-pw"
     engine = make_admin_engine()
     uid = _make_admin(engine, email, password)

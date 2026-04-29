@@ -29,7 +29,7 @@ from openpyxl import Workbook, load_workbook
 from sqlalchemy import delete, select
 from sqlalchemy.engine import Engine
 
-from hadir.db import custom_field_values, custom_fields
+from maugood.db import custom_field_values, custom_fields
 from tests.conftest import TENANT_ID, department_id_by_code
 
 
@@ -376,7 +376,7 @@ def test_import_applies_known_codes_and_warns_on_unknown(
             {
                 "employee_code": "OM0801",
                 "full_name": "Imp One",
-                "email": "imp1@test.hadir",
+                "email": "imp1@test.maugood",
                 "department_code": "ENG",
                 "badge": "B-100",
                 "ghost_field": "ignored",
@@ -384,7 +384,7 @@ def test_import_applies_known_codes_and_warns_on_unknown(
             {
                 "employee_code": "OM0802",
                 "full_name": "Imp Two",
-                "email": "imp2@test.hadir",
+                "email": "imp2@test.maugood",
                 "department_code": "OPS",
                 "badge": "B-200",
                 "ghost_field": "also ignored",
@@ -437,7 +437,7 @@ def test_import_coerce_failure_warns_and_skips_cell(
             {
                 "employee_code": "OM0901",
                 "full_name": "Bad Number",
-                "email": "bn@test.hadir",
+                "email": "bn@test.maugood",
                 "department_code": "ENG",
                 "years": "not-a-number",
             }

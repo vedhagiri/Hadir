@@ -1,4 +1,4 @@
-# Hadir frontend — Claude Code notes
+# Maugood frontend — Claude Code notes
 
 ## Status
 P1 + P4 + P6 + P7 + P11 + P12 complete. **P13 complete**: `/reports`
@@ -67,7 +67,7 @@ frontend/
       Placeholder.tsx     # "Coming in P<N>" scaffolds
     features/
       employees/          # P6
-        types.ts          # wire types mirroring hadir/employees/schemas.py
+        types.ts          # wire types mirroring maugood/employees/schemas.py
         hooks.ts          # TanStack Query hooks: list/detail/photos + mutations
         EmployeesPage.tsx # ported from design/pages.jsx::EmployeesPage
         ImportModal.tsx   # Excel import flow with per-row results
@@ -145,7 +145,7 @@ identity card with a TODO comment pointing at the deferred switcher.
 
 ## Smoke test (P13)
 The Playwright spec runs against the live compose stack. Requires
-`HADIR_ENV=dev` (it uses the `/api/_test/*` endpoints to seed a
+`MAUGOOD_ENV=dev` (it uses the `/api/_test/*` endpoints to seed a
 detection and force a recompute).
 
 ```bash

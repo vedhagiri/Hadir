@@ -55,7 +55,9 @@ _TRANSLATED_FILES = (
 # punctuation, or interface tokens we don't translate. Matching
 # is exact: a line containing one of these substrings is excused.
 _ALLOW_SUBSTRINGS = (
-    "Hadir",  # brand
+    "Maugood",  # brand
+    "Muscat Tech Solutions",  # vendor attribution in sidebar footer
+    "Powered by",  # leading half of the vendor attribution line
     "v0.1",
     "v1.0",
     "ح",  # Arabic brand mark glyph used as a logo

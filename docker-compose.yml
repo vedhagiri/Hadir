@@ -2,21 +2,21 @@ services:
   postgres:
     image: postgres:15
     environment:
-      POSTGRES_USER: hadir
+      POSTGRES_USER: maugood
       # P28: pick up the operator-supplied admin password from
-      # ``HADIR_ADMIN_DB_PASSWORD`` so the bootstrap superuser
-      # ``hadir`` and the URL Alembic uses
-      # (``HADIR_ADMIN_DATABASE_URL``) agree on day one. Falls
-      # back to the dev default ``hadir`` so an unconfigured
+      # ``MAUGOOD_ADMIN_DB_PASSWORD`` so the bootstrap superuser
+      # ``maugood`` and the URL Alembic uses
+      # (``MAUGOOD_ADMIN_DATABASE_URL``) agree on day one. Falls
+      # back to the dev default ``maugood`` so an unconfigured
       # ``docker compose up`` keeps working in development.
-      POSTGRES_PASSWORD: ${HADIR_ADMIN_DB_PASSWORD:-hadir}
-      POSTGRES_DB: hadir
+      POSTGRES_PASSWORD: ${MAUGOOD_ADMIN_DB_PASSWORD:-maugood}
+      POSTGRES_DB: maugood
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hadir -d hadir"]
+      test: ["CMD-SHELL", "pg_isready -U maugood -d maugood"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -27,23 +27,23 @@ services:
     env_file:
       - ./.env
     environment:
-      # App-runtime URL (hadir_app role, limited grants) — this is what
+      # App-runtime URL (maugood_app role, limited grants) — this is what
       # FastAPI connects with at request time.
-      HADIR_DATABASE_URL: ${HADIR_DATABASE_URL:-postgresql+psycopg://hadir_app:hadir_app@postgres:5432/hadir}
-      # Admin URL (hadir_admin role, full grants) — used only by Alembic
-      # and the seed scripts. In dev we connect as the POSTGRES_USER ('hadir',
+      MAUGOOD_DATABASE_URL: ${MAUGOOD_DATABASE_URL:-postgresql+psycopg://maugood_app:maugood_app@postgres:5432/maugood}
+      # Admin URL (maugood_admin role, full grants) — used only by Alembic
+      # and the seed scripts. In dev we connect as the POSTGRES_USER ('maugood',
       # which owns the database) until the first migration creates
-      # hadir_admin; subsequent runs could switch to hadir_admin, but there
-      # is no behavioural difference and staying on 'hadir' avoids a
+      # maugood_admin; subsequent runs could switch to maugood_admin, but there
+      # is no behavioural difference and staying on 'maugood' avoids a
       # chicken-and-egg bootstrap.
-      HADIR_ADMIN_DATABASE_URL: ${HADIR_ADMIN_DATABASE_URL:-postgresql+psycopg://hadir:hadir@postgres:5432/hadir}
+      MAUGOOD_ADMIN_DATABASE_URL: ${MAUGOOD_ADMIN_DATABASE_URL:-postgresql+psycopg://maugood:maugood@postgres:5432/maugood}
       # Role passwords used by the initial migration to CREATE ROLE. The
       # defaults match the URLs above so a fresh `docker compose up` just
       # works without any .env editing.
-      HADIR_APP_DB_PASSWORD: ${HADIR_APP_DB_PASSWORD:-hadir_app}
-      HADIR_ADMIN_DB_PASSWORD: ${HADIR_ADMIN_DB_PASSWORD:-hadir_admin}
-      HADIR_TENANT_MODE: ${HADIR_TENANT_MODE:-single}
-      HADIR_ENV: ${HADIR_ENV:-dev}
+      MAUGOOD_APP_DB_PASSWORD: ${MAUGOOD_APP_DB_PASSWORD:-maugood_app}
+      MAUGOOD_ADMIN_DB_PASSWORD: ${MAUGOOD_ADMIN_DB_PASSWORD:-maugood_admin}
+      MAUGOOD_TENANT_MODE: ${MAUGOOD_TENANT_MODE:-single}
+      MAUGOOD_ENV: ${MAUGOOD_ENV:-dev}
     volumes:
       - ./backend:/app
       # P28-followup: the pre_omran_reset_seed script needs to read the

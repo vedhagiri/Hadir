@@ -87,12 +87,12 @@ def upgrade() -> None:
     )
 
     # Grants — same pattern as every other per-tenant table.
-    op.execute('ALTER TABLE policy_assignments OWNER TO hadir_admin')
+    op.execute('ALTER TABLE policy_assignments OWNER TO maugood_admin')
     op.execute(
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON policy_assignments TO hadir_app"
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON policy_assignments TO maugood_app"
     )
     op.execute(
-        "GRANT USAGE, SELECT ON SEQUENCE policy_assignments_id_seq TO hadir_app"
+        "GRANT USAGE, SELECT ON SEQUENCE policy_assignments_id_seq TO maugood_app"
     )
 
 

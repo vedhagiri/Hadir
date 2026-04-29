@@ -13,7 +13,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from hadir.db import audit_log, get_engine, users
+from maugood.db import audit_log, get_engine, users
 
 
 def _login(client, admin_user) -> None:

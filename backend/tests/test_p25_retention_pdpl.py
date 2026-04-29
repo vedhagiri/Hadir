@@ -25,7 +25,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import delete, insert, select
 
-from hadir.db import (
+from maugood.db import (
     audit_log,
     camera_health_snapshots,
     cameras,
@@ -38,14 +38,14 @@ from hadir.db import (
     report_runs,
     user_sessions,
 )
-from hadir.employees import pdpl as pdpl_module
-from hadir.logging_config import (
+from maugood.employees import pdpl as pdpl_module
+from maugood.logging_config import (
     GzipRotatingFileHandler,
     audit_logger,
     configure_logging,
 )
-from hadir.retention.sweep import run_retention_sweep
-from hadir.tenants.scope import TenantScope
+from maugood.retention.sweep import run_retention_sweep
+from maugood.tenants.scope import TenantScope
 
 
 TENANT_ID = 1
@@ -95,8 +95,8 @@ def test_gzip_rotating_handler_compresses_on_rollover(tmp_path: Path) -> None:
 
 
 def test_configure_logging_creates_audit_logger(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("HADIR_LOG_DISABLE_FILES", "0")
-    monkeypatch.setenv("HADIR_LOG_DIR", str(tmp_path))
+    monkeypatch.setenv("MAUGOOD_LOG_DISABLE_FILES", "0")
+    monkeypatch.setenv("MAUGOOD_LOG_DIR", str(tmp_path))
     configure_logging(log_dir=tmp_path, enable_files=True, backup_count=3)
     try:
         audit_logger().info("hello from p25 audit")
@@ -202,7 +202,7 @@ def test_retention_sweep_deletes_expired_user_sessions(admin_engine):
     # historic id=1 admin has been replaced by a freshly-
     # seeded one (P28-followup: pre_omran_reset_seed.py
     # invalidates the previous fixture assumption).
-    from hadir.db import users as users_t  # noqa: PLC0415
+    from maugood.db import users as users_t  # noqa: PLC0415
 
     with admin_engine.begin() as conn:
         any_user = conn.execute(
@@ -267,7 +267,7 @@ def test_retention_sweep_never_touches_protected_tables(admin_engine):
     ``retention.swept`` row when anything was deleted).
     """
 
-    from hadir.db import (  # noqa: PLC0415
+    from maugood.db import (  # noqa: PLC0415
         attendance_records,
         approved_leaves,
         detection_events,
@@ -380,7 +380,7 @@ def created_employee(admin_engine):
                     tenant_id=TENANT_ID,
                     employee_code=f"P25EMP{suffix}",
                     full_name="Original Person",
-                    email=f"original-{suffix}@hadir.local",
+                    email=f"original-{suffix}@maugood.local",
                     department_id=dept_id,
                     status="active",
                 )
@@ -501,7 +501,7 @@ def test_pdpl_delete_endpoint_redacts_and_drops(
         ).first()
         assert emp_row is not None
         assert emp_row.full_name == pdpl_module.REDACTED_NAME
-        assert emp_row.email == f"deleted-{emp_id}@hadir.local"
+        assert emp_row.email == f"deleted-{emp_id}@maugood.local"
         assert emp_row.status == "deleted"
 
         # Photos + cfv rows gone.

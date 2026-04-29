@@ -1,10 +1,10 @@
-# Hadir — disaster recovery policy
+# Maugood — disaster recovery policy
 
 > **Audience:** Omran IT operators + MTS engineers on call.
 > **Cadence:** quarterly DR rehearsals. See `docs/dr-rehearsal.md`
 > for the running log.
 
-This document states Hadir's disaster-recovery objectives, the
+This document states Maugood's disaster-recovery objectives, the
 mechanism that meets them, and the future work that will
 tighten them.
 
@@ -44,20 +44,20 @@ upside.
   * a `manifest.json` listing every file with its sha256,
     size, and the source's `pg_server_version`.
 * **Where it lands**:
-  * **Local**: `${HADIR_BACKUP_ROOT:-/backup}` on the host
+  * **Local**: `${MAUGOOD_BACKUP_ROOT:-/backup}` on the host
     (mounted into the backup container). Default is the
     `backup_storage` named volume; operators on a NAS-backed
     host bind-mount the NAS path instead via
-    `HADIR_BACKUP_DIR=/mnt/nas/hadir`.
-  * **Off-site (optional)**: `HADIR_BACKUP_S3_URI=s3://bucket/prefix/`
+    `MAUGOOD_BACKUP_DIR=/mnt/nas/maugood`.
+  * **Off-site (optional)**: `MAUGOOD_BACKUP_S3_URI=s3://bucket/prefix/`
     triggers an `aws s3 cp --recursive` once the local copy is
     written and verified. Requires `INCLUDE_AWS_CLI=1` at
     image-build time (off by default — keeps the image small).
 * **Retention** (configurable, defaults from BRD):
-  * `HADIR_BACKUP_RETAIN_DAILY` — last 30 days.
-  * `HADIR_BACKUP_RETAIN_WEEKLY` — last 12 weeks (most recent
+  * `MAUGOOD_BACKUP_RETAIN_DAILY` — last 30 days.
+  * `MAUGOOD_BACKUP_RETAIN_WEEKLY` — last 12 weeks (most recent
     Sunday in each).
-  * `HADIR_BACKUP_RETAIN_MONTHLY` — last 12 months (first day
+  * `MAUGOOD_BACKUP_RETAIN_MONTHLY` — last 12 months (first day
     in each).
 * **Partial-run safety**: each backup is marked complete with
   a `_complete` marker file at the very end. Retention only
@@ -87,7 +87,7 @@ work. Red-line behaviour:
    non-empty (`public.tenants` has rows OR any non-system
    schema exists), the script demands an explicit
    confirmation:
-   * In production (`HADIR_ENV=production`): the operator must
+   * In production (`MAUGOOD_ENV=production`): the operator must
      pass `--yes-i-have-a-backup-of-the-target` after taking a
      confirmed backup of the *target*. The flag is not a
      shortcut — it's a checkpoint that the operator has done
@@ -96,7 +96,7 @@ work. Red-line behaviour:
      unset: the script asks for a typed `RESTORE` (case-
      sensitive, on `/dev/tty` so a script can't bypass it).
 3. **Drop in reverse dependency order**: per-tenant schemas
-   first (CASCADE), then `main`, then the Hadir tables on
+   first (CASCADE), then `main`, then the Maugood tables on
    `public` (the schema itself stays, citext extension lives
    there).
 4. **Restore each schema's dump in forward dependency order**:
@@ -133,7 +133,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml \
     start backend nginx
 
 # 4. Smoke-check.
-curl -k https://${HADIR_PUBLIC_HOSTNAME}/api/health   # 200
+curl -k https://${MAUGOOD_PUBLIC_HOSTNAME}/api/health   # 200
 # Log in via the UI; verify the bell, recent attendance,
 # and at least one report endpoint return restored data.
 ```
@@ -161,7 +161,7 @@ seconds of the failure.
 * **pgBackRest**: more features (delta restores, manifest
   validation, parallel transfer); heavier ops surface.
   Probably overkill for a single-host pilot but a comfortable
-  fit if Hadir grows to a multi-node cluster.
+  fit if Maugood grows to a multi-node cluster.
 
 **What lands in the v1.x phase that ships this**:
 
@@ -185,7 +185,7 @@ it for v1.0.
 
 ### Encryption-key escrow
 
-`HADIR_FERNET_KEY` and `HADIR_AUTH_FERNET_KEY` are operator-
+`MAUGOOD_FERNET_KEY` and `MAUGOOD_AUTH_FERNET_KEY` are operator-
 generated and (per `docs/deploy-production.md`)
 **non-recoverable** — losing them invalidates every encrypted
 photo, every encrypted RTSP credential, every encrypted email

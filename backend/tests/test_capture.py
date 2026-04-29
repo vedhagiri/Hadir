@@ -21,16 +21,16 @@ import numpy as np
 import pytest
 from sqlalchemy import delete, func, insert, select
 
-from hadir.capture import manager as manager_mod
-from hadir.capture.analyzer import Detection
-from hadir.capture.events import captures_dir
-from hadir.capture.reader import CaptureWorker, ReaderConfig
-from hadir.capture.tracker import Bbox
-from hadir.cameras import repository as camera_repo
-from hadir.cameras import rtsp as rtsp_io
-from hadir.config import get_settings
-from hadir.db import camera_health_snapshots, cameras, detection_events, get_engine
-from hadir.tenants.scope import TenantScope
+from maugood.capture import manager as manager_mod
+from maugood.capture.analyzer import Detection
+from maugood.capture.events import captures_dir
+from maugood.capture.reader import CaptureWorker, ReaderConfig
+from maugood.capture.tracker import Bbox
+from maugood.cameras import repository as camera_repo
+from maugood.cameras import rtsp as rtsp_io
+from maugood.config import get_settings
+from maugood.db import camera_health_snapshots, cameras, detection_events, get_engine
+from maugood.tenants.scope import TenantScope
 
 TENANT = TenantScope(tenant_id=1)
 
@@ -324,7 +324,7 @@ def test_manager_hot_reload_cycle(admin_engine) -> None:
     """Spin up, create a camera, delete it, and confirm the worker set shrinks."""
 
     # Stub the analyzer factory so the manager never touches InsightFace.
-    from hadir.capture.analyzer import (
+    from maugood.capture.analyzer import (
         clear_analyzer_factory,
         set_analyzer_factory,
     )
@@ -510,7 +510,7 @@ def test_manager_auto_starts_workers_for_enabled_cameras_at_boot(
 ) -> None:
     """Manager.start() must spawn one worker per enabled camera across
     every active tenant in ``public.tenants`` — independent of
-    ``HADIR_TENANT_MODE``. The bug fixed by this test:
+    ``MAUGOOD_TENANT_MODE``. The bug fixed by this test:
     pre-fix the single-mode branch only scanned the default tenant
     schema and missed cameras living in tenant_<slug> schemas.
     """
@@ -519,7 +519,7 @@ def test_manager_auto_starts_workers_for_enabled_cameras_at_boot(
     # real RTSP socket. The fake VideoCapture always returns (False,
     # None) so the reader thread enters reconnect mode but the worker
     # itself is_alive — that's all this test cares about.
-    from hadir.capture.analyzer import (
+    from maugood.capture.analyzer import (
         clear_analyzer_factory,
         set_analyzer_factory,
     )
@@ -574,7 +574,7 @@ def test_manager_continues_when_one_camera_fails_to_decrypt(
     ``capture.worker.start_failed``; the good cameras audit as
     ``capture.worker.started_at_boot``."""
 
-    from hadir.capture.analyzer import (
+    from maugood.capture.analyzer import (
         clear_analyzer_factory,
         set_analyzer_factory,
     )
@@ -633,7 +633,7 @@ def test_manager_continues_when_one_camera_fails_to_decrypt(
 
         # Audit rows: one started_at_boot for good, one
         # start_failed for bad.
-        from hadir.db import audit_log  # noqa: PLC0415
+        from maugood.db import audit_log  # noqa: PLC0415
 
         with admin_engine.begin() as conn:
             rows = conn.execute(
@@ -666,7 +666,7 @@ def test_disable_camera_via_crud_stops_worker_synchronously(
     must stop the worker without waiting for any poll loop. The hook
     re-fetches the row, sees enabled=False, and calls stop_camera."""
 
-    from hadir.capture.analyzer import (
+    from maugood.capture.analyzer import (
         clear_analyzer_factory,
         set_analyzer_factory,
     )
@@ -736,7 +736,7 @@ def test_reconcile_starts_worker_on_worker_enabled_flip_true(
     reconcile pass. P28.5b's load-bearing red line: out-of-band
     mutations don't drop on the floor."""
 
-    from hadir.capture.analyzer import (
+    from maugood.capture.analyzer import (
         clear_analyzer_factory,
         set_analyzer_factory,
     )
@@ -800,7 +800,7 @@ def test_reconcile_stops_worker_on_worker_enabled_flip_false(
     """Mirror of the above — a worker_enabled=true → false flip
     out-of-band must stop the worker on the next reconcile pass."""
 
-    from hadir.capture.analyzer import (
+    from maugood.capture.analyzer import (
         clear_analyzer_factory,
         set_analyzer_factory,
     )
@@ -861,7 +861,7 @@ def test_reconcile_propagates_capture_config_change_without_restart(
     audit row records before/after under
     ``capture.worker.config_updated``."""
 
-    from hadir.capture.analyzer import (
+    from maugood.capture.analyzer import (
         clear_analyzer_factory,
         set_analyzer_factory,
     )
@@ -926,7 +926,7 @@ def test_reconcile_propagates_capture_config_change_without_restart(
         assert worker_before.get_capture_config()["save_full_frames"] is True
 
         # Audit row must carry before + after JSONB.
-        from hadir.db import audit_log  # noqa: PLC0415
+        from maugood.db import audit_log  # noqa: PLC0415
 
         with admin_engine.begin() as conn:
             row = conn.execute(
@@ -958,8 +958,8 @@ def test_quality_score_arithmetic() -> None:
     stays around for v1.x ranking work once kps land in
     ``Detection``."""
 
-    from hadir.capture.events import quality_score
-    from hadir.capture.tracker import Bbox
+    from maugood.capture.events import quality_score
+    from maugood.capture.tracker import Bbox
 
     # 60×60 face at det_score 0.9: area_norm = 3600/40000 = 0.09
     #   → 0.75*0.09 + 0.25*0.9 = 0.0675 + 0.225 = 0.2925.
@@ -976,7 +976,7 @@ def test_tracker_force_retires_after_max_duration_sec() -> None:
     even when the detection is still present. Ensures the prototype's
     MAX_EVENT_DURATION_SEC behaviour landed in our IoUTracker."""
 
-    from hadir.capture.tracker import Bbox, IoUTracker
+    from maugood.capture.tracker import Bbox, IoUTracker
 
     tr = IoUTracker(
         iou_threshold=0.3,
@@ -1004,7 +1004,7 @@ def test_per_tenant_config_changes_isolated(admin_engine) -> None:
     other tenant's workers. Lightweight unit-y test that operates on
     the manager's internal workers dict directly."""
 
-    from hadir.capture.analyzer import (
+    from maugood.capture.analyzer import (
         clear_analyzer_factory,
         set_analyzer_factory,
     )
@@ -1104,8 +1104,8 @@ def test_emit_writes_low_quality_row_after_quality_gate_removal(
     is now ignored at runtime.
     """
 
-    from hadir.capture import events as events_mod  # noqa: PLC0415
-    from hadir.capture.tracker import Bbox  # noqa: PLC0415
+    from maugood.capture import events as events_mod  # noqa: PLC0415
+    from maugood.capture.tracker import Bbox  # noqa: PLC0415
 
     monkeypatch.setattr(
         events_mod, "captures_dir",
@@ -1157,8 +1157,8 @@ def test_emit_skips_row_and_file_when_crop_size_zero(
     clamps to zero pixels OR a zero-byte JPEG buffer must skip the
     INSERT and not leave a file."""
 
-    from hadir.capture import events as events_mod  # noqa: PLC0415
-    from hadir.capture.tracker import Bbox  # noqa: PLC0415
+    from maugood.capture import events as events_mod  # noqa: PLC0415
+    from maugood.capture.tracker import Bbox  # noqa: PLC0415
 
     monkeypatch.setattr(
         events_mod, "captures_dir",
@@ -1216,8 +1216,8 @@ def test_emit_skips_row_when_file_write_raises(
     that didn't wrap write_bytes in try/except, and passes after.
     """
 
-    from hadir.capture import events as events_mod  # noqa: PLC0415
-    from hadir.capture.tracker import Bbox  # noqa: PLC0415
+    from maugood.capture import events as events_mod  # noqa: PLC0415
+    from maugood.capture.tracker import Bbox  # noqa: PLC0415
 
     monkeypatch.setattr(
         events_mod, "captures_dir",
@@ -1270,8 +1270,8 @@ def test_emit_writes_path_identical_to_inserted_value(
     ``detection_events.face_crop_path`` must be byte-for-byte
     identical (invariant 4)."""
 
-    from hadir.capture import events as events_mod  # noqa: PLC0415
-    from hadir.capture.tracker import Bbox  # noqa: PLC0415
+    from maugood.capture import events as events_mod  # noqa: PLC0415
+    from maugood.capture.tracker import Bbox  # noqa: PLC0415
 
     monkeypatch.setattr(
         events_mod, "captures_dir",
@@ -1330,13 +1330,13 @@ def test_detection_enabled_short_circuits_detect_call(
     flag flips.
     """
 
-    from hadir.capture import reader as reader_mod  # noqa: PLC0415
-    from hadir.capture.analyzer import (  # noqa: PLC0415
+    from maugood.capture import reader as reader_mod  # noqa: PLC0415
+    from maugood.capture.analyzer import (  # noqa: PLC0415
         Detection,
         clear_analyzer_factory,
         set_analyzer_factory,
     )
-    from hadir.capture.tracker import Bbox  # noqa: PLC0415
+    from maugood.capture.tracker import Bbox  # noqa: PLC0415
 
     detect_call_count = {"n": 0}
 
@@ -1399,9 +1399,9 @@ def test_emit_writes_detection_metadata_when_detector_config_passed(
     test in this module that doesn't pass the param.
     """
 
-    from hadir.capture import events as events_mod  # noqa: PLC0415
-    from hadir.capture.tracker import Bbox  # noqa: PLC0415
-    from hadir.detection import DetectorConfig  # noqa: PLC0415
+    from maugood.capture import events as events_mod  # noqa: PLC0415
+    from maugood.capture.tracker import Bbox  # noqa: PLC0415
+    from maugood.detection import DetectorConfig  # noqa: PLC0415
 
     monkeypatch.setattr(
         events_mod, "captures_dir",

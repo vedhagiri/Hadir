@@ -5,7 +5,7 @@
 // "Use local account" link — break-glass only. When OIDC is disabled
 // or the tenant has no config, the local form is the primary surface.
 //
-// Tenant resolution: subdomain-based routing (omran.hadir.example.com)
+// Tenant resolution: subdomain-based routing (omran.maugood.example.com)
 // will land here in production. For local dev the tenant slug comes
 // from a ?tenant=… query param the user types in (or the picker below).
 

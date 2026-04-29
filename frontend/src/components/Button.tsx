@@ -1,6 +1,6 @@
 // Button primitive with built-in async-loading state.
 //
-// **Why this exists**: every form across Hadir has its own
+// **Why this exists**: every form across Maugood has its own
 // ``setSubmitting(true)`` ... ``finally setSubmitting(false)`` dance.
 // Centralising it here means the spinner + disabled state come for
 // free when ``onClick`` returns a Promise — no boilerplate per
@@ -86,7 +86,7 @@ export function Button({
             border: "1.5px solid currentColor",
             borderTopColor: "transparent",
             borderRadius: "50%",
-            animation: "hadir-spin 0.7s linear infinite",
+            animation: "maugood-spin 0.7s linear infinite",
             // Slight nudge so the spinner sits on the text baseline.
             verticalAlign: "-1px",
           }}

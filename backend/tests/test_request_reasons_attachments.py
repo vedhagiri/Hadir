@@ -39,8 +39,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, insert, select
 from sqlalchemy.engine import Engine
 
-from hadir.auth.passwords import hash_password
-from hadir.db import (
+from maugood.auth.passwords import hash_password
+from maugood.db import (
     approved_leaves,
     audit_log,
     employees,
@@ -108,7 +108,7 @@ def _make_user(
                 )
             )
         if department_codes:
-            from hadir.db import departments  # noqa: PLC0415
+            from maugood.db import departments  # noqa: PLC0415
 
             for d in department_codes:
                 dept_id = conn.execute(
@@ -158,10 +158,10 @@ def attachment_workflow(admin_engine: Engine) -> Iterator[dict]:
     """
 
     suffix = secrets.token_hex(4)
-    employee_email = f"emp-att-{suffix}@p14.hadir"
-    manager_email = f"mgr-att-{suffix}@p14.hadir"
-    hr_email = f"hr-att-{suffix}@p14.hadir"
-    admin_email = f"adm-att-{suffix}@p14.hadir"
+    employee_email = f"emp-att-{suffix}@p14.maugood"
+    manager_email = f"mgr-att-{suffix}@p14.maugood"
+    hr_email = f"hr-att-{suffix}@p14.maugood"
+    admin_email = f"adm-att-{suffix}@p14.maugood"
     password = "att-pw-" + secrets.token_hex(6)
 
     employee_uid = _make_user(
@@ -194,7 +194,7 @@ def attachment_workflow(admin_engine: Engine) -> Iterator[dict]:
         full_name="P14 Smoke Admin",
     )
 
-    from hadir.db import departments  # noqa: PLC0415
+    from maugood.db import departments  # noqa: PLC0415
 
     with admin_engine.begin() as conn:
         eng_dept = int(
@@ -269,7 +269,7 @@ def attachment_workflow(admin_engine: Engine) -> Iterator[dict]:
                     audit_log.c.entity_type == "request",
                 )
             )
-            from hadir.db import attendance_records  # noqa: PLC0415
+            from maugood.db import attendance_records  # noqa: PLC0415
 
             conn.execute(
                 delete(attendance_records).where(
@@ -568,7 +568,7 @@ def test_unrelated_employee_cannot_view_attachments(
 
     # Provision a second Employee; no relation to this request.
     suffix = secrets.token_hex(4)
-    other_email = f"other-{suffix}@p14.hadir"
+    other_email = f"other-{suffix}@p14.maugood"
     other_pw = "other-" + secrets.token_hex(6)
     other_uid = _make_user(
         admin_engine,

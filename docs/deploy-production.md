@@ -1,13 +1,13 @@
-# Hadir — production deployment runbook
+# Maugood — production deployment runbook
 
 This document walks an Omran IT operator from a fresh
-**Ubuntu 22.04 LTS** server to a running Hadir stack served over
+**Ubuntu 22.04 LTS** server to a running Maugood stack served over
 HTTPS. The pilot deployment lived on the corporate LAN; v1.0
 ships TLS termination, a private docker network for the backend,
 and a config-driven cert handling story (operator-provided
 default + optional Let's Encrypt).
 
-> Every step below uses the `${HADIR_*}` variable names the
+> Every step below uses the `${MAUGOOD_*}` variable names the
 > backend already understands. The same names are documented in
 > `.env.example`; this runbook is a superset focused on the
 > production-only knobs.
@@ -18,11 +18,11 @@ default + optional Let's Encrypt).
 
 * Ubuntu 22.04 LTS (or any recent Linux with Docker support).
 * A public hostname with a DNS A/AAAA record pointing at the
-  server (e.g. `hadir.example.com`). The hostname is referenced
+  server (e.g. `maugood.example.com`). The hostname is referenced
   in the nginx `server_name` directive and in the
-  `HADIR_OIDC_REDIRECT_BASE_URL`.
+  `MAUGOOD_OIDC_REDIRECT_BASE_URL`.
 * TCP/80 + TCP/443 reachable from the public internet (or from
-  the corporate network if Hadir lives on a VPN).
+  the corporate network if Maugood lives on a VPN).
 * Sudo access on the server.
 
 ### Install Docker
@@ -53,10 +53,10 @@ newgrp docker
 ### Clone the repo
 
 ```sh
-sudo mkdir -p /opt/hadir
-sudo chown $USER /opt/hadir
-git clone https://github.com/<org>/Hadir.git /opt/hadir
-cd /opt/hadir
+sudo mkdir -p /opt/maugood
+sudo chown $USER /opt/maugood
+git clone https://github.com/<org>/Maugood.git /opt/maugood
+cd /opt/maugood
 git checkout v1.0   # or the latest release tag
 ```
 
@@ -64,19 +64,19 @@ git checkout v1.0   # or the latest release tag
 
 ## 2. Generate secrets
 
-Hadir refuses to boot in production with the dev placeholder
-secrets in place (`hadir.security.check_production_config`).
+Maugood refuses to boot in production with the dev placeholder
+secrets in place (`maugood.security.check_production_config`).
 Every command below uses **stdlib only** so a fresh Ubuntu
 22.04 host runs them without an extra `pip install`.
 
 ```sh
-python3 -c "import secrets; print(secrets.token_urlsafe(48))"                       # HADIR_SESSION_SECRET
-python3 -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"   # HADIR_FERNET_KEY
-python3 -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"   # HADIR_AUTH_FERNET_KEY
-python3 -c "import secrets; print(secrets.token_urlsafe(48))"                       # HADIR_REPORT_SIGNED_URL_SECRET
-python3 -c "import secrets; print(secrets.token_urlsafe(24))"                       # HADIR_APP_DB_PASSWORD
-python3 -c "import secrets; print(secrets.token_urlsafe(24))"                       # HADIR_ADMIN_DB_PASSWORD
-python3 -c "import secrets; print(secrets.token_urlsafe(20))"                       # HADIR_GRAFANA_ADMIN_PASSWORD
+python3 -c "import secrets; print(secrets.token_urlsafe(48))"                       # MAUGOOD_SESSION_SECRET
+python3 -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"   # MAUGOOD_FERNET_KEY
+python3 -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"   # MAUGOOD_AUTH_FERNET_KEY
+python3 -c "import secrets; print(secrets.token_urlsafe(48))"                       # MAUGOOD_REPORT_SIGNED_URL_SECRET
+python3 -c "import secrets; print(secrets.token_urlsafe(24))"                       # MAUGOOD_APP_DB_PASSWORD
+python3 -c "import secrets; print(secrets.token_urlsafe(24))"                       # MAUGOOD_ADMIN_DB_PASSWORD
+python3 -c "import secrets; print(secrets.token_urlsafe(20))"                       # MAUGOOD_GRAFANA_ADMIN_PASSWORD
 ```
 
 The two Fernet lines produce 32-byte URL-safe-base64 keys —
@@ -88,13 +88,13 @@ Stash every value in a password manager **before** putting
 them in `.env` — they're not recoverable, and rotating them
 invalidates:
 
-* `HADIR_SESSION_SECRET` — every active session.
-* `HADIR_FERNET_KEY` — every encrypted RTSP credential, every
+* `MAUGOOD_SESSION_SECRET` — every active session.
+* `MAUGOOD_FERNET_KEY` — every encrypted RTSP credential, every
   encrypted photo, every encrypted attachment.
-* `HADIR_AUTH_FERNET_KEY` — every encrypted OIDC client
+* `MAUGOOD_AUTH_FERNET_KEY` — every encrypted OIDC client
   secret, every encrypted email-config password, every
   signed report download token.
-* `HADIR_REPORT_SIGNED_URL_SECRET` — every outstanding
+* `MAUGOOD_REPORT_SIGNED_URL_SECRET` — every outstanding
   signed-URL download.
 
 ---
@@ -114,31 +114,31 @@ that's intentional):
 
 ```bash
 # ---- secrets (generated above) ----
-HADIR_SESSION_SECRET=<paste>
-HADIR_FERNET_KEY=<paste>
-HADIR_AUTH_FERNET_KEY=<paste>
-HADIR_REPORT_SIGNED_URL_SECRET=<paste>
+MAUGOOD_SESSION_SECRET=<paste>
+MAUGOOD_FERNET_KEY=<paste>
+MAUGOOD_AUTH_FERNET_KEY=<paste>
+MAUGOOD_REPORT_SIGNED_URL_SECRET=<paste>
 
 # ---- DB role passwords (set on first boot via the migration) ----
-HADIR_APP_DB_PASSWORD=<long random>
-HADIR_ADMIN_DB_PASSWORD=<long random>
-HADIR_DATABASE_URL=postgresql+psycopg://hadir_app:<HADIR_APP_DB_PASSWORD>@postgres:5432/hadir
-HADIR_ADMIN_DATABASE_URL=postgresql+psycopg://hadir:<HADIR_ADMIN_DB_PASSWORD>@postgres:5432/hadir
+MAUGOOD_APP_DB_PASSWORD=<long random>
+MAUGOOD_ADMIN_DB_PASSWORD=<long random>
+MAUGOOD_DATABASE_URL=postgresql+psycopg://maugood_app:<MAUGOOD_APP_DB_PASSWORD>@postgres:5432/maugood
+MAUGOOD_ADMIN_DATABASE_URL=postgresql+psycopg://maugood:<MAUGOOD_ADMIN_DB_PASSWORD>@postgres:5432/maugood
 
 # ---- Production hardening ----
-HADIR_ENV=production
-HADIR_BEHIND_PROXY=true
-HADIR_SESSION_COOKIE_SECURE=true
-HADIR_FORWARDED_ALLOW_IPS=*
-HADIR_HSTS_MAX_AGE_SECONDS=31536000
+MAUGOOD_ENV=production
+MAUGOOD_BEHIND_PROXY=true
+MAUGOOD_SESSION_COOKIE_SECURE=true
+MAUGOOD_FORWARDED_ALLOW_IPS=*
+MAUGOOD_HSTS_MAX_AGE_SECONDS=31536000
 
 # ---- Public-facing config ----
-HADIR_PUBLIC_HOSTNAME=hadir.example.com
-HADIR_ALLOWED_ORIGINS=https://hadir.example.com
-HADIR_OIDC_REDIRECT_BASE_URL=https://hadir.example.com
+MAUGOOD_PUBLIC_HOSTNAME=maugood.example.com
+MAUGOOD_ALLOWED_ORIGINS=https://maugood.example.com
+MAUGOOD_OIDC_REDIRECT_BASE_URL=https://maugood.example.com
 
 # ---- TLS cert handling (see §4) ----
-HADIR_TLS_CERT_DIR=./ops/certs
+MAUGOOD_TLS_CERT_DIR=./ops/certs
 ```
 
 ---
@@ -150,10 +150,10 @@ HADIR_TLS_CERT_DIR=./ops/certs
 Drop the cert + key into `ops/certs/`:
 
 ```sh
-sudo mkdir -p /opt/hadir/ops/certs
-sudo cp /path/to/operator-supplied/fullchain.pem /opt/hadir/ops/certs/fullchain.pem
-sudo cp /path/to/operator-supplied/privkey.pem   /opt/hadir/ops/certs/privkey.pem
-sudo chmod 0640 /opt/hadir/ops/certs/*.pem
+sudo mkdir -p /opt/maugood/ops/certs
+sudo cp /path/to/operator-supplied/fullchain.pem /opt/maugood/ops/certs/fullchain.pem
+sudo cp /path/to/operator-supplied/privkey.pem   /opt/maugood/ops/certs/privkey.pem
+sudo chmod 0640 /opt/maugood/ops/certs/*.pem
 ```
 
 The cert must be a full chain (server + intermediates). The key
@@ -166,7 +166,7 @@ Layer in `docker-compose.le.yml` and add an ACME email:
 
 ```bash
 # in .env
-HADIR_LE_EMAIL=ops@example.com
+MAUGOOD_LE_EMAIL=ops@example.com
 ```
 
 ```sh
@@ -194,7 +194,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml restart nginx
 
 # Renew weekly (certbot is a no-op until 30 days before expiry).
 sudo crontab -e
-# 0 3 * * 0 cd /opt/hadir && docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.le.yml --profile letsencrypt run --rm certbot && docker compose -f docker-compose.yml -f docker-compose.prod.yml restart nginx
+# 0 3 * * 0 cd /opt/maugood && docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.le.yml --profile letsencrypt run --rm certbot && docker compose -f docker-compose.yml -f docker-compose.prod.yml restart nginx
 ```
 
 > **Default**: operator-provided certs. Let's Encrypt is opt-in
@@ -206,7 +206,7 @@ sudo crontab -e
 ## 5. Boot the stack
 
 ```sh
-cd /opt/hadir
+cd /opt/maugood
 docker compose \
   -f docker-compose.yml \
   -f docker-compose.prod.yml \
@@ -224,7 +224,7 @@ Compose-up will:
   backend (advances the legacy + boundary migrations on `main`,
   then iterates every tenant schema in `public.tenants` —
   details in `backend/CLAUDE.md "Per-schema migration model"`);
-* render `ops/nginx/hadir.conf.template` with the
+* render `ops/nginx/maugood.conf.template` with the
   operator-supplied hostname + cert paths via `envsubst`;
 * run `nginx -t` against the rendered config before exec — a
   syntax error or missing cert kills the container with a
@@ -236,18 +236,18 @@ Verify:
 docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
 # postgres + backend + nginx all "Up". The backend has NO
 # host port mapping — only nginx reaches it via the private
-# `hadir-internal` network.
+# `maugood-internal` network.
 
-curl -sk https://${HADIR_PUBLIC_HOSTNAME}/api/health
+curl -sk https://${MAUGOOD_PUBLIC_HOSTNAME}/api/health
 # {"status":"ok"}
 
 # HSTS + the rest of the security headers should be present.
-curl -skI https://${HADIR_PUBLIC_HOSTNAME}/api/health | grep -iE \
+curl -skI https://${MAUGOOD_PUBLIC_HOSTNAME}/api/health | grep -iE \
     'strict-transport|x-frame|x-content|referrer-policy|permissions-policy'
 
 # Plain-HTTP is rejected with 421 by the backend's HTTPS gate
 # (and 301'd to HTTPS by nginx before that).
-curl -sIk -H "Host: ${HADIR_PUBLIC_HOSTNAME}" http://${HADIR_PUBLIC_HOSTNAME}/api/health \
+curl -sIk -H "Host: ${MAUGOOD_PUBLIC_HOSTNAME}" http://${MAUGOOD_PUBLIC_HOSTNAME}/api/health \
   | head -5
 ```
 
@@ -258,12 +258,12 @@ curl -sIk -H "Host: ${HADIR_PUBLIC_HOSTNAME}" http://${HADIR_PUBLIC_HOSTNAME}/ap
 > **Pick a path before running step 6:**
 >
 > * **Single-tenant deployment** (one customer, e.g. Omran's
->   pilot install): leave `HADIR_TENANT_MODE=single` (or
+>   pilot install): leave `MAUGOOD_TENANT_MODE=single` (or
 >   unset — `single` is the default). The seed script below
 >   creates the first Admin user inside the legacy `main`
 >   schema. This is the simplest shape and matches the pilot.
 > * **Multi-tenant SaaS deployment** (multiple customers
->   served from one host): set `HADIR_TENANT_MODE=multi` in
+>   served from one host): set `MAUGOOD_TENANT_MODE=multi` in
 >   `.env` *before* the first compose-up. Skip the seed
 >   script and use `scripts/provision_tenant.py` per
 >   tenant — see §6.5 below. The pilot Omran tenant is
@@ -278,7 +278,7 @@ curl -sIk -H "Host: ${HADIR_PUBLIC_HOSTNAME}" http://${HADIR_PUBLIC_HOSTNAME}/ap
 docker compose \
   -f docker-compose.yml \
   -f docker-compose.prod.yml \
-  exec -e HADIR_SEED_PASSWORD='<pick a strong password ≥ 12 chars>' backend \
+  exec -e MAUGOOD_SEED_PASSWORD='<pick a strong password ≥ 12 chars>' backend \
   python -m scripts.seed_admin \
     --email admin@example.com \
     --full-name 'Operator Name'
@@ -288,7 +288,7 @@ The seed script enforces a 12-char minimum (P27 §1.1.2 floor).
 The email **must** use a public TLD — `.local` and other
 reserved TLDs are rejected by the email validator.
 
-Open `https://${HADIR_PUBLIC_HOSTNAME}` in a browser; sign in;
+Open `https://${MAUGOOD_PUBLIC_HOSTNAME}` in a browser; sign in;
 verify the topbar shows the operator name + the locale switcher.
 
 If your tenant uses Microsoft Entra ID, configure OIDC under
@@ -301,7 +301,7 @@ If your tenant uses Microsoft Entra ID, configure OIDC under
 docker compose \
   -f docker-compose.yml \
   -f docker-compose.prod.yml \
-  exec -e HADIR_PROVISION_PASSWORD='<pick a strong password ≥ 12 chars>' backend \
+  exec -e MAUGOOD_PROVISION_PASSWORD='<pick a strong password ≥ 12 chars>' backend \
   python -m scripts.provision_tenant \
     --slug tenant_<slug> \
     --name '<Display Name>' \
@@ -348,12 +348,12 @@ The compose stack persists Postgres on a named volume
 docker compose \
   -f docker-compose.yml \
   -f docker-compose.prod.yml \
-  exec -T postgres pg_dumpall -U hadir > /var/backups/hadir-$(date +%F).sql
+  exec -T postgres pg_dumpall -U maugood > /var/backups/maugood-$(date +%F).sql
 ```
 
 ### Encryption keys
 
-Rotating `HADIR_FERNET_KEY` invalidates every encrypted blob on
+Rotating `MAUGOOD_FERNET_KEY` invalidates every encrypted blob on
 disk (photos, RTSP credentials, attachments). Rotation is
 straightforward only when the volume is empty — i.e. when
 provisioning a brand-new tenant. Real-world rotation is an M3
@@ -361,7 +361,7 @@ hardening exercise (P28+) and intentionally out of scope here.
 
 ### Session secret
 
-Rotating `HADIR_SESSION_SECRET` invalidates every active
+Rotating `MAUGOOD_SESSION_SECRET` invalidates every active
 session — operators have to sign in again. No other side effects.
 
 ---
@@ -370,15 +370,15 @@ session — operators have to sign in again. No other side effects.
 
 After every deploy:
 
-* [ ] `curl -sk https://${HADIR_PUBLIC_HOSTNAME}/api/health` → 200.
+* [ ] `curl -sk https://${MAUGOOD_PUBLIC_HOSTNAME}/api/health` → 200.
 * [ ] HSTS, X-Frame-Options, X-Content-Type-Options,
       Referrer-Policy, Permissions-Policy present on the response.
-* [ ] HTTP -> HTTPS redirect (`http://${HADIR_PUBLIC_HOSTNAME}`
+* [ ] HTTP -> HTTPS redirect (`http://${MAUGOOD_PUBLIC_HOSTNAME}`
       returns 301 to https).
 * [ ] Backend port 8000 is **not** reachable from the public
       network (only nginx → backend over the private docker
       network):
-      `nc -zv -w 2 ${HADIR_PUBLIC_HOSTNAME} 8000` should refuse.
+      `nc -zv -w 2 ${MAUGOOD_PUBLIC_HOSTNAME} 8000` should refuse.
 * [ ] Sign in via the UI, verify the language switch works,
       verify a notification arrives in the bell.
 * [ ] Sign out, sign in again — verify theme + density + language
@@ -396,32 +396,32 @@ locally. The dev compose is **untouched** by P23.
 ```sh
 brew install mkcert nss   # macOS; on Linux: apt install libnss3-tools then build mkcert from source
 mkcert -install
-mkcert -cert-file ops/certs/fullchain.pem -key-file ops/certs/privkey.pem hadir.local localhost 127.0.0.1
+mkcert -cert-file ops/certs/fullchain.pem -key-file ops/certs/privkey.pem maugood.local localhost 127.0.0.1
 ```
 
 Bring up the production overlay locally (with its own project
 name so it doesn't collide with the dev stack):
 
 ```sh
-HADIR_PUBLIC_HOSTNAME=hadir.local \
-HADIR_TLS_CERT_DIR=./ops/certs \
-HADIR_ALLOWED_ORIGINS=https://hadir.local \
-HADIR_OIDC_REDIRECT_BASE_URL=https://hadir.local \
-HADIR_SESSION_SECRET=local-dev-rotate \
-HADIR_FERNET_KEY=$(python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())') \
-HADIR_AUTH_FERNET_KEY=$(python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())') \
-HADIR_REPORT_SIGNED_URL_SECRET=local-dev-rotate \
-docker compose -f docker-compose.yml -f docker-compose.prod.yml -p hadirhttps up -d
+MAUGOOD_PUBLIC_HOSTNAME=maugood.local \
+MAUGOOD_TLS_CERT_DIR=./ops/certs \
+MAUGOOD_ALLOWED_ORIGINS=https://maugood.local \
+MAUGOOD_OIDC_REDIRECT_BASE_URL=https://maugood.local \
+MAUGOOD_SESSION_SECRET=local-dev-rotate \
+MAUGOOD_FERNET_KEY=$(python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())') \
+MAUGOOD_AUTH_FERNET_KEY=$(python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())') \
+MAUGOOD_REPORT_SIGNED_URL_SECRET=local-dev-rotate \
+docker compose -f docker-compose.yml -f docker-compose.prod.yml -p maugoodhttps up -d
 ```
 
-Add `127.0.0.1 hadir.local` to `/etc/hosts`, then visit
-`https://hadir.local`. mkcert pre-installed the local CA so the
+Add `127.0.0.1 maugood.local` to `/etc/hosts`, then visit
+`https://maugood.local`. mkcert pre-installed the local CA so the
 browser shows a green padlock.
 
 To stop:
 
 ```sh
-docker compose -p hadirhttps down -v
+docker compose -p maugoodhttps down -v
 docker compose up -d   # back to the regular dev stack
 ```
 
@@ -457,7 +457,7 @@ docker compose exec backend bash -c '
 
 The capture module reads from ``/data/models/`` by default; the
 default lookup path can be overridden via
-``hadir.detection.set_yolo_model_dir`` if your deploy stages the
+``maugood.detection.set_yolo_model_dir`` if your deploy stages the
 model elsewhere.
 
 If your production network blocks the download entirely, copy
@@ -470,13 +470,13 @@ the mode in System Settings.
 
 | Purpose                    | Path                                       |
 | -------------------------- | ------------------------------------------ |
-| nginx config template      | `ops/nginx/hadir.conf.template`            |
+| nginx config template      | `ops/nginx/maugood.conf.template`            |
 | nginx entrypoint           | `ops/nginx/entrypoint.sh`                  |
 | nginx Dockerfile (multi)   | `ops/nginx/Dockerfile`                     |
 | Cert directory             | `ops/certs/{fullchain,privkey}.pem`        |
 | Production overlay         | `docker-compose.prod.yml`                  |
 | Let's Encrypt overlay      | `docker-compose.le.yml`                    |
-| Backend prod hardening     | `backend/hadir/security.py`                |
+| Backend prod hardening     | `backend/maugood/security.py`                |
 | Production startup check   | `check_production_config` in the same file |
 | Per-phase build record     | `docs/phases/P23.md`                       |
 

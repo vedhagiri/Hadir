@@ -22,9 +22,9 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from hadir.config import Settings
-from hadir.main import create_app
-from hadir.security import (
+from maugood.config import Settings
+from maugood.main import create_app
+from maugood.security import (
     HttpsEnforceMiddleware,
     ProductionConfigError,
     SecurityHeadersMiddleware,
@@ -36,15 +36,15 @@ from hadir.security import (
 # valid production config. Tests mutate one field at a time to
 # assert the corresponding failure.
 _OK_PROD_ENV: dict[str, str] = {
-    "HADIR_ENV": "production",
-    "HADIR_SESSION_COOKIE_SECURE": "true",
-    "HADIR_BEHIND_PROXY": "true",
-    "HADIR_ALLOWED_ORIGINS": "https://hadir.example.com",
-    "HADIR_OIDC_REDIRECT_BASE_URL": "https://hadir.example.com",
-    "HADIR_SESSION_SECRET": "rotate-me-in-prod-please",
-    "HADIR_FERNET_KEY": "rotate-me-in-prod-please-fernet",
-    "HADIR_AUTH_FERNET_KEY": "rotate-me-in-prod-please-auth",
-    "HADIR_REPORT_SIGNED_URL_SECRET": "rotate-me-in-prod-please-rep",
+    "MAUGOOD_ENV": "production",
+    "MAUGOOD_SESSION_COOKIE_SECURE": "true",
+    "MAUGOOD_BEHIND_PROXY": "true",
+    "MAUGOOD_ALLOWED_ORIGINS": "https://maugood.example.com",
+    "MAUGOOD_OIDC_REDIRECT_BASE_URL": "https://maugood.example.com",
+    "MAUGOOD_SESSION_SECRET": "rotate-me-in-prod-please",
+    "MAUGOOD_FERNET_KEY": "rotate-me-in-prod-please-fernet",
+    "MAUGOOD_AUTH_FERNET_KEY": "rotate-me-in-prod-please-auth",
+    "MAUGOOD_REPORT_SIGNED_URL_SECRET": "rotate-me-in-prod-please-rep",
 }
 
 
@@ -76,31 +76,31 @@ def test_production_config_passes_when_everything_is_set(prod_env) -> None:
 def test_production_config_skips_when_env_is_dev(prod_env) -> None:
     # ``check_production_config`` is a no-op outside production —
     # otherwise dev would have to mirror prod env vars.
-    check_production_config(prod_env(HADIR_ENV="dev"))
+    check_production_config(prod_env(MAUGOOD_ENV="dev"))
 
 
 def test_production_config_requires_secure_cookie(prod_env) -> None:
     with pytest.raises(ProductionConfigError) as exc:
-        check_production_config(prod_env(HADIR_SESSION_COOKIE_SECURE="false"))
+        check_production_config(prod_env(MAUGOOD_SESSION_COOKIE_SECURE="false"))
     assert "session_cookie_secure" in str(exc.value).lower() or "cookie" in str(exc.value).lower()
 
 
 def test_production_config_requires_behind_proxy(prod_env) -> None:
     with pytest.raises(ProductionConfigError) as exc:
-        check_production_config(prod_env(HADIR_BEHIND_PROXY="false"))
+        check_production_config(prod_env(MAUGOOD_BEHIND_PROXY="false"))
     assert "behind_proxy" in str(exc.value).lower() or "x-forwarded-proto" in str(exc.value).lower()
 
 
 def test_production_config_requires_allowed_origins(prod_env) -> None:
     with pytest.raises(ProductionConfigError) as exc:
-        check_production_config(prod_env(HADIR_ALLOWED_ORIGINS=""))
+        check_production_config(prod_env(MAUGOOD_ALLOWED_ORIGINS=""))
     assert "allowed_origins" in str(exc.value).lower()
 
 
 def test_production_config_rejects_http_oidc_base(prod_env) -> None:
     with pytest.raises(ProductionConfigError) as exc:
         check_production_config(
-            prod_env(HADIR_OIDC_REDIRECT_BASE_URL="http://hadir.example.com")
+            prod_env(MAUGOOD_OIDC_REDIRECT_BASE_URL="http://maugood.example.com")
         )
     assert "https" in str(exc.value).lower()
 
@@ -108,18 +108,18 @@ def test_production_config_rejects_http_oidc_base(prod_env) -> None:
 @pytest.mark.parametrize(
     "env_var",
     [
-        "HADIR_SESSION_SECRET",
-        "HADIR_FERNET_KEY",
-        "HADIR_AUTH_FERNET_KEY",
-        "HADIR_REPORT_SIGNED_URL_SECRET",
+        "MAUGOOD_SESSION_SECRET",
+        "MAUGOOD_FERNET_KEY",
+        "MAUGOOD_AUTH_FERNET_KEY",
+        "MAUGOOD_REPORT_SIGNED_URL_SECRET",
     ],
 )
 def test_production_config_rejects_placeholder_secrets(prod_env, env_var: str) -> None:
     placeholders = {
-        "HADIR_SESSION_SECRET": "dev-session-secret-change-me",
-        "HADIR_FERNET_KEY": "dev-fernet-key-change-me",
-        "HADIR_AUTH_FERNET_KEY": "dev-auth-fernet-key-change-me",
-        "HADIR_REPORT_SIGNED_URL_SECRET": "dev-report-signed-url-secret-change-me",
+        "MAUGOOD_SESSION_SECRET": "dev-session-secret-change-me",
+        "MAUGOOD_FERNET_KEY": "dev-fernet-key-change-me",
+        "MAUGOOD_AUTH_FERNET_KEY": "dev-auth-fernet-key-change-me",
+        "MAUGOOD_REPORT_SIGNED_URL_SECRET": "dev-report-signed-url-secret-change-me",
     }
     with pytest.raises(ProductionConfigError):
         check_production_config(prod_env(**{env_var: placeholders[env_var]}))
@@ -190,12 +190,12 @@ def test_https_gate_exempts_metrics_for_prometheus() -> None:
 
     @app.get("/metrics")
     def metrics() -> dict[str, str]:
-        return {"hadir_test_metric": "1"}
+        return {"maugood_test_metric": "1"}
 
     client = TestClient(app)
     resp = client.get("/metrics")
     assert resp.status_code == 200
-    assert resp.json() == {"hadir_test_metric": "1"}
+    assert resp.json() == {"maugood_test_metric": "1"}
 
 
 # --- security headers ------------------------------------------
@@ -243,6 +243,6 @@ def test_create_app_in_production_refuses_unsafe(prod_env) -> None:
     # Tear down the cookie-secure flag — the rest of the safe env
     # is in place. ``check_production_config`` should surface the
     # missing piece by raising.
-    prod_env(HADIR_SESSION_COOKIE_SECURE="false")
+    prod_env(MAUGOOD_SESSION_COOKIE_SECURE="false")
     with pytest.raises(ProductionConfigError):
         create_app()

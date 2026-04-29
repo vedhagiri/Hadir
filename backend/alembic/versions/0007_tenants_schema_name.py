@@ -44,7 +44,7 @@ def upgrade() -> None:
     op.create_check_constraint(
         "ck_tenants_schema_name_format",
         "tenants",
-        # Mirror the regex in hadir.db._TENANT_SCHEMA_RE so an operator
+        # Mirror the regex in maugood.db._TENANT_SCHEMA_RE so an operator
         # can't slip a junk schema name in via a manual UPDATE.
         "schema_name ~ '^[A-Za-z_][A-Za-z0-9_]{0,62}$'",
         schema=SCHEMA,

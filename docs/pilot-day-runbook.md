@@ -20,7 +20,7 @@ Omran has more.
 - [ ] USB stick *only if* Omran wants offline transfer of photos; otherwise plan to receive the photos via SCP on-site
 - [ ] Printed `docs/pilot-acceptance-checklist.md` — two copies (one for the sponsor, one for our records)
 - [ ] `docs/pilot-signoff.md` open in an editor on the laptop, ready to fill in
-- [ ] BRD `Hadir_v1.0_BRD.docx` on the laptop in case the sponsor wants to refer to §15.1 live
+- [ ] BRD `Maugood_v1.0_BRD.docx` on the laptop in case the sponsor wants to refer to §15.1 live
 - [ ] PROJECT_CONTEXT.md §8 (deferred list) printed — the sponsor signs an acknowledgement of this list
 
 **Pre-flight on the laptop (smoke before you leave)**
@@ -60,8 +60,8 @@ sudo apt-get install -y docker.io docker-compose-plugin git
 sudo usermod -aG docker $USER
 # Log out + back in so the docker group takes effect.
 
-git clone <your repo URL> ~/hadir
-cd ~/hadir
+git clone <your repo URL> ~/maugood
+cd ~/maugood
 git checkout 0efc0bc        # P13 commit (or whichever you froze on)
 ```
 
@@ -84,15 +84,15 @@ git log --oneline -1
 The script:
 
 1. Refuses to run if `.env` already exists.
-2. Generates a fresh `HADIR_FERNET_KEY`, `HADIR_SESSION_SECRET`, and DB
+2. Generates a fresh `MAUGOOD_FERNET_KEY`, `MAUGOOD_SESSION_SECRET`, and DB
    passwords using only Python 3 stdlib (no extra deps).
-3. Writes `.env` (mode 600) with `HADIR_ENV=production` so the dev-only
+3. Writes `.env` (mode 600) with `MAUGOOD_ENV=production` so the dev-only
    `/api/_test/*` endpoints will **not** mount.
 4. **Prints the secrets exactly once.** Paste them into Omran's secret
    manager *before* pressing Enter.
 5. Prompts before bringing up the stack.
 
-> **Red line.** `HADIR_FERNET_KEY` is the single key for every at-rest
+> **Red line.** `MAUGOOD_FERNET_KEY` is the single key for every at-rest
 > encrypted artifact (face crops, capture crops, RTSP URLs, embeddings).
 > Lose it and every stored byte becomes garbage. Get it into Omran's
 > secret manager **before** you continue.
@@ -119,7 +119,7 @@ docker compose ps
 # → all three services Up; postgres healthy
 ```
 
-`HADIR_ENV=production` so the backend logs will NOT print the
+`MAUGOOD_ENV=production` so the backend logs will NOT print the
 `DEV-ONLY /api/_test endpoints mounted` line. If you see that line,
 you're in dev mode — stop and check `.env`.
 
@@ -131,7 +131,7 @@ Use the named HR contact's email and the sealed-envelope password.
 **Never** seed a shared `admin@…` account.
 
 ```bash
-docker compose exec -e HADIR_SEED_PASSWORD='<from-envelope>' backend \
+docker compose exec -e MAUGOOD_SEED_PASSWORD='<from-envelope>' backend \
   python -m scripts.seed_admin \
     --email <hr-contact@omran.example> \
     --full-name '<HR contact full name>'
@@ -258,7 +258,7 @@ What to note privately:
 - [ ] Any camera that drops out (System page → not reachable)
 - [ ] Any consistent false-negative for a known employee
 - [ ] Any false-positive (one employee being matched as another) — this
-      is rare with `HADIR_MATCH_THRESHOLD=0.45` but if it happens, log
+      is rare with `MAUGOOD_MATCH_THRESHOLD=0.45` but if it happens, log
       who → who, and propose to bump the threshold and reembed
       post-pilot
 
@@ -284,7 +284,7 @@ The seven functional items:
    with live data
 6. On-demand Excel export (Reports page → Generate Excel → open the
    file in front of the sponsor)
-7. UI matches the Hadir design system (English, light mode)
+7. UI matches the Maugood design system (English, light mode)
 
 Then the **deferred-list acknowledgement**: read PROJECT_CONTEXT §8
 out loud (or hand the printed copy over) and have the sponsor sign
@@ -362,7 +362,7 @@ Short version:
 
 ## What "done" looks like
 
-- [ ] Stack is up on the Omran host with `HADIR_ENV=production`
+- [ ] Stack is up on the Omran host with `MAUGOOD_ENV=production`
 - [ ] Cameras configured + previews verified
 - [ ] Employees imported + photos enrolled + reembed run
 - [ ] One hour of real-world identifications observed

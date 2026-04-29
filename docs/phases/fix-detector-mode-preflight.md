@@ -15,14 +15,14 @@ Backend logs were spamming, on every analyzer cycle (≈ 6/s × 2
 cameras):
 
 ```
-WARNING hadir.capture.reader camera Camera 2: analyzer error: ModuleNotFoundError
-WARNING hadir.capture.reader camera Giri Home: analyzer error: ModuleNotFoundError
+WARNING maugood.capture.reader camera Camera 2: analyzer error: ModuleNotFoundError
+WARNING maugood.capture.reader camera Giri Home: analyzer error: ModuleNotFoundError
 ```
 
 Reproduced from a python REPL inside the backend container:
 
 ```python
->>> from hadir.detection.detectors import _load_yolo
+>>> from maugood.detection.detectors import _load_yolo
 >>> _load_yolo()
 ModuleNotFoundError: No module named 'ultralytics'
 ```
@@ -30,7 +30,7 @@ ModuleNotFoundError: No module named 'ultralytics'
 Audit log showed the operator switching `tenant_mts_demo`'s
 `tenant_settings.detection_config.mode` from `insightface` to
 `yolo+face` on `2026-04-26 19:56:22 UTC`. The `yolo+face` code path
-in `hadir/detection/detectors.py::_load_yolo` does
+in `maugood/detection/detectors.py::_load_yolo` does
 `from ultralytics import YOLO`, but `ultralytics` is **not** in
 `backend/pyproject.toml` and not installed in the runtime image. The
 import raised on every analyzer cycle, the analyzer thread caught
@@ -79,13 +79,13 @@ hot-swapped each worker's detector config without a worker restart.
 ModuleNotFoundError stopped firing within one tick. Backend logs:
 
 ```
-INFO hadir.identification.matcher matcher cache loaded: tenant_id=2 employees=1 vectors=1
-INFO hadir.capture.directory employee directory loaded: tenant_id=2 employees=1
+INFO maugood.identification.matcher matcher cache loaded: tenant_id=2 employees=1 vectors=1
+INFO maugood.capture.directory employee directory loaded: tenant_id=2 employees=1
 ```
 
 ### C — pre-flight check on `PUT /api/system/detection-config`
 
-New `hadir/detection/detectors.py::is_mode_available(mode)` returns
+New `maugood/detection/detectors.py::is_mode_available(mode)` returns
 True iff the runtime carries the deps for that mode:
 
 * `insightface` → always True (mandatory dep).
@@ -93,7 +93,7 @@ True iff the runtime carries the deps for that mode:
   (already loaded) **or** `importlib.util.find_spec("ultralytics")`
   returns a spec.
 
-`hadir/system/router.py::put_detection_config` calls this
+`maugood/system/router.py::put_detection_config` calls this
 immediately after the Pydantic validation step. An unavailable mode
 returns **400** with the canonical detail shape:
 
@@ -196,19 +196,19 @@ a recall regression.
 
 ### Fix
 
-* `hadir/capture/events.py::emit_detection_event` — removed the
+* `maugood/capture/events.py::emit_detection_event` — removed the
   `if score < min_quality: return None` block. Detector-level
   filtering upstream (`min_det_score`, `min_face_pixels`) is the
   only gate now, mirroring prototype.
-* `hadir/capture/events.py` docstring updated — invariant 1 is now
+* `maugood/capture/events.py` docstring updated — invariant 1 is now
   the empty-crop guard, invariant 2 is reserved.
-* `hadir/cameras/schemas.py::CaptureConfig` — `min_face_quality_to_save`
+* `maugood/cameras/schemas.py::CaptureConfig` — `min_face_quality_to_save`
   default lowered to `0.0` and field marked deprecated. Kept on the
   schema so existing JSON validates and migration 0027 doesn't need
   a follow-up.
-* `hadir/cameras/repository.py::DEFAULT_CAPTURE_CONFIG` — same.
-* `hadir/db.py::cameras` server_default JSON — same.
-* `hadir/capture/reader.py::CaptureWorker.DEFAULT_CAPTURE_CONFIG` —
+* `maugood/cameras/repository.py::DEFAULT_CAPTURE_CONFIG` — same.
+* `maugood/db.py::cameras` server_default JSON — same.
+* `maugood/capture/reader.py::CaptureWorker.DEFAULT_CAPTURE_CONFIG` —
   same.
 * `frontend/src/features/cameras/types.ts::DEFAULT_CAPTURE_CONFIG`
   — same; field documented as deprecated.
@@ -302,20 +302,20 @@ rebuilds without code change.
   `detection_events.detection_metadata JSONB NULL`. Idempotent
   (`_has_column` short-circuit) so re-running per tenant via the
   orchestrator is safe.
-* `backend/hadir/db.py::detection_events` — column declaration.
-* `backend/hadir/detection/metadata.py` — `current_metadata(config,
+* `backend/maugood/db.py::detection_events` — column declaration.
+* `backend/maugood/detection/metadata.py` — `current_metadata(config,
   match_threshold=)` helper. Single source of truth for the snapshot
   shape.
-* `backend/hadir/capture/events.py::emit_detection_event` — accepts
+* `backend/maugood/capture/events.py::emit_detection_event` — accepts
   `detector_config=` param. Computes metadata via the helper and
   writes it on the same INSERT. Failure to compute is logged at
   DEBUG and produces NULL — a version-probe error never sinks the
   event write.
-* `backend/hadir/capture/reader.py::_analyzer_loop` — snapshots the
+* `backend/maugood/capture/reader.py::_analyzer_loop` — snapshots the
   worker's current detection_config under the lock and passes a
   `DetectorConfig` instance to `emit_detection_event` for every new
   track.
-* `backend/hadir/detection_events/router.py::DetectionEventOut` —
+* `backend/maugood/detection_events/router.py::DetectionEventOut` —
   surfaces `detection_metadata: Optional[dict]`. The list query
   selects the column.
 * `frontend/src/features/camera-logs/types.ts` — `DetectionMetadata`

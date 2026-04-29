@@ -95,9 +95,9 @@ def upgrade() -> None:
             name="ck_email_config_provider",
         ),
     )
-    op.execute('ALTER TABLE email_config OWNER TO hadir_admin')
+    op.execute('ALTER TABLE email_config OWNER TO maugood_admin')
     op.execute(
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON email_config TO hadir_app"
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON email_config TO maugood_app"
     )
     # Seed an empty row for the migrating tenant — provisioning does
     # the same inline for new tenants.
@@ -178,12 +178,12 @@ def upgrade() -> None:
         "report_schedules",
         ["tenant_id", "active", "next_run_at"],
     )
-    op.execute('ALTER TABLE report_schedules OWNER TO hadir_admin')
+    op.execute('ALTER TABLE report_schedules OWNER TO maugood_admin')
     op.execute(
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON report_schedules TO hadir_app"
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON report_schedules TO maugood_app"
     )
     op.execute(
-        "GRANT USAGE, SELECT ON SEQUENCE report_schedules_id_seq TO hadir_app"
+        "GRANT USAGE, SELECT ON SEQUENCE report_schedules_id_seq TO maugood_app"
     )
 
     # ----- report_runs ---------------------------------------------------
@@ -236,12 +236,12 @@ def upgrade() -> None:
         "report_runs",
         ["tenant_id", "schedule_id", "started_at"],
     )
-    op.execute('ALTER TABLE report_runs OWNER TO hadir_admin')
+    op.execute('ALTER TABLE report_runs OWNER TO maugood_admin')
     op.execute(
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON report_runs TO hadir_app"
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON report_runs TO maugood_app"
     )
     op.execute(
-        "GRANT USAGE, SELECT ON SEQUENCE report_runs_id_seq TO hadir_app"
+        "GRANT USAGE, SELECT ON SEQUENCE report_runs_id_seq TO maugood_app"
     )
 
 

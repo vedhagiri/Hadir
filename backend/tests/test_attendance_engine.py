@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time
 
-from hadir.attendance.engine import ShiftPolicy, compute
+from maugood.attendance.engine import ShiftPolicy, compute
 
 
 FIXED = ShiftPolicy(
@@ -47,7 +47,7 @@ def test_no_events_is_absent() -> None:
 
 
 def test_leave_clears_absent_flag() -> None:
-    from hadir.attendance.engine import LeaveRecord  # noqa: PLC0415
+    from maugood.attendance.engine import LeaveRecord  # noqa: PLC0415
 
     r = compute(
         employee_id=1,

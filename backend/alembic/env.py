@@ -1,7 +1,7 @@
-"""Alembic environment for Hadir.
+"""Alembic environment for Maugood.
 
-Runs migrations as the admin role (``hadir_admin``) because migrations
-own DDL and grant decisions that ``hadir_app`` is not allowed to make.
+Runs migrations as the admin role (``maugood_admin``) because migrations
+own DDL and grant decisions that ``maugood_app`` is not allowed to make.
 
 Per-schema migration model (v1.0 P2):
 
@@ -33,8 +33,8 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from hadir.config import get_settings
-from hadir.db import metadata, metadata_global
+from maugood.config import get_settings
+from maugood.db import metadata, metadata_global
 
 config = context.config
 if config.config_file_name is not None:

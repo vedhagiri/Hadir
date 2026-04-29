@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
 from sqlalchemy.engine import Engine
 
-from hadir.db import audit_log, departments, employees
+from maugood.db import audit_log, departments, employees
 
 
 @pytest.fixture

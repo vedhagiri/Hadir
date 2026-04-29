@@ -73,9 +73,9 @@ def upgrade() -> None:
             "format IN ('csv','json')", name="ck_erp_export_config_format"
         ),
     )
-    op.execute('ALTER TABLE erp_export_config OWNER TO hadir_admin')
+    op.execute('ALTER TABLE erp_export_config OWNER TO maugood_admin')
     op.execute(
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON erp_export_config TO hadir_app"
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON erp_export_config TO maugood_app"
     )
     op.execute(
         """

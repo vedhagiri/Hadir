@@ -60,7 +60,7 @@ frontend/.playwright-cache/
 *.swp
 *.swo
 
-# Hadir runtime data — face crops, models, captures
+# Maugood runtime data — face crops, models, captures
 data/
 backend/data/
 

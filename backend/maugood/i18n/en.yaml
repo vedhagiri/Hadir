@@ -1,0 +1,63 @@
+# Maugood backend strings — English source bundle.
+# Key shape mirrors the call-site: ``notifications.{category}.subject``,
+# ``notifications.{category}.body``, ``email.report.unsubscribe``, etc.
+
+notifications:
+  approval_assigned:
+    subject: "{stage} review: {request_type} request from {submitter_name}"
+    body: "A {request_type} request has reached your queue. Review and decide in the Approvals inbox."
+  approval_decided:
+    subject: "Your {request_type} request was {status_label}"
+    body: "{decider_label} marked your request as {status_label}."
+  admin_override:
+    subject: "Admin override · {request_type} request {status_label}"
+    body: "An administrator overrode the {previous_stage} decision on this request."
+    body_no_prior: "An administrator decided this request via override."
+  overtime_flagged:
+    subject: "Overtime flagged · {employee_full_name} ({employee_code}) — {overtime_minutes} min on {date}"
+    body: "{employee_full_name} ({employee_code}) accumulated {overtime_minutes} minutes of overtime on {date}. Review and approve / reject via the Daily Attendance page."
+  camera_unreachable:
+    subject: "Camera unreachable · {camera_name} for {minutes_unreachable} min"
+    body: "Camera {camera_name} (id={camera_id}) has been unreachable for {minutes_unreachable} minutes. Investigate via the Camera logs page."
+  report_ready:
+    subject: "Your {format_upper} report is ready ({range_label})"
+    body: "Your on-demand {format_upper} attendance report for {range_label} finished successfully. Open it from the Reports page or the email we just sent."
+
+email:
+  unsubscribe_pointer: "You're receiving this because the {category_label} category is set to email-on for your account at {tenant_name}. To stop these for this category, open Settings → Notifications in Maugood and flip the toggle to off — the change applies on the next event."
+  report:
+    subject: "{tenant_name} attendance report — {range_start} to {range_end}"
+  test:
+    subject: "Maugood email configuration test"
+    body: "This is a test from Maugood's email configuration page."
+
+errors:
+  forbidden: "You don't have permission for that."
+  not_found: "Not found."
+  invalid_request: "Invalid request."
+  rate_limited: "Too many attempts. Please wait a moment and try again."
+
+categories:
+  approval_assigned: "Approval assigned to me"
+  approval_decided: "My request decided"
+  overtime_flagged: "Overtime flagged"
+  camera_unreachable: "Camera unreachable"
+  report_ready: "Report ready"
+  admin_override: "Admin override"
+
+stages:
+  manager: "Manager"
+  hr: "HR"
+  pending_manager: "the pending Manager"
+  pending_hr: "the pending HR review"
+  prior: "the prior"
+
+statuses:
+  submitted: "submitted"
+  manager_approved: "manager approved"
+  manager_rejected: "rejected by manager"
+  hr_approved: "approved"
+  hr_rejected: "rejected by HR"
+  admin_approved: "admin override · approved"
+  admin_rejected: "admin override · rejected"
+  cancelled: "cancelled"

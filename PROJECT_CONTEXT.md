@@ -1,4 +1,4 @@
-# Hadir — Project Context Memory
+# Maugood — Project Context Memory
 
 **Purpose of this document:** Paste this into a fresh Claude conversation or save in project knowledge so any new Claude instance has full context without re-reading the long history.
 
@@ -11,9 +11,9 @@
 
 ## 1. Product identity
 
-**Name:** Hadir (Arabic حاضر, meaning "present" — fitting for an attendance system)
+**Name:** Maugood (Arabic حاضر, meaning "present" — fitting for an attendance system)
 
-**One-line definition:** Hadir is a camera-based employee attendance platform. IP cameras on a corporate LAN detect employees as they arrive and leave; the system identifies them by face, computes attendance against configurable shift policies, runs approval workflows for exceptions, and delivers scheduled reports.
+**One-line definition:** Maugood is a camera-based employee attendance platform. IP cameras on a corporate LAN detect employees as they arrive and leave; the system identifies them by face, computes attendance against configurable shift policies, runs approval workflows for exceptions, and delivers scheduled reports.
 
 **Vendor:** Muscat Tech Solutions (MTS)
 **First customer:** Omran, Oman
@@ -27,7 +27,7 @@ Because Omran needs a demo in ~5 days but the full product is 8–16 weeks of wo
 
 ### Track A — Pilot (5 days, week 1)
 
-Single-tenant, simplified policy engine, no approval workflow, no scheduled reports, no i18n translations, local auth only, HTTP on LAN. Goal: demonstrate that cameras at Omran capture employees, identify them, produce attendance logs, and the UI looks like the final Hadir design. This is a **demo**, not production. The client must be told this clearly.
+Single-tenant, simplified policy engine, no approval workflow, no scheduled reports, no i18n translations, local auth only, HTTP on LAN. Goal: demonstrate that cameras at Omran capture employees, identify them, produce attendance logs, and the UI looks like the final Maugood design. This is a **demo**, not production. The client must be told this clearly.
 
 ### Track B — v1.0 Full Product (8–10 weeks after pilot signoff)
 
@@ -151,8 +151,8 @@ These are confirmed answers from Omran — do not re-litigate these without chec
 - TanStack Query for server state
 - Zustand for small client state
 - React Hook Form + Zod for forms
-- Plain CSS using the Hadir design system's files (no Tailwind, no CSS-in-JS)
-- Icons from the curated `icons.jsx` from the Hadir design reference
+- Plain CSS using the Maugood design system's files (no Tailwind, no CSS-in-JS)
+- Icons from the curated `icons.jsx` from the Maugood design reference
 - Vitest + Playwright for testing
 
 ### Database
@@ -174,7 +174,7 @@ These are confirmed answers from Omran — do not re-litigate these without chec
 - Not Django (too heavy; we don't need admin/templates/forms)
 - Not Node backend (face pipeline requires Python)
 - Not Next.js (SSR unnecessary for authenticated app)
-- Not Tailwind (Hadir design uses CSS custom properties for theming)
+- Not Tailwind (Maugood design uses CSS custom properties for theming)
 - Not MongoDB (data is relational)
 - Not GraphQL (REST fits the use case)
 - Not Kubernetes (single-host deployment; overkill)
@@ -182,7 +182,7 @@ These are confirmed answers from Omran — do not re-litigate these without chec
 
 ---
 
-## 6. Hadir design system (summary)
+## 6. Maugood design system (summary)
 
 Full reference lives in `design-system.md`. Key constraints:
 
@@ -196,7 +196,7 @@ Full reference lives in `design-system.md`. Key constraints:
 - **RTL + Arabic** supported via `dir="rtl"` on root; infrastructure ready in v1.0; translations to be supplied/reviewed
 
 ### Reference files
-- `Hadir.html` and supporting files from `Globe_loader__3_.zip` archive
+- `Maugood.html` and supporting files from `Globe_loader__3_.zip` archive
 - Contains: styles.css + 3 enhancement CSS files, icons.jsx, all dashboard components, all pages, sample data with Omani employee names
 - Copy CSS files verbatim into `frontend/src/styles/`; do not port to another framework
 
@@ -205,15 +205,15 @@ Full reference lives in `design-system.md`. Key constraints:
 ## 7. Project structure
 
 ### Repository
-**Single GitHub monorepo** named `hadir` with this structure:
+**Single GitHub monorepo** named `maugood` with this structure:
 
 ```
-hadir/
+maugood/
   backend/
     pyproject.toml
     .env.example
     Dockerfile
-    hadir/             # python package
+    maugood/             # python package
       __init__.py
       main.py          # FastAPI app factory
       config.py        # Pydantic Settings
@@ -251,7 +251,7 @@ hadir/
     src/
       main.tsx
       App.tsx
-      styles/          # Hadir CSS from design reference, verbatim
+      styles/          # Maugood CSS from design reference, verbatim
       design/          # icons.jsx + read-only copy of design zip
       api/             # generated OpenAPI types + fetch wrapper
       auth/            # AuthProvider, LoginPage
@@ -326,7 +326,7 @@ Explicitly out of pilot scope — Omran will be told this at demo:
 - Full role switcher (pilot uses user's highest role)
 
 Pilot includes:
-- Shell + design matching Hadir
+- Shell + design matching Maugood
 - Local email+password auth
 - Users, roles, departments, audit log
 - Cameras CRUD + live preview (on-demand)
@@ -384,7 +384,7 @@ Every one of these has a reasonable default in the BRD / design. They need confi
 ## 12. Known constraints / red lines
 
 - **Biometric data is PDPL-regulated.** Encryption at rest, audit-logged access, delete-on-request — all non-negotiable.
-- **No clever design improvements.** The Hadir design is the design. Claude Code doesn't "enhance" it unless asked.
+- **No clever design improvements.** The Maugood design is the design. Claude Code doesn't "enhance" it unless asked.
 - **No scope creep into post-pilot features.** If a prompt starts adding approval workflow during pilot, stop and push back.
 - **RTSP credentials never plain-text.** Encrypted with Fernet, key from env var.
 - **Passwords never logged.** Argon2 hashes are fine; plain passwords never appear anywhere.
@@ -410,10 +410,10 @@ If the user asks for something that conflicts with what's in this file, flag it 
 
 ## 14. Glossary (for when you hand this off)
 
-- **Hadir** — the product name (Arabic حاضر "present")
+- **Maugood** — the product name (Arabic حاضر "present")
 - **Omran** — the first customer, a company in Oman
 - **MTS / Muscat Tech Solutions** — the vendor; Suresh's company
-- **Tenant** — a customer of Hadir-as-SaaS; one schema per tenant in multi-tenant mode
+- **Tenant** — a customer of Maugood-as-SaaS; one schema per tenant in multi-tenant mode
 - **Pilot / v0.1** — the 5-day demo build
 - **v1.0** — the full product shipping 8–10 weeks post-pilot
 - **detection-app** — the original single-user prototype (Round 1–4 work); retained as reference and demo, not the basis for v1.0 code

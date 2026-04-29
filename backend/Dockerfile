@@ -33,7 +33,7 @@ COPY pyproject.toml ./
 RUN pip install --upgrade pip \
     && pip install ".[dev]"
 
-COPY hadir ./hadir
+COPY maugood ./maugood
 COPY alembic ./alembic
 COPY alembic.ini ./alembic.ini
 COPY scripts ./scripts

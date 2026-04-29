@@ -15,10 +15,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, insert, select
 from sqlalchemy.engine import Engine
 
-from hadir.auth.passwords import hash_password
-from hadir.branding import css as branding_css
-from hadir.branding.constants import BRAND_PALETTE, FONT_OPTIONS
-from hadir.db import (
+from maugood.auth.passwords import hash_password
+from maugood.branding import css as branding_css
+from maugood.branding.constants import BRAND_PALETTE, FONT_OPTIONS
+from maugood.db import (
     audit_log,
     mts_staff,
     super_admin_audit,
@@ -53,7 +53,7 @@ def super_admin_user(admin_engine: Engine) -> Iterator[dict]:
     independent.
     """
 
-    email = f"sa-brand-{secrets.token_hex(4)}@super.hadir"
+    email = f"sa-brand-{secrets.token_hex(4)}@super.maugood"
     password = "super-pw-" + secrets.token_hex(6)
     password_hash = hash_password(password)
     with tenant_context("public"):

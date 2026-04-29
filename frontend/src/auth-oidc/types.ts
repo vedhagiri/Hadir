@@ -1,5 +1,5 @@
 // Wire types for the Entra ID OIDC flow (v1.0 P6).
-// Mirrors the Pydantic responses in ``hadir/auth/oidc.py``.
+// Mirrors the Pydantic responses in ``maugood/auth/oidc.py``.
 
 export interface OidcStatusResponse {
   enabled: boolean;

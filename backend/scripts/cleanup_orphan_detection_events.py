@@ -3,7 +3,7 @@
 Background: P28.5b validation surfaced 251 ``detection_events`` rows in
 ``tenant_mts_demo`` whose ``face_crop_path`` pointed at files that
 weren't on disk. The forward-going write path is now hardened (see
-``hadir/capture/events.py`` invariants), but the existing rows have to
+``maugood/capture/events.py`` invariants), but the existing rows have to
 be reclassified so the API can stop returning 410 for every missing
 crop and the Camera Logs UI can show a clean "Crop unavailable"
 placeholder instead of a broken image.
@@ -43,8 +43,8 @@ from pathlib import Path
 from sqlalchemy import select, update
 from sqlalchemy.engine import Engine
 
-from hadir.auth.audit import write_audit
-from hadir.db import (
+from maugood.auth.audit import write_audit
+from maugood.db import (
     audit_log,
     detection_events,
     make_admin_engine,
@@ -53,7 +53,7 @@ from hadir.db import (
 )
 
 
-logger = logging.getLogger("hadir.cleanup_orphan_detection_events")
+logger = logging.getLogger("maugood.cleanup_orphan_detection_events")
 
 
 def _make_admin_engine() -> Engine:

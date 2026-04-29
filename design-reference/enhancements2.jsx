@@ -1,4 +1,4 @@
-/* Hadir enhancements v2 — leave policies, XLSX generator, camera logs,
+/* Maugood enhancements v2 — leave policies, XLSX generator, camera logs,
    multi-dept managers, capture→compare explainer */
 
 /* ---------- tiny CSV→XLSX trigger (mocked: generates a .xls-ish HTML blob) ---------- */
@@ -525,7 +525,7 @@ function PipelinePage() {
     <>
       <div className="page-header">
         <div>
-          <h1 className="page-title">How Hadir works</h1>
+          <h1 className="page-title">How Maugood works</h1>
           <p className="page-sub">Camera captures → face compared against enrolled reference → attendance XLSX generated</p>
         </div>
       </div>

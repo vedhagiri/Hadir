@@ -10,16 +10,16 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, insert, select
 
-from hadir.cameras import rtsp as rtsp_io
-from hadir.config import get_settings
-from hadir.db import (
+from maugood.cameras import rtsp as rtsp_io
+from maugood.config import get_settings
+from maugood.db import (
     audit_log,
     cameras,
     detection_events,
     employee_photos,
     employees,
 )
-from hadir.employees.photos import encrypt_bytes
+from maugood.employees.photos import encrypt_bytes
 
 
 def _login(client: TestClient, user: dict) -> None:

@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 
-// Hadir design system stylesheets, copied verbatim from the design archive.
+// Maugood design system stylesheets, copied verbatim from the design archive.
 // Order matters: enhancements layer over the base.
 import "./styles/styles.css";
 import "./styles/styles-enhancements.css";

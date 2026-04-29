@@ -1,5 +1,5 @@
 """
-bootstrap_dev.py — minimum viable login set for a fresh Hadir machine.
+bootstrap_dev.py — minimum viable login set for a fresh Maugood machine.
 
 WHAT THIS DOES
 ==============
@@ -213,10 +213,10 @@ def generate_password(length: int = 16) -> str:
 # ─────────────────────────────────────────────────────────────────────
 
 def get_engine() -> Engine:
-    """Read HADIR_DATABASE_URL and return a SQLAlchemy engine."""
-    url = os.environ.get("HADIR_DATABASE_URL")
+    """Read MAUGOOD_DATABASE_URL and return a SQLAlchemy engine."""
+    url = os.environ.get("MAUGOOD_DATABASE_URL")
     if not url:
-        sys.exit("HADIR_DATABASE_URL is not set in the environment.")
+        sys.exit("MAUGOOD_DATABASE_URL is not set in the environment.")
     return create_engine(url, future=True)
 
 
@@ -427,7 +427,7 @@ def format_credentials(records: list[dict]) -> str:
     """Return the credentials.txt body as a string."""
     lines = []
     lines.append("=" * 78)
-    lines.append("Hadir bootstrap credentials")
+    lines.append("Maugood bootstrap credentials")
     lines.append(f"Generated: {datetime.now(timezone.utc).isoformat()}")
     lines.append("=" * 78)
     lines.append("")
@@ -467,7 +467,7 @@ def format_credentials(records: list[dict]) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Bootstrap a fresh Hadir machine with super-admin and 2 demo tenants."
+        description="Bootstrap a fresh Maugood machine with super-admin and 2 demo tenants."
     )
     parser.add_argument(
         "--verbose", "-v", action="store_true",

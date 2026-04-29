@@ -22,9 +22,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.engine import Engine
 
-from hadir.db import audit_log, tenant_settings
-from hadir.detection import DetectorConfig, quality_score
-from hadir.capture.tracker import IoUTracker
+from maugood.db import audit_log, tenant_settings
+from maugood.detection import DetectorConfig, quality_score
+from maugood.capture.tracker import IoUTracker
 
 
 # ---------------------------------------------------------------------------
@@ -314,12 +314,12 @@ def test_put_detection_config_rejects_unavailable_mode(
         return mode != "yolo+face"
 
     monkeypatch.setattr(
-        "hadir.system.router.is_mode_available", _fake_unavailable, raising=False
+        "maugood.system.router.is_mode_available", _fake_unavailable, raising=False
     )
     # The router imports lazily inside the handler — patch the symbol
     # at its source too so the lookup hits the fake either way.
     monkeypatch.setattr(
-        "hadir.detection.is_mode_available", _fake_unavailable
+        "maugood.detection.is_mode_available", _fake_unavailable
     )
 
     resp = client.put(

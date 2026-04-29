@@ -1,6 +1,6 @@
 """Pre-Omran reset + seed.
 
-A single re-runnable script that wipes the local Hadir database,
+A single re-runnable script that wipes the local Maugood database,
 re-provisions every tenant the validation walkthrough touches,
 seeds rich dummy data, and writes a fresh ``credentials.txt`` at
 the repo root.
@@ -51,7 +51,7 @@ from typing import Any, Optional
 from sqlalchemy import insert, select, text
 from sqlalchemy.engine import Connection, Engine
 
-from hadir.db import (
+from maugood.db import (
     cameras,
     custom_fields,
     holidays,
@@ -83,7 +83,7 @@ from _seed_helpers import (  # noqa: E402
 )
 from provision_tenant import provision_tenant  # noqa: E402
 
-logger = logging.getLogger("hadir.pre_omran_reset_seed")
+logger = logging.getLogger("maugood.pre_omran_reset_seed")
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -102,7 +102,7 @@ DEMO_BRANDING = {"primary_color_key": "plum", "font_key": "plus-jakarta-sans"}
 # directly (which takes a schema, not a slug) — every other surface
 # routes through the friendly slug.
 def _demo_schema() -> str:
-    from hadir.tenants.slug import schema_name_for_slug  # noqa: PLC0415
+    from maugood.tenants.slug import schema_name_for_slug  # noqa: PLC0415
 
     return schema_name_for_slug(DEMO_SLUG)
 
@@ -210,9 +210,9 @@ def _placeholder_check() -> None:
 
 
 def _slug_check(slug: str) -> None:
-    # Mirrors ``hadir.tenants.slug.SLUG_RE`` — the same CHECK
+    # Mirrors ``maugood.tenants.slug.SLUG_RE`` — the same CHECK
     # migration 0026 enforces on ``public.tenants.slug``.
-    from hadir.tenants.slug import SLUG_RE  # noqa: PLC0415
+    from maugood.tenants.slug import SLUG_RE  # noqa: PLC0415
 
     if not SLUG_RE.match(slug):
         print(
@@ -225,10 +225,10 @@ def _slug_check(slug: str) -> None:
 
 
 def _env_check() -> None:
-    env = os.environ.get("HADIR_ENV", "")
+    env = os.environ.get("MAUGOOD_ENV", "")
     if env != "dev":
         print(
-            f"\n  ERROR: HADIR_ENV must equal 'dev' (got {env!r}).\n"
+            f"\n  ERROR: MAUGOOD_ENV must equal 'dev' (got {env!r}).\n"
             "  This script wipes data — refusing to run outside dev.\n",
             file=sys.stderr,
         )
@@ -237,16 +237,16 @@ def _env_check() -> None:
 
 def _typed_confirm() -> None:
     print("\n" + "─" * 64)
-    print("This script wipes ALL Hadir data in the local database.")
+    print("This script wipes ALL Maugood data in the local database.")
     print("Type 'RESET' to continue (anything else aborts):")
     print("─" * 64)
     if not sys.stdin.isatty():
         # No tty — accept env-based confirmation for CI/test runs.
-        if os.environ.get("HADIR_RESET_CONFIRM") == "RESET":
-            print("[non-tty] HADIR_RESET_CONFIRM=RESET — proceeding")
+        if os.environ.get("MAUGOOD_RESET_CONFIRM") == "RESET":
+            print("[non-tty] MAUGOOD_RESET_CONFIRM=RESET — proceeding")
             return
         print(
-            "  ERROR: no TTY and HADIR_RESET_CONFIRM is not set to RESET.",
+            "  ERROR: no TTY and MAUGOOD_RESET_CONFIRM is not set to RESET.",
             file=sys.stderr,
         )
         sys.exit(2)
@@ -330,8 +330,8 @@ def _wipe_database(engine: Engine) -> None:
         conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
         conn.execute(text("CREATE SCHEMA public"))
         # The two roles persist across drops — they're cluster-level.
-        conn.execute(text("GRANT USAGE ON SCHEMA public TO hadir_app"))
-        conn.execute(text("GRANT USAGE ON SCHEMA public TO hadir_admin"))
+        conn.execute(text("GRANT USAGE ON SCHEMA public TO maugood_app"))
+        conn.execute(text("GRANT USAGE ON SCHEMA public TO maugood_admin"))
 
 
 def _migrate_public(backend_dir: Path) -> None:
@@ -436,7 +436,7 @@ def _seed_demo_tenant(engine: Engine, *, tenant_id: int) -> TenantCredentials:
     )
     creds = TenantCredentials(slug=DEMO_SLUG, display_name=DEMO_NAME)
 
-    from hadir.db import tenant_context  # noqa: PLC0415
+    from maugood.db import tenant_context  # noqa: PLC0415
 
     with tenant_context(demo_schema):
         # All seed work in one transaction.
@@ -800,7 +800,7 @@ def _real_corporate_schema() -> str:
     # Single derivation helper — same one ``provision_tenant`` uses
     # so the schema name printed during a dry run matches the value
     # that lands in ``public.tenants.schema_name``.
-    from hadir.tenants.slug import schema_name_for_slug  # noqa: PLC0415
+    from maugood.tenants.slug import schema_name_for_slug  # noqa: PLC0415
 
     return schema_name_for_slug(REAL_CORPORATE_SLUG)
 
@@ -813,7 +813,7 @@ def _seed_real_corporate(
     print(f"\n▸ Seeding {REAL_CORPORATE_NAME} ({schema}, tenant_id={tenant_id})...")
     creds = TenantCredentials(slug=REAL_CORPORATE_SLUG, display_name=REAL_CORPORATE_NAME)
 
-    from hadir.db import tenant_context  # noqa: PLC0415
+    from maugood.db import tenant_context  # noqa: PLC0415
 
     with tenant_context(schema):
         with engine.begin() as conn:
@@ -895,7 +895,7 @@ def _seed_real_corporate(
             # Encrypted RTSP URL stored as a placeholder so the row
             # is visible in the Cameras UI; the operator MUST update
             # it via the UI before testing.
-            from hadir.cameras import rtsp as rtsp_io  # noqa: PLC0415
+            from maugood.cameras import rtsp as rtsp_io  # noqa: PLC0415
 
             placeholder_url = "rtsp://placeholder.invalid/PLACEHOLDER"
             encrypted = rtsp_io.encrypt_url(placeholder_url)
@@ -945,7 +945,7 @@ def _format_credentials(
     border = "═" * 60
     lines = [
         f"╔{border}╗",
-        "║         HADIR v1.0 — PRE-OMRAN VALIDATION CREDENTIALS      ║",
+        "║         MAUGOOD v1.0 — PRE-OMRAN VALIDATION CREDENTIALS      ║",
         f"║         Generated: {now_iso:<38} ║",
         "║         WARNING: dev/test credentials only — DO NOT USE    ║",
         "║         IN PRODUCTION. credentials.txt is gitignored.      ║",
@@ -1056,7 +1056,7 @@ def _resolve_repo_root() -> Path:
 
     Order of preference:
 
-    1. ``HADIR_REPO_ROOT`` env override.
+    1. ``MAUGOOD_REPO_ROOT`` env override.
     2. ``/repo`` — the bind-mount the docker-compose.yml ships
        (P28-followup) so the container can read the host's
        .gitignore + write credentials.txt to the host's repo
@@ -1065,7 +1065,7 @@ def _resolve_repo_root() -> Path:
        when running this script directly on the host (no docker).
     """
 
-    override = os.environ.get("HADIR_REPO_ROOT")
+    override = os.environ.get("MAUGOOD_REPO_ROOT")
     if override:
         return Path(override)
     repo_mount = Path("/repo")
@@ -1102,7 +1102,7 @@ def _write_credentials(content: str) -> Path:
 
 def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Wipe + re-seed Hadir with rich validation data.",
+        description="Wipe + re-seed Maugood with rich validation data.",
     )
     p.add_argument(
         "--skip-real",

@@ -15,8 +15,8 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import text
 
-from hadir.config import get_settings
-from hadir.db import (
+from maugood.config import get_settings
+from maugood.db import (
     DEFAULT_SCHEMA,
     get_engine,
     make_admin_engine,
@@ -59,13 +59,13 @@ def two_isolated_schemas():
             # provisioning CLI will do in P2).
             conn.execute(
                 text(
-                    f'GRANT USAGE ON SCHEMA "{s}" TO hadir_app'
+                    f'GRANT USAGE ON SCHEMA "{s}" TO maugood_app'
                 )
             )
             conn.execute(
                 text(
                     f'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES '
-                    f'IN SCHEMA "{s}" TO hadir_app'
+                    f'IN SCHEMA "{s}" TO maugood_app'
                 )
             )
 
@@ -109,7 +109,7 @@ def test_single_mode_default_search_path_is_main() -> None:
     settings = get_settings()
     assert settings.tenant_mode == "single", (
         "this test asserts single-mode default; "
-        "set HADIR_TENANT_MODE=single to run"
+        "set MAUGOOD_TENANT_MODE=single to run"
     )
 
     engine = get_engine()
@@ -197,9 +197,9 @@ def test_multi_mode_no_context_refuses_to_query(monkeypatch) -> None:
     """In multi mode with no tenant context, the connection-checkout event
     raises before any SQL is issued (the v1.0 fail-closed red line)."""
 
-    from hadir.config import Settings as _Settings  # noqa: PLC0415
-    import hadir.config as _config  # noqa: PLC0415
-    import hadir.db as _db  # noqa: PLC0415
+    from maugood.config import Settings as _Settings  # noqa: PLC0415
+    import maugood.config as _config  # noqa: PLC0415
+    import maugood.db as _db  # noqa: PLC0415
 
     # Override get_settings to return multi mode for this test only.
     real_get_settings = _config.get_settings
@@ -224,8 +224,8 @@ def test_multi_mode_no_context_refuses_to_query(monkeypatch) -> None:
 def test_multi_mode_with_context_works(monkeypatch, two_isolated_schemas) -> None:
     """Same multi-mode override, but with a context — queries succeed."""
 
-    import hadir.config as _config  # noqa: PLC0415
-    import hadir.db as _db  # noqa: PLC0415
+    import maugood.config as _config  # noqa: PLC0415
+    import maugood.db as _db  # noqa: PLC0415
 
     multi_settings = _config.get_settings().model_copy(update={"tenant_mode": "multi"})
     monkeypatch.setattr(_config, "get_settings", lambda: multi_settings)

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time
 
-from hadir.attendance.engine import (
+from maugood.attendance.engine import (
     HolidayRecord,
     LeaveRecord,
     ShiftPolicy,

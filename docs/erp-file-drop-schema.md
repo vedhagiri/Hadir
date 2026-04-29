@@ -1,4 +1,4 @@
-# Hadir → ERP file-drop schema
+# Maugood → ERP file-drop schema
 
 **Version:** 1
 **Last updated:** 2026-04-25 (v1.0 P19)
@@ -6,11 +6,11 @@
 
 ## Overview
 
-Hadir writes a daily attendance export file into a directory the
+Maugood writes a daily attendance export file into a directory the
 client's ERP polls. One file per run, named:
 
 ```
-hadir-attendance-{YYYYMMDD}-{HHmmss}.{csv|json}
+maugood-attendance-{YYYYMMDD}-{HHmmss}.{csv|json}
 ```
 
 The timestamp is UTC. Format and cadence are configured per tenant
@@ -24,7 +24,7 @@ it).
 | Field | Type | Notes |
 | --- | --- | --- |
 | `employee_code` | string | Tenant-unique HR code, e.g. `OM0042`. |
-| `full_name` | string | Display name as recorded in Hadir. |
+| `full_name` | string | Display name as recorded in Maugood. |
 | `date` | string `YYYY-MM-DD` | Attendance date. |
 | `in_time` | string `HH:MM:SS` or empty / null | First detection of the day, in tenant timezone. |
 | `out_time` | string `HH:MM:SS` or empty / null | Last detection of the day. |
@@ -35,7 +35,7 @@ it).
 | `overtime_minutes` | integer | Minutes worked beyond the policy's required hours. |
 | `status` | string enum | Reduced single-string view — see "Status reduction" below. |
 | `policy_code` | string | Internal policy type — `Fixed`, `Flex`, `Ramadan`, or `Custom`. |
-| `tenant_slug` | string | Hadir tenant identifier (Postgres schema name). Useful for ERPs that consume multiple Hadir tenants. |
+| `tenant_slug` | string | Maugood tenant identifier (Postgres schema name). Useful for ERPs that consume multiple Maugood tenants. |
 
 ### Status reduction
 
@@ -133,7 +133,7 @@ UTF-8 encoded, single object at the top level:
 `metadata.schema_version` is the integer this document describes. We
 bump it whenever a column is added, renamed, or its semantics
 change. Consumers should accept unknown extra fields without erroring
-— Hadir will only break at a major version (`schema_version=2`).
+— Maugood will only break at a major version (`schema_version=2`).
 
 ## Operational notes
 

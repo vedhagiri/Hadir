@@ -1,4 +1,4 @@
-# Hadir pilot — sign-off
+# Maugood pilot — sign-off
 
 > **STATUS: not yet delivered.** This file is a template committed
 > before P14 has actually been run. Do **not** treat the existence of
@@ -18,11 +18,11 @@
 | Time on-site | `<TODO HH:MM start> → <TODO HH:MM finish>` |
 | Location | `<TODO Omran HQ address / building / floor>` |
 | Git commit deployed | `<TODO output of: git rev-parse --short HEAD on the host>` |
-| Hadir version | `0.1` (pilot) |
+| Maugood version | `0.1` (pilot) |
 | Tenant mode | `single` |
-| Backend env | `HADIR_ENV=production` (DEV-ONLY `/api/_test/*` endpoints **not** mounted) |
+| Backend env | `MAUGOOD_ENV=production` (DEV-ONLY `/api/_test/*` endpoints **not** mounted) |
 | Local timezone | `Asia/Muscat` |
-| Match threshold | `<TODO HADIR_MATCH_THRESHOLD value at sign-off — default 0.45>` |
+| Match threshold | `<TODO MAUGOOD_MATCH_THRESHOLD value at sign-off — default 0.45>` |
 | Cameras configured | `<TODO N>` |
 | Employees imported | `<TODO N>` |
 | Reference photos enrolled | `<TODO N — should equal active-employees once reembed completes>` |
@@ -67,7 +67,7 @@ verbally and the printed checklist row was signed.
 - [ ] **6. On-demand Excel export** — Reports page → Generate Excel
       for today's range → file downloaded and opened on the sponsor's
       laptop. Columns + ISO-week sheet naming verified.
-- [ ] **7. UI matches the Hadir design system in English, light
+- [ ] **7. UI matches the Maugood design system in English, light
       mode** — sponsor walked the navigation; confirmed branding /
       typography / color usage match the design proposals reviewed
       pre-pilot.

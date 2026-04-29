@@ -218,19 +218,19 @@ def upgrade() -> None:
                 "WHERE status = 'pending'"
             )
         )
-        # Apply standard hadir_app grants — everything except DELETE
+        # Apply standard maugood_app grants — everything except DELETE
         # because the table is append-only by design (decisions stay on
         # record). DELETE is reserved for the admin engine for cleanup.
         op.execute(
             text(
                 "GRANT SELECT, INSERT, UPDATE ON delete_requests "
-                "TO hadir_app"
+                "TO maugood_app"
             )
         )
         op.execute(
             text(
                 "GRANT USAGE, SELECT ON SEQUENCE delete_requests_id_seq "
-                "TO hadir_app"
+                "TO maugood_app"
             )
         )
 

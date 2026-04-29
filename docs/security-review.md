@@ -1,4 +1,4 @@
-# Hadir — security review pass
+# Maugood — security review pass
 
 **Date:** 2026-04-26
 **Reviewer:** Suresh (MTS) via Claude Code
@@ -16,7 +16,7 @@ section below; never edit a past finding.
 ### 1.1 Bandit (Python static analysis)
 
 ```
-$ docker compose exec backend bandit -r hadir/ -ll
+$ docker compose exec backend bandit -r maugood/ -ll
 Total issues (by severity): Low: 53, Medium: 0, High: 0
 ```
 
@@ -35,7 +35,7 @@ The 53 lows fall into two families:
   ``observe_*`` call sites for the same reason. Acceptable.
 
 Two **B105 (hardcoded_password_string)** false positives in
-``hadir/auth/oidc.py`` — the linter flags the *literal*
+``maugood/auth/oidc.py`` — the linter flags the *literal*
 string ``""`` in ``payload.client_secret != ""``. That's a
 "don't rotate when the operator left the field blank"
 guard, not a hardcoded credential. Acceptable.
@@ -102,9 +102,9 @@ frontend refresh.
 
 | Image           | Base                | HIGH+CRIT before | After P27 |
 | --------------- | ------------------- | ---------------- | --------- |
-| `hadir-backend` | debian 13.4         | 142H / 0C        | unchanged |
-| `hadir-nginx`   | alpine 3.21.3 → **3.23.4** | 28H / 6C  | **0 / 0** |
-| `hadir-backup`  | alpine 3.23.4       | 0 OS / 19H + 3C in Go binaries | **0 OS / 8H + 1C in gosu only** |
+| `maugood-backend` | debian 13.4         | 142H / 0C        | unchanged |
+| `maugood-nginx`   | alpine 3.21.3 → **3.23.4** | 28H / 6C  | **0 / 0** |
+| `maugood-backup`  | alpine 3.23.4       | 0 OS / 19H + 3C in Go binaries | **0 OS / 8H + 1C in gosu only** |
 
 **Fixes applied:**
 
@@ -123,7 +123,7 @@ frontend refresh.
   patches as they ship.
 * **Backup image / gosu binary**: 8 HIGH + 1 CRITICAL CVEs
   in the `gosu` binary that the postgres-15-alpine base
-  layer ships for setuid handoff. Hadir's backup script
+  layer ships for setuid handoff. Maugood's backup script
   doesn't invoke gosu (we run as root inside the
   short-lived container). Replacing it requires rebasing
   on a different image — defer to a v1.x dependency
@@ -144,8 +144,8 @@ was found, what was done.
 | Vector | Result |
 | --- | --- |
 | **Session fixation** | SAFE. `auth.sessions.create_session` always allocates a fresh ``secrets.token_urlsafe(48)`` on login; we never accept a client-supplied session id. |
-| **Brute-force** | PROTECTED. P3's `LoginRateLimiter` keys on `(email_lower, client_ip)` with `HADIR_LOGIN_MAX_ATTEMPTS` (default 10) per `HADIR_LOGIN_RATE_LIMIT_RESET_MINUTES` (default 10). The audit row `auth.login.rate_limited` is written before the 429. |
-| **OIDC state + nonce** | VALIDATED. `auth/oidc.py` signs the state+nonce blob into `hadir_oidc_state`; the callback verifies the signature, the nonce against the ID-token claim, and the JWKS-validated signature on the token itself. |
+| **Brute-force** | PROTECTED. P3's `LoginRateLimiter` keys on `(email_lower, client_ip)` with `MAUGOOD_LOGIN_MAX_ATTEMPTS` (default 10) per `MAUGOOD_LOGIN_RATE_LIMIT_RESET_MINUTES` (default 10). The audit row `auth.login.rate_limited` is written before the 429. |
+| **OIDC state + nonce** | VALIDATED. `auth/oidc.py` signs the state+nonce blob into `maugood_oidc_state`; the callback verifies the signature, the nonce against the ID-token claim, and the JWKS-validated signature on the token itself. |
 | **Password policy** | **FINDING (medium) — fixed in P27.** Neither `scripts/seed_admin.py` nor `scripts/provision_tenant.py` enforced a minimum password length. An operator could set a 1-char admin password. **Fix:** both scripts now refuse passwords shorter than 12 characters (NIST SP 800-63B § 5.1.1.2 floor + a comfortable margin). OIDC remains the recommended path for user-added accounts. |
 
 ### 2.2 Authorization — role guards, IDOR
@@ -183,7 +183,7 @@ intentional anonymous endpoints are
 `GET /api/auth/oidc/{status,login,callback}`.
 
 **IDOR test — photo by guess** — every photo lookup query
-in `hadir/employees/photos.py` includes
+in `maugood/employees/photos.py` includes
 ``employee_photos.c.tenant_id == scope.tenant_id`` AND
 ``employee_photos.c.employee_id == employee_id``. A
 guessed photo id from another tenant returns 404, not a
@@ -249,12 +249,12 @@ configured. No SSRF.
   Cross-origin POSTs that aren't a top-level navigation
   don't get the cookie.
 * **CORS** is allowlist-driven via
-  `HADIR_ALLOWED_ORIGINS`. P23's
+  `MAUGOOD_ALLOWED_ORIGINS`. P23's
   `check_production_config` refuses to boot in production
   without a non-empty value. Cross-origin reads of API
   responses are blocked.
 * **API surface is JSON-only.** A drive-by form-post
-  attack (`<form action="https://hadir.example.com/...">`)
+  attack (`<form action="https://maugood.example.com/...">`)
   fails Pydantic validation because the Content-Type is
   `application/x-www-form-urlencoded`, not
   `application/json`.
@@ -268,8 +268,8 @@ Two Fernet keys:
 
 | Key | Encrypts | Rotation cadence |
 | --- | --- | --- |
-| `HADIR_FERNET_KEY` | RTSP credentials, employee photos, capture crops, request attachments, embeddings | **annual** |
-| `HADIR_AUTH_FERNET_KEY` | Entra OIDC client_secret, email config secrets, report signed-URL tokens | **annual + on suspected compromise** |
+| `MAUGOOD_FERNET_KEY` | RTSP credentials, employee photos, capture crops, request attachments, embeddings | **annual** |
+| `MAUGOOD_AUTH_FERNET_KEY` | Entra OIDC client_secret, email config secrets, report signed-URL tokens | **annual + on suspected compromise** |
 
 Rotation is a destructive operation today (rotating
 invalidates every cipher). v1.x will introduce two-key
@@ -320,7 +320,7 @@ No plaintext secrets in tree or history.
 * **Request attachments (P14)** — magic-byte sniff with
   per-format allowlist (JPEG/PNG/GIF/WEBP/PDF + DOCX
   guarded by extension+content-type pair);
-  `HADIR_REQUEST_ATTACHMENT_MAX_MB` (default 5MB)
+  `MAUGOOD_REQUEST_ATTACHMENT_MAX_MB` (default 5MB)
   server-enforced regardless of any client check;
   encrypted at rest; filenames are
   `{uuid.uuid4().hex}.{ext}`.
@@ -341,19 +341,19 @@ supplied bytes).
 Verified in this session:
 
 ```
-$ psql -U hadir_app -c "DELETE FROM main.audit_log WHERE 1=1"
+$ psql -U maugood_app -c "DELETE FROM main.audit_log WHERE 1=1"
 ERROR: permission denied for table audit_log
 
-$ psql -U hadir_app -c "UPDATE main.audit_log SET action='tampered'"
+$ psql -U maugood_app -c "UPDATE main.audit_log SET action='tampered'"
 ERROR: permission denied for table audit_log
 
-$ psql -U hadir_app -c "TRUNCATE main.audit_log"
+$ psql -U maugood_app -c "TRUNCATE main.audit_log"
 ERROR: permission denied for table audit_log
 ```
 
-The `hadir_app` runtime role has INSERT + SELECT only on
+The `maugood_app` runtime role has INSERT + SELECT only on
 `audit_log` (P2 grant policy). Mutation requires the
-`hadir_admin` role, which only Alembic + scripts hold.
+`maugood_admin` role, which only Alembic + scripts hold.
 Red-line preserved.
 
 ---
