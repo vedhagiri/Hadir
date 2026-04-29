@@ -11,6 +11,7 @@
 import { useMemo, useState } from "react";
 
 import { useMe } from "../../auth/AuthProvider";
+import { PdfOptionsModal } from "../../components/PdfOptionsModal";
 import { primaryRole } from "../../types";
 import { useDepartments } from "../departments/hooks";
 import { useEmployeeList } from "../employees/hooks";
@@ -39,6 +40,8 @@ export function DailyAttendancePage() {
   const [employeeId, setEmployeeId] = useState<number | null>(null);
   const [drawerItem, setDrawerItem] = useState<AttendanceItem | null>(null);
   const [regenInfo, setRegenInfo] = useState<string | null>(null);
+  const [pdfModalOpen, setPdfModalOpen] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   // Wire the active scope to backend filters. "Team" is a manager-team
   // filter that we don't have a dedicated endpoint for yet — it falls
@@ -95,7 +98,10 @@ export function DailyAttendancePage() {
     });
   };
 
-  const downloadReport = async (format: "xlsx" | "pdf") => {
+  const downloadReport = async (
+    format: "xlsx" | "pdf",
+    pdfOpts?: { includeEmployeePhotos: boolean },
+  ) => {
     const path =
       format === "pdf"
         ? "/api/reports/attendance.pdf"
@@ -103,6 +109,9 @@ export function DailyAttendancePage() {
     const body: Record<string, unknown> = { start: date, end: date };
     if (filterDeptId !== null) body.department_id = filterDeptId;
     if (filterEmpId !== null) body.employee_id = filterEmpId;
+    if (format === "pdf" && pdfOpts) {
+      body.include_employee_photos = pdfOpts.includeEmployeePhotos;
+    }
     const resp = await fetch(path, {
       method: "POST",
       credentials: "same-origin",
@@ -122,6 +131,17 @@ export function DailyAttendancePage() {
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+  };
+
+  const handlePdfRequest = () => setPdfModalOpen(true);
+  const handlePdfConfirm = async (includePhotos: boolean) => {
+    setPdfBusy(true);
+    try {
+      await downloadReport("pdf", { includeEmployeePhotos: includePhotos });
+    } finally {
+      setPdfBusy(false);
+      setPdfModalOpen(false);
+    }
   };
 
   return (
@@ -323,8 +343,8 @@ export function DailyAttendancePage() {
           <div style={{ display: "flex", gap: 6 }}>
             <button
               className="btn btn-sm"
-              onClick={() => downloadReport("pdf")}
-              disabled={!list.data}
+              onClick={handlePdfRequest}
+              disabled={!list.data || pdfBusy}
             >
               <span aria-hidden style={{ marginInlineEnd: 4 }}>📄</span>
               PDF
@@ -432,6 +452,15 @@ export function DailyAttendancePage() {
       {drawerItem && (
         <AttendanceDrawer item={drawerItem} onClose={() => setDrawerItem(null)} />
       )}
+
+      <PdfOptionsModal
+        open={pdfModalOpen}
+        onClose={() => {
+          if (!pdfBusy) setPdfModalOpen(false);
+        }}
+        onConfirm={handlePdfConfirm}
+        busy={pdfBusy}
+      />
     </>
   );
 }

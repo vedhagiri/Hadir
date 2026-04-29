@@ -47,6 +47,11 @@ class AttendanceReportRequest(BaseModel):
     # Pilot-only knob — keeps a curious operator from generating a
     # year of data accidentally. v1.0 reports run as background jobs.
     max_days: int = Field(default=90, ge=1, le=366)
+    # PDF only: when False, the In photo / Out photo columns are
+    # hidden in the rendered PDF (and the per-day crop decrypts are
+    # skipped — meaningful speedup on large ranges). The XLSX path
+    # ignores this flag.
+    include_employee_photos: bool = True
 
 
 @router.post("/attendance.xlsx")
@@ -228,6 +233,7 @@ def generate_attendance_pdf(
             employee_id=payload.employee_id,
             generated_by_email=user.email,
             department_label=department_label,
+            include_employee_photos=payload.include_employee_photos,
         )
 
         # Friendly slug fuels the spec'd filename

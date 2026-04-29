@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "../../api/client";
+import { PdfOptionsModal } from "../../components/PdfOptionsModal";
 import { Icon } from "../../shell/Icon";
 import { useEmployeeList, useEmployeeDetail } from "../employees/hooks";
 import type { Employee } from "../employees/types";
@@ -116,6 +117,7 @@ export function EmployeeReportPage() {
   const [downloading, setDownloading] = useState<"xlsx" | "pdf" | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pdfModalOpen, setPdfModalOpen] = useState(false);
 
   useEffect(() => {
     setInfo(null);
@@ -215,7 +217,7 @@ export function EmployeeReportPage() {
     }
   };
 
-  const downloadPdf = async () => {
+  const downloadPdf = async (includePhotos: boolean) => {
     if (selectedEmployeeId === null) return;
     setDownloading("pdf");
     setError(null);
@@ -229,6 +231,7 @@ export function EmployeeReportPage() {
           start,
           end,
           employee_id: selectedEmployeeId,
+          include_employee_photos: includePhotos,
         }),
       });
       if (!resp.ok) {
@@ -293,7 +296,7 @@ export function EmployeeReportPage() {
           </button>
           <button
             className="btn btn-primary"
-            onClick={downloadPdf}
+            onClick={() => setPdfModalOpen(true)}
             disabled={selectedEmployeeId === null || downloading !== null}
           >
             <Icon name="fileText" size={12} />
@@ -631,6 +634,18 @@ export function EmployeeReportPage() {
           </div>
         </>
       )}
+
+      <PdfOptionsModal
+        open={pdfModalOpen}
+        onClose={() => {
+          if (downloading !== "pdf") setPdfModalOpen(false);
+        }}
+        onConfirm={async (includePhotos) => {
+          await downloadPdf(includePhotos);
+          setPdfModalOpen(false);
+        }}
+        busy={downloading === "pdf"}
+      />
     </>
   );
 }

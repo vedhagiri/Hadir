@@ -14,8 +14,10 @@ import { useTranslation } from "react-i18next";
 import { DrawerShell } from "../../components/DrawerShell";
 
 import { Icon } from "../../shell/Icon";
+import { BrandLogo } from "./BrandLogo";
 import { useCreateCamera, usePatchCamera } from "./hooks";
 import {
+  BRAND_OPTIONS,
   DEFAULT_CAPTURE_CONFIG,
   ZONE_OPTIONS,
   type Camera,
@@ -47,6 +49,7 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
   const [name, setName] = useState(initial?.name ?? "");
   const [location, setLocation] = useState(initial?.location ?? "");
   const [zone, setZone] = useState(initial?.zone ?? "");
+  const [brand, setBrand] = useState(initial?.brand ?? "");
   const [workerEnabled, setWorkerEnabled] = useState(
     initial?.worker_enabled ?? true,
   );
@@ -67,6 +70,7 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
     setName(initial?.name ?? "");
     setLocation(initial?.location ?? "");
     setZone(initial?.zone ?? "");
+    setBrand(initial?.brand ?? "");
     setWorkerEnabled(initial?.worker_enabled ?? true);
     setDisplayEnabled(initial?.display_enabled ?? true);
     setDetectionEnabled(initial?.detection_enabled ?? true);
@@ -86,6 +90,11 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
           setError(t("cameras.errors.rtspRequired"));
           return;
         }
+        // "Others" is a UI-only sentinel for "no specific brand" —
+        // store as null so the BrandLogo falls back to the generic
+        // camera icon.
+        const brandNorm =
+          brand && brand !== "Others" ? brand : null;
         const input: CameraCreateInput = {
           name: name.trim(),
           location: location.trim(),
@@ -95,6 +104,7 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
           display_enabled: displayEnabled,
           detection_enabled: detectionEnabled,
           capture_config: config,
+          brand: brandNorm,
         };
         await create.mutateAsync(input);
       } else {
@@ -104,6 +114,8 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
         if (location.trim() !== initial.location) patchBody.location = location.trim();
         const zoneNorm = zone || null;
         if (zoneNorm !== (initial.zone ?? null)) patchBody.zone = zoneNorm;
+        const brandNorm = brand && brand !== "Others" ? brand : null;
+        if (brandNorm !== (initial.brand ?? null)) patchBody.brand = brandNorm;
         if (workerEnabled !== initial.worker_enabled) {
           patchBody.worker_enabled = workerEnabled;
         }
@@ -209,6 +221,36 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
                 </option>
               ))}
             </select>
+          </Field>
+
+          <Field
+            label="Brand"
+            hint="Used to render a brand-coloured chip next to this camera in lists. Pick Others if your brand isn't listed — a generic camera icon is shown."
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              <BrandLogo
+                brand={brand && brand !== "Others" ? brand : null}
+                size={28}
+              />
+              <select
+                value={brand}
+                onChange={(e) => setBrand(e.target.value)}
+                style={{ ...inputStyle, flex: 1 }}
+              >
+                <option value="">— Pick a brand —</option>
+                {BRAND_OPTIONS.map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+              </select>
+            </div>
           </Field>
 
           <Field

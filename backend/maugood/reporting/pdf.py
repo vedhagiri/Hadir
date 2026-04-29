@@ -250,14 +250,22 @@ def _build_employees(
     rows: list,
     conn: Connection,
     scope: TenantScope,
+    *,
+    include_employee_photos: bool = True,
 ) -> list[dict]:
     """Group flat rows by employee + compute per-employee totals.
 
-    Each day row is decorated with ``in_crop_data_url`` /
+    When ``include_employee_photos`` is True (the default), each day
+    row is decorated with ``in_crop_data_url`` /
     ``out_crop_data_url`` — the first / last detection event's
     Fernet-encrypted crop, decrypted to a base64 ``data:`` URL.
     Missing crops resolve to ``None`` so the template can swap to
     a placeholder cell without breaking the layout.
+
+    When False, the per-day crop decrypts are skipped entirely (a
+    measurable speedup on long ranges) and both URLs land as None;
+    the template gates the photo columns on the ``show_photos``
+    flag so the visual layout shifts cleanly.
     """
 
     by_employee: dict[int, dict] = {}
@@ -286,9 +294,12 @@ def _build_employees(
             if r.total_minutes is not None
             else None
         )
-        in_crop, out_crop = _crops_for_day(
-            conn, scope, employee_id=int(r.employee_id), on_date=r.date
-        )
+        if include_employee_photos:
+            in_crop, out_crop = _crops_for_day(
+                conn, scope, employee_id=int(r.employee_id), on_date=r.date
+            )
+        else:
+            in_crop, out_crop = None, None
         emp["days"].append(
             {
                 "date": r.date.isoformat(),
@@ -403,6 +414,7 @@ def build_pdf(
     employee_id: Optional[int] = None,
     generated_by_email: str = "",
     department_label: Optional[str] = None,
+    include_employee_photos: bool = True,
 ) -> tuple[bytes, int]:
     """Render the PDF and return ``(bytes, row_count)``.
 
@@ -419,7 +431,12 @@ def build_pdf(
         department_ids=department_ids,
         employee_id=employee_id,
     )
-    employees_grouped = _build_employees(rows, conn, scope)
+    employees_grouped = _build_employees(
+        rows,
+        conn,
+        scope,
+        include_employee_photos=include_employee_photos,
+    )
 
     day_count = (end_date - start_date).days + 1
     summary = _summary(rows, employees_grouped, day_count=day_count)
@@ -440,6 +457,7 @@ def build_pdf(
         ),
         generated_by_email=generated_by_email or "—",
         filters={"department_label": department_label},
+        show_photos=include_employee_photos,
     )
 
     # Lazy-import WeasyPrint so a test that doesn't render PDFs (e.g.

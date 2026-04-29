@@ -626,3 +626,19 @@ input[type="radio"]:focus-visible {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
 }
+
+/* ------------------------------------------------------------------
+   Sidebar width bump. The design's --sidebar-w (232px) was sized
+   for the original 14px icons + 0px item indent. After bumping the
+   icons to 17px and pushing each row 16px further in (so items sit
+   visibly under their group heading), the longest labels — "Settings
+   & custom fields", "System & infrastructure", "Detection & Tracker",
+   "Former employees seen" — clip and the inner scroll appears. 268px
+   gives every label room without making the sidebar feel oversized.
+   ------------------------------------------------------------------ */
+:root {
+  --sidebar-w: 268px;
+}
+[data-sidebar="collapsed"] {
+  --sidebar-w: 64px;
+}

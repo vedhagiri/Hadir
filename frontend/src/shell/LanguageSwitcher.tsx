@@ -15,15 +15,19 @@ import { useTranslation } from "react-i18next";
 import { setLanguage, type SupportedLanguage } from "../i18n";
 
 // Flag rendering note: we use Unicode regional-indicator emoji
-// (🇬🇧 / 🇸🇦) rather than SVG assets — every modern browser on
+// (🇬🇧 / 🇴🇲) rather than SVG assets — every modern browser on
 // macOS, iOS, Android, and Linux renders them as the country flag.
 // On Windows 10/11 without the optional "Segoe UI Emoji" font
 // pack, they fall back to two-letter abbreviations (e.g. "GB"),
 // which is a degraded-but-readable result. Switch to inline SVG
 // later if Windows fidelity becomes a pilot blocker.
+//
+// Arabic uses the Oman flag (🇴🇲) — Maugood is built for the
+// Omani market; the language toggle reflects locale, not the
+// linguistic origin of Arabic.
 const OPTIONS: { code: SupportedLanguage; label: string; flag: string; short: string }[] = [
   { code: "en", label: "English", flag: "🇬🇧", short: "EN" },
-  { code: "ar", label: "العربية", flag: "🇸🇦", short: "AR" },
+  { code: "ar", label: "العربية", flag: "🇴🇲", short: "AR" },
 ];
 
 export function LanguageSwitcher() {

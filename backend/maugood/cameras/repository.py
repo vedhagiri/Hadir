@@ -227,6 +227,7 @@ def create_camera(
     camera_code: Optional[str] = None,
     zone: Optional[str] = None,
     capture_config: Optional[dict[str, Any]] = None,
+    brand: Optional[str] = None,
 ) -> int:
     # Auto-generate the running code when the caller didn't supply
     # one. ``next_camera_code`` reads the current MAX(code) for the
@@ -248,6 +249,8 @@ def create_camera(
     }
     if capture_config is not None:
         values["capture_config"] = _normalise_capture_config(capture_config)
+    if brand is not None:
+        values["brand"] = brand
 
     new_id = conn.execute(
         insert(cameras).values(**values).returning(cameras.c.id)

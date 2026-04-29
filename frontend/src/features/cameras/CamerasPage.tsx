@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { ModalShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
+import { BrandLogo } from "./BrandLogo";
 import { CameraDrawer } from "./CameraDrawer";
 import { PreviewModal } from "./PreviewModal";
 import { useCameras, useDeleteCamera, usePatchCamera } from "./hooks";
@@ -141,15 +142,26 @@ export function CamerasPage() {
                   {cam.camera_code}
                 </td>
                 <td>
-                  <div style={{ fontWeight: 500 }}>{cam.name}</div>
-                  {metadataLine && (
-                    <div
-                      className="text-xs text-dim mono"
-                      style={{ marginTop: 2 }}
-                    >
-                      {metadataLine}
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                    }}
+                  >
+                    <BrandLogo brand={cam.brand} size={28} />
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 500 }}>{cam.name}</div>
+                      {metadataLine && (
+                        <div
+                          className="text-xs text-dim mono"
+                          style={{ marginTop: 2 }}
+                        >
+                          {metadataLine}
+                        </div>
+                      )}
                     </div>
-                  )}
+                  </div>
                 </td>
                 <td className="text-sm">
                   {cam.zone ? (

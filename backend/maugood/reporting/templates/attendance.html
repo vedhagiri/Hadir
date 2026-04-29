@@ -313,9 +313,9 @@
       <thead>
         <tr>
           <th>Date</th>
-          <th class="center">In photo</th>
+          {% if show_photos %}<th class="center">In photo</th>{% endif %}
           <th>In</th>
-          <th class="center">Out photo</th>
+          {% if show_photos %}<th class="center">Out photo</th>{% endif %}
           <th>Out</th>
           <th class="right">Hours</th>
           <th class="center">Late</th>
@@ -330,6 +330,7 @@
         {% for d in emp.days %}
         <tr>
           <td class="mono">{{ d.date }}</td>
+          {% if show_photos %}
           <td class="crop-cell">
             {% if d.in_crop_data_url %}
               <img class="crop-thumb" src="{{ d.in_crop_data_url }}" alt="In crop {{ d.date }}" />
@@ -337,7 +338,9 @@
               <span class="crop-missing">—</span>
             {% endif %}
           </td>
+          {% endif %}
           <td class="mono">{{ d.in_time or "—" }}</td>
+          {% if show_photos %}
           <td class="crop-cell">
             {% if d.out_crop_data_url %}
               <img class="crop-thumb" src="{{ d.out_crop_data_url }}" alt="Out crop {{ d.date }}" />
@@ -345,6 +348,7 @@
               <span class="crop-missing">—</span>
             {% endif %}
           </td>
+          {% endif %}
           <td class="mono">{{ d.out_time or "—" }}</td>
           <td class="right mono">{{ d.total_hours if d.total_hours is not none else "—" }}</td>
           <td class="center">{% if d.late %}<span class="flag-yes">Yes</span>{% else %}<span class="flag-no">—</span>{% endif %}</td>
@@ -355,7 +359,7 @@
           <td>{{ d.policy_name }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="12" class="empty-day">No attendance records in this range.</td></tr>
+        <tr><td colspan="{{ 12 if show_photos else 10 }}" class="empty-day">No attendance records in this range.</td></tr>
         {% endfor %}
       </tbody>
     </table>

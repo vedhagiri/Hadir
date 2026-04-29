@@ -1,4 +1,4 @@
-// Reports page — three report types (Daily Attendance / Event Log /
+// Reports page — three report types (Attendance / Event Log /
 // Department Summary), each with a live preview + Run & download
 // button, plus a scheduled-delivery list at the bottom.
 //
@@ -7,17 +7,18 @@
 //   docs/scripts/issues-screenshots/07-Events_log _report.png
 //   docs/scripts/issues-screenshots/08-Department_Summary.png
 //
-// Daily Attendance flows through the existing /api/reports/attendance.{xlsx,pdf}
-// endpoints. Event Log + Department Summary download as client-side
-// CSV blobs for now — server-side XLSX/PDF for those types is a
-// follow-up. The preview tables read live data from the same
-// endpoints the Daily Attendance + Camera Logs pages use, so what
-// you see is what you'd download.
+// Attendance flows through /api/reports/attendance.{xlsx,pdf} and
+// supports a date range (start..end) — the table preview samples the
+// start day, the download streams the full range. Event Log + Dept
+// Summary download as client-side CSV blobs for now (server-side
+// XLSX/PDF for those types is a follow-up); both keep a single-day
+// picker since their data shape is per-event-on-day.
 
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
 import { api } from "../../api/client";
+import { PdfOptionsModal } from "../../components/PdfOptionsModal";
 import { Icon, type IconName } from "../../shell/Icon";
 import { useAttendance } from "../attendance/hooks";
 import type { AttendanceItem } from "../attendance/types";
@@ -27,7 +28,7 @@ import { useDepartments } from "../departments/hooks";
 // Types
 // ---------------------------------------------------------------------------
 
-type ReportKey = "daily-attendance" | "event-log" | "department-summary";
+type ReportKey = "attendance" | "event-log" | "department-summary";
 
 interface DetectionEventRow {
   id: number;
@@ -111,16 +112,22 @@ function rowsToCsv(headers: string[], rows: (string | number | null)[][]): strin
 // ---------------------------------------------------------------------------
 
 export function ReportsPage() {
-  const [activeReport, setActiveReport] = useState<ReportKey>("daily-attendance");
+  const [activeReport, setActiveReport] = useState<ReportKey>("attendance");
+  // Attendance uses a date range (start..end); Event Log + Department
+  // Summary keep a single-day picker. The single ``date`` state below
+  // backs both — for Attendance it tracks the start day's preview
+  // sample, with ``endDate`` carrying the upper bound.
   const [date, setDate] = useState<string>(todayIso());
+  const [endDate, setEndDate] = useState<string>(todayIso());
   const [downloading, setDownloading] = useState<"xlsx" | "pdf" | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pdfModalOpen, setPdfModalOpen] = useState(false);
 
   useEffect(() => {
     setInfo(null);
     setError(null);
-  }, [activeReport, date]);
+  }, [activeReport, date, endDate]);
 
   return (
     <>
@@ -154,11 +161,11 @@ export function ReportsPage() {
         }}
       >
         <ReportTypeCard
-          active={activeReport === "daily-attendance"}
-          onClick={() => setActiveReport("daily-attendance")}
+          active={activeReport === "attendance"}
+          onClick={() => setActiveReport("attendance")}
           icon="fileText"
-          title="Daily Attendance"
-          subtitle="one row per person per day · worked hours vs policy"
+          title="Attendance"
+          subtitle="one row per person per day · worked hours vs policy · pick a date range"
           meta="9 columns · xlsx / pdf"
         />
         <ReportTypeCard
@@ -198,15 +205,28 @@ export function ReportsPage() {
       )}
 
       {/* Preview */}
-      {activeReport === "daily-attendance" && (
-        <DailyAttendancePreview
-          date={date}
-          setDate={setDate}
+      {activeReport === "attendance" && (
+        <AttendancePreview
+          start={date}
+          end={endDate}
+          setStart={(d) => {
+            setDate(d);
+            // Keep end ≥ start to avoid an inverted range — when the
+            // operator drags the start past the current end, snap end
+            // forward. Same affordance most date-range pickers ship.
+            if (endDate < d) setEndDate(d);
+          }}
+          setEnd={setEndDate}
           downloading={downloading}
           onDownload={async (format) => {
-            await downloadDailyAttendance({
+            if (format === "pdf") {
+              setPdfModalOpen(true);
+              return;
+            }
+            await downloadAttendance({
               format,
-              date,
+              start: date,
+              end: endDate,
               setDownloading,
               setInfo,
               setError,
@@ -245,6 +265,25 @@ export function ReportsPage() {
         />
       )}
 
+      <PdfOptionsModal
+        open={pdfModalOpen}
+        onClose={() => {
+          if (downloading !== "pdf") setPdfModalOpen(false);
+        }}
+        onConfirm={async (includePhotos) => {
+          await downloadAttendance({
+            format: "pdf",
+            start: date,
+            end: endDate,
+            pdfOpts: { includeEmployeePhotos: includePhotos },
+            setDownloading,
+            setInfo,
+            setError,
+          });
+          setPdfModalOpen(false);
+        }}
+        busy={downloading === "pdf"}
+      />
     </>
   );
 }
@@ -325,29 +364,38 @@ function ReportTypeCard({
 }
 
 // ---------------------------------------------------------------------------
-// Daily Attendance preview
+// Attendance preview (date range)
 // ---------------------------------------------------------------------------
 
-function DailyAttendancePreview({
-  date,
-  setDate,
+function AttendancePreview({
+  start,
+  end,
+  setStart,
+  setEnd,
   downloading,
   onDownload,
 }: {
-  date: string;
-  setDate: (d: string) => void;
+  start: string;
+  end: string;
+  setStart: (d: string) => void;
+  setEnd: (d: string) => void;
   downloading: "xlsx" | "pdf" | null;
   onDownload: (format: "xlsx" | "pdf") => Promise<void>;
 }) {
-  const list = useAttendance(date, null);
+  // Live preview: a sample of the start day. The full range goes
+  // into the downloaded report — sampling every day client-side for
+  // a long range would mean N round-trips.
+  const list = useAttendance(start, null);
   const items = list.data?.items ?? [];
   const previewItems = items.slice(0, 8);
 
   return (
     <PreviewCard
-      title="Daily Attendance"
-      date={date}
-      setDate={setDate}
+      title="Attendance"
+      date={start}
+      setDate={setStart}
+      endDate={end}
+      setEndDate={setEnd}
       previewCount={previewItems.length}
       totalCount={items.length}
       isLoading={list.isLoading}
@@ -372,7 +420,7 @@ function DailyAttendancePreview({
     >
       {previewItems.length === 0 ? (
         <EmptyTableRow colSpan={10}>
-          No attendance rows for {date}.
+          No attendance rows for {start}.
         </EmptyTableRow>
       ) : (
         previewItems.map((it, idx) => (
@@ -415,19 +463,27 @@ function DailyStatusPill({ item }: { item: AttendanceItem }) {
   return <span className="pill pill-success">Present</span>;
 }
 
-async function downloadDailyAttendance({
+async function downloadAttendance({
   format,
-  date,
+  start,
+  end,
+  pdfOpts,
   setDownloading,
   setInfo,
   setError,
 }: {
   format: "xlsx" | "pdf";
-  date: string;
+  start: string;
+  end: string;
+  pdfOpts?: { includeEmployeePhotos: boolean };
   setDownloading: (v: "xlsx" | "pdf" | null) => void;
   setInfo: (v: string | null) => void;
   setError: (v: string | null) => void;
 }): Promise<void> {
+  if (start > end) {
+    setError("Start date must be on or before end date.");
+    return;
+  }
   setDownloading(format);
   setError(null);
   setInfo(null);
@@ -436,19 +492,30 @@ async function downloadDailyAttendance({
       format === "pdf"
         ? "/api/reports/attendance.pdf"
         : "/api/reports/attendance.xlsx";
+    const body: Record<string, unknown> = { start, end };
+    if (format === "pdf" && pdfOpts) {
+      body.include_employee_photos = pdfOpts.includeEmployeePhotos;
+    }
     const resp = await fetch(path, {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ start: date, end: date }),
+      body: JSON.stringify(body),
     });
     if (!resp.ok) {
       setError(`Download failed (${resp.status}).`);
       return;
     }
     const blob = await resp.blob();
-    downloadBlob(blob, `daily_attendance_${date}.${format}`);
-    setInfo(`Downloaded daily_attendance_${date}.${format}.`);
+    // Single-day range collapses the filename to ``attendance_{date}``
+    // for backwards compatibility; otherwise the operator gets the
+    // full ``attendance_{start}_to_{end}`` shape.
+    const stem =
+      start === end
+        ? `attendance_${start}`
+        : `attendance_${start}_to_${end}`;
+    downloadBlob(blob, `${stem}.${format}`);
+    setInfo(`Downloaded ${stem}.${format}.`);
   } catch {
     setError("Network error.");
   } finally {
@@ -1112,6 +1179,8 @@ function PreviewCard({
   title,
   date,
   setDate,
+  endDate,
+  setEndDate,
   previewCount,
   totalCount,
   isLoading,
@@ -1127,6 +1196,11 @@ function PreviewCard({
   title: string;
   date: string;
   setDate: (d: string) => void;
+  /** Optional — when present, a second date input renders next to
+   *  the first and the card displays "{start} → {end}" in its
+   *  caption. Leave undefined for single-day reports. */
+  endDate?: string;
+  setEndDate?: (d: string) => void;
   previewCount: number;
   totalCount: number;
   isLoading: boolean;
@@ -1139,14 +1213,26 @@ function PreviewCard({
   columns: string[];
   children: ReactNode;
 }) {
+  const hasRange = endDate !== undefined && setEndDate !== undefined;
+  const dateInputStyle: React.CSSProperties = {
+    padding: "5px 9px",
+    fontSize: 12.5,
+    border: "1px solid var(--border)",
+    borderRadius: "var(--radius-sm)",
+    background: "var(--bg-elev)",
+    color: "var(--text)",
+    fontFamily: "var(--font-sans)",
+    outline: "none",
+  };
   return (
     <div className="card">
       <div className="card-head">
         <div>
           <h3 className="card-title">Preview · {title}</h3>
           <div className="text-xs text-dim" style={{ marginTop: 2 }}>
-            Sample showing first {previewCount} row{previewCount === 1 ? "" : "s"}{" "}
-            · date {date}
+            {hasRange
+              ? `Sample showing first ${previewCount} row${previewCount === 1 ? "" : "s"} of ${date} · range ${date} → ${endDate}`
+              : `Sample showing first ${previewCount} row${previewCount === 1 ? "" : "s"} · date ${date}`}
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1162,17 +1248,30 @@ function PreviewCard({
             type="date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
-            style={{
-              padding: "5px 9px",
-              fontSize: 12.5,
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius-sm)",
-              background: "var(--bg-elev)",
-              color: "var(--text)",
-              fontFamily: "var(--font-sans)",
-              outline: "none",
-            }}
+            aria-label={hasRange ? "Start date" : "Date"}
+            style={dateInputStyle}
           />
+          {hasRange && (
+            <>
+              <span
+                style={{
+                  fontSize: 12,
+                  color: "var(--text-tertiary)",
+                  fontFamily: "var(--font-mono)",
+                }}
+              >
+                →
+              </span>
+              <input
+                type="date"
+                value={endDate}
+                min={date}
+                onChange={(e) => setEndDate(e.target.value)}
+                aria-label="End date"
+                style={dateInputStyle}
+              />
+            </>
+          )}
           <button
             className="btn btn-primary btn-sm"
             onClick={runAndDownload}

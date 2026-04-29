@@ -71,6 +71,7 @@ export interface CameraCreateInput {
   display_enabled: boolean;
   detection_enabled: boolean;
   capture_config: CaptureConfig;
+  brand?: string | null;
 }
 
 export interface CameraPatchInput {
@@ -83,6 +84,7 @@ export interface CameraPatchInput {
   display_enabled?: boolean;
   detection_enabled?: boolean;
   capture_config?: CaptureConfig;
+  brand?: string | null;
 }
 
 export const ZONE_OPTIONS = [
@@ -96,3 +98,19 @@ export const ZONE_OPTIONS = [
 ] as const;
 
 export type Zone = (typeof ZONE_OPTIONS)[number];
+
+// Curated camera-brand list. Free-form on the backend (varchar), but
+// the UI offers this menu so we can render a brand-coloured chip
+// next to each camera in the list. "Others" maps to null on the
+// wire — the chip falls back to a generic camera icon.
+export const BRAND_OPTIONS = [
+  "Samsung",
+  "Hikvision",
+  "Dahua",
+  "CP Plus",
+  "Axis",
+  "Panasonic",
+  "Others",
+] as const;
+
+export type CameraBrand = (typeof BRAND_OPTIONS)[number];

@@ -125,6 +125,7 @@ def create_camera_endpoint(
                 camera_code=payload.camera_code,
                 zone=payload.zone,
                 capture_config=payload.capture_config.model_dump(),
+                brand=payload.brand,
             )
         except IntegrityError as exc:
             raise HTTPException(
@@ -189,6 +190,8 @@ def patch_camera_endpoint(
             # the JSONB shape so two writes of equivalent payloads produce
             # the same DB row.
             values["capture_config"] = provided["capture_config"]
+        if "brand" in provided:
+            values["brand"] = provided["brand"]
 
         if "rtsp_url" in provided and provided["rtsp_url"] is not None:
             try:

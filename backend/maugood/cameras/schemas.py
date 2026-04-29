@@ -89,6 +89,12 @@ class CameraCreateIn(BaseModel):
     display_enabled: bool = True
     detection_enabled: bool = True
     capture_config: CaptureConfig = Field(default_factory=CaptureConfig)
+    # Optional brand tag. The frontend offers a curated dropdown
+    # (Samsung, Hikvision, Dahua, CP Plus, Axis, Panasonic, Others)
+    # used purely to render a brand-coloured chip next to the camera
+    # name; the schema stays free-form so future brands can be added
+    # without a migration.
+    brand: Optional[str] = Field(default=None, max_length=64)
 
 
 class CameraPatchIn(BaseModel):
@@ -107,3 +113,4 @@ class CameraPatchIn(BaseModel):
     # the whole bag). A future API version could accept partial
     # updates by switching to a dedicated CaptureConfigPatch model.
     capture_config: Optional[CaptureConfig] = None
+    brand: Optional[str] = Field(default=None, max_length=64)
