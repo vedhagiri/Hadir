@@ -39,10 +39,14 @@ frontend/dist/
 frontend/*.tsbuildinfo
 .vite/
 *.log
+*.log.*
+*.log.*.gz
+*.gz
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+backend/logs/
 
 # Playwright artifacts (P13 smoke)
 frontend/test-results/
