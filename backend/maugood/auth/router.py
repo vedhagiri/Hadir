@@ -18,7 +18,7 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from maugood.auth.audit import write_audit
@@ -36,7 +36,13 @@ from maugood.auth.sessions import (
     update_active_role,
 )
 from maugood.config import get_settings
-from maugood.db import get_engine, tenant_context, tenants, users
+from maugood.db import (
+    employees as employees_table,
+    get_engine,
+    tenant_context,
+    tenants,
+    users,
+)
 from maugood.tenants import TenantScope, get_tenant_scope
 from maugood.tenants.slug import SLUG_RE
 
@@ -60,8 +66,21 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 class LoginRequest(BaseModel):
     """Body of ``POST /api/auth/login``.
 
-    ``EmailStr`` validates the format; we lowercase the stored value so
-    CITEXT's case-insensitive comparison matches every time.
+    The ``email`` field accepts any of three identifiers:
+
+    1. An email address (``dawud@acme.com``) — the historical contract,
+       resolved via ``users.email`` (CITEXT, case-insensitive).
+    2. An employee code (``EMP001``, ``OM350``) — resolved via
+       ``employees.employee_code`` → that row's ``email`` →
+       ``users.email``. Lets HR import an XLSX without an email column
+       and let staff log in with their badge number.
+    3. A "username" (the local part of an email, ``dawud``) — resolved
+       by an exact match on the local part of ``users.email`` when the
+       lookup is unambiguous (one and only one user matches). Falls
+       back silently if the local-part is shared.
+
+    The wire field stays named ``email`` to avoid breaking the existing
+    frontend; future clients can rename it.
 
     ``tenant_slug`` (v1.0 P5; reworked alongside migration 0026) is
     the **friendly slug** of the tenant — the value an operator types
@@ -78,7 +97,11 @@ class LoginRequest(BaseModel):
     to the pilot's tenant (``slug='main'``). Required in multi mode.
     """
 
-    email: EmailStr
+    # Accepts email / employee_code / username. Validation is
+    # delegated to the resolver helper; the field stays a free-form
+    # string to support all three. We still bound the length to keep
+    # the rate-limiter key cardinality sane.
+    email: str = Field(min_length=1, max_length=200)
     password: str = Field(min_length=1, max_length=1024)
     tenant_slug: str | None = Field(default=None, max_length=40)
 
@@ -135,6 +158,90 @@ def _client_ip(request: Request) -> str:
 
     client = request.client
     return client.host if client is not None else "unknown"
+
+
+def _resolve_user_for_login(
+    conn,
+    *,
+    tenant_id: int,
+    identifier: str,
+):
+    """Look up a user by email / employee_code / username (in that order).
+
+    Returns the same row shape as the original ``select(users)`` so the
+    caller can pattern-match without caring which path matched. ``None``
+    when no candidate is found by any path.
+
+    The three paths run sequentially — we don't try every path and pick
+    a winner. The first hit wins, which means the order matters: an
+    email always beats an employee_code, an employee_code always beats
+    a username. Operators with a "username == employee_code" collision
+    get the email/employee_code interpretation, never the username one.
+    """
+
+    from sqlalchemy import func as _func  # noqa: PLC0415
+
+    base_select = select(
+        users.c.id,
+        users.c.tenant_id,
+        users.c.email,
+        users.c.full_name,
+        users.c.password_hash,
+        users.c.is_active,
+    )
+
+    # Path 1 — email. The ``@`` heuristic skips spurious lookups when
+    # the operator typed an employee_code (no ``@`` in the string).
+    if "@" in identifier:
+        row = conn.execute(
+            base_select.where(
+                users.c.tenant_id == tenant_id,
+                users.c.email == identifier.lower(),
+            )
+        ).first()
+        if row is not None:
+            return row
+
+    # Path 2 — employee_code. Cross-table walk:
+    #   employees.employee_code → employees.email → users.email
+    # ``employees.email`` is nullable (post-#1) so we filter rows that
+    # actually carry an email; an employee without an email simply
+    # can't log in with their code yet (Admin must set one first).
+    code = identifier.strip()
+    if code:
+        emp_row = conn.execute(
+            select(employees_table.c.email).where(
+                employees_table.c.tenant_id == tenant_id,
+                employees_table.c.employee_code == code,
+                employees_table.c.email.is_not(None),
+            )
+        ).first()
+        if emp_row is not None and emp_row.email:
+            row = conn.execute(
+                base_select.where(
+                    users.c.tenant_id == tenant_id,
+                    users.c.email == str(emp_row.email).lower(),
+                )
+            ).first()
+            if row is not None:
+                return row
+
+    # Path 3 — username (local part of email). Only resolves when
+    # exactly one user matches. Two users sharing a local part is
+    # ambiguous — fall through to the unknown-credential path so an
+    # attacker can't oracle which account exists.
+    if "@" not in identifier:
+        candidates = conn.execute(
+            base_select.where(
+                users.c.tenant_id == tenant_id,
+                _func.split_part(users.c.email, "@", 1)
+                == identifier.lower(),
+            ).limit(2)
+        ).all()
+        if len(candidates) == 1:
+            return candidates[0]
+
+    return None
 
 
 def _resolve_login_target(
@@ -212,7 +319,12 @@ def login(
 ) -> MeResponse:
     """Verify credentials, start a session, set the cookie."""
 
-    email = payload.email.lower()
+    # Keep the typed identifier verbatim for the audit trail (so the
+    # operator can see what was actually entered — email, code, or
+    # username), and a separate normalised key for the rate-limiter
+    # bucket so an attacker can't cycle case to dodge the throttle.
+    typed_identifier = payload.email.strip()
+    rate_key = typed_identifier.lower()
     ip = _client_ip(request)
     settings = get_settings()
     engine = get_engine()
@@ -222,8 +334,8 @@ def login(
     # unknown-tenant 401 happens before we have a tenant_id to scope
     # the audit insert under). Never logs the password.
     logger.info(
-        "login attempt email=%s tenant_slug=%s ip=%s",
-        email,
+        "login attempt identifier=%s tenant_slug=%s ip=%s",
+        typed_identifier,
         payload.tenant_slug or "<none>",
         ip,
     )
@@ -238,7 +350,7 @@ def login(
     # (the request was anonymous on entry), so this context is what
     # makes multi-tenant login work.
     with tenant_context(target_schema):
-        if limiter.is_blocked(email, ip):
+        if limiter.is_blocked(rate_key, ip):
             with engine.begin() as conn:
                 write_audit(
                     conn,
@@ -246,30 +358,24 @@ def login(
                     action="auth.login.rate_limited",
                     entity_type="user",
                     entity_id=None,
-                    after={"email_attempted": email, "ip": ip},
+                    after={"identifier_attempted": typed_identifier, "ip": ip},
                 )
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="too many login attempts",
             )
 
-        # Load the user in a short read-only transaction. We end it before
-        # any branch that might ``raise HTTPException`` — raising inside
-        # ``engine.begin()`` would roll back the audit write that follows.
+        # Load the user in a short read-only transaction. We end it
+        # before any branch that might ``raise HTTPException`` —
+        # raising inside ``engine.begin()`` would roll back the audit
+        # write that follows. The resolver tries email →
+        # employee_code → username (see ``_resolve_user_for_login``).
         with engine.begin() as conn:
-            user_row = conn.execute(
-                select(
-                    users.c.id,
-                    users.c.tenant_id,
-                    users.c.email,
-                    users.c.full_name,
-                    users.c.password_hash,
-                    users.c.is_active,
-                ).where(
-                    users.c.tenant_id == target_tenant_id,
-                    users.c.email == email,
-                )
-            ).first()
+            user_row = _resolve_user_for_login(
+                conn,
+                tenant_id=target_tenant_id,
+                identifier=typed_identifier,
+            )
 
         # Single "invalid credentials" path for (a) unknown email, (b)
         # wrong password, and (c) inactive user. We still audit each case
@@ -284,7 +390,7 @@ def login(
             failure_reason = "wrong_password"
 
         if failure_reason is not None:
-            attempts = limiter.register_failure(email, ip)
+            attempts = limiter.register_failure(rate_key, ip)
             with engine.begin() as conn:
                 write_audit(
                     conn,
@@ -294,15 +400,15 @@ def login(
                     entity_type="user",
                     entity_id=str(user_row.id) if user_row is not None else None,
                     after={
-                        "email_attempted": email,
+                        "identifier_attempted": typed_identifier,
                         "ip": ip,
                         "reason": failure_reason,
                         "attempts": attempts,
                     },
                 )
             logger.info(
-                "login failed email=%s tenant_schema=%s reason=%s attempts=%d",
-                email,
+                "login failed identifier=%s tenant_schema=%s reason=%s attempts=%d",
+                typed_identifier,
                 target_schema,
                 failure_reason,
                 attempts,
@@ -316,7 +422,11 @@ def login(
         assert user_row is not None  # narrowed by the failure_reason branch.
 
         # Success — reset the counter, create the session, audit, load bundle.
-        limiter.reset_key(email, ip)
+        limiter.reset_key(rate_key, ip)
+        # The resolved row's email is the canonical identifier from
+        # here on (audit + log lines). The typed identifier might
+        # have been an employee_code or a username.
+        resolved_email = str(user_row.email)
         with engine.begin() as conn:
             # P7: prime ``active_role`` with the user's highest role
             # so a fresh session lands on the most-capable nav by
@@ -357,8 +467,9 @@ def login(
                 tenant_id=target_tenant_id,
             )
         logger.info(
-            "login success email=%s tenant_schema=%s user_id=%d",
-            email,
+            "login success email=%s identifier=%s tenant_schema=%s user_id=%d",
+            resolved_email,
+            typed_identifier,
             target_schema,
             int(user_row.id),
         )

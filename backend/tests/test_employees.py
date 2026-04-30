@@ -49,6 +49,14 @@ def test_import_5_rows_3_valid_1_bad_dept_1_duplicate(
 ) -> None:
     _login(client, admin_user)
 
+    # Unique-per-run department code so we always exercise the
+    # auto-create-and-warn path (post-#2). A literal like "ZZZ"
+    # would survive across test runs and silently turn this into a
+    # no-warning success on every run after the first.
+    import secrets as _secrets  # noqa: PLC0415
+
+    fresh_dept = "ZZZ" + _secrets.token_hex(2).upper()
+
     xlsx = _build_xlsx(
         [
             # Row 2 — valid, new
@@ -57,8 +65,8 @@ def test_import_5_rows_3_valid_1_bad_dept_1_duplicate(
             {"employee_code": "OM0002", "full_name": "Bob Al-Kindi", "email": "bob@example.com", "department_code": "OPS"},
             # Row 4 — valid, new
             {"employee_code": "OM0003", "full_name": "Carol Al-Busaidi", "email": "carol@example.com", "department_code": "ADM"},
-            # Row 5 — bad department
-            {"employee_code": "OM0004", "full_name": "Dan Al-Shukaili", "email": "dan@example.com", "department_code": "ZZZ"},
+            # Row 5 — never-before-seen department, auto-created on import
+            {"employee_code": "OM0004", "full_name": "Dan Al-Shukaili", "email": "dan@example.com", "department_code": fresh_dept},
             # Row 6 — duplicate of row 2
             {"employee_code": "OM0001", "full_name": "Alice duplicate", "email": "alice-dup@example.com", "department_code": "ENG"},
         ]
@@ -70,15 +78,21 @@ def test_import_5_rows_3_valid_1_bad_dept_1_duplicate(
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["created"] == 3
+    # Post-#2 (auto-create departments on import): the previously
+    # "bad" row 5 now succeeds — ZZZ is auto-created and the
+    # employee lands. Only the duplicate (row 6) errors out.
+    assert body["created"] == 4
     assert body["updated"] == 0
-    assert len(body["errors"]) == 2
+    assert len(body["errors"]) == 1
+    assert body["errors"][0]["row"] == 6
+    assert "duplicate" in body["errors"][0]["message"].lower()
 
-    errors_by_row = {e["row"]: e["message"] for e in body["errors"]}
-    assert 5 in errors_by_row
-    assert "department" in errors_by_row[5].lower()
-    assert 6 in errors_by_row
-    assert "duplicate" in errors_by_row[6].lower()
+    # Auto-created department surfaces as a warning so the operator
+    # knows the side effect happened. The row number matches the
+    # employee row that triggered it.
+    warnings_by_row = {w["row"]: w["message"] for w in body["warnings"]}
+    assert 5 in warnings_by_row
+    assert fresh_dept in warnings_by_row[5]
 
     # Re-import with a corrected version should now be an UPDATE for OM0001.
     xlsx2 = _build_xlsx(

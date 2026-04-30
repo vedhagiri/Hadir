@@ -81,7 +81,7 @@ def test_login_wrong_password_returns_401_and_audits(
     failures = [r for r in rows if r["action"] == "auth.login.failure"]
     assert failures, "expected an auth.login.failure audit row"
     row = failures[0]
-    assert row["after"]["email_attempted"] == admin_user["email"]
+    assert row["after"]["identifier_attempted"] == admin_user["email"]
     assert row["after"]["reason"] == "wrong_password"
     assert "wrong-password" not in str(row["after"])  # defence-in-depth
 

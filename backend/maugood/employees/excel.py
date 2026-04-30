@@ -31,9 +31,16 @@ from maugood.employees.repository import EmployeeRow
 REQUIRED_COLUMNS: tuple[str, ...] = (
     "employee_code",
     "full_name",
-    "email",
     "department_code",
 )
+
+# ``email`` used to be required. It's now optional — many customers
+# import an HR roster that doesn't carry an email column at all
+# (employee_code identifies the row), and the user-account creation
+# happens later when an Admin promotes the employee to Manager / HR /
+# Admin. The parser still picks ``email`` up when present and threads
+# it through to ``ImportRow.email``.
+_EMAIL_COLUMN: str = "email"
 
 # P28.7 added six optional columns. They land in the export and the
 # import accepts them; ``reports_to_email`` is resolved to a user_id at
@@ -68,6 +75,7 @@ EXPORT_COLUMNS: tuple[str, ...] = (
 _KNOWN_HEADERS: frozenset[str] = frozenset(
     {
         *REQUIRED_COLUMNS,
+        _EMAIL_COLUMN,
         "photo_count",
         "deactivation_reason",
         *P28_7_OPTIONAL_COLUMNS,
@@ -149,10 +157,11 @@ def parse_import(stream: BytesIO) -> Iterator[ImportRow]:
             )
 
         idx = {name: headers.index(name) for name in REQUIRED_COLUMNS}
-        # P28.7 optional columns — pos lookup or None if not present.
+        # ``email`` and the P28.7 fields are all optional — locate them
+        # when present, leave the slot None when the column is absent.
         opt_idx: dict[str, Optional[int]] = {
             col: (headers.index(col) if col in headers else None)
-            for col in P28_7_OPTIONAL_COLUMNS
+            for col in (_EMAIL_COLUMN, *P28_7_OPTIONAL_COLUMNS)
         }
         # Index every non-required, non-blank column too — these are the
         # custom-field candidates.
@@ -193,7 +202,7 @@ def parse_import(stream: BytesIO) -> Iterator[ImportRow]:
 
             code = _cell_str(row[idx["employee_code"]]) if idx["employee_code"] < len(row) else ""
             name = _cell_str(row[idx["full_name"]]) if idx["full_name"] < len(row) else ""
-            email_raw = _cell_str(row[idx["email"]]) if idx["email"] < len(row) else ""
+            email_raw = _opt_cell(row, _EMAIL_COLUMN) or ""
             dept_code = _cell_str(row[idx["department_code"]]) if idx["department_code"] < len(row) else ""
 
             cv: dict[str, str] = {}

@@ -42,7 +42,7 @@ from maugood.auth.dependencies import (
     require_role,
 )
 from maugood.custom_fields import repository as cf_repo
-from maugood.db import get_engine
+from maugood.db import departments as dept_table, get_engine
 from maugood.employees import excel as excel_io
 from maugood.employees import pdpl as pdpl_module
 from maugood.employees import photos as photos_io
@@ -66,6 +66,14 @@ from maugood.employees.schemas import (
 from maugood.tenants.scope import TenantScope
 
 logger = logging.getLogger(__name__)
+
+# Mirrors the departments_router code-shape regex. The Excel import
+# auto-creates departments when an unknown code lands on a row; we
+# reject codes that wouldn't pass the standalone create endpoint so
+# the on-the-fly path can't sneak data through that the dedicated CRUD
+# would reject.
+import re as _re
+_DEPT_CODE_RE = _re.compile(r"^[A-Z0-9_]{1,16}$")
 
 router = APIRouter(prefix="/api/employees", tags=["employees"])
 
@@ -795,10 +803,63 @@ async def import_employees_endpoint(
             with engine.begin() as conn:
                 dept = repo.get_department_by_code(conn, scope, row.department_code)
                 if dept is None:
-                    # Raise to break out of the ``with`` and land in except.
-                    raise _RowError(
-                        f"unknown department_code '{row.department_code}'"
+                    # Auto-create the department. Operators import HR
+                    # rosters where every employee has a department code
+                    # but the department isn't pre-populated in Maugood;
+                    # erroring per-row blocks the whole import for what
+                    # is really a one-line operator-trivial fix. The
+                    # auto-created row uses the code as both the code and
+                    # the display name (operator can rename via the
+                    # Departments page later) and gets a warning row in
+                    # the import response so the side effect is visible.
+                    auto_code = row.department_code.strip().upper()
+                    if not _DEPT_CODE_RE.match(auto_code):
+                        raise _RowError(
+                            f"invalid department_code '{row.department_code}' "
+                            "(use 1-16 chars: A-Z, 0-9, underscore)"
+                        )
+                    from sqlalchemy import insert as _insert  # noqa: PLC0415
+
+                    new_dept_id = conn.execute(
+                        _insert(dept_table)
+                        .values(
+                            tenant_id=scope.tenant_id,
+                            code=auto_code,
+                            name=auto_code,
+                        )
+                        .returning(dept_table.c.id)
+                    ).scalar_one()
+                    write_audit(
+                        conn,
+                        tenant_id=scope.tenant_id,
+                        actor_user_id=user.id,
+                        action="department.created",
+                        entity_type="department",
+                        entity_id=str(new_dept_id),
+                        after={
+                            "code": auto_code,
+                            "name": auto_code,
+                            "auto_imported_for": row.employee_code,
+                        },
                     )
+                    warnings.append(
+                        ImportWarningSchema(
+                            row=row.excel_row,
+                            message=(
+                                f"created department '{auto_code}' on the "
+                                "fly — rename it from Settings → "
+                                "Departments if you want a friendlier name"
+                            ),
+                        )
+                    )
+                    dept = repo.get_department_by_code(conn, scope, auto_code)
+                    if dept is None:
+                        # Defence in depth — should never happen since we
+                        # just inserted the row.
+                        raise _RowError(
+                            f"failed to read back auto-created department "
+                            f"'{auto_code}'"
+                        )
 
                 # P28.7: resolve reports_to_email → user_id within the
                 # tenant. Unknown email is a per-row error so the

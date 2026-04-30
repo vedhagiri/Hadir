@@ -354,7 +354,7 @@ def audit_rows_for_email(engine: Engine, email: str) -> list[dict]:
                 audit_log.c.entity_id,
                 audit_log.c.after,
             )
-            .where(audit_log.c.after.op("@>")({"email_attempted": email}))
+            .where(audit_log.c.after.op("@>")({"identifier_attempted": email}))
             .order_by(audit_log.c.id.desc())
         ).all()
     return [dict(r._mapping) for r in rows]
