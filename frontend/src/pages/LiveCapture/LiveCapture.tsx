@@ -1,11 +1,12 @@
-// P28.5 — Live Capture page.
+// Live Capture page — full-page video player with a camera-picker
+// sidebar. The event-stream feed that used to sit under the viewer
+// has been removed; the Camera Logs page is the persistent
+// historical view, and a full-page player is what operators actually
+// want here.
 //
-// Layout ported from design-reference/pages.jsx::LiveCapture: a header
-// strip with Pause/Resume + Reconnect, a 2:1 grid (viewer + camera
-// list), and a full-width event-stream card below. The viewer is a
-// plain <img> pointing at the MJPEG endpoint; bounding boxes are
-// baked into the JPEG by the capture worker, so there's no canvas
-// or SVG overlay layer.
+// The viewer is a plain <img> pointing at the MJPEG endpoint;
+// bounding boxes are baked into the JPEG by the capture worker, so
+// there's no canvas or SVG overlay layer.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -14,24 +15,7 @@ import { useCameras } from "../../features/cameras/hooks";
 import type { Camera } from "../../features/cameras/types";
 import { RollingNumber } from "../../motion/RollingNumber";
 import { Icon } from "../../shell/Icon";
-import { useEventStream, useLiveStats } from "./hooks";
-import type { LiveEvent } from "./types";
-
-function formatTime(iso: string): string {
-  // Mirror the design's HH:MM:SS local time. Timestamps from the
-  // backend are UTC ISO strings; ``toLocaleTimeString`` honours the
-  // browser locale + timezone.
-  try {
-    return new Date(iso).toLocaleTimeString();
-  } catch {
-    return iso;
-  }
-}
-
-function formatPct(conf: number | null): string {
-  if (conf == null) return "—";
-  return `${Math.round(conf * 100)}%`;
-}
+import { useLiveStats } from "./hooks";
 
 export function LiveCapturePage() {
   const { t } = useTranslation();
@@ -57,12 +41,12 @@ export function LiveCapturePage() {
 
   const [activeCamId, setActiveCamId] = useState<number | null>(null);
   const [paused, setPaused] = useState(false);
-  const [showOnlyUnknown, setShowOnlyUnknown] = useState(false);
   const imgRef = useRef<HTMLImageElement | null>(null);
 
-  // The streams + stats hooks short-circuit when the active camera is
-  // display-disabled — no point polling /live-stats or opening a WS
-  // for a feed the backend will refuse.
+  // Stats hook is the only stream we keep — it powers the
+  // online/offline pill and the rolling counters. The WebSocket
+  // event-stream subscription was retired alongside the
+  // event-stream UI block; Camera Logs is the historical view.
   const activeCam = useMemo(
     () => allCameras.find((c) => c.id === activeCamId) ?? null,
     [allCameras, activeCamId],
@@ -70,7 +54,6 @@ export function LiveCapturePage() {
   const activeIsLive =
     activeCam != null && activeCam.worker_enabled && activeCam.display_enabled;
   const stats = useLiveStats(paused || !activeIsLive ? null : activeCamId);
-  const stream = useEventStream(activeIsLive ? activeCamId : null);
 
   const onTogglePause = () => setPaused((p) => !p);
   const onSelect = (id: number) => {
@@ -79,32 +62,12 @@ export function LiveCapturePage() {
     setPaused(false);
   };
 
-  const onExport = () => {
-    if (activeCamId == null) return;
-    const url = `/api/cameras/${activeCamId}/events.csv?hours=1`;
-    // Same-origin; cookie auth flows automatically. Use a hidden
-    // anchor to trigger the browser's download UI.
-    const a = document.createElement("a");
-    a.href = url;
-    a.rel = "noopener";
-    a.click();
-  };
-
-  const filteredEvents: LiveEvent[] = useMemo(() => {
-    if (!showOnlyUnknown) return stream.events;
-    return stream.events.filter((e) => e.status === "unknown");
-  }, [stream.events, showOnlyUnknown]);
-
-  const camStatus =
-    stats.data?.status ??
-    (stream.status === "open" ? "online" : "offline");
+  const camStatus = stats.data?.status ?? "offline";
   const showOffline =
     activeIsLive &&
     !paused &&
     stats.data &&
     camStatus === "offline";
-  const showReconnecting =
-    activeIsLive && !paused && stream.status === "reconnecting";
 
   // P28.5b: explanatory empty states for cameras the operator
   // selected but that aren't currently streaming. The MJPEG endpoint
@@ -199,19 +162,31 @@ export function LiveCapturePage() {
       <div
         className="grid"
         style={{
-          // Bumped from 2fr 1fr → 3fr 1fr so the player gets ~75 % of
-          // the row width (was 67 %). Combined with the taller aspect
-          // ratio below, the viewer is noticeably larger.
-          gridTemplateColumns: "3fr 1fr",
+          // Full-page layout: player dominates, camera picker is a
+          // slim sidebar. The grid stretches to fill the remaining
+          // viewport height beneath the page header so the player
+          // is not aspect-ratio constrained — operators want the
+          // largest possible viewer.
+          gridTemplateColumns: "minmax(0, 1fr) 280px",
           gap: 16,
-          marginBottom: 16,
+          height: "calc(100vh - 180px)",
+          minHeight: 480,
         }}
       >
         {/* Viewer */}
-        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-          {/* Bumped from 16/8.2 → 16/9: same width yields ~10 % more
-              vertical space. */}
-          <div className="cam-stage" style={{ aspectRatio: "16 / 9" }}>
+        <div
+          className="card"
+          style={{
+            padding: 0,
+            overflow: "hidden",
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
+          <div
+            className="cam-stage"
+            style={{ flex: 1, minHeight: 0, position: "relative" }}
+          >
             <div className="cam-bg" />
             {/* Stage container the imperative <img> attaches into.
                 Sits between cam-bg and the overlays so the DOM order
@@ -308,22 +283,6 @@ export function LiveCapturePage() {
                 {t("liveCapture.offline")}
               </div>
             )}
-            {showReconnecting && (
-              <div
-                style={{
-                  position: "absolute",
-                  bottom: 12,
-                  left: 12,
-                  background: "rgba(0,0,0,0.45)",
-                  color: "var(--bg)",
-                  padding: "4px 10px",
-                  borderRadius: 4,
-                  fontSize: 11,
-                }}
-              >
-                {t("liveCapture.reconnecting")}
-              </div>
-            )}
             {activeCam && (
               <div className="cam-label rec">
                 {`CAM-${activeCam.id} · ${activeCam.name}`}
@@ -383,7 +342,14 @@ export function LiveCapturePage() {
         </div>
 
         {/* Camera list */}
-        <div className="card">
+        <div
+          className="card"
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            minHeight: 0,
+          }}
+        >
           <div className="card-head">
             <h3 className="card-title">{t("liveCapture.cameras")}</h3>
           </div>
@@ -393,6 +359,9 @@ export function LiveCapturePage() {
               display: "flex",
               flexDirection: "column",
               gap: 2,
+              overflowY: "auto",
+              flex: 1,
+              minHeight: 0,
             }}
           >
             {camerasQuery.isLoading && (
@@ -476,172 +445,7 @@ export function LiveCapturePage() {
         </div>
       </div>
 
-      {/* Event stream */}
-      <div className="card">
-        <div className="card-head">
-          <h3 className="card-title">
-            {t("liveCapture.eventStream")}{" "}
-            <span
-              className="pill pill-info"
-              style={{ marginInlineStart: 6 }}
-            >
-              {t("liveCapture.live")}
-            </span>
-          </h3>
-          <div className="flex items-center gap-2">
-            <button
-              className={`btn btn-sm ${showOnlyUnknown ? "" : "btn-ghost"}`}
-              onClick={() => setShowOnlyUnknown((s) => !s)}
-              aria-pressed={showOnlyUnknown}
-            >
-              <Icon name="filter" size={12} />
-              {t("liveCapture.onlyUnknown")}
-            </button>
-            <button
-              className="btn btn-sm"
-              onClick={onExport}
-              disabled={activeCamId == null}
-            >
-              <Icon name="download" size={12} />
-              {t("liveCapture.exportLastHour")}
-            </button>
-          </div>
-        </div>
-        <table className="table">
-          <thead>
-            <tr>
-              <th style={{ width: 72 }}>{t("liveCapture.col.face")}</th>
-              <th>{t("liveCapture.col.time")}</th>
-              <th>{t("liveCapture.col.camera")}</th>
-              <th>{t("liveCapture.col.identified")}</th>
-              <th>{t("liveCapture.col.confidence")}</th>
-              <th>{t("liveCapture.col.status")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredEvents.length === 0 && (
-              <tr>
-                <td
-                  colSpan={6}
-                  style={{
-                    textAlign: "center",
-                    padding: 18,
-                    color: "var(--text-secondary)",
-                    fontSize: 12,
-                  }}
-                >
-                  {activeCamId == null
-                    ? t("liveCapture.eventsEmpty")
-                    : t("liveCapture.eventsWaiting")}
-                </td>
-              </tr>
-            )}
-            {filteredEvents.map((ev, i) => {
-              const known = ev.status === "identified";
-              return (
-                <tr
-                  key={`${ev.time}-${i}`}
-                  style={{
-                    animation: "fadeInRow 200ms ease",
-                  }}
-                >
-                  <td>
-                    {ev.event_id != null ? (
-                      <img
-                        src={`/api/detection-events/${ev.event_id}/crop`}
-                        alt={`event ${ev.event_id}`}
-                        loading="lazy"
-                        style={{
-                          display: "block",
-                          width: 56,
-                          height: 56,
-                          objectFit: "cover",
-                          borderRadius: "var(--radius-sm)",
-                          border: "1px solid var(--border)",
-                        }}
-                      />
-                    ) : (
-                      <div
-                        title="No crop available"
-                        aria-label="No crop available"
-                        style={{
-                          display: "grid",
-                          placeItems: "center",
-                          width: 56,
-                          height: 56,
-                          borderRadius: "var(--radius-sm)",
-                          border: "1px dashed var(--border)",
-                          background: "var(--bg-sunken)",
-                          color: "var(--text-tertiary)",
-                          fontSize: 9,
-                          textAlign: "center",
-                          lineHeight: 1.1,
-                          padding: 4,
-                        }}
-                      >
-                        —
-                      </div>
-                    )}
-                  </td>
-                  <td className="mono text-sm">{formatTime(ev.time)}</td>
-                  <td>
-                    <span className="pill pill-neutral">
-                      CAM-{ev.camera_id}
-                    </span>
-                  </td>
-                  <td>
-                    {known ? (
-                      <div>
-                        <div style={{ fontSize: 12, fontWeight: 500 }}>
-                          {ev.employee_name ?? `EMP ${ev.employee_id}`}
-                        </div>
-                        {ev.employee_code && (
-                          <div className="text-xs text-dim mono">
-                            {ev.employee_code}
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <span className="text-secondary">
-                        {t("liveCapture.unknownFace")}
-                      </span>
-                    )}
-                  </td>
-                  <td
-                    className="mono text-sm"
-                    style={{
-                      color:
-                        (ev.confidence ?? 0) > 0.7
-                          ? "var(--success-text)"
-                          : "var(--warning-text)",
-                    }}
-                  >
-                    {formatPct(ev.confidence)}
-                  </td>
-                  <td>
-                    <span
-                      className={`pill ${
-                        known ? "pill-success" : "pill-warning"
-                      }`}
-                    >
-                      {known
-                        ? t("liveCapture.identified")
-                        : t("liveCapture.unknown")}
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
 
-      <style>{`
-        @keyframes fadeInRow {
-          from { opacity: 0; transform: translateY(-4px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-      `}</style>
     </>
   );
 }

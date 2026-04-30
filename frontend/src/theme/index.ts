@@ -20,7 +20,13 @@ export const DENSITIES: readonly Density[] = ["compact", "comfortable"] as const
 
 const THEME_KEY = "maugood-theme";
 const DENSITY_KEY = "maugood-density";
-const DEFAULT_THEME: Theme = "system";
+// Default to ``light`` rather than ``system``: most operators
+// browse Maugood during work hours on monitors that are tuned for
+// light UI, and the dashboard's accent palette + status pills were
+// designed against the light surfaces. Operators who prefer dark
+// can flip it explicitly via Settings → Display, and that choice
+// persists in localStorage + on their user row server-side.
+const DEFAULT_THEME: Theme = "light";
 const DEFAULT_DENSITY: Density = "comfortable";
 
 let _theme: Theme = readStoredTheme();

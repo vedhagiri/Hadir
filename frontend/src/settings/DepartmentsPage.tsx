@@ -350,6 +350,15 @@ function DepartmentManagersModal({
   return (
     <ModalShell onClose={onClose}>
       <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 60,
+          display: "grid",
+          placeItems: "center",
+        }}
+      >
+      <div
         className="card"
         style={{ width: "min(540px, 92vw)", padding: 22 }}
       >
@@ -498,6 +507,7 @@ function DepartmentManagersModal({
             </button>
           </div>
         ))}
+      </div>
       </div>
     </ModalShell>
   );

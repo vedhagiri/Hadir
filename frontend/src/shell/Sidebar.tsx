@@ -13,7 +13,7 @@ import { NavLink } from "react-router-dom";
 
 import omranLogo from "../assets/omran_logo.png";
 import { api } from "../api/client";
-import { APP_VERSION_SHORT } from "../config";
+import { APP_VERSION_FULL } from "../config";
 import type { CameraListResponse } from "../features/cameras/types";
 import type { EmployeeListResponse } from "../features/employees/types";
 import { SPRING } from "../motion/tokens";
@@ -290,7 +290,7 @@ export function Sidebar({ role }: Props) {
         </div>
         <div style={{ marginTop: 2, opacity: 0.8 }}>
           <span className="nav-label-text">Maugood </span>
-          {APP_VERSION_SHORT}
+          v{APP_VERSION_FULL}
         </div>
       </div>
     </aside>

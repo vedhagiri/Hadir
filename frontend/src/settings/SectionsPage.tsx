@@ -265,6 +265,15 @@ function SectionFormModal({
 
   return (
     <ModalShell onClose={onClose}>
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 60,
+          display: "grid",
+          placeItems: "center",
+        }}
+      >
       <form
         onSubmit={handleSubmit}
         className="card"
@@ -342,6 +351,7 @@ function SectionFormModal({
           </button>
         </div>
       </form>
+      </div>
     </ModalShell>
   );
 }
@@ -448,6 +458,15 @@ function SectionManagersModal({
 
   return (
     <ModalShell onClose={onClose}>
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 60,
+          display: "grid",
+          placeItems: "center",
+        }}
+      >
       <div className="card" style={{ width: "min(540px, 92vw)", padding: 22 }}>
         <div
           style={{
@@ -560,6 +579,7 @@ function SectionManagersModal({
             </button>
           </div>
         ))}
+      </div>
       </div>
     </ModalShell>
   );
