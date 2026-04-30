@@ -3,7 +3,7 @@
 // (each <img> hits the auth-gated /crop endpoint, which decrypts on the
 // fly and writes a detection_event.crop_viewed audit row per fetch).
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 
 import { Icon } from "../../shell/Icon";
 import { useCameraOptions, useDetectionEvents } from "./hooks";
@@ -73,13 +73,76 @@ function groupEvents(events: DetectionEvent[]): EventGroup[] {
   return groups;
 }
 
-function formatTimeRange(group: EventGroup): string {
-  const a = new Date(group.lastAt).toLocaleTimeString();
-  if (group.children.length === 1) return new Date(group.lastAt).toLocaleString();
-  const b = new Date(group.firstAt).toLocaleTimeString();
-  // Time-only range when same calendar day; full date for the
-  // anchor (lastAt) so the operator can read the date too.
-  return `${new Date(group.lastAt).toLocaleDateString()}, ${b} – ${a}`;
+/**
+ * Anything <= 3 days old gets a relative label ("3 min ago",
+ * "5 hours ago"). Older than 3 days falls back to the absolute
+ * locale string so a 6-month-old event is still readable.
+ */
+const RELATIVE_THRESHOLD_DAYS = 3;
+const RELATIVE_THRESHOLD_MS = RELATIVE_THRESHOLD_DAYS * 86_400_000;
+
+function formatRelative(iso: string, now: number): string {
+  const ts = new Date(iso).getTime();
+  if (!Number.isFinite(ts)) return iso;
+  const diffMs = now - ts;
+  if (diffMs >= RELATIVE_THRESHOLD_MS) {
+    return new Date(iso).toLocaleString();
+  }
+  // Future timestamps (clock skew) — just show "just now".
+  const sec = Math.max(0, Math.floor(diffMs / 1000));
+  if (sec < 5) return "just now";
+  if (sec < 60) return `${sec} sec ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min} min ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr} hour${hr === 1 ? "" : "s"} ago`;
+  const day = Math.floor(hr / 24);
+  return `${day} day${day === 1 ? "" : "s"} ago`;
+}
+
+function formatExact(iso: string): string {
+  // "Mon, May 1, 2026, 02:16:22" — readable + carries seconds for
+  // the operator's tooltip.
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return iso;
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "short",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(d);
+}
+
+/**
+ * Live-ticking relative time. Re-renders every 30 s so "1 min ago"
+ * advances on its own without a page refresh. Tooltip carries the
+ * absolute timestamp (with seconds) for operators who want the
+ * exact moment.
+ */
+function RelativeTime({ iso }: { iso: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
+  return <span title={formatExact(iso)}>{formatRelative(iso, now)}</span>;
+}
+
+function formatTimeRange(group: EventGroup, now: number): string {
+  if (group.children.length === 1) return formatRelative(group.lastAt, now);
+  // Multi-event group: show the latest as a relative anchor; the
+  // tooltip on the row gives the operator the exact times if they
+  // need them.
+  return formatRelative(group.lastAt, now);
+}
+
+function formatRangeTooltip(group: EventGroup): string {
+  if (group.children.length === 1) return formatExact(group.lastAt);
+  return `${formatExact(group.firstAt)} → ${formatExact(group.lastAt)}`;
 }
 
 export function CameraLogsPage() {
@@ -101,6 +164,13 @@ export function CameraLogsPage() {
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(
     () => new Set(),
   );
+  // Shared 30 s ticker drives every group-row's relative-time
+  // label so they advance in lockstep without one timer per row.
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNowTick(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
   const toggleGroup = (id: number) =>
     setExpandedGroups((cur) => {
       const next = new Set(cur);
@@ -328,7 +398,9 @@ export function CameraLogsPage() {
                             size={11}
                           />
                         )}
-                        <span>{formatTimeRange(group)}</span>
+                        <span title={formatRangeTooltip(group)}>
+                          {formatTimeRange(group, nowTick)}
+                        </span>
                         {isGrouped && (
                           <span
                             className="pill pill-accent"
@@ -453,7 +525,7 @@ export function CameraLogsPage() {
                           className="mono text-sm text-dim"
                           style={{ paddingInlineStart: 14 }}
                         >
-                          {new Date(child.captured_at).toLocaleString()}
+                          <RelativeTime iso={child.captured_at} />
                         </td>
                         <td className="text-sm text-dim">
                           {child.camera_name}
