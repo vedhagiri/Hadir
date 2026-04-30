@@ -55,6 +55,10 @@ def annotate_frame(frame_bgr, boxes: Iterable[AnnotationBox]) -> None:  # type: 
     drawing so OpenCV doesn't raise on negative coords. The label
     rectangle hugs the top-left corner of the box; if there isn't
     enough space above the box, it falls inside instead.
+
+    Matched faces (``known=True``) get a small green-and-white
+    "match" indicator on the top-right of the rectangle — a clear
+    visual signal that the matcher fired and identified the person.
     """
 
     import cv2  # noqa: PLC0415
@@ -107,6 +111,28 @@ def annotate_frame(frame_bgr, boxes: Iterable[AnnotationBox]) -> None:  # type: 
             thickness,
             lineType=cv2.LINE_AA,
         )
+
+        # Match indicator on top-right corner: a 14-px filled green
+        # circle with a white check inside. Only drawn for matched
+        # faces. Sits flush against the rectangle's top-right corner
+        # so it doesn't fight with the label on the top-left.
+        if b.known:
+            radius = 9
+            # Anchor centre 2 px outside the box so half the circle
+            # overlaps the rectangle border for a clean stitched look.
+            cx = min(w_frame - radius - 1, x2 + 2)
+            cy = max(radius + 1, y1 - 2)
+            # White outline halo so the circle stays legible on busy
+            # frames (e.g. a green door behind the person).
+            cv2.circle(frame_bgr, (cx, cy), radius + 1, _WHITE_BGR, -1)
+            cv2.circle(frame_bgr, (cx, cy), radius, _GREEN_BGR, -1)
+            # White checkmark inside — two short polylines so the
+            # tick stays sharp regardless of frame compression.
+            tick_a = (cx - 4, cy)
+            tick_b = (cx - 1, cy + 3)
+            tick_c = (cx + 4, cy - 3)
+            cv2.line(frame_bgr, tick_a, tick_b, _WHITE_BGR, 2, lineType=cv2.LINE_AA)
+            cv2.line(frame_bgr, tick_b, tick_c, _WHITE_BGR, 2, lineType=cv2.LINE_AA)
 
 
 def encode_jpeg(frame_bgr, quality: int = 70) -> Optional[bytes]:  # type: ignore[no-untyped-def]

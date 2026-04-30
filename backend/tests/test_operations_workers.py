@@ -145,17 +145,15 @@ def test_matching_unknown_when_detection_red(admin_engine: Engine) -> None:
     assert states["attendance"]["state"] == "unknown"
 
 
-def test_matching_red_only_when_detection_firing(admin_engine: Engine) -> None:
-    """Matching is red **only** when detection is actually firing
-    (frames_analyzed_60s > 0) but no match has happened in over an
-    hour AND there are enrolled photos to match against. With zero
-    enrolled photos the stage stays amber (the matcher is fine —
-    there's just nothing to match against).
+def test_matching_green_when_running_with_photos(admin_engine: Engine) -> None:
+    """Matching is GREEN whenever the worker is running and at
+    least one reference photo is enrolled, regardless of when the
+    last match fired. Operators want a clear "matcher is up"
+    signal — match age is context, not a state driver.
 
-    Now reads photo counts from the DB (matcher cache_stats was
-    refactored to query rather than peek at the in-memory cache),
-    so the test seeds an ``employee_photos`` row with a non-null
-    embedding instead of poking the cache.
+    With zero enrolled photos the stage is amber (matcher fine,
+    nothing to match against). When detection is red the stage
+    goes ``unknown`` (can't judge).
     """
 
     from maugood.db import employee_photos as _photos
@@ -169,11 +167,11 @@ def test_matching_red_only_when_detection_firing(admin_engine: Engine) -> None:
     now = time.time()
     for i in range(5):
         w._frames_analyzed_window.append(now - i)
-    # No matches in over an hour.
+    # No matches in over an hour — should NOT downgrade the stage.
     w._last_match_at = now - 4000
 
-    # Seed an employee + photo with a non-null embedding so the
-    # "no photos" short-circuit doesn't apply.
+    # Seed an employee + photo with a non-null embedding so
+    # cache_stats reports vectors > 0.
     seeded_emp_id = None
     seeded_photo_id = None
     try:
@@ -203,9 +201,11 @@ def test_matching_red_only_when_detection_firing(admin_engine: Engine) -> None:
 
         states = w._compute_stage_states()
         assert states["detection"]["state"] == "green"
-        assert states["matching"]["state"] == "red"
-        # Attendance is unknown because matching is red.
-        assert states["attendance"]["state"] == "unknown"
+        # New semantics: matcher is running + has photos = green
+        # regardless of match age.
+        assert states["matching"]["state"] == "green"
+        # Attendance follows the old conditional rules from match_state.
+        assert states["attendance"]["state"] in {"green", "amber"}
     finally:
         with admin_engine.begin() as conn:
             if seeded_photo_id is not None:

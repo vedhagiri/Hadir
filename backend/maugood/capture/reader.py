@@ -1298,16 +1298,18 @@ class CaptureWorker:
             det_state = "red"
             det_detail = "Analyzer thread idle / dead"
 
-        # Matching — conditional red. When 0 reference photos are
-        # enrolled the matcher will never produce a match (by
-        # design); surface that state directly so operators don't
-        # have to read the generic "matcher silent" hint.
+        # Matching state. The matcher is green whenever the worker is
+        # running AND reference photos are enrolled — match age is
+        # informational, not a state driver. Operators want a clear
+        # "matcher is up" signal independent of whether anyone has
+        # walked past the camera in the last 10 minutes.
         from maugood.identification.matcher import (  # noqa: PLC0415
             matcher_cache,
         )
 
         cache_stats = matcher_cache.cache_stats(self._scope.tenant_id)
-        no_photos = cache_stats.get("vectors", 0) == 0
+        photo_count = cache_stats.get("vectors", 0)
+        emp_count = cache_stats.get("employees", 0)
 
         match_age = (
             (now - self._last_match_at) if self._last_match_at else 999_999
@@ -1315,37 +1317,36 @@ class CaptureWorker:
         if det_state == "red":
             match_state = "unknown"
             match_detail = "Cannot judge — detection is red"
-        elif no_photos:
+        elif photo_count == 0:
             # Worker is healthy, but there's nothing to match against.
-            # Amber not red — the matcher itself is fine.
             match_state = "amber"
             match_detail = (
                 "No reference photos enrolled — every face lands as "
                 "Unknown until you upload photos per employee."
             )
-        elif match_age < 600:
-            match_state = "green"
-            match_detail = (
-                f"Last match {int(match_age)}s ago"
-                if match_age >= 1
-                else "Matches happening live"
-            )
-        elif match_age < 3600:
-            match_state = "amber"
-            match_detail = (
-                f"Last match {int(match_age // 60)}min ago — quiet hallway?"
-            )
-        elif frames_60s > 0:
-            match_state = "red"
-            match_detail = (
-                f"Detector firing but matcher silent — "
-                f"{cache_stats.get('employees', 0)} employee(s) enrolled "
-                f"with {cache_stats.get('vectors', 0)} photo(s); check "
-                "for missing reference photos or threshold drift."
-            )
         else:
-            match_state = "amber"
-            match_detail = "Detection idle — cannot evaluate matcher"
+            # Matcher is running and has vectors — green. The detail
+            # line carries the last-match age so operators can spot a
+            # threshold-drift problem at a glance, but the colour
+            # stays green regardless.
+            match_state = "green"
+            if self._last_match_at is None:
+                match_detail = (
+                    f"Matcher running · {emp_count} employee(s), "
+                    f"{photo_count} photo(s) enrolled · no matches yet"
+                )
+            elif match_age < 60:
+                match_detail = (
+                    f"Matcher running · {emp_count} employee(s), "
+                    f"{photo_count} photo(s) · last match "
+                    f"{int(match_age)}s ago"
+                )
+            else:
+                match_detail = (
+                    f"Matcher running · {emp_count} employee(s), "
+                    f"{photo_count} photo(s) · last match "
+                    f"{int(match_age // 60)}min ago"
+                )
 
         # Attendance — also conditional
         att_age = self._compute_last_attendance_age()
