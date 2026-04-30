@@ -264,6 +264,26 @@ export function Sidebar({ role }: Props) {
           lineHeight: 1.4,
         }}
       >
+        {/* "Made with ♥ in Oman" tagline + flag. Hidden when the
+            sidebar is collapsed via .nav-label-text (the same hide
+            class the rest of the footer uses). */}
+        <div
+          className="nav-label-text"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+            marginBottom: 4,
+            fontSize: 10.5,
+            color: "var(--text-tertiary)",
+          }}
+        >
+          <span aria-hidden style={{ fontSize: 24, lineHeight: 1 }}>
+            🇴🇲
+          </span>
+          <span>Made with ♥ in Oman</span>
+        </div>
         <div className="nav-label-text">
           Powered by{" "}
           <span style={{ fontWeight: 600 }}>Muscat Tech Solutions</span>

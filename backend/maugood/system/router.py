@@ -10,9 +10,12 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import shutil
 import time as time_mod
 from datetime import datetime, time, timedelta, timezone
+from pathlib import Path
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends
@@ -46,6 +49,61 @@ ADMIN = Depends(require_role("Admin"))
 # operators want to see on the System page.
 _PROCESS_START_TS = time_mod.time()
 
+logger = logging.getLogger(__name__)
+
+# Root path the data volume is mounted at. ``/data`` is the convention
+# from the docker-compose ``faces_data`` volume — every tenant-scoped
+# byte (face crops, attachments, reports, ERP exports, branding) lives
+# under it. Override via ``MAUGOOD_DATA_ROOT`` for non-standard mounts.
+_DATA_ROOT = Path(os.environ.get("MAUGOOD_DATA_ROOT", "/data"))
+
+
+def _dir_size_bytes(path: Path) -> int:
+    """Sum the size of every regular file under ``path`` recursively.
+
+    Returns 0 when the path doesn't exist (a fresh install hasn't
+    written there yet) or when an OSError fires mid-walk (a file was
+    rotated between iterdir + stat). Errors are logged at DEBUG so a
+    single ``find: permission denied`` doesn't fill the log.
+    """
+
+    if not path.exists():
+        return 0
+    total = 0
+    try:
+        for child in path.rglob("*"):
+            try:
+                if child.is_file():
+                    total += child.stat().st_size
+            except OSError as exc:
+                logger.debug("dir_size: skipping %s (%s)", child, exc)
+    except OSError as exc:
+        logger.debug("dir_size: walk failed for %s (%s)", path, exc)
+    return total
+
+
+class StorageStats(BaseModel):
+    """Disk + DB footprint surfaced on the Admin dashboard.
+
+    Per-tenant byte sums walk the on-disk directories under
+    ``/data`` that belong to this tenant (face crops, attachments,
+    reports, ERP exports). The DB footprint and disk-volume totals
+    are host-level — the same value lands for every tenant. That's
+    deliberate: a tenant Admin wants the operational picture of the
+    machine they're running on.
+    """
+
+    db_size_bytes: int
+    face_crops_bytes: int
+    attachments_bytes: int
+    reports_bytes: int
+    erp_exports_bytes: int
+    detection_events_total: int
+    attendance_records_total: int
+    disk_total_bytes: int
+    disk_free_bytes: int
+    disk_used_bytes: int
+
 
 class HealthOut(BaseModel):
     backend_uptime_seconds: int
@@ -60,6 +118,7 @@ class HealthOut(BaseModel):
     cameras_enabled: int
     detection_events_today: int
     attendance_records_today: int
+    storage: StorageStats
 
 
 class CameraHealthSeriesPoint(BaseModel):
@@ -176,6 +235,84 @@ def get_health(user: Annotated[CurrentUser, ADMIN]) -> HealthOut:
             ).scalar_one()
         )
 
+        # Lifetime row counts feed the storage block — the operator
+        # sees not just "how big is the disk slice" but also "how
+        # many rows live in it".
+        events_total = int(
+            conn.execute(
+                select(func.count()).where(
+                    detection_events.c.tenant_id == scope.tenant_id,
+                )
+            ).scalar_one()
+        )
+        attendance_total = int(
+            conn.execute(
+                select(func.count()).where(
+                    attendance_records.c.tenant_id == scope.tenant_id,
+                )
+            ).scalar_one()
+        )
+
+        # DB footprint — total size of the connected database. This
+        # is shared across tenants in multi-tenant mode (every
+        # schema lives in the same DB), so we report the host total
+        # rather than try to apportion. Operators planning capacity
+        # care about the disk number; per-schema breakdowns are
+        # available via psql for the curious.
+        try:
+            db_size_bytes = int(
+                conn.execute(
+                    text("SELECT pg_database_size(current_database())")
+                ).scalar_one()
+            )
+        except Exception as exc:
+            logger.debug("pg_database_size failed: %s", exc)
+            db_size_bytes = 0
+
+    # Per-tenant on-disk byte sums. Each path uses the tenant_id as
+    # the second segment so the walk stays scoped to this tenant
+    # only. The matcher cache + capture pipeline mirror these
+    # exact paths when they write — see employees/photos.py +
+    # capture/events.py for the canonical write side.
+    tenant_id_str = str(scope.tenant_id)
+    face_ref_root = _DATA_ROOT / "faces" / tenant_id_str
+    face_capture_root = _DATA_ROOT / "faces" / "captures" / tenant_id_str
+    attachments_root = _DATA_ROOT / "attachments" / tenant_id_str
+    reports_root = _DATA_ROOT / "reports" / tenant_id_str
+    erp_root = _DATA_ROOT / "erp" / tenant_id_str
+
+    face_crops_bytes = _dir_size_bytes(face_ref_root) + _dir_size_bytes(
+        face_capture_root
+    )
+    attachments_bytes = _dir_size_bytes(attachments_root)
+    reports_bytes = _dir_size_bytes(reports_root)
+    erp_exports_bytes = _dir_size_bytes(erp_root)
+
+    # Host disk-usage triple. Falls back to zeros when /data isn't
+    # mounted (CI containers without the data volume) so the
+    # endpoint stays 200 instead of 500'ing on a broken topology.
+    try:
+        disk = shutil.disk_usage(str(_DATA_ROOT) if _DATA_ROOT.exists() else "/")
+        disk_total = int(disk.total)
+        disk_free = int(disk.free)
+        disk_used = int(disk.used)
+    except OSError as exc:
+        logger.debug("disk_usage failed: %s", exc)
+        disk_total = disk_free = disk_used = 0
+
+    storage = StorageStats(
+        db_size_bytes=db_size_bytes,
+        face_crops_bytes=face_crops_bytes,
+        attachments_bytes=attachments_bytes,
+        reports_bytes=reports_bytes,
+        erp_exports_bytes=erp_exports_bytes,
+        detection_events_total=events_total,
+        attendance_records_total=attendance_total,
+        disk_total_bytes=disk_total,
+        disk_free_bytes=disk_free,
+        disk_used_bytes=disk_used,
+    )
+
     uptime = max(0, int(time_mod.time() - _PROCESS_START_TS))
     return HealthOut(
         backend_uptime_seconds=uptime,
@@ -190,6 +327,7 @@ def get_health(user: Annotated[CurrentUser, ADMIN]) -> HealthOut:
         cameras_enabled=cameras_enabled,
         detection_events_today=events_today,
         attendance_records_today=attendance_today,
+        storage=storage,
     )
 
 

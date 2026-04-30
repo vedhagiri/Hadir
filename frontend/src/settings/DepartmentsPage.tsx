@@ -9,18 +9,24 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { ApiError } from "../api/client";
+import { ApiError, api } from "../api/client";
 import { ModalShell } from "../components/DrawerShell";
 import {
   type Department,
+  type DepartmentManager,
+  useAssignDepartmentManager,
   useCreateDepartment,
   useDeleteDepartment,
+  useDepartmentManagers,
   useDepartments,
+  useRemoveDepartmentManager,
   useUpdateDepartment,
 } from "../features/departments/hooks";
 import { Icon } from "../shell/Icon";
 import { toast } from "../shell/Toaster";
 import { SettingsTabs } from "./SettingsTabs";
+
+import { useQuery } from "@tanstack/react-query";
 
 export function DepartmentsPage() {
   const { t } = useTranslation();
@@ -32,6 +38,7 @@ export function DepartmentsPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [editing, setEditing] = useState<Department | null>(null);
+  const [managingDept, setManagingDept] = useState<Department | null>(null);
 
   const onDelete = (d: Department) => {
     if (
@@ -94,7 +101,8 @@ export function DepartmentsPage() {
               <th style={{ width: 140 }}>{t("departments.col.code")}</th>
               <th>{t("departments.col.name")}</th>
               <th style={{ width: 120 }}>{t("departments.col.employees")}</th>
-              <th style={{ width: 180, textAlign: "right" }}>
+              <th style={{ minWidth: 220 }}>Managers</th>
+              <th style={{ width: 240, textAlign: "right" }}>
                 {t("departments.col.actions")}
               </th>
             </tr>
@@ -103,7 +111,7 @@ export function DepartmentsPage() {
             {list.isLoading && (
               <tr>
                 <td
-                  colSpan={4}
+                  colSpan={5}
                   className="text-sm text-dim"
                   style={{ padding: 16 }}
                 >
@@ -114,7 +122,7 @@ export function DepartmentsPage() {
             {list.data?.items.length === 0 && (
               <tr>
                 <td
-                  colSpan={4}
+                  colSpan={5}
                   className="text-sm text-dim"
                   style={{ padding: 16 }}
                 >
@@ -127,6 +135,9 @@ export function DepartmentsPage() {
                 <td className="mono text-sm">{d.code}</td>
                 <td className="text-sm">{d.name}</td>
                 <td className="mono text-sm">{d.employee_count}</td>
+                <td className="text-sm">
+                  <ManagerChips departmentId={d.id} />
+                </td>
                 <td>
                   <div
                     style={{
@@ -135,6 +146,14 @@ export function DepartmentsPage() {
                       justifyContent: "flex-end",
                     }}
                   >
+                    <button
+                      className="btn btn-sm"
+                      onClick={() => setManagingDept(d)}
+                      title="Assign or remove department managers"
+                    >
+                      <Icon name="users" size={11} />
+                      Managers
+                    </button>
                     <button
                       className="btn btn-sm"
                       onClick={() => setEditing(d)}
@@ -189,7 +208,274 @@ export function DepartmentsPage() {
           onImported={() => list.refetch()}
         />
       )}
+      {managingDept && (
+        <DepartmentManagersModal
+          department={managingDept}
+          onClose={() => setManagingDept(null)}
+        />
+      )}
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Manager chips (per row) + assignment modal
+// ---------------------------------------------------------------------------
+
+function ManagerChips({ departmentId }: { departmentId: number }) {
+  const list = useDepartmentManagers(departmentId);
+  if (list.isLoading) {
+    return <span className="text-xs text-dim">Loading…</span>;
+  }
+  if (list.isError) {
+    return (
+      <span className="text-xs" style={{ color: "var(--danger-text)" }}>
+        Failed to load
+      </span>
+    );
+  }
+  const items = list.data?.items ?? [];
+  if (items.length === 0) {
+    return <span className="text-xs text-dim">— No managers assigned —</span>;
+  }
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+      {items.map((m) => (
+        <span
+          key={m.user_id}
+          className="pill pill-info"
+          title={m.email}
+          style={{ fontSize: 11 }}
+        >
+          {m.full_name}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+interface ManagerCandidate {
+  id: number;
+  full_name: string;
+  email: string;
+  is_active: boolean;
+}
+
+interface ManagerCandidateListResponse {
+  items: ManagerCandidate[];
+}
+
+function DepartmentManagersModal({
+  department,
+  onClose,
+}: {
+  department: Department;
+  onClose: () => void;
+}) {
+  const assigned = useDepartmentManagers(department.id);
+  const assign = useAssignDepartmentManager();
+  const remove = useRemoveDepartmentManager();
+  // All Manager-role users in the tenant. The picker filters out
+  // already-assigned users so an operator can't pick a duplicate.
+  const candidates = useQuery({
+    queryKey: ["users", "managers"],
+    queryFn: () =>
+      api<ManagerCandidateListResponse>(
+        "/api/users?role=Manager&active_only=true",
+      ),
+    staleTime: 60 * 1000,
+  });
+  const [pickedId, setPickedId] = useState<number | "">("");
+
+  const assignedIds = new Set(
+    (assigned.data?.items ?? []).map((m) => m.user_id),
+  );
+  const available =
+    candidates.data?.items.filter((u) => !assignedIds.has(u.id)) ?? [];
+
+  const onAssign = () => {
+    if (pickedId === "") return;
+    assign.mutate(
+      { departmentId: department.id, userId: Number(pickedId) },
+      {
+        onSuccess: () => {
+          toast.success("Manager assigned to department.");
+          setPickedId("");
+        },
+        onError: (err) => {
+          const detail =
+            err instanceof ApiError
+              ? (err.body as { detail?: { message?: string } })?.detail?.message
+              : null;
+          toast.error(detail ?? "Assignment failed.");
+        },
+      },
+    );
+  };
+
+  const onRemove = (m: DepartmentManager) => {
+    remove.mutate(
+      { departmentId: department.id, userId: m.user_id },
+      {
+        onSuccess: () => toast.success(`${m.full_name} removed.`),
+        onError: () => toast.error("Remove failed."),
+      },
+    );
+  };
+
+  return (
+    <ModalShell onClose={onClose}>
+      <div
+        className="card"
+        style={{ width: "min(540px, 92vw)", padding: 22 }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            marginBottom: 14,
+          }}
+        >
+          <div>
+            <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>
+              {department.code} · {department.name}
+            </h2>
+            <p
+              className="text-xs text-dim"
+              style={{ margin: "4px 0 0", maxWidth: 440 }}
+            >
+              Managers added here can see every employee in this department
+              on the dashboard, attendance, calendar, approvals, and reports
+              — automatically, regardless of designation.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            <Icon name="x" size={14} />
+          </button>
+        </div>
+
+        <div
+          style={{
+            fontSize: 11,
+            fontWeight: 500,
+            textTransform: "uppercase",
+            letterSpacing: "0.05em",
+            color: "var(--text-tertiary)",
+            marginBottom: 6,
+          }}
+        >
+          Add a manager
+        </div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
+          <select
+            value={pickedId}
+            onChange={(e) =>
+              setPickedId(e.target.value === "" ? "" : Number(e.target.value))
+            }
+            disabled={candidates.isLoading || assign.isPending}
+            style={{
+              flex: 1,
+              padding: "7px 10px",
+              fontSize: 13,
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius-sm)",
+              background: "var(--bg-elev)",
+              color: "var(--text)",
+            }}
+          >
+            <option value="">
+              {candidates.isLoading
+                ? "Loading managers…"
+                : available.length === 0
+                  ? "All managers are already assigned"
+                  : "— Pick a Manager-role user —"}
+            </option>
+            {available.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.full_name} · {u.email}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={onAssign}
+            disabled={pickedId === "" || assign.isPending}
+          >
+            <Icon name="check" size={11} />
+            {assign.isPending ? "Assigning…" : "Assign"}
+          </button>
+        </div>
+
+        <div
+          style={{
+            fontSize: 11,
+            fontWeight: 500,
+            textTransform: "uppercase",
+            letterSpacing: "0.05em",
+            color: "var(--text-tertiary)",
+            marginBottom: 6,
+          }}
+        >
+          Currently assigned
+        </div>
+        {assigned.isLoading && (
+          <div className="text-sm text-dim">Loading…</div>
+        )}
+        {!assigned.isLoading &&
+          (assigned.data?.items.length ?? 0) === 0 && (
+            <div className="text-sm text-dim">
+              No managers assigned. Pick one above.
+            </div>
+          )}
+        {assigned.data?.items.map((m) => (
+          <div
+            key={m.user_id}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+              padding: "8px 10px",
+              borderRadius: "var(--radius-sm)",
+              background: "var(--bg-sunken)",
+              marginBottom: 6,
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <div
+                style={{
+                  fontWeight: 500,
+                  fontSize: 13,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {m.full_name}
+              </div>
+              <div className="text-xs text-dim mono">{m.email}</div>
+            </div>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => onRemove(m)}
+              disabled={remove.isPending}
+              title="Remove from this department"
+            >
+              <Icon name="x" size={11} />
+              Remove
+            </button>
+          </div>
+        ))}
+      </div>
+    </ModalShell>
   );
 }
 

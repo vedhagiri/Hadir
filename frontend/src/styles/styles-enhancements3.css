@@ -467,8 +467,12 @@ input[type="radio"]:focus-visible {
   display: none;
 }
 
-/* Hide every section heading. */
-[data-sidebar="collapsed"] .nav-label {
+/* Hide every section heading. The selector carries `.sidebar` to
+   match the specificity of the section-heading override further down
+   (`.sidebar .nav-label`, two classes) — without that anchor, the
+   later rule's `display: flex` would win on source order alone and
+   the headings would stay visible in collapsed mode. */
+[data-sidebar="collapsed"] .sidebar .nav-label {
   display: none;
 }
 

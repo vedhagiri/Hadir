@@ -1,5 +1,18 @@
 // Wire types for /api/system/*.
 
+export interface StorageStats {
+  db_size_bytes: number;
+  face_crops_bytes: number;
+  attachments_bytes: number;
+  reports_bytes: number;
+  erp_exports_bytes: number;
+  detection_events_total: number;
+  attendance_records_total: number;
+  disk_total_bytes: number;
+  disk_free_bytes: number;
+  disk_used_bytes: number;
+}
+
 export interface SystemHealth {
   backend_uptime_seconds: number;
   process_pid: number;
@@ -13,6 +26,7 @@ export interface SystemHealth {
   cameras_enabled: number;
   detection_events_today: number;
   attendance_records_today: number;
+  storage: StorageStats;
 }
 
 export interface CameraHealthPoint {

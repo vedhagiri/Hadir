@@ -37,7 +37,15 @@ from maugood.auth.dependencies import (
     current_user,
     require_any_role,
 )
-from maugood.db import departments, employees, get_engine
+from maugood.db import (
+    departments,
+    employees,
+    get_engine,
+    roles,
+    user_departments,
+    user_roles,
+    users,
+)
 from maugood.tenants.scope import TenantScope
 
 logger = logging.getLogger(__name__)
@@ -508,3 +516,242 @@ def _count_employees(scope: TenantScope, department_id: int) -> int:
             )
         ).scalar_one()
     return int(n or 0)
+
+
+# ---------------------------------------------------------------------------
+# Department-manager assignment (user_departments)
+# ---------------------------------------------------------------------------
+#
+# A Manager added here lands in ``user_departments`` and immediately
+# becomes visible-in-scope for every employee currently in (and every
+# future employee added to) that department — the existing
+# ``get_manager_visible_employee_ids`` helper unions
+# ``user_departments`` with ``manager_assignments``, so the attendance
+# router, scheduler, calendar, approvals inbox, and reports all
+# inherit the visibility automatically.
+#
+# Symmetric with the manager-assignments page (per-employee), this
+# surface gives the operator the per-department lever: "every nurse in
+# OPS reports to Sara" instead of clicking 47 nurses one by one.
+
+
+class DepartmentManagerOut(BaseModel):
+    user_id: int
+    full_name: str
+    email: str
+
+
+class DepartmentManagerListOut(BaseModel):
+    items: list[DepartmentManagerOut]
+
+
+class DepartmentManagerAddIn(BaseModel):
+    user_id: int
+
+
+def _ensure_department(conn, scope: TenantScope, department_id: int) -> str:
+    """Resolve the department code or 404. Used in audit payloads so an
+    auditor sees which department was touched without re-joining."""
+    row = conn.execute(
+        select(departments.c.code).where(
+            departments.c.tenant_id == scope.tenant_id,
+            departments.c.id == department_id,
+        )
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="department not found")
+    return str(row.code)
+
+
+@router.get(
+    "/{department_id}/managers",
+    response_model=DepartmentManagerListOut,
+)
+def list_department_managers(
+    department_id: int, user: Annotated[CurrentUser, AUTH]
+) -> DepartmentManagerListOut:
+    """List the Manager-role users assigned to this department.
+
+    Open to every authenticated role — the same permission stance as
+    the parent department list. Mutation stays Admin/HR only.
+    """
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    engine = get_engine()
+    with engine.begin() as conn:
+        _ensure_department(conn, scope, department_id)
+        rows = conn.execute(
+            select(users.c.id, users.c.full_name, users.c.email)
+            .select_from(
+                user_departments.join(
+                    users,
+                    (users.c.id == user_departments.c.user_id)
+                    & (users.c.tenant_id == user_departments.c.tenant_id),
+                )
+            )
+            .where(
+                user_departments.c.tenant_id == scope.tenant_id,
+                user_departments.c.department_id == department_id,
+            )
+            .order_by(users.c.full_name.asc())
+        ).all()
+    return DepartmentManagerListOut(
+        items=[
+            DepartmentManagerOut(
+                user_id=int(r.id),
+                full_name=str(r.full_name),
+                email=str(r.email),
+            )
+            for r in rows
+        ]
+    )
+
+
+@router.post(
+    "/{department_id}/managers",
+    response_model=DepartmentManagerOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def assign_department_manager(
+    department_id: int,
+    payload: DepartmentManagerAddIn,
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
+) -> DepartmentManagerOut:
+    """Assign a user (must hold the Manager role) to this department.
+
+    Idempotent — re-assigning an already-assigned user returns the
+    existing row instead of 409, so a double-click in the picker is
+    harmless. The Manager-role check is enforced server-side; the
+    UI's filtered dropdown is convenience only.
+    """
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    engine = get_engine()
+    with engine.begin() as conn:
+        dept_code = _ensure_department(conn, scope, department_id)
+        target = conn.execute(
+            select(users.c.id, users.c.full_name, users.c.email).where(
+                users.c.tenant_id == scope.tenant_id,
+                users.c.id == payload.user_id,
+                users.c.is_active.is_(True),
+            )
+        ).first()
+        if target is None:
+            raise HTTPException(
+                status_code=404, detail="user not found or inactive"
+            )
+
+        # Manager-role guard. We check via user_roles → roles join so a
+        # user with multiple roles still passes as long as one of them
+        # is Manager.
+        has_manager = conn.execute(
+            select(roles.c.code)
+            .select_from(
+                user_roles.join(roles, roles.c.id == user_roles.c.role_id)
+            )
+            .where(
+                user_roles.c.tenant_id == scope.tenant_id,
+                user_roles.c.user_id == payload.user_id,
+                roles.c.code == "Manager",
+            )
+            .limit(1)
+        ).first()
+        if has_manager is None:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "field": "user_id",
+                    "message": (
+                        "user must hold the Manager role to be "
+                        "assigned to a department"
+                    ),
+                },
+            )
+
+        # Idempotent insert — duplicate is a no-op.
+        existing = conn.execute(
+            select(user_departments.c.user_id).where(
+                user_departments.c.tenant_id == scope.tenant_id,
+                user_departments.c.user_id == payload.user_id,
+                user_departments.c.department_id == department_id,
+            )
+        ).first()
+        if existing is None:
+            conn.execute(
+                insert(user_departments).values(
+                    tenant_id=scope.tenant_id,
+                    user_id=payload.user_id,
+                    department_id=department_id,
+                )
+            )
+            write_audit(
+                conn,
+                tenant_id=scope.tenant_id,
+                actor_user_id=user.id,
+                action="department.manager_assigned",
+                entity_type="department",
+                entity_id=str(department_id),
+                after={
+                    "department_code": dept_code,
+                    "manager_user_id": payload.user_id,
+                    "manager_email": str(target.email),
+                },
+            )
+            logger.info(
+                "department manager assigned: dept=%s user=%s by=%s",
+                dept_code,
+                payload.user_id,
+                user.id,
+            )
+    return DepartmentManagerOut(
+        user_id=int(target.id),
+        full_name=str(target.full_name),
+        email=str(target.email),
+    )
+
+
+@router.delete(
+    "/{department_id}/managers/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def remove_department_manager(
+    department_id: int,
+    user_id: int,
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
+) -> None:
+    """Remove a Manager from this department's roster.
+
+    Idempotent — removing an already-absent user is a 204, not a 404,
+    so the operator's "remove" button always succeeds.
+    """
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    engine = get_engine()
+    with engine.begin() as conn:
+        dept_code = _ensure_department(conn, scope, department_id)
+        result = conn.execute(
+            sql_delete(user_departments).where(
+                user_departments.c.tenant_id == scope.tenant_id,
+                user_departments.c.user_id == user_id,
+                user_departments.c.department_id == department_id,
+            )
+        )
+        if result.rowcount > 0:
+            write_audit(
+                conn,
+                tenant_id=scope.tenant_id,
+                actor_user_id=user.id,
+                action="department.manager_removed",
+                entity_type="department",
+                entity_id=str(department_id),
+                after={
+                    "department_code": dept_code,
+                    "manager_user_id": user_id,
+                },
+            )
+            logger.info(
+                "department manager removed: dept=%s user=%s by=%s",
+                dept_code,
+                user_id,
+                user.id,
+            )
