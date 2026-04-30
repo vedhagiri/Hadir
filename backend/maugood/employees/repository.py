@@ -352,6 +352,7 @@ def create_employee(
     relieving_date: Optional[date] = None,
     deactivated_at: Optional[datetime] = None,
     deactivation_reason: Optional[str] = None,
+    section_id: Optional[int] = None,
 ) -> int:
     new_id = conn.execute(
         insert(employees)
@@ -361,6 +362,7 @@ def create_employee(
             full_name=full_name,
             email=email,
             department_id=department_id,
+            section_id=section_id,
             status=status,
             designation=designation,
             phone=phone,

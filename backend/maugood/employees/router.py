@@ -861,6 +861,141 @@ async def import_employees_endpoint(
                             f"'{auto_code}'"
                         )
 
+                # P29 (#3) — division. Optional column. If the row
+                # carries a division_code we resolve or auto-create
+                # it, then make sure the resolved department is
+                # linked to that division (UPDATE only when the FK
+                # is currently null OR mismatches the imported value;
+                # silently confirm when already correct so the
+                # import is idempotent).
+                from maugood.db import (  # noqa: PLC0415
+                    divisions as _divisions,
+                    sections as _sections,
+                )
+                from sqlalchemy import insert as _insert  # noqa: PLC0415
+                from sqlalchemy import select as _select  # noqa: PLC0415
+
+                if row.division_code:
+                    div_code = row.division_code.strip().upper()
+                    if not _DEPT_CODE_RE.match(div_code):
+                        raise _RowError(
+                            f"invalid division_code '{row.division_code}' "
+                            "(use 1-16 chars: A-Z, 0-9, underscore)"
+                        )
+                    div_row = conn.execute(
+                        _select(_divisions.c.id).where(
+                            _divisions.c.tenant_id == scope.tenant_id,
+                            _divisions.c.code == div_code,
+                        )
+                    ).first()
+                    if div_row is None:
+                        new_div_id = conn.execute(
+                            _insert(_divisions)
+                            .values(
+                                tenant_id=scope.tenant_id,
+                                code=div_code,
+                                name=div_code,
+                            )
+                            .returning(_divisions.c.id)
+                        ).scalar_one()
+                        write_audit(
+                            conn,
+                            tenant_id=scope.tenant_id,
+                            actor_user_id=user.id,
+                            action="division.created",
+                            entity_type="division",
+                            entity_id=str(new_div_id),
+                            after={
+                                "code": div_code,
+                                "name": div_code,
+                                "auto_imported_for": row.employee_code,
+                            },
+                        )
+                        warnings.append(
+                            ImportWarningSchema(
+                                row=row.excel_row,
+                                message=(
+                                    f"created division '{div_code}' on the "
+                                    "fly — rename it from Settings → "
+                                    "Divisions if you want a friendlier name"
+                                ),
+                            )
+                        )
+                        target_div_id = int(new_div_id)
+                    else:
+                        target_div_id = int(div_row.id)
+                    # Link the dept to this division if the FK is
+                    # currently empty or mismatched.
+                    if dept.division_id != target_div_id:
+                        conn.execute(
+                            dept_table.update()
+                            .where(
+                                dept_table.c.tenant_id == scope.tenant_id,
+                                dept_table.c.id == dept.id,
+                            )
+                            .values(division_id=target_div_id)
+                        )
+
+                # P29 (#3) — section. Optional. Sections are scoped
+                # per department; the same code can re-appear under
+                # different parents. Auto-create when missing under
+                # the resolved department.
+                section_id_for_employee: Optional[int] = None
+                if row.section_code:
+                    sec_code = row.section_code.strip().upper()
+                    if not _DEPT_CODE_RE.match(sec_code):
+                        raise _RowError(
+                            f"invalid section_code '{row.section_code}' "
+                            "(use 1-16 chars: A-Z, 0-9, underscore)"
+                        )
+                    sec_row = conn.execute(
+                        _select(_sections.c.id).where(
+                            _sections.c.tenant_id == scope.tenant_id,
+                            _sections.c.department_id == dept.id,
+                            _sections.c.code == sec_code,
+                        )
+                    ).first()
+                    if sec_row is None:
+                        new_sec_id = conn.execute(
+                            _insert(_sections)
+                            .values(
+                                tenant_id=scope.tenant_id,
+                                department_id=dept.id,
+                                code=sec_code,
+                                name=sec_code,
+                            )
+                            .returning(_sections.c.id)
+                        ).scalar_one()
+                        write_audit(
+                            conn,
+                            tenant_id=scope.tenant_id,
+                            actor_user_id=user.id,
+                            action="section.created",
+                            entity_type="section",
+                            entity_id=str(new_sec_id),
+                            after={
+                                "code": sec_code,
+                                "name": sec_code,
+                                "department_id": dept.id,
+                                "department_code": row.department_code,
+                                "auto_imported_for": row.employee_code,
+                            },
+                        )
+                        warnings.append(
+                            ImportWarningSchema(
+                                row=row.excel_row,
+                                message=(
+                                    f"created section '{row.department_code}/"
+                                    f"{sec_code}' on the fly — rename it from "
+                                    "Settings → Sections if you want a "
+                                    "friendlier name"
+                                ),
+                            )
+                        )
+                        section_id_for_employee = int(new_sec_id)
+                    else:
+                        section_id_for_employee = int(sec_row.id)
+
                 # P28.7: resolve reports_to_email → user_id within the
                 # tenant. Unknown email is a per-row error so the
                 # operator can fix the spelling without losing the rest
@@ -892,6 +1027,7 @@ async def import_employees_endpoint(
                         full_name=row.full_name,
                         email=row.email,
                         department_id=dept.id,
+                        section_id=section_id_for_employee,
                         designation=row.designation,
                         phone=row.phone,
                         reports_to_user_id=reports_to_id,
@@ -939,6 +1075,11 @@ async def import_employees_endpoint(
                         update_values["joining_date"] = joining
                     if relieving is not None:
                         update_values["relieving_date"] = relieving
+                    # Section: only set when the row carried a code
+                    # (auto-created upstream). An empty section column
+                    # leaves the existing assignment alone.
+                    if section_id_for_employee is not None:
+                        update_values["section_id"] = section_id_for_employee
 
                     repo.update_employee(
                         conn, scope, existing.id, values=update_values

@@ -12,6 +12,10 @@ export interface Department {
   code: string;
   name: string;
   employee_count: number;
+  // P29 (#3): top-tier hierarchy. Null when not assigned.
+  division_id?: number | null;
+  division_code?: string | null;
+  division_name?: string | null;
 }
 
 export interface DepartmentListResponse {
@@ -29,7 +33,11 @@ export function useDepartments(): UseQueryResult<DepartmentListResponse, Error> 
 export function useCreateDepartment() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { code: string; name: string }) =>
+    mutationFn: (input: {
+      code: string;
+      name: string;
+      division_id?: number | null;
+    }) =>
       api<Department>("/api/departments", {
         method: "POST",
         body: input,
@@ -41,11 +49,23 @@ export function useCreateDepartment() {
 export function useUpdateDepartment() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, name }: { id: number; name: string }) =>
-      api<Department>(`/api/departments/${id}`, {
+    mutationFn: ({
+      id,
+      name,
+      division_id,
+    }: {
+      id: number;
+      name?: string;
+      division_id?: number | null;
+    }) => {
+      const body: Record<string, unknown> = {};
+      if (name !== undefined) body.name = name;
+      if (division_id !== undefined) body.division_id = division_id;
+      return api<Department>(`/api/departments/${id}`, {
         method: "PATCH",
-        body: { name },
-      }),
+        body,
+      });
+    },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["departments"] }),
   });
 }

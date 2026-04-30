@@ -208,7 +208,9 @@
     "tabs": {
       "branding": "الهوية البصرية",
       "authentication": "المصادقة",
+      "divisions": "الشُّعب",
       "departments": "الأقسام",
+      "sections": "الفروع",
       "customFields": "الحقول المخصصة",
       "reasonCategories": "أسباب الطلبات",
       "email": "البريد الإلكتروني",

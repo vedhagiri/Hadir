@@ -8,7 +8,9 @@ import { NavLink } from "react-router-dom";
 const TABS = [
   { to: "/settings/branding", key: "branding" },
   { to: "/settings/authentication", key: "authentication" },
+  { to: "/settings/divisions", key: "divisions" },
   { to: "/settings/departments", key: "departments" },
+  { to: "/settings/sections", key: "sections" },
   { to: "/settings/custom-fields", key: "customFields" },
   { to: "/settings/reason-categories", key: "reasonCategories" },
   { to: "/settings/email", key: "email" },

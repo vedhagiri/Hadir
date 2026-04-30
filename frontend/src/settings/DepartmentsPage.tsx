@@ -22,6 +22,7 @@ import {
   useRemoveDepartmentManager,
   useUpdateDepartment,
 } from "../features/departments/hooks";
+import { useDivisions } from "../features/divisions/hooks";
 import { Icon } from "../shell/Icon";
 import { toast } from "../shell/Toaster";
 import { SettingsTabs } from "./SettingsTabs";
@@ -100,6 +101,7 @@ export function DepartmentsPage() {
             <tr>
               <th style={{ width: 140 }}>{t("departments.col.code")}</th>
               <th>{t("departments.col.name")}</th>
+              <th style={{ width: 180 }}>Division</th>
               <th style={{ width: 120 }}>{t("departments.col.employees")}</th>
               <th style={{ minWidth: 220 }}>Managers</th>
               <th style={{ width: 240, textAlign: "right" }}>
@@ -111,7 +113,7 @@ export function DepartmentsPage() {
             {list.isLoading && (
               <tr>
                 <td
-                  colSpan={5}
+                  colSpan={6}
                   className="text-sm text-dim"
                   style={{ padding: 16 }}
                 >
@@ -122,7 +124,7 @@ export function DepartmentsPage() {
             {list.data?.items.length === 0 && (
               <tr>
                 <td
-                  colSpan={5}
+                  colSpan={6}
                   className="text-sm text-dim"
                   style={{ padding: 16 }}
                 >
@@ -134,6 +136,19 @@ export function DepartmentsPage() {
               <tr key={d.id}>
                 <td className="mono text-sm">{d.code}</td>
                 <td className="text-sm">{d.name}</td>
+                <td className="text-sm">
+                  {d.division_code ? (
+                    <span title={d.division_name ?? undefined}>
+                      <span className="mono text-xs text-dim">
+                        {d.division_code}
+                      </span>
+                      {" · "}
+                      {d.division_name}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-dim">— None —</span>
+                  )}
+                </td>
                 <td className="mono text-sm">{d.employee_count}</td>
                 <td className="text-sm">
                   <ManagerChips departmentId={d.id} />
@@ -182,8 +197,12 @@ export function DepartmentsPage() {
           mode="add"
           initialCode={nextNumericCode(list.data?.items ?? [])}
           onClose={() => setShowAdd(false)}
-          onSubmit={async (code, name) => {
-            await create.mutateAsync({ code, name });
+          onSubmit={async (code, name, divisionId) => {
+            await create.mutateAsync({
+              code,
+              name,
+              division_id: divisionId,
+            });
             toast.success(t("departments.toast.created") as string);
             setShowAdd(false);
           }}
@@ -194,9 +213,14 @@ export function DepartmentsPage() {
           mode="edit"
           initialCode={editing.code}
           initialName={editing.name}
+          initialDivisionId={editing.division_id ?? null}
           onClose={() => setEditing(null)}
-          onSubmit={async (_code, name) => {
-            await update.mutateAsync({ id: editing.id, name });
+          onSubmit={async (_code, name, divisionId) => {
+            await update.mutateAsync({
+              id: editing.id,
+              name,
+              division_id: divisionId,
+            });
             toast.success(t("departments.toast.updated") as string);
             setEditing(null);
           }}
@@ -679,20 +703,30 @@ function DepartmentFormModal({
   mode,
   initialCode,
   initialName,
+  initialDivisionId,
   onClose,
   onSubmit,
 }: {
   mode: "add" | "edit";
   initialCode?: string;
   initialName?: string;
+  initialDivisionId?: number | null;
   onClose: () => void;
-  onSubmit: (code: string, name: string) => Promise<void>;
+  onSubmit: (
+    code: string,
+    name: string,
+    divisionId: number | null,
+  ) => Promise<void>;
 }) {
   const { t } = useTranslation();
   const [code, setCode] = useState(initialCode ?? "");
   const [name, setName] = useState(initialName ?? "");
+  const [divisionId, setDivisionId] = useState<number | "">(
+    initialDivisionId ?? "",
+  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const divisions = useDivisions();
 
   const submit = async () => {
     if (mode === "add" && !code.trim()) {
@@ -706,7 +740,11 @@ function DepartmentFormModal({
     setError(null);
     setSubmitting(true);
     try {
-      await onSubmit(code.trim().toUpperCase(), name.trim());
+      await onSubmit(
+        code.trim().toUpperCase(),
+        name.trim(),
+        divisionId === "" ? null : Number(divisionId),
+      );
     } catch (e) {
       const detail =
         e instanceof ApiError
@@ -800,6 +838,44 @@ function DepartmentFormModal({
                 color: "var(--text)",
               }}
             />
+          </label>
+          <label
+            className="text-xs text-dim"
+            style={{ display: "block", fontWeight: 500 }}
+          >
+            Division
+            <select
+              value={divisionId}
+              onChange={(e) =>
+                setDivisionId(
+                  e.target.value === "" ? "" : Number(e.target.value),
+                )
+              }
+              style={{
+                marginTop: 4,
+                width: "100%",
+                padding: "6px 10px",
+                fontSize: 14,
+                borderRadius: "var(--radius-sm)",
+                border: "1px solid var(--border)",
+                background: "var(--bg-elev)",
+                color: "var(--text)",
+              }}
+            >
+              <option value="">— No division —</option>
+              {divisions.data?.items.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.code} · {d.name}
+                </option>
+              ))}
+            </select>
+            <span
+              className="text-xs text-dim"
+              style={{ display: "block", marginTop: 4 }}
+            >
+              Optional. Division managers see every employee under their
+              division automatically.
+            </span>
           </label>
           {error && (
             <div

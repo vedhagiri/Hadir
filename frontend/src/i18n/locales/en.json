@@ -208,7 +208,9 @@
     "tabs": {
       "branding": "Branding",
       "authentication": "Authentication",
+      "divisions": "Divisions",
       "departments": "Departments",
+      "sections": "Sections",
       "customFields": "Custom fields",
       "reasonCategories": "Request reasons",
       "email": "Email",

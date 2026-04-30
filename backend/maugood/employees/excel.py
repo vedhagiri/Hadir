@@ -55,6 +55,20 @@ P28_7_OPTIONAL_COLUMNS: tuple[str, ...] = (
     "status",
 )
 
+# P29 (#3): the org hierarchy adds two optional columns. Both
+# auto-create-on-the-fly when the import sees an unknown code, same
+# behaviour as ``department_code``. Operators can also use the
+# friendlier alias ``division`` / ``section`` — the parser folds
+# both forms into ``division_code`` / ``section_code``.
+HIERARCHY_OPTIONAL_COLUMNS: tuple[str, ...] = (
+    "division_code",
+    "section_code",
+)
+_HIERARCHY_ALIASES: dict[str, str] = {
+    "division": "division_code",
+    "section": "section_code",
+}
+
 EXPORT_COLUMNS: tuple[str, ...] = (
     "employee_code",
     "full_name",
@@ -79,6 +93,8 @@ _KNOWN_HEADERS: frozenset[str] = frozenset(
         "photo_count",
         "deactivation_reason",
         *P28_7_OPTIONAL_COLUMNS,
+        *HIERARCHY_OPTIONAL_COLUMNS,
+        *_HIERARCHY_ALIASES.keys(),
     }
 )
 
@@ -104,6 +120,10 @@ class ImportRow:
     joining_date: Optional[str] = None
     relieving_date: Optional[str] = None
     status: Optional[str] = None
+    # P29 (#3) hierarchy columns — both optional, both auto-create
+    # on the import handler when the code doesn't exist yet.
+    division_code: Optional[str] = None
+    section_code: Optional[str] = None
     # ``custom_values`` keys are the **raw** header strings as they
     # appeared in the spreadsheet (already lower-snake-cased). The
     # router decides which match a known custom-field code, which
@@ -157,11 +177,26 @@ def parse_import(stream: BytesIO) -> Iterator[ImportRow]:
             )
 
         idx = {name: headers.index(name) for name in REQUIRED_COLUMNS}
-        # ``email`` and the P28.7 fields are all optional — locate them
-        # when present, leave the slot None when the column is absent.
+        # ``email`` + P28.7 + P29 hierarchy fields are all optional —
+        # locate them when present, leave the slot None when the
+        # column is absent. The hierarchy aliases (``division`` /
+        # ``section``) fold into their canonical column name first
+        # so a sheet can use either form without us caring twice.
+        def _resolve_opt_pos(canonical: str) -> Optional[int]:
+            if canonical in headers:
+                return headers.index(canonical)
+            for alias, target in _HIERARCHY_ALIASES.items():
+                if target == canonical and alias in headers:
+                    return headers.index(alias)
+            return None
+
         opt_idx: dict[str, Optional[int]] = {
-            col: (headers.index(col) if col in headers else None)
-            for col in (_EMAIL_COLUMN, *P28_7_OPTIONAL_COLUMNS)
+            col: _resolve_opt_pos(col)
+            for col in (
+                _EMAIL_COLUMN,
+                *P28_7_OPTIONAL_COLUMNS,
+                *HIERARCHY_OPTIONAL_COLUMNS,
+            )
         }
         # Index every non-required, non-blank column too — these are the
         # custom-field candidates.
@@ -234,6 +269,8 @@ def parse_import(stream: BytesIO) -> Iterator[ImportRow]:
                 joining_date=_opt_cell(row, "joining_date"),
                 relieving_date=_opt_cell(row, "relieving_date"),
                 status=_opt_cell(row, "status"),
+                division_code=_opt_cell(row, "division_code"),
+                section_code=_opt_cell(row, "section_code"),
                 custom_values=cv,
             )
     finally:
@@ -276,9 +313,24 @@ def parse_csv_import(data: bytes) -> Iterator[ImportRow]:
         )
 
     idx = {name: headers.index(name) for name in REQUIRED_COLUMNS}
+
+    # Same alias resolution as the XLSX parser — division/section
+    # accept their canonical or friendlier-alias header.
+    def _resolve_csv_opt_pos(canonical: str) -> Optional[int]:
+        if canonical in headers:
+            return headers.index(canonical)
+        for alias, target in _HIERARCHY_ALIASES.items():
+            if target == canonical and alias in headers:
+                return headers.index(alias)
+        return None
+
     opt_idx: dict[str, Optional[int]] = {
-        col: (headers.index(col) if col in headers else None)
-        for col in P28_7_OPTIONAL_COLUMNS
+        col: _resolve_csv_opt_pos(col)
+        for col in (
+            _EMAIL_COLUMN,
+            *P28_7_OPTIONAL_COLUMNS,
+            *HIERARCHY_OPTIONAL_COLUMNS,
+        )
     }
     custom_idx: dict[str, int] = {}
     for pos, header in enumerate(headers):
@@ -306,9 +358,7 @@ def parse_csv_import(data: bytes) -> Iterator[ImportRow]:
             if idx["full_name"] < len(row)
             else ""
         )
-        email_raw = (
-            row[idx["email"]].strip() if idx["email"] < len(row) else ""
-        )
+        email_raw = _opt(row, _EMAIL_COLUMN) or ""
         dept_code = (
             row[idx["department_code"]].strip()
             if idx["department_code"] < len(row)
@@ -334,6 +384,8 @@ def parse_csv_import(data: bytes) -> Iterator[ImportRow]:
             joining_date=_opt(row, "joining_date"),
             relieving_date=_opt(row, "relieving_date"),
             status=_opt(row, "status"),
+            division_code=_opt(row, "division_code"),
+            section_code=_opt(row, "section_code"),
             custom_values=cv,
         )
 

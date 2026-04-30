@@ -16,6 +16,8 @@ import { AuthenticationPage } from "./auth-oidc/AuthenticationPage";
 import { BrandingPage } from "./branding/BrandingPage";
 import { CustomFieldsPage } from "./custom-fields/CustomFieldsPage";
 import { DepartmentsPage } from "./settings/DepartmentsPage";
+import { DivisionsPage } from "./settings/DivisionsPage";
+import { SectionsPage } from "./settings/SectionsPage";
 import { DisplaySettingsPage } from "./settings/DisplaySettingsPage";
 import { ErpExportPage } from "./erp-export/ErpExportPage";
 import { NotificationsPage } from "./notifications/NotificationsPage";
@@ -120,6 +122,8 @@ export function App() {
         <Route path="settings/branding" element={<BrandingPage />} />
         <Route path="settings/authentication" element={<AuthenticationPage />} />
         <Route path="settings/departments" element={<DepartmentsPage />} />
+        <Route path="settings/divisions" element={<DivisionsPage />} />
+        <Route path="settings/sections" element={<SectionsPage />} />
         <Route path="settings/custom-fields" element={<CustomFieldsPage />} />
         <Route path="settings/reason-categories" element={<ReasonCategoriesPage />} />
         <Route path="settings/email" element={<EmailConfigPage />} />
