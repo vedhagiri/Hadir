@@ -67,6 +67,7 @@ class DepartmentRow:
     id: int
     code: str
     name: str
+    division_id: Optional[int] = None
 
 
 def _photo_count_subquery():
@@ -177,27 +178,47 @@ def get_department_by_code(
     conn: Connection, scope: TenantScope, code: str
 ) -> Optional[DepartmentRow]:
     row = conn.execute(
-        select(departments.c.id, departments.c.code, departments.c.name).where(
+        select(
+            departments.c.id,
+            departments.c.code,
+            departments.c.name,
+            departments.c.division_id,
+        ).where(
             departments.c.tenant_id == scope.tenant_id, departments.c.code == code
         )
     ).first()
     if row is None:
         return None
-    return DepartmentRow(id=int(row.id), code=str(row.code), name=str(row.name))
+    return DepartmentRow(
+        id=int(row.id),
+        code=str(row.code),
+        name=str(row.name),
+        division_id=int(row.division_id) if row.division_id is not None else None,
+    )
 
 
 def get_department_by_id(
     conn: Connection, scope: TenantScope, department_id: int
 ) -> Optional[DepartmentRow]:
     row = conn.execute(
-        select(departments.c.id, departments.c.code, departments.c.name).where(
+        select(
+            departments.c.id,
+            departments.c.code,
+            departments.c.name,
+            departments.c.division_id,
+        ).where(
             departments.c.tenant_id == scope.tenant_id,
             departments.c.id == department_id,
         )
     ).first()
     if row is None:
         return None
-    return DepartmentRow(id=int(row.id), code=str(row.code), name=str(row.name))
+    return DepartmentRow(
+        id=int(row.id),
+        code=str(row.code),
+        name=str(row.name),
+        division_id=int(row.division_id) if row.division_id is not None else None,
+    )
 
 
 # --- Employees --------------------------------------------------------------

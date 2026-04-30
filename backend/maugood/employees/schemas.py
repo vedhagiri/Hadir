@@ -163,6 +163,38 @@ class ImportResult(BaseModel):
     warnings: list[ImportWarning] = []
 
 
+class ImportPreviewRow(BaseModel):
+    """One row from a dry-run preview of an import.
+
+    Mirrors what the actual import will store after defaults are
+    applied. ``defaulted_joining_date`` is True when the row's
+    ``joining_date`` cell was blank and the import will fall back
+    to today's date.
+    """
+
+    row: int
+    employee_code: str
+    full_name: str
+    email: Optional[str] = None
+    designation: Optional[str] = None
+    phone: Optional[str] = None
+    division: Optional[str] = None
+    department: str
+    section: Optional[str] = None
+    joining_date: Optional[str] = None
+    relieving_date: Optional[str] = None
+    reports_to_email: Optional[str] = None
+    defaulted_joining_date: bool = False
+
+
+class ImportPreviewResult(BaseModel):
+    """Server-side preview of an import, no rows committed."""
+
+    rows: list[ImportPreviewRow]
+    errors: list[ImportError]
+    warnings: list[ImportWarning] = []
+
+
 # --- Photos (P6) -----------------------------------------------------------
 
 

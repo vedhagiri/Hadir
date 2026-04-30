@@ -94,7 +94,9 @@ def test_import_5_rows_3_valid_1_bad_dept_1_duplicate(
     assert 5 in warnings_by_row
     assert fresh_dept in warnings_by_row[5]
 
-    # Re-import with a corrected version should now be an UPDATE for OM0001.
+    # Re-importing the same employee_code is rejected as a per-row
+    # error — strict create-only contract. The operator must edit
+    # the existing row through the UI / PATCH endpoint instead.
     xlsx2 = _build_xlsx(
         [
             {"employee_code": "OM0001", "full_name": "Alice Renamed", "email": "alice+new@example.com", "department_code": "ENG"},
@@ -107,8 +109,9 @@ def test_import_5_rows_3_valid_1_bad_dept_1_duplicate(
     assert resp.status_code == 200
     body2 = resp.json()
     assert body2["created"] == 0
-    assert body2["updated"] == 1
-    assert body2["errors"] == []
+    assert body2["updated"] == 0
+    assert len(body2["errors"]) == 1
+    assert "already exists" in body2["errors"][0]["message"].lower()
 
 
 # ---------------------------------------------------------------------------

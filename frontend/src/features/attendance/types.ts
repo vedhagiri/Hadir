@@ -15,6 +15,7 @@ export interface AttendanceItem {
   employee_id: number;
   employee_code: string;
   full_name: string;
+  employee_status?: "active" | "inactive" | "deleted";
   department: DepartmentRef;
   date: string;
   in_time: string | null;

@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from io import BytesIO
-from typing import Annotated, Optional
+from typing import Annotated, Literal, Optional
 
 from fastapi import (
     APIRouter,
@@ -55,6 +55,8 @@ from maugood.employees.schemas import (
     EmployeeOut,
     EmployeePatchIn,
     ImportError as ImportErrorSchema,
+    ImportPreviewResult,
+    ImportPreviewRow,
     ImportResult,
     ImportWarning as ImportWarningSchema,
     PhotoIngestAccepted,
@@ -74,6 +76,115 @@ logger = logging.getLogger(__name__)
 # would reject.
 import re as _re
 _DEPT_CODE_RE = _re.compile(r"^[A-Z0-9_]{1,16}$")
+
+
+def _slugify_to_code(name: str, max_len: int = 16) -> str:
+    """Generate a deterministic short code from a free-form name.
+
+    Examples::
+
+        "Operations Unit" -> "OPERATIONS_UNIT"
+        "Branding and Communications" -> "BRANDING_AND_COM"
+        "Information and Communication Technology" -> "IACT"
+
+    The result is uppercase ASCII, restricted to ``[A-Z0-9_]``, and never
+    longer than ``max_len`` (16 by default — matches ``_DEPT_CODE_RE``).
+    Returns an empty string when ``name`` carries no usable characters;
+    the caller falls back to a generic prefix in that case.
+    """
+
+    squashed = _re.sub(r"[^A-Za-z0-9]+", "_", name).strip("_").upper()
+    if not squashed:
+        return ""
+    if len(squashed) <= max_len:
+        return squashed
+    # Too long: try an acronym from the original word boundaries.
+    words = [w for w in _re.split(r"[^A-Za-z0-9]+", name) if w]
+    acronym = "".join(w[0].upper() for w in words)
+    if 2 <= len(acronym) <= max_len:
+        return acronym
+    return squashed[:max_len].rstrip("_") or squashed[:max_len]
+
+
+def _resolve_or_create_code(
+    conn: Connection,
+    *,
+    table,
+    tenant_id: int,
+    raw_value: str,
+    parent_department_id: Optional[int] = None,
+) -> tuple[int, str, str, bool]:
+    """Look up or auto-create a (code, name) row from a free-form import value.
+
+    Behaviour:
+      * If ``raw_value`` already matches ``_DEPT_CODE_RE`` (i.e. looks
+        like an existing short code), prefer matching by code first.
+      * Otherwise look up by **name** (case-insensitive) — operators
+        often paste the same display name twice; reuse the existing
+        row regardless of how its code was generated last time.
+      * On miss, generate a unique short code via ``_slugify_to_code``;
+        if the generated code collides with another row, append
+        ``_2``, ``_3``, … until free.
+
+    Returns ``(row_id, resolved_code, resolved_name, created)``.
+    The caller writes the audit row + warning when ``created`` is True.
+
+    ``parent_department_id`` is set when resolving a section row, since
+    sections are unique per department rather than per tenant.
+    """
+
+    from sqlalchemy import insert as _insert  # noqa: PLC0415
+    from sqlalchemy import select as _select  # noqa: PLC0415
+
+    value = raw_value.strip()
+    base_filters = [table.c.tenant_id == tenant_id]
+    if parent_department_id is not None:
+        base_filters.append(table.c.department_id == parent_department_id)
+
+    if _DEPT_CODE_RE.match(value.upper()):
+        existing = conn.execute(
+            _select(table.c.id, table.c.code, table.c.name).where(
+                *base_filters, table.c.code == value.upper()
+            )
+        ).first()
+        if existing is not None:
+            return int(existing.id), str(existing.code), str(existing.name), False
+
+    name_lookup = conn.execute(
+        _select(table.c.id, table.c.code, table.c.name).where(
+            *base_filters, func.lower(table.c.name) == value.lower()
+        )
+    ).first()
+    if name_lookup is not None:
+        return int(name_lookup.id), str(name_lookup.code), str(name_lookup.name), False
+
+    base_code = _slugify_to_code(value) or "ITEM"
+    candidate = base_code
+    suffix = 2
+    while True:
+        clash = conn.execute(
+            _select(table.c.id).where(*base_filters, table.c.code == candidate)
+        ).first()
+        if clash is None:
+            break
+        tail = f"_{suffix}"
+        trimmed = base_code[: max(1, 16 - len(tail))]
+        candidate = f"{trimmed}{tail}"
+        suffix += 1
+
+    insert_values: dict[str, object] = {
+        "tenant_id": tenant_id,
+        "code": candidate,
+        "name": value,
+    }
+    if parent_department_id is not None:
+        insert_values["department_id"] = parent_department_id
+
+    new_id = conn.execute(
+        _insert(table).values(**insert_values).returning(table.c.id)
+    ).scalar_one()
+    return int(new_id), candidate, value, True
+
 
 router = APIRouter(prefix="/api/employees", tags=["employees"])
 
@@ -765,6 +876,319 @@ def pdpl_delete_employee_endpoint(
     )
 
 
+# ---- Bulk delete -----------------------------------------------------
+#
+# Two scopes — explicit ``ids=[…]`` for the "delete selected" UX, or
+# ``scope="all"`` to wipe every active+inactive employee in the tenant.
+# Two modes — ``mode="soft"`` (status='inactive', reversible) or
+# ``mode="hard"`` (PDPL erasure, irreversible — drops photos,
+# custom-field values, redacts PII, audits). Hard mode reuses the
+# single-row PDPL helper so the audit shape stays identical to
+# ``POST /api/employees/{id}/gdpr-delete``.
+#
+# Hard mode requires the PDPL confirmation phrase. Soft mode does
+# not — soft delete is reversible by editing the row.
+
+
+class BulkDeleteRequest(BaseModel):
+    scope: Literal["selected", "all"] = _PydField(
+        ..., description="``selected`` requires ``ids``; ``all`` ignores it."
+    )
+    mode: Literal["soft", "hard"] = _PydField(
+        ...,
+        description=(
+            "``soft`` flips status to inactive (reversible). ``hard`` "
+            "is PDPL erasure (irreversible) and requires "
+            "``confirmation``."
+        ),
+    )
+    ids: Optional[list[int]] = _PydField(
+        default=None,
+        description="Required when ``scope='selected'``; ignored otherwise.",
+    )
+    confirmation: Optional[str] = _PydField(
+        default=None,
+        max_length=64,
+        description=(
+            "Required when ``mode='hard'``. Must equal "
+            f"{pdpl_module.PDPL_CONFIRMATION_PHRASE!r}."
+        ),
+    )
+
+
+class BulkDeleteResponse(BaseModel):
+    scope: Literal["selected", "all"]
+    mode: Literal["soft", "hard"]
+    requested: int
+    deleted: int
+    skipped: int
+    errors: list[ImportErrorSchema] = []
+
+
+@router.post("/bulk-delete", response_model=BulkDeleteResponse)
+def bulk_delete_endpoint(
+    payload: BulkDeleteRequest,
+    user: Annotated[CurrentUser, ADMIN],
+) -> BulkDeleteResponse:
+    """Soft- or hard-delete multiple employees in one call.
+
+    Admin-only. Selected scope drives the row set off the request body's
+    ``ids``; ``all`` scope walks every employee in the tenant.
+
+    Hard delete reuses ``pdpl_delete_employee`` per row inside its own
+    transaction so a single failure (file-system permission, etc.)
+    doesn't abort the rest of the batch — the per-row errors come back
+    in ``errors``.
+    """
+
+    if payload.mode == "hard":
+        if payload.confirmation != pdpl_module.PDPL_CONFIRMATION_PHRASE:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "confirmation phrase did not match (case + whitespace "
+                    "sensitive)"
+                ),
+            )
+
+    if payload.scope == "selected":
+        if not payload.ids:
+            raise HTTPException(
+                status_code=400, detail="ids[] is required when scope='selected'"
+            )
+        target_ids = list(dict.fromkeys(payload.ids))  # de-dup, keep order
+    else:
+        target_ids = []
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    engine = get_engine()
+
+    if payload.scope == "all":
+        with engine.begin() as conn:
+            from sqlalchemy import select as _select  # noqa: PLC0415
+            from maugood.db import employees as _employees  # noqa: PLC0415
+
+            target_ids = [
+                int(r.id)
+                for r in conn.execute(
+                    _select(_employees.c.id).where(
+                        _employees.c.tenant_id == scope.tenant_id,
+                        _employees.c.status != "deleted",
+                    )
+                ).fetchall()
+            ]
+
+    deleted = 0
+    skipped = 0
+    errors: list[ImportErrorSchema] = []
+
+    for emp_id in target_ids:
+        try:
+            with engine.begin() as conn:
+                existing = repo.get_employee(conn, scope, emp_id)
+                if existing is None:
+                    skipped += 1
+                    continue
+                if payload.mode == "soft":
+                    if existing.status == "inactive":
+                        skipped += 1
+                        continue
+                    repo.soft_delete_employee(conn, scope, emp_id)
+                    write_audit(
+                        conn,
+                        tenant_id=scope.tenant_id,
+                        actor_user_id=user.id,
+                        action="employee.soft_deleted",
+                        entity_type="employee",
+                        entity_id=str(emp_id),
+                        before={"status": existing.status},
+                        after={
+                            "status": "inactive",
+                            "employee_code": existing.employee_code,
+                            "source": "bulk",
+                        },
+                    )
+                    deleted += 1
+                else:
+                    # Bulk hard mode = full purge. Drops the row +
+                    # every cascading reference. The single-row PDPL
+                    # endpoint (``/gdpr-delete``) still uses the
+                    # redact-then-keep flow for compliance.
+                    pdpl_module.purge_employee(
+                        conn,
+                        scope,
+                        employee_id=emp_id,
+                        actor_user_id=user.id,
+                    )
+                    deleted += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "bulk-delete failed for employee %d: %s",
+                emp_id,
+                exc,
+                exc_info=True,
+            )
+            errors.append(
+                ImportErrorSchema(
+                    row=emp_id,
+                    message=str(exc).split("\n", 1)[0].strip()
+                    or exc.__class__.__name__,
+                )
+            )
+
+    # Summary audit row so an operator can search the audit log for
+    # one entry rather than N — the per-row writes above are still
+    # the verifiable record.
+    with engine.begin() as conn:
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="employee.bulk_deleted",
+            entity_type="employee",
+            after={
+                "scope": payload.scope,
+                "mode": payload.mode,
+                "requested": len(target_ids),
+                "deleted": deleted,
+                "skipped": skipped,
+                "error_count": len(errors),
+            },
+        )
+
+    return BulkDeleteResponse(
+        scope=payload.scope,
+        mode=payload.mode,
+        requested=len(target_ids),
+        deleted=deleted,
+        skipped=skipped,
+        errors=errors,
+    )
+
+
+@router.post("/import-preview", response_model=ImportPreviewResult)
+async def import_preview_endpoint(
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
+    file: UploadFile = File(...),
+) -> ImportPreviewResult:
+    """Dry-run an employee import: parse the file, apply defaults, return
+    the rows and per-row errors **without writing anything**.
+
+    The frontend posts the same file twice — once here for the
+    preview, then to ``POST /api/employees/import`` after the
+    operator confirms. The duplication is intentional: keeping the
+    actual import endpoint stateless avoids the question of "what
+    happened to my upload between page reloads".
+    """
+
+    data = await file.read()
+    is_csv = (file.filename or "").lower().endswith(".csv")
+    try:
+        if is_csv:
+            rows = list(excel_io.parse_csv_import(data))
+        else:
+            rows = list(excel_io.parse_import(BytesIO(data)))
+    except excel_io.ImportParseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    engine = get_engine()
+
+    # Probe existing employee codes in one shot so the preview can
+    # flag duplicates in the same UI pass instead of waiting for the
+    # actual import to fail per row.
+    candidate_codes = [r.employee_code for r in rows if r.employee_code]
+    existing_codes: set[str] = set()
+    if candidate_codes:
+        from sqlalchemy import select as _select  # noqa: PLC0415
+        from maugood.db import employees as _employees  # noqa: PLC0415
+
+        with engine.begin() as conn:
+            existing_codes = {
+                str(row.employee_code)
+                for row in conn.execute(
+                    _select(_employees.c.employee_code).where(
+                        _employees.c.tenant_id == scope.tenant_id,
+                        _employees.c.employee_code.in_(candidate_codes),
+                    )
+                ).fetchall()
+            }
+
+    preview_rows: list[ImportPreviewRow] = []
+    errors: list[ImportErrorSchema] = []
+    today_iso = datetime.now(tz=timezone.utc).date().isoformat()
+    seen: set[str] = set()
+
+    for r in rows:
+        if not r.employee_code:
+            errors.append(
+                ImportErrorSchema(row=r.excel_row, message="employee_code is required")
+            )
+            continue
+        if not r.full_name:
+            errors.append(
+                ImportErrorSchema(row=r.excel_row, message="full_name is required")
+            )
+            continue
+        if not r.department_code:
+            errors.append(
+                ImportErrorSchema(
+                    row=r.excel_row, message="department_code is required"
+                )
+            )
+            continue
+        if r.employee_code in seen:
+            errors.append(
+                ImportErrorSchema(
+                    row=r.excel_row,
+                    message=(
+                        f"duplicate employee_code '{r.employee_code}' "
+                        "earlier in file"
+                    ),
+                )
+            )
+            continue
+        if r.employee_code in existing_codes:
+            errors.append(
+                ImportErrorSchema(
+                    row=r.excel_row,
+                    message=(
+                        f"employee_code '{r.employee_code}' already exists"
+                    ),
+                )
+            )
+            continue
+        seen.add(r.employee_code)
+
+        # Mirror the import handler's joining_date fallback so the
+        # preview shows the operator exactly what will land in the DB.
+        joining = r.joining_date
+        defaulted = False
+        if not joining or not joining.strip():
+            joining = today_iso
+            defaulted = True
+
+        preview_rows.append(
+            ImportPreviewRow(
+                row=r.excel_row,
+                employee_code=r.employee_code,
+                full_name=r.full_name,
+                email=r.email,
+                designation=r.designation,
+                phone=r.phone,
+                division=r.division_code,
+                department=r.department_code,
+                section=r.section_code,
+                joining_date=joining,
+                relieving_date=r.relieving_date,
+                reports_to_email=r.reports_to_email,
+                defaulted_joining_date=defaulted,
+            )
+        )
+
+    return ImportPreviewResult(rows=preview_rows, errors=errors, warnings=[])
+
+
 @router.post("/import", response_model=ImportResult)
 async def import_employees_endpoint(
     user: Annotated[CurrentUser, ADMIN_OR_HR],
@@ -834,7 +1258,11 @@ async def import_employees_endpoint(
 
         # P28.7 — date parsing happens before the transaction so a
         # malformed cell becomes a per-row error without rolling back
-        # anything else.
+        # anything else. A missing ``joining_date`` defaults to today
+        # in the tenant's timezone — the operator usually imports the
+        # roster on the day a hire starts and forgets the column;
+        # the lifecycle cron then ignores them rather than treating
+        # the row as a "future joiner" with a NULL date.
         try:
             joining = excel_io.parse_iso_date(row.joining_date)
         except ValueError:
@@ -845,6 +1273,10 @@ async def import_employees_endpoint(
                 )
             )
             continue
+        if joining is None:
+            from datetime import date as _date_today  # noqa: PLC0415
+
+            joining = _date_today.today()
         try:
             relieving = excel_io.parse_iso_date(row.relieving_date)
         except ValueError:
@@ -869,44 +1301,23 @@ async def import_employees_endpoint(
         # and matches the partial-success contract of the response shape.
         try:
             with engine.begin() as conn:
-                dept = repo.get_department_by_code(conn, scope, row.department_code)
-                if dept is None:
-                    # Auto-create the department. Operators import HR
-                    # rosters where every employee has a department code
-                    # but the department isn't pre-populated in Maugood;
-                    # erroring per-row blocks the whole import for what
-                    # is really a one-line operator-trivial fix. The
-                    # auto-created row uses the code as both the code and
-                    # the display name (operator can rename via the
-                    # Departments page later) and gets a warning row in
-                    # the import response so the side effect is visible.
-                    auto_code = row.department_code.strip().upper()
-                    if not _DEPT_CODE_RE.match(auto_code):
-                        raise _RowError(
-                            f"invalid department_code '{row.department_code}' "
-                            "(use 1-16 chars: A-Z, 0-9, underscore)"
-                        )
-                    from sqlalchemy import insert as _insert  # noqa: PLC0415
-
-                    new_dept_id = conn.execute(
-                        _insert(dept_table)
-                        .values(
-                            tenant_id=scope.tenant_id,
-                            code=auto_code,
-                            name=auto_code,
-                        )
-                        .returning(dept_table.c.id)
-                    ).scalar_one()
+                dept_id, dept_code, dept_name, dept_created = _resolve_or_create_code(
+                    conn,
+                    table=dept_table,
+                    tenant_id=scope.tenant_id,
+                    raw_value=row.department_code,
+                )
+                if dept_created:
                     write_audit(
                         conn,
                         tenant_id=scope.tenant_id,
                         actor_user_id=user.id,
                         action="department.created",
                         entity_type="department",
-                        entity_id=str(new_dept_id),
+                        entity_id=str(dept_id),
                         after={
-                            "code": auto_code,
-                            "name": auto_code,
+                            "code": dept_code,
+                            "name": dept_name,
                             "auto_imported_for": row.employee_code,
                         },
                     )
@@ -914,20 +1325,17 @@ async def import_employees_endpoint(
                         ImportWarningSchema(
                             row=row.excel_row,
                             message=(
-                                f"created department '{auto_code}' on the "
-                                "fly — rename it from Settings → "
-                                "Departments if you want a friendlier name"
+                                f"created department '{dept_name}' "
+                                f"(code {dept_code}) on the fly — "
+                                "edit it from Settings → Departments"
                             ),
                         )
                     )
-                    dept = repo.get_department_by_code(conn, scope, auto_code)
-                    if dept is None:
-                        # Defence in depth — should never happen since we
-                        # just inserted the row.
-                        raise _RowError(
-                            f"failed to read back auto-created department "
-                            f"'{auto_code}'"
-                        )
+                dept = repo.get_department_by_id(conn, scope, dept_id)
+                if dept is None:
+                    raise _RowError(
+                        f"failed to read back department '{dept_code}'"
+                    )
 
                 # P29 (#3) — division. Optional column. If the row
                 # carries a division_code we resolve or auto-create
@@ -940,42 +1348,25 @@ async def import_employees_endpoint(
                     divisions as _divisions,
                     sections as _sections,
                 )
-                from sqlalchemy import insert as _insert  # noqa: PLC0415
-                from sqlalchemy import select as _select  # noqa: PLC0415
 
                 if row.division_code:
-                    div_code = row.division_code.strip().upper()
-                    if not _DEPT_CODE_RE.match(div_code):
-                        raise _RowError(
-                            f"invalid division_code '{row.division_code}' "
-                            "(use 1-16 chars: A-Z, 0-9, underscore)"
-                        )
-                    div_row = conn.execute(
-                        _select(_divisions.c.id).where(
-                            _divisions.c.tenant_id == scope.tenant_id,
-                            _divisions.c.code == div_code,
-                        )
-                    ).first()
-                    if div_row is None:
-                        new_div_id = conn.execute(
-                            _insert(_divisions)
-                            .values(
-                                tenant_id=scope.tenant_id,
-                                code=div_code,
-                                name=div_code,
-                            )
-                            .returning(_divisions.c.id)
-                        ).scalar_one()
+                    div_id, div_code, div_name, div_created = _resolve_or_create_code(
+                        conn,
+                        table=_divisions,
+                        tenant_id=scope.tenant_id,
+                        raw_value=row.division_code,
+                    )
+                    if div_created:
                         write_audit(
                             conn,
                             tenant_id=scope.tenant_id,
                             actor_user_id=user.id,
                             action="division.created",
                             entity_type="division",
-                            entity_id=str(new_div_id),
+                            entity_id=str(div_id),
                             after={
                                 "code": div_code,
-                                "name": div_code,
+                                "name": div_name,
                                 "auto_imported_for": row.employee_code,
                             },
                         )
@@ -983,25 +1374,20 @@ async def import_employees_endpoint(
                             ImportWarningSchema(
                                 row=row.excel_row,
                                 message=(
-                                    f"created division '{div_code}' on the "
-                                    "fly — rename it from Settings → "
-                                    "Divisions if you want a friendlier name"
+                                    f"created division '{div_name}' "
+                                    f"(code {div_code}) on the fly — "
+                                    "edit it from Settings → Divisions"
                                 ),
                             )
                         )
-                        target_div_id = int(new_div_id)
-                    else:
-                        target_div_id = int(div_row.id)
-                    # Link the dept to this division if the FK is
-                    # currently empty or mismatched.
-                    if dept.division_id != target_div_id:
+                    if dept.division_id != div_id:
                         conn.execute(
                             dept_table.update()
                             .where(
                                 dept_table.c.tenant_id == scope.tenant_id,
                                 dept_table.c.id == dept.id,
                             )
-                            .values(division_id=target_div_id)
+                            .values(division_id=div_id)
                         )
 
                 # P29 (#3) — section. Optional. Sections are scoped
@@ -1010,42 +1396,26 @@ async def import_employees_endpoint(
                 # the resolved department.
                 section_id_for_employee: Optional[int] = None
                 if row.section_code:
-                    sec_code = row.section_code.strip().upper()
-                    if not _DEPT_CODE_RE.match(sec_code):
-                        raise _RowError(
-                            f"invalid section_code '{row.section_code}' "
-                            "(use 1-16 chars: A-Z, 0-9, underscore)"
-                        )
-                    sec_row = conn.execute(
-                        _select(_sections.c.id).where(
-                            _sections.c.tenant_id == scope.tenant_id,
-                            _sections.c.department_id == dept.id,
-                            _sections.c.code == sec_code,
-                        )
-                    ).first()
-                    if sec_row is None:
-                        new_sec_id = conn.execute(
-                            _insert(_sections)
-                            .values(
-                                tenant_id=scope.tenant_id,
-                                department_id=dept.id,
-                                code=sec_code,
-                                name=sec_code,
-                            )
-                            .returning(_sections.c.id)
-                        ).scalar_one()
+                    sec_id, sec_code, sec_name, sec_created = _resolve_or_create_code(
+                        conn,
+                        table=_sections,
+                        tenant_id=scope.tenant_id,
+                        raw_value=row.section_code,
+                        parent_department_id=dept.id,
+                    )
+                    if sec_created:
                         write_audit(
                             conn,
                             tenant_id=scope.tenant_id,
                             actor_user_id=user.id,
                             action="section.created",
                             entity_type="section",
-                            entity_id=str(new_sec_id),
+                            entity_id=str(sec_id),
                             after={
                                 "code": sec_code,
-                                "name": sec_code,
+                                "name": sec_name,
                                 "department_id": dept.id,
-                                "department_code": row.department_code,
+                                "department_code": dept_code,
                                 "auto_imported_for": row.employee_code,
                             },
                         )
@@ -1053,16 +1423,13 @@ async def import_employees_endpoint(
                             ImportWarningSchema(
                                 row=row.excel_row,
                                 message=(
-                                    f"created section '{row.department_code}/"
-                                    f"{sec_code}' on the fly — rename it from "
-                                    "Settings → Sections if you want a "
-                                    "friendlier name"
+                                    f"created section '{sec_name}' "
+                                    f"(code {dept_code}/{sec_code}) on the "
+                                    "fly — edit it from Settings → Sections"
                                 ),
                             )
                         )
-                        section_id_for_employee = int(new_sec_id)
-                    else:
-                        section_id_for_employee = int(sec_row.id)
+                    section_id_for_employee = sec_id
 
                 # P28.7: resolve reports_to_email → user_id within the
                 # tenant. Unknown email is a per-row error so the
@@ -1087,97 +1454,51 @@ async def import_employees_endpoint(
                     reports_to_id = int(user_row.id)
 
                 existing = repo.get_employee_by_code(conn, scope, row.employee_code)
-                if existing is None:
-                    new_id = repo.create_employee(
-                        conn,
-                        scope,
-                        employee_code=row.employee_code,
-                        full_name=row.full_name,
-                        email=row.email,
-                        department_id=dept.id,
-                        section_id=section_id_for_employee,
-                        designation=row.designation,
-                        phone=row.phone,
-                        reports_to_user_id=reports_to_id,
-                        joining_date=joining,
-                        relieving_date=relieving,
+                if existing is not None:
+                    # Strict create-only import: a duplicate
+                    # ``employee_code`` is a per-row error so the
+                    # operator can fix the file and re-upload. The
+                    # existing row stays untouched.
+                    raise _RowError(
+                        f"employee_code '{row.employee_code}' already exists"
                     )
-                    write_audit(
-                        conn,
-                        tenant_id=scope.tenant_id,
-                        actor_user_id=user.id,
-                        action="employee.created",
-                        entity_type="employee",
-                        entity_id=str(new_id),
-                        after={
-                            "employee_code": row.employee_code,
-                            "full_name": row.full_name,
-                            "email": row.email,
-                            "department_code": row.department_code,
-                            "designation": row.designation,
-                            "phone": row.phone,
-                            "reports_to_user_id": reports_to_id,
-                            "joining_date": joining.isoformat() if joining else None,
-                            "relieving_date": relieving.isoformat() if relieving else None,
-                            "source": "import",
-                        },
-                    )
-                    created += 1
-                    target_employee_id = new_id
-                else:
-                    update_values: dict[str, object] = {
+
+                new_id = repo.create_employee(
+                    conn,
+                    scope,
+                    employee_code=row.employee_code,
+                    full_name=row.full_name,
+                    email=row.email,
+                    department_id=dept.id,
+                    section_id=section_id_for_employee,
+                    designation=row.designation,
+                    phone=row.phone,
+                    reports_to_user_id=reports_to_id,
+                    joining_date=joining,
+                    relieving_date=relieving,
+                )
+                write_audit(
+                    conn,
+                    tenant_id=scope.tenant_id,
+                    actor_user_id=user.id,
+                    action="employee.created",
+                    entity_type="employee",
+                    entity_id=str(new_id),
+                    after={
+                        "employee_code": row.employee_code,
                         "full_name": row.full_name,
                         "email": row.email,
-                        "department_id": dept.id,
-                    }
-                    # Only set the new fields when the row actually
-                    # provides a value — empty cells leave the existing
-                    # value alone (the import is upsert-friendly).
-                    if row.designation is not None:
-                        update_values["designation"] = row.designation
-                    if row.phone is not None:
-                        update_values["phone"] = row.phone
-                    if row.reports_to_email is not None:
-                        update_values["reports_to_user_id"] = reports_to_id
-                    if joining is not None:
-                        update_values["joining_date"] = joining
-                    if relieving is not None:
-                        update_values["relieving_date"] = relieving
-                    # Section: only set when the row carried a code
-                    # (auto-created upstream). An empty section column
-                    # leaves the existing assignment alone.
-                    if section_id_for_employee is not None:
-                        update_values["section_id"] = section_id_for_employee
-
-                    repo.update_employee(
-                        conn, scope, existing.id, values=update_values
-                    )
-                    write_audit(
-                        conn,
-                        tenant_id=scope.tenant_id,
-                        actor_user_id=user.id,
-                        action="employee.updated",
-                        entity_type="employee",
-                        entity_id=str(existing.id),
-                        before={
-                            "full_name": existing.full_name,
-                            "email": existing.email,
-                            "department_code": existing.department_code,
-                        },
-                        after={
-                            "full_name": row.full_name,
-                            "email": row.email,
-                            "department_code": row.department_code,
-                            "designation": row.designation,
-                            "phone": row.phone,
-                            "reports_to_user_id": reports_to_id,
-                            "joining_date": joining.isoformat() if joining else None,
-                            "relieving_date": relieving.isoformat() if relieving else None,
-                            "source": "import",
-                        },
-                    )
-                    updated += 1
-                    target_employee_id = existing.id
+                        "department_code": row.department_code,
+                        "designation": row.designation,
+                        "phone": row.phone,
+                        "reports_to_user_id": reports_to_id,
+                        "joining_date": joining.isoformat() if joining else None,
+                        "relieving_date": relieving.isoformat() if relieving else None,
+                        "source": "import",
+                    },
+                )
+                created += 1
+                target_employee_id = new_id
 
                 # P12: apply custom-field values from the row. Unknown
                 # codes are warnings (operator left a stale column),
@@ -1225,10 +1546,22 @@ async def import_employees_endpoint(
         except Exception as exc:  # noqa: BLE001
             # Swallow per-row DB errors and keep going; the operator sees
             # the row/message in the response. Unlogged fields (password,
-            # RTSP URL) can't surface here because we never pass them.
-            logger.warning("import row %d failed: %s", row.excel_row, exc)
+            # RTSP URL) can't surface here because we never pass them
+            # through the import path.
+            logger.warning(
+                "import row %d failed: %s", row.excel_row, exc, exc_info=True
+            )
+            # Surface the exception type + first line of message so an
+            # operator hitting a regression sees enough detail to file a
+            # report. The DB-side messages are operator-readable
+            # (``permission denied for table X``, ``violates foreign
+            # key constraint``, etc.).
+            short = str(exc).split("\n", 1)[0].strip() or exc.__class__.__name__
             errors.append(
-                ImportErrorSchema(row=row.excel_row, message="could not save row")
+                ImportErrorSchema(
+                    row=row.excel_row,
+                    message=f"could not save row: {short}",
+                )
             )
 
     # One summary audit row with the counts — useful for an "audit log

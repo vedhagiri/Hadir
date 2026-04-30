@@ -105,6 +105,41 @@ export function useImportEmployees() {
   });
 }
 
+export interface ImportPreviewRow {
+  row: number;
+  employee_code: string;
+  full_name: string;
+  email: string | null;
+  designation: string | null;
+  phone: string | null;
+  division: string | null;
+  department: string;
+  section: string | null;
+  joining_date: string | null;
+  relieving_date: string | null;
+  reports_to_email: string | null;
+  defaulted_joining_date: boolean;
+}
+
+export interface ImportPreviewResult {
+  rows: ImportPreviewRow[];
+  errors: { row: number; message: string }[];
+  warnings: { row: number; message: string }[];
+}
+
+export function usePreviewImport() {
+  return useMutation({
+    mutationFn: async (file: File): Promise<ImportPreviewResult> => {
+      const form = new FormData();
+      form.append("file", file);
+      return api<ImportPreviewResult>("/api/employees/import-preview", {
+        method: "POST",
+        body: form,
+      });
+    },
+  });
+}
+
 export function useBulkIngestPhotos() {
   const qc = useQueryClient();
   return useMutation({
@@ -279,6 +314,37 @@ export function useAdminOverrideDeleteRequest() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["delete-requests"] });
       qc.invalidateQueries({ queryKey: ["employees"] });
+    },
+  });
+}
+
+export interface BulkDeleteRequest {
+  scope: "selected" | "all";
+  mode: "soft" | "hard";
+  ids?: number[];
+  confirmation?: string;
+}
+
+export interface BulkDeleteResponse {
+  scope: "selected" | "all";
+  mode: "soft" | "hard";
+  requested: number;
+  deleted: number;
+  skipped: number;
+  errors: { row: number; message: string }[];
+}
+
+export function useBulkDeleteEmployees() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: BulkDeleteRequest): Promise<BulkDeleteResponse> =>
+      api<BulkDeleteResponse>("/api/employees/bulk-delete", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["employees"] });
+      qc.invalidateQueries({ queryKey: ["delete-requests"] });
     },
   });
 }

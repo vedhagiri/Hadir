@@ -247,3 +247,116 @@ def pdpl_delete_employee(
 # require an exact match (case + whitespace sensitive) so a
 # sloppy curl with a typo can't accidentally invoke a delete.
 PDPL_CONFIRMATION_PHRASE = "I CONFIRM PDPL DELETION"
+
+
+# ---- purge (operator-driven full delete) ------------------------------
+#
+# Distinct from ``pdpl_delete_employee`` (which preserves attendance
+# + audit history per BRD NFR-RET-004). ``purge_employee`` is wired
+# from the bulk-delete UI's "hard" mode so an operator can wipe a
+# tenant's roster cleanly during setup / pilot rotation. Every
+# referencing row is removed:
+#
+#   * employee_photos          — cascade
+#   * custom_field_values      — cascade
+#   * attendance_records       — cascade
+#   * approved_leaves          — cascade
+#   * requests                 — cascade
+#   * manager_assignments      — cascade
+#   * delete_requests          — cascade
+#   * detection_events.employee_id            → SET NULL (history kept)
+#   * detection_events.former_match_employee_id → SET NULL (history kept)
+#
+# detection_events rows survive with their face crops still on disk
+# but no employee linkage — the operator can age them out via the
+# capture-events retention sweep separately. Audit log row stays
+# (append-only at the DB grant level).
+
+
+@dataclass
+class PurgeEmployeeResult:
+    employee_id: int
+    photo_files_deleted: int
+    full_name: str
+
+
+def purge_employee(
+    conn: Connection,
+    scope: TenantScope,
+    *,
+    employee_id: int,
+    actor_user_id: int,
+) -> PurgeEmployeeResult:
+    """Drop an employee row and every referencing row.
+
+    Photos on disk are removed best-effort first (so the on-disk
+    state matches the DB state after commit). The DB DELETE cascades
+    via the FK constraints declared in ``maugood/db.py``.
+    """
+
+    employee = conn.execute(
+        select(employees.c.id, employees.c.full_name).where(
+            employees.c.tenant_id == scope.tenant_id,
+            employees.c.id == employee_id,
+        )
+    ).first()
+    if employee is None:
+        raise ValueError("employee not found")
+
+    full_name = str(employee.full_name)
+
+    photo_paths = [
+        str(r.file_path)
+        for r in conn.execute(
+            select(employee_photos.c.file_path).where(
+                employee_photos.c.tenant_id == scope.tenant_id,
+                employee_photos.c.employee_id == employee_id,
+            )
+        ).all()
+    ]
+    photo_files_deleted = 0
+    for path in photo_paths:
+        if _drop_photo_file(path):
+            photo_files_deleted += 1
+
+    # Delete the employee row — every referencing CASCADE FK clears
+    # the dependent rows in one transaction. detection_events FKs
+    # are SET NULL so capture history survives anonymously.
+    conn.execute(
+        delete(employees).where(
+            employees.c.tenant_id == scope.tenant_id,
+            employees.c.id == employee_id,
+        )
+    )
+
+    try:
+        matcher_cache.invalidate_employee(scope.tenant_id, employee_id)
+    except Exception:  # noqa: BLE001
+        logger.debug(
+            "purge: matcher_cache.invalidate_employee no-op", exc_info=True
+        )
+
+    write_audit(
+        conn,
+        tenant_id=scope.tenant_id,
+        actor_user_id=actor_user_id,
+        action="employee.purged",
+        entity_type="employee",
+        entity_id=str(employee_id),
+        before={"full_name": full_name},
+        after={"photo_files_deleted": photo_files_deleted},
+    )
+    audit_logger().info(
+        "employee.purged tenant=%s employee_id=%s actor_user_id=%s "
+        "photo_files=%d",
+        scope.tenant_id,
+        employee_id,
+        actor_user_id,
+        photo_files_deleted,
+    )
+
+    return PurgeEmployeeResult(
+        employee_id=employee_id,
+        photo_files_deleted=photo_files_deleted,
+        full_name=full_name,
+    )

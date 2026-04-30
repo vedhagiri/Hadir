@@ -407,8 +407,35 @@ export function DailyAttendancePage() {
                   >
                     <Avatar name={it.full_name} seed={it.employee_code} />
                     <div>
-                      <div style={{ fontWeight: 500, fontSize: 13 }}>
+                      <div
+                        style={{
+                          fontWeight: 500,
+                          fontSize: 13,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          color:
+                            it.employee_status === "inactive"
+                              ? "var(--text-secondary)"
+                              : undefined,
+                          textDecoration:
+                            it.employee_status === "inactive"
+                              ? "line-through"
+                              : undefined,
+                        }}
+                      >
                         {it.full_name}
+                        {it.employee_status === "inactive" && (
+                          <span
+                            className="pill pill-neutral"
+                            style={{
+                              fontSize: 10,
+                              textDecoration: "none",
+                            }}
+                          >
+                            archived
+                          </span>
+                        )}
                       </div>
                       <div className="mono text-xs text-dim">
                         {it.employee_code}

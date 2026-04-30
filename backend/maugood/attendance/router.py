@@ -42,6 +42,7 @@ class AttendanceItem(BaseModel):
     employee_id: int
     employee_code: str
     full_name: str
+    employee_status: str = "active"
     department: DepartmentOut
     date: date_type
     in_time: Optional[str] = None
@@ -70,6 +71,7 @@ def _row_to_item(row: repo.AttendanceRow) -> AttendanceItem:
         employee_id=row.employee_id,
         employee_code=row.employee_code,
         full_name=row.full_name,
+        employee_status=row.employee_status,
         department=DepartmentOut(
             id=row.department_id,
             code=row.department_code,

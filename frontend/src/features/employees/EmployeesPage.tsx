@@ -19,8 +19,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { useMe } from "../../auth/AuthProvider";
 import { Icon } from "../../shell/Icon";
 import { useDepartments } from "../departments/hooks";
+import { BulkDeleteModal } from "./BulkDeleteModal";
 import { DeleteConfirmModal } from "./DeleteConfirmModal";
 import { EmployeeDrawer } from "./EmployeeDrawer";
 import { EmployeeViewDrawer } from "./EmployeeViewDrawer";
@@ -47,8 +49,14 @@ export function EmployeesPage() {
   const [drawerId, setDrawerId] = useState<number | null | undefined>(undefined);
   const [viewId, setViewId] = useState<number | null>(null);
   const [deletingEmployee, setDeletingEmployee] = useState<Employee | null>(null);
+  const [bulkDeleteScope, setBulkDeleteScope] = useState<
+    "selected" | "all" | null
+  >(null);
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
+
+  const { data: me } = useMe();
+  const isAdmin = !!me?.roles?.includes("Admin");
 
   // Search debounce — only fire the server query when the input is
   // empty (show all) or has ≥3 chars (avoid noisy hits on every key
@@ -161,6 +169,27 @@ export function EmployeesPage() {
           </p>
         </div>
         <div className="page-actions">
+          {isAdmin && selected.size > 0 && (
+            <button
+              className="btn btn-danger"
+              onClick={() => setBulkDeleteScope("selected")}
+            >
+              <Icon name="trash" size={12} />
+              {t("employees.bulkDelete.selectedButton", {
+                count: selected.size,
+              }) as string}
+            </button>
+          )}
+          {isAdmin && selected.size === 0 && (
+            <button
+              className="btn"
+              onClick={() => setBulkDeleteScope("all")}
+              title={t("employees.bulkDelete.allTooltip") as string}
+            >
+              <Icon name="trash" size={12} />
+              {t("employees.bulkDelete.allButton") as string}
+            </button>
+          )}
           <button className="btn" onClick={onExport}>
             <Icon name="download" size={12} />
             {selected.size > 0
@@ -454,6 +483,19 @@ export function EmployeesPage() {
           onClose={() => setDeletingEmployee(null)}
           onSubmitted={() => {
             setDeletingEmployee(null);
+            list.refetch();
+            pendingDeletes.refetch();
+          }}
+        />
+      )}
+      {bulkDeleteScope !== null && (
+        <BulkDeleteModal
+          scope={bulkDeleteScope}
+          selectedIds={Array.from(selected)}
+          selectedCount={selected.size}
+          onClose={() => setBulkDeleteScope(null)}
+          onSubmitted={() => {
+            setSelected(new Set());
             list.refetch();
             pendingDeletes.refetch();
           }}

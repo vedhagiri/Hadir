@@ -60,6 +60,11 @@ class AttendanceRow:
     absent: bool
     overtime_minutes: int
     leave_type_id: Optional[int]
+    # Soft-delete display: when an employee is flipped to ``inactive``
+    # we keep their attendance history but mark the row archived in
+    # the UI. Hard-deleted (purged) employees never appear here at
+    # all because the ``employees`` JOIN finds no row.
+    employee_status: str = "active"
 
 
 def local_tz() -> ZoneInfo:
@@ -657,6 +662,7 @@ def list_for_employee_range(
             employees.c.id.label("employee_id"),
             employees.c.employee_code,
             employees.c.full_name,
+            employees.c.status.label("employee_status"),
             employees.c.department_id,
             departments.c.code.label("department_code"),
             departments.c.name.label("department_name"),
@@ -710,6 +716,7 @@ def list_for_employee_range(
             employee_id=int(r.employee_id),
             employee_code=str(r.employee_code),
             full_name=str(r.full_name),
+            employee_status=str(getattr(r, "employee_status", "active") or "active"),
             department_id=int(r.department_id),
             department_code=str(r.department_code),
             department_name=str(r.department_name),
@@ -761,6 +768,7 @@ def list_for_date(
             employees.c.id.label("employee_id"),
             employees.c.employee_code,
             employees.c.full_name,
+            employees.c.status.label("employee_status"),
             employees.c.department_id,
             departments.c.code.label("department_code"),
             departments.c.name.label("department_name"),
@@ -825,6 +833,7 @@ def list_for_date(
             employee_id=int(r.employee_id),
             employee_code=str(r.employee_code),
             full_name=str(r.full_name),
+            employee_status=str(getattr(r, "employee_status", "active") or "active"),
             department_id=int(r.department_id),
             department_code=str(r.department_code),
             department_name=str(r.department_name),

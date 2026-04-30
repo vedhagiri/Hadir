@@ -8,6 +8,7 @@ export interface DetectionEvent {
   employee_id: number | null;
   employee_code: string | null;
   employee_name: string | null;
+  employee_status?: "active" | "inactive" | "deleted" | null;
   confidence: number | null;
   track_id: string;
   has_crop: boolean;

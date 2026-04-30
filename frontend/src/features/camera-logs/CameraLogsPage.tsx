@@ -359,9 +359,29 @@ export function CameraLogsPage() {
                     <td className="text-sm">
                       {ev.employee_id ? (
                         <span>
-                          <span style={{ fontWeight: 500 }}>
+                          <span
+                            style={{
+                              fontWeight: 500,
+                              color:
+                                ev.employee_status === "inactive"
+                                  ? "var(--text-secondary)"
+                                  : undefined,
+                              textDecoration:
+                                ev.employee_status === "inactive"
+                                  ? "line-through"
+                                  : undefined,
+                            }}
+                          >
                             {ev.employee_name}
                           </span>{" "}
+                          {ev.employee_status === "inactive" && (
+                            <span
+                              className="pill pill-neutral"
+                              style={{ fontSize: 10, marginInlineEnd: 4 }}
+                            >
+                              archived
+                            </span>
+                          )}
                           <span className="mono text-xs text-dim">
                             {ev.employee_code}
                           </span>

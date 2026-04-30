@@ -64,7 +64,13 @@ HIERARCHY_OPTIONAL_COLUMNS: tuple[str, ...] = (
     "division_code",
     "section_code",
 )
+# Friendly header aliases. The keys appear in operator-supplied
+# spreadsheets; the values are the canonical column names the parser
+# (and the import handler) work with. The `department` mapping is
+# critical — operators export from HR systems that almost always
+# label that column without the `_code` suffix.
 _HIERARCHY_ALIASES: dict[str, str] = {
+    "department": "department_code",
     "division": "division_code",
     "section": "section_code",
 }
@@ -169,7 +175,10 @@ def parse_import(stream: BytesIO) -> Iterator[ImportRow]:
         if header_row is None:
             raise ImportParseError("workbook is empty")
 
-        headers = [_normalise_header(c) for c in header_row]
+        headers = [
+            _HIERARCHY_ALIASES.get(_normalise_header(c), _normalise_header(c))
+            for c in header_row
+        ]
         missing = [c for c in REQUIRED_COLUMNS if c not in headers]
         if missing:
             raise ImportParseError(
@@ -305,7 +314,10 @@ def parse_csv_import(data: bytes) -> Iterator[ImportRow]:
     except StopIteration as exc:
         raise ImportParseError("CSV is empty") from exc
 
-    headers = [_normalise_header(c) for c in header_row]
+    headers = [
+        _HIERARCHY_ALIASES.get(_normalise_header(c), _normalise_header(c))
+        for c in header_row
+    ]
     missing = [c for c in REQUIRED_COLUMNS if c not in headers]
     if missing:
         raise ImportParseError(

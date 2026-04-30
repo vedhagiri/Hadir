@@ -47,6 +47,7 @@ class DetectionEventOut(BaseModel):
     employee_id: Optional[int] = None
     employee_code: Optional[str] = None
     employee_name: Optional[str] = None
+    employee_status: Optional[str] = None
     confidence: Optional[float] = None
     track_id: str
     has_crop: bool
@@ -85,6 +86,7 @@ def _build_select(scope: TenantScope):
             detection_events.c.employee_id,
             employees.c.employee_code,
             employees.c.full_name.label("employee_name"),
+            employees.c.status.label("employee_status"),
             detection_events.c.confidence,
             detection_events.c.track_id,
             detection_events.c.face_crop_path,
@@ -177,6 +179,9 @@ def list_events(
             employee_id=int(r.employee_id) if r.employee_id is not None else None,
             employee_code=str(r.employee_code) if r.employee_code is not None else None,
             employee_name=str(r.employee_name) if r.employee_name is not None else None,
+            employee_status=(
+                str(r.employee_status) if r.employee_status is not None else None
+            ),
             confidence=float(r.confidence) if r.confidence is not None else None,
             track_id=str(r.track_id),
             has_crop=bool(r.face_crop_path),
