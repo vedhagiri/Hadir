@@ -1171,7 +1171,15 @@ class CaptureWorker:
             return self._att_cache_age
 
         try:
+            from datetime import datetime, timedelta, timezone  # noqa: PLC0415
             from sqlalchemy import func as sa_func  # noqa: PLC0415
+
+            # Compute the 4-hour cutoff Python-side so the SQL is
+            # straightforward and portable. The earlier
+            # ``sa_func.cast(..., interval)`` form was malformed and
+            # raised silently — the worker fell into the catch-all
+            # below and reported "engine stuck" forever.
+            cutoff_dt = datetime.now(timezone.utc) - timedelta(hours=4)
 
             with self._engine.begin() as conn:
                 row = conn.execute(
@@ -1193,13 +1201,15 @@ class CaptureWorker:
                         attendance_records.c.tenant_id
                         == self._scope.tenant_id,
                         detection_events.c.camera_id == self.camera_id,
-                        attendance_records.c.computed_at
-                        > sa_func.now() - sa_func.cast(
-                            "4 hours", sa_func.text("interval").type
-                        ),
+                        attendance_records.c.computed_at > cutoff_dt,
                     )
                 ).first()
         except Exception:  # noqa: BLE001
+            logger.warning(
+                "attendance age query failed for camera_id=%s",
+                self.camera_id,
+                exc_info=True,
+            )
             self._att_cache_ts = now
             self._att_cache_age = 999_999.0
             return self._att_cache_age
