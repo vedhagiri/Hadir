@@ -32,6 +32,8 @@ htmlcov/
 coverage.xml
 dist/
 build/
+# Update-applier snapshots (scripts/deploy-update.sh)
+backups/
 
 # Node / Vite
 node_modules/
