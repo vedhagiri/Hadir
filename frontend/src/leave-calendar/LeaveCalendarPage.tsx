@@ -24,8 +24,6 @@ import {
   useImportHolidaysXlsx,
   useLeaveTypes,
   usePatchLeaveType,
-  usePatchTenantSettings,
-  useTenantSettings,
 } from "./hooks";
 import type {
   ApprovedLeave,
@@ -35,16 +33,6 @@ import type {
 
 
 type Tab = "types" | "holidays" | "leaves";
-
-const WEEKDAYS = [
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
-  "Sunday",
-];
 
 
 export function LeaveCalendarPage() {
@@ -68,7 +56,9 @@ export function LeaveCalendarPage() {
         </p>
       </header>
 
-      <TenantSettingsPanel />
+      {/* Tenant timezone + weekend-day controls moved to
+          Settings → Workspace so they live alongside the other
+          tenant-wide configuration knobs. */}
 
       <div style={{ display: "flex", gap: 4 }}>
         <TabButton tab={tab} value="types" onClick={setTab}>
@@ -124,130 +114,10 @@ function TabButton({
 }
 
 
-// ---- Tenant settings ----------------------------------------------------
-
-
-function TenantSettingsPanel() {
-  const settings = useTenantSettings();
-  const patch = usePatchTenantSettings();
-  const [error, setError] = useState<string | null>(null);
-
-  if (settings.isLoading) return <p>Loading tenant settings…</p>;
-  if (settings.error || !settings.data)
-    return (
-      <p style={{ color: "var(--danger-text)" }}>
-        Couldn’t load tenant settings.
-      </p>
-    );
-
-  const onToggleDay = async (day: string) => {
-    setError(null);
-    const current = new Set(settings.data!.weekend_days);
-    if (current.has(day)) current.delete(day);
-    else current.add(day);
-    try {
-      await patch.mutateAsync({ weekend_days: Array.from(current) });
-    } catch (err) {
-      handleApi(err, setError, "Save failed");
-    }
-  };
-
-  const onTimezoneChange = async (tz: string) => {
-    setError(null);
-    try {
-      await patch.mutateAsync({ timezone: tz });
-    } catch (err) {
-      handleApi(err, setError, "Save failed");
-    }
-  };
-
-  return (
-    <section
-      style={{
-        background: "var(--bg-elev)",
-        border: "1px solid var(--border)",
-        borderRadius: "var(--radius-md)",
-        padding: 16,
-        display: "flex",
-        flexDirection: "column",
-        gap: 10,
-      }}
-    >
-      <header>
-        <h2
-          style={{
-            fontSize: 12,
-            textTransform: "uppercase",
-            letterSpacing: "0.04em",
-            color: "var(--text-tertiary)",
-            margin: 0,
-          }}
-        >
-          Tenant settings
-        </h2>
-        <p
-          style={{
-            margin: "2px 0 0 0",
-            color: "var(--text-secondary)",
-            fontSize: 12,
-          }}
-        >
-          Timezone is tenant-scoped — every attendance comparison runs in
-          this tenant&apos;s timezone, not the server&apos;s.
-        </p>
-      </header>
-
-      <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-        <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <span style={labelStyle}>Timezone (IANA)</span>
-          <input
-            type="text"
-            defaultValue={settings.data.timezone}
-            onBlur={(e) => {
-              const v = e.target.value.trim();
-              if (v && v !== settings.data!.timezone) {
-                void onTimezoneChange(v);
-              }
-            }}
-            style={{ ...inputStyle, minWidth: 200 }}
-          />
-        </label>
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <span style={labelStyle}>Weekend days</span>
-          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-            {WEEKDAYS.map((d) => {
-              const on = settings.data!.weekend_days.includes(d);
-              return (
-                <button
-                  key={d}
-                  type="button"
-                  onClick={() => void onToggleDay(d)}
-                  disabled={patch.isPending}
-                  style={{
-                    fontSize: 11.5,
-                    padding: "3px 10px",
-                    borderRadius: 999,
-                    border: on
-                      ? "1px solid var(--accent-border)"
-                      : "1px solid var(--border)",
-                    background: on ? "var(--accent-soft)" : "var(--bg)",
-                    color: on ? "var(--accent-text)" : "var(--text)",
-                    cursor: "pointer",
-                  }}
-                >
-                  {d.slice(0, 3)}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-      {error && (
-        <div style={errorBox}>{error}</div>
-      )}
-    </section>
-  );
-}
+// Tenant timezone + weekend-day controls live at
+// ``/settings/workspace`` now. The hooks
+// (``useTenantSettings``, ``usePatchTenantSettings``) are still
+// imported here because other panels on this page consume them.
 
 
 // ---- Leave types tab -----------------------------------------------------

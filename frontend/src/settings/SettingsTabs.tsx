@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { NavLink } from "react-router-dom";
 
 const TABS = [
+  { to: "/settings/workspace", key: "workspace" },
   { to: "/settings/branding", key: "branding" },
   { to: "/settings/authentication", key: "authentication" },
   { to: "/settings/divisions", key: "divisions" },

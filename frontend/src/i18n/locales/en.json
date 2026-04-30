@@ -206,6 +206,7 @@
   },
   "settings": {
     "tabs": {
+      "workspace": "Workspace",
       "branding": "Branding",
       "authentication": "Authentication",
       "divisions": "Divisions",
@@ -218,6 +219,18 @@
       "erpExport": "ERP export",
       "notifications": "Notifications",
       "display": "Display"
+    },
+    "workspace": {
+      "title": "Workspace",
+      "subtitle": "Tenant-wide clock and calendar settings.",
+      "loadFailed": "Could not load workspace settings.",
+      "timezoneTitle": "Timezone",
+      "timezoneDesc": "Maugood stores everything in UTC internally. This setting is the wall clock used for shift boundaries, today's-rollover, scheduler firings, and report dates. Pick the timezone where this workspace's cameras and employees are physically located.",
+      "timezoneLabel": "Workspace timezone",
+      "customTimezone": "Custom IANA timezone…",
+      "customLabel": "Custom timezone (Continent/City)",
+      "weekendTitle": "Weekend days",
+      "weekendDesc": "Days marked as weekend never count as Absent — work captured on these days flows to overtime."
     }
   },
   "departments": {

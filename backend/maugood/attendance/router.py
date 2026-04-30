@@ -103,7 +103,9 @@ def _row_to_item(row: repo.AttendanceRow) -> AttendanceItem:
 
 
 def _compute_pending_employee_ids(
-    scope: TenantScope, rows: list  # type: ignore[type-arg]
+    scope: TenantScope,
+    rows: list,  # type: ignore[type-arg]
+    tenant_tz,  # ZoneInfo — caller's tenant clock for "now"
 ) -> set[int]:
     """For today's rows, return the set of employee_ids whose shift
     end is still in the future and who haven't checked in yet (i.e.
@@ -113,6 +115,9 @@ def _compute_pending_employee_ids(
     end-of-shift time. Fixed → ``end``; Flex / Custom-Flex →
     ``out_window_end``. Anything we can't parse is treated as
     "shift over" so we don't mask actual absentees.
+
+    ``tenant_tz`` is the tenant's wall clock — used so the comparison
+    uses the right "now" for tenants outside the server timezone.
     """
 
     pending: set[int] = set()
@@ -129,7 +134,6 @@ def _compute_pending_employee_ids(
 
     from sqlalchemy import select  # noqa: PLC0415
 
-    from maugood.attendance.repository import local_tz  # noqa: PLC0415
     from maugood.db import shift_policies  # noqa: PLC0415
 
     policy_ids = sorted({r.policy_id for r in candidate_rows})
@@ -155,7 +159,7 @@ def _compute_pending_employee_ids(
             str(end_str) if isinstance(end_str, str) else None
         )
 
-    now_local = datetime.now(timezone.utc).astimezone(local_tz()).time()
+    now_local = datetime.now(timezone.utc).astimezone(tenant_tz).time()
 
     for r in candidate_rows:
         end_str = shift_end_by_policy.get(int(r.policy_id))
@@ -175,28 +179,29 @@ def _compute_pending_employee_ids(
 
 
 def _compute_day_context(
-    scope: TenantScope, the_date: date_type
+    scope: TenantScope,
+    the_date: date_type,
+    tenant_settings_snapshot,  # TenantTimeSettings — caller-loaded
 ) -> tuple[bool, Optional[str]]:
     """Return ``(is_weekend, holiday_name)`` for one date.
 
-    Reads tenant_settings.weekend_days + the holidays table once so
-    the frontend can render "Weekend" / "Holiday" pills instead of
-    falling through to "Present" on a non-working day.
+    Reads tenant_settings.weekend_days + the holidays table so the
+    frontend can render "Weekend" / "Holiday" pills instead of
+    falling through to "Present" on a non-working day. The
+    tenant-settings snapshot is loaded once by the caller and
+    threaded through so all helpers see the same values.
     """
 
     from sqlalchemy import select  # noqa: PLC0415
 
-    from maugood.attendance.repository import load_tenant_settings  # noqa: PLC0415
     from maugood.db import holidays as _holidays  # noqa: PLC0415
 
     is_weekend = False
     holiday_name: Optional[str] = None
     try:
+        weekday_name = the_date.strftime("%A")
+        is_weekend = weekday_name in tenant_settings_snapshot.weekend_days
         with get_engine().begin() as conn:
-            settings = load_tenant_settings(conn, scope)
-            weekday_name = the_date.strftime("%A")
-            is_weekend = weekday_name in settings.weekend_days
-
             row = conn.execute(
                 select(_holidays.c.name).where(
                     _holidays.c.tenant_id == scope.tenant_id,
@@ -245,9 +250,18 @@ def list_attendance(
     ] = None,
 ) -> AttendanceListOut:
     scope = TenantScope(tenant_id=user.tenant_id)
-    from maugood.attendance.repository import local_tz  # noqa: PLC0415
+    from maugood.attendance.repository import (  # noqa: PLC0415
+        load_tenant_settings,
+        local_tz_for,
+    )
 
-    the_date = date or datetime.now(timezone.utc).astimezone(local_tz()).date()
+    # Per-tenant timezone is the canonical clock for "today" /
+    # shift-end comparisons. Load tenant_settings once at the top so
+    # every helper below uses the same tz snapshot.
+    with get_engine().begin() as conn:
+        _tenant_settings_snapshot = load_tenant_settings(conn, scope)
+    tenant_tz = local_tz_for(_tenant_settings_snapshot)
+    the_date = date or datetime.now(timezone.utc).astimezone(tenant_tz).date()
 
     # Role scoping. Admin/HR see everything; Manager's view is the
     # **union** of (a) their department(s) and (b) employees directly
@@ -323,17 +337,21 @@ def list_attendance(
 
     # Decorate rows for today with the ``pending`` flag — the
     # frontend renders "Waiting for login" when the shift end hasn't
-    # passed yet, otherwise the existing "Absent" pill.
+    # passed yet, otherwise the existing "Absent" pill. Both
+    # helpers take the per-tenant tz so a tenant in Asia/Dubai uses
+    # the right "today" / "now" for shift-end comparison.
     today_local = (
-        datetime.now(timezone.utc).astimezone(local_tz()).date()
+        datetime.now(timezone.utc).astimezone(tenant_tz).date()
     )
     pending_ids: set[int] = set()
     if the_date == today_local and rows:
-        pending_ids = _compute_pending_employee_ids(scope, rows)
+        pending_ids = _compute_pending_employee_ids(scope, rows, tenant_tz)
 
     # Per-row context flags (weekend / holiday) so the frontend
     # doesn't fall through to "Present" on a non-working day.
-    is_weekend, holiday_name = _compute_day_context(scope, the_date)
+    is_weekend, holiday_name = _compute_day_context(
+        scope, the_date, _tenant_settings_snapshot
+    )
 
     items = []
     for r in rows:

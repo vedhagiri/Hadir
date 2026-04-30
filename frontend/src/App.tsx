@@ -19,6 +19,7 @@ import { DepartmentsPage } from "./settings/DepartmentsPage";
 import { DivisionsPage } from "./settings/DivisionsPage";
 import { SectionsPage } from "./settings/SectionsPage";
 import { DisplaySettingsPage } from "./settings/DisplaySettingsPage";
+import { WorkspacePage } from "./settings/WorkspacePage";
 import { ErpExportPage } from "./erp-export/ErpExportPage";
 import { NotificationsPage } from "./notifications/NotificationsPage";
 import { NotificationPreferencesPage } from "./notifications/PreferencesPage";
@@ -118,7 +119,8 @@ export function App() {
         <Route path="mgr-assign" element={<ManagerAssignmentsPage />} />
         <Route path="policies" element={<PoliciesPage />} />
         <Route path="leave-policy" element={<LeaveCalendarPage />} />
-        <Route path="settings" element={<Navigate to="/settings/branding" replace />} />
+        <Route path="settings" element={<Navigate to="/settings/workspace" replace />} />
+        <Route path="settings/workspace" element={<WorkspacePage />} />
         <Route path="settings/branding" element={<BrandingPage />} />
         <Route path="settings/authentication" element={<AuthenticationPage />} />
         <Route path="settings/departments" element={<DepartmentsPage />} />
