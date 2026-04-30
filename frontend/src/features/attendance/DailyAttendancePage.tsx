@@ -63,22 +63,42 @@ export function DailyAttendancePage() {
 
   const stats = useMemo(() => {
     const items = list.data?.items ?? [];
-    const present = items.filter(
-      (it) => !it.absent && !it.late && it.leave_type_id === null,
-    ).length;
-    const late = items.filter((it) => it.late && !it.absent).length;
+    // Match the StatusPill priority: leave > holiday > weekend >
+    // pending > absent (no in_time) > late > present.
     const onLeave = items.filter(
       (it) => it.absent && it.leave_type_id !== null,
     ).length;
-    const absent = items.filter(
-      (it) => it.absent && it.leave_type_id === null,
+    const offDay = items.filter(
+      (it) =>
+        !it.in_time &&
+        it.leave_type_id === null &&
+        (it.is_holiday || it.is_weekend),
     ).length;
+    const pending = items.filter(
+      (it) =>
+        it.pending &&
+        it.leave_type_id === null &&
+        !it.is_holiday &&
+        !it.is_weekend,
+    ).length;
+    const absent = items.filter(
+      (it) =>
+        !it.in_time &&
+        it.leave_type_id === null &&
+        !it.pending &&
+        !it.is_holiday &&
+        !it.is_weekend,
+    ).length;
+    const late = items.filter((it) => !!it.in_time && it.late).length;
+    const present = items.filter((it) => !!it.in_time && !it.late).length;
     return {
       total: items.length,
       present,
       late,
       absent,
       onLeave,
+      pending,
+      offDay,
     };
   }, [list.data]);
 
@@ -330,6 +350,12 @@ export function DailyAttendancePage() {
         <StatTile label="Present" value={stats.present} tone="success" />
         <StatTile label="Late" value={stats.late} tone="warning" />
         <StatTile label="Absent" value={stats.absent} tone="danger" />
+        {stats.pending > 0 && (
+          <StatTile label="Waiting" value={stats.pending} tone="info" />
+        )}
+        {stats.offDay > 0 && (
+          <StatTile label="Off day" value={stats.offDay} />
+        )}
         <StatTile label="On leave" value={stats.onLeave} tone="info" />
       </div>
 
@@ -568,10 +594,29 @@ function StatTile({
 }
 
 function StatusPill({ item }: { item: AttendanceItem }) {
+  // Order matters: leave / holiday / weekend take priority over
+  // workday verdicts so a row on a non-working day never reads as
+  // "Absent" or falls through to "Present" with no in_time.
   if (item.absent && item.leave_type_id !== null) {
     return <span className="pill pill-info">On leave</span>;
   }
-  if (item.absent) {
+  if (item.is_holiday && !item.in_time) {
+    return (
+      <span className="pill pill-info">
+        Holiday{item.holiday_name ? ` — ${item.holiday_name}` : ""}
+      </span>
+    );
+  }
+  if (item.is_weekend && !item.in_time) {
+    return <span className="pill pill-neutral">Weekend</span>;
+  }
+  if (item.pending) {
+    return <span className="pill pill-info">Waiting for login</span>;
+  }
+  // No in_time on a workday → Absent, regardless of the engine's
+  // ``absent`` flag. Operators read "Present" as "checked in
+  // today"; rows without a recorded check-in shouldn't be Present.
+  if (!item.in_time) {
     return <span className="pill pill-danger">Absent</span>;
   }
   if (item.late) {
@@ -675,6 +720,9 @@ const selectStyle = {
 export function FlagPills({ item }: { item: AttendanceItem }) {
   if (item.absent && item.leave_type_id !== null) {
     return <span className="pill pill-info">on leave</span>;
+  }
+  if (item.pending) {
+    return <span className="pill pill-info">waiting</span>;
   }
   if (item.absent) {
     return <span className="pill pill-danger">absent</span>;

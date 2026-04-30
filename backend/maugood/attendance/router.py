@@ -55,6 +55,17 @@ class AttendanceItem(BaseModel):
     absent: bool
     overtime_minutes: int
     leave_type_id: Optional[int] = None
+    # ``pending`` = true when the row is for today's date AND the
+    # employee hasn't checked in yet AND their shift end is still in
+    # the future. Lets the frontend render "Waiting for login"
+    # instead of "Absent" for staff who simply haven't arrived yet.
+    pending: bool = False
+    # Per-row context flags so the frontend can render "Weekend" /
+    # "Holiday" pills instead of falling through to "Present" on
+    # rows that simply weren't expected to have a check-in.
+    is_weekend: bool = False
+    is_holiday: bool = False
+    holiday_name: Optional[str] = None
 
 
 class AttendanceListOut(BaseModel):
@@ -89,6 +100,116 @@ def _row_to_item(row: repo.AttendanceRow) -> AttendanceItem:
         overtime_minutes=row.overtime_minutes,
         leave_type_id=row.leave_type_id,
     )
+
+
+def _compute_pending_employee_ids(
+    scope: TenantScope, rows: list  # type: ignore[type-arg]
+) -> set[int]:
+    """For today's rows, return the set of employee_ids whose shift
+    end is still in the future and who haven't checked in yet (i.e.
+    the row is "absent" with no in_time and no leave).
+
+    Reads each unique policy's config once and pulls the
+    end-of-shift time. Fixed → ``end``; Flex / Custom-Flex →
+    ``out_window_end``. Anything we can't parse is treated as
+    "shift over" so we don't mask actual absentees.
+    """
+
+    pending: set[int] = set()
+    if not rows:
+        return pending
+
+    candidate_rows = [
+        r
+        for r in rows
+        if r.absent and r.in_time is None and r.leave_type_id is None
+    ]
+    if not candidate_rows:
+        return pending
+
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from maugood.attendance.repository import local_tz  # noqa: PLC0415
+    from maugood.db import shift_policies  # noqa: PLC0415
+
+    policy_ids = sorted({r.policy_id for r in candidate_rows})
+    with get_engine().begin() as conn:
+        config_rows = conn.execute(
+            select(shift_policies.c.id, shift_policies.c.config).where(
+                shift_policies.c.tenant_id == scope.tenant_id,
+                shift_policies.c.id.in_(policy_ids),
+            )
+        ).all()
+
+    # policy_id -> end-of-shift "HH:MM" string (or None on parse failure)
+    shift_end_by_policy: dict[int, Optional[str]] = {}
+    for cr in config_rows:
+        cfg = cr.config or {}
+        end_str = (
+            cfg.get("end")
+            or cfg.get("out_window_end")
+            or cfg.get("inner", {}).get("end")
+            or cfg.get("inner", {}).get("out_window_end")
+        )
+        shift_end_by_policy[int(cr.id)] = (
+            str(end_str) if isinstance(end_str, str) else None
+        )
+
+    now_local = datetime.now(timezone.utc).astimezone(local_tz()).time()
+
+    for r in candidate_rows:
+        end_str = shift_end_by_policy.get(int(r.policy_id))
+        if not end_str:
+            continue
+        try:
+            hh, mm = end_str.split(":")[:2]
+            from datetime import time as _time  # noqa: PLC0415
+
+            shift_end = _time(int(hh), int(mm))
+        except Exception:  # noqa: BLE001
+            continue
+        if now_local < shift_end:
+            pending.add(int(r.employee_id))
+
+    return pending
+
+
+def _compute_day_context(
+    scope: TenantScope, the_date: date_type
+) -> tuple[bool, Optional[str]]:
+    """Return ``(is_weekend, holiday_name)`` for one date.
+
+    Reads tenant_settings.weekend_days + the holidays table once so
+    the frontend can render "Weekend" / "Holiday" pills instead of
+    falling through to "Present" on a non-working day.
+    """
+
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from maugood.attendance.repository import load_tenant_settings  # noqa: PLC0415
+    from maugood.db import holidays as _holidays  # noqa: PLC0415
+
+    is_weekend = False
+    holiday_name: Optional[str] = None
+    try:
+        with get_engine().begin() as conn:
+            settings = load_tenant_settings(conn, scope)
+            weekday_name = the_date.strftime("%A")
+            is_weekend = weekday_name in settings.weekend_days
+
+            row = conn.execute(
+                select(_holidays.c.name).where(
+                    _holidays.c.tenant_id == scope.tenant_id,
+                    _holidays.c.date == the_date,
+                )
+            ).first()
+            if row is not None and row.name:
+                holiday_name = str(row.name)
+    except Exception:  # noqa: BLE001
+        # Defence in depth — if the lookup fails we fall back to
+        # workday semantics so absentees aren't masked.
+        return False, None
+    return is_weekend, holiday_name
 
 
 def _employee_row_id_for(user: CurrentUser) -> Optional[int]:
@@ -199,9 +320,32 @@ def list_attendance(
             employee_id=employee_filter_id,
             employee_ids=employee_ids,
         )
-    return AttendanceListOut(
-        date=the_date, items=[_row_to_item(r) for r in rows]
+
+    # Decorate rows for today with the ``pending`` flag — the
+    # frontend renders "Waiting for login" when the shift end hasn't
+    # passed yet, otherwise the existing "Absent" pill.
+    today_local = (
+        datetime.now(timezone.utc).astimezone(local_tz()).date()
     )
+    pending_ids: set[int] = set()
+    if the_date == today_local and rows:
+        pending_ids = _compute_pending_employee_ids(scope, rows)
+
+    # Per-row context flags (weekend / holiday) so the frontend
+    # doesn't fall through to "Present" on a non-working day.
+    is_weekend, holiday_name = _compute_day_context(scope, the_date)
+
+    items = []
+    for r in rows:
+        item = _row_to_item(r)
+        if r.employee_id in pending_ids:
+            item.pending = True
+        item.is_weekend = is_weekend
+        if holiday_name is not None:
+            item.is_holiday = True
+            item.holiday_name = holiday_name
+        items.append(item)
+    return AttendanceListOut(date=the_date, items=items)
 
 
 @router.get("/me/recent", response_model=AttendanceListOut)

@@ -28,6 +28,16 @@ export interface AttendanceItem {
   absent: boolean;
   overtime_minutes: number;
   leave_type_id: number | null;
+  // Server-computed: true when this row is for today and the
+  // employee hasn't checked in yet AND their shift hasn't ended.
+  // Frontend renders "Waiting for login" instead of "Absent".
+  pending?: boolean;
+  // Per-row day context flags. Lets the pill say "Weekend" or
+  // "Holiday — Eid" instead of falling through to "Present" on
+  // rows that simply weren't expected to have a check-in.
+  is_weekend?: boolean;
+  is_holiday?: boolean;
+  holiday_name?: string | null;
 }
 
 export interface AttendanceListResponse {
