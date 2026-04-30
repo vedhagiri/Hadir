@@ -30,6 +30,7 @@ import { DrawerShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
 import { toast } from "../../shell/Toaster";
 import { useDepartments } from "../departments/hooks";
+import { useSections } from "../sections/hooks";
 import { DeleteConfirmModal } from "./DeleteConfirmModal";
 import {
   useCreateEmployee,
@@ -73,6 +74,11 @@ interface FormState {
   phone: string;
   reports_to_user_id: number | null;
   department_id: number;
+  // P29 (#3): finest-grained tier. null when no section is
+  // assigned (sections are optional). Cleared automatically when
+  // the department changes — a section under the old department
+  // wouldn't be valid under the new one.
+  section_id: number | null;
   joining_date: string;
   relieving_date: string;
   status: "active" | "inactive";
@@ -88,6 +94,7 @@ function emptyForm(): FormState {
     phone: "",
     reports_to_user_id: null,
     department_id: 1,
+    section_id: null,
     joining_date: "",
     relieving_date: "",
     status: "active",
@@ -104,6 +111,7 @@ function fromEmployee(e: Employee): FormState {
     phone: e.phone ?? "",
     reports_to_user_id: e.reports_to_user_id ?? null,
     department_id: e.department.id,
+    section_id: e.section?.id ?? null,
     joining_date: e.joining_date ?? "",
     relieving_date: e.relieving_date ?? "",
     status: e.status,
@@ -139,6 +147,11 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
   });
 
   const [form, setForm] = useState<FormState>(emptyForm());
+  // Sections under the currently-selected department. Re-fetches
+  // automatically when the operator picks a different department —
+  // and we clear ``form.section_id`` in the same change handler so a
+  // stale section can't survive the swap.
+  const sectionsQuery = useSections(form.department_id ?? null);
   const [photoAngle, setPhotoAngle] = useState<PhotoAngle>("front");
   const [serverError, setServerError] = useState<string | null>(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -254,6 +267,10 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
       phone: form.phone.trim() || null,
       reports_to_user_id: form.reports_to_user_id ?? null,
       department_id: form.department_id,
+      // P29 (#3): explicitly include section_id (null clears the
+      // assignment, an int sets it). Backend validates the section
+      // sits under the resolved department.
+      section_id: form.section_id,
       joining_date: form.joining_date || null,
       relieving_date: form.relieving_date || null,
       status: form.status,
@@ -569,11 +586,20 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
 
           {/* Assignment */}
           <SectionLabel>{t("employees.section.assignment") as string}</SectionLabel>
-          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
             <Select
               label={t("employees.field.department") as string}
               value={String(form.department_id)}
-              onChange={(v) => onField("department_id", Number(v))}
+              onChange={(v) =>
+                // Department change clears the section so the picker
+                // can't carry a stale section that belongs to the old
+                // department.
+                setForm((s) => ({
+                  ...s,
+                  department_id: Number(v),
+                  section_id: null,
+                }))
+              }
               options={(departmentsQuery.data?.items ?? []).map((d) => ({
                 value: String(d.id),
                 label: `${d.name} (${d.code})`,
@@ -593,6 +619,31 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
                 })) as { value: string; label: string }[]),
               ]}
             />
+          </div>
+          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+            <Select
+              label="Section"
+              value={form.section_id === null ? "" : String(form.section_id)}
+              onChange={(v) =>
+                onField("section_id", v === "" ? null : Number(v))
+              }
+              options={[
+                {
+                  value: "",
+                  label:
+                    sectionsQuery.isLoading
+                      ? "Loading sections…"
+                      : (sectionsQuery.data?.items.length ?? 0) === 0
+                        ? "— No sections in this department —"
+                        : "— None —",
+                },
+                ...(sectionsQuery.data?.items ?? []).map((s) => ({
+                  value: String(s.id),
+                  label: `${s.name} (${s.code})`,
+                })),
+              ]}
+            />
+            <div />
           </div>
 
           {/* Lifecycle dates */}

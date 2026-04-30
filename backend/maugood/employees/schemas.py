@@ -30,12 +30,20 @@ class DepartmentOut(BaseModel):
     name: str
 
 
+class SectionOut(BaseModel):
+    id: int
+    code: str
+    name: str
+
+
 class EmployeeOut(BaseModel):
     id: int
     employee_code: str
     full_name: str
     email: Optional[str] = None
     department: DepartmentOut
+    # P29 (#3): finest-grained tier. None when not assigned.
+    section: Optional[SectionOut] = None
     status: StatusOut
     photo_count: int
     created_at: datetime
@@ -71,6 +79,9 @@ class EmployeeCreateIn(BaseModel):
     # ``department_id`` (surrogate key) for human callers.
     department_code: Optional[str] = Field(default=None, min_length=1, max_length=32)
     department_id: Optional[int] = None
+    # P29 (#3): optional section. Server validates it belongs to the
+    # resolved department.
+    section_id: Optional[int] = None
     status: Status = "active"
     # P28.7 — extended fields.
     designation: Optional[str] = Field(default=None, max_length=80)
@@ -100,6 +111,9 @@ class EmployeePatchIn(BaseModel):
     email: Optional[EmailStr] = None
     department_code: Optional[str] = Field(default=None, min_length=1, max_length=32)
     department_id: Optional[int] = None
+    # P29 (#3) — pass an int to set, omit to leave alone. Wire is
+    # opt-in (None means "leave as-is", not "clear").
+    section_id: Optional[int] = None
     status: Optional[Status] = None
     # P28.7
     designation: Optional[str] = Field(default=None, max_length=80)

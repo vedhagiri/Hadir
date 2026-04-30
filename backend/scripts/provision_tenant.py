@@ -115,6 +115,12 @@ _APP_CRUD_TABLES = (
     "tenant_branding",
     "tenant_oidc_config",
     "manager_assignments",
+    # P29 (#3) — three-tier hierarchy. Mirrors departments +
+    # user_departments granted above.
+    "divisions",
+    "sections",
+    "user_divisions",
+    "user_sections",
     "policy_assignments",
     "leave_types",
     "holidays",

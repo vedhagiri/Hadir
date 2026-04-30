@@ -94,6 +94,15 @@ def _row_to_out(row: repo.EmployeeRow) -> EmployeeOut:
             "code": row.department_code,
             "name": row.department_name,
         },
+        section=(
+            {
+                "id": row.section_id,
+                "code": row.section_code or "",
+                "name": row.section_name or "",
+            }
+            if row.section_id is not None
+            else None
+        ),
         status=row.status,  # type: ignore[arg-type]  -- DB CHECK limits to active|inactive|deleted (P25)
         photo_count=row.photo_count,
         created_at=row.created_at,
@@ -277,6 +286,31 @@ def create_employee_endpoint(
             department_code=payload.department_code,
         )
 
+        # Validate section_id (when set) belongs to the resolved
+        # department + this tenant. Guards against cross-tenant /
+        # cross-dept smuggling via the wire — and surfaces a clean
+        # 400 when the operator picked a section under a different
+        # department.
+        if payload.section_id is not None:
+            from sqlalchemy import select as _select  # noqa: PLC0415
+            from maugood.db import sections as _sections  # noqa: PLC0415
+
+            sec_row = conn.execute(
+                _select(_sections.c.id).where(
+                    _sections.c.tenant_id == scope.tenant_id,
+                    _sections.c.id == payload.section_id,
+                    _sections.c.department_id == dept_id,
+                )
+            ).first()
+            if sec_row is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "section_id is not a section under the resolved "
+                        "department"
+                    ),
+                )
+
         # Validate ``reports_to_user_id`` belongs to this tenant — guards
         # against cross-tenant ID smuggling via the wire.
         if payload.reports_to_user_id is not None:
@@ -307,6 +341,7 @@ def create_employee_endpoint(
             full_name=payload.full_name,
             email=payload.email,
             department_id=dept_id,
+            section_id=payload.section_id,
             status=payload.status,
             designation=payload.designation,
             phone=payload.phone,
@@ -458,6 +493,39 @@ def patch_employee_endpoint(
                 department_id=provided.get("department_id"),
                 department_code=provided.get("department_code"),
             )
+
+        # P29 (#3) — section assignment. Validate it sits under the
+        # department being applied (either freshly resolved above or
+        # the existing one). The wire is opt-in: ``section_id=None``
+        # with the field ``in provided`` clears the assignment;
+        # field omitted entirely leaves it as-is.
+        if "section_id" in provided:
+            new_sec = provided["section_id"]
+            if new_sec is None:
+                values["section_id"] = None
+            else:
+                from sqlalchemy import select as _select  # noqa: PLC0415
+                from maugood.db import sections as _sections  # noqa: PLC0415
+
+                effective_dept_id = values.get(
+                    "department_id", before.department_id
+                )
+                sec_row = conn.execute(
+                    _select(_sections.c.id).where(
+                        _sections.c.tenant_id == scope.tenant_id,
+                        _sections.c.id == int(new_sec),
+                        _sections.c.department_id == effective_dept_id,
+                    )
+                ).first()
+                if sec_row is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            "section_id is not a section under the "
+                            "resolved department"
+                        ),
+                    )
+                values["section_id"] = int(new_sec)
 
         # P28.7 status flip rules:
         # - active → inactive: requires deactivation_reason (min 5 chars,

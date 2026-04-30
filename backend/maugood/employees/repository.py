@@ -15,7 +15,13 @@ from typing import Optional
 from sqlalchemy import and_, func, insert, or_, select, update
 from sqlalchemy.engine import Connection
 
-from maugood.db import departments, employee_photos, employees, users
+from maugood.db import (
+    departments,
+    employee_photos,
+    employees,
+    sections,
+    users,
+)
 from maugood.tenants.scope import TenantScope
 
 
@@ -30,6 +36,13 @@ class EmployeeRow:
     department_id: int
     department_code: str
     department_name: str
+    # P29 (#3): finest-grained tier. Three nullable columns instead
+    # of one because the ``section_id`` may be NULL while the two
+    # joined string columns are also NULL — matches the optional
+    # nature of the assignment.
+    section_id: Optional[int]
+    section_code: Optional[str]
+    section_name: Optional[str]
     status: str
     photo_count: int
     created_at: datetime
@@ -85,6 +98,9 @@ def _employee_select(scope: TenantScope):
             employees.c.department_id,
             departments.c.code.label("department_code"),
             departments.c.name.label("department_name"),
+            employees.c.section_id,
+            sections.c.code.label("section_code"),
+            sections.c.name.label("section_name"),
             employees.c.status,
             photo_count,
             employees.c.created_at,
@@ -104,7 +120,15 @@ def _employee_select(scope: TenantScope):
                     departments.c.id == employees.c.department_id,
                     departments.c.tenant_id == employees.c.tenant_id,
                 ),
-            ).outerjoin(
+            )
+            .outerjoin(
+                sections,
+                and_(
+                    sections.c.id == employees.c.section_id,
+                    sections.c.tenant_id == employees.c.tenant_id,
+                ),
+            )
+            .outerjoin(
                 reports_to,
                 and_(
                     reports_to.c.id == employees.c.reports_to_user_id,
@@ -125,6 +149,10 @@ def _row_to_employee(row) -> EmployeeRow:
         department_id=int(row.department_id),
         department_code=str(row.department_code),
         department_name=str(row.department_name),
+        section_id=
+            int(row.section_id) if row.section_id is not None else None,
+        section_code=row.section_code,
+        section_name=row.section_name,
         status=str(row.status),
         photo_count=int(row.photo_count),
         created_at=row.created_at,

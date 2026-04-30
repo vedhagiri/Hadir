@@ -7,6 +7,15 @@ export interface Department {
   name: string;
 }
 
+// P29 (#3) — finest-grained tier of the org hierarchy. Sections
+// nest inside a department; the same code can appear under
+// different departments (OPS/QA + ENG/QA are distinct).
+export interface SectionRef {
+  id: number;
+  code: string;
+  name: string;
+}
+
 export type EmployeeStatus = "active" | "inactive";
 export type PhotoAngle = "front" | "left" | "right" | "other";
 
@@ -16,6 +25,9 @@ export interface Employee {
   full_name: string;
   email: string | null;
   department: Department;
+  // P29 (#3): null when the employee isn't assigned to a section
+  // (sections are optional; not every tenant uses them).
+  section?: SectionRef | null;
   status: EmployeeStatus;
   photo_count: number;
   created_at: string;
@@ -48,6 +60,9 @@ export interface EmployeeWritePayload {
   email?: string | null;
   department_id?: number | null;
   department_code?: string | null;
+  // P29 (#3): null clears the assignment; field omitted leaves
+  // it as-is (PATCH semantics).
+  section_id?: number | null;
   status?: EmployeeStatus;
   designation?: string | null;
   phone?: string | null;
