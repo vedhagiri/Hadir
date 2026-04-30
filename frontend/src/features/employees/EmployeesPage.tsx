@@ -30,6 +30,8 @@ import { ImportModal } from "./ImportModal";
 import {
   useDeleteRequestList,
   useEmployeeList,
+  type EmployeeSortBy,
+  type EmployeeSortDir,
 } from "./hooks";
 import type { Employee } from "./types";
 
@@ -54,9 +56,25 @@ export function EmployeesPage() {
   >(null);
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
+  const [sortBy, setSortBy] = useState<EmployeeSortBy>("employee_code");
+  const [sortDir, setSortDir] = useState<EmployeeSortDir>("asc");
 
   const { data: me } = useMe();
   const isAdmin = !!me?.roles?.includes("Admin");
+
+  const onSortClick = (column: EmployeeSortBy) => {
+    setPage(1);
+    setSortBy((prevBy) => {
+      if (prevBy === column) {
+        // Same column → flip direction
+        setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
+        return prevBy;
+      }
+      // Different column → reset to asc
+      setSortDir("asc");
+      return column;
+    });
+  };
 
   // Search debounce — only fire the server query when the input is
   // empty (show all) or has ≥3 chars (avoid noisy hits on every key
@@ -85,8 +103,10 @@ export function EmployeesPage() {
       include_inactive: statusFilter !== "active",
       page,
       page_size: PAGE_SIZE,
+      sort_by: sortBy,
+      sort_dir: sortDir,
     }),
-    [debouncedQ, departmentId, statusFilter, page],
+    [debouncedQ, departmentId, statusFilter, page, sortBy, sortDir],
   );
 
   const list = useEmployeeList(filters);
@@ -303,11 +323,33 @@ export function EmployeesPage() {
                   aria-label={t("employees.selectAllOnPage") as string}
                 />
               </th>
-              <th>{t("employees.col.employee") as string}</th>
-              <th>{t("employees.col.id") as string}</th>
-              <th>{t("employees.col.department") as string}</th>
+              <SortableHeader
+                column="employee_code"
+                label={t("employees.col.id") as string}
+                width={110}
+                activeColumn={sortBy}
+                direction={sortDir}
+                onClick={onSortClick}
+              />
+              <SortableHeader
+                column="full_name"
+                label={t("employees.col.employee") as string}
+                activeColumn={sortBy}
+                direction={sortDir}
+                onClick={onSortClick}
+              />
+              <SortableHeader
+                column="department"
+                label={t("employees.col.department") as string}
+                activeColumn={sortBy}
+                direction={sortDir}
+                onClick={onSortClick}
+              />
               <th>{t("employees.col.role") as string}</th>
               <th>{t("employees.col.manager") as string}</th>
+              <th style={{ width: 130 }}>
+                {t("employees.col.photos") as string}
+              </th>
               <th style={{ width: 110, textAlign: "end" }}>
                 {t("employees.col.actions") as string}
               </th>
@@ -316,7 +358,7 @@ export function EmployeesPage() {
           <tbody>
             {list.isLoading && (
               <tr>
-                <td colSpan={7} className="text-sm text-dim" style={{ padding: 16 }}>
+                <td colSpan={8} className="text-sm text-dim" style={{ padding: 16 }}>
                   {t("common.loading") as string}
                 </td>
               </tr>
@@ -324,7 +366,7 @@ export function EmployeesPage() {
             {list.isError && (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={8}
                   className="text-sm"
                   style={{ padding: 16, color: "var(--danger-text)" }}
                 >
@@ -355,6 +397,7 @@ export function EmployeesPage() {
                       aria-label={t("employees.selectRow") as string}
                     />
                   </td>
+                  <td className="mono text-sm">{e.employee_code}</td>
                   <td>
                     <div
                       style={{ display: "flex", alignItems: "center", gap: 10 }}
@@ -377,7 +420,6 @@ export function EmployeesPage() {
                       </div>
                     </div>
                   </td>
-                  <td className="mono text-sm">{e.employee_code}</td>
                   <td className="text-sm">{e.department.name}</td>
                   <td>
                     {role ? (
@@ -392,6 +434,27 @@ export function EmployeesPage() {
                   </td>
                   <td className="text-sm">
                     {e.reports_to_full_name ?? "—"}
+                  </td>
+                  <td>
+                    {e.photo_count > 0 ? (
+                      <span
+                        className="pill pill-accent"
+                        title={t("employees.photos.tooltip", {
+                          count: e.photo_count,
+                        }) as string}
+                      >
+                        <Icon name="camera" size={11} />
+                        <span style={{ marginInlineStart: 4 }}>
+                          {t("employees.photos.count", {
+                            count: e.photo_count,
+                          }) as string}
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="text-xs text-dim">
+                        {t("employees.photos.none") as string}
+                      </span>
+                    )}
                   </td>
                   <td
                     onClick={(ev) => ev.stopPropagation()}
@@ -417,7 +480,7 @@ export function EmployeesPage() {
             })}
             {!list.isLoading && visibleItems.length === 0 && (
               <tr>
-                <td colSpan={7} className="text-sm text-dim" style={{ padding: 16 }}>
+                <td colSpan={8} className="text-sm text-dim" style={{ padding: 16 }}>
                   {t("employees.empty") as string}
                 </td>
               </tr>
@@ -512,6 +575,77 @@ export function EmployeesPage() {
  * neither bubbles up to the row click handler (which opens the
  * drawer).
  */
+/**
+ * Clickable column header. Click cycles asc → desc → asc on the
+ * same column; clicking a different column resets to asc on the
+ * new column. Active column shows the chevron icon; inactive
+ * columns show a dim "both directions" hint so the operator
+ * knows they can sort.
+ */
+function SortableHeader({
+  column,
+  label,
+  width,
+  activeColumn,
+  direction,
+  onClick,
+}: {
+  column: EmployeeSortBy;
+  label: string;
+  width?: number;
+  activeColumn: EmployeeSortBy;
+  direction: EmployeeSortDir;
+  onClick: (column: EmployeeSortBy) => void;
+}) {
+  const active = activeColumn === column;
+  return (
+    <th style={width != null ? { width } : undefined}>
+      <button
+        type="button"
+        onClick={() => onClick(column)}
+        aria-sort={active ? (direction === "asc" ? "ascending" : "descending") : "none"}
+        style={{
+          background: "transparent",
+          border: "none",
+          padding: 0,
+          cursor: "pointer",
+          color: "inherit",
+          font: "inherit",
+          fontWeight: "inherit",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 4,
+        }}
+      >
+        {label}
+        {active ? (
+          <Icon
+            name={direction === "asc" ? "chevronUp" : "chevronDown"}
+            size={11}
+          />
+        ) : (
+          // Stacked tiny chevrons hint the column is sortable
+          // without picking a direction.
+          <span
+            aria-hidden
+            className="text-dim"
+            style={{
+              display: "inline-flex",
+              flexDirection: "column",
+              lineHeight: 0.6,
+              fontSize: 9,
+              opacity: 0.55,
+            }}
+          >
+            <span>▲</span>
+            <span>▼</span>
+          </span>
+        )}
+      </button>
+    </th>
+  );
+}
+
 function RowActionsMenu({
   onView,
   onEdit,

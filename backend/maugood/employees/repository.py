@@ -255,8 +255,15 @@ def list_employees(
     include_inactive: bool = False,
     page: int = 1,
     page_size: int = 50,
+    sort_by: str = "employee_code",
+    sort_dir: str = "asc",
 ) -> tuple[list[EmployeeRow], int]:
-    """Return a page of employees and the total count matching the filters."""
+    """Return a page of employees and the total count matching the filters.
+
+    ``sort_by`` accepts ``employee_code`` | ``full_name`` |
+    ``department``. Anything else falls back to ``employee_code``.
+    ``sort_dir`` is ``asc`` or ``desc``; anything else is ``asc``.
+    """
 
     page = max(1, page)
     page_size = max(1, min(page_size, 200))
@@ -282,8 +289,18 @@ def list_employees(
     count_stmt = select(func.count()).select_from(base.subquery())
     total = int(conn.execute(count_stmt).scalar_one())
 
+    sort_columns = {
+        "employee_code": employees.c.employee_code,
+        "full_name": employees.c.full_name,
+        "department": departments.c.name,
+    }
+    primary = sort_columns.get(sort_by, employees.c.employee_code)
+    primary = primary.desc() if sort_dir == "desc" else primary.asc()
+    # Always tie-break on employee_code so the page slice is stable
+    # across reloads when the primary sort has duplicate values
+    # (e.g. two employees in the same department).
     rows = conn.execute(
-        base.order_by(employees.c.employee_code.asc())
+        base.order_by(primary, employees.c.employee_code.asc())
         .limit(page_size)
         .offset((page - 1) * page_size)
     ).all()

@@ -19,12 +19,20 @@ import type {
   PhotoListResponse,
 } from "./types";
 
+export type EmployeeSortBy = "employee_code" | "full_name" | "department";
+export type EmployeeSortDir = "asc" | "desc";
+
 export interface EmployeeListFilters {
   q: string;
   department_id: number | null;
   include_inactive: boolean;
   page: number;
   page_size: number;
+  // Sort knobs. Optional so existing call sites that don't care
+  // about ordering keep working — we default to ``employee_code asc``
+  // (matches the backend default).
+  sort_by?: EmployeeSortBy;
+  sort_dir?: EmployeeSortDir;
 }
 
 export function useEmployeeList(
@@ -38,6 +46,8 @@ export function useEmployeeList(
   if (filters.include_inactive) params.set("include_inactive", "true");
   params.set("page", String(filters.page));
   params.set("page_size", String(filters.page_size));
+  params.set("sort_by", filters.sort_by ?? "employee_code");
+  params.set("sort_dir", filters.sort_dir ?? "asc");
   const path = `/api/employees?${params.toString()}`;
 
   return useQuery({

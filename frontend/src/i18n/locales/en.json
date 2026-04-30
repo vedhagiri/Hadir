@@ -744,6 +744,11 @@
       "uploadHint": "Multiple files share the same position. Switch the position above to add a different angle.",
       "empty": "No reference photos yet. Use the upload panel below.",
       "confirmDelete": "Delete this reference photo?",
+      "count_one": "{{count}} photo",
+      "count_other": "{{count}} photos",
+      "tooltip_one": "{{count}} reference photo enrolled",
+      "tooltip_other": "{{count}} reference photos enrolled",
+      "none": "No photos",
       "angles": {
         "front": "Front",
         "left": "Left",

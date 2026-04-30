@@ -379,6 +379,13 @@ def list_employees_endpoint(
     include_inactive: Annotated[bool, Query()] = False,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+    sort_by: Annotated[
+        Literal["employee_code", "full_name", "department"],
+        Query(description="Sort key (employee_code | full_name | department)."),
+    ] = "employee_code",
+    sort_dir: Annotated[
+        Literal["asc", "desc"], Query(description="Sort direction.")
+    ] = "asc",
 ) -> EmployeeListOut:
     scope = TenantScope(tenant_id=user.tenant_id)
     with get_engine().begin() as conn:
@@ -390,6 +397,8 @@ def list_employees_endpoint(
             include_inactive=include_inactive,
             page=page,
             page_size=page_size,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
         )
     return EmployeeListOut(
         items=[_row_to_out(r) for r in rows],
