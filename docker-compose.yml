@@ -12,7 +12,13 @@ services:
       POSTGRES_PASSWORD: ${MAUGOOD_ADMIN_DB_PASSWORD:-maugood}
       POSTGRES_DB: maugood
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      # Bind mount under the install dir's ./data/ tree so the
+      # operator can ``ls`` what's actually there, ``tar -czf``
+      # backup the whole install in one shot, and not have to think
+      # about ``docker volume inspect``. Override the host path
+      # via MAUGOOD_POSTGRES_DATA_DIR to put the DB on a different
+      # disk if you want it elsewhere.
+      - ${MAUGOOD_POSTGRES_DATA_DIR:-./data/postgres}:/var/lib/postgresql/data
     ports:
       # Host port is env-overridable so a second Maugood instance on
       # the same machine can pick a different port (e.g.
@@ -56,14 +62,18 @@ services:
       # mount is read-write because of the credentials.txt write; the
       # .gitignore file is never modified by the script.
       - .:/repo
-      # Encrypted employee photos (P6) and capture crops (P8) land under
-      # /data/faces. Kept on a named volume so photos survive
-      # `docker compose down` but reset on `down -v`.
-      - faces_data:/data
-      # InsightFace model cache (~250 MB buffalo_l). The library
-      # downloads to $HOME/.insightface on first use; keeping it on a
-      # named volume avoids re-downloading on every container restart.
-      - insightface_models:/root/.insightface
+      # Encrypted employee photos (P6) and capture crops (P8), plus
+      # attachments / reports / ERP exports / branding logos all land
+      # under /data inside the container. Bind-mounted into ./data/
+      # of the install dir for operator-friendly access ("where ARE
+      # my face crops?" → "right here, just ``ls``"). Override via
+      # MAUGOOD_FACES_DATA_DIR for a different host location.
+      - ${MAUGOOD_FACES_DATA_DIR:-./data/faces}:/data
+      # InsightFace model cache (~250 MB buffalo_l). Downloaded once
+      # on first detection; persisted via a bind mount so the
+      # download doesn't repeat on every container rebuild. Override
+      # via MAUGOOD_INSIGHTFACE_MODELS_DIR.
+      - ${MAUGOOD_INSIGHTFACE_MODELS_DIR:-./data/insightface_models}:/root/.insightface
       # P21: read-only mount of the frontend tree so the JSX i18n
       # lint test can scan ``frontend/src/**/*.tsx`` from the backend
       # pytest run. Defensive — the lint skips gracefully if the
@@ -92,7 +102,11 @@ services:
       - backend
 
 volumes:
-  postgres_data:
+  # frontend_node_modules stays a named volume even though the rest
+  # moved to bind mounts: the dev frontend service bind-mounts
+  # ./frontend → /app, and a host-side node_modules built on macOS
+  # would clobber the Linux-built one inside the container. Named
+  # volume keeps the two separate. (The prod stack removes the dev
+  # frontend service entirely — node_modules lives inside the nginx
+  # build there, not here.)
   frontend_node_modules:
-  faces_data:
-  insightface_models:
