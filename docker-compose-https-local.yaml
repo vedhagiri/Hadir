@@ -1,0 +1,195 @@
+# Maugood — local HTTPS, prod-like, all-in-one compose file.
+#
+# This is a SELF-CONTAINED stack you can bring up on a developer or
+# pilot machine that mirrors production: HTTPS via nginx + a
+# self-signed cert for whatever local domain you pick, the backend
+# behind nginx (no host port), the frontend built into the nginx
+# image, postgres + backend + the full observability trio
+# (prometheus + alertmanager + grafana). Every persistent state
+# directory is a bind mount under ``./data/`` so you can ``ls``,
+# ``tar -czf``, and back up the whole install in one shot.
+#
+# Run via:
+#
+#     docker compose -f docker-compose-https-local.yaml up -d --build
+#
+# Use ``scripts/local-setup-wizard.sh`` first if you want secrets +
+# cert + .env generated for you in one step.
+#
+# Add the chosen domain to /etc/hosts on every machine that will
+# browse to it:
+#     127.0.0.1   maugood.local
+#
+# The wizard does this for you on the host it runs on; other
+# machines on the LAN need their /etc/hosts edited manually OR a
+# real DNS record.
+
+services:
+  # -----------------------------------------------------------------
+  # Postgres — bound to localhost only (the loopback bind makes the
+  # DB browseable from a desktop SQL client without exposing it on
+  # the LAN). Bind-mount under ./data/postgres so an ``ls`` shows
+  # what's actually there.
+  # -----------------------------------------------------------------
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: maugood
+      POSTGRES_PASSWORD: ${MAUGOOD_ADMIN_DB_PASSWORD:-maugood}
+      POSTGRES_DB: maugood
+    volumes:
+      - ${MAUGOOD_POSTGRES_DATA_DIR:-./data/postgres}:/var/lib/postgresql/data
+    ports:
+      # Loopback only — desktop tools can connect, the LAN can't.
+      - "127.0.0.1:${MAUGOOD_POSTGRES_HOST_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U maugood -d maugood"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - maugood-internal
+    restart: unless-stopped
+
+  # -----------------------------------------------------------------
+  # Backend — no host port; nginx is the only thing that reaches it.
+  # MAUGOOD_ENV=production turns on every hardening guard. The
+  # entrypoint runs Alembic migrations on every boot (idempotent).
+  # -----------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+    env_file:
+      - ./.env
+    environment:
+      MAUGOOD_DATABASE_URL: ${MAUGOOD_DATABASE_URL:-postgresql+psycopg://maugood_app:maugood_app@postgres:5432/maugood}
+      MAUGOOD_ADMIN_DATABASE_URL: ${MAUGOOD_ADMIN_DATABASE_URL:-postgresql+psycopg://maugood:maugood@postgres:5432/maugood}
+      MAUGOOD_APP_DB_PASSWORD: ${MAUGOOD_APP_DB_PASSWORD:-maugood_app}
+      MAUGOOD_ADMIN_DB_PASSWORD: ${MAUGOOD_ADMIN_DB_PASSWORD:-maugood}
+      MAUGOOD_TENANT_MODE: ${MAUGOOD_TENANT_MODE:-multi}
+      MAUGOOD_ENV: ${MAUGOOD_ENV:-production}
+      MAUGOOD_BEHIND_PROXY: "true"
+      MAUGOOD_SESSION_COOKIE_SECURE: "true"
+      MAUGOOD_FORWARDED_ALLOW_IPS: ${MAUGOOD_FORWARDED_ALLOW_IPS:-*}
+      MAUGOOD_HSTS_MAX_AGE_SECONDS: ${MAUGOOD_HSTS_MAX_AGE_SECONDS:-31536000}
+      MAUGOOD_PUBLIC_HOSTNAME: ${MAUGOOD_PUBLIC_HOSTNAME:-maugood.local}
+      MAUGOOD_ALLOWED_ORIGINS: ${MAUGOOD_ALLOWED_ORIGINS:-https://maugood.local}
+      MAUGOOD_OIDC_REDIRECT_BASE_URL: ${MAUGOOD_OIDC_REDIRECT_BASE_URL:-https://maugood.local}
+    volumes:
+      # Source code bind mount — same as the dev compose. Lets a
+      # local-dev-on-prod-stack workflow work without an image
+      # rebuild for every code change.
+      - ./backend:/app
+      - .:/repo
+      - ${MAUGOOD_FACES_DATA_DIR:-./data/faces}:/data
+      - ${MAUGOOD_INSIGHTFACE_MODELS_DIR:-./data/insightface_models}:/root/.insightface
+      - ./frontend:/frontend:ro
+      # Persistent log archives (rotated daily, gzipped after 7 days
+      # by P25's GzipRotatingFileHandler). Bind-mounted so the
+      # operator can ``tail -f`` and ``less`` them from the host.
+      - ./data/logs:/app/logs
+    networks:
+      - maugood-internal
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # -----------------------------------------------------------------
+  # nginx — terminates TLS for the local domain, serves the frontend
+  # bundle (built into the image at build time), proxies /api/* to
+  # the backend. Bind the cert directory so the wizard's generated
+  # cert lands in place.
+  # -----------------------------------------------------------------
+  nginx:
+    build:
+      context: .
+      dockerfile: ops/nginx/Dockerfile
+    image: maugood-nginx:local
+    environment:
+      MAUGOOD_PUBLIC_HOSTNAME: ${MAUGOOD_PUBLIC_HOSTNAME:-maugood.local}
+      MAUGOOD_TLS_CERT_FILE: /etc/nginx/certs/fullchain.pem
+      MAUGOOD_TLS_KEY_FILE: /etc/nginx/certs/privkey.pem
+    volumes:
+      - ./ops/certs:/etc/nginx/certs:ro
+    ports:
+      # Standard 80 + 443 by default; override the env vars to run
+      # alongside another instance on different host ports.
+      - "${MAUGOOD_NGINX_HTTP_HOST_PORT:-80}:80"
+      - "${MAUGOOD_NGINX_HTTPS_HOST_PORT:-443}:443"
+    networks:
+      - maugood-internal
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # -----------------------------------------------------------------
+  # Prometheus — scrapes /metrics from the backend every 15s.
+  # Internal-only by default; expose on the LAN by uncommenting the
+  # ports block if you want a desktop browser to load the UI.
+  # -----------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./deploy/prometheus:/etc/prometheus:ro
+      - ./data/prometheus:/prometheus
+    ports:
+      - "127.0.0.1:${MAUGOOD_PROMETHEUS_HOST_PORT:-9090}:9090"
+    networks:
+      - maugood-internal
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    volumes:
+      - ./deploy/alertmanager:/etc/alertmanager:ro
+      - ./data/alertmanager:/alertmanager
+    ports:
+      - "127.0.0.1:${MAUGOOD_ALERTMANAGER_HOST_PORT:-9093}:9093"
+    networks:
+      - maugood-internal
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  # -----------------------------------------------------------------
+  # Grafana — bound to all interfaces by default since the operator
+  # actually wants to look at dashboards. Behind the same internal
+  # network; auth is admin/${MAUGOOD_GRAFANA_ADMIN_PASSWORD}.
+  # -----------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:11.2.2
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./data/grafana:/var/lib/grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${MAUGOOD_GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${MAUGOOD_GRAFANA_ADMIN_PASSWORD:-grafana}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: ${MAUGOOD_GRAFANA_ROOT_URL:-http://localhost:3000}
+    ports:
+      - "${MAUGOOD_GRAFANA_HOST_PORT:-3000}:3000"
+    networks:
+      - maugood-internal
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+networks:
+  maugood-internal:
+    driver: bridge
+
+# No named volumes — every persistent path bind-mounts under ./data/
+# so the operator can see + back up everything in one place.

@@ -221,6 +221,19 @@ git archive \
     -o "${ZIP_PATH}" \
     "${ARCHIVE_REF}"
 
+# Stamp a top-level VERSION file inside the zip so a customer who
+# extracts the bundle can ``cat VERSION`` to know what's installed.
+# git archive doesn't have a built-in way to inject extra files, so
+# we tack one on with the zip CLI.
+TMP_VERSION_DIR="$(mktemp -d)"
+trap 'rm -rf "${TMP_VERSION_DIR}"' EXIT
+mkdir -p "${TMP_VERSION_DIR}/maugood-${TAG}"
+echo "${TAG}" > "${TMP_VERSION_DIR}/maugood-${TAG}/VERSION"
+(
+    cd "${TMP_VERSION_DIR}"
+    zip -q "${REPO_ROOT}/${ZIP_PATH}" "maugood-${TAG}/VERSION"
+)
+
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------

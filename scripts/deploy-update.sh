@@ -342,6 +342,18 @@ echo ">> Bringing the stack back up"
 # ---------------------------------------------------------------------------
 
 if [[ ${DRY_RUN} -eq 0 ]]; then
+    # Update the VERSION file at the install root (the zip ships
+    # one at maugood-vX.Y.Z/VERSION and rsync mirrored it across; we
+    # also append to .version-history.log so the operator can see
+    # every upgrade this install has been through).
+    if [[ -f "${INSTALL_DIR}/VERSION" ]]; then
+        echo
+        echo ">> Stamping VERSION + .version-history.log"
+        STAMPED_VERSION="$(cat "${INSTALL_DIR}/VERSION")"
+        echo "${STAMPED_VERSION:-${NEW_VERSION:-?}} updated $(date -u +%Y-%m-%dT%H:%M:%SZ) from ${CURRENT_VERSION}" \
+            >> "${INSTALL_DIR}/.version-history.log"
+    fi
+
     echo
     echo ">> Probing /api/health (up to 90s)"
     DEADLINE=$(( $(date +%s) + 90 ))
