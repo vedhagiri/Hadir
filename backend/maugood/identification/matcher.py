@@ -117,14 +117,32 @@ class MatcherCache:
         P28.7: invalidates BOTH the embedding cache and the lifecycle
         cache so a status flip (active ↔ inactive) reflects on the
         next detection without a full reload.
+
+        Edge case: when the cache loaded with zero employees (e.g. no
+        photos existed at load time), per-employee invalidation finds
+        no entry to dirty. We have to fall through to a full
+        per-tenant invalidate so the next match re-runs ``_full_load``
+        and picks up the newly-enrolled photo. Without this, the
+        first photo uploaded after boot is silently invisible to the
+        matcher until the process restarts.
         """
 
         with self._lock:
-            for entries in self._per_tenant.values():
+            found = False
+            for tenant_id, entries in self._per_tenant.items():
                 if employee_id in entries:
                     entries[employee_id] = None
+                    found = True
             for life in self._lifecycle.values():
                 life.pop(employee_id, None)
+            if not found:
+                # Drop every tenant's loaded marker so the next match
+                # rebuilds from scratch. We don't know which tenant
+                # owns the new photo here (the caller has the scope
+                # but the legacy signature doesn't take it); clearing
+                # all tenants is cheap — each tenant's cache rebuilds
+                # in milliseconds the next time a frame matches.
+                self._loaded.clear()
 
     def invalidate_all(self) -> None:
         """Force a full reload on next use. Pilot admin operations only."""
@@ -143,6 +161,49 @@ class MatcherCache:
             self._per_tenant.pop(tenant_id, None)
             self._lifecycle.pop(tenant_id, None)
             self._loaded.discard(tenant_id)
+
+    def cache_stats(self, tenant_id: int) -> dict:
+        """Return the enrolled-employee + vector counts for this tenant.
+
+        Reads from the DB so the count reflects ground truth even
+        before the in-memory cache has loaded (the cache is lazy and
+        only populates on first match call). The worker pipeline UI
+        polls this every few seconds; a fast indexed COUNT is fine.
+        """
+
+        from sqlalchemy import distinct, func  # noqa: PLC0415
+
+        try:
+            engine = get_engine()
+            with engine.begin() as conn:
+                row = conn.execute(
+                    select(
+                        func.count(employee_photos.c.id).label("vectors"),
+                        func.count(distinct(employee_photos.c.employee_id)).label(
+                            "employees"
+                        ),
+                    ).where(
+                        employee_photos.c.tenant_id == tenant_id,
+                        employee_photos.c.embedding.is_not(None),
+                    )
+                ).first()
+            if row is None:
+                return {"loaded": True, "employees": 0, "vectors": 0}
+            return {
+                "loaded": True,
+                "employees": int(row.employees or 0),
+                "vectors": int(row.vectors or 0),
+            }
+        except Exception:  # noqa: BLE001
+            # Defence in depth — never let a stats failure crash the
+            # worker stage computation. Return zeroes; the UI will
+            # show the conservative "no photos" amber message.
+            logger.warning(
+                "matcher cache_stats query failed for tenant_id=%s",
+                tenant_id,
+                exc_info=True,
+            )
+            return {"loaded": False, "employees": 0, "vectors": 0}
 
     # ------------------------------------------------------------------
 

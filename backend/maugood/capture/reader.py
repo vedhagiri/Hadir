@@ -1298,13 +1298,31 @@ class CaptureWorker:
             det_state = "red"
             det_detail = "Analyzer thread idle / dead"
 
-        # Matching — conditional red
+        # Matching — conditional red. When 0 reference photos are
+        # enrolled the matcher will never produce a match (by
+        # design); surface that state directly so operators don't
+        # have to read the generic "matcher silent" hint.
+        from maugood.identification.matcher import (  # noqa: PLC0415
+            matcher_cache,
+        )
+
+        cache_stats = matcher_cache.cache_stats(self._scope.tenant_id)
+        no_photos = cache_stats.get("vectors", 0) == 0
+
         match_age = (
             (now - self._last_match_at) if self._last_match_at else 999_999
         )
         if det_state == "red":
             match_state = "unknown"
             match_detail = "Cannot judge — detection is red"
+        elif no_photos:
+            # Worker is healthy, but there's nothing to match against.
+            # Amber not red — the matcher itself is fine.
+            match_state = "amber"
+            match_detail = (
+                "No reference photos enrolled — every face lands as "
+                "Unknown until you upload photos per employee."
+            )
         elif match_age < 600:
             match_state = "green"
             match_detail = (
@@ -1320,7 +1338,10 @@ class CaptureWorker:
         elif frames_60s > 0:
             match_state = "red"
             match_detail = (
-                "Detector firing but matcher silent — check enrolled photos"
+                f"Detector firing but matcher silent — "
+                f"{cache_stats.get('employees', 0)} employee(s) enrolled "
+                f"with {cache_stats.get('vectors', 0)} photo(s); check "
+                "for missing reference photos or threshold drift."
             )
         else:
             match_state = "amber"

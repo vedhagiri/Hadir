@@ -148,8 +148,18 @@ def test_matching_unknown_when_detection_red(admin_engine: Engine) -> None:
 def test_matching_red_only_when_detection_firing(admin_engine: Engine) -> None:
     """Matching is red **only** when detection is actually firing
     (frames_analyzed_60s > 0) but no match has happened in over an
-    hour — which is a real failure mode (broken matcher cache or
-    enrolled photos)."""
+    hour AND there are enrolled photos to match against. With zero
+    enrolled photos the stage stays amber (the matcher is fine —
+    there's just nothing to match against).
+
+    Now reads photo counts from the DB (matcher cache_stats was
+    refactored to query rather than peek at the in-memory cache),
+    so the test seeds an ``employee_photos`` row with a non-null
+    embedding instead of poking the cache.
+    """
+
+    from maugood.db import employee_photos as _photos
+    from maugood.db import employees as _emps
 
     w = _make_worker(admin_engine)
     w._started_at = time.time() - 120
@@ -161,11 +171,51 @@ def test_matching_red_only_when_detection_firing(admin_engine: Engine) -> None:
         w._frames_analyzed_window.append(now - i)
     # No matches in over an hour.
     w._last_match_at = now - 4000
-    states = w._compute_stage_states()
-    assert states["detection"]["state"] == "green"
-    assert states["matching"]["state"] == "red"
-    # Attendance is unknown because matching is red.
-    assert states["attendance"]["state"] == "unknown"
+
+    # Seed an employee + photo with a non-null embedding so the
+    # "no photos" short-circuit doesn't apply.
+    seeded_emp_id = None
+    seeded_photo_id = None
+    try:
+        with admin_engine.begin() as conn:
+            seeded_emp_id = conn.execute(
+                insert(_emps)
+                .values(
+                    tenant_id=TENANT_ID,
+                    employee_code="P288-MATCH-SEED",
+                    full_name="P288 Match Seed",
+                    department_id=1,
+                    status="active",
+                )
+                .returning(_emps.c.id)
+            ).scalar_one()
+            seeded_photo_id = conn.execute(
+                insert(_photos)
+                .values(
+                    tenant_id=TENANT_ID,
+                    employee_id=seeded_emp_id,
+                    file_path="/tmp/test-seed.jpg",
+                    angle="front",
+                    embedding=b"x" * 64,
+                )
+                .returning(_photos.c.id)
+            ).scalar_one()
+
+        states = w._compute_stage_states()
+        assert states["detection"]["state"] == "green"
+        assert states["matching"]["state"] == "red"
+        # Attendance is unknown because matching is red.
+        assert states["attendance"]["state"] == "unknown"
+    finally:
+        with admin_engine.begin() as conn:
+            if seeded_photo_id is not None:
+                conn.execute(
+                    delete(_photos).where(_photos.c.id == seeded_photo_id)
+                )
+            if seeded_emp_id is not None:
+                conn.execute(
+                    delete(_emps).where(_emps.c.id == seeded_emp_id)
+                )
 
 
 # ---------------------------------------------------------------------------
