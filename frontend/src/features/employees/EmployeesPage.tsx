@@ -346,7 +346,6 @@ export function EmployeesPage() {
                 onClick={onSortClick}
               />
               <th>{t("employees.col.role") as string}</th>
-              <th>{t("employees.col.manager") as string}</th>
               <th style={{ width: 130 }}>
                 {t("employees.col.photos") as string}
               </th>
@@ -358,7 +357,7 @@ export function EmployeesPage() {
           <tbody>
             {list.isLoading && (
               <tr>
-                <td colSpan={8} className="text-sm text-dim" style={{ padding: 16 }}>
+                <td colSpan={7} className="text-sm text-dim" style={{ padding: 16 }}>
                   {t("common.loading") as string}
                 </td>
               </tr>
@@ -366,7 +365,7 @@ export function EmployeesPage() {
             {list.isError && (
               <tr>
                 <td
-                  colSpan={8}
+                  colSpan={7}
                   className="text-sm"
                   style={{ padding: 16, color: "var(--danger-text)" }}
                 >
@@ -432,9 +431,6 @@ export function EmployeesPage() {
                       <span className="text-xs text-dim">—</span>
                     )}
                   </td>
-                  <td className="text-sm">
-                    {e.reports_to_full_name ?? "—"}
-                  </td>
                   <td>
                     {e.photo_count > 0 ? (
                       <span
@@ -480,7 +476,7 @@ export function EmployeesPage() {
             })}
             {!list.isLoading && visibleItems.length === 0 && (
               <tr>
-                <td colSpan={8} className="text-sm text-dim" style={{ padding: 16 }}>
+                <td colSpan={7} className="text-sm text-dim" style={{ padding: 16 }}>
                   {t("employees.empty") as string}
                 </td>
               </tr>

@@ -405,13 +405,39 @@ function DepartmentManagersModal({
         >
           Add a manager
         </div>
+        {!candidates.isLoading &&
+          (candidates.data?.items.length ?? 0) === 0 && (
+            <div
+              style={{
+                background: "var(--bg-sunken)",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius-sm)",
+                padding: "10px 12px",
+                marginBottom: 10,
+                fontSize: 12.5,
+                lineHeight: 1.5,
+                color: "var(--text-secondary)",
+              }}
+            >
+              No Manager-role users in this workspace yet. Open the
+              employee on the{" "}
+              <strong>Employees</strong> page, click <strong>Edit</strong>,
+              and tick the <strong>Manager</strong> role — they'll appear in
+              this picker.
+            </div>
+          )}
+
         <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
           <select
             value={pickedId}
             onChange={(e) =>
               setPickedId(e.target.value === "" ? "" : Number(e.target.value))
             }
-            disabled={candidates.isLoading || assign.isPending}
+            disabled={
+              candidates.isLoading ||
+              assign.isPending ||
+              available.length === 0
+            }
             style={{
               flex: 1,
               padding: "7px 10px",
@@ -425,9 +451,11 @@ function DepartmentManagersModal({
             <option value="">
               {candidates.isLoading
                 ? "Loading managers…"
-                : available.length === 0
-                  ? "All managers are already assigned"
-                  : "— Pick a Manager-role user —"}
+                : (candidates.data?.items.length ?? 0) === 0
+                  ? "No Manager-role users — promote someone first"
+                  : available.length === 0
+                    ? "Every Manager is already assigned"
+                    : "— Pick a Manager-role user —"}
             </option>
             {available.map((u) => (
               <option key={u.id} value={u.id}>
