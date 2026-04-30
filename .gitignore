@@ -69,8 +69,20 @@ backend/data/
 # Local design archive (the unpacked design-reference is committed; the .zip is not)
 *.zip
 
-known_people/
-reports/
-captures/
-saved_crops/
+# Root-level runtime data dirs only — anchored so they don't shadow
+# nested code paths like ``frontend/src/features/reports/``. The
+# unanchored form was the cause of FormerEmployeesSeenReport.tsx
+# silently dropping out of release zips.
+/known_people/
+/reports/
+/captures/
+/saved_crops/
+
+# Same runtime artefacts under the prototype reference (kept out of
+# the repo for size; the prototype-reference dir is also export-ignored
+# from release zips via .gitattributes).
+prototype-reference/backend/known_people/
+prototype-reference/backend/reports/
+prototype-reference/backend/captures/
+prototype-reference/backend/saved_crops/
 
