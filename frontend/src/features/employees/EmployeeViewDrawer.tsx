@@ -180,11 +180,35 @@ function DetailsTab({
       </Section>
 
       <Section label={t("employees.section.assignment") as string}>
+        <Row label={t("employees.field.division") as string}>
+          {employee.division ? (
+            <>
+              {employee.division.name}{" "}
+              <span className="mono text-xs text-dim">
+                ({employee.division.code})
+              </span>
+            </>
+          ) : (
+            <span className="text-xs text-dim">—</span>
+          )}
+        </Row>
         <Row label={t("employees.field.department") as string}>
           {employee.department.name}{" "}
           <span className="mono text-xs text-dim">
             ({employee.department.code})
           </span>
+        </Row>
+        <Row label={t("employees.field.section") as string}>
+          {employee.section ? (
+            <>
+              {employee.section.name}{" "}
+              <span className="mono text-xs text-dim">
+                ({employee.section.code})
+              </span>
+            </>
+          ) : (
+            <span className="text-xs text-dim">—</span>
+          )}
         </Row>
         <Row label={t("employees.field.reportsTo") as string}>
           {employee.reports_to_full_name ?? "—"}

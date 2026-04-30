@@ -7,6 +7,14 @@ export interface Department {
   name: string;
 }
 
+// P29 (#3) — top tier of the org hierarchy. Departments roll up
+// into divisions; sections drill down inside departments.
+export interface DivisionRef {
+  id: number;
+  code: string;
+  name: string;
+}
+
 // P29 (#3) — finest-grained tier of the org hierarchy. Sections
 // nest inside a department; the same code can appear under
 // different departments (OPS/QA + ENG/QA are distinct).
@@ -25,6 +33,9 @@ export interface Employee {
   full_name: string;
   email: string | null;
   department: Department;
+  // P29 (#3): division is resolved through ``departments.division_id``.
+  // Null when the department isn't linked to a division.
+  division?: DivisionRef | null;
   // P29 (#3): null when the employee isn't assigned to a section
   // (sections are optional; not every tenant uses them).
   section?: SectionRef | null;

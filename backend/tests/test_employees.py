@@ -89,10 +89,10 @@ def test_import_5_rows_3_valid_1_bad_dept_1_duplicate(
 
     # Auto-created department surfaces as a warning so the operator
     # knows the side effect happened. The row number matches the
-    # employee row that triggered it.
-    warnings_by_row = {w["row"]: w["message"] for w in body["warnings"]}
-    assert 5 in warnings_by_row
-    assert fresh_dept in warnings_by_row[5]
+    # employee row that triggered it. There may be multiple warnings
+    # per row (auto-created dept, default-login created, etc.).
+    row5_messages = [w["message"] for w in body["warnings"] if w["row"] == 5]
+    assert any(fresh_dept in m for m in row5_messages)
 
     # Re-importing the same employee_code is rejected as a per-row
     # error — strict create-only contract. The operator must edit

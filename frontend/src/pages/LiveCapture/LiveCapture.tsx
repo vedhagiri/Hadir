@@ -41,7 +41,9 @@ export function LiveCapturePage() {
 
   const [activeCamId, setActiveCamId] = useState<number | null>(null);
   const [paused, setPaused] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const imgRef = useRef<HTMLImageElement | null>(null);
+  const viewerCardRef = useRef<HTMLDivElement | null>(null);
 
   // Stats hook is the only stream we keep — it powers the
   // online/offline pill and the rolling counters. The WebSocket
@@ -108,8 +110,12 @@ export function LiveCapturePage() {
 
     const img = document.createElement("img");
     img.alt = "live camera";
+    // ``object-fit: contain`` preserves the camera's native aspect
+    // ratio — letterboxing on either axis instead of stretching /
+    // cropping. The black backdrop on ``.cam-stage`` (set on the
+    // wrapping div below) absorbs the letterbox bands cleanly.
     img.style.cssText =
-      "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;";
+      "position:absolute;inset:0;width:100%;height:100%;object-fit:contain;";
     img.src = streamingUrl || ABORT_PIXEL;
     stage.appendChild(img);
     imgRef.current = img;
@@ -128,6 +134,32 @@ export function LiveCapturePage() {
       if (imgRef.current === img) imgRef.current = null;
     };
   }, [streamingUrl]);
+
+  // Track real fullscreen state — ESC and the browser's own controls
+  // can leave fullscreen without firing through our toggle, so we
+  // sync from ``fullscreenchange`` instead of trusting local state.
+  useEffect(() => {
+    const onChange = () => {
+      setIsFullscreen(document.fullscreenElement === viewerCardRef.current);
+    };
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  const onToggleFullscreen = async () => {
+    const el = viewerCardRef.current;
+    if (!el) return;
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else {
+        await el.requestFullscreen();
+      }
+    } catch {
+      // Fullscreen API can refuse (sandbox, no user gesture, etc.)
+      // — silently ignore; the operator can press F11 instead.
+    }
+  };
 
   return (
     <>
@@ -156,6 +188,30 @@ export function LiveCapturePage() {
             <Icon name={paused ? "play" : "pause"} size={12} />
             {paused ? t("liveCapture.resume") : t("liveCapture.pause")}
           </button>
+          <button
+            className="btn"
+            onClick={onToggleFullscreen}
+            disabled={activeCamId == null}
+            aria-pressed={isFullscreen}
+            title={
+              isFullscreen
+                ? (t("liveCapture.exitFullscreen", {
+                    defaultValue: "Exit fullscreen",
+                  }) as string)
+                : (t("liveCapture.fullscreen", {
+                    defaultValue: "Fullscreen",
+                  }) as string)
+            }
+          >
+            <Icon name={isFullscreen ? "minimize" : "maximize"} size={12} />
+            {isFullscreen
+              ? (t("liveCapture.exitFullscreen", {
+                  defaultValue: "Exit fullscreen",
+                }) as string)
+              : (t("liveCapture.fullscreen", {
+                  defaultValue: "Fullscreen",
+                }) as string)}
+          </button>
         </div>
       </div>
 
@@ -175,18 +231,61 @@ export function LiveCapturePage() {
       >
         {/* Viewer */}
         <div
+          ref={viewerCardRef}
           className="card"
           style={{
             padding: 0,
             overflow: "hidden",
             display: "flex",
             flexDirection: "column",
+            // Real fullscreen reuses this same element via
+            // ``element.requestFullscreen()`` — no portal, no remount,
+            // so the MJPEG <img> stream keeps streaming through the
+            // mode flip with zero re-fetch cost.
+            background: isFullscreen ? "#000" : undefined,
           }}
         >
           <div
             className="cam-stage"
-            style={{ flex: 1, minHeight: 0, position: "relative" }}
+            style={{
+              flex: 1,
+              minHeight: 0,
+              position: "relative",
+              background: "#000",
+            }}
           >
+            {isFullscreen && (
+              <button
+                type="button"
+                onClick={onToggleFullscreen}
+                title={t("liveCapture.exitFullscreen", {
+                  defaultValue: "Exit fullscreen",
+                }) as string}
+                style={{
+                  position: "absolute",
+                  top: 12,
+                  insetInlineEnd: 12,
+                  zIndex: 5,
+                  background: "rgba(0,0,0,0.55)",
+                  color: "white",
+                  border: "1px solid rgba(255,255,255,0.18)",
+                  borderRadius: 6,
+                  padding: "6px 10px",
+                  fontSize: 12,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  cursor: "pointer",
+                  backdropFilter: "blur(4px)",
+                  WebkitBackdropFilter: "blur(4px)",
+                }}
+              >
+                <Icon name="minimize" size={12} />
+                {t("liveCapture.exitFullscreen", {
+                  defaultValue: "Exit fullscreen",
+                }) as string}
+              </button>
+            )}
             <div className="cam-bg" />
             {/* Stage container the imperative <img> attaches into.
                 Sits between cam-bg and the overlays so the DOM order

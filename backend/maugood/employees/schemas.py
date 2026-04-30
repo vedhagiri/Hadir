@@ -30,6 +30,12 @@ class DepartmentOut(BaseModel):
     name: str
 
 
+class DivisionOut(BaseModel):
+    id: int
+    code: str
+    name: str
+
+
 class SectionOut(BaseModel):
     id: int
     code: str
@@ -42,6 +48,10 @@ class EmployeeOut(BaseModel):
     full_name: str
     email: Optional[str] = None
     department: DepartmentOut
+    # P29 (#3): division — the tier above department. Resolved from
+    # ``departments.division_id``; None when the department isn't
+    # linked to a division yet.
+    division: Optional[DivisionOut] = None
     # P29 (#3): finest-grained tier. None when not assigned.
     section: Optional[SectionOut] = None
     status: StatusOut

@@ -30,6 +30,7 @@ import { DrawerShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
 import { toast } from "../../shell/Toaster";
 import { useDepartments } from "../departments/hooks";
+import { useDivisions } from "../divisions/hooks";
 import { useSections } from "../sections/hooks";
 import { DeleteConfirmModal } from "./DeleteConfirmModal";
 import {
@@ -73,6 +74,10 @@ interface FormState {
   designation: string;
   phone: string;
   reports_to_user_id: number | null;
+  // P29 (#3): division — filters which departments are pickable.
+  // Optional: tenants without a division-tier set this to null and
+  // see every department in the dropdown.
+  division_id: number | null;
   department_id: number;
   // P29 (#3): finest-grained tier. null when no section is
   // assigned (sections are optional). Cleared automatically when
@@ -93,6 +98,7 @@ function emptyForm(): FormState {
     designation: "",
     phone: "",
     reports_to_user_id: null,
+    division_id: null,
     department_id: 1,
     section_id: null,
     joining_date: "",
@@ -110,6 +116,7 @@ function fromEmployee(e: Employee): FormState {
     designation: e.designation ?? "",
     phone: e.phone ?? "",
     reports_to_user_id: e.reports_to_user_id ?? null,
+    division_id: e.division?.id ?? null,
     department_id: e.department.id,
     section_id: e.section?.id ?? null,
     joining_date: e.joining_date ?? "",
@@ -130,6 +137,7 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
   const detail = useEmployeeDetail(employeeId);
   const photos = useEmployeePhotos(employeeId);
   const departmentsQuery = useDepartments();
+  const divisionsQuery = useDivisions();
   const pendingDelete = useEmployeePendingDeleteRequest(employeeId);
   const create = useCreateEmployee();
   const update = useUpdateEmployee();
@@ -243,6 +251,13 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
         setServerError(t("employees.errors.codeAndNameRequired") as string);
         return null;
       }
+    }
+    // ``department_id === 0`` is the in-form sentinel for "no department
+    // picked yet" — happens when the operator chose a division that
+    // didn't include the previously-selected department.
+    if (!form.department_id) {
+      setServerError(t("employees.errors.departmentRequired") as string);
+      return null;
     }
     if (form.status === "inactive") {
       const reason = form.deactivation_reason.trim();
@@ -586,10 +601,46 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
 
           {/* Assignment */}
           <SectionLabel>{t("employees.section.assignment") as string}</SectionLabel>
-          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+          {/* Division → Department → Section is the org chain. The
+              dropdowns cascade: changing the division narrows the
+              department list to those linked to it (or shows every
+              department when no division is picked); changing the
+              department clears the now-incompatible section. */}
+          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 10 }}>
+            <Select
+              label={t("employees.field.division") as string}
+              value={form.division_id === null ? "" : String(form.division_id)}
+              onChange={(v) => {
+                const newDivisionId = v === "" ? null : Number(v);
+                // If the currently-selected department isn't under
+                // the new division, clear it (and the section). When
+                // the operator un-picks the division (back to "All"),
+                // leave the existing department alone.
+                setForm((s) => {
+                  const currentDept = (departmentsQuery.data?.items ?? [])
+                    .find((d) => d.id === s.department_id);
+                  const deptStillValid =
+                    newDivisionId === null ||
+                    (currentDept?.division_id ?? null) === newDivisionId;
+                  return {
+                    ...s,
+                    division_id: newDivisionId,
+                    department_id: deptStillValid ? s.department_id : 0,
+                    section_id: deptStillValid ? s.section_id : null,
+                  };
+                });
+              }}
+              options={[
+                { value: "", label: t("employees.field.allDivisions") as string },
+                ...(divisionsQuery.data?.items ?? []).map((d) => ({
+                  value: String(d.id),
+                  label: `${d.name} (${d.code})`,
+                })),
+              ]}
+            />
             <Select
               label={t("employees.field.department") as string}
-              value={String(form.department_id)}
+              value={form.department_id ? String(form.department_id) : ""}
               onChange={(v) =>
                 // Department change clears the section so the picker
                 // can't carry a stale section that belongs to the old
@@ -600,11 +651,46 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
                   section_id: null,
                 }))
               }
-              options={(departmentsQuery.data?.items ?? []).map((d) => ({
-                value: String(d.id),
-                label: `${d.name} (${d.code})`,
-              }))}
+              options={[
+                ...(form.department_id === 0
+                  ? [{ value: "", label: t("employees.field.pickDepartment") as string }]
+                  : []),
+                ...(departmentsQuery.data?.items ?? [])
+                  .filter((d) =>
+                    form.division_id === null
+                      ? true
+                      : (d.division_id ?? null) === form.division_id,
+                  )
+                  .map((d) => ({
+                    value: String(d.id),
+                    label: `${d.name} (${d.code})`,
+                  })),
+              ]}
             />
+            <Select
+              label={t("employees.field.section") as string}
+              value={form.section_id === null ? "" : String(form.section_id)}
+              onChange={(v) =>
+                onField("section_id", v === "" ? null : Number(v))
+              }
+              options={[
+                {
+                  value: "",
+                  label:
+                    sectionsQuery.isLoading
+                      ? (t("common.loading") as string)
+                      : (sectionsQuery.data?.items.length ?? 0) === 0
+                        ? (t("employees.field.noSectionsInDept") as string)
+                        : (t("employees.field.noSection") as string),
+                },
+                ...(sectionsQuery.data?.items ?? []).map((s) => ({
+                  value: String(s.id),
+                  label: `${s.name} (${s.code})`,
+                })),
+              ]}
+            />
+          </div>
+          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
             <Select
               label={t("employees.field.reportsTo") as string}
               value={form.reports_to_user_id === null ? "" : String(form.reports_to_user_id)}
@@ -617,30 +703,6 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
                   value: String(m.id),
                   label: `${m.full_name} · ${m.email}`,
                 })) as { value: string; label: string }[]),
-              ]}
-            />
-          </div>
-          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
-            <Select
-              label="Section"
-              value={form.section_id === null ? "" : String(form.section_id)}
-              onChange={(v) =>
-                onField("section_id", v === "" ? null : Number(v))
-              }
-              options={[
-                {
-                  value: "",
-                  label:
-                    sectionsQuery.isLoading
-                      ? "Loading sections…"
-                      : (sectionsQuery.data?.items.length ?? 0) === 0
-                        ? "— No sections in this department —"
-                        : "— None —",
-                },
-                ...(sectionsQuery.data?.items ?? []).map((s) => ({
-                  value: String(s.id),
-                  label: `${s.name} (${s.code})`,
-                })),
               ]}
             />
             <div />

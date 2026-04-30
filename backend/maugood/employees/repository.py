@@ -17,6 +17,7 @@ from sqlalchemy.engine import Connection
 
 from maugood.db import (
     departments,
+    divisions,
     employee_photos,
     employees,
     sections,
@@ -36,16 +37,23 @@ class EmployeeRow:
     department_id: int
     department_code: str
     department_name: str
+    status: str
+    photo_count: int
+    created_at: datetime
+    # P29 (#3): division — the tier above department. Resolved
+    # through the department's FK so the employee_id alone reaches
+    # all three tiers in one query. Nullable because divisions are
+    # optional per tenant.
+    division_id: Optional[int] = None
+    division_code: Optional[str] = None
+    division_name: Optional[str] = None
     # P29 (#3): finest-grained tier. Three nullable columns instead
     # of one because the ``section_id`` may be NULL while the two
     # joined string columns are also NULL — matches the optional
     # nature of the assignment.
-    section_id: Optional[int]
-    section_code: Optional[str]
-    section_name: Optional[str]
-    status: str
-    photo_count: int
-    created_at: datetime
+    section_id: Optional[int] = None
+    section_code: Optional[str] = None
+    section_name: Optional[str] = None
     # P28.7 fields. All optional — pre-P28.7 rows are NULL.
     designation: Optional[str] = None
     phone: Optional[str] = None
@@ -99,6 +107,9 @@ def _employee_select(scope: TenantScope):
             employees.c.department_id,
             departments.c.code.label("department_code"),
             departments.c.name.label("department_name"),
+            departments.c.division_id,
+            divisions.c.code.label("division_code"),
+            divisions.c.name.label("division_name"),
             employees.c.section_id,
             sections.c.code.label("section_code"),
             sections.c.name.label("section_name"),
@@ -120,6 +131,13 @@ def _employee_select(scope: TenantScope):
                 and_(
                     departments.c.id == employees.c.department_id,
                     departments.c.tenant_id == employees.c.tenant_id,
+                ),
+            )
+            .outerjoin(
+                divisions,
+                and_(
+                    divisions.c.id == departments.c.division_id,
+                    divisions.c.tenant_id == departments.c.tenant_id,
                 ),
             )
             .outerjoin(
@@ -150,6 +168,10 @@ def _row_to_employee(row) -> EmployeeRow:
         department_id=int(row.department_id),
         department_code=str(row.department_code),
         department_name=str(row.department_name),
+        division_id=
+            int(row.division_id) if getattr(row, "division_id", None) is not None else None,
+        division_code=getattr(row, "division_code", None),
+        division_name=getattr(row, "division_name", None),
         section_id=
             int(row.section_id) if row.section_id is not None else None,
         section_code=row.section_code,

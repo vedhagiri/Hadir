@@ -186,6 +186,108 @@ def _resolve_or_create_code(
     return int(new_id), candidate, value, True
 
 
+def _maybe_create_default_employee_login(
+    *,
+    conn: Connection,
+    scope: TenantScope,
+    actor_user_id: int,
+    employee_email: str,
+    employee_full_name: str,
+    warnings: list,
+    excel_row: int,
+) -> None:
+    """Create a default platform login for an imported employee.
+
+    No-op when a user already exists for the email (case-insensitive)
+    in this tenant; emits a warning so the operator can see the skip.
+    Otherwise inserts the ``users`` + ``user_roles`` rows linking the
+    new account to the tenant's ``Employee`` role.
+
+    Random 24-char URL-safe token as the temp password — never
+    surfaced in the response or logs. Operators reset per-employee
+    from the Edit drawer for whoever actually needs to sign in.
+    """
+
+    import secrets  # noqa: PLC0415
+    from sqlalchemy import insert as _insert  # noqa: PLC0415
+    from sqlalchemy import select as _select  # noqa: PLC0415
+
+    from maugood.auth.passwords import hash_password  # noqa: PLC0415
+    from maugood.db import roles as _roles  # noqa: PLC0415
+    from maugood.db import user_roles as _user_roles  # noqa: PLC0415
+    from maugood.db import users as _users  # noqa: PLC0415
+
+    email_lower = employee_email.strip().lower()
+
+    existing = conn.execute(
+        _select(_users.c.id).where(
+            _users.c.tenant_id == scope.tenant_id,
+            func.lower(_users.c.email) == email_lower,
+        )
+    ).first()
+    if existing is not None:
+        warnings.append(
+            ImportWarningSchema(
+                row=excel_row,
+                message=(
+                    f"login already exists for {email_lower} — "
+                    "kept the existing account, no roles changed"
+                ),
+            )
+        )
+        return
+
+    role_row = conn.execute(
+        _select(_roles.c.id).where(
+            _roles.c.tenant_id == scope.tenant_id,
+            _roles.c.code == "Employee",
+        )
+    ).first()
+    if role_row is None:
+        # Fail loud rather than silent: the per-tenant seed always
+        # plants the four roles. Missing Employee role is a system
+        # config bug, not an operator-fixable per-row issue.
+        raise RuntimeError(
+            "Employee role missing for tenant — provisioning is broken"
+        )
+
+    password_hash = hash_password(secrets.token_urlsafe(24))
+    new_user_id = conn.execute(
+        _insert(_users)
+        .values(
+            tenant_id=scope.tenant_id,
+            email=email_lower,
+            password_hash=password_hash,
+            full_name=employee_full_name.strip(),
+            is_active=True,
+        )
+        .returning(_users.c.id)
+    ).scalar_one()
+
+    conn.execute(
+        _insert(_user_roles).values(
+            tenant_id=scope.tenant_id,
+            user_id=int(new_user_id),
+            role_id=int(role_row.id),
+        )
+    )
+
+    write_audit(
+        conn,
+        tenant_id=scope.tenant_id,
+        actor_user_id=actor_user_id,
+        action="user.created",
+        entity_type="user",
+        entity_id=str(new_user_id),
+        after={
+            "email": email_lower,
+            "full_name": employee_full_name.strip(),
+            "role_codes": ["Employee"],
+            "source": "import",
+        },
+    )
+
+
 router = APIRouter(prefix="/api/employees", tags=["employees"])
 
 # P28.7: most endpoints now accept Admin OR HR. PDPL hard-delete is
@@ -205,6 +307,15 @@ def _row_to_out(row: repo.EmployeeRow) -> EmployeeOut:
             "code": row.department_code,
             "name": row.department_name,
         },
+        division=(
+            {
+                "id": row.division_id,
+                "code": row.division_code or "",
+                "name": row.division_name or "",
+            }
+            if row.division_id is not None
+            else None
+        ),
         section=(
             {
                 "id": row.section_id,
@@ -1499,6 +1610,44 @@ async def import_employees_endpoint(
                 )
                 created += 1
                 target_employee_id = new_id
+
+                # Default platform login: every imported employee
+                # gets a ``users`` row + Employee role so the role is
+                # surfaced on the employees list immediately. Future
+                # role changes go through the Edit drawer.
+                #
+                # When the import row has an email, that's the login
+                # email. When it doesn't (HR rosters often skip
+                # email), we synthesise one from the employee_code
+                # so the row is unique and the operator can either
+                # leave it placeholder or override later. The
+                # synthesised local-suffix `.maugood.local` is the
+                # same convention the PDPL redact path uses, so a
+                # quick grep tells you "no real email".
+                login_email = (
+                    row.email.strip()
+                    if row.email and row.email.strip()
+                    else f"{row.employee_code.lower()}@maugood.local"
+                )
+                _maybe_create_default_employee_login(
+                    conn=conn,
+                    scope=scope,
+                    actor_user_id=user.id,
+                    employee_email=login_email,
+                    employee_full_name=row.full_name,
+                    warnings=warnings,
+                    excel_row=row.excel_row,
+                )
+                # Backfill the employee row's email when we
+                # synthesised one — keeps the user↔employee join
+                # working in the list view (which matches by email).
+                if not row.email:
+                    repo.update_employee(
+                        conn,
+                        scope,
+                        new_id,
+                        values={"email": login_email},
+                    )
 
                 # P12: apply custom-field values from the row. Unknown
                 # codes are warnings (operator left a stale column),
