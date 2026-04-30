@@ -39,6 +39,7 @@ from maugood.auth.dependencies import (
 )
 from maugood.db import (
     departments,
+    divisions,
     employees,
     get_engine,
     roles,
@@ -73,6 +74,11 @@ class DepartmentOut(BaseModel):
     code: str
     name: str
     employee_count: int
+    # P29 (#3): top-tier hierarchy. None when not assigned to a
+    # division — operator can backfill via PATCH.
+    division_id: Optional[int] = None
+    division_code: Optional[str] = None
+    division_name: Optional[str] = None
 
 
 class DepartmentListOut(BaseModel):
@@ -82,6 +88,7 @@ class DepartmentListOut(BaseModel):
 class DepartmentCreateIn(BaseModel):
     code: str = Field(min_length=1, max_length=16)
     name: str = Field(min_length=2, max_length=120)
+    division_id: Optional[int] = None
 
     @field_validator("code")
     @classmethod
@@ -104,6 +111,8 @@ class DepartmentPatchIn(BaseModel):
     # ``code`` is intentionally not editable — Excel imports + audit
     # rows reference it. Renaming the display name is fine; renaming
     # the code is a follow-up because it changes the import contract.
+    # ``division_id`` is editable (use ``None`` to clear).
+    division_id: Optional[int] = None
 
     @field_validator("name")
     @classmethod
@@ -124,10 +133,17 @@ def _list_with_counts(scope: TenantScope) -> list[DepartmentOut]:
                 departments.c.id,
                 departments.c.code,
                 departments.c.name,
+                departments.c.division_id,
+                divisions.c.code.label("division_code"),
+                divisions.c.name.label("division_name"),
                 func.count(employees.c.id).label("employee_count"),
             )
             .select_from(
                 departments.outerjoin(
+                    divisions,
+                    (divisions.c.id == departments.c.division_id)
+                    & (divisions.c.tenant_id == departments.c.tenant_id),
+                ).outerjoin(
                     employees,
                     (employees.c.department_id == departments.c.id)
                     & (employees.c.tenant_id == departments.c.tenant_id)
@@ -135,7 +151,14 @@ def _list_with_counts(scope: TenantScope) -> list[DepartmentOut]:
                 )
             )
             .where(departments.c.tenant_id == scope.tenant_id)
-            .group_by(departments.c.id, departments.c.code, departments.c.name)
+            .group_by(
+                departments.c.id,
+                departments.c.code,
+                departments.c.name,
+                departments.c.division_id,
+                divisions.c.code,
+                divisions.c.name,
+            )
             .order_by(departments.c.code.asc())
         ).all()
     return [
@@ -144,6 +167,9 @@ def _list_with_counts(scope: TenantScope) -> list[DepartmentOut]:
             code=str(r.code),
             name=str(r.name),
             employee_count=int(r.employee_count or 0),
+            division_id=int(r.division_id) if r.division_id else None,
+            division_code=str(r.division_code) if r.division_code else None,
+            division_name=str(r.division_name) if r.division_name else None,
         )
         for r in rows
     ]
@@ -184,12 +210,29 @@ def create_department(
                 status_code=409,
                 detail={"field": "code", "message": "code already exists"},
             )
+        # Validate division_id (when present) exists in this tenant.
+        if payload.division_id is not None:
+            div_exists = conn.execute(
+                select(divisions.c.id).where(
+                    divisions.c.tenant_id == scope.tenant_id,
+                    divisions.c.id == payload.division_id,
+                )
+            ).first()
+            if div_exists is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "field": "division_id",
+                        "message": "division not found",
+                    },
+                )
         new_id = conn.execute(
             insert(departments)
             .values(
                 tenant_id=scope.tenant_id,
                 code=payload.code,
                 name=payload.name,
+                division_id=payload.division_id,
             )
             .returning(departments.c.id)
         ).scalar_one()
@@ -200,7 +243,11 @@ def create_department(
             action="department.created",
             entity_type="department",
             entity_id=str(new_id),
-            after={"code": payload.code, "name": payload.name},
+            after={
+                "code": payload.code,
+                "name": payload.name,
+                "division_id": payload.division_id,
+            },
         )
     logger.info(
         "department created: id=%s code=%s by_user=%s",
@@ -214,6 +261,7 @@ def create_department(
         code=payload.code,
         name=payload.name,
         employee_count=0,
+        division_id=payload.division_id,
     )
 
 
@@ -225,10 +273,23 @@ def patch_department(
 ) -> DepartmentOut:
     scope = TenantScope(tenant_id=user.tenant_id)
     engine = get_engine()
+    # ``division_id`` opt-in semantics: ``None`` in the payload means
+    # "leave it as-is", not "clear it". To explicitly clear, pass a
+    # sentinel via the wire — but Pydantic's default-None makes that
+    # impossible without a separate model. Operators clearing a
+    # division will be rare (you usually move dept to another
+    # division, not orphan it), so we trade that off in favour of
+    # the simpler API. To clear, the operator can re-issue PATCH
+    # with the new division — or DELETE + recreate if they really
+    # want a NULL.
+    payload_data = payload.model_dump(exclude_unset=True)
     with engine.begin() as conn:
         before = conn.execute(
             select(
-                departments.c.id, departments.c.code, departments.c.name
+                departments.c.id,
+                departments.c.code,
+                departments.c.name,
+                departments.c.division_id,
             ).where(
                 departments.c.tenant_id == scope.tenant_id,
                 departments.c.id == department_id,
@@ -239,6 +300,24 @@ def patch_department(
         values: dict = {}
         if payload.name is not None:
             values["name"] = payload.name
+        if "division_id" in payload_data:
+            new_div = payload_data["division_id"]
+            if new_div is not None:
+                div_exists = conn.execute(
+                    select(divisions.c.id).where(
+                        divisions.c.tenant_id == scope.tenant_id,
+                        divisions.c.id == new_div,
+                    )
+                ).first()
+                if div_exists is None:
+                    raise HTTPException(
+                        status_code=422,
+                        detail={
+                            "field": "division_id",
+                            "message": "division not found",
+                        },
+                    )
+            values["division_id"] = new_div
         if values:
             conn.execute(
                 update(departments)
@@ -255,17 +334,31 @@ def patch_department(
                 action="department.updated",
                 entity_type="department",
                 entity_id=str(department_id),
-                before={"code": str(before.code), "name": str(before.name)},
+                before={
+                    "code": str(before.code),
+                    "name": str(before.name),
+                    "division_id": (
+                        int(before.division_id) if before.division_id else None
+                    ),
+                },
                 after={
                     "code": str(before.code),
                     "name": values.get("name", str(before.name)),
+                    "division_id": values.get(
+                        "division_id",
+                        int(before.division_id) if before.division_id else None,
+                    ),
                 },
             )
+    new_division_id = values.get(
+        "division_id", int(before.division_id) if before.division_id else None
+    )
     return DepartmentOut(
         id=int(before.id),
         code=str(before.code),
         name=values.get("name", str(before.name)),
         employee_count=_count_employees(scope, department_id),
+        division_id=new_division_id,
     )
 
 

@@ -1296,6 +1296,29 @@ user_roles = Table(
 )
 
 
+divisions = Table(
+    "divisions",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column("code", Text, nullable=False),
+    Column("name", Text, nullable=False),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    UniqueConstraint("tenant_id", "code", name="uq_divisions_tenant_code"),
+)
+
+
 departments = Table(
     "departments",
     metadata,
@@ -1309,7 +1332,51 @@ departments = Table(
     ),
     Column("name", Text, nullable=False),
     Column("code", Text, nullable=False),
+    # P29 (#3): top-tier hierarchy. Nullable so existing tenants
+    # without divisions keep working until backfilled.
+    Column(
+        "division_id",
+        Integer,
+        ForeignKey("divisions.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    ),
     UniqueConstraint("tenant_id", "code", name="uq_departments_tenant_code"),
+)
+
+
+sections = Table(
+    "sections",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "department_id",
+        Integer,
+        ForeignKey("departments.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column("code", Text, nullable=False),
+    Column("name", Text, nullable=False),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    UniqueConstraint(
+        "tenant_id",
+        "department_id",
+        "code",
+        name="uq_sections_tenant_dept_code",
+    ),
 )
 
 
@@ -1326,6 +1393,57 @@ user_departments = Table(
         "department_id",
         Integer,
         ForeignKey("departments.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
+        primary_key=True,
+    ),
+)
+
+
+# P29 (#3): manager-to-division and manager-to-section mirrors of
+# user_departments. The scope helper unions all three so a manager
+# assigned at any tier sees the right slice.
+user_divisions = Table(
+    "user_divisions",
+    metadata,
+    Column(
+        "user_id",
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "division_id",
+        Integer,
+        ForeignKey("divisions.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
+        primary_key=True,
+    ),
+)
+
+
+user_sections = Table(
+    "user_sections",
+    metadata,
+    Column(
+        "user_id",
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "section_id",
+        Integer,
+        ForeignKey("sections.id", ondelete="CASCADE"),
         primary_key=True,
     ),
     Column(
@@ -1447,6 +1565,16 @@ employees = Table(
         Integer,
         ForeignKey("departments.id", ondelete="RESTRICT"),
         nullable=False,
+        index=True,
+    ),
+    # P29 (#3): finest-grained tier of the org hierarchy. Optional —
+    # not every tenant uses sections. Section visibility joins through
+    # ``user_sections`` in the manager scope helper.
+    Column(
+        "section_id",
+        Integer,
+        ForeignKey("sections.id", ondelete="RESTRICT"),
+        nullable=True,
         index=True,
     ),
     # Soft-delete flag. 'inactive' hides the row from every default list;

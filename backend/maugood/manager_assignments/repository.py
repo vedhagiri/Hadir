@@ -30,7 +30,9 @@ from maugood.db import (
     manager_assignments,
     roles,
     user_departments,
+    user_divisions,
     user_roles,
+    user_sections,
     users,
 )
 from maugood.tenants.scope import TenantScope
@@ -352,12 +354,30 @@ def get_manager_visible_employee_ids(
     *,
     manager_user_id: int,
 ) -> set[int]:
-    """Union of (a) dept-member employees and (b) directly-assigned ones.
+    """Union of every visibility path open to a Manager.
 
-    Returns an empty set when the manager has neither departments
-    nor direct assignments — call sites should treat that as "Manager
-    sees nothing" without widening to the full tenant view.
+    Four sources contribute, all merged into one ``set[int]``:
+
+    (a) ``user_departments`` — manager is a member of the employee's
+        department. Department-tier scope.
+    (b) ``manager_assignments`` — direct per-employee assignment
+        (P8). Picks up cross-department or out-of-hierarchy
+        relationships HR carved out by hand.
+    (c) ``user_divisions`` (P29 #3) — manager is assigned to the
+        division that owns the employee's department. Division-tier
+        scope. A division manager sees every employee in every
+        department under that division automatically.
+    (d) ``user_sections`` (P29 #3) — manager is assigned to the
+        employee's specific section. Section-tier scope. The finest-
+        grained tier; useful when one team-lead inside a department
+        should only see their own team.
+
+    Returns an empty set when the manager has none of the above —
+    call sites must treat that as "Manager sees nothing", not as a
+    license to widen to the full tenant view.
     """
+
+    visible: set[int] = set()
 
     # (a) Employees in departments the manager is a member of.
     dept_employee_rows = conn.execute(
@@ -377,7 +397,7 @@ def get_manager_visible_employee_ids(
             employees.c.status == "active",
         )
     ).all()
-    visible: set[int] = {int(r.id) for r in dept_employee_rows}
+    visible.update(int(r.id) for r in dept_employee_rows)
 
     # (b) Direct assignments via manager_assignments.
     direct_rows = conn.execute(
@@ -387,5 +407,53 @@ def get_manager_visible_employee_ids(
         )
     ).all()
     visible.update(int(r.employee_id) for r in direct_rows)
+
+    # (c) Division-tier — every employee whose department lives under
+    #     a division the manager is assigned to.
+    div_employee_rows = conn.execute(
+        select(employees.c.id)
+        .select_from(
+            employees.join(
+                departments,
+                and_(
+                    departments.c.id == employees.c.department_id,
+                    departments.c.tenant_id == employees.c.tenant_id,
+                ),
+            ).join(
+                user_divisions,
+                and_(
+                    user_divisions.c.division_id == departments.c.division_id,
+                    user_divisions.c.tenant_id == departments.c.tenant_id,
+                ),
+            )
+        )
+        .where(
+            employees.c.tenant_id == scope.tenant_id,
+            user_divisions.c.user_id == manager_user_id,
+            employees.c.status == "active",
+        )
+    ).all()
+    visible.update(int(r.id) for r in div_employee_rows)
+
+    # (d) Section-tier — the manager is assigned directly to the
+    #     employee's section.
+    sec_employee_rows = conn.execute(
+        select(employees.c.id)
+        .select_from(
+            employees.join(
+                user_sections,
+                and_(
+                    user_sections.c.section_id == employees.c.section_id,
+                    user_sections.c.tenant_id == employees.c.tenant_id,
+                ),
+            )
+        )
+        .where(
+            employees.c.tenant_id == scope.tenant_id,
+            user_sections.c.user_id == manager_user_id,
+            employees.c.status == "active",
+        )
+    ).all()
+    visible.update(int(r.id) for r in sec_employee_rows)
 
     return visible

@@ -62,6 +62,8 @@ from maugood.super_admin import router as super_admin_router
 from maugood.super_admin.system import router as super_admin_system_router
 from maugood.system.router import router as system_router
 from maugood.departments_router import router as departments_router
+from maugood.divisions_router import router as divisions_router
+from maugood.sections_router import router as sections_router
 from maugood.users_lookup import router as users_lookup_router
 
 
@@ -255,6 +257,8 @@ def create_app() -> FastAPI:
     app.include_router(system_router)
     app.include_router(users_lookup_router)
     app.include_router(departments_router)
+    app.include_router(divisions_router)
+    app.include_router(sections_router)
     app.include_router(audit_log_router)
     app.include_router(reporting_router)
     app.include_router(former_employees_router)
