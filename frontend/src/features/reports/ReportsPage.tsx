@@ -744,14 +744,6 @@ function EventLogPreview({
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <button
-            className="btn btn-sm"
-            disabled
-            title="Filter drawer arrives in a follow-up"
-          >
-            <Icon name="filter" size={11} />
-            Filters
-          </button>
           <DatePicker
             value={date}
             onChange={setDate}
@@ -1054,6 +1046,47 @@ interface DeptRow {
   totalMinutes: number;
 }
 
+// Classify an attendance row into a department-summary bucket.
+// Mirrors DailyStatusPill's logic so the per-department totals match
+// what the user sees on the daily attendance page. Weekend/holiday/
+// pending rows aren't part of "today's working population" and are
+// excluded by returning ``null``.
+type SummaryBucket = "present" | "late" | "absent" | "onLeave";
+
+function classifyForSummary(it: AttendanceItem): SummaryBucket | null {
+  if (it.is_holiday && !it.in_time) return null;
+  if (it.is_weekend && !it.in_time) return null;
+  if (it.pending) return null;
+  if (it.absent && it.leave_type_id !== null) return "onLeave";
+  if (!it.in_time) return "absent";
+  if (it.late) return "late";
+  return "present";
+}
+
+function emptyDeptRow(d: { id: number; code: string; name: string }): DeptRow {
+  return {
+    id: d.id,
+    code: d.code,
+    name: d.name,
+    headcount: 0,
+    present: 0,
+    late: 0,
+    absent: 0,
+    onLeave: 0,
+    totalMinutes: 0,
+  };
+}
+
+function applyToDeptRow(row: DeptRow, it: AttendanceItem): void {
+  const bucket = classifyForSummary(it);
+  if (bucket === null) return;
+  row.headcount += 1;
+  row[bucket] += 1;
+  if (bucket === "present" || bucket === "late") {
+    row.totalMinutes += it.total_minutes ?? 0;
+  }
+}
+
 function useDepartmentSummary(date: string): {
   rows: DeptRow[];
   loading: boolean;
@@ -1066,47 +1099,14 @@ function useDepartmentSummary(date: string): {
     const allDepts = departments.data?.items ?? [];
     if (items.length === 0 && allDepts.length === 0) return [];
     const byDept = new Map<number, DeptRow>();
-    for (const d of allDepts) {
-      byDept.set(d.id, {
-        id: d.id,
-        code: d.code,
-        name: d.name,
-        headcount: 0,
-        present: 0,
-        late: 0,
-        absent: 0,
-        onLeave: 0,
-        totalMinutes: 0,
-      });
-    }
+    for (const d of allDepts) byDept.set(d.id, emptyDeptRow(d));
     for (const it of items) {
       let row = byDept.get(it.department.id);
       if (!row) {
-        row = {
-          id: it.department.id,
-          code: it.department.code,
-          name: it.department.name,
-          headcount: 0,
-          present: 0,
-          late: 0,
-          absent: 0,
-          onLeave: 0,
-          totalMinutes: 0,
-        };
+        row = emptyDeptRow(it.department);
         byDept.set(it.department.id, row);
       }
-      row.headcount += 1;
-      if (it.absent && it.leave_type_id !== null) {
-        row.onLeave += 1;
-      } else if (it.absent) {
-        row.absent += 1;
-      } else if (it.late) {
-        row.late += 1;
-        row.totalMinutes += it.total_minutes ?? 0;
-      } else {
-        row.present += 1;
-        row.totalMinutes += it.total_minutes ?? 0;
-      }
+      applyToDeptRow(row, it);
     }
     return Array.from(byDept.values())
       .filter((r) => r.headcount > 0)
@@ -1214,31 +1214,10 @@ async function downloadDepartmentSummary({
     for (const it of items) {
       let row = grouped.get(it.department.id);
       if (!row) {
-        row = {
-          id: it.department.id,
-          code: it.department.code,
-          name: it.department.name,
-          headcount: 0,
-          present: 0,
-          late: 0,
-          absent: 0,
-          onLeave: 0,
-          totalMinutes: 0,
-        };
+        row = emptyDeptRow(it.department);
         grouped.set(it.department.id, row);
       }
-      row.headcount += 1;
-      if (it.absent && it.leave_type_id !== null) {
-        row.onLeave += 1;
-      } else if (it.absent) {
-        row.absent += 1;
-      } else if (it.late) {
-        row.late += 1;
-        row.totalMinutes += it.total_minutes ?? 0;
-      } else {
-        row.present += 1;
-        row.totalMinutes += it.total_minutes ?? 0;
-      }
+      applyToDeptRow(row, it);
     }
     const csv = rowsToCsv(
       [
@@ -1253,6 +1232,7 @@ async function downloadDepartmentSummary({
         "Avg hours",
       ],
       Array.from(grouped.values())
+        .filter((r) => r.headcount > 0)
         .sort((a, b) => b.headcount - a.headcount)
         .map((r, idx) => {
           const worked =
@@ -1350,14 +1330,6 @@ function PreviewCard({
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           {filterSlot ?? (
             <>
-              <button
-                className="btn btn-sm"
-                disabled
-                title="Filter drawer arrives in a follow-up"
-              >
-                <Icon name="filter" size={11} />
-                Filters
-              </button>
               <DatePicker
                 value={date}
                 onChange={setDate}
