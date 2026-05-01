@@ -29,7 +29,7 @@ from typing import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, insert, select
+from sqlalchemy import delete, func, insert, select
 from sqlalchemy.engine import Engine
 
 from maugood.attendance_calendar.queries import (
@@ -340,9 +340,17 @@ def _month_str(d: date) -> str:
 def _set_user_to_manager(
     admin_engine: Engine, *, user_id: int, department_id: int
 ) -> None:
-    """Replace the user's roles with [Manager] and assign them to the
-    given department. Used to flip the shared ``admin_user`` fixture
-    into a Manager for one test, then restored by the caller."""
+    """Replace the user's roles with [Manager], assign them to the
+    given department (legacy P8 plumbing — kept for any test that
+    still inspects user_departments), AND seed an ``employees`` row
+    matched by email in the same department so the new team-rule
+    resolver returns the department's other members.
+
+    The Calendar / Attendance / Approvals Manager scope migrated
+    from the P8 visible-set to ``manager_team_employee_ids`` which
+    walks the rule chain (Rule 0 / Rule 1 / fallback "same dept"
+    here) on the manager's own employee record.
+    """
 
     with admin_engine.begin() as conn:
         conn.execute(delete(user_roles).where(user_roles.c.user_id == user_id))
@@ -365,9 +373,49 @@ def _set_user_to_manager(
             )
         )
 
+        # Resolve the user's email so the new resolver can find them
+        # via the ``employees.email`` bridge.
+        from maugood.db import users as _users  # noqa: PLC0415
+
+        user_row = conn.execute(
+            select(_users.c.email).where(_users.c.id == user_id)
+        ).first()
+        if user_row is None or not user_row.email:
+            return
+        # Make sure no leftover row from a previous test confuses the
+        # email join, then seed a fresh manager employee row.
+        conn.execute(
+            delete(employees).where(
+                employees.c.tenant_id == TENANT_ID,
+                func.lower(employees.c.email) == user_row.email.lower(),
+            )
+        )
+        conn.execute(
+            insert(employees).values(
+                tenant_id=TENANT_ID,
+                employee_code=f"MGR-{user_id}",
+                full_name="Manager Test",
+                email=user_row.email,
+                department_id=department_id,
+                status="active",
+            )
+        )
+
 
 def _restore_admin(admin_engine: Engine, *, user_id: int) -> None:
     with admin_engine.begin() as conn:
+        from maugood.db import users as _users  # noqa: PLC0415
+
+        user_row = conn.execute(
+            select(_users.c.email).where(_users.c.id == user_id)
+        ).first()
+        if user_row is not None and user_row.email:
+            conn.execute(
+                delete(employees).where(
+                    employees.c.tenant_id == TENANT_ID,
+                    func.lower(employees.c.email) == user_row.email.lower(),
+                )
+            )
         conn.execute(delete(user_roles).where(user_roles.c.user_id == user_id))
         conn.execute(
             delete(user_departments).where(user_departments.c.user_id == user_id)

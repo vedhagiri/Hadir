@@ -36,9 +36,7 @@ from maugood.auth.audit import write_audit
 from maugood.auth.dependencies import CurrentUser, current_user
 from maugood.db import detection_events, employees, get_engine
 from maugood.employees.photos import decrypt_bytes
-from maugood.manager_assignments.repository import (
-    get_manager_visible_employee_ids,
-)
+from maugood.employees.repository import manager_team_employee_ids
 from maugood.tenants.scope import TenantScope
 
 logger = logging.getLogger(__name__)
@@ -162,7 +160,9 @@ def _resolve_visible_employees(
     """Return the role-scoped employee_id allow-list, or ``None`` for
     Admin/HR (= no narrowing).
 
-    Manager → union of department membership + manager_assignments.
+    Manager → team-rule team (My Team / Team Members tab) — replaces
+    the legacy P8 visible-set so every team-scoped surface reads
+    consistently.
     Employee → just the employee row that maps to their email.
     """
 
@@ -170,8 +170,8 @@ def _resolve_visible_employees(
         return None
     if _is_manager(user):
         with get_engine().begin() as conn:
-            visible = get_manager_visible_employee_ids(
-                conn, scope, manager_user_id=user.id
+            visible = manager_team_employee_ids(
+                conn, scope, user_email=user.email, user_id=user.id
             )
         return sorted(int(x) for x in visible)
     # Employee

@@ -535,3 +535,168 @@ def list_all_for_export(conn: Connection, scope: TenantScope) -> list[EmployeeRo
         _employee_select(scope).order_by(employees.c.employee_code.asc())
     ).all()
     return [_row_to_employee(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Team Members rule resolver — shared by My Team, Team Members tab, and
+# every Manager-scoped surface (attendance, calendar, approvals,
+# detection events, …). Keeps the rule in one place so the manager's
+# "team" reads identically across the product.
+#
+# Rules — first match wins:
+#   0. Manager triple — designation contains "manager" (CI substring) AND
+#      div / dept / section names are all distinct → exact triple match
+#      on (division_id, department_id, section_id).
+#   1. Flat hierarchy — div.name == dept.name == sec.name → same division
+#   2. Fallback — same department
+# ---------------------------------------------------------------------------
+
+
+def resolve_team_employee_ids(
+    conn: Connection,
+    scope: TenantScope,
+    target_employee_id: int,
+) -> frozenset[int]:
+    """Return the set of teammate ids for ``target_employee_id``.
+
+    The target itself is excluded; only ``status='active'`` rows
+    count. Returns an empty set when the target row doesn't exist
+    in the tenant.
+    """
+
+    from maugood.db import (  # noqa: PLC0415
+        departments as _departments,
+        divisions as _divisions,
+        sections as _sections,
+    )
+
+    target = conn.execute(
+        select(
+            employees.c.id,
+            employees.c.department_id,
+            employees.c.section_id,
+            employees.c.designation,
+            _departments.c.name.label("dept_name"),
+            _departments.c.division_id,
+            _divisions.c.name.label("div_name"),
+            _sections.c.name.label("sec_name"),
+        )
+        .select_from(
+            employees.join(
+                _departments,
+                (_departments.c.id == employees.c.department_id)
+                & (_departments.c.tenant_id == employees.c.tenant_id),
+            )
+            .outerjoin(
+                _divisions,
+                (_divisions.c.id == _departments.c.division_id)
+                & (_divisions.c.tenant_id == employees.c.tenant_id),
+            )
+            .outerjoin(
+                _sections,
+                (_sections.c.id == employees.c.section_id)
+                & (_sections.c.tenant_id == employees.c.tenant_id),
+            )
+        )
+        .where(
+            employees.c.tenant_id == scope.tenant_id,
+            employees.c.id == target_employee_id,
+        )
+    ).first()
+    if target is None:
+        return frozenset()
+
+    div_name = target.div_name
+    dept_name = target.dept_name
+    sec_name = target.sec_name
+    designation = target.designation
+
+    rule_zero = (
+        designation is not None
+        and "manager" in designation.lower()
+        and div_name is not None
+        and dept_name is not None
+        and sec_name is not None
+        and div_name != dept_name
+        and dept_name != sec_name
+        and div_name != sec_name
+        and target.division_id is not None
+        and target.section_id is not None
+    )
+    rule_one = (
+        div_name is not None
+        and dept_name is not None
+        and sec_name is not None
+        and div_name == dept_name == sec_name
+        and target.division_id is not None
+    )
+
+    base = (
+        select(employees.c.id)
+        .select_from(
+            employees.join(
+                _departments,
+                (_departments.c.id == employees.c.department_id)
+                & (_departments.c.tenant_id == employees.c.tenant_id),
+            )
+        )
+        .where(
+            employees.c.tenant_id == scope.tenant_id,
+            employees.c.id != target_employee_id,
+            employees.c.status == "active",
+        )
+    )
+
+    if rule_zero:
+        stmt = base.where(
+            employees.c.department_id == target.department_id,
+            employees.c.section_id == target.section_id,
+            _departments.c.division_id == target.division_id,
+        )
+    elif rule_one:
+        stmt = base.where(_departments.c.division_id == target.division_id)
+    else:
+        stmt = base.where(employees.c.department_id == target.department_id)
+
+    return frozenset(int(r.id) for r in conn.execute(stmt).all())
+
+
+def manager_team_employee_ids(
+    conn: Connection,
+    scope: TenantScope,
+    *,
+    user_email: str,
+    user_id: Optional[int] = None,
+) -> frozenset[int]:
+    """Convenience: ``user.email`` → manager's employee row → team ids.
+
+    Primary path: lower-cased email match against ``employees.email``,
+    then the team-rule resolver gets applied to that employee record.
+    The manager's own employee.id is **excluded** from the returned
+    set — same shape as Team Members tab + My Team.
+
+    Fallback: when the manager has no matching employee row (some
+    tenants run Manager users as pure operators with no profile),
+    fall back to the legacy P8 visible-set
+    (``manager_assignments`` ∪ ``user_departments``) — this preserves
+    behaviour for tenants that haven't migrated to the new
+    designation-based hierarchy. ``user_id`` is required for the
+    fallback path; without it the fallback is skipped and an empty
+    set is returned.
+    """
+
+    from maugood.requests.repository import (  # noqa: PLC0415
+        employee_for_user_email,
+    )
+
+    my_emp_id = employee_for_user_email(conn, scope, email=user_email)
+    if my_emp_id is not None:
+        return resolve_team_employee_ids(conn, scope, my_emp_id)
+
+    if user_id is None:
+        return frozenset()
+    from maugood.manager_assignments.repository import (  # noqa: PLC0415
+        get_manager_visible_employee_ids as _legacy,
+    )
+
+    return frozenset(int(x) for x in _legacy(conn, scope, manager_user_id=user_id))

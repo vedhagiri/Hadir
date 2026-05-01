@@ -17,9 +17,7 @@ from pydantic import BaseModel
 from maugood.attendance import repository as repo
 from maugood.auth.dependencies import CurrentUser, current_user
 from maugood.db import employees, get_engine
-from maugood.manager_assignments.repository import (
-    get_manager_visible_employee_ids,
-)
+from maugood.employees.repository import manager_team_employee_ids
 from maugood.tenants.scope import TenantScope
 
 logger = logging.getLogger(__name__)
@@ -277,24 +275,29 @@ def list_attendance(
         if department_id is not None:
             department_ids = [department_id]
     elif "Manager" in user.roles:
+        # Manager scope = the team-rule team (My Team / Team Members
+        # tab). Replaces the legacy P8 visible-set so every
+        # team-scoped surface reads consistently.
         with get_engine().begin() as conn:
-            visible = get_manager_visible_employee_ids(
-                conn, scope, manager_user_id=user.id
+            visible = manager_team_employee_ids(
+                conn, scope, user_email=user.email, user_id=user.id
             )
         if not visible:
             return AttendanceListOut(date=the_date, items=[])
         if department_id is not None:
             # The Admin-style department filter narrows further but
-            # cannot widen past the Manager's union. Refuse a filter
-            # that lands outside any visible department membership.
+            # cannot widen past the Manager's team. The repo
+            # intersects employee_ids ∩ department_ids, so a
+            # department that has no team-mates simply yields zero
+            # rows. We refuse a filter outside the manager's own
+            # department membership to keep the UX coherent with
+            # the dropdown (which only lists their depts).
             allowed_depts = set(user.departments)
             if department_id not in allowed_depts:
                 raise HTTPException(
                     status_code=403, detail="not a member of this department"
                 )
             department_ids = [department_id]
-        # Always pass the visible-employee union — together with the
-        # optional department filter, the repo intersects them.
         employee_ids = sorted(visible)
     else:  # Employee-only
         if department_id is not None:
@@ -437,8 +440,8 @@ def employee_attendance_range(
         pass  # any employee in tenant
     elif "Manager" in user.roles:
         with get_engine().begin() as conn:
-            visible = get_manager_visible_employee_ids(
-                conn, scope, manager_user_id=user.id
+            visible = manager_team_employee_ids(
+                conn, scope, user_email=user.email, user_id=user.id
             )
         if employee_id not in visible:
             raise HTTPException(

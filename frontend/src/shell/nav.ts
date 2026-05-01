@@ -74,7 +74,6 @@ export const NAV: Record<Role, NavItem[]> = {
     { id: "calendar", label: "Team Calendar", icon: "calendar" },
     { id: "my-team", label: "My Team", icon: "users" },
     { id: "approvals", label: "Approvals", icon: "inbox" },
-    { id: "daily-attendance", label: "Daily Attendance", icon: "fileText" },
   ],
   Employee: [
     { section: "Me" },

@@ -53,9 +53,7 @@ from maugood.notifications.producer import (
     notify_approval_assigned,
     notify_approval_decided,
 )
-from maugood.manager_assignments.repository import (
-    get_manager_visible_employee_ids,
-)
+from maugood.employees.repository import manager_team_employee_ids
 from maugood.requests import attachments as attachment_io
 from maugood.requests import reason_categories as cat_repo
 from maugood.requests import repository as repo
@@ -255,8 +253,8 @@ def _can_view(user: CurrentUser, row: repo.RequestRow) -> bool:
         # else, including the attendance scope).
         scope = TenantScope(tenant_id=user.tenant_id)
         with get_engine().begin() as conn:
-            visible = get_manager_visible_employee_ids(
-                conn, scope, manager_user_id=user.id
+            visible = manager_team_employee_ids(
+                conn, scope, user_email=user.email, user_id=user.id
             )
         if row.employee_id in visible:
             return True
@@ -442,8 +440,8 @@ def list_requests(user: Annotated[CurrentUser, USER]) -> list[RequestResponse]:
             rows = repo.list_requests_for_hr(conn, scope)
     elif _has_role(user, "Manager"):
         with get_engine().begin() as conn:
-            visible = get_manager_visible_employee_ids(
-                conn, scope, manager_user_id=user.id
+            visible = manager_team_employee_ids(
+                conn, scope, user_email=user.email, user_id=user.id
             )
             primary_ids = frozenset(
                 repo.primary_managed_employee_ids(
@@ -528,8 +526,8 @@ def _pending_for_role(
     if _has_role(user, "HR"):
         return repo.list_pending_hr(conn, scope), frozenset()
     if _has_role(user, "Manager"):
-        visible = get_manager_visible_employee_ids(
-            conn, scope, manager_user_id=user.id
+        visible = manager_team_employee_ids(
+            conn, scope, user_email=user.email, user_id=user.id
         )
         primary = frozenset(
             repo.primary_managed_employee_ids(
@@ -811,8 +809,8 @@ def manager_decide_endpoint(
         # P15 widens the gate from "directly assigned only" to the
         # union of department membership + direct assignment — same
         # set used by the inbox listing and ``_can_view``.
-        visible = get_manager_visible_employee_ids(
-            conn, scope, manager_user_id=user.id
+        visible = manager_team_employee_ids(
+            conn, scope, user_email=user.email, user_id=user.id
         )
         if row.employee_id not in visible:
             raise HTTPException(
