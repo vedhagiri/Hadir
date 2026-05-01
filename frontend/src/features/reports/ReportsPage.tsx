@@ -427,6 +427,8 @@ function AttendancePreview({
   onDownload: (format: "xlsx" | "pdf") => Promise<void>;
 }) {
   const [preset, setPreset] = useState<PresetKey>("today");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   // Sync start/end whenever a preset (non-custom) is chosen.
   useEffect(() => {
@@ -438,12 +440,20 @@ function AttendancePreview({
   }, [preset]);
 
   // Live preview samples the start day only — fetching every day in a
-  // range client-side would mean N round-trips. The table renders the
-  // full row list for the start day; the downloaded report streams
-  // every day in the range.
+  // range client-side would mean N round-trips. The table paginates
+  // client-side; the downloaded report streams every day in the range.
   const list = useAttendance(start, null);
   const items = list.data?.items ?? [];
-  const previewItems = items;
+  const total = items.length;
+
+  // Reset to page 1 when the date or page size changes — otherwise a
+  // smaller dataset can leave us on an out-of-range page.
+  useEffect(() => {
+    setPage(1);
+  }, [start, pageSize]);
+
+  const pageStart = (page - 1) * pageSize;
+  const previewItems = items.slice(pageStart, pageStart + pageSize);
 
   const filterSlot = (
     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -502,7 +512,16 @@ function AttendancePreview({
       endDate={end}
       filterSlot={filterSlot}
       previewCount={previewItems.length}
-      totalCount={items.length}
+      totalCount={total}
+      pagerSlot={
+        <Pager
+          page={page}
+          pageSize={pageSize}
+          total={total}
+          setPage={setPage}
+          setPageSize={setPageSize}
+        />
+      }
       isLoading={list.isLoading}
       isError={list.isError}
       downloadXlsx={() => onDownload("xlsx")}
@@ -530,7 +549,7 @@ function AttendancePreview({
       ) : (
         previewItems.map((it, idx) => (
           <tr key={`${it.employee_id}-${it.date}`}>
-            <td className="text-sm text-dim mono">{idx + 1}</td>
+            <td className="text-sm text-dim mono">{pageStart + idx + 1}</td>
             <td className="mono text-sm">{it.employee_code}</td>
             <td className="text-sm" style={{ fontWeight: 500 }}>
               {it.full_name}
@@ -719,7 +738,6 @@ function EventLogPreview({
   const evts = useEventLog(date, page, pageSize);
   const items = evts.data?.items ?? [];
   const total = evts.data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const rangeEnd = Math.min(total, page * pageSize);
 
@@ -888,91 +906,21 @@ function EventLogPreview({
           gap: 8,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span>
-            {total === 0
-              ? "0 rows"
-              : `${rangeStart}–${rangeEnd} of ${total}`}
-          </span>
-          <label
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              fontSize: 12,
-              color: "var(--text-tertiary)",
-            }}
-          >
-            Page size
-            <select
-              value={pageSize}
-              onChange={(e) => setPageSize(Number(e.target.value))}
-              style={{
-                padding: "3px 6px",
-                fontSize: 12,
-                border: "1px solid var(--border)",
-                borderRadius: "var(--radius-sm)",
-                background: "var(--bg-elev)",
-                color: "var(--text)",
-                outline: "none",
-              }}
-            >
-              <option value={10}>10</option>
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-              <option value={100}>100</option>
-            </select>
-          </label>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <button
-            className="btn btn-sm"
-            onClick={() => setPage(1)}
-            disabled={page <= 1}
-            aria-label="First page"
-          >
-            «
-          </button>
-          <button
-            className="btn btn-sm"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page <= 1}
-            aria-label="Previous page"
-          >
-            ‹ Prev
-          </button>
-          <span
-            className="mono text-xs"
-            style={{ minWidth: 80, textAlign: "center" }}
-          >
-            Page {page} / {totalPages}
-          </span>
-          <button
-            className="btn btn-sm"
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page >= totalPages}
-            aria-label="Next page"
-          >
-            Next ›
-          </button>
-          <button
-            className="btn btn-sm"
-            onClick={() => setPage(totalPages)}
-            disabled={page >= totalPages}
-            aria-label="Last page"
-          >
-            »
-          </button>
-          <button
-            className="btn btn-sm"
-            onClick={onDownload}
-            disabled={downloading !== null}
-            style={{ marginInlineStart: 8 }}
-          >
-            <Icon name="download" size={11} />
-            {downloading === "xlsx" ? "Downloading…" : "Download CSV"}
-          </button>
-        </div>
+        <Pager
+          page={page}
+          pageSize={pageSize}
+          total={total}
+          setPage={setPage}
+          setPageSize={setPageSize}
+        />
+        <button
+          className="btn btn-sm"
+          onClick={onDownload}
+          disabled={downloading !== null}
+        >
+          <Icon name="download" size={11} />
+          {downloading === "xlsx" ? "Downloading…" : "Download CSV"}
+        </button>
       </div>
     </div>
   );
@@ -1289,6 +1237,7 @@ function PreviewCard({
   filterSlot,
   previewCount,
   totalCount,
+  pagerSlot,
   isLoading,
   isError,
   downloadXlsx,
@@ -1311,6 +1260,10 @@ function PreviewCard({
   filterSlot?: ReactNode;
   previewCount: number;
   totalCount: number;
+  /** When provided, replaces the static "N preview rows · …" footer
+   *  text with a paginator + page-size selector. The download buttons
+   *  still render to the right. */
+  pagerSlot?: ReactNode;
   isLoading: boolean;
   isError: boolean;
   downloadXlsx: () => void;
@@ -1420,12 +1373,16 @@ function PreviewCard({
           borderTop: "1px solid var(--border)",
           fontSize: 12.5,
           color: "var(--text-secondary)",
+          flexWrap: "wrap",
+          gap: 8,
         }}
       >
-        <span>
-          {previewCount} preview row{previewCount === 1 ? "" : "s"} · full
-          dataset would be ~{totalCount} rows
-        </span>
+        {pagerSlot ?? (
+          <span>
+            {previewCount} preview row{previewCount === 1 ? "" : "s"} · full
+            dataset would be ~{totalCount} rows
+          </span>
+        )}
         <div style={{ display: "flex", gap: 8 }}>
           {onDownloadPdf && (
             <button
@@ -1448,6 +1405,109 @@ function PreviewCard({
         </div>
       </div>
     </div>
+  );
+}
+
+// Page size options reused by every paginated preview.
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+
+function Pager({
+  page,
+  pageSize,
+  total,
+  setPage,
+  setPageSize,
+}: {
+  page: number;
+  pageSize: number;
+  total: number;
+  setPage: (next: number) => void;
+  setPageSize: (next: number) => void;
+}) {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  // Clamp to a valid range — guards against a frame where ``page``
+  // hasn't been reset yet after the dataset shrank (e.g. date change).
+  const safePage = Math.min(Math.max(page, 1), totalPages);
+  const rangeStart = total === 0 ? 0 : (safePage - 1) * pageSize + 1;
+  const rangeEnd = Math.min(total, safePage * pageSize);
+  return (
+    <>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <span>
+          {total === 0 ? "0 rows" : `${rangeStart}–${rangeEnd} of ${total}`}
+        </span>
+        <label
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 12,
+            color: "var(--text-tertiary)",
+          }}
+        >
+          Page size
+          <select
+            value={pageSize}
+            onChange={(e) => setPageSize(Number(e.target.value))}
+            style={{
+              padding: "3px 6px",
+              fontSize: 12,
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius-sm)",
+              background: "var(--bg-elev)",
+              color: "var(--text)",
+              outline: "none",
+            }}
+          >
+            {PAGE_SIZE_OPTIONS.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <button
+          className="btn btn-sm"
+          onClick={() => setPage(1)}
+          disabled={page <= 1}
+          aria-label="First page"
+        >
+          «
+        </button>
+        <button
+          className="btn btn-sm"
+          onClick={() => setPage(Math.max(1, page - 1))}
+          disabled={page <= 1}
+          aria-label="Previous page"
+        >
+          ‹ Prev
+        </button>
+        <span
+          className="mono text-xs"
+          style={{ minWidth: 80, textAlign: "center" }}
+        >
+          Page {page} / {totalPages}
+        </span>
+        <button
+          className="btn btn-sm"
+          onClick={() => setPage(Math.min(totalPages, page + 1))}
+          disabled={page >= totalPages}
+          aria-label="Next page"
+        >
+          Next ›
+        </button>
+        <button
+          className="btn btn-sm"
+          onClick={() => setPage(totalPages)}
+          disabled={page >= totalPages}
+          aria-label="Last page"
+        >
+          »
+        </button>
+      </div>
+    </>
   );
 }
 
