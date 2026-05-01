@@ -640,66 +640,35 @@ export function HrDashboard() {
         </div>
       </div>
 
-      {/* Arrival distribution + Department leaderboard */}
-      <div
-        className="grid"
-        style={{
-          gridTemplateColumns: "1fr 1fr",
-          gap: 16,
-          marginBottom: 16,
-        }}
-      >
-        <div className="card">
-          <div className="card-head">
-            <div>
-              <h3 className="card-title">Arrival distribution · today</h3>
-              <div className="text-xs text-dim" style={{ marginTop: 2 }}>
-                Check-ins bucketed by hour (local time)
-              </div>
-            </div>
-          </div>
-          <div className="card-body">
-            <BarChart
-              data={arrivalByHour}
-              fill="var(--accent)"
-              colorAt={(_, b) => {
-                const v = b.value;
-                if (v === 0) return "var(--bg-sunken)";
-                const max = Math.max(...arrivalByHour.map((x) => x.value));
-                const intensity = max > 0 ? v / max : 0;
-                if (intensity > 0.66) return "var(--success)";
-                if (intensity > 0.33) return "var(--accent)";
-                return "color-mix(in oklch, var(--accent) 50%, transparent)";
-              }}
-            />
-            <div
-              className="text-xs text-dim"
-              style={{ marginTop: 6, fontFamily: "var(--font-mono)" }}
-            >
-              Hours 06–11 highlighted; counts only rows with a check-in
+      {/* Arrival distribution */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-head">
+          <div>
+            <h3 className="card-title">Arrival distribution · today</h3>
+            <div className="text-xs text-dim" style={{ marginTop: 2 }}>
+              Check-ins bucketed by hour (local time)
             </div>
           </div>
         </div>
-
-        <div className="card">
-          <div className="card-head">
-            <div>
-              <h3 className="card-title">By department · today</h3>
-              <div className="text-xs text-dim" style={{ marginTop: 2 }}>
-                Present / Late / On leave / Absent stack
-              </div>
-            </div>
-          </div>
+        <div className="card-body">
+          <BarChart
+            data={arrivalByHour}
+            fill="var(--accent)"
+            colorAt={(_, b) => {
+              const v = b.value;
+              if (v === 0) return "var(--bg-sunken)";
+              const max = Math.max(...arrivalByHour.map((x) => x.value));
+              const intensity = max > 0 ? v / max : 0;
+              if (intensity > 0.66) return "var(--success)";
+              if (intensity > 0.33) return "var(--accent)";
+              return "color-mix(in oklch, var(--accent) 50%, transparent)";
+            }}
+          />
           <div
-            className="card-body"
-            style={{ display: "flex", flexDirection: "column", gap: 10 }}
+            className="text-xs text-dim"
+            style={{ marginTop: 6, fontFamily: "var(--font-mono)" }}
           >
-            {deptRows.length === 0 && (
-              <div className="text-sm text-dim">No departments configured.</div>
-            )}
-            {deptRows.map((r) => (
-              <DeptStackRow key={r.id} row={r} />
-            ))}
+            Hours 06–11 highlighted; counts only rows with a check-in
           </div>
         </div>
       </div>
@@ -1203,82 +1172,6 @@ function KpiCard({
           {delta}
         </div>
       )}
-    </div>
-  );
-}
-
-interface DeptRow {
-  id: number;
-  code: string;
-  name: string;
-  present: number;
-  late: number;
-  absent: number;
-  onLeave: number;
-  total: number;
-}
-
-function DeptStackRow({ row: r }: { row: DeptRow }) {
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "120px 1fr 60px",
-        gap: 8,
-        alignItems: "center",
-      }}
-    >
-      <div
-        className="text-sm"
-        style={{
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          fontWeight: 500,
-        }}
-        title={r.name}
-      >
-        {r.name}
-      </div>
-      <div
-        style={{
-          display: "flex",
-          height: 14,
-          borderRadius: 4,
-          overflow: "hidden",
-          background: "var(--bg-sunken)",
-          border: "1px solid var(--border)",
-          width: r.total > 0 ? "100%" : 8,
-        }}
-      >
-        {r.present > 0 && (
-          <div
-            title={`Present ${r.present}`}
-            style={{ flex: r.present, background: "var(--success)" }}
-          />
-        )}
-        {r.late > 0 && (
-          <div
-            title={`Late ${r.late}`}
-            style={{ flex: r.late, background: "var(--warning)" }}
-          />
-        )}
-        {r.onLeave > 0 && (
-          <div
-            title={`On leave ${r.onLeave}`}
-            style={{ flex: r.onLeave, background: "var(--info)" }}
-          />
-        )}
-        {r.absent > 0 && (
-          <div
-            title={`Absent ${r.absent}`}
-            style={{ flex: r.absent, background: "var(--danger)" }}
-          />
-        )}
-      </div>
-      <div className="text-xs text-dim mono" style={{ textAlign: "end" }}>
-        {r.total}
-      </div>
     </div>
   );
 }
