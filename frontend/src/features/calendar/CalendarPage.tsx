@@ -6,7 +6,7 @@
 //     Employee auto-locked to themselves).
 // Click any day in either view to open the DayDetailDrawer.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useMe } from "../../auth/AuthProvider";
@@ -32,11 +32,12 @@ export function CalendarPage() {
   const role = me.data ? primaryRole(me.data.roles) : "Employee";
   const isCompanyAllowed = role === "Admin" || role === "HR" || role === "Manager";
 
-  // Default to Per-person view scoped to the logged-in user. Admin/HR/
-  // Manager can still flip to the Company tab; Employee never sees the
-  // tab strip. This puts "my own calendar" in front of every role on
-  // first load, mirroring the My Attendance page's self-view.
-  const [tab, setTab] = useState<Tab>("person");
+  // Admin/HR/Manager land on the Company view (org-wide month
+  // aggregate) so they see the global picture before drilling in.
+  // Employee can't see the Company tab — they stay on Person, locked
+  // to themselves.
+  const [tab, setTab] = useState<Tab>("company");
+  const effectiveTab: Tab = isCompanyAllowed ? tab : "person";
   const [month, setMonth] = useState<string>(currentMonth());
 
   // Per-person picker state. The card-grid component (PersonPickerGrid)
@@ -44,47 +45,48 @@ export function CalendarPage() {
   // *selected* employee id here.
   const [employeeId, setEmployeeId] = useState<number | null>(null);
 
-  // Auto-resolve the logged-in user to themselves for every role —
-  // Admin/HR/Manager get their own calendar pre-loaded; the picker
-  // stays one click away via the "Back to employees" button. The
-  // backend's GET /api/employees/me does the email match server-side
-  // so we don't ship the entire employee list to the client.
+  // Auto-resolve the logged-in user once. The ref flips to true on the
+  // first auto-fill or any explicit "go to picker" gesture (Back
+  // button, Company-view day click), so we never override an operator
+  // who's deliberately landed on the picker grid.
   const myEmployee = useMyEmployee();
+  const autoFilledRef = useRef(false);
   useEffect(() => {
+    if (autoFilledRef.current) return;
     if (employeeId !== null) return;
-    if (myEmployee.data) setEmployeeId(myEmployee.data.id);
-  }, [employeeId, myEmployee.data]);
+    if (!myEmployee.data) return;
+    // Skip auto-fill for roles that default to Company view — the
+    // first action there should drop them on the picker, not their
+    // own calendar.
+    if (isCompanyAllowed) {
+      autoFilledRef.current = true;
+      return;
+    }
+    setEmployeeId(myEmployee.data.id);
+    autoFilledRef.current = true;
+  }, [employeeId, myEmployee.data, isCompanyAllowed]);
 
   const company = useCompanyCalendar(
     month,
-    tab === "company" && isCompanyAllowed,
+    effectiveTab === "company" && isCompanyAllowed,
   );
   const person = usePersonCalendar(
-    tab === "person" ? employeeId : null,
+    effectiveTab === "person" ? employeeId : null,
     month,
   );
 
   const [drawerDate, setDrawerDate] = useState<string | null>(null);
   const [exceptionDate, setExceptionDate] = useState<string | null>(null);
-  const drawerEmployeeId =
-    tab === "person" ? employeeId : drawerEmployeeForCompany();
-
-  // For Company tab: drilling into a date without a fixed employee
-  // doesn't open the per-person drawer — instead we drop the user
-  // into Per-person view scoped to that date for picking. Per the
-  // prompt: company view click → "Per-person view, scoped to that
-  // date". Until they pick an employee the drawer stays closed.
-  function drawerEmployeeForCompany(): number | null {
-    return null;
-  }
+  const drawerEmployeeId = effectiveTab === "person" ? employeeId : null;
 
   const onPickCompanyDate = (iso: string) => {
-    setTab("person");
-    // No automatic drawer open — they pick an employee, then click a
-    // day to drill in. This mirrors the prompt's UX expectation
-    // ("Per-person view, scoped to that date") without forcing a
-    // pre-selection that may not be the operator's first choice.
+    // Drill from Company → Person picker for the same month. Clear
+    // the selected employee and lock auto-fill so the operator lands
+    // on the picker grid, not their own calendar.
     setMonth(iso.slice(0, 7));
+    setEmployeeId(null);
+    autoFilledRef.current = true;
+    setTab("person");
   };
 
   const onPickPersonDay = (iso: string) => {
@@ -93,11 +95,11 @@ export function CalendarPage() {
 
   const exportHref = useMemo(() => {
     const params = new URLSearchParams({ month });
-    if (tab === "person" && employeeId !== null) {
+    if (effectiveTab === "person" && employeeId !== null) {
       params.set("employee_id", String(employeeId));
     }
     return `/api/attendance/calendar/export?${params.toString()}`;
-  }, [month, tab, employeeId]);
+  }, [month, effectiveTab, employeeId]);
 
   return (
     <>
@@ -107,7 +109,7 @@ export function CalendarPage() {
             {t("calendar.title") as string}
           </h1>
           <p className="page-sub">
-            {tab === "company"
+            {effectiveTab === "company"
               ? (t("calendar.companySub") as string)
               : (t("calendar.personSub") as string)}
           </p>
@@ -149,13 +151,13 @@ export function CalendarPage() {
           }}
         >
           <TabButton
-            active={tab === "company"}
+            active={effectiveTab === "company"}
             onClick={() => setTab("company")}
           >
             {t("calendar.tabCompany") as string}
           </TabButton>
           <TabButton
-            active={tab === "person"}
+            active={effectiveTab === "person"}
             onClick={() => setTab("person")}
           >
             {t("calendar.tabPerson") as string}
@@ -166,14 +168,17 @@ export function CalendarPage() {
       {/* Per-person tab now opens with a card grid. Operator picks
           a card → calendar loads. A back-to-list button at the top
           of the calendar card returns to the picker. */}
-      {tab === "person" &&
+      {effectiveTab === "person" &&
         employeeId !== null &&
         role !== "Employee" && (
           <div style={{ marginBottom: 12 }}>
             <button
               type="button"
               className="btn btn-sm"
-              onClick={() => setEmployeeId(null)}
+              onClick={() => {
+                setEmployeeId(null);
+                autoFilledRef.current = true;
+              }}
             >
               <Icon name="chevronLeft" size={11} />
               {t("calendar.backToList", {
@@ -183,7 +188,7 @@ export function CalendarPage() {
           </div>
         )}
 
-      {tab === "company" && isCompanyAllowed && (
+      {effectiveTab === "company" && isCompanyAllowed && (
         <>
           {company.isLoading && (
             <div className="text-sm text-dim">{t("calendar.loading") as string}</div>
@@ -203,7 +208,7 @@ export function CalendarPage() {
         </>
       )}
 
-      {tab === "person" && (
+      {effectiveTab === "person" && (
         <>
           {employeeId === null && role !== "Employee" && (
             <PersonPickerGrid
