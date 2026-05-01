@@ -5,6 +5,8 @@
 import { useTranslation } from "react-i18next";
 import { NavLink } from "react-router-dom";
 
+import { useMe } from "../auth/AuthProvider";
+
 const TABS = [
   { to: "/settings/workspace", key: "workspace" },
   { to: "/settings/branding", key: "branding" },
@@ -21,8 +23,23 @@ const TABS = [
   { to: "/settings/display", key: "display" },
 ] as const;
 
+// HR sees the org-structure tabs only — the rest are operator/admin
+// surfaces (branding, OIDC, email/Graph creds, schedules, ERP, etc.)
+// that should stay behind the Admin role.
+const HR_TABS: ReadonlyArray<(typeof TABS)[number]["key"]> = [
+  "divisions",
+  "departments",
+  "sections",
+];
+
 export function SettingsTabs() {
   const { t } = useTranslation();
+  const me = useMe();
+  const role = me.data?.active_role ?? null;
+  const visibleTabs =
+    role === "Admin"
+      ? TABS
+      : TABS.filter((tab) => HR_TABS.includes(tab.key));
   return (
     <nav
       style={{
@@ -33,7 +50,7 @@ export function SettingsTabs() {
       }}
       aria-label={t("nav.items.settings")}
     >
-      {TABS.map((tab) => (
+      {visibleTabs.map((tab) => (
         <NavLink
           key={tab.to}
           to={tab.to}

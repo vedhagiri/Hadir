@@ -71,6 +71,28 @@ function AdminOnly({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/** Role-aware redirect for the Settings hub: Admin → workspace,
+ *  HR → divisions, anyone else → dashboard. Used by the bare
+ *  ``/settings`` route so HR doesn't get bounced to a tab they
+ *  can't read. */
+function SettingsRedirect() {
+  const me = useMe();
+  if (me.isLoading) return null;
+  const role = me.data?.active_role;
+  if (role === "Admin") return <Navigate to="/settings/workspace" replace />;
+  if (role === "HR") return <Navigate to="/settings/divisions" replace />;
+  return <Navigate to="/dashboard" replace />;
+}
+
+/** Settings tabs that stay Admin-only — branding, OIDC, email
+ *  credentials, schedules, ERP export, notifications config,
+ *  display defaults, custom fields, reason categories, workspace.
+ *  HR navigating to these via direct URL gets bounced back to
+ *  the dashboard. */
+function SettingsAdminOnly({ children }: { children: React.ReactNode }) {
+  return <AdminOnly>{children}</AdminOnly>;
+}
+
 export function App() {
   return (
     <Routes>
@@ -119,20 +141,20 @@ export function App() {
         <Route path="mgr-assign" element={<ManagerAssignmentsPage />} />
         <Route path="policies" element={<PoliciesPage />} />
         <Route path="leave-policy" element={<LeaveCalendarPage />} />
-        <Route path="settings" element={<Navigate to="/settings/workspace" replace />} />
-        <Route path="settings/workspace" element={<WorkspacePage />} />
-        <Route path="settings/branding" element={<BrandingPage />} />
-        <Route path="settings/authentication" element={<AuthenticationPage />} />
+        <Route path="settings" element={<SettingsRedirect />} />
+        <Route path="settings/workspace" element={<SettingsAdminOnly><WorkspacePage /></SettingsAdminOnly>} />
+        <Route path="settings/branding" element={<SettingsAdminOnly><BrandingPage /></SettingsAdminOnly>} />
+        <Route path="settings/authentication" element={<SettingsAdminOnly><AuthenticationPage /></SettingsAdminOnly>} />
         <Route path="settings/departments" element={<DepartmentsPage />} />
         <Route path="settings/divisions" element={<DivisionsPage />} />
         <Route path="settings/sections" element={<SectionsPage />} />
-        <Route path="settings/custom-fields" element={<CustomFieldsPage />} />
-        <Route path="settings/reason-categories" element={<ReasonCategoriesPage />} />
-        <Route path="settings/email" element={<EmailConfigPage />} />
-        <Route path="settings/schedules" element={<SchedulesPage />} />
-        <Route path="settings/erp-export" element={<ErpExportPage />} />
-        <Route path="settings/notifications" element={<NotificationPreferencesPage />} />
-        <Route path="settings/display" element={<DisplaySettingsPage />} />
+        <Route path="settings/custom-fields" element={<SettingsAdminOnly><CustomFieldsPage /></SettingsAdminOnly>} />
+        <Route path="settings/reason-categories" element={<SettingsAdminOnly><ReasonCategoriesPage /></SettingsAdminOnly>} />
+        <Route path="settings/email" element={<SettingsAdminOnly><EmailConfigPage /></SettingsAdminOnly>} />
+        <Route path="settings/schedules" element={<SettingsAdminOnly><SchedulesPage /></SettingsAdminOnly>} />
+        <Route path="settings/erp-export" element={<SettingsAdminOnly><ErpExportPage /></SettingsAdminOnly>} />
+        <Route path="settings/notifications" element={<SettingsAdminOnly><NotificationPreferencesPage /></SettingsAdminOnly>} />
+        <Route path="settings/display" element={<SettingsAdminOnly><DisplaySettingsPage /></SettingsAdminOnly>} />
         <Route path="notifications" element={<NotificationsPage />} />
         <Route path="my-requests" element={<MyRequestsPage />} />
         <Route path="approvals" element={<ApprovalsPage />} />
