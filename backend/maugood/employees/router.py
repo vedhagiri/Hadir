@@ -371,6 +371,65 @@ def _resolve_department_id(
 # --- Endpoints --------------------------------------------------------------
 
 
+@router.get("/my-team", response_model=EmployeeListOut)
+def list_my_team_endpoint(
+    user: Annotated[
+        CurrentUser, Depends(require_role("Manager"))
+    ],
+    q: Annotated[Optional[str], Query(description="Text search")] = None,
+    department_id: Annotated[Optional[int], Query()] = None,
+    include_inactive: Annotated[bool, Query()] = False,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+    sort_by: Annotated[
+        Literal["employee_code", "full_name", "department"],
+        Query(description="Sort key (employee_code | full_name | department)."),
+    ] = "employee_code",
+    sort_dir: Annotated[
+        Literal["asc", "desc"], Query(description="Sort direction.")
+    ] = "asc",
+) -> EmployeeListOut:
+    """Manager-scoped employee list.
+
+    Returns the same shape as ``GET /api/employees`` but narrowed to
+    the manager's visible-set per P8 (union of
+    ``manager_assignments`` + ``user_departments``). Empty set yields
+    zero rows; the endpoint never 403s even on a manager with no
+    assignments — the frontend renders a "No team members" empty
+    state.
+    """
+
+    from maugood.manager_assignments.repository import (  # noqa: PLC0415
+        get_manager_visible_employee_ids,
+    )
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    with get_engine().begin() as conn:
+        visible = frozenset(
+            get_manager_visible_employee_ids(
+                conn, scope, manager_user_id=user.id
+            )
+        )
+        rows, total = repo.list_employees(
+            conn,
+            scope,
+            q=q,
+            department_id=department_id,
+            include_inactive=include_inactive,
+            page=page,
+            page_size=page_size,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+            restrict_to_ids=visible,
+        )
+    return EmployeeListOut(
+        items=[_row_to_out(r) for r in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
 @router.get("", response_model=EmployeeListOut)
 def list_employees_endpoint(
     user: Annotated[CurrentUser, ADMIN_OR_HR],

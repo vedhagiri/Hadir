@@ -35,6 +35,7 @@ import { CameraLogsPage } from "./features/camera-logs/CameraLogsPage";
 import { CamerasPage } from "./features/cameras/CamerasPage";
 import { DashboardRouter } from "./features/dashboard/DashboardRouter";
 import { EmployeesPage } from "./features/employees/EmployeesPage";
+import { MyTeamPage } from "./features/employees/MyTeamPage";
 import { CalendarPage } from "./features/calendar/CalendarPage";
 import { WorkersPage } from "./features/operations/WorkersPage";
 import { EmployeeReportPage } from "./features/reports/EmployeeReportPage";
@@ -158,12 +159,14 @@ export function App() {
         <Route path="notifications" element={<NotificationsPage />} />
         <Route path="my-requests" element={<MyRequestsPage />} />
         <Route path="approvals" element={<ApprovalsPage />} />
+        <Route path="my-team" element={<MyTeamPage />} />
         <Route path="pipeline" element={<PipelinePage />} />
         <Route path="api-docs" element={<AdminOnly><ApiDocsPage /></AdminOnly>} />
         {ALL_PAGE_IDS.filter(
           (id) =>
             id !== "dashboard" &&
             id !== "employees" &&
+            id !== "my-team" &&
             id !== "cameras" &&
             id !== "camera-logs" &&
             id !== "live" &&

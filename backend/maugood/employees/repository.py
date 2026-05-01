@@ -257,22 +257,33 @@ def list_employees(
     page_size: int = 50,
     sort_by: str = "employee_code",
     sort_dir: str = "asc",
+    restrict_to_ids: Optional[frozenset[int]] = None,
 ) -> tuple[list[EmployeeRow], int]:
     """Return a page of employees and the total count matching the filters.
 
     ``sort_by`` accepts ``employee_code`` | ``full_name`` |
     ``department``. Anything else falls back to ``employee_code``.
     ``sort_dir`` is ``asc`` or ``desc``; anything else is ``asc``.
+
+    ``restrict_to_ids`` (when not None) narrows the query to the
+    given set of employee ids — used by the Manager "My Team"
+    endpoint to scope to the manager's visible-set. An empty set
+    short-circuits to zero rows without querying.
     """
 
     page = max(1, page)
     page_size = max(1, min(page_size, 200))
+
+    if restrict_to_ids is not None and len(restrict_to_ids) == 0:
+        return [], 0
 
     base = _employee_select(scope)
     if not include_inactive:
         base = base.where(employees.c.status == "active")
     if department_id is not None:
         base = base.where(employees.c.department_id == department_id)
+    if restrict_to_ids is not None:
+        base = base.where(employees.c.id.in_(restrict_to_ids))
     if q:
         needle = f"%{q.strip().lower()}%"
         base = base.where(
