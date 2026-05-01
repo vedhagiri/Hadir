@@ -17,6 +17,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { ApiError } from "../api/client";
+import { DatePicker } from "../components/DatePicker";
 import { DrawerShell } from "../components/DrawerShell";
 import { Icon } from "../shell/Icon";
 import { toast } from "../shell/Toaster";
@@ -983,12 +984,11 @@ function PolicyForm({
           </select>
         </FormField>
         <FormField label="Active from">
-          <input
-            type="date"
+          <DatePicker
             value={activeFrom}
-            onChange={(e) => setActiveFrom(e.target.value)}
-            required
-            style={inputStyle}
+            onChange={setActiveFrom}
+            ariaLabel="Active from"
+            triggerStyle={{ width: "100%" }}
           />
         </FormField>
       </div>
@@ -1003,21 +1003,20 @@ function PolicyForm({
           }}
         >
           <FormField label="Range start">
-            <input
-              type="date"
+            <DatePicker
               value={rangeStart}
-              onChange={(e) => setRangeStart(e.target.value)}
-              required
-              style={inputStyle}
+              onChange={setRangeStart}
+              ariaLabel="Range start"
+              triggerStyle={{ width: "100%" }}
             />
           </FormField>
           <FormField label="Range end">
-            <input
-              type="date"
+            <DatePicker
               value={rangeEnd}
-              onChange={(e) => setRangeEnd(e.target.value)}
-              required
-              style={inputStyle}
+              onChange={setRangeEnd}
+              min={rangeStart}
+              ariaLabel="Range end"
+              triggerStyle={{ width: "100%" }}
             />
           </FormField>
           {type === "Custom" && (

@@ -8,6 +8,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import { DatePicker } from "../components/DatePicker";
 import {
   useCustomFields,
   useEmployeeCustomFieldValues,
@@ -196,11 +197,10 @@ function ValueInput({ type, options, value, onChange }: ValueInputProps) {
   }
   if (type === "date") {
     return (
-      <input
-        type="date"
-        className="input"
+      <DatePicker
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={onChange}
+        triggerStyle={{ width: "100%" }}
       />
     );
   }

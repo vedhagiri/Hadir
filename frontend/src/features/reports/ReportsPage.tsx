@@ -18,6 +18,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
 import { api } from "../../api/client";
+import { DatePicker } from "../../components/DatePicker";
 import { PdfOptionsModal } from "../../components/PdfOptionsModal";
 import { Icon, type IconName } from "../../shell/Icon";
 import { useAttendance } from "../attendance/hooks";
@@ -56,6 +57,49 @@ function todayIso(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
+
+// ---------------------------------------------------------------------------
+// Date preset helpers
+// ---------------------------------------------------------------------------
+
+type PresetKey = "today" | "this-week" | "last-3" | "last-7" | "custom";
+
+function isoDate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function presetRange(preset: Exclude<PresetKey, "custom">): { start: string; end: string } {
+  const today = new Date();
+  switch (preset) {
+    case "today":
+      return { start: isoDate(today), end: isoDate(today) };
+    case "this-week": {
+      const day = today.getDay(); // 0=Sun
+      const diff = day === 0 ? -6 : 1 - day;
+      const mon = new Date(today);
+      mon.setDate(today.getDate() + diff);
+      return { start: isoDate(mon), end: isoDate(today) };
+    }
+    case "last-3": {
+      const d = new Date(today);
+      d.setDate(today.getDate() - 2);
+      return { start: isoDate(d), end: isoDate(today) };
+    }
+    case "last-7": {
+      const d = new Date(today);
+      d.setDate(today.getDate() - 6);
+      return { start: isoDate(d), end: isoDate(today) };
+    }
+  }
+}
+
+const PRESET_LABELS: { key: PresetKey; label: string }[] = [
+  { key: "today", label: "Today" },
+  { key: "this-week", label: "This week" },
+  { key: "last-3", label: "Last 3 days" },
+  { key: "last-7", label: "Last 7 days" },
+  { key: "custom", label: "Custom range" },
+];
 
 function shortTime(iso: string | null): string {
   if (!iso) return "—";
@@ -382,12 +426,71 @@ function AttendancePreview({
   downloading: "xlsx" | "pdf" | null;
   onDownload: (format: "xlsx" | "pdf") => Promise<void>;
 }) {
-  // Live preview: a sample of the start day. The full range goes
-  // into the downloaded report — sampling every day client-side for
-  // a long range would mean N round-trips.
+  const [preset, setPreset] = useState<PresetKey>("today");
+
+  // Sync start/end whenever a preset (non-custom) is chosen.
+  useEffect(() => {
+    if (preset === "custom") return;
+    const { start: s, end: e } = presetRange(preset);
+    setStart(s);
+    setEnd(e);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preset]);
+
+  // Live preview samples the start day only — fetching every day in a
+  // range client-side would mean N round-trips.
   const list = useAttendance(start, null);
   const items = list.data?.items ?? [];
   const previewItems = items.slice(0, 8);
+
+  const filterSlot = (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+      {/* Preset quick-pick */}
+      <div className="seg" role="group" aria-label="Date range preset">
+        {PRESET_LABELS.map(({ key, label }) => (
+          <button
+            key={key}
+            type="button"
+            className={`seg-btn${preset === key ? " active" : ""}`}
+            onClick={() => setPreset(key)}
+            aria-pressed={preset === key}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {/* Custom date pickers — only shown when Custom is active */}
+      {preset === "custom" && (
+        <>
+          <DatePicker
+            value={start}
+            onChange={(next) => {
+              setStart(next);
+              if (end < next) setEnd(next);
+            }}
+            max={todayIso()}
+            ariaLabel="From date"
+          />
+          <span
+            style={{
+              fontSize: 12,
+              color: "var(--text-tertiary)",
+              fontFamily: "var(--font-mono)",
+            }}
+          >
+            →
+          </span>
+          <DatePicker
+            value={end}
+            onChange={setEnd}
+            min={start}
+            max={todayIso()}
+            ariaLabel="To date"
+          />
+        </>
+      )}
+    </div>
+  );
 
   return (
     <PreviewCard
@@ -395,7 +498,7 @@ function AttendancePreview({
       date={start}
       setDate={setStart}
       endDate={end}
-      setEndDate={setEnd}
+      filterSlot={filterSlot}
       previewCount={previewItems.length}
       totalCount={items.length}
       isLoading={list.isLoading}
@@ -454,7 +557,20 @@ function DailyStatusPill({ item }: { item: AttendanceItem }) {
   if (item.absent && item.leave_type_id !== null) {
     return <span className="pill pill-info">On leave</span>;
   }
-  if (item.absent) {
+  if (item.is_holiday && !item.in_time) {
+    return (
+      <span className="pill pill-info">
+        Holiday{item.holiday_name ? ` — ${item.holiday_name}` : ""}
+      </span>
+    );
+  }
+  if (item.is_weekend && !item.in_time) {
+    return <span className="pill pill-neutral">Weekend</span>;
+  }
+  if (item.pending) {
+    return <span className="pill pill-info">Waiting for login</span>;
+  }
+  if (!item.in_time) {
     return <span className="pill pill-danger">Absent</span>;
   }
   if (item.late) {
@@ -629,20 +745,11 @@ function EventLogPreview({
             <Icon name="filter" size={11} />
             Filters
           </button>
-          <input
-            type="date"
+          <DatePicker
             value={date}
-            onChange={(e) => setDate(e.target.value)}
-            style={{
-              padding: "5px 9px",
-              fontSize: 12.5,
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius-sm)",
-              background: "var(--bg-elev)",
-              color: "var(--text)",
-              fontFamily: "var(--font-sans)",
-              outline: "none",
-            }}
+            onChange={setDate}
+            max={todayIso()}
+            ariaLabel="Event log date"
           />
           <button
             className="btn btn-primary btn-sm"
@@ -1181,6 +1288,7 @@ function PreviewCard({
   setDate,
   endDate,
   setEndDate,
+  filterSlot,
   previewCount,
   totalCount,
   isLoading,
@@ -1196,11 +1304,13 @@ function PreviewCard({
   title: string;
   date: string;
   setDate: (d: string) => void;
-  /** Optional — when present, a second date input renders next to
-   *  the first and the card displays "{start} → {end}" in its
-   *  caption. Leave undefined for single-day reports. */
+  /** When present the subtitle shows "{start} → {end}". */
   endDate?: string;
+  /** When present together with endDate, a second date input renders. */
   setEndDate?: (d: string) => void;
+  /** When provided, replaces the built-in date inputs in the card header.
+   *  The Run & download button still renders after it. */
+  filterSlot?: ReactNode;
   previewCount: number;
   totalCount: number;
   isLoading: boolean;
@@ -1214,62 +1324,60 @@ function PreviewCard({
   children: ReactNode;
 }) {
   const hasRange = endDate !== undefined && setEndDate !== undefined;
-  const dateInputStyle: React.CSSProperties = {
-    padding: "5px 9px",
-    fontSize: 12.5,
-    border: "1px solid var(--border)",
-    borderRadius: "var(--radius-sm)",
-    background: "var(--bg-elev)",
-    color: "var(--text)",
-    fontFamily: "var(--font-sans)",
-    outline: "none",
-  };
+
+  // Subtitle shows range whenever endDate is supplied, regardless of
+  // whether the built-in date inputs or a filterSlot owns the controls.
+  const subtitle =
+    endDate !== undefined
+      ? `Preview of ${date} · range ${date} → ${endDate}`
+      : `Preview · date ${date}`;
+
   return (
     <div className="card">
       <div className="card-head">
         <div>
           <h3 className="card-title">Preview · {title}</h3>
           <div className="text-xs text-dim" style={{ marginTop: 2 }}>
-            {hasRange
-              ? `Sample showing first ${previewCount} row${previewCount === 1 ? "" : "s"} of ${date} · range ${date} → ${endDate}`
-              : `Sample showing first ${previewCount} row${previewCount === 1 ? "" : "s"} · date ${date}`}
+            {subtitle}
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <button
-            className="btn btn-sm"
-            disabled
-            title="Filter drawer arrives in a follow-up"
-          >
-            <Icon name="filter" size={11} />
-            Filters
-          </button>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            aria-label={hasRange ? "Start date" : "Date"}
-            style={dateInputStyle}
-          />
-          {hasRange && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {filterSlot ?? (
             <>
-              <span
-                style={{
-                  fontSize: 12,
-                  color: "var(--text-tertiary)",
-                  fontFamily: "var(--font-mono)",
-                }}
+              <button
+                className="btn btn-sm"
+                disabled
+                title="Filter drawer arrives in a follow-up"
               >
-                →
-              </span>
-              <input
-                type="date"
-                value={endDate}
-                min={date}
-                onChange={(e) => setEndDate(e.target.value)}
-                aria-label="End date"
-                style={dateInputStyle}
+                <Icon name="filter" size={11} />
+                Filters
+              </button>
+              <DatePicker
+                value={date}
+                onChange={setDate}
+                max={todayIso()}
+                ariaLabel={hasRange ? "Start date" : "Date"}
               />
+              {hasRange && (
+                <>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: "var(--text-tertiary)",
+                      fontFamily: "var(--font-mono)",
+                    }}
+                  >
+                    →
+                  </span>
+                  <DatePicker
+                    value={endDate}
+                    onChange={setEndDate!}
+                    min={date}
+                    max={todayIso()}
+                    ariaLabel="End date"
+                  />
+                </>
+              )}
             </>
           )}
           <button

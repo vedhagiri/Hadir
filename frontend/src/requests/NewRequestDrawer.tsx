@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { ApiError } from "../api/client";
+import { DatePicker } from "../components/DatePicker";
 import { DrawerShell } from "../components/DrawerShell";
 import { useLeaveTypes } from "../leave-calendar/hooks";
 import { Icon } from "../shell/Icon";
@@ -234,18 +235,19 @@ export function NewRequestDrawer({
                 marginBottom: 12,
               }}
             >
-              <input
-                type="date"
-                className="input"
+              <DatePicker
                 value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
+                onChange={setStartDate}
+                ariaLabel={type === "exception" ? "Target date" : "Start date"}
+                triggerStyle={{ width: "100%" }}
               />
               {type === "leave" && (
-                <input
-                  type="date"
-                  className="input"
+                <DatePicker
                   value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
+                  onChange={setEndDate}
+                  min={startDate}
+                  ariaLabel="End date"
+                  triggerStyle={{ width: "100%" }}
                 />
               )}
             </div>

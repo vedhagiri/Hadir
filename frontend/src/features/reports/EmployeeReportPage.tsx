@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "../../api/client";
+import { DatePicker } from "../../components/DatePicker";
 import { PdfOptionsModal } from "../../components/PdfOptionsModal";
 import { Icon } from "../../shell/Icon";
 import { useEmployeeList, useEmployeeDetail } from "../employees/hooks";
@@ -353,17 +354,18 @@ export function EmployeeReportPage() {
           >
             Range
           </span>
-          <input
-            type="date"
+          <DatePicker
             value={start}
-            onChange={(e) => setStart(e.target.value)}
-            style={inputStyle}
+            onChange={setStart}
+            max={todayIso()}
+            ariaLabel="Start date"
           />
-          <input
-            type="date"
+          <DatePicker
             value={end}
-            onChange={(e) => setEnd(e.target.value)}
-            style={inputStyle}
+            onChange={setEnd}
+            min={start}
+            max={todayIso()}
+            ariaLabel="End date"
           />
           <div className="seg" role="tablist" aria-label="Quick range">
             <button

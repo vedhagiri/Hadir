@@ -17,6 +17,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { DatePicker, todayIso } from "../../components/DatePicker";
 import { DrawerShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
 import { useDayDetail } from "../calendar/hooks";
@@ -425,20 +426,12 @@ function EventsTab({ employeeId }: { employeeId: number }) {
         >
           {t("employees.events.dateLabel") as string}
         </label>
-        <input
-          type="date"
+        <DatePicker
           value={date}
           disabled={allDates}
-          onChange={(e) => setDate(e.target.value || todayLocalIso())}
-          style={{
-            padding: "5px 8px",
-            fontSize: 12.5,
-            border: "1px solid var(--border)",
-            borderRadius: "var(--radius-sm)",
-            background: allDates ? "var(--bg-sunken)" : "var(--bg-elev)",
-            color: "var(--text)",
-            opacity: allDates ? 0.6 : 1,
-          }}
+          onChange={(next) => setDate(next || todayLocalIso())}
+          max={todayIso()}
+          ariaLabel={t("employees.events.dateLabel") as string}
         />
         <label
           style={{
@@ -628,18 +621,11 @@ function AttendanceTab({ employeeId }: { employeeId: number }) {
         >
           {t("employees.events.dateLabel") as string}
         </label>
-        <input
-          type="date"
+        <DatePicker
           value={date}
-          onChange={(e) => setDate(e.target.value || todayLocalIso())}
-          style={{
-            padding: "5px 8px",
-            fontSize: 12.5,
-            border: "1px solid var(--border)",
-            borderRadius: "var(--radius-sm)",
-            background: "var(--bg-elev)",
-            color: "var(--text)",
-          }}
+          onChange={(next) => setDate(next || todayLocalIso())}
+          max={todayIso()}
+          ariaLabel={t("employees.events.dateLabel") as string}
         />
         <button
           type="button"

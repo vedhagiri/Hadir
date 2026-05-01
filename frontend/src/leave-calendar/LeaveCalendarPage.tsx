@@ -13,6 +13,7 @@
 import { useState } from "react";
 
 import { ApiError } from "../api/client";
+import { DatePicker } from "../components/DatePicker";
 import {
   useApprovedLeaves,
   useCreateApprovedLeave,
@@ -355,12 +356,11 @@ function HolidaysTab() {
       <form onSubmit={onAdd} style={formStyle}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr 1fr", gap: 10 }}>
           <Field label="Date">
-            <input
-              type="date"
+            <DatePicker
               value={date}
-              onChange={(e) => setDate(e.target.value)}
-              required
-              style={inputStyle}
+              onChange={setDate}
+              ariaLabel="Holiday date"
+              triggerStyle={{ width: "100%" }}
             />
           </Field>
           <Field label="Name">
@@ -542,21 +542,20 @@ function ApprovedLeavesTab() {
               </select>
             </Field>
             <Field label="Start">
-              <input
-                type="date"
+              <DatePicker
                 value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                required
-                style={inputStyle}
+                onChange={setStartDate}
+                ariaLabel="Start date"
+                triggerStyle={{ width: "100%" }}
               />
             </Field>
             <Field label="End">
-              <input
-                type="date"
+              <DatePicker
                 value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                required
-                style={inputStyle}
+                onChange={setEndDate}
+                min={startDate}
+                ariaLabel="End date"
+                triggerStyle={{ width: "100%" }}
               />
             </Field>
           </div>

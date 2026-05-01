@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 
 import { api } from "../../api/client";
+import { DatePicker, todayIso } from "../../components/DatePicker";
 import { Icon } from "../../shell/Icon";
 
 interface Sighting {
@@ -91,22 +92,23 @@ export function FormerEmployeesSeenReport() {
             {data.data ? ` · ${data.data.total}` : ""}
           </h3>
           <div className="flex gap-2" style={{ alignItems: "center" }}>
-            <label className="text-xs text-dim">
+            <label className="text-xs text-dim" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               {t("formerEmployees.from") as string}
-              <input
-                type="date"
+              <DatePicker
                 value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
-                style={selectStyle}
+                onChange={setFromDate}
+                max={todayIso()}
+                ariaLabel={t("formerEmployees.from") as string}
               />
             </label>
-            <label className="text-xs text-dim">
+            <label className="text-xs text-dim" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               {t("formerEmployees.to") as string}
-              <input
-                type="date"
+              <DatePicker
                 value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
-                style={selectStyle}
+                onChange={setToDate}
+                min={fromDate}
+                max={todayIso()}
+                ariaLabel={t("formerEmployees.to") as string}
               />
             </label>
           </div>
@@ -182,12 +184,3 @@ export function FormerEmployeesSeenReport() {
   );
 }
 
-const selectStyle = {
-  padding: "4px 8px",
-  marginInlineStart: 6,
-  fontSize: 12.5,
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius-sm)",
-  background: "var(--bg-elev)",
-  color: "var(--text)",
-} as const;

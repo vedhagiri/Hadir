@@ -11,6 +11,7 @@
 import { useMemo, useState } from "react";
 
 import { useMe } from "../../auth/AuthProvider";
+import { DatePicker, todayIso } from "../../components/DatePicker";
 import { PdfOptionsModal } from "../../components/PdfOptionsModal";
 import { primaryRole } from "../../types";
 import { useDepartments } from "../departments/hooks";
@@ -20,14 +21,6 @@ import { useAttendance, useRegenerateAttendance } from "./hooks";
 import type { AttendanceItem } from "./types";
 
 type ScopeMode = "company" | "department" | "team" | "individual";
-
-function todayIso(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${dd}`;
-}
 
 export function DailyAttendancePage() {
   const me = useMe();
@@ -238,11 +231,11 @@ export function DailyAttendancePage() {
           >
             Date
           </span>
-          <input
-            type="date"
+          <DatePicker
             value={date}
-            onChange={(e) => setDate(e.target.value)}
-            style={selectStyle}
+            onChange={setDate}
+            max={todayIso()}
+            ariaLabel="Attendance date"
           />
         </div>
 

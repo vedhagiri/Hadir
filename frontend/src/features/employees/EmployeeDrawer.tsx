@@ -26,6 +26,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ApiError, api } from "../../api/client";
 import { useMe } from "../../auth/AuthProvider";
 import { primaryRole } from "../../types";
+import { DatePicker } from "../../components/DatePicker";
 import { DrawerShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
 import { toast } from "../../shell/Toaster";
@@ -1359,25 +1360,37 @@ function Field({
         {label}
         {required ? " *" : ""}
       </label>
-      <input
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        disabled={disabled}
-        maxLength={maxLength}
-        className={mono ? "mono" : ""}
-        style={{
-          width: "100%",
-          marginTop: 4,
-          padding: "6px 8px",
-          fontSize: 13,
-          border: "1px solid var(--border)",
-          borderRadius: "var(--radius-sm)",
-          background: disabled ? "var(--bg-sunken)" : "var(--bg-elev)",
-          color: disabled ? "var(--text-tertiary)" : "var(--text)",
-          fontFamily: mono ? "var(--font-mono)" : undefined,
-        }}
-      />
+      {type === "date" ? (
+        <div style={{ marginTop: 4 }}>
+          <DatePicker
+            value={value}
+            onChange={onChange}
+            disabled={disabled ?? false}
+            ariaLabel={label}
+            triggerStyle={{ width: "100%" }}
+          />
+        </div>
+      ) : (
+        <input
+          type={type}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={disabled}
+          maxLength={maxLength}
+          className={mono ? "mono" : ""}
+          style={{
+            width: "100%",
+            marginTop: 4,
+            padding: "6px 8px",
+            fontSize: 13,
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-sm)",
+            background: disabled ? "var(--bg-sunken)" : "var(--bg-elev)",
+            color: disabled ? "var(--text-tertiary)" : "var(--text)",
+            fontFamily: mono ? "var(--font-mono)" : undefined,
+          }}
+        />
+      )}
     </div>
   );
 }
