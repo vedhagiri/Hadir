@@ -66,7 +66,6 @@ export const NAV: Record<Role, NavItem[]> = {
     { id: "settings", label: "Settings", icon: "settings" },
     { section: "Help" },
     { id: "pipeline", label: "How it works", icon: "sparkles" },
-    { id: "api-docs", label: "API Reference", icon: "fileText" },
     { section: "Personal" },
     { id: "my-attendance", label: "My Attendance", icon: "calendar" },
   ],
