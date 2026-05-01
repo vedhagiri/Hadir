@@ -593,47 +593,36 @@ export function HrDashboard() {
           <div
             className="card-body"
             style={{
-              display: "flex",
+              display: "grid",
+              gridTemplateColumns: "auto 1fr",
               alignItems: "center",
-              gap: 14,
-              flexWrap: "wrap",
+              justifyContent: "center",
+              columnGap: 16,
             }}
           >
-            <Donut
-              slices={statusSlices}
-              centerValue={String(todaySummary?.working ?? 0)}
-              centerLabel="working"
-            />
+            <div style={{ display: "grid", placeItems: "center" }}>
+              <Donut
+                slices={statusSlices}
+                centerValue={String(todaySummary?.working ?? 0)}
+                centerLabel="working"
+              />
+            </div>
             <div
               style={{
-                flex: 1,
-                minWidth: 130,
                 display: "flex",
                 flexDirection: "column",
-                gap: 6,
+                gap: 8,
+                fontSize: 12.5,
+                minWidth: 0,
               }}
             >
               {statusSlices.map((s) => (
-                <div
+                <Counter
                   key={s.label}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    fontSize: 12.5,
-                  }}
-                >
-                  <span
-                    style={{
-                      width: 10,
-                      height: 10,
-                      borderRadius: 3,
-                      background: s.color,
-                    }}
-                  />
-                  <span style={{ flex: 1 }}>{s.label}</span>
-                  <span className="mono text-dim">{s.value}</span>
-                </div>
+                  color={s.color}
+                  label={s.label}
+                  value={s.value}
+                />
               ))}
             </div>
           </div>
@@ -800,33 +789,37 @@ export function HrDashboard() {
             style={{
               display: "grid",
               gridTemplateColumns: "auto 1fr",
-              gap: 16,
+              columnGap: 16,
               alignItems: "center",
+              justifyContent: "center",
             }}
           >
-            <Donut
-              slices={[
-                {
-                  label: "With manager",
-                  value: pendingByStage.manager,
-                  color: "var(--accent)",
-                },
-                {
-                  label: "With HR",
-                  value: pendingByStage.hr,
-                  color: "var(--warning)",
-                },
-              ]}
-              size={130}
-              centerValue={String(pendingByStage.total)}
-              centerLabel="pending"
-            />
+            <div style={{ display: "grid", placeItems: "center" }}>
+              <Donut
+                slices={[
+                  {
+                    label: "With manager",
+                    value: pendingByStage.manager,
+                    color: "var(--accent)",
+                  },
+                  {
+                    label: "With HR",
+                    value: pendingByStage.hr,
+                    color: "var(--warning)",
+                  },
+                ]}
+                size={130}
+                centerValue={String(pendingByStage.total)}
+                centerLabel="pending"
+              />
+            </div>
             <div
               style={{
                 display: "flex",
                 flexDirection: "column",
                 gap: 8,
                 fontSize: 12.5,
+                minWidth: 0,
               }}
             >
               <Counter
@@ -864,7 +857,10 @@ export function HrDashboard() {
             </div>
           </div>
           {pendingPreview.length > 0 && (
-            <table className="table" style={{ marginTop: 8 }}>
+            <table
+              className="table"
+              style={{ borderTop: "1px solid var(--border)" }}
+            >
               <thead>
                 <tr>
                   <th>EMPLOYEE</th>
@@ -929,45 +925,49 @@ export function HrDashboard() {
             style={{
               display: "grid",
               gridTemplateColumns: "auto 1fr",
-              gap: 14,
+              columnGap: 16,
               alignItems: "center",
+              justifyContent: "center",
             }}
           >
-            <Donut
-              slices={[
-                {
-                  label: "Fixed",
-                  value: policyMix.Fixed ?? 0,
-                  color: "var(--accent)",
-                },
-                {
-                  label: "Flex",
-                  value: policyMix.Flex ?? 0,
-                  color: "var(--info)",
-                },
-                {
-                  label: "Ramadan",
-                  value: policyMix.Ramadan ?? 0,
-                  color: "var(--warning)",
-                },
-                {
-                  label: "Custom",
-                  value: policyMix.Custom ?? 0,
-                  color: "var(--success)",
-                },
-              ]}
-              size={130}
-              centerValue={String(
-                Object.values(policyMix).reduce((a, b) => a + b, 0),
-              )}
-              centerLabel="policies"
-            />
+            <div style={{ display: "grid", placeItems: "center" }}>
+              <Donut
+                slices={[
+                  {
+                    label: "Fixed",
+                    value: policyMix.Fixed,
+                    color: "var(--accent)",
+                  },
+                  {
+                    label: "Flex",
+                    value: policyMix.Flex,
+                    color: "var(--info)",
+                  },
+                  {
+                    label: "Ramadan",
+                    value: policyMix.Ramadan,
+                    color: "var(--warning)",
+                  },
+                  {
+                    label: "Custom",
+                    value: policyMix.Custom,
+                    color: "var(--success)",
+                  },
+                ]}
+                size={130}
+                centerValue={String(
+                  Object.values(policyMix).reduce((a, b) => a + b, 0),
+                )}
+                centerLabel="policies"
+              />
+            </div>
             <div
               style={{
                 display: "flex",
                 flexDirection: "column",
-                gap: 6,
+                gap: 8,
                 fontSize: 12.5,
+                minWidth: 0,
               }}
             >
               <Counter
