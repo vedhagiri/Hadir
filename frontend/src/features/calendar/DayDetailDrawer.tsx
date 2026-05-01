@@ -2,11 +2,13 @@
 // applied, day timeline ribbon, evidence crops, and a "Submit
 // exception" CTA the request flow (P14) plugs into.
 
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { DrawerShell } from "../../components/DrawerShell";
 
+import { DrawerShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
 import { useDayDetail } from "./hooks";
+import type { EvidenceCrop } from "./types";
 
 interface Props {
   employeeId: number;
@@ -178,35 +180,7 @@ export function DayDetailDrawer({
                     }}
                   >
                     {detail.data.evidence.map((e) => (
-                      <div
-                        key={e.detection_event_id}
-                        style={{
-                          border: "1px solid var(--border)",
-                          borderRadius: 8,
-                          overflow: "hidden",
-                          background: "var(--bg-sunken)",
-                        }}
-                      >
-                        <img
-                          src={e.crop_url}
-                          alt={`${e.captured_at} ${e.camera_code}`}
-                          loading="lazy"
-                          style={{
-                            display: "block",
-                            width: "100%",
-                            aspectRatio: "1 / 1",
-                            objectFit: "cover",
-                          }}
-                        />
-                        <div style={{ padding: "4px 6px" }}>
-                          <div className="mono text-xs">
-                            {e.captured_at.slice(0, 5)}
-                          </div>
-                          <div className="text-xs text-dim">
-                            {e.camera_code}
-                          </div>
-                        </div>
-                      </div>
+                      <EvidenceTile key={e.detection_event_id} item={e} />
                     ))}
                   </div>
                 )}
@@ -244,6 +218,80 @@ export function DayDetailDrawer({
         </div>
       </div>
     </DrawerShell>
+  );
+}
+
+function EvidenceTile({ item }: { item: EvidenceCrop }) {
+  const { t } = useTranslation();
+  // Three-state image: loading → loaded → broken. Falls back to a
+  // styled placeholder when the crop is missing (404 orphan), the
+  // file is gone (410), or decrypt fails (500). Keeps the rest of
+  // the drawer readable without a browser-default broken icon.
+  const [status, setStatus] = useState<"loading" | "loaded" | "broken">(
+    "loading",
+  );
+  return (
+    <div
+      style={{
+        border: "1px solid var(--border)",
+        borderRadius: 8,
+        overflow: "hidden",
+        background: "var(--bg-sunken)",
+      }}
+    >
+      <div
+        style={{
+          position: "relative",
+          width: "100%",
+          aspectRatio: "1 / 1",
+          background: "var(--bg-sunken)",
+        }}
+      >
+        {status !== "broken" && (
+          <img
+            src={item.crop_url}
+            alt={`${item.captured_at} ${item.camera_code}`}
+            loading="lazy"
+            onLoad={() => setStatus("loaded")}
+            onError={() => setStatus("broken")}
+            style={{
+              display: "block",
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              opacity: status === "loaded" ? 1 : 0,
+              transition: "opacity 120ms ease",
+            }}
+          />
+        )}
+        {status === "broken" && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "grid",
+              placeItems: "center",
+              color: "var(--text-tertiary)",
+              fontSize: 10.5,
+              textAlign: "center",
+              padding: 6,
+              gap: 4,
+            }}
+          >
+            <Icon name="info" size={16} />
+            <span>
+              {t("calendar.evidenceUnavailable", {
+                defaultValue: "Crop unavailable",
+              }) as string}
+            </span>
+          </div>
+        )}
+      </div>
+      <div style={{ padding: "4px 6px" }}>
+        <div className="mono text-xs">{item.captured_at.slice(0, 5)}</div>
+        <div className="text-xs text-dim">{item.camera_code}</div>
+      </div>
+    </div>
   );
 }
 

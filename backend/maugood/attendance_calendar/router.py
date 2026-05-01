@@ -24,8 +24,9 @@ from dataclasses import asdict
 from datetime import date as date_type, datetime, timezone
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
+from pathlib import Path
 from pydantic import BaseModel
 from sqlalchemy import and_, func, select
 
@@ -33,7 +34,8 @@ from maugood.attendance.repository import load_tenant_settings, local_tz_for
 from maugood.attendance_calendar import queries
 from maugood.auth.audit import write_audit
 from maugood.auth.dependencies import CurrentUser, current_user
-from maugood.db import employees, get_engine
+from maugood.db import detection_events, employees, get_engine
+from maugood.employees.photos import decrypt_bytes
 from maugood.manager_assignments.repository import (
     get_manager_visible_employee_ids,
 )
@@ -358,6 +360,85 @@ def get_day_detail(
         holiday_name=detail.holiday_name,
         leave_name=detail.leave_name,
     )
+
+
+@router.get(
+    "/evidence/{employee_id}/{event_id}/crop",
+    responses={200: {"content": {"image/jpeg": {}}}},
+)
+def get_evidence_crop(
+    employee_id: int,
+    event_id: int,
+    user: Annotated[CurrentUser, Depends(current_user)],
+) -> Response:
+    """Decrypt + stream a face crop for the calendar's evidence
+    section. Same scope rules as the day-detail endpoint —
+    Admin/HR for any employee, Manager for visible-set, Employee
+    only self. Out-of-scope ``employee_id`` returns 404 (never
+    403, which would leak existence). Mirrors the audit hook on
+    the legacy Admin-only ``/api/detection-events/{id}/crop``
+    so HR/Manager image views still leave a verifiable trail.
+    """
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    _check_can_view_employee(user, scope, employee_id)
+
+    with get_engine().begin() as conn:
+        row = conn.execute(
+            select(
+                detection_events.c.id,
+                detection_events.c.face_crop_path,
+                detection_events.c.camera_id,
+                detection_events.c.employee_id,
+            ).where(
+                detection_events.c.tenant_id == scope.tenant_id,
+                detection_events.c.id == event_id,
+            )
+        ).first()
+        if row is None:
+            raise HTTPException(status_code=404, detail="event not found")
+        # Belt-and-braces: confirm this event is actually for the
+        # employee in the path. Catches a deliberate id-swap probe.
+        if row.employee_id is not None and int(row.employee_id) != employee_id:
+            raise HTTPException(status_code=404, detail="event not found")
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id if user.id > 0 else None,
+            action="detection_event.crop_viewed",
+            entity_type="detection_event",
+            entity_id=str(event_id),
+            after={
+                "camera_id": int(row.camera_id),
+                "employee_id": (
+                    int(row.employee_id) if row.employee_id is not None else None
+                ),
+                "via": "calendar",
+            },
+        )
+
+    # P28.5b orphan-row hardening: distinguish "row never had a crop"
+    # from "row had a crop but the file is gone now". 404 on no-path,
+    # 410 on path-but-file-missing — same shape as the legacy admin
+    # endpoint so the frontend can handle both cleanly.
+    if row.face_crop_path is None:
+        raise HTTPException(status_code=404, detail="crop_unavailable")
+    path = Path(str(row.face_crop_path))
+    if not path.exists():
+        logger.warning(
+            "calendar evidence crop missing on disk: event=%s path=%s",
+            event_id,
+            path,
+        )
+        raise HTTPException(status_code=410, detail="crop file missing")
+    try:
+        plain = decrypt_bytes(path.read_bytes())
+    except RuntimeError as exc:
+        logger.warning("crop decrypt failed for event %s: %s", event_id, exc)
+        raise HTTPException(
+            status_code=500, detail="could not decrypt crop"
+        ) from exc
+    return Response(content=plain, media_type="image/jpeg")
 
 
 @router.get("/export")

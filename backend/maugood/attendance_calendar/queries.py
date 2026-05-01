@@ -545,6 +545,7 @@ def collapse_timeline(
 def pick_evidence(
     events: list[dict],
     *,
+    employee_id: int,
     in_time: Optional[time],
     out_time: Optional[time],
     max_crops: int = 5,
@@ -637,7 +638,10 @@ def pick_evidence(
                     if best.get("confidence") is not None
                     else None
                 ),
-                crop_url=f"/api/detection-events/{int(best['id'])}/crop",
+                crop_url=(
+                    f"/api/attendance/calendar/evidence/"
+                    f"{employee_id}/{int(best['id'])}/crop"
+                ),
             )
         )
         if len(out) >= max_crops:
@@ -831,6 +835,7 @@ def fetch_day_detail(
     timeline = collapse_timeline(captured_times)
     evidence = pick_evidence(
         event_dicts,
+        employee_id=int(emp_row.id),
         in_time=ar.in_time if ar is not None else None,
         out_time=ar.out_time if ar is not None else None,
     )
