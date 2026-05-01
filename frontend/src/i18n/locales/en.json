@@ -652,7 +652,8 @@
       "scopeLabel": "Scope",
       "scope": {
         "division": "Division",
-        "department": "Department"
+        "department": "Department",
+        "section": "Section"
       },
       "members": "members",
       "empty": "No other team members in this scope.",

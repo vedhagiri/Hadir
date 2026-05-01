@@ -652,7 +652,8 @@
       "scopeLabel": "النطاق",
       "scope": {
         "division": "القسم العام",
-        "department": "الإدارة"
+        "department": "الإدارة",
+        "section": "القسم الفرعي"
       },
       "members": "أعضاء",
       "empty": "لا يوجد أعضاء آخرون في هذا النطاق.",

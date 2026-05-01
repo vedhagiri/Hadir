@@ -882,8 +882,11 @@ class TeamMemberOut(_TM_BaseModel):
 class TeamMembersOut(_TM_BaseModel):
     # ``scope`` describes which tier of the org structure the team
     # was resolved against, so the frontend can label the tab
-    # accurately ("Division · Engineering" / "Department · Ops").
-    scope: Literal["division", "department"]
+    # accurately ("Division · Engineering" / "Department · Ops" /
+    # "Section · Backend"). ``section`` is the strictest match —
+    # active only when the viewed employee is a Manager and their
+    # division/department/section names are all distinct (Rule 0).
+    scope: Literal["division", "department", "section"]
     scope_name: str
     items: list[TeamMemberOut]
 
@@ -897,11 +900,20 @@ def list_team_members_endpoint(
 ) -> TeamMembersOut:
     """Resolve an employee's team-mates by an org-structure rule set.
 
-    * Rule 1 — when ``division.name == department.name == section.name``
-      (all three exist with the same name): team is every active
-      employee whose department rolls up to the same division.
-    * Otherwise (Rule 2 or fall-back): team is every active employee
-      in the same department.
+    Rules — first match wins:
+
+    * Rule 0 (Manager triple) — when the viewed employee's designation
+      contains "manager" (case-insensitive substring) AND their
+      division/department/section names are all distinct (none of the
+      three pairs equal): team is every active employee whose
+      ``(division_id, department_id, section_id)`` triple matches
+      the manager's exactly.
+    * Rule 1 (Flat hierarchy) — when ``division.name ==
+      department.name == section.name`` (all three exist with the
+      same name): team is every active employee whose department
+      rolls up to the same division.
+    * Rule 2 / fall-back — every active employee in the same
+      department.
 
     Comparison is on the ``name`` column per the product spec.
     Self-excluded; ``status='active'`` only.
@@ -933,6 +945,7 @@ def list_team_members_endpoint(
                 _employees.c.id,
                 _employees.c.department_id,
                 _employees.c.section_id,
+                _employees.c.designation,
                 _departments.c.name.label("dept_name"),
                 _departments.c.division_id,
                 _divisions.c.name.label("div_name"),
@@ -975,6 +988,25 @@ def list_team_members_endpoint(
         div_name = target.div_name
         dept_name = target.dept_name
         sec_name = target.sec_name
+        designation = target.designation
+
+        # Rule 0 — Manager triple. Designation contains "manager" as a
+        # case-insensitive substring AND the three tier names are all
+        # distinct (none of the three pairs equal). This catches the
+        # "Operations Manager" / "Logistics Manager" cases sitting at
+        # a real Division+Department+Section path.
+        rule_zero = (
+            designation is not None
+            and "manager" in designation.lower()
+            and div_name is not None
+            and dept_name is not None
+            and sec_name is not None
+            and div_name != dept_name
+            and dept_name != sec_name
+            and div_name != sec_name
+            and target.division_id is not None
+            and target.section_id is not None
+        )
 
         rule_one = (
             div_name is not None
@@ -1019,9 +1051,18 @@ def list_team_members_endpoint(
             .order_by(_employees.c.full_name.asc())
         )
 
-        if rule_one:
+        scope_label: Literal["division", "department", "section"]
+        if rule_zero:
+            stmt = base.where(
+                _employees.c.department_id == target.department_id,
+                _employees.c.section_id == target.section_id,
+                _departments.c.division_id == target.division_id,
+            )
+            scope_label = "section"
+            scope_name = sec_name or ""
+        elif rule_one:
             stmt = base.where(_departments.c.division_id == target.division_id)
-            scope_label: Literal["division", "department"] = "division"
+            scope_label = "division"
             scope_name = div_name or ""
         else:
             stmt = base.where(_employees.c.department_id == target.department_id)

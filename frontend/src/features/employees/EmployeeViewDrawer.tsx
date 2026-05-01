@@ -203,7 +203,12 @@ function TeamMembersTab({ employeeId }: { employeeId: number }) {
           </span>
           <span style={{ fontWeight: 500 }}>
             {t(`employees.team.scope.${scope}`, {
-              defaultValue: scope === "division" ? "Division" : "Department",
+              defaultValue:
+                scope === "division"
+                  ? "Division"
+                  : scope === "section"
+                    ? "Section"
+                    : "Department",
             }) as string}
             {" · "}
             {scope_name || "—"}

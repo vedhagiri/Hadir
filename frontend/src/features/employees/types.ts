@@ -77,7 +77,7 @@ export interface TeamMember {
 }
 
 export interface TeamMembersResponse {
-  scope: "division" | "department";
+  scope: "division" | "department" | "section";
   scope_name: string;
   items: TeamMember[];
 }
