@@ -34,6 +34,7 @@ from sqlalchemy.engine import Engine
 
 from maugood.attendance_calendar.queries import (
     TIMELINE_GAP_MINUTES,
+    _shift,
     collapse_timeline,
     parse_month,
 )
@@ -639,3 +640,33 @@ def test_cross_tenant_employee_id_returns_404(
         f"/api/attendance/calendar/day/{bogus_id}/{seeded_calendar['days'][0].isoformat()}"
     )
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Regression: _shift used to overflow when called with a check-in just
+# after midnight (e.g. an OT or weekend punch at 00:19). The old pivot
+# was ``date.min`` so subtracting 30 minutes produced
+# 0000-12-31 23:49 → ``OverflowError: date value out of range``.
+# This 500'd ``GET /api/attendance/calendar/day/{eid}/{today}`` for any
+# employee whose ``in_time`` was inside the first half-hour of the day.
+# ---------------------------------------------------------------------------
+
+
+def test_shift_handles_pre_midnight_underflow() -> None:
+    # 00:19 minus 30 min would underflow date.min; should clamp to 00:00.
+    assert _shift(time(0, 19), -30) == time(0, 0)
+    # 00:00 minus any positive minutes also clamps to 00:00.
+    assert _shift(time(0, 0), -1) == time(0, 0)
+
+
+def test_shift_handles_post_2359_overflow() -> None:
+    # 23:50 plus 30 min would push past the pivot day; should clamp to 23:59.
+    assert _shift(time(23, 50), +30) == time(23, 59)
+    assert _shift(time(23, 59), +120) == time(23, 59)
+
+
+def test_shift_round_trip_inside_day() -> None:
+    # Sanity: in-day arithmetic is unaffected.
+    assert _shift(time(10, 0), 30) == time(10, 30)
+    assert _shift(time(10, 0), -30) == time(9, 30)
+    assert _shift(time(15, 30), -90) == time(14, 0)

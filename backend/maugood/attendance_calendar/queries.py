@@ -650,11 +650,17 @@ def pick_evidence(
 
 
 def _shift(t: time, minutes: int) -> Optional[time]:
-    """Add ``minutes`` to a ``time``; clamps at 00:00 / 23:59."""
+    """Add ``minutes`` to a ``time``; clamps at 00:00 / 23:59.
 
-    base = datetime.combine(date.min, t) + timedelta(minutes=minutes)
-    if base.date() != date.min:
-        if base.date() < date.min:
+    Uses a mid-calendar pivot date so a check-in at 00:19 minus 30
+    minutes (and similar boundary cases) stays well clear of the
+    ``date.min`` underflow that crashes ``datetime.combine``.
+    """
+
+    pivot = date(2000, 1, 1)
+    base = datetime.combine(pivot, t) + timedelta(minutes=minutes)
+    if base.date() != pivot:
+        if base.date() < pivot:
             return time(0, 0)
         return time(23, 59)
     return base.time()
