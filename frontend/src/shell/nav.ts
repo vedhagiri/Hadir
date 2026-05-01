@@ -44,9 +44,6 @@ export const NAV: Record<Role, NavItem[]> = {
     { section: "Help" },
     { id: "pipeline", label: "How it works", icon: "sparkles" },
     { id: "api-docs", label: "API Reference", icon: "fileText" },
-    { section: "Personal" },
-    { id: "my-attendance", label: "My Attendance", icon: "calendar" },
-    { id: "my-requests", label: "My Requests", icon: "clipboard" },
   ],
   HR: [
     { section: "Overview" },
