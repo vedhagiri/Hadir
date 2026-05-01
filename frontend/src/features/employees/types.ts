@@ -63,6 +63,22 @@ export interface EmployeeListResponse {
   page_size: number;
 }
 
+// Team Members tab — slim shape returned by
+// ``GET /api/employees/{id}/team-members``. Scope tells the UI
+// which org tier the team was resolved against.
+export interface TeamMember {
+  id: number;
+  employee_code: string;
+  full_name: string;
+  designation: string | null;
+}
+
+export interface TeamMembersResponse {
+  scope: "division" | "department";
+  scope_name: string;
+  items: TeamMember[];
+}
+
 // P28.7 — payload for POST + PATCH. Every field optional on PATCH; on
 // POST the backend requires employee_code + full_name + department_*.
 export interface EmployeeWritePayload {

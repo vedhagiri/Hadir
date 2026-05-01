@@ -17,6 +17,7 @@ import type {
   ImportResult,
   PhotoIngestResult,
   PhotoListResponse,
+  TeamMembersResponse,
 } from "./types";
 
 export type EmployeeSortBy = "employee_code" | "full_name" | "department";
@@ -95,6 +96,18 @@ export function useEmployeePhotos(
     queryKey: ["employees", "photos", employeeId],
     queryFn: () => api<PhotoListResponse>(`/api/employees/${employeeId}/photos`),
     enabled: employeeId !== null,
+  });
+}
+
+export function useEmployeeTeamMembers(
+  employeeId: number | null,
+): UseQueryResult<TeamMembersResponse, Error> {
+  return useQuery({
+    queryKey: ["employees", "team-members", employeeId],
+    queryFn: () =>
+      api<TeamMembersResponse>(`/api/employees/${employeeId}/team-members`),
+    enabled: employeeId !== null,
+    staleTime: 60 * 1000,
   });
 }
 

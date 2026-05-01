@@ -862,6 +862,171 @@ def patch_employee_endpoint(
     return _row_to_out(after)
 
 
+from pydantic import BaseModel as _TM_BaseModel  # noqa: E402
+
+
+class TeamMemberOut(_TM_BaseModel):
+    id: int
+    employee_code: str
+    full_name: str
+    designation: Optional[str] = None
+
+
+class TeamMembersOut(_TM_BaseModel):
+    # ``scope`` describes which tier of the org structure the team
+    # was resolved against, so the frontend can label the tab
+    # accurately ("Division · Engineering" / "Department · Ops").
+    scope: Literal["division", "department"]
+    scope_name: str
+    items: list[TeamMemberOut]
+
+
+@router.get("/{employee_id}/team-members", response_model=TeamMembersOut)
+def list_team_members_endpoint(
+    employee_id: int,
+    user: Annotated[
+        CurrentUser, Depends(require_any_role("Admin", "HR", "Manager"))
+    ],
+) -> TeamMembersOut:
+    """Resolve an employee's team-mates by an org-structure rule set.
+
+    * Rule 1 — when ``division.name == department.name == section.name``
+      (all three exist with the same name): team is every active
+      employee whose department rolls up to the same division.
+    * Otherwise (Rule 2 or fall-back): team is every active employee
+      in the same department.
+
+    Comparison is on the ``name`` column per the product spec.
+    Self-excluded; ``status='active'`` only.
+
+    Manager scope: a Manager can fetch this for any employee in
+    their visible set (department membership ∪ direct
+    ``manager_assignments`` per P8); out-of-scope ids return 404 to
+    avoid leaking existence. Admin/HR see any employee.
+    """
+
+    from sqlalchemy import select as _select  # noqa: PLC0415
+
+    from maugood.db import (  # noqa: PLC0415
+        departments as _departments,
+        divisions as _divisions,
+        employees as _employees,
+        sections as _sections,
+    )
+    from maugood.manager_assignments.repository import (  # noqa: PLC0415
+        get_manager_visible_employee_ids,
+    )
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    is_admin_or_hr = "Admin" in user.roles or "HR" in user.roles
+
+    with get_engine().begin() as conn:
+        target = conn.execute(
+            _select(
+                _employees.c.id,
+                _employees.c.department_id,
+                _employees.c.section_id,
+                _departments.c.name.label("dept_name"),
+                _departments.c.division_id,
+                _divisions.c.name.label("div_name"),
+                _sections.c.name.label("sec_name"),
+            )
+            .select_from(
+                _employees.join(
+                    _departments,
+                    (_departments.c.id == _employees.c.department_id)
+                    & (_departments.c.tenant_id == _employees.c.tenant_id),
+                )
+                .outerjoin(
+                    _divisions,
+                    (_divisions.c.id == _departments.c.division_id)
+                    & (_divisions.c.tenant_id == _employees.c.tenant_id),
+                )
+                .outerjoin(
+                    _sections,
+                    (_sections.c.id == _employees.c.section_id)
+                    & (_sections.c.tenant_id == _employees.c.tenant_id),
+                )
+            )
+            .where(
+                _employees.c.tenant_id == scope.tenant_id,
+                _employees.c.id == employee_id,
+            )
+        ).first()
+        if target is None:
+            raise HTTPException(status_code=404, detail="employee not found")
+
+        if not is_admin_or_hr:
+            visible = get_manager_visible_employee_ids(
+                conn, scope, manager_user_id=user.id
+            )
+            if employee_id not in visible:
+                # 404 not 403 — never leak existence to a Manager who
+                # can't see the row.
+                raise HTTPException(status_code=404, detail="employee not found")
+
+        div_name = target.div_name
+        dept_name = target.dept_name
+        sec_name = target.sec_name
+
+        rule_one = (
+            div_name is not None
+            and dept_name is not None
+            and sec_name is not None
+            and div_name == dept_name == sec_name
+            and target.division_id is not None
+        )
+
+        base = (
+            _select(
+                _employees.c.id,
+                _employees.c.employee_code,
+                _employees.c.full_name,
+                _employees.c.designation,
+            )
+            .select_from(
+                _employees.join(
+                    _departments,
+                    (_departments.c.id == _employees.c.department_id)
+                    & (_departments.c.tenant_id == _employees.c.tenant_id),
+                )
+            )
+            .where(
+                _employees.c.tenant_id == scope.tenant_id,
+                _employees.c.id != employee_id,
+                _employees.c.status == "active",
+            )
+            .order_by(_employees.c.full_name.asc())
+        )
+
+        if rule_one:
+            stmt = base.where(_departments.c.division_id == target.division_id)
+            scope_label: Literal["division", "department"] = "division"
+            scope_name = div_name or ""
+        else:
+            stmt = base.where(_employees.c.department_id == target.department_id)
+            scope_label = "department"
+            scope_name = dept_name or ""
+
+        rows = conn.execute(stmt).all()
+
+    return TeamMembersOut(
+        scope=scope_label,
+        scope_name=scope_name,
+        items=[
+            TeamMemberOut(
+                id=int(r.id),
+                employee_code=str(r.employee_code),
+                full_name=str(r.full_name),
+                designation=(
+                    str(r.designation) if r.designation is not None else None
+                ),
+            )
+            for r in rows
+        ],
+    )
+
+
 @router.delete("/{employee_id}", status_code=status.HTTP_204_NO_CONTENT)
 def soft_delete_employee_endpoint(
     employee_id: int,

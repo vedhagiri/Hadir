@@ -24,10 +24,14 @@ import { useDayDetail } from "../calendar/hooks";
 import type { DayDetail } from "../calendar/types";
 import { useDetectionEvents } from "../camera-logs/hooks";
 import type { DetectionEvent } from "../camera-logs/types";
-import { useEmployeeDetail, useEmployeePhotos } from "./hooks";
+import {
+  useEmployeeDetail,
+  useEmployeePhotos,
+  useEmployeeTeamMembers,
+} from "./hooks";
 import type { Employee, Photo } from "./types";
 
-type Tab = "details" | "events" | "attendance";
+type Tab = "details" | "events" | "attendance" | "team";
 
 export function EmployeeViewDrawer({
   employeeId,
@@ -94,7 +98,7 @@ export function EmployeeViewDrawer({
             padding: "0 18px",
           }}
         >
-          {(["details", "attendance", "events"] as Tab[]).map((key) => {
+          {(["details", "attendance", "events", "team"] as Tab[]).map((key) => {
             const active = tab === key;
             return (
               <button
@@ -144,9 +148,117 @@ export function EmployeeViewDrawer({
           {tab === "attendance" && (
             <AttendanceTab employeeId={employeeId} />
           )}
+
+          {tab === "team" && <TeamMembersTab employeeId={employeeId} />}
         </div>
       </div>
     </DrawerShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Team Members tab
+// ---------------------------------------------------------------------------
+
+function TeamMembersTab({ employeeId }: { employeeId: number }) {
+  const { t } = useTranslation();
+  const team = useEmployeeTeamMembers(employeeId);
+
+  if (team.isLoading) {
+    return (
+      <div className="text-sm text-dim">{t("common.loading") as string}…</div>
+    );
+  }
+  if (team.isError || !team.data) {
+    return (
+      <div className="text-sm" style={{ color: "var(--danger-text)" }}>
+        {t("employees.team.loadFailed", {
+          defaultValue: "Could not load team members.",
+        }) as string}
+      </div>
+    );
+  }
+
+  const { scope, scope_name, items } = team.data;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+          padding: "8px 12px",
+          background: "var(--bg-sunken)",
+          border: "1px solid var(--border)",
+          borderRadius: "var(--radius-sm)",
+          fontSize: 12.5,
+        }}
+      >
+        <div>
+          <span className="text-xs text-dim" style={{ marginInlineEnd: 6 }}>
+            {t("employees.team.scopeLabel", {
+              defaultValue: "Scope",
+            }) as string}
+          </span>
+          <span style={{ fontWeight: 500 }}>
+            {t(`employees.team.scope.${scope}`, {
+              defaultValue: scope === "division" ? "Division" : "Department",
+            }) as string}
+            {" · "}
+            {scope_name || "—"}
+          </span>
+        </div>
+        <span className="mono text-xs text-dim">
+          {items.length}{" "}
+          {t("employees.team.members", {
+            count: items.length,
+            defaultValue: items.length === 1 ? "member" : "members",
+          }) as string}
+        </span>
+      </div>
+
+      {items.length === 0 ? (
+        <div className="text-sm text-dim" style={{ padding: 8 }}>
+          {t("employees.team.empty", {
+            defaultValue: "No other team members in this scope.",
+          }) as string}
+        </div>
+      ) : (
+        <table className="table">
+          <thead>
+            <tr>
+              <th style={{ textTransform: "uppercase", fontSize: 11 }}>
+                {t("employees.field.code", {
+                  defaultValue: "Employee ID",
+                }) as string}
+              </th>
+              <th style={{ textTransform: "uppercase", fontSize: 11 }}>
+                {t("employees.field.fullName", {
+                  defaultValue: "Name",
+                }) as string}
+              </th>
+              <th style={{ textTransform: "uppercase", fontSize: 11 }}>
+                {t("employees.field.designation", {
+                  defaultValue: "Designation",
+                }) as string}
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((m) => (
+              <tr key={m.id}>
+                <td className="mono text-sm">{m.employee_code}</td>
+                <td className="text-sm" style={{ fontWeight: 500 }}>
+                  {m.full_name}
+                </td>
+                <td className="text-sm">{m.designation ?? "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
   );
 }
 

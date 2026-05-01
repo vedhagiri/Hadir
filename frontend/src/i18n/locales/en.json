@@ -644,8 +644,19 @@
       "tab": {
         "details": "Details",
         "attendance": "Attendance",
-        "events": "Camera events"
+        "events": "Camera events",
+        "team": "Team Members"
       }
+    },
+    "team": {
+      "scopeLabel": "Scope",
+      "scope": {
+        "division": "Division",
+        "department": "Department"
+      },
+      "members": "members",
+      "empty": "No other team members in this scope.",
+      "loadFailed": "Could not load team members."
     },
     "attendance": {
       "loadFailed": "Could not load attendance for this date.",
