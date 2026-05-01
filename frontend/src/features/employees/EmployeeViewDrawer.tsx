@@ -163,6 +163,10 @@ export function EmployeeViewDrawer({
 function TeamMembersTab({ employeeId }: { employeeId: number }) {
   const { t } = useTranslation();
   const team = useEmployeeTeamMembers(employeeId);
+  // Dev/debug toggle — the three org-tier columns are off by default
+  // and revealed via the "Show org tiers" button. Keeps the tab tidy
+  // for everyday use without losing the rule-tracing visibility.
+  const [showTiers, setShowTiers] = useState(false);
 
   if (team.isLoading) {
     return (
@@ -214,13 +218,38 @@ function TeamMembersTab({ employeeId }: { employeeId: number }) {
             {scope_name || "—"}
           </span>
         </div>
-        <span className="mono text-xs text-dim">
-          {items.length}{" "}
-          {t("employees.team.members", {
-            count: items.length,
-            defaultValue: items.length === 1 ? "member" : "members",
-          }) as string}
-        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => setShowTiers((v) => !v)}
+            aria-pressed={showTiers}
+            title={
+              showTiers
+                ? (t("employees.team.hideTiers", {
+                    defaultValue: "Hide org tiers",
+                  }) as string)
+                : (t("employees.team.showTiers", {
+                    defaultValue: "Show org tiers",
+                  }) as string)
+            }
+          >
+            {showTiers
+              ? (t("employees.team.hideTiers", {
+                  defaultValue: "Hide org tiers",
+                }) as string)
+              : (t("employees.team.showTiers", {
+                  defaultValue: "Show org tiers",
+                }) as string)}
+          </button>
+          <span className="mono text-xs text-dim">
+            {items.length}{" "}
+            {t("employees.team.members", {
+              count: items.length,
+              defaultValue: items.length === 1 ? "member" : "members",
+            }) as string}
+          </span>
+        </div>
       </div>
 
       {items.length === 0 ? (
@@ -249,21 +278,25 @@ function TeamMembersTab({ employeeId }: { employeeId: number }) {
                     defaultValue: "Designation",
                   }) as string}
                 </th>
-                <th style={{ textTransform: "uppercase", fontSize: 11 }}>
-                  {t("employees.team.col.division", {
-                    defaultValue: "Division",
-                  }) as string}
-                </th>
-                <th style={{ textTransform: "uppercase", fontSize: 11 }}>
-                  {t("employees.team.col.department", {
-                    defaultValue: "Department",
-                  }) as string}
-                </th>
-                <th style={{ textTransform: "uppercase", fontSize: 11 }}>
-                  {t("employees.team.col.section", {
-                    defaultValue: "Section",
-                  }) as string}
-                </th>
+                {showTiers && (
+                  <>
+                    <th style={{ textTransform: "uppercase", fontSize: 11 }}>
+                      {t("employees.team.col.division", {
+                        defaultValue: "Division",
+                      }) as string}
+                    </th>
+                    <th style={{ textTransform: "uppercase", fontSize: 11 }}>
+                      {t("employees.team.col.department", {
+                        defaultValue: "Department",
+                      }) as string}
+                    </th>
+                    <th style={{ textTransform: "uppercase", fontSize: 11 }}>
+                      {t("employees.team.col.section", {
+                        defaultValue: "Section",
+                      }) as string}
+                    </th>
+                  </>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -274,15 +307,19 @@ function TeamMembersTab({ employeeId }: { employeeId: number }) {
                     {m.full_name}
                   </td>
                   <td className="text-sm">{m.designation ?? "—"}</td>
-                  <td className="text-sm text-dim">
-                    {m.division_name ?? "—"}
-                  </td>
-                  <td className="text-sm text-dim">
-                    {m.department_name ?? "—"}
-                  </td>
-                  <td className="text-sm text-dim">
-                    {m.section_name ?? "—"}
-                  </td>
+                  {showTiers && (
+                    <>
+                      <td className="text-sm text-dim">
+                        {m.division_name ?? "—"}
+                      </td>
+                      <td className="text-sm text-dim">
+                        {m.department_name ?? "—"}
+                      </td>
+                      <td className="text-sm text-dim">
+                        {m.section_name ?? "—"}
+                      </td>
+                    </>
+                  )}
                 </tr>
               ))}
             </tbody>

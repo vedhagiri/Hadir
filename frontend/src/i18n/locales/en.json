@@ -658,6 +658,8 @@
       "members": "members",
       "empty": "No other team members in this scope.",
       "loadFailed": "Could not load team members.",
+      "showTiers": "Show org tiers",
+      "hideTiers": "Hide org tiers",
       "col": {
         "division": "Division",
         "department": "Department",
