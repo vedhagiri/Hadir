@@ -1078,9 +1078,14 @@ function emptyDeptRow(d: { id: number; code: string; name: string }): DeptRow {
 }
 
 function applyToDeptRow(row: DeptRow, it: AttendanceItem): void {
+  // Total employees = one row per active employee (the scheduler
+  // emits one attendance_records row per active employee per day —
+  // weekend, holiday, and pending rows still count toward the
+  // department roster, they just don't bucket into present/late/
+  // absent/on-leave).
+  row.headcount += 1;
   const bucket = classifyForSummary(it);
   if (bucket === null) return;
-  row.headcount += 1;
   row[bucket] += 1;
   if (bucket === "present" || bucket === "late") {
     row.totalMinutes += it.total_minutes ?? 0;
@@ -1108,9 +1113,9 @@ function useDepartmentSummary(date: string): {
       }
       applyToDeptRow(row, it);
     }
-    return Array.from(byDept.values())
-      .filter((r) => r.headcount > 0)
-      .sort((a, b) => b.headcount - a.headcount);
+    return Array.from(byDept.values()).sort((a, b) =>
+      a.code.localeCompare(b.code),
+    );
   }, [list.data, departments.data]);
 
   return {
@@ -1132,7 +1137,8 @@ function DepartmentSummaryPreview({
   onDownload: () => Promise<void>;
 }) {
   const { rows, loading, error } = useDepartmentSummary(date);
-  const previewRows = rows.slice(0, 8);
+  // Show every department, not just a preview slice.
+  const previewRows = rows;
   return (
     <PreviewCard
       title="Department Summary"
@@ -1149,8 +1155,7 @@ function DepartmentSummaryPreview({
       columns={[
         "#",
         "Department",
-        "Head",
-        "Headcount",
+        "Total employees",
         "Present",
         "Late",
         "Absent",
@@ -1159,8 +1164,8 @@ function DepartmentSummaryPreview({
       ]}
     >
       {previewRows.length === 0 ? (
-        <EmptyTableRow colSpan={9}>
-          No attendance rows for {date}, so the summary is empty.
+        <EmptyTableRow colSpan={8}>
+          No departments configured yet.
         </EmptyTableRow>
       ) : (
         previewRows.map((r, idx) => {
@@ -1174,7 +1179,6 @@ function DepartmentSummaryPreview({
               <td className="text-sm" style={{ fontWeight: 500 }}>
                 {r.name}
               </td>
-              <td className="text-sm text-dim">—</td>
               <td className="mono text-sm">{r.headcount}</td>
               <td className="mono text-sm">{r.present}</td>
               <td className="mono text-sm">{r.late}</td>
@@ -1208,9 +1212,16 @@ async function downloadDepartmentSummary({
       date: string;
       items: AttendanceItem[];
     };
-    const attendance = await api<AttRows>(`/api/attendance?date=${date}`);
+    type DeptListResp = {
+      items: { id: number; code: string; name: string }[];
+    };
+    const [attendance, deptResp] = await Promise.all([
+      api<AttRows>(`/api/attendance?date=${date}`),
+      api<DeptListResp>("/api/departments"),
+    ]);
     const items = attendance.items ?? [];
     const grouped = new Map<number, DeptRow>();
+    for (const d of deptResp.items ?? []) grouped.set(d.id, emptyDeptRow(d));
     for (const it of items) {
       let row = grouped.get(it.department.id);
       if (!row) {
@@ -1224,7 +1235,7 @@ async function downloadDepartmentSummary({
         "#",
         "Department code",
         "Department",
-        "Headcount",
+        "Total employees",
         "Present",
         "Late",
         "Absent",
@@ -1232,8 +1243,7 @@ async function downloadDepartmentSummary({
         "Avg hours",
       ],
       Array.from(grouped.values())
-        .filter((r) => r.headcount > 0)
-        .sort((a, b) => b.headcount - a.headcount)
+        .sort((a, b) => a.code.localeCompare(b.code))
         .map((r, idx) => {
           const worked =
             r.present + r.late > 0
