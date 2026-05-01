@@ -156,6 +156,9 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
   });
 
   const [form, setForm] = useState<FormState>(emptyForm());
+  // Snapshot of the form taken at hydration time. Used by Edit mode
+  // to disable Save until something actually changes.
+  const [initialForm, setInitialForm] = useState<FormState | null>(null);
   // Sections under the currently-selected department. Re-fetches
   // automatically when the operator picks a different department —
   // and we clear ``form.section_id`` in the same change handler so a
@@ -236,11 +239,23 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
   // Hydrate form when the detail loads (Edit mode).
   useEffect(() => {
     if (detail.data) {
-      setForm(fromEmployee(detail.data));
+      const snapshot = fromEmployee(detail.data);
+      setForm(snapshot);
+      setInitialForm(snapshot);
     } else if (isAddMode) {
       setForm(emptyForm());
+      setInitialForm(null);
     }
   }, [detail.data, isAddMode]);
+
+  // Compare the live form against the hydration snapshot. Edit-mode
+  // Save button stays disabled until something actually changes.
+  const isDirty = useMemo(() => {
+    if (initialForm === null) return false;
+    return (Object.keys(form) as (keyof FormState)[]).some(
+      (k) => form[k] !== initialForm[k],
+    );
+  }, [form, initialForm]);
 
   const onField = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((s) => ({ ...s, [key]: value }));
@@ -1250,7 +1265,11 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
               type="button"
               className="btn btn-primary"
               onClick={() => void onSave()}
-              disabled={create.isPending || update.isPending}
+              disabled={
+                create.isPending ||
+                update.isPending ||
+                (!isAddMode && !isDirty)
+              }
             >
               {isAddMode
                 ? (t("employees.drawer.create") as string)
