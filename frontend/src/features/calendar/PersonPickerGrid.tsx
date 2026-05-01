@@ -18,14 +18,31 @@ const SEARCH_DEBOUNCE_MS = 350;
 
 export function PersonPickerGrid({
   onPickEmployee,
+  restrictToIds,
+  restrictionLabel,
+  onClearRestriction,
 }: {
   onPickEmployee: (employee: Employee) => void;
+  /** When provided, only employees whose ids are in this set render
+   *  in the grid. Empty array → "no check-ins" empty state. ``null``
+   *  → no restriction (full picker). */
+  restrictToIds?: number[] | null;
+  /** Banner copy describing why the picker is restricted (e.g.
+   *  "Weekend · 2026-05-01"). */
+  restrictionLabel?: string | null;
+  /** Called when the operator chooses to drop the restriction and
+   *  see the full picker. */
+  onClearRestriction?: () => void;
 }) {
   const { t } = useTranslation();
   const [q, setQ] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
   const [departmentId, setDepartmentId] = useState<number | null>(null);
   const [page, setPage] = useState(1);
+  const restrictedSet = useMemo(
+    () => (restrictToIds ? new Set(restrictToIds) : null),
+    [restrictToIds],
+  );
 
   // Debounce + 3-char minimum, mirroring the Employees list page.
   useEffect(() => {
@@ -51,18 +68,74 @@ export function PersonPickerGrid({
     [debouncedQ, departmentId, page],
   );
 
-  const employees = useEmployeeList(filters);
+  // When restricted, fetch a wider page so the post-filter grid
+  // typically fits in one page. The set is small (handful of OT
+  // check-ins) so this is bounded.
+  const effectiveFilters = useMemo(
+    () =>
+      restrictedSet
+        ? { ...filters, page: 1, page_size: 200 }
+        : filters,
+    [filters, restrictedSet],
+  );
+  const employees = useEmployeeList(effectiveFilters);
   const departments = useDepartments();
 
+  const allItems = employees.data?.items ?? [];
+  const items = useMemo(() => {
+    if (!restrictedSet) return allItems;
+    return allItems.filter((e) => restrictedSet.has(e.id));
+  }, [allItems, restrictedSet]);
+
   const totalPages = useMemo(() => {
+    if (restrictedSet) return 1;
     if (!employees.data) return 1;
     return Math.max(1, Math.ceil(employees.data.total / employees.data.page_size));
-  }, [employees.data]);
-
-  const items = employees.data?.items ?? [];
+  }, [employees.data, restrictedSet]);
 
   return (
     <div className="card" style={{ padding: 14 }}>
+      {/* Restriction banner — shown when the picker was opened by
+          drilling into a non-working day from the company calendar.
+          The "Show all" pill releases the filter without leaving the
+          picker. */}
+      {restrictedSet && restrictionLabel && (
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 8,
+            padding: "8px 10px",
+            marginBottom: 10,
+            border: "1px solid var(--border)",
+            background: "var(--info-soft)",
+            color: "var(--info-text, var(--info))",
+            borderRadius: "var(--radius-sm)",
+            fontSize: 12.5,
+          }}
+        >
+          <span>
+            {t("calendar.picker.drillBanner", {
+              label: restrictionLabel,
+              count: restrictedSet.size,
+              defaultValue: `${restrictionLabel} · showing ${restrictedSet.size} OT check-in${restrictedSet.size === 1 ? "" : "s"}`,
+            }) as string}
+          </span>
+          {onClearRestriction && (
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={onClearRestriction}
+            >
+              {t("calendar.picker.showAll", {
+                defaultValue: "Show all",
+              }) as string}
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Filter row */}
       <div
         style={{
@@ -114,7 +187,9 @@ export function PersonPickerGrid({
           className="mono text-xs text-dim"
           style={{ whiteSpace: "nowrap" }}
         >
-          {employees.data?.items.length ?? 0} / {employees.data?.total ?? 0}
+          {restrictedSet
+            ? `${items.length} / ${restrictedSet.size}`
+            : `${items.length} / ${employees.data?.total ?? 0}`}
         </span>
       </div>
 
@@ -136,9 +211,14 @@ export function PersonPickerGrid({
       )}
       {employees.data && items.length === 0 && (
         <div className="text-sm text-dim" style={{ padding: 14 }}>
-          {t("calendar.picker.empty", {
-            defaultValue: "No employees match. Try widening filters.",
-          }) as string}
+          {restrictedSet
+            ? (t("calendar.picker.noCheckIns", {
+                defaultValue:
+                  "No check-ins on this date. Pick a different day or release the filter.",
+              }) as string)
+            : (t("calendar.picker.empty", {
+                defaultValue: "No employees match. Try widening filters.",
+              }) as string)}
         </div>
       )}
       {items.length > 0 && (

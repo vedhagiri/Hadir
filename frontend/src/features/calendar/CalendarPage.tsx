@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next";
 import { useMe } from "../../auth/AuthProvider";
 import { primaryRole } from "../../types";
 import { NewRequestDrawer } from "../../requests/NewRequestDrawer";
+import { useAttendance } from "../attendance/hooks";
 import { useMyEmployee } from "../employees/hooks";
 import { CompanyView } from "./CompanyView";
 import { DayDetailDrawer } from "./DayDetailDrawer";
@@ -44,6 +45,34 @@ export function CalendarPage() {
   // owns its own search/department/page state — we only track the
   // *selected* employee id here.
   const [employeeId, setEmployeeId] = useState<number | null>(null);
+
+  // When the operator drilled in from a Company-view day click, hold
+  // onto the date here so we can fetch /api/attendance for that day
+  // and narrow the picker grid to the OT check-ins on weekend/holiday
+  // days. ``null`` means "show the full picker".
+  const [pickedCompanyDate, setPickedCompanyDate] = useState<string | null>(
+    null,
+  );
+  const pickedDayAttendance = useAttendance(pickedCompanyDate, null);
+  const drillFilter = useMemo(() => {
+    if (!pickedCompanyDate) return null;
+    const items = pickedDayAttendance.data?.items ?? [];
+    if (items.length === 0) return null;
+    const sample = items[0]!;
+    if (!sample.is_weekend && !sample.is_holiday) {
+      // Working day — full picker is the right surface.
+      return null;
+    }
+    const ids = items
+      .filter((it) => Boolean(it.in_time))
+      .map((it) => it.employee_id);
+    return {
+      date: pickedCompanyDate,
+      kind: sample.is_holiday ? ("holiday" as const) : ("weekend" as const),
+      holidayName: sample.holiday_name ?? null,
+      employeeIds: ids,
+    };
+  }, [pickedCompanyDate, pickedDayAttendance.data]);
 
   // Auto-resolve the logged-in user once. The ref flips to true on the
   // first auto-fill or any explicit "go to picker" gesture (Back
@@ -85,6 +114,7 @@ export function CalendarPage() {
     // on the picker grid, not their own calendar.
     setMonth(iso.slice(0, 7));
     setEmployeeId(null);
+    setPickedCompanyDate(iso);
     autoFilledRef.current = true;
     setTab("person");
   };
@@ -177,6 +207,7 @@ export function CalendarPage() {
               className="btn btn-sm"
               onClick={() => {
                 setEmployeeId(null);
+                setPickedCompanyDate(null);
                 autoFilledRef.current = true;
               }}
             >
@@ -213,6 +244,24 @@ export function CalendarPage() {
           {employeeId === null && role !== "Employee" && (
             <PersonPickerGrid
               onPickEmployee={(emp) => setEmployeeId(emp.id)}
+              restrictToIds={drillFilter ? drillFilter.employeeIds : null}
+              restrictionLabel={
+                drillFilter
+                  ? drillFilter.kind === "holiday"
+                    ? t("calendar.drill.holiday", {
+                        date: drillFilter.date,
+                        name: drillFilter.holidayName ?? "",
+                        defaultValue: drillFilter.holidayName
+                          ? `Holiday — ${drillFilter.holidayName} · ${drillFilter.date}`
+                          : `Holiday · ${drillFilter.date}`,
+                      }) as string
+                    : (t("calendar.drill.weekend", {
+                        date: drillFilter.date,
+                        defaultValue: `Weekend · ${drillFilter.date}`,
+                      }) as string)
+                  : null
+              }
+              onClearRestriction={() => setPickedCompanyDate(null)}
             />
           )}
           {employeeId === null && role === "Employee" && (

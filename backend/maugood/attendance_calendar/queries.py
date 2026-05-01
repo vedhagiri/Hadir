@@ -191,6 +191,16 @@ def company_view(
                     _bool_to_int(),
                 )
             ).label("leave"),
+            # ``check_ins`` = anyone with a real in_time on the row.
+            # Late employees still check in, so they're included in
+            # this sum and we subtract them out below for the strict
+            # "on-time present" count surfaced by the calendar.
+            func.sum(
+                func.cast(
+                    attendance_records.c.in_time.isnot(None),
+                    _bool_to_int(),
+                )
+            ).label("check_ins"),
         )
         .where(*agg_filter)
         .group_by(attendance_records.c.date)
@@ -211,14 +221,21 @@ def company_view(
     out: list[CompanyDay] = []
     for d in iter_days(month_start, month_end):
         agg = agg_rows.get(d)
-        absent = int(agg.absent or 0) if agg else 0
+        absent_raw = int(agg.absent or 0) if agg else 0
         late = int(agg.late or 0) if agg else 0
         leave = int(agg.leave or 0) if agg else 0
-        rows = int(agg.rows or 0) if agg else 0
-        # "Present" = rows where neither absent nor on leave. Late
-        # employees still count as present for the day-level
-        # percentage; the late count surfaces alongside.
-        present = max(0, rows - absent - leave)
+        check_ins = int(agg.check_ins or 0) if agg else 0
+        # "Present" = on-time check-ins. The previous formula
+        # (rows - absent - leave) silently counted weekend / pending
+        # rows (no in_time, not marked absent) as present, which
+        # showed "178 present" on a quiet weekend. Subtracting late
+        # from check-ins gives a strict on-time count; the late
+        # count surfaces alongside.
+        present = max(0, check_ins - late)
+        # ``absent`` rows from the engine include "on leave" rows
+        # (engine sets absent=true + leave_type_id when on leave).
+        # Subtract leave to get true no-show absences.
+        absent = max(0, absent_raw - leave)
         weekend = is_weekend(d, weekend_days)
         hol_name = holiday_by_date.get(d)
         active = active_count
