@@ -71,6 +71,9 @@ export interface TeamMember {
   employee_code: string;
   full_name: string;
   designation: string | null;
+  division_name: string | null;
+  department_name: string | null;
+  section_name: string | null;
 }
 
 export interface TeamMembersResponse {

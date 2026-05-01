@@ -870,6 +870,13 @@ class TeamMemberOut(_TM_BaseModel):
     employee_code: str
     full_name: str
     designation: Optional[str] = None
+    # Dev-visibility: each member's resolved org tiers so the operator
+    # can eyeball which rule fired for which row. ``None`` when the
+    # employee isn't mapped at that tier (sections are optional, and
+    # divisions are derived through ``departments.division_id``).
+    division_name: Optional[str] = None
+    department_name: Optional[str] = None
+    section_name: Optional[str] = None
 
 
 class TeamMembersOut(_TM_BaseModel):
@@ -983,12 +990,25 @@ def list_team_members_endpoint(
                 _employees.c.employee_code,
                 _employees.c.full_name,
                 _employees.c.designation,
+                _divisions.c.name.label("member_div_name"),
+                _departments.c.name.label("member_dept_name"),
+                _sections.c.name.label("member_sec_name"),
             )
             .select_from(
                 _employees.join(
                     _departments,
                     (_departments.c.id == _employees.c.department_id)
                     & (_departments.c.tenant_id == _employees.c.tenant_id),
+                )
+                .outerjoin(
+                    _divisions,
+                    (_divisions.c.id == _departments.c.division_id)
+                    & (_divisions.c.tenant_id == _employees.c.tenant_id),
+                )
+                .outerjoin(
+                    _sections,
+                    (_sections.c.id == _employees.c.section_id)
+                    & (_sections.c.tenant_id == _employees.c.tenant_id),
                 )
             )
             .where(
@@ -1020,6 +1040,21 @@ def list_team_members_endpoint(
                 full_name=str(r.full_name),
                 designation=(
                     str(r.designation) if r.designation is not None else None
+                ),
+                division_name=(
+                    str(r.member_div_name)
+                    if r.member_div_name is not None
+                    else None
+                ),
+                department_name=(
+                    str(r.member_dept_name)
+                    if r.member_dept_name is not None
+                    else None
+                ),
+                section_name=(
+                    str(r.member_sec_name)
+                    if r.member_sec_name is not None
+                    else None
                 ),
             )
             for r in rows

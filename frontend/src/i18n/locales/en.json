@@ -656,7 +656,12 @@
       },
       "members": "members",
       "empty": "No other team members in this scope.",
-      "loadFailed": "Could not load team members."
+      "loadFailed": "Could not load team members.",
+      "col": {
+        "division": "Division",
+        "department": "Department",
+        "section": "Section"
+      }
     },
     "attendance": {
       "loadFailed": "Could not load attendance for this date.",

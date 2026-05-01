@@ -225,38 +225,64 @@ function TeamMembersTab({ employeeId }: { employeeId: number }) {
           }) as string}
         </div>
       ) : (
-        <table className="table">
-          <thead>
-            <tr>
-              <th style={{ textTransform: "uppercase", fontSize: 11 }}>
-                {t("employees.field.code", {
-                  defaultValue: "Employee ID",
-                }) as string}
-              </th>
-              <th style={{ textTransform: "uppercase", fontSize: 11 }}>
-                {t("employees.field.fullName", {
-                  defaultValue: "Name",
-                }) as string}
-              </th>
-              <th style={{ textTransform: "uppercase", fontSize: 11 }}>
-                {t("employees.field.designation", {
-                  defaultValue: "Designation",
-                }) as string}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((m) => (
-              <tr key={m.id}>
-                <td className="mono text-sm">{m.employee_code}</td>
-                <td className="text-sm" style={{ fontWeight: 500 }}>
-                  {m.full_name}
-                </td>
-                <td className="text-sm">{m.designation ?? "—"}</td>
+        <div style={{ overflowX: "auto" }}>
+          <table className="table">
+            <thead>
+              <tr>
+                <th style={{ textTransform: "uppercase", fontSize: 11 }}>
+                  {t("employees.field.code", {
+                    defaultValue: "Employee ID",
+                  }) as string}
+                </th>
+                <th style={{ textTransform: "uppercase", fontSize: 11 }}>
+                  {t("employees.field.fullName", {
+                    defaultValue: "Name",
+                  }) as string}
+                </th>
+                <th style={{ textTransform: "uppercase", fontSize: 11 }}>
+                  {t("employees.field.designation", {
+                    defaultValue: "Designation",
+                  }) as string}
+                </th>
+                <th style={{ textTransform: "uppercase", fontSize: 11 }}>
+                  {t("employees.team.col.division", {
+                    defaultValue: "Division",
+                  }) as string}
+                </th>
+                <th style={{ textTransform: "uppercase", fontSize: 11 }}>
+                  {t("employees.team.col.department", {
+                    defaultValue: "Department",
+                  }) as string}
+                </th>
+                <th style={{ textTransform: "uppercase", fontSize: 11 }}>
+                  {t("employees.team.col.section", {
+                    defaultValue: "Section",
+                  }) as string}
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {items.map((m) => (
+                <tr key={m.id}>
+                  <td className="mono text-sm">{m.employee_code}</td>
+                  <td className="text-sm" style={{ fontWeight: 500 }}>
+                    {m.full_name}
+                  </td>
+                  <td className="text-sm">{m.designation ?? "—"}</td>
+                  <td className="text-sm text-dim">
+                    {m.division_name ?? "—"}
+                  </td>
+                  <td className="text-sm text-dim">
+                    {m.department_name ?? "—"}
+                  </td>
+                  <td className="text-sm text-dim">
+                    {m.section_name ?? "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
