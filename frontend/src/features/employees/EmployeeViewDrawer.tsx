@@ -19,6 +19,7 @@ import { useTranslation } from "react-i18next";
 
 import { DatePicker, todayIso } from "../../components/DatePicker";
 import { DrawerShell } from "../../components/DrawerShell";
+import { RelativeTime } from "../../components/RelativeTime";
 import { Icon } from "../../shell/Icon";
 import { useDayDetail } from "../calendar/hooks";
 import type { DayDetail } from "../calendar/types";
@@ -714,8 +715,8 @@ function EventsTab({ employeeId }: { employeeId: number }) {
                   />
                 )}
               </td>
-              <td className="mono text-sm">
-                {new Date(ev.captured_at).toLocaleString()}
+              <td className="text-sm">
+                <RelativeTime iso={ev.captured_at} />
               </td>
               <td className="text-sm">{ev.camera_name}</td>
               <td className="mono text-sm">
