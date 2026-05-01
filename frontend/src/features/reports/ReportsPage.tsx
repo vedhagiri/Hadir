@@ -438,10 +438,12 @@ function AttendancePreview({
   }, [preset]);
 
   // Live preview samples the start day only — fetching every day in a
-  // range client-side would mean N round-trips.
+  // range client-side would mean N round-trips. The table renders the
+  // full row list for the start day; the downloaded report streams
+  // every day in the range.
   const list = useAttendance(start, null);
   const items = list.data?.items ?? [];
-  const previewItems = items.slice(0, 8);
+  const previewItems = items;
 
   const filterSlot = (
     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
