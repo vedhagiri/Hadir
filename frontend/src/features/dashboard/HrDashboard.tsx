@@ -74,9 +74,51 @@ interface DaySummary {
   absent: number;
   onLeave: number;
   working: number;
+  /** Tenant-wide day classification, derived from item flags. */
+  kind: "working" | "weekend" | "holiday";
+  /** Holiday name when kind === "holiday", else null. */
+  holidayName: string | null;
+  /** Check-ins on a non-working day → counted as overtime. */
+  otCheckIns: number;
+}
+
+function dayKindFor(items: AttendanceItem[]): {
+  kind: "working" | "weekend" | "holiday";
+  holidayName: string | null;
+} {
+  // ``is_weekend`` and ``is_holiday`` are tenant-wide for the date —
+  // backend computes one value per request — so we sample the first
+  // row. (Cross-tenant: the request itself is already tenant-scoped.)
+  const sample = items[0];
+  if (!sample) return { kind: "working", holidayName: null };
+  if (sample.is_holiday) {
+    return { kind: "holiday", holidayName: sample.holiday_name ?? null };
+  }
+  if (sample.is_weekend) return { kind: "weekend", holidayName: null };
+  return { kind: "working", holidayName: null };
 }
 
 function summarise(date: string, items: AttendanceItem[]): DaySummary {
+  const { kind, holidayName } = dayKindFor(items);
+
+  // Non-working days: every check-in is OT, no working population.
+  // Showing 100% Present on a weekend (because one OT employee
+  // came in) was the load-bearing bug behind this branch.
+  if (kind !== "working") {
+    const otCheckIns = items.filter((it) => Boolean(it.in_time)).length;
+    return {
+      date,
+      present: 0,
+      late: 0,
+      absent: 0,
+      onLeave: 0,
+      working: 0,
+      kind,
+      holidayName,
+      otCheckIns,
+    };
+  }
+
   let present = 0,
     late = 0,
     absent = 0,
@@ -91,7 +133,17 @@ function summarise(date: string, items: AttendanceItem[]): DaySummary {
     else if (b === "absent") absent += 1;
     else if (b === "onLeave") onLeave += 1;
   }
-  return { date, present, late, absent, onLeave, working };
+  return {
+    date,
+    present,
+    late,
+    absent,
+    onLeave,
+    working,
+    kind,
+    holidayName,
+    otCheckIns: 0,
+  };
 }
 
 function shortTime(iso: string | null): string {
@@ -362,6 +414,17 @@ export function HrDashboard() {
       : "Ramadan ends today";
   }, [policies.data, policyMix.Ramadan]);
 
+  const dayKindLabel = useMemo(() => {
+    if (!todaySummary) return null;
+    if (todaySummary.kind === "weekend") return "Weekend";
+    if (todaySummary.kind === "holiday") {
+      return todaySummary.holidayName
+        ? `Holiday — ${todaySummary.holidayName}`
+        : "Holiday";
+    }
+    return null;
+  }, [todaySummary]);
+
   const subtitle = useMemo(() => {
     const d = new Date();
     const day = d.toLocaleDateString(undefined, {
@@ -371,12 +434,20 @@ export function HrDashboard() {
       day: "numeric",
     });
     const parts = [day];
-    if (ramadanBanner) parts.push(ramadanBanner);
+    if (dayKindLabel) {
+      parts.push(
+        todaySummary && todaySummary.otCheckIns > 0
+          ? `${dayKindLabel} · ${todaySummary.otCheckIns} OT check-in${todaySummary.otCheckIns === 1 ? "" : "s"}`
+          : dayKindLabel,
+      );
+    } else if (ramadanBanner) {
+      parts.push(ramadanBanner);
+    }
     if (todayPresentPct !== null) {
       parts.push(`${todayPresentPct}% presence today`);
     }
     return parts.join(" · ");
-  }, [ramadanBanner, todayPresentPct]);
+  }, [ramadanBanner, todayPresentPct, dayKindLabel, todaySummary]);
 
   const dailySchedule = useMemo(
     () => (schedules.data ?? []).find((s) => s.active && s.format === "xlsx"),
@@ -423,24 +494,38 @@ export function HrDashboard() {
   const pendingPreview = (inboxPending.data ?? []).slice(0, 5);
 
   const statusSlices = todaySummary
-    ? [
-        {
-          label: "Present",
-          value: todaySummary.present,
-          color: "var(--success)",
-        },
-        { label: "Late", value: todaySummary.late, color: "var(--warning)" },
-        {
-          label: "On leave",
-          value: todaySummary.onLeave,
-          color: "var(--info)",
-        },
-        {
-          label: "Absent",
-          value: todaySummary.absent,
-          color: "var(--danger)",
-        },
-      ]
+    ? todaySummary.kind !== "working"
+      ? [
+          {
+            label: "OT check-ins",
+            value: todaySummary.otCheckIns,
+            color: "var(--accent)",
+          },
+          {
+            label: "Off",
+            value:
+              todayItems.length - todaySummary.otCheckIns,
+            color: "var(--text-tertiary)",
+          },
+        ]
+      : [
+          {
+            label: "Present",
+            value: todaySummary.present,
+            color: "var(--success)",
+          },
+          { label: "Late", value: todaySummary.late, color: "var(--warning)" },
+          {
+            label: "On leave",
+            value: todaySummary.onLeave,
+            color: "var(--info)",
+          },
+          {
+            label: "Absent",
+            value: todaySummary.absent,
+            color: "var(--danger)",
+          },
+        ]
     : [];
 
   return (
@@ -479,18 +564,30 @@ export function HrDashboard() {
         <KpiCard
           icon="users"
           label="Present today"
-          value={todayPresentPct === null ? "—" : `${todayPresentPct}%`}
+          value={
+            dayKindLabel
+              ? dayKindLabel
+              : todayPresentPct === null
+                ? "—"
+                : `${todayPresentPct}%`
+          }
           delta={
-            deltaVsYesterday === null
-              ? undefined
-              : `${deltaVsYesterday > 0 ? "+" : ""}${deltaVsYesterday}% vs yesterday`
+            dayKindLabel
+              ? `${todaySummary?.otCheckIns ?? 0} OT check-in${
+                  (todaySummary?.otCheckIns ?? 0) === 1 ? "" : "s"
+                }`
+              : deltaVsYesterday === null
+                ? undefined
+                : `${deltaVsYesterday > 0 ? "+" : ""}${deltaVsYesterday}% vs yesterday`
           }
           deltaTone={
-            deltaVsYesterday === null
+            dayKindLabel
               ? undefined
-              : deltaVsYesterday >= 0
-                ? "up"
-                : "down"
+              : deltaVsYesterday === null
+                ? undefined
+                : deltaVsYesterday >= 0
+                  ? "up"
+                  : "down"
           }
           spark={sparkPresent}
           sparkColor="var(--success)"
@@ -498,8 +595,8 @@ export function HrDashboard() {
         <KpiCard
           icon="clock"
           label="Late arrivals"
-          value={String(todaySummary?.late ?? 0)}
-          delta={`${todaySummary?.late ?? 0} today`}
+          value={dayKindLabel ? "—" : String(todaySummary?.late ?? 0)}
+          delta={dayKindLabel ? "no working day" : `${todaySummary?.late ?? 0} today`}
           spark={sparkLate}
           sparkColor="var(--warning)"
         />
@@ -527,8 +624,8 @@ export function HrDashboard() {
         <KpiCard
           icon="user"
           label="Absent today"
-          value={String(todaySummary?.absent ?? 0)}
-          delta="no events all day"
+          value={dayKindLabel ? "—" : String(todaySummary?.absent ?? 0)}
+          delta={dayKindLabel ? "no working day" : "no events all day"}
           spark={sparkAbsent}
           sparkColor="var(--danger)"
         />
@@ -588,7 +685,9 @@ export function HrDashboard() {
         <div className="card">
           <div className="card-head">
             <h3 className="card-title">Status breakdown</h3>
-            <span className="text-xs text-dim mono">{todayIso()}</span>
+            <span className="text-xs text-dim mono">
+              {dayKindLabel ?? todayIso()}
+            </span>
           </div>
           <div
             className="card-body"
@@ -603,8 +702,16 @@ export function HrDashboard() {
             <div style={{ display: "grid", placeItems: "center" }}>
               <Donut
                 slices={statusSlices}
-                centerValue={String(todaySummary?.working ?? 0)}
-                centerLabel="working"
+                centerValue={
+                  todaySummary && todaySummary.kind !== "working"
+                    ? String(todaySummary.otCheckIns)
+                    : String(todaySummary?.working ?? 0)
+                }
+                centerLabel={
+                  todaySummary && todaySummary.kind !== "working"
+                    ? "OT"
+                    : "working"
+                }
               />
             </div>
             <div
