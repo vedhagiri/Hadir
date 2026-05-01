@@ -36,13 +36,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/detection-events", tags=["detection-events"])
 
-# Camera Logs is in the HR nav, so the endpoints that back it open
-# to Admin + HR. Both roles already have full org visibility on
-# every other surface (employees, attendance, requests). Manager +
-# Employee are intentionally excluded — Manager scope on detection
-# events is a future feature, and Employee never needs the full
-# event log.
-ADMIN_OR_HR = Depends(require_any_role("Admin", "HR"))
+# Camera Logs is in the HR nav. Manager is allowed too but only for
+# events scoped to their team (the My Team drawer's Camera events
+# tab) — see the runtime team-membership check inside ``list_events``
+# and ``crop_endpoint``. Employee stays 403 (would need a per-self
+# scope endpoint, future work).
+ADMIN_HR_MANAGER = Depends(require_any_role("Admin", "HR", "Manager"))
 
 
 class DetectionEventOut(BaseModel):
@@ -130,7 +129,7 @@ def _build_select(scope: TenantScope):
 
 @router.get("", response_model=DetectionEventListOut)
 def list_events(
-    user: Annotated[CurrentUser, ADMIN_OR_HR],
+    user: Annotated[CurrentUser, ADMIN_HR_MANAGER],
     camera_id: Annotated[Optional[int], Query()] = None,
     employee_id: Annotated[Optional[int], Query()] = None,
     identified: Annotated[
@@ -147,6 +146,27 @@ def list_events(
     page_size: Annotated[int, Query(ge=1, le=200)] = 100,
 ) -> DetectionEventListOut:
     scope = TenantScope(tenant_id=user.tenant_id)
+
+    is_manager_only = (
+        "Manager" in user.roles
+        and "Admin" not in user.roles
+        and "HR" not in user.roles
+    )
+    if is_manager_only:
+        # Manager can only browse events for employees in their team
+        # set (per ``_resolve_team_employee_ids``). The endpoint
+        # accepts an explicit employee_id and refuses without one to
+        # avoid leaking the full event log; if employee_id is given
+        # we additionally verify it's in the team set, 404 otherwise.
+        from maugood.employees.router import _assert_manager_can_view  # noqa: PLC0415
+
+        if employee_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail="employee_id required for Manager role",
+            )
+        with get_engine().begin() as conn:
+            _assert_manager_can_view(user, conn, scope, employee_id)
 
     base = _build_select(scope)
     if camera_id is not None:
@@ -222,7 +242,7 @@ def list_events(
 
 @router.get("/{event_id}/crop")
 def crop_endpoint(
-    event_id: int, user: Annotated[CurrentUser, ADMIN_OR_HR]
+    event_id: int, user: Annotated[CurrentUser, ADMIN_HR_MANAGER]
 ) -> Response:
     """Decrypt + stream the encrypted face crop. Auth-gated, audit-logged."""
 
@@ -242,6 +262,24 @@ def crop_endpoint(
         ).first()
         if row is None:
             raise HTTPException(status_code=404, detail="event not found")
+
+        # Manager-scope guard: the event's employee must be in their
+        # team set. Unidentified events (employee_id IS NULL) stay
+        # admin/HR-only since there's no scope to anchor the check on.
+        is_manager_only = (
+            "Manager" in user.roles
+            and "Admin" not in user.roles
+            and "HR" not in user.roles
+        )
+        if is_manager_only:
+            from maugood.employees.router import (  # noqa: PLC0415
+                _assert_manager_can_view,
+            )
+
+            if row.employee_id is None:
+                raise HTTPException(status_code=404, detail="event not found")
+            _assert_manager_can_view(user, conn, scope, int(row.employee_id))
+
         write_audit(
             conn,
             tenant_id=scope.tenant_id,

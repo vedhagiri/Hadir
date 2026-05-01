@@ -815,7 +815,7 @@ const selectStyle = {
   outline: "none",
 } as const;
 
-function initials(fullName: string): string {
+export function initials(fullName: string): string {
   const parts = fullName.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return "??";
   if (parts.length === 1) return (parts[0] ?? "").slice(0, 2).toUpperCase();
@@ -824,7 +824,7 @@ function initials(fullName: string): string {
 
 // Stable per-name avatar color — pick from a small palette by hashing
 // the full name. Mirrors the design screenshot's tinted circles.
-function avatarBg(fullName: string): string {
+export function avatarBg(fullName: string): string {
   const palette = [
     "#7c3aed", // violet
     "#2563eb", // blue
@@ -845,7 +845,7 @@ function avatarBg(fullName: string): string {
 // Pick the most-privileged role for the pill, mirroring the
 // frontend's primaryRole() helper for the auth context. Order:
 // Admin > HR > Manager > Employee.
-function primaryRoleFromCodes(codes: string[]): string | null {
+export function primaryRoleFromCodes(codes: string[]): string | null {
   const order = ["Admin", "HR", "Manager", "Employee"];
   for (const r of order) {
     if (codes.includes(r)) return r;
@@ -853,7 +853,7 @@ function primaryRoleFromCodes(codes: string[]): string | null {
   return codes[0] ?? null;
 }
 
-function rolePillClass(role: string): string {
+export function rolePillClass(role: string): string {
   switch (role) {
     case "Admin":
       return "pill-danger";

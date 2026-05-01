@@ -17,6 +17,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { useMe } from "../../auth/AuthProvider";
 import { DatePicker, todayIso } from "../../components/DatePicker";
 import { DrawerShell } from "../../components/DrawerShell";
 import { RelativeTime } from "../../components/RelativeTime";
@@ -44,6 +45,11 @@ export function EmployeeViewDrawer({
   onEdit: () => void;
 }) {
   const { t } = useTranslation();
+  const me = useMe();
+  // Edit is Admin/HR-only on the backend, so hide the button for any
+  // other role (Manager opening the drawer from My Team).
+  const canEdit =
+    me.data?.roles?.includes("Admin") || me.data?.roles?.includes("HR");
   const detail = useEmployeeDetail(employeeId);
   const photos = useEmployeePhotos(employeeId);
   const [tab, setTab] = useState<Tab>("details");
@@ -66,18 +72,20 @@ export function EmployeeViewDrawer({
             )}
           </div>
           <div style={{ display: "flex", gap: 6 }}>
-            <button
-              type="button"
-              className="btn btn-sm"
-              onClick={() => {
-                onClose();
-                onEdit();
-              }}
-              title={t("employees.action.edit") as string}
-            >
-              <Icon name="edit" size={11} />
-              {t("employees.action.edit") as string}
-            </button>
+            {canEdit && (
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => {
+                  onClose();
+                  onEdit();
+                }}
+                title={t("employees.action.edit") as string}
+              >
+                <Icon name="edit" size={11} />
+                {t("employees.action.edit") as string}
+              </button>
+            )}
             <button
               type="button"
               className="icon-btn"

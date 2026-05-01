@@ -294,6 +294,43 @@ router = APIRouter(prefix="/api/employees", tags=["employees"])
 # still Admin-only — see the comment on that handler.
 ADMIN = Depends(require_role("Admin"))
 ADMIN_OR_HR = Depends(require_any_role("Admin", "HR"))
+# Read-only Manager-eligible endpoints (employee detail, photos,
+# detection events, etc.) use this dep + ``_assert_manager_can_view``
+# below to enforce team-scoping. Admin/HR remain unrestricted; the
+# helper short-circuits for those roles.
+ADMIN_HR_MANAGER = Depends(require_any_role("Admin", "HR", "Manager"))
+
+
+def _assert_manager_can_view(
+    user: CurrentUser, conn, scope: "TenantScope", target_employee_id: int
+) -> None:
+    """Raise 404 if a Manager isn't allowed to see ``target_employee_id``.
+
+    Admin/HR bypass entirely — they have full org visibility on every
+    other read surface. Manager scope = the team-rule resolver applied
+    to the manager's own employee record (the same set surfaced by
+    My Team / Team Members on their own profile). 404, never 403, so a
+    cross-tenant or out-of-scope id doesn't leak existence.
+    """
+
+    if "Admin" in user.roles or "HR" in user.roles:
+        return
+    if "Manager" not in user.roles:
+        raise HTTPException(status_code=404, detail="employee not found")
+    from maugood.requests.repository import (  # noqa: PLC0415
+        employee_for_user_email,
+    )
+
+    my_emp_id = employee_for_user_email(conn, scope, email=user.email)
+    if my_emp_id is None:
+        raise HTTPException(status_code=404, detail="employee not found")
+    team = _resolve_team_employee_ids(conn, scope, my_emp_id)
+    # The manager themselves is excluded from the team set (the rule
+    # resolver does ``id != target``); allow self-view explicitly.
+    if target_employee_id == my_emp_id:
+        return
+    if target_employee_id not in team:
+        raise HTTPException(status_code=404, detail="employee not found")
 
 
 def _row_to_out(row: repo.EmployeeRow) -> EmployeeOut:
@@ -837,10 +874,11 @@ def get_my_employee_endpoint(
 @router.get("/{employee_id}", response_model=EmployeeOut)
 def get_employee_endpoint(
     employee_id: int,
-    user: Annotated[CurrentUser, ADMIN_OR_HR],
+    user: Annotated[CurrentUser, ADMIN_HR_MANAGER],
 ) -> EmployeeOut:
     scope = TenantScope(tenant_id=user.tenant_id)
     with get_engine().begin() as conn:
+        _assert_manager_can_view(user, conn, scope, employee_id)
         row = repo.get_employee(conn, scope, employee_id)
     if row is None:
         raise HTTPException(status_code=404, detail="employee not found")
@@ -2424,10 +2462,11 @@ async def upload_photos_endpoint(
 @router.get("/{employee_id}/photos", response_model=PhotoListOut)
 def list_photos_endpoint(
     employee_id: int,
-    user: Annotated[CurrentUser, ADMIN_OR_HR],
+    user: Annotated[CurrentUser, ADMIN_HR_MANAGER],
 ) -> PhotoListOut:
     scope = TenantScope(tenant_id=user.tenant_id)
     with get_engine().begin() as conn:
+        _assert_manager_can_view(user, conn, scope, employee_id)
         emp = repo.get_employee(conn, scope, employee_id)
         if emp is None:
             raise HTTPException(status_code=404, detail="employee not found")
@@ -2444,12 +2483,13 @@ def list_photos_endpoint(
 def get_photo_image_endpoint(
     employee_id: int,
     photo_id: int,
-    user: Annotated[CurrentUser, ADMIN_OR_HR],
+    user: Annotated[CurrentUser, ADMIN_HR_MANAGER],
 ) -> Response:
     """Decrypt and stream the stored image bytes (auth-gated, audited)."""
 
     scope = TenantScope(tenant_id=user.tenant_id)
     with get_engine().begin() as conn:
+        _assert_manager_can_view(user, conn, scope, employee_id)
         row = photos_io.get_photo(
             conn, scope, photo_id=photo_id, employee_id=employee_id
         )
