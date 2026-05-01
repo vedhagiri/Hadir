@@ -643,14 +643,21 @@ async function downloadAttendance({
 // Event Log preview
 // ---------------------------------------------------------------------------
 
+// Convert a YYYY-MM-DD picked in the browser into a true UTC window
+// covering that local day. Sending naive strings would let Postgres
+// coerce them to UTC (session TZ) and exclude events that landed in
+// the local day but live in a different UTC date — see e.g. Asia/Muscat
+// 01:30 maps to UTC 21:30 the previous day.
+function localDayUtcRange(date: string): { start: string; end: string } {
+  const startLocal = new Date(`${date}T00:00:00`);
+  const endLocal = new Date(`${date}T23:59:59.999`);
+  return { start: startLocal.toISOString(), end: endLocal.toISOString() };
+}
+
 function useEventLog(date: string, page: number, pageSize: number) {
-  // Local-day window. We send naive ISO strings; the backend filters
-  // captured_at and Postgres compares correctly given the timezone
-  // hints on the column.
-  const start = `${date}T00:00:00`;
-  const end = `${date}T23:59:59`;
+  const { start, end } = localDayUtcRange(date);
   return useApi<DetectionEventListResponse>(
-    `/api/detection-events?start=${start}&end=${end}&page=${page}&page_size=${pageSize}`,
+    `/api/detection-events?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&page=${page}&page_size=${pageSize}`,
     [date, page, pageSize],
   );
 }
@@ -992,14 +999,13 @@ async function downloadEventLog({
   setError(null);
   setInfo(null);
   try {
-    const start = `${date}T00:00:00`;
-    const end = `${date}T23:59:59`;
+    const { start, end } = localDayUtcRange(date);
     // Pull all rows in chunks (page_size capped at 200).
     const all: DetectionEventRow[] = [];
     let page = 1;
     while (true) {
       const resp = await api<DetectionEventListResponse>(
-        `/api/detection-events?start=${start}&end=${end}&page_size=200&page=${page}`,
+        `/api/detection-events?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&page_size=200&page=${page}`,
       );
       all.push(...resp.items);
       if (page * resp.page_size >= resp.total) break;
