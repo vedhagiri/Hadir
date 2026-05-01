@@ -8,12 +8,13 @@
 // /api/attendance/series endpoint yet. Fine for ≤ a few hundred
 // employees; once the aggregate endpoint lands we swap the source.
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 
 import { api } from "../../api/client";
 import { useMe } from "../../auth/AuthProvider";
+import { DatePicker, todayIso } from "../../components/DatePicker";
 import { usePolicies } from "../../policies/hooks";
 import { useInboxPending, useInboxSummary } from "../../requests/hooks";
 import {
@@ -35,13 +36,11 @@ function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
 
-function todayIso(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-function isoDaysAgo(n: number): string {
-  const d = new Date();
+function isoDaysBefore(anchor: string, n: number): string {
+  // ``anchor`` is a YYYY-MM-DD picked by the operator; n=0 returns
+  // the anchor unchanged. Doing the math via Date keeps month-rollover
+  // correct (e.g. anchor=2026-05-02 minus 6 → 2026-04-26).
+  const d = new Date(`${anchor}T00:00:00`);
   d.setDate(d.getDate() - n);
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
@@ -164,17 +163,17 @@ function hoursDecimal(min: number | null): string {
 
 const SERIES_DAYS = 7;
 
-function useAttendanceSeries(): {
+function useAttendanceSeries(anchor: string): {
   isLoading: boolean;
   series: DaySummary[];
-  todayItems: AttendanceItem[];
+  selectedItems: AttendanceItem[];
 } {
   const dates = useMemo(
     () =>
       Array.from({ length: SERIES_DAYS }, (_, i) =>
-        isoDaysAgo(SERIES_DAYS - 1 - i),
+        isoDaysBefore(anchor, SERIES_DAYS - 1 - i),
       ),
-    [],
+    [anchor],
   );
   const queries = useQueries({
     queries: dates.map((d) => ({
@@ -188,8 +187,8 @@ function useAttendanceSeries(): {
     () => dates.map((d, i) => summarise(d, queries[i]?.data?.items ?? [])),
     [dates, queries],
   );
-  const todayItems = queries[queries.length - 1]?.data?.items ?? [];
-  return { isLoading, series, todayItems };
+  const selectedItems = queries[queries.length - 1]?.data?.items ?? [];
+  return { isLoading, series, selectedItems };
 }
 
 // ---------------------------------------------------------------------------
@@ -206,7 +205,14 @@ export function HrDashboard() {
   const schedules = useReportSchedules();
   const runNow = useRunNow();
 
-  const { series, todayItems } = useAttendanceSeries();
+  // Selected date — defaults to wall-clock today; clamped to today
+  // by the picker so HR can't peek into the future. Past data stays
+  // available for reviewing yesterday's, last week's, or any prior
+  // attendance day.
+  const [selectedDate, setSelectedDate] = useState<string>(todayIso());
+  const isToday = selectedDate === todayIso();
+
+  const { series, selectedItems: todayItems } = useAttendanceSeries(selectedDate);
   const todaySummary = series[series.length - 1];
   const yesterday = series[series.length - 2];
 
@@ -372,14 +378,13 @@ export function HrDashboard() {
       Ramadan: 0,
       Custom: 0,
     };
-    const t = todayIso();
     for (const p of policies.data ?? []) {
       if (p.type === "Ramadan" || p.type === "Custom") {
         if (
           p.config.start_date &&
           p.config.end_date &&
-          p.config.start_date <= t &&
-          t <= p.config.end_date
+          p.config.start_date <= selectedDate &&
+          selectedDate <= p.config.end_date
         ) {
           counts[p.type] += 1;
         }
@@ -388,31 +393,31 @@ export function HrDashboard() {
       counts[p.type] += 1;
     }
     return counts;
-  }, [policies.data]);
+  }, [policies.data, selectedDate]);
 
   const ramadanBanner = useMemo(() => {
     if (policyMix.Ramadan === 0) return null;
-    const t = todayIso();
     const r = (policies.data ?? []).find(
       (p) =>
         p.type === "Ramadan" &&
         p.config.start_date &&
         p.config.end_date &&
-        p.config.start_date <= t &&
-        t <= p.config.end_date,
+        p.config.start_date <= selectedDate &&
+        selectedDate <= p.config.end_date,
     );
     if (!r || !r.config.end_date) return "Ramadan period active";
     const daysLeft = Math.max(
       0,
       Math.round(
-        (new Date(r.config.end_date).getTime() - new Date(t).getTime()) /
+        (new Date(r.config.end_date).getTime() -
+          new Date(selectedDate).getTime()) /
           86_400_000,
       ),
     );
     return daysLeft > 0
       ? `Ramadan · ${daysLeft} day${daysLeft === 1 ? "" : "s"} remaining`
-      : "Ramadan ends today";
-  }, [policies.data, policyMix.Ramadan]);
+      : "Ramadan ends on this date";
+  }, [policies.data, policyMix.Ramadan, selectedDate]);
 
   const dayKindLabel = useMemo(() => {
     if (!todaySummary) return null;
@@ -426,7 +431,9 @@ export function HrDashboard() {
   }, [todaySummary]);
 
   const subtitle = useMemo(() => {
-    const d = new Date();
+    // Use the selected date — the dashboard's frame of reference is
+    // whatever HR pinned in the picker, not wall-clock today.
+    const d = new Date(`${selectedDate}T00:00:00`);
     const day = d.toLocaleDateString(undefined, {
       weekday: "long",
       year: "numeric",
@@ -434,6 +441,7 @@ export function HrDashboard() {
       day: "numeric",
     });
     const parts = [day];
+    if (!isToday) parts.push("historic view");
     if (dayKindLabel) {
       parts.push(
         todaySummary && todaySummary.otCheckIns > 0
@@ -444,22 +452,31 @@ export function HrDashboard() {
       parts.push(ramadanBanner);
     }
     if (todayPresentPct !== null) {
-      parts.push(`${todayPresentPct}% presence today`);
+      parts.push(
+        `${todayPresentPct}% presence ${isToday ? "today" : "on this date"}`,
+      );
     }
     return parts.join(" · ");
-  }, [ramadanBanner, todayPresentPct, dayKindLabel, todaySummary]);
+  }, [
+    ramadanBanner,
+    todayPresentPct,
+    dayKindLabel,
+    todaySummary,
+    selectedDate,
+    isToday,
+  ]);
 
   const dailySchedule = useMemo(
     () => (schedules.data ?? []).find((s) => s.active && s.format === "xlsx"),
     [schedules.data],
   );
 
-  function downloadTodayXlsx() {
+  function downloadSelectedXlsx() {
     void fetch("/api/reports/attendance.xlsx", {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ start: todayIso(), end: todayIso() }),
+      body: JSON.stringify({ start: selectedDate, end: selectedDate }),
     })
       .then(async (r) => {
         if (!r.ok) {
@@ -469,12 +486,14 @@ export function HrDashboard() {
         const blob = await r.blob();
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
-        a.download = `attendance_${todayIso()}.xlsx`;
+        a.download = `attendance_${selectedDate}.xlsx`;
         document.body.appendChild(a);
         a.click();
         a.remove();
         URL.revokeObjectURL(a.href);
-        toast.success("Today's attendance exported");
+        toast.success(
+          isToday ? "Today's attendance exported" : `Exported ${selectedDate}`,
+        );
       })
       .catch(() => toast.error("Network error"));
   }
@@ -539,9 +558,28 @@ export function HrDashboard() {
           </h1>
           <p className="page-sub">{subtitle}</p>
         </div>
-        <div className="page-actions" style={{ display: "flex", gap: 8 }}>
-          <button className="btn" onClick={downloadTodayXlsx}>
-            <Icon name="download" size={12} /> Export today
+        <div
+          className="page-actions"
+          style={{ display: "flex", gap: 8, alignItems: "center" }}
+        >
+          <DatePicker
+            value={selectedDate}
+            onChange={setSelectedDate}
+            max={todayIso()}
+            ariaLabel="Dashboard date"
+          />
+          {!isToday && (
+            <button
+              className="btn btn-sm"
+              onClick={() => setSelectedDate(todayIso())}
+              title="Jump back to today"
+            >
+              Today
+            </button>
+          )}
+          <button className="btn" onClick={downloadSelectedXlsx}>
+            <Icon name="download" size={12} />{" "}
+            {isToday ? "Export today" : `Export ${selectedDate}`}
           </button>
           <button
             className="btn btn-primary"
@@ -645,7 +683,7 @@ export function HrDashboard() {
             <div>
               <h3 className="card-title">Company-wide presence</h3>
               <div className="text-xs text-dim" style={{ marginTop: 2 }}>
-                Last 7 days · daily presence vs target
+                7 days ending {selectedDate} · daily presence vs target
               </div>
             </div>
             <span
@@ -686,7 +724,7 @@ export function HrDashboard() {
           <div className="card-head">
             <h3 className="card-title">Status breakdown</h3>
             <span className="text-xs text-dim mono">
-              {dayKindLabel ?? todayIso()}
+              {dayKindLabel ?? selectedDate}
             </span>
           </div>
           <div
@@ -1116,6 +1154,8 @@ export function HrDashboard() {
         rows={todayItems.slice(0, 10)}
         total={todayItems.length}
         loading={!todaySummary}
+        date={selectedDate}
+        isToday={isToday}
         onSeeAll={() => navigate("/daily-attendance")}
       />
     </>
@@ -1468,18 +1508,24 @@ function LiveAttendance({
   rows,
   total,
   loading,
+  date,
+  isToday,
   onSeeAll,
 }: {
   rows: AttendanceItem[];
   total: number;
   loading: boolean;
+  date: string;
+  isToday: boolean;
   onSeeAll: () => void;
 }) {
   return (
     <div className="card">
       <div className="card-head">
         <div>
-          <h3 className="card-title">Today's attendance · live</h3>
+          <h3 className="card-title">
+            {isToday ? "Today's attendance · live" : `Attendance · ${date}`}
+          </h3>
           <div className="text-xs text-dim" style={{ marginTop: 2 }}>
             {total === 0
               ? "No rows yet"
