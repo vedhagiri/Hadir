@@ -391,25 +391,38 @@ def list_my_team_endpoint(
 ) -> EmployeeListOut:
     """Manager-scoped employee list.
 
-    Returns the same shape as ``GET /api/employees`` but narrowed to
-    the manager's visible-set per P8 (union of
-    ``manager_assignments`` + ``user_departments``). Empty set yields
-    zero rows; the endpoint never 403s even on a manager with no
-    assignments — the frontend renders a "No team members" empty
-    state.
+    Reuses the Team Members rule chain (see
+    ``GET /api/employees/{id}/team-members``) applied to the
+    manager's own employee record:
+
+    * Rule 0 — designation contains "manager" + division/department/
+      section names all distinct → the manager's exact triple
+    * Rule 1 — division.name == department.name == section.name →
+      same division
+    * Rule 2 / fall-back → same department
+
+    The manager's own row is excluded; only ``status='active''``
+    rows count. Returns the same ``EmployeeListOut`` shape as
+    ``GET /api/employees`` so the frontend renders with the same
+    Employee type. A manager without an employee record (e.g. a
+    user with the Manager role but no email match in
+    ``employees``) yields an empty list — the frontend's empty
+    state explains it.
     """
 
-    from maugood.manager_assignments.repository import (  # noqa: PLC0415
-        get_manager_visible_employee_ids,
+    from maugood.requests.repository import (  # noqa: PLC0415
+        employee_for_user_email,
     )
 
     scope = TenantScope(tenant_id=user.tenant_id)
     with get_engine().begin() as conn:
-        visible = frozenset(
-            get_manager_visible_employee_ids(
-                conn, scope, manager_user_id=user.id
+        my_emp_id = employee_for_user_email(conn, scope, email=user.email)
+        if my_emp_id is None:
+            return EmployeeListOut(
+                items=[], total=0, page=page, page_size=page_size
             )
-        )
+
+        team_ids = _resolve_team_employee_ids(conn, scope, my_emp_id)
         rows, total = repo.list_employees(
             conn,
             scope,
@@ -420,7 +433,7 @@ def list_my_team_endpoint(
             page_size=page_size,
             sort_by=sort_by,
             sort_dir=sort_dir,
-            restrict_to_ids=visible,
+            restrict_to_ids=team_ids,
         )
     return EmployeeListOut(
         items=[_row_to_out(r) for r in rows],
@@ -428,6 +441,120 @@ def list_my_team_endpoint(
         page=page,
         page_size=page_size,
     )
+
+
+def _resolve_team_employee_ids(
+    conn,
+    scope: TenantScope,
+    target_employee_id: int,
+) -> frozenset[int]:
+    """Internal helper — apply the team-members rule chain to the
+    given target and return the matching employee ids.
+
+    Mirrors the resolver inside ``list_team_members_endpoint``; the
+    two surfaces share the same rule order so a Manager's "My Team"
+    page is exactly what the Team Members tab shows on their own
+    profile.
+    """
+
+    from sqlalchemy import select as _select  # noqa: PLC0415
+
+    from maugood.db import (  # noqa: PLC0415
+        departments as _departments,
+        divisions as _divisions,
+        employees as _employees,
+        sections as _sections,
+    )
+
+    target = conn.execute(
+        _select(
+            _employees.c.id,
+            _employees.c.department_id,
+            _employees.c.section_id,
+            _employees.c.designation,
+            _departments.c.name.label("dept_name"),
+            _departments.c.division_id,
+            _divisions.c.name.label("div_name"),
+            _sections.c.name.label("sec_name"),
+        )
+        .select_from(
+            _employees.join(
+                _departments,
+                (_departments.c.id == _employees.c.department_id)
+                & (_departments.c.tenant_id == _employees.c.tenant_id),
+            )
+            .outerjoin(
+                _divisions,
+                (_divisions.c.id == _departments.c.division_id)
+                & (_divisions.c.tenant_id == _employees.c.tenant_id),
+            )
+            .outerjoin(
+                _sections,
+                (_sections.c.id == _employees.c.section_id)
+                & (_sections.c.tenant_id == _employees.c.tenant_id),
+            )
+        )
+        .where(
+            _employees.c.tenant_id == scope.tenant_id,
+            _employees.c.id == target_employee_id,
+        )
+    ).first()
+    if target is None:
+        return frozenset()
+
+    div_name = target.div_name
+    dept_name = target.dept_name
+    sec_name = target.sec_name
+    designation = target.designation
+
+    rule_zero = (
+        designation is not None
+        and "manager" in designation.lower()
+        and div_name is not None
+        and dept_name is not None
+        and sec_name is not None
+        and div_name != dept_name
+        and dept_name != sec_name
+        and div_name != sec_name
+        and target.division_id is not None
+        and target.section_id is not None
+    )
+    rule_one = (
+        div_name is not None
+        and dept_name is not None
+        and sec_name is not None
+        and div_name == dept_name == sec_name
+        and target.division_id is not None
+    )
+
+    base = (
+        _select(_employees.c.id)
+        .select_from(
+            _employees.join(
+                _departments,
+                (_departments.c.id == _employees.c.department_id)
+                & (_departments.c.tenant_id == _employees.c.tenant_id),
+            )
+        )
+        .where(
+            _employees.c.tenant_id == scope.tenant_id,
+            _employees.c.id != target_employee_id,
+            _employees.c.status == "active",
+        )
+    )
+
+    if rule_zero:
+        stmt = base.where(
+            _employees.c.department_id == target.department_id,
+            _employees.c.section_id == target.section_id,
+            _departments.c.division_id == target.division_id,
+        )
+    elif rule_one:
+        stmt = base.where(_departments.c.division_id == target.division_id)
+    else:
+        stmt = base.where(_employees.c.department_id == target.department_id)
+
+    return frozenset(int(r.id) for r in conn.execute(stmt).all())
 
 
 @router.get("", response_model=EmployeeListOut)
