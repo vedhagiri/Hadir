@@ -20,7 +20,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.engine import Connection
 
 from maugood.auth.audit import write_audit
-from maugood.auth.dependencies import CurrentUser, require_role
+from maugood.auth.dependencies import CurrentUser, require_any_role
 from maugood.cameras import repository as camera_repo
 from maugood.db import (
     cameras,
@@ -36,7 +36,13 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/detection-events", tags=["detection-events"])
 
-ADMIN = Depends(require_role("Admin"))
+# Camera Logs is in the HR nav, so the endpoints that back it open
+# to Admin + HR. Both roles already have full org visibility on
+# every other surface (employees, attendance, requests). Manager +
+# Employee are intentionally excluded — Manager scope on detection
+# events is a future feature, and Employee never needs the full
+# event log.
+ADMIN_OR_HR = Depends(require_any_role("Admin", "HR"))
 
 
 class DetectionEventOut(BaseModel):
@@ -124,7 +130,7 @@ def _build_select(scope: TenantScope):
 
 @router.get("", response_model=DetectionEventListOut)
 def list_events(
-    user: Annotated[CurrentUser, ADMIN],
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
     camera_id: Annotated[Optional[int], Query()] = None,
     employee_id: Annotated[Optional[int], Query()] = None,
     identified: Annotated[
@@ -216,7 +222,7 @@ def list_events(
 
 @router.get("/{event_id}/crop")
 def crop_endpoint(
-    event_id: int, user: Annotated[CurrentUser, ADMIN]
+    event_id: int, user: Annotated[CurrentUser, ADMIN_OR_HR]
 ) -> Response:
     """Decrypt + stream the encrypted face crop. Auth-gated, audit-logged."""
 
