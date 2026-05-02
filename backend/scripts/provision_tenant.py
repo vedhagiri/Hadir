@@ -607,6 +607,33 @@ def provision(
 
     engine.dispose()
 
+    # Kick a single attendance recompute for the new tenant so the
+    # backend's scheduler doesn't have to wait up to 15 min for its
+    # next interval tick to notice this tenant. Fresh tenants have
+    # zero employees so the call returns 0 rows — that's fine. The
+    # important thing is the live FastAPI process logs visible
+    # activity for the new tenant, and any future calls (after the
+    # operator adds employees) inherit a primed code path.
+    try:
+        from maugood.attendance.scheduler import recompute_today  # noqa: PLC0415
+        from maugood.tenants.scope import TenantScope  # noqa: PLC0415
+
+        scope = TenantScope(tenant_id=tenant_id, tenant_schema=schema_name)
+        n = recompute_today(scope)
+        logger.info(
+            "attendance: kicked recompute for new tenant %s — %d rows",
+            slug,
+            n,
+        )
+    except Exception as exc:  # noqa: BLE001
+        # Non-fatal — provisioning succeeded; the scheduler's regular
+        # interval will pick the tenant up on the next tick.
+        logger.warning(
+            "attendance: post-provision recompute kick failed (%s) — "
+            "regular scheduler tick will catch it",
+            type(exc).__name__,
+        )
+
     return {
         "tenant_id": tenant_id,
         "slug": slug,

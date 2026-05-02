@@ -218,11 +218,25 @@ def _recompute_today_inner(scope: TenantScope) -> int:
             conn, scope, the_date=today
         )
     if not policy_map:
-        logger.warning(
-            "attendance: no active policy resolves for tenant %s on %s",
-            scope.tenant_id,
-            today,
-        )
+        # Distinguish "fresh tenant with no employees yet" (info) from
+        # "tenant has employees but no policy covers today" (warning,
+        # actual misconfiguration). The pre-fix message was a warning
+        # in both cases and read like a broken install on first boot.
+        if not employee_ids:
+            logger.info(
+                "attendance: tenant %s has no active employees on %s — "
+                "nothing to compute",
+                scope.tenant_id,
+                today,
+            )
+        else:
+            logger.warning(
+                "attendance: no active policy resolves for tenant %s on %s "
+                "(employees=%d) — check policy_assignments + active_from",
+                scope.tenant_id,
+                today,
+                len(employee_ids),
+            )
         return 0
 
     upserted = 0
