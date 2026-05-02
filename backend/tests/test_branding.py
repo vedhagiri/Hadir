@@ -180,6 +180,87 @@ def test_patch_validates_against_fonts(
     assert ok.json()["font_key"] == "lato"
 
 
+def test_patch_display_name_updates_public_tenants_row(
+    client: TestClient,
+    admin_engine: Engine,
+    admin_user: dict,
+    reset_branding_row: None,
+) -> None:
+    """Branding patch is the natural surface for the corporate
+    display name. The value lives in ``public.tenants.name`` and
+    threads through ``MeResponse.tenant_name`` so the sidebar brand
+    row picks it up on the next /me refresh."""
+
+    from sqlalchemy import select, update  # noqa: PLC0415
+
+    from maugood.db import tenants  # noqa: PLC0415
+    from tests.conftest import TENANT_ID  # noqa: PLC0415
+
+    _login_admin(client, admin_user)
+
+    # Snapshot the current name so we can restore + flip it back.
+    with admin_engine.begin() as conn:
+        before = conn.execute(
+            select(tenants.c.name).where(tenants.c.id == TENANT_ID)
+        ).scalar_one()
+
+    try:
+        # Empty / blank string → 400, no DB write.
+        empty = client.patch("/api/branding", json={"display_name": "   "})
+        assert empty.status_code == 400, empty.text
+
+        # Non-empty → 200, response carries the trimmed value, DB
+        # row reflects it.
+        ok = client.patch(
+            "/api/branding", json={"display_name": "  ACME Corporation  "}
+        )
+        assert ok.status_code == 200, ok.text
+        assert ok.json()["display_name"] == "ACME Corporation"
+
+        # /api/auth/me threads the value through tenant_name.
+        me = client.get("/api/auth/me")
+        assert me.status_code == 200
+        assert me.json()["tenant_name"] == "ACME Corporation"
+
+        with admin_engine.begin() as conn:
+            on_disk = conn.execute(
+                select(tenants.c.name).where(tenants.c.id == TENANT_ID)
+            ).scalar_one()
+        assert on_disk == "ACME Corporation"
+    finally:
+        with admin_engine.begin() as conn:
+            conn.execute(
+                update(tenants).where(tenants.c.id == TENANT_ID).values(
+                    name=before
+                )
+            )
+
+
+def test_me_carries_brand_logo_meta_after_upload(
+    client: TestClient, admin_user: dict, reset_branding_row: None
+) -> None:
+    """``MeResponse.has_brand_logo`` flips True after an upload and
+    ``brand_logo_version`` carries the row's updated_at so the
+    frontend cache-busts the served logo URL."""
+
+    _login_admin(client, admin_user)
+
+    me_before = client.get("/api/auth/me").json()
+    assert me_before["has_brand_logo"] is False
+    assert me_before["brand_logo_version"] in (None, "")
+
+    upload = client.post(
+        "/api/branding/logo",
+        files={"logo": ("logo.png", _TINY_PNG, "image/png")},
+    )
+    assert upload.status_code == 200, upload.text
+
+    me_after = client.get("/api/auth/me").json()
+    assert me_after["has_brand_logo"] is True
+    assert isinstance(me_after["brand_logo_version"], str)
+    assert me_after["brand_logo_version"]  # non-empty ISO timestamp
+
+
 def test_patch_writes_audit_row(
     client: TestClient,
     admin_engine: Engine,

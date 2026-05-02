@@ -138,6 +138,16 @@ class MeResponse(BaseModel):
     # to the product name ("Maugood") in that case so the brand row
     # never renders blank.
     tenant_name: str = ""
+    # ``True`` when the tenant has uploaded a brand logo through
+    # ``/api/branding/logo``. The sidebar uses it to decide between
+    # the tenant logo and the static product-mark fallback.
+    has_brand_logo: bool = False
+    # ISO timestamp from ``tenant_branding.updated_at`` — the sidebar
+    # appends it as a ``?v=`` query string so the browser refetches
+    # ``/api/branding/logo`` after the operator uploads a new file
+    # (server already sends Cache-Control: no-store, but the
+    # cache-buster guards against intermediaries).
+    brand_logo_version: str | None = None
 
 
 class PreferredLanguageRequest(BaseModel):
@@ -505,6 +515,7 @@ def login(
         path="/",
     )
 
+    has_logo, version = _resolve_brand_logo_meta(target_tenant_id)
     return MeResponse(
         id=bundle.id,
         email=bundle.email,
@@ -517,6 +528,8 @@ def login(
         preferred_theme=bundle.preferred_theme,
         preferred_density=bundle.preferred_density,
         tenant_name=_resolve_tenant_name(target_tenant_id),
+        has_brand_logo=has_logo,
+        brand_logo_version=version,
     )
 
 
@@ -582,12 +595,40 @@ def _resolve_tenant_name(tenant_id: int) -> str:
     return str(row.name) if row and row.name else ""
 
 
+def _resolve_brand_logo_meta(tenant_id: int) -> tuple[bool, str | None]:
+    """Return ``(has_logo, version_str)`` from the active tenant's
+    ``tenant_branding`` row.
+
+    Surfaced through ``MeResponse`` so the sidebar can decide between
+    the operator-uploaded logo and the static product-mark fallback
+    without an extra round-trip. ``version_str`` is the row's
+    ``updated_at`` ISO string — the sidebar appends it as ``?v=…`` so
+    the browser refetches whenever the operator uploads a new file.
+    Returns ``(False, None)`` when no row exists yet (lazily-created
+    on first read elsewhere)."""
+
+    from maugood.db import tenant_branding  # noqa: PLC0415
+
+    engine = get_engine()
+    with engine.begin() as conn:
+        row = conn.execute(
+            select(
+                tenant_branding.c.logo_path,
+                tenant_branding.c.updated_at,
+            ).where(tenant_branding.c.tenant_id == tenant_id)
+        ).first()
+    if row is None or row.logo_path is None:
+        return False, None
+    return True, row.updated_at.isoformat()
+
+
 def _to_me_response(
     user: CurrentUser,
     *,
     is_imp: bool = False,
     sa_user_id: int | None = None,
 ) -> MeResponse:
+    has_logo, version = _resolve_brand_logo_meta(user.tenant_id)
     return MeResponse(
         id=user.id,
         email=user.email,
@@ -602,6 +643,8 @@ def _to_me_response(
         preferred_theme=user.preferred_theme,
         preferred_density=user.preferred_density,
         tenant_name=_resolve_tenant_name(user.tenant_id),
+        has_brand_logo=has_logo,
+        brand_logo_version=version,
     )
 
 

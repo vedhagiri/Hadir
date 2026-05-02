@@ -64,6 +64,16 @@ export function Sidebar({ role }: Props) {
   // sensible brand instead of a blank.
   const me = useMe();
   const brandName = (me.data?.tenant_name?.trim() || "Maugood");
+  // When the operator uploaded a tenant logo through Settings →
+  // Branding, the brand row shows it instead of the static product
+  // mark. The ``?v=…`` cache-buster comes from the row's updated_at
+  // timestamp so a fresh upload pulls a fresh image even when the
+  // browser ignored Cache-Control: no-store.
+  const brandLogoSrc = me.data?.has_brand_logo
+    ? `/api/branding/logo?v=${encodeURIComponent(
+        me.data.brand_logo_version ?? "",
+      )}`
+    : productLogo;
   // Only Manager / HR / Admin have an Approvals link; Employees don't,
   // so we skip the inbox query for them.
   const approvalsRoles = role === "Admin" || role === "HR" || role === "Manager";
@@ -80,7 +90,7 @@ export function Sidebar({ role }: Props) {
     <aside className="sidebar">
       <div className="sidebar-brand">
         <img
-          src={productLogo}
+          src={brandLogoSrc}
           alt={brandName}
           className="brand-logo"
           style={{

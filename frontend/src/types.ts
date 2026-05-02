@@ -32,6 +32,14 @@ export interface MeResponse {
   // Empty string on a fresh install before the operator's setup
   // wizard runs; the sidebar falls back to "Maugood" in that case.
   tenant_name?: string;
+  // True when an operator-uploaded logo exists in
+  // ``tenant_branding.logo_path``. The sidebar uses it to decide
+  // between ``/api/branding/logo`` and the static product mark.
+  has_brand_logo?: boolean;
+  // ISO timestamp from ``tenant_branding.updated_at``. Used as a
+  // ``?v=…`` cache-buster on ``/api/branding/logo`` so browsers
+  // refetch after a fresh upload.
+  brand_logo_version?: string | null;
 }
 
 // Used by the shell to decide which NAV to render when a user holds more

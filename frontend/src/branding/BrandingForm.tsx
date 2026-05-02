@@ -9,6 +9,7 @@
 // input, no font upload (BRD FR-BRD-002).
 
 import { useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { ApiError } from "../api/client";
 import {
@@ -29,6 +30,7 @@ interface Props {
   onPatch: (input: {
     primary_color_key?: BrandingPaletteKey;
     font_key?: BrandingFontKey;
+    display_name?: string;
   }) => Promise<BrandingResponse>;
   onLogoUpload: (file: File) => Promise<BrandingResponse>;
   onLogoDelete: () => Promise<void>;
@@ -51,10 +53,14 @@ export function BrandingForm({
   applyToDocument = false,
 }: Props) {
   const options = useBrandingOptions();
+  const queryClient = useQueryClient();
   const [primaryKey, setPrimaryKey] = useState<BrandingPaletteKey>(
     branding.primary_color_key,
   );
   const [fontKey, setFontKey] = useState<BrandingFontKey>(branding.font_key);
+  const [displayName, setDisplayName] = useState<string>(
+    branding.display_name ?? "",
+  );
   const [serverError, setServerError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [logoBusy, setLogoBusy] = useState(false);
@@ -67,7 +73,8 @@ export function BrandingForm({
   useEffect(() => {
     setPrimaryKey(branding.primary_color_key);
     setFontKey(branding.font_key);
-  }, [branding.primary_color_key, branding.font_key]);
+    setDisplayName(branding.display_name ?? "");
+  }, [branding.primary_color_key, branding.font_key, branding.display_name]);
 
   if (options.isLoading) {
     return <p style={{ color: "var(--text-tertiary)" }}>Loading branding options…</p>;
@@ -86,18 +93,38 @@ export function BrandingForm({
     palette.find((p) => p.key === primaryKey) ?? palette[0]!;
   const selectedFont = fonts.find((f) => f.key === fontKey) ?? fonts[0]!;
 
+  const trimmedDisplayName = displayName.trim();
+  const persistedDisplayName = branding.display_name ?? "";
+  const displayNameDirty = trimmedDisplayName !== persistedDisplayName.trim();
   const dirty =
-    primaryKey !== branding.primary_color_key || fontKey !== branding.font_key;
+    primaryKey !== branding.primary_color_key ||
+    fontKey !== branding.font_key ||
+    displayNameDirty;
 
   const onSave = async () => {
+    if (displayNameDirty && !trimmedDisplayName) {
+      setServerError("Display name cannot be empty.");
+      return;
+    }
     setServerError(null);
     setBusy(true);
     try {
-      const patch: { primary_color_key?: BrandingPaletteKey; font_key?: BrandingFontKey } = {};
+      const patch: {
+        primary_color_key?: BrandingPaletteKey;
+        font_key?: BrandingFontKey;
+        display_name?: string;
+      } = {};
       if (primaryKey !== branding.primary_color_key)
         patch.primary_color_key = primaryKey;
       if (fontKey !== branding.font_key) patch.font_key = fontKey;
+      if (displayNameDirty) patch.display_name = trimmedDisplayName;
       await onPatch(patch);
+      // The display name flows through ``/api/auth/me`` into the
+      // sidebar brand row — invalidate the me query so the rename
+      // shows up without a page reload.
+      if (displayNameDirty) {
+        await queryClient.invalidateQueries({ queryKey: ["me"] });
+      }
     } catch (err) {
       if (err instanceof ApiError) {
         const body = err.body as { detail?: unknown } | null;
@@ -129,6 +156,10 @@ export function BrandingForm({
     try {
       await onLogoUpload(file);
       setLogoCacheBust((n) => n + 1);
+      // Sidebar reads has_brand_logo + brand_logo_version from
+      // /api/auth/me — invalidate so the brand row swaps to the new
+      // upload without a reload.
+      await queryClient.invalidateQueries({ queryKey: ["me"] });
     } catch (err) {
       if (err instanceof ApiError) {
         const body = err.body as { detail?: unknown } | null;
@@ -152,6 +183,7 @@ export function BrandingForm({
     try {
       await onLogoDelete();
       setLogoCacheBust((n) => n + 1);
+      await queryClient.invalidateQueries({ queryKey: ["me"] });
     } catch (err) {
       if (err instanceof ApiError) {
         const body = err.body as { detail?: unknown } | null;
@@ -170,6 +202,34 @@ export function BrandingForm({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      <Section title="Corporate display name">
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <input
+            type="text"
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            placeholder="e.g. Acme Corporation"
+            maxLength={200}
+            aria-label="Corporate display name"
+            style={{
+              padding: "8px 10px",
+              fontSize: 13,
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius-sm)",
+              background: "var(--bg-elev)",
+              color: "var(--text)",
+              fontFamily: "var(--font-sans)",
+              outline: "none",
+              maxWidth: 380,
+            }}
+          />
+          <span style={{ fontSize: 11.5, color: "var(--text-tertiary)" }}>
+            Shown in the brand row at the top of the sidebar. Falls
+            back to "Maugood" when blank.
+          </span>
+        </div>
+      </Section>
+
       <Section title="Primary colour">
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           {palette.map((p) => (

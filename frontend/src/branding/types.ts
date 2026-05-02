@@ -19,11 +19,18 @@ export interface BrandingResponse {
   font_key: BrandingFontKey;
   has_logo: boolean;
   updated_at: string;
+  // Free-form corporate display name (``public.tenants.name``).
+  // Empty string when the operator hasn't set one yet — the sidebar
+  // brand row falls back to "Maugood" in that case.
+  display_name: string;
 }
 
 export interface BrandingPatchInput {
   primary_color_key?: BrandingPaletteKey;
   font_key?: BrandingFontKey;
+  // ``undefined`` = leave the current name alone. A non-empty string
+  // updates ``public.tenants.name``; the server rejects empty input.
+  display_name?: string;
 }
 
 export interface BrandingPaletteEntry {

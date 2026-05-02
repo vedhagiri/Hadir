@@ -72,14 +72,102 @@ super_admin_router = APIRouter(
 # ---------------------------------------------------------------------------
 
 
-def _to_response(row: branding_repo.BrandingRow) -> BrandingResponse:
+def _to_response(
+    row: branding_repo.BrandingRow,
+    *,
+    display_name: str = "",
+) -> BrandingResponse:
     return BrandingResponse(
         tenant_id=row.tenant_id,
         primary_color_key=row.primary_color_key,
         font_key=row.font_key,
         has_logo=row.logo_path is not None,
         updated_at=row.updated_at.isoformat(),
+        display_name=display_name,
     )
+
+
+def _read_display_name(tenant_id: int) -> str:
+    """Read ``public.tenants.name`` for one tenant. Returns the empty
+    string when the tenant row is missing (callers treat that as "use
+    the product fallback")."""
+
+    with tenant_context("public"):
+        with get_engine().begin() as conn:
+            row = conn.execute(
+                select(tenants.c.name).where(tenants.c.id == tenant_id)
+            ).first()
+    return str(row.name) if row and row.name else ""
+
+
+def _write_display_name(
+    tenant_id: int,
+    name: str,
+    *,
+    actor_user_id: Optional[int],
+    super_admin_user_id: Optional[int] = None,
+    super_admin_ip: Optional[str] = None,
+) -> str:
+    """Update ``public.tenants.name`` and write a paired audit row.
+
+    The unique constraint on ``tenants.name`` can refuse the update
+    when another tenant already holds the name; we surface that as a
+    400 in the patch handler. Returns the value that actually landed
+    in the row."""
+
+    from sqlalchemy import update as _sa_update  # noqa: PLC0415
+    from sqlalchemy.exc import IntegrityError  # noqa: PLC0415
+
+    before = _read_display_name(tenant_id)
+    if before == name:
+        return before
+
+    with tenant_context("public"):
+        with get_engine().begin() as conn:
+            try:
+                conn.execute(
+                    _sa_update(tenants)
+                    .where(tenants.c.id == tenant_id)
+                    .values(name=name)
+                )
+            except IntegrityError as exc:
+                # Unique constraint hit — another tenant already owns
+                # this display name. Surface as a 400 to the caller.
+                raise HTTPException(
+                    status_code=400,
+                    detail="display name already in use by another tenant",
+                ) from exc
+
+    # Audit lands in the tenant's own log so the rename is visible to
+    # the tenant Admin alongside the rest of the branding history.
+    schema = _resolve_tenant_schema(tenant_id=tenant_id)
+    with tenant_context(schema):
+        with get_engine().begin() as conn:
+            if super_admin_user_id is not None:
+                write_audit_dual(
+                    conn,
+                    tenant_id=tenant_id,
+                    super_admin_user_id=super_admin_user_id,
+                    actor_user_id=None,
+                    action="branding.display_name_updated",
+                    entity_type="branding",
+                    entity_id=str(tenant_id),
+                    before={"display_name": before},
+                    after={"display_name": name},
+                    ip=super_admin_ip,
+                )
+            else:
+                write_audit(
+                    conn,
+                    tenant_id=tenant_id,
+                    actor_user_id=actor_user_id,
+                    action="branding.display_name_updated",
+                    entity_type="branding",
+                    entity_id=str(tenant_id),
+                    before={"display_name": before},
+                    after={"display_name": name},
+                )
+    return name
 
 
 def _resolve_tenant_schema(*, tenant_id: int) -> str:
@@ -107,7 +195,7 @@ def get_my_branding(
     engine = get_engine()
     with engine.begin() as conn:
         row = branding_repo.get_branding(conn, tenant_id=user.tenant_id)
-    return _to_response(row)
+    return _to_response(row, display_name=_read_display_name(user.tenant_id))
 
 
 @router.get(".css")
@@ -160,6 +248,7 @@ def patch_my_branding(
     try:
         primary = payload.validated_color()
         font = payload.validated_font()
+        display_name = payload.validated_display_name()
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -168,6 +257,7 @@ def patch_my_branding(
         actor_user_id=user.id,
         primary_color_key=primary,
         font_key=font,
+        display_name=display_name,
     )
 
 
@@ -213,7 +303,7 @@ def super_admin_get_branding(
     with tenant_context(schema):
         with engine.begin() as conn:
             row = branding_repo.get_branding(conn, tenant_id=tenant_id)
-    return _to_response(row)
+    return _to_response(row, display_name=_read_display_name(tenant_id))
 
 
 @super_admin_router.patch("")
@@ -226,6 +316,7 @@ def super_admin_patch_branding(
     try:
         primary = payload.validated_color()
         font = payload.validated_font()
+        display_name = payload.validated_display_name()
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -234,6 +325,7 @@ def super_admin_patch_branding(
         actor_user_id=None,  # operator, not a tenant user
         primary_color_key=primary,
         font_key=font,
+        display_name=display_name,
         super_admin_user_id=super_admin.id,
         super_admin_ip=getattr(request.state, "client_ip", None),
     )
@@ -289,67 +381,96 @@ def _do_branding_patch(
     actor_user_id: Optional[int],
     primary_color_key: Optional[str],
     font_key: Optional[str],
+    display_name: Optional[str] = None,
     super_admin_user_id: Optional[int] = None,
     super_admin_ip: Optional[str] = None,
 ) -> BrandingResponse:
-    """Patch primary_color_key / font_key for ``tenant_id``.
+    """Patch primary_color_key / font_key / display_name for ``tenant_id``.
 
     For tenant-side calls, the request is already inside the tenant
     context (set by the middleware). For operator-side calls, we hop
-    into the target tenant's schema explicitly.
+    into the target tenant's schema explicitly. ``display_name`` lives
+    in ``public.tenants.name`` rather than ``tenant_branding`` so it
+    has its own audit row + writer.
     """
 
     schema = _resolve_tenant_schema(tenant_id=tenant_id)
     engine = get_engine()
 
+    only_display_name = (
+        primary_color_key is None and font_key is None and display_name is not None
+    )
+
     with tenant_context(schema):
         with engine.begin() as conn:
             before = branding_repo.get_branding(conn, tenant_id=tenant_id)
-            after = branding_repo.update_branding(
-                conn,
-                tenant_id=tenant_id,
-                primary_color_key=primary_color_key,
-                font_key=font_key,
-            )
-            if super_admin_user_id is not None:
-                write_audit_dual(
-                    conn,
-                    tenant_id=tenant_id,
-                    super_admin_user_id=super_admin_user_id,
-                    actor_user_id=None,
-                    action="branding.updated",
-                    entity_type="branding",
-                    entity_id=str(tenant_id),
-                    before={
-                        "primary_color_key": before.primary_color_key,
-                        "font_key": before.font_key,
-                    },
-                    after={
-                        "primary_color_key": after.primary_color_key,
-                        "font_key": after.font_key,
-                    },
-                    ip=super_admin_ip,
-                )
+            # Only touch tenant_branding if there's something to write
+            # for it. A display-name-only patch leaves the row alone
+            # (and its updated_at — we don't want a rename to invalidate
+            # the cached CSS).
+            if only_display_name:
+                after = before
             else:
-                write_audit(
+                after = branding_repo.update_branding(
                     conn,
                     tenant_id=tenant_id,
-                    actor_user_id=actor_user_id,
-                    action="branding.updated",
-                    entity_type="branding",
-                    entity_id=str(tenant_id),
-                    before={
-                        "primary_color_key": before.primary_color_key,
-                        "font_key": before.font_key,
-                    },
-                    after={
-                        "primary_color_key": after.primary_color_key,
-                        "font_key": after.font_key,
-                    },
+                    primary_color_key=primary_color_key,
+                    font_key=font_key,
                 )
+            if not only_display_name:
+                if super_admin_user_id is not None:
+                    write_audit_dual(
+                        conn,
+                        tenant_id=tenant_id,
+                        super_admin_user_id=super_admin_user_id,
+                        actor_user_id=None,
+                        action="branding.updated",
+                        entity_type="branding",
+                        entity_id=str(tenant_id),
+                        before={
+                            "primary_color_key": before.primary_color_key,
+                            "font_key": before.font_key,
+                        },
+                        after={
+                            "primary_color_key": after.primary_color_key,
+                            "font_key": after.font_key,
+                        },
+                        ip=super_admin_ip,
+                    )
+                else:
+                    write_audit(
+                        conn,
+                        tenant_id=tenant_id,
+                        actor_user_id=actor_user_id,
+                        action="branding.updated",
+                        entity_type="branding",
+                        entity_id=str(tenant_id),
+                        before={
+                            "primary_color_key": before.primary_color_key,
+                            "font_key": before.font_key,
+                        },
+                        after={
+                            "primary_color_key": after.primary_color_key,
+                            "font_key": after.font_key,
+                        },
+                    )
 
-    branding_css.invalidate_tenant(tenant_id)
-    return _to_response(after)
+    if not only_display_name:
+        branding_css.invalidate_tenant(tenant_id)
+
+    # Display-name update is its own write + audit row. Done after the
+    # branding row update so the audit ordering reads cleanly in the
+    # log.
+    if display_name is not None:
+        _write_display_name(
+            tenant_id,
+            display_name,
+            actor_user_id=actor_user_id,
+            super_admin_user_id=super_admin_user_id,
+            super_admin_ip=super_admin_ip,
+        )
+
+    return _to_response(after, display_name=_read_display_name(tenant_id))
 
 
 def _do_logo_upload(
@@ -401,7 +522,7 @@ def _do_logo_upload(
                 )
 
     branding_css.invalidate_tenant(tenant_id)
-    return _to_response(after)
+    return _to_response(after, display_name=_read_display_name(tenant_id))
 
 
 def _do_logo_delete(
