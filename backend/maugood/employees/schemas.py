@@ -10,7 +10,9 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel, EmailStr, Field, model_validator
+import re
+
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # Inbound (create/patch) — operators can only flip between
@@ -22,6 +24,26 @@ Status = Literal["active", "inactive"]
 # rows can serialise. Keep ``Status`` in sync with the DB
 # CHECK at migration 0024.
 StatusOut = Literal["active", "inactive", "deleted"]
+
+
+# Loose email validator — accepts any ``user@host.tld`` shape so
+# seeded / customer rosters with ``.local`` and other special-use
+# TLDs (``email-validator`` rejects those by default) round-trip
+# through CreateIn / PatchIn without surprising the operator.
+# Strict deliverability checks belong on outgoing-mail surfaces,
+# not the employee record.
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _validate_email_lenient(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    s = v.strip()
+    if not s:
+        return None
+    if not _EMAIL_RE.match(s):
+        raise ValueError("email is not a valid address")
+    return s.lower()
 
 
 class DepartmentOut(BaseModel):
@@ -84,7 +106,13 @@ class EmployeeCreateIn(BaseModel):
     employee_code: str = Field(min_length=1, max_length=64)
     full_name: str = Field(min_length=1, max_length=200)
     # Optional — not every employee has a company email in the pilot.
-    email: Optional[EmailStr] = None
+    # Plain ``str`` (not ``EmailStr``) because seeded / customer rosters
+    # commonly use ``.local`` and other special-use TLDs that
+    # ``email-validator`` rejects outright. The shared
+    # ``_validate_email_lenient`` validator below enforces a loose
+    # ``user@host.tld`` shape and lower-cases for case-insensitive
+    # match parity with the rest of the codebase.
+    email: Optional[str] = None
     # Prefer ``department_code`` (stable across tenants) over
     # ``department_id`` (surrogate key) for human callers.
     department_code: Optional[str] = Field(default=None, min_length=1, max_length=32)
@@ -103,6 +131,11 @@ class EmployeeCreateIn(BaseModel):
     # (handled at the router; min_length=5 enforced there).
     deactivation_reason: Optional[str] = Field(default=None, max_length=400)
 
+    @field_validator("email", mode="before")
+    @classmethod
+    def _email_lenient(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_email_lenient(v)
+
     @model_validator(mode="after")
     def _date_order(self) -> "EmployeeCreateIn":
         if (
@@ -118,7 +151,8 @@ class EmployeePatchIn(BaseModel):
     # Every field optional — PATCH is partial. Callers pass only what they
     # want to change.
     full_name: Optional[str] = Field(default=None, min_length=1, max_length=200)
-    email: Optional[EmailStr] = None
+    # Plain ``str`` (lenient regex below) — matches CreateIn rationale.
+    email: Optional[str] = None
     department_code: Optional[str] = Field(default=None, min_length=1, max_length=32)
     department_id: Optional[int] = None
     # P29 (#3) — pass an int to set, omit to leave alone. Wire is
@@ -132,6 +166,11 @@ class EmployeePatchIn(BaseModel):
     joining_date: Optional[date] = None
     relieving_date: Optional[date] = None
     deactivation_reason: Optional[str] = Field(default=None, max_length=400)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def _email_lenient(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_email_lenient(v)
 
     @model_validator(mode="after")
     def _date_order(self) -> "EmployeePatchIn":
