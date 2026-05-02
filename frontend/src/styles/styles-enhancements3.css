@@ -646,3 +646,18 @@ input[type="radio"]:focus-visible {
 [data-sidebar="collapsed"] {
   --sidebar-w: 64px;
 }
+
+/* ------------------------------------------------------------------
+   Table headers scroll with the content. The design's ``.table th``
+   rule (styles.css L519) sets ``position: sticky; top: 0`` so the
+   header pinned to the viewport on long lists. Operators expected
+   the header to scroll out with the rows — the sticky behaviour was
+   read as "stuck/broken" rather than "convenient". Override it here
+   so every ``.table`` row scrolls as one block. ``.preview-table``
+   keeps its own sticky header (separate selector, scoped to the
+   import preview's internal scroll container — not page scroll).
+   ------------------------------------------------------------------ */
+.table th {
+  position: static;
+  top: auto;
+}
