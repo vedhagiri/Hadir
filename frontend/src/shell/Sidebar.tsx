@@ -11,6 +11,7 @@ import { motion } from "framer-motion";
 import { NavLink } from "react-router-dom";
 
 import productLogo from "../assets/mts_logo.png";
+import maugoodAiLogo from "../assets/maugoodai_logo.png";
 import { useMe } from "../auth/AuthProvider";
 import { APP_VERSION_FULL } from "../config";
 import { SPRING } from "../motion/tokens";
@@ -232,6 +233,30 @@ export function Sidebar({ role }: Props) {
           lineHeight: 1.4,
         }}
       >
+        {/* Product logo — wide banner ("MaugoodAI · CCTV-Based AI
+            Attendance System"). Renders only when the sidebar is
+            expanded; the .nav-label-text wrapper hides it on collapse
+            (a 200-px-wide banner doesn't make sense in a 64-px rail). */}
+        <div
+          className="nav-label-text"
+          style={{
+            display: "flex",
+            justifyContent: "center",
+            marginBottom: 8,
+          }}
+        >
+          <img
+            src={maugoodAiLogo}
+            alt="MaugoodAI — CCTV-Based AI Attendance System"
+            style={{
+              width: "100%",
+              maxWidth: 200,
+              height: "auto",
+              display: "block",
+              opacity: 0.92,
+            }}
+          />
+        </div>
         {/* "Made with ♥ in Oman" tagline + flag. Hidden when the
             sidebar is collapsed via .nav-label-text (the same hide
             class the rest of the footer uses). */}
