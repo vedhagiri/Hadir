@@ -1183,13 +1183,25 @@ function statusPillClass(status: string): string {
   }
 }
 
-function formatHms(iso: string): string {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleTimeString(undefined, { hour12: false });
-  } catch {
-    return iso;
+// The day-detail endpoint returns time-only fields ("HH:MM:SS")
+// for ``in_time``, ``out_time``, ``timeline[].start/end``, and
+// ``evidence[].captured_at`` — they're already in tenant-local
+// time, no date component. ``new Date("00:19:53")`` returns
+// Invalid Date so we parse the string ourselves.
+function formatHms(value: string): string {
+  if (!value) return "—";
+  // Accept "HH:MM:SS" / "HH:MM" / full ISO datetime defensively.
+  const isoMatch = /^(\d{4})-\d{2}-\d{2}T(\d{2}):(\d{2})(?::(\d{2}))?/.exec(
+    value,
+  );
+  if (isoMatch) {
+    const [, , hh, mm, ss] = isoMatch;
+    return `${hh}:${mm}:${ss ?? "00"}`;
   }
+  const hms = /^(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(value);
+  if (!hms) return value;
+  const [, h, m, s] = hms;
+  return `${h!.padStart(2, "0")}:${m}:${(s ?? "00").padStart(2, "0")}`;
 }
 
 function minutesToHms(m: number): string {
@@ -1199,13 +1211,15 @@ function minutesToHms(m: number): string {
   return `${String(h).padStart(2, "0")}:${String(r).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-function isoToLocalMin(iso: string): number | null {
-  try {
-    const d = new Date(iso);
-    return d.getHours() * 60 + d.getMinutes();
-  } catch {
-    return null;
+function isoToLocalMin(value: string): number | null {
+  if (!value) return null;
+  const isoMatch = /^\d{4}-\d{2}-\d{2}T(\d{2}):(\d{2})/.exec(value);
+  if (isoMatch) {
+    return parseInt(isoMatch[1]!, 10) * 60 + parseInt(isoMatch[2]!, 10);
   }
+  const hms = /^(\d{1,2}):(\d{2})/.exec(value);
+  if (!hms) return null;
+  return parseInt(hms[1]!, 10) * 60 + parseInt(hms[2]!, 10);
 }
 
 function Section({
