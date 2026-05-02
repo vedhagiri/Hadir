@@ -34,7 +34,12 @@ export function RestartAllModal({
           top: "50%",
           insetInlineStart: "50%",
           transform: "translate(-50%, -50%)",
-          zIndex: 51,
+          // Must sit above the .drawer-scrim z-index (60 in
+          // styles-enhancements.css, which overrides the 50 in
+          // styles.css). The pre-fix value of 51 left the scrim ON
+          // TOP of the modal — operators saw the screen dim but no
+          // panel, so the modal looked like it never loaded.
+          zIndex: 61,
           background: "var(--bg-elev)",
           border: "1px solid var(--border)",
           borderRadius: "var(--radius)",

@@ -92,7 +92,10 @@ export function CameraMetadataModal({
           top: "50%",
           insetInlineStart: "50%",
           transform: "translate(-50%, -50%)",
-          zIndex: 51,
+          // 61 to clear .drawer-scrim's z-index (60 from
+          // styles-enhancements.css). 51 left the panel BEHIND the
+          // scrim and the modal looked like it never loaded.
+          zIndex: 61,
           background: "var(--bg-elev)",
           border: "1px solid var(--border)",
           borderRadius: "var(--radius)",
