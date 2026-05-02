@@ -52,7 +52,11 @@ services:
     restart: unless-stopped
 
   # -----------------------------------------------------------------
-  # Backend — no host port; nginx is the only thing that reaches it.
+  # Backend — bound to 127.0.0.1 only. nginx is the production path
+  # for browser traffic; the loopback host port exists so an operator
+  # can curl FastAPI directly when debugging (Swagger, /metrics, etc.)
+  # without going through TLS termination. The wizard prompts for the
+  # host port; the compose default is 8000.
   # MAUGOOD_ENV=production turns on every hardening guard. The
   # entrypoint runs Alembic migrations on every boot (idempotent).
   # -----------------------------------------------------------------
@@ -61,6 +65,8 @@ services:
       context: ./backend
     env_file:
       - ./.env
+    ports:
+      - "127.0.0.1:${MAUGOOD_BACKEND_HOST_PORT:-8000}:8000"
     environment:
       MAUGOOD_DATABASE_URL: ${MAUGOOD_DATABASE_URL:-postgresql+psycopg://maugood_app:maugood_app@postgres:5432/maugood}
       MAUGOOD_ADMIN_DATABASE_URL: ${MAUGOOD_ADMIN_DATABASE_URL:-postgresql+psycopg://maugood:maugood@postgres:5432/maugood}

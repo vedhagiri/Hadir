@@ -63,9 +63,12 @@ SUPERADMIN_NAME="MTS Super Admin"
 # compose file already reads these via ``${VAR:-fallback}`` so the
 # fallback inside the YAML is the safety net if .env doesn't carry
 # them. Same env-var names as the compose, set in .env below.
-PORT_HTTPS=""
-PORT_HTTP=""
+#
+# HTTPS (443) + HTTP (80) are intentionally **not** prompted —
+# they're the standard public-facing ports operators expect to find
+# on the documented URL. If they conflict, edit .env directly.
 PORT_POSTGRES=""
+PORT_BACKEND=""
 PORT_GRAFANA=""
 PORT_PROMETHEUS=""
 PORT_ALERTMANAGER=""
@@ -83,9 +86,8 @@ while [[ $# -gt 0 ]]; do
         --admin-password)    ADMIN_PASSWORD="$2"; shift 2 ;;
         --superadmin-email)  SUPERADMIN_EMAIL="$2"; shift 2 ;;
         --superadmin-name)   SUPERADMIN_NAME="$2"; shift 2 ;;
-        --port-https)        PORT_HTTPS="$2"; shift 2 ;;
-        --port-http)         PORT_HTTP="$2"; shift 2 ;;
         --port-postgres)     PORT_POSTGRES="$2"; shift 2 ;;
+        --port-backend)      PORT_BACKEND="$2"; shift 2 ;;
         --port-grafana)      PORT_GRAFANA="$2"; shift 2 ;;
         --port-prometheus)   PORT_PROMETHEUS="$2"; shift 2 ;;
         --port-alertmanager) PORT_ALERTMANAGER="$2"; shift 2 ;;
@@ -284,32 +286,31 @@ if [[ ${REUSE} -eq 0 ]]; then
 
     echo
     echo "Host ports"
-    echo "  Press Enter to accept the defaults; pick custom values if"
-    echo "  you're running another stack on the same host. Postgres /"
-    echo "  Prometheus / Alertmanager bind to 127.0.0.1 only — they're"
-    echo "  not reachable from the LAN. If a canonical default is"
-    echo "  already in use the wizard probes a fallback list and"
-    echo "  shows the first free port instead."
+    echo "  HTTPS (443) and HTTP (80) are fixed — those are the"
+    echo "  standard public-facing ports the operator expects. Edit"
+    echo "  .env later if you need to override them. The five below"
+    echo "  cover backing services + observability and are bound to"
+    echo "  127.0.0.1 only (loopback — not reachable from the LAN)."
+    echo "  If a canonical default is in use the wizard probes a"
+    echo "  fallback list and offers the first free port instead."
     # Each call: canonical default first, then a short list of safe
     # alternates the wizard rotates through if the default is busy.
     # The note "port X in use, suggesting Y" prints on stderr from
     # port_default() so the operator sees the swap before the prompt.
-    _DEF_HTTPS="$(port_default 443 8443 8444 9443 10443)"
-    _DEF_HTTP="$(port_default 80 8080 8081 8082 9080)"
     _DEF_POSTGRES="$(port_default 5432 5433 15432 15433 54320)"
+    _DEF_BACKEND="$(port_default 8000 8001 8080 18000 28000)"
     _DEF_GRAFANA="$(port_default 3000 3001 3030 3300 13000)"
     _DEF_PROMETHEUS="$(port_default 9090 9091 9092 19090 29090)"
     _DEF_ALERTMANAGER="$(port_default 9093 9094 9095 19093 29093)"
-    prompt PORT_HTTPS        "HTTPS (browser → nginx)"        "${_DEF_HTTPS}"
-    prompt PORT_HTTP         "HTTP (redirect → HTTPS)"        "${_DEF_HTTP}"
     prompt PORT_POSTGRES     "Postgres (loopback)"            "${_DEF_POSTGRES}"
+    prompt PORT_BACKEND      "Backend FastAPI (loopback)"     "${_DEF_BACKEND}"
     prompt PORT_GRAFANA      "Grafana"                        "${_DEF_GRAFANA}"
     prompt PORT_PROMETHEUS   "Prometheus (loopback)"          "${_DEF_PROMETHEUS}"
     prompt PORT_ALERTMANAGER "Alertmanager (loopback)"        "${_DEF_ALERTMANAGER}"
 
     # Validate every port: 1-65535. Catch typos before docker compose
     # bombs with a confusing yaml error.
-    for _name in PORT_HTTPS PORT_HTTP PORT_POSTGRES PORT_GRAFANA \
+    for _name in PORT_POSTGRES PORT_BACKEND PORT_GRAFANA \
                  PORT_PROMETHEUS PORT_ALERTMANAGER; do
         _val="${!_name}"
         if ! [[ "${_val}" =~ ^[0-9]+$ ]] || (( _val < 1 || _val > 65535 )); then
@@ -317,16 +318,6 @@ if [[ ${REUSE} -eq 0 ]]; then
             exit 2
         fi
     done
-
-    if (( PORT_HTTPS < 1024 || PORT_HTTP < 1024 )) \
-       && [[ "$(id -u)" != "0" ]]; then
-        echo
-        echo "  note: ports below 1024 (HTTP / HTTPS) need root or"
-        echo "        CAP_NET_BIND_SERVICE on the docker daemon. Docker"
-        echo "        Desktop handles this transparently; on a bare"
-        echo "        Linux host you may need to pick higher ports or"
-        echo "        run docker as root."
-    fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -378,9 +369,11 @@ MAUGOOD_OIDC_REDIRECT_BASE_URL=https://${DOMAIN}
 
 # Host ports — picked by the wizard, read by docker-compose.
 # Override later by editing .env and running ``docker compose up -d``.
-MAUGOOD_NGINX_HTTPS_HOST_PORT=${PORT_HTTPS}
-MAUGOOD_NGINX_HTTP_HOST_PORT=${PORT_HTTP}
+# HTTPS (443) and HTTP (80) inherit the compose YAML defaults so they
+# stay on the canonical ports unless the operator overrides them by
+# hand-editing this file.
 MAUGOOD_POSTGRES_HOST_PORT=${PORT_POSTGRES}
+MAUGOOD_BACKEND_HOST_PORT=${PORT_BACKEND}
 MAUGOOD_GRAFANA_HOST_PORT=${PORT_GRAFANA}
 MAUGOOD_PROMETHEUS_HOST_PORT=${PORT_PROMETHEUS}
 MAUGOOD_ALERTMANAGER_HOST_PORT=${PORT_ALERTMANAGER}
@@ -489,14 +482,9 @@ docker compose -f docker-compose-https-local.yaml up -d
 
 echo
 echo ">> Waiting for backend to be healthy"
-# The probe URL must include the operator-picked HTTPS port — without
-# it, a custom port (e.g. 8443) would 404 because the host browser
-# would never reach the nginx container.
-_probe_suffix=""
-if [[ "${PORT_HTTPS}" != "443" ]]; then _probe_suffix=":${PORT_HTTPS}"; fi
 DEADLINE=$(( $(date +%s) + 180 ))
 while [[ $(date +%s) -lt ${DEADLINE} ]]; do
-    if curl -sk -m 5 "https://${DOMAIN}${_probe_suffix}/api/health" 2>/dev/null \
+    if curl -sk -m 5 "https://${DOMAIN}/api/health" 2>/dev/null \
         | grep -q '"status":"ok"'; then
         echo "  ✓ backend healthy"
         break
@@ -540,20 +528,14 @@ echo "================================================================"
 echo " ✓ Maugood ${VERSION} is running"
 echo "================================================================"
 echo
-# Build the URLs from the actual ports — only show ``:port`` when the
-# operator picked a non-default value, so the common case stays clean.
-_https_port_suffix=""
-if [[ "${PORT_HTTPS}" != "443" ]]; then _https_port_suffix=":${PORT_HTTPS}"; fi
-TENANT_URL="https://${DOMAIN}${_https_port_suffix}"
-
 echo " Tenant login"
-echo "   URL          : ${TENANT_URL}/login"
+echo "   URL          : https://${DOMAIN}/login"
 echo "   Tenant slug  : ${TENANT_SLUG}"
 echo "   Email        : ${ADMIN_EMAIL}"
 echo "   Password     : ${ADMIN_PASSWORD:-<from --admin-password>}"
 echo
 echo " Super-Admin console"
-echo "   URL          : ${TENANT_URL}/super-admin/login"
+echo "   URL          : https://${DOMAIN}/super-admin/login"
 echo "   Email        : ${SUPERADMIN_EMAIL}"
 if [[ ${REUSE} -eq 0 ]]; then
     echo "   Password     : ${SUPER_PASSWORD}"
@@ -564,8 +546,9 @@ echo "   Grafana      : http://localhost:${PORT_GRAFANA}  (admin / see .env GRAF
 echo "   Prometheus   : http://localhost:${PORT_PROMETHEUS}  (loopback only)"
 echo "   Alertmanager : http://localhost:${PORT_ALERTMANAGER}  (loopback only)"
 echo
-echo " Database"
-echo "   Postgres     : localhost:${PORT_POSTGRES}  (loopback only — see backend/.env for the URL)"
+echo " Direct (debug) access"
+echo "   Backend API  : http://localhost:${PORT_BACKEND}  (loopback — bypasses nginx)"
+echo "   Postgres     : localhost:${PORT_POSTGRES}  (loopback — see backend/.env for the URL)"
 echo
 echo " Stop the stack:"
 echo "   docker compose -f docker-compose-https-local.yaml down"
