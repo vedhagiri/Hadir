@@ -15,6 +15,7 @@
 // picker since their data shape is per-event-on-day.
 
 import { useEffect, useMemo, useState } from "react";
+import { useQueries } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
 import { api } from "../../api/client";
@@ -23,7 +24,10 @@ import { DatePicker } from "../../components/DatePicker";
 import { PdfOptionsModal } from "../../components/PdfOptionsModal";
 import { Icon, type IconName } from "../../shell/Icon";
 import { useAttendance } from "../attendance/hooks";
-import type { AttendanceItem } from "../attendance/types";
+import type {
+  AttendanceItem,
+  AttendanceListResponse,
+} from "../attendance/types";
 import { useDepartments } from "../departments/hooks";
 import { RematchModal } from "./RematchModal";
 
@@ -68,6 +72,24 @@ type PresetKey = "today" | "this-week" | "last-3" | "last-7" | "custom";
 
 function isoDate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// Enumerate every YYYY-MM-DD in [start..end] inclusive, capped to
+// ``cap`` most-recent days so a wide custom range doesn't fire
+// hundreds of round-trips just to fill a preview. Returns dates
+// in chronological order.
+function enumerateDays(start: string, end: string, cap: number): string[] {
+  const a = new Date(`${start}T00:00:00`);
+  const b = new Date(`${end}T00:00:00`);
+  if (isNaN(a.getTime()) || isNaN(b.getTime()) || a > b) return [start];
+  const out: string[] = [];
+  const cur = new Date(a);
+  while (cur <= b) {
+    out.push(isoDate(cur));
+    cur.setDate(cur.getDate() + 1);
+  }
+  if (out.length <= cap) return out;
+  return out.slice(out.length - cap); // keep the most recent ``cap`` days
 }
 
 function presetRange(preset: Exclude<PresetKey, "custom">): { start: string; end: string } {
@@ -455,39 +477,68 @@ function AttendancePreview({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preset]);
 
-  // Live preview samples the start day only — fetching every day in a
-  // range client-side would mean N round-trips. The table paginates
-  // client-side; the downloaded report streams every day in the range.
-  const list = useAttendance(start, null);
-  const items = list.data?.items ?? [];
+  // Multi-day preview — enumerate every date in [start..end] and
+  // fetch in parallel via useQueries so picking "Last 7 days" /
+  // "This week" actually shows multiple days of rows. Capped at
+  // PREVIEW_DAYS_CAP so a wide custom range doesn't fire 90+
+  // round-trips just to fill a preview; the downloaded XLSX/PDF
+  // still covers the full range.
+  const PREVIEW_DAYS_CAP = 31;
+  const dates = useMemo(() => enumerateDays(start, end, PREVIEW_DAYS_CAP), [start, end]);
+  const dayQueries = useQueries({
+    queries: dates.map((d) => ({
+      queryKey: ["attendance", d, null] as const,
+      queryFn: () => api<AttendanceListResponse>(`/api/attendance?date=${d}`),
+      staleTime: 30 * 1000,
+    })),
+  });
+  const isLoading = dayQueries.some((q) => q.isLoading);
+  const isError = dayQueries.some((q) => q.isError);
+  const items = useMemo(
+    () => dayQueries.flatMap((q) => q.data?.items ?? []),
+    [dayQueries],
+  );
   const total = items.length;
+  // ``true`` when we're looking at fewer days than the operator
+  // selected because the cap kicked in; surfaces a hint near the
+  // page-size dropdown.
+  const truncated =
+    enumerateDays(start, end, PREVIEW_DAYS_CAP + 1).length > PREVIEW_DAYS_CAP;
 
-  // Reset to page 1 when the date or page size changes — otherwise a
+  // Reset to page 1 when the range or page size changes — otherwise a
   // smaller dataset can leave us on an out-of-range page.
   useEffect(() => {
     setPage(1);
-  }, [start, pageSize]);
+  }, [start, end, pageSize]);
 
   const pageStart = (page - 1) * pageSize;
   const previewItems = items.slice(pageStart, pageStart + pageSize);
 
+  const presetSelectStyle: React.CSSProperties = {
+    padding: "5px 9px",
+    fontSize: 12.5,
+    border: "1px solid var(--border)",
+    borderRadius: "var(--radius-sm)",
+    background: "var(--bg-elev)",
+    color: "var(--text)",
+    fontFamily: "var(--font-sans)",
+    outline: "none",
+  };
+
   const filterSlot = (
     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-      {/* Preset quick-pick */}
-      <div className="seg" role="group" aria-label="Date range preset">
+      <select
+        value={preset}
+        onChange={(e) => setPreset(e.target.value as PresetKey)}
+        aria-label="Date range preset"
+        style={presetSelectStyle}
+      >
         {PRESET_LABELS.map(({ key, label }) => (
-          <button
-            key={key}
-            type="button"
-            className={`seg-btn${preset === key ? " active" : ""}`}
-            onClick={() => setPreset(key)}
-            aria-pressed={preset === key}
-          >
+          <option key={key} value={key}>
             {label}
-          </button>
+          </option>
         ))}
-      </div>
-      {/* Custom date pickers — only shown when Custom is active */}
+      </select>
       {preset === "custom" && (
         <>
           <DatePicker
@@ -517,6 +568,18 @@ function AttendancePreview({
           />
         </>
       )}
+      {truncated && (
+        <span
+          className="text-xs"
+          style={{
+            color: "var(--warning-text, var(--warning))",
+            fontFamily: "var(--font-mono)",
+          }}
+          title={`Preview limited to the most recent ${PREVIEW_DAYS_CAP} days. The downloaded report covers the full range.`}
+        >
+          preview · {PREVIEW_DAYS_CAP}d cap
+        </span>
+      )}
     </div>
   );
 
@@ -538,13 +601,12 @@ function AttendancePreview({
           setPageSize={setPageSize}
         />
       }
-      isLoading={list.isLoading}
-      isError={list.isError}
+      isLoading={isLoading}
+      isError={isError}
       downloadXlsx={() => onDownload("xlsx")}
       downloadingXlsx={downloading === "xlsx"}
       downloadingPdf={downloading === "pdf"}
       onDownloadPdf={() => onDownload("pdf")}
-      runAndDownload={() => onDownload("xlsx")}
       columns={[
         "#",
         "Employee ID",
@@ -1286,7 +1348,11 @@ function PreviewCard({
   downloadingXlsx: boolean;
   downloadingPdf: boolean;
   onDownloadPdf?: () => void;
-  runAndDownload: () => void;
+  // Optional. When omitted the PreviewCard skips the primary
+  // "Run & download" button in the header and lets the footer's
+  // Download XLSX / PDF buttons carry the action — avoids two
+  // visually competing download CTAs.
+  runAndDownload?: () => void;
   columns: string[];
   children: ReactNode;
 }) {
@@ -1339,14 +1405,16 @@ function PreviewCard({
               )}
             </>
           )}
-          <button
-            className="btn btn-primary btn-sm"
-            onClick={runAndDownload}
-            disabled={downloadingXlsx || downloadingPdf}
-          >
-            <Icon name="download" size={11} />
-            {downloadingXlsx ? "Downloading…" : "Run & download"}
-          </button>
+          {runAndDownload && (
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={runAndDownload}
+              disabled={downloadingXlsx || downloadingPdf}
+            >
+              <Icon name="download" size={11} />
+              {downloadingXlsx ? "Downloading…" : "Run & download"}
+            </button>
+          )}
         </div>
       </div>
       <table className="table">
