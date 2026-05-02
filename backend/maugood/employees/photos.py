@@ -157,6 +157,8 @@ class PhotoRow:
     employee_id: int
     angle: str
     file_path: str
+    uploaded_by_user_id: Optional[int] = None
+    approval_status: str = "approved"
 
 
 def create_photo_row(
@@ -167,8 +169,18 @@ def create_photo_row(
     angle: str,
     file_path: str,
     approved_by_user_id: Optional[int],
+    uploaded_by_user_id: Optional[int] = None,
+    approval_status: str = "approved",
 ) -> int:
-    """Insert an ``employee_photos`` row. Pilot-approved by whoever ingested it."""
+    """Insert an ``employee_photos`` row.
+
+    ``uploaded_by_user_id`` (migration 0036) records who actually
+    submitted the bytes — drives the Employee self-delete gate.
+    ``approval_status`` defaults to 'approved' for the historic
+    Admin/HR ingest path; the Employee self-upload route passes
+    'pending' so the matcher cache ignores it until an Admin/HR
+    flips it via the approval queue.
+    """
 
     from sqlalchemy import func  # local import keeps this module light
 
@@ -181,6 +193,8 @@ def create_photo_row(
             file_path=file_path,
             approved_by_user_id=approved_by_user_id,
             approved_at=func.now() if approved_by_user_id is not None else None,
+            uploaded_by_user_id=uploaded_by_user_id,
+            approval_status=approval_status,
         )
         .returning(employee_photos.c.id)
     ).scalar_one()
@@ -196,6 +210,8 @@ def list_photos_for_employee(
             employee_photos.c.employee_id,
             employee_photos.c.angle,
             employee_photos.c.file_path,
+            employee_photos.c.uploaded_by_user_id,
+            employee_photos.c.approval_status,
         )
         .where(
             employee_photos.c.tenant_id == scope.tenant_id,
@@ -209,6 +225,12 @@ def list_photos_for_employee(
             employee_id=int(r.employee_id),
             angle=str(r.angle),
             file_path=str(r.file_path),
+            uploaded_by_user_id=(
+                int(r.uploaded_by_user_id)
+                if r.uploaded_by_user_id is not None
+                else None
+            ),
+            approval_status=str(r.approval_status),
         )
         for r in rows
     ]
@@ -223,6 +245,8 @@ def get_photo(
             employee_photos.c.employee_id,
             employee_photos.c.angle,
             employee_photos.c.file_path,
+            employee_photos.c.uploaded_by_user_id,
+            employee_photos.c.approval_status,
         )
         .where(
             employee_photos.c.tenant_id == scope.tenant_id,
@@ -237,6 +261,12 @@ def get_photo(
         employee_id=int(row.employee_id),
         angle=str(row.angle),
         file_path=str(row.file_path),
+        uploaded_by_user_id=(
+            int(row.uploaded_by_user_id)
+            if row.uploaded_by_user_id is not None
+            else None
+        ),
+        approval_status=str(row.approval_status),
     )
 
 

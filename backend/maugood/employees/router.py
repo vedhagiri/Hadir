@@ -761,6 +761,482 @@ def get_my_employee_endpoint(
     return _row_to_out(row)
 
 
+# ---------------------------------------------------------------------------
+# Employee self-photo endpoints (Profile & Photo page)
+# ---------------------------------------------------------------------------
+#
+# These four routes power the ``/my-profile`` page. Each authenticated
+# role can hit them, but the ``current_user.email`` → employee row
+# resolution means the operator always operates on their own record.
+# Cross-employee mutation is impossible via this surface — the
+# endpoint never accepts an ``employee_id`` from the wire.
+#
+# Approval gate: self-uploads land as ``approval_status='pending'``;
+# the matcher cache's load filters for ``approved`` so a pending
+# photo's embedding (computed but inert) doesn't enrol the matcher
+# until an Admin/HR flips it via the approval queue.
+#
+# Self-delete gate: the DELETE handler refuses with 403 if the
+# stored ``uploaded_by_user_id`` doesn't match the requester.
+# Operator overrides (Admin/HR delete-any) keep working through the
+# existing ``/{employee_id}/photos/{photo_id}`` DELETE.
+
+
+def _resolve_self_employee_id(
+    user: CurrentUser, scope: TenantScope
+) -> int:
+    """Look up the employee row linked to the logged-in user.
+
+    Returns the id, or raises 404 with a uniform error so the
+    frontend can render a "complete your profile" empty state when
+    the user account isn't linked yet.
+    """
+
+    if not user.email:
+        raise HTTPException(
+            status_code=404, detail="no employee linked to this account"
+        )
+    with get_engine().begin() as conn:
+        row = repo.get_employee_by_email(conn, scope, user.email)
+    if row is None:
+        raise HTTPException(
+            status_code=404, detail="no employee linked to this account"
+        )
+    return int(row.id)
+
+
+@router.get("/me/photos", response_model=PhotoListOut)
+def list_my_photos_endpoint(
+    user: Annotated[CurrentUser, Depends(current_user)],
+) -> PhotoListOut:
+    scope = TenantScope(tenant_id=user.tenant_id)
+    employee_id = _resolve_self_employee_id(user, scope)
+    with get_engine().begin() as conn:
+        rows = photos_io.list_photos_for_employee(conn, scope, employee_id)
+    return PhotoListOut(
+        items=[
+            PhotoOut(
+                id=r.id,
+                employee_id=r.employee_id,
+                angle=r.angle,  # type: ignore[arg-type]
+                uploaded_by_user_id=r.uploaded_by_user_id,
+                approval_status=r.approval_status,  # type: ignore[arg-type]
+            )
+            for r in rows
+        ]
+    )
+
+
+@router.post("/me/photos", response_model=PhotoIngestResult)
+async def upload_my_photo_endpoint(
+    user: Annotated[CurrentUser, Depends(current_user)],
+    files: list[UploadFile] = File(...),
+    angle: Annotated[str, Form()] = photos_io.DEFAULT_ANGLE,
+) -> PhotoIngestResult:
+    """Employee self-upload. Lands as ``approval_status='pending'``.
+
+    Mirrors the Admin/HR drawer upload route but pins the operator
+    to themselves and skips the auto-approval. The Fernet write +
+    embedding compute happen immediately so the only gate left
+    when an Admin approves is the row flip.
+    """
+
+    if angle not in photos_io.ALLOWED_ANGLES:
+        raise HTTPException(
+            status_code=400, detail=f"invalid angle '{angle}'"
+        )
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    employee_id = _resolve_self_employee_id(user, scope)
+
+    engine = get_engine()
+    with engine.begin() as conn:
+        emp = repo.get_employee(conn, scope, employee_id)
+    assert emp is not None  # _resolve_self_employee_id raises if missing
+
+    accepted: list[PhotoIngestAccepted] = []
+    rejected: list[PhotoIngestRejected] = []
+
+    for upload in files:
+        raw_name = upload.filename or "upload.jpg"
+        data = await upload.read()
+        if not data:
+            rejected.append(
+                PhotoIngestRejected(filename=raw_name, reason="empty file")
+            )
+            continue
+
+        try:
+            file_path = photos_io.write_encrypted(
+                scope.tenant_id, emp.employee_code, angle, data
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("photo write failed for %s: %s", raw_name, exc)
+            rejected.append(
+                PhotoIngestRejected(
+                    filename=raw_name, reason="could not store file"
+                )
+            )
+            continue
+
+        with engine.begin() as conn:
+            photo_id = photos_io.create_photo_row(
+                conn,
+                scope,
+                employee_id=emp.id,
+                angle=angle,
+                file_path=file_path,
+                approved_by_user_id=None,  # not approved yet
+                uploaded_by_user_id=user.id,
+                approval_status="pending",
+            )
+            write_audit(
+                conn,
+                tenant_id=scope.tenant_id,
+                actor_user_id=user.id,
+                action="photo.ingested_self",
+                entity_type="photo",
+                entity_id=str(photo_id),
+                after={
+                    "employee_id": emp.id,
+                    "employee_code": emp.employee_code,
+                    "angle": angle,
+                    "source": "self",
+                    "filename": raw_name,
+                    "approval_status": "pending",
+                },
+            )
+
+        accepted.append(
+            PhotoIngestAccepted(
+                filename=raw_name,
+                employee_code=emp.employee_code,
+                angle=angle,  # type: ignore[arg-type]
+                photo_id=photo_id,
+            )
+        )
+
+        # Pre-compute the embedding so an Admin approval is a single
+        # status flip — the cache filter still keeps it dormant.
+        try:
+            id_enrollment.enroll_photo(get_engine(), scope, photo_id)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "self-upload embedding enrol failed for photo_id=%s",
+                photo_id,
+                exc_info=True,
+            )
+
+    return PhotoIngestResult(accepted=accepted, rejected=rejected)
+
+
+@router.get("/me/photos/{photo_id}/image")
+def get_my_photo_image_endpoint(
+    photo_id: int,
+    user: Annotated[CurrentUser, Depends(current_user)],
+) -> Response:
+    scope = TenantScope(tenant_id=user.tenant_id)
+    employee_id = _resolve_self_employee_id(user, scope)
+    with get_engine().begin() as conn:
+        row = photos_io.get_photo(
+            conn, scope, photo_id=photo_id, employee_id=employee_id
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail="photo not found")
+    try:
+        plain = photos_io.read_decrypted(row.file_path)
+    except (FileNotFoundError, RuntimeError) as exc:
+        logger.warning(
+            "self-photo read failed for id=%s: %s", photo_id, exc
+        )
+        raise HTTPException(
+            status_code=500, detail="could not read photo"
+        ) from exc
+    return Response(content=plain, media_type="image/jpeg")
+
+
+# ---------------------------------------------------------------------------
+# Photo approvals queue (Admin/HR)
+# ---------------------------------------------------------------------------
+#
+# When an Employee uploads a reference photo via /api/employees/me/photos
+# the row lands as ``approval_status='pending'``. The matcher cache
+# filters those out, so they sit dormant until an Admin or HR acts on
+# them via this surface.
+
+
+from pydantic import BaseModel as _PA_BaseModel  # noqa: E402
+
+
+class PendingPhotoOut(_PA_BaseModel):
+    photo_id: int
+    employee_id: int
+    employee_code: str
+    employee_full_name: str
+    angle: Literal["front", "left", "right", "other"]
+    uploaded_by_user_id: Optional[int] = None
+    uploaded_by_email: Optional[str] = None
+    uploaded_at: datetime
+
+
+class PendingPhotoListOut(_PA_BaseModel):
+    items: list[PendingPhotoOut]
+
+
+@router.get("/photos/pending", response_model=PendingPhotoListOut)
+def list_pending_photos_endpoint(
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
+) -> PendingPhotoListOut:
+    """Tenant-wide list of photos awaiting approval.
+
+    Joins the employees + users tables so the operator sees who the
+    photo is for and who uploaded it without a second round trip.
+    Bounded by the partial index added in migration 0036
+    (``ix_employee_photos_pending``).
+    """
+
+    from sqlalchemy import select as _select  # noqa: PLC0415
+    from maugood.db import (  # noqa: PLC0415
+        employee_photos as _photos,
+        users as _users,
+    )
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    with get_engine().begin() as conn:
+        rows = conn.execute(
+            _select(
+                _photos.c.id.label("photo_id"),
+                _photos.c.employee_id,
+                _photos.c.angle,
+                _photos.c.uploaded_by_user_id,
+                _photos.c.created_at,
+                repo.employees.c.employee_code,
+                repo.employees.c.full_name.label("employee_full_name"),
+                _users.c.email.label("uploaded_by_email"),
+            )
+            .select_from(
+                _photos.join(
+                    repo.employees,
+                    (repo.employees.c.id == _photos.c.employee_id)
+                    & (repo.employees.c.tenant_id == _photos.c.tenant_id),
+                ).outerjoin(
+                    _users, _users.c.id == _photos.c.uploaded_by_user_id
+                )
+            )
+            .where(
+                _photos.c.tenant_id == scope.tenant_id,
+                _photos.c.approval_status == "pending",
+            )
+            .order_by(_photos.c.created_at.asc())
+        ).all()
+
+    return PendingPhotoListOut(
+        items=[
+            PendingPhotoOut(
+                photo_id=int(r.photo_id),
+                employee_id=int(r.employee_id),
+                employee_code=str(r.employee_code),
+                employee_full_name=str(r.employee_full_name),
+                angle=str(r.angle),  # type: ignore[arg-type]
+                uploaded_by_user_id=(
+                    int(r.uploaded_by_user_id)
+                    if r.uploaded_by_user_id is not None
+                    else None
+                ),
+                uploaded_by_email=(
+                    str(r.uploaded_by_email)
+                    if r.uploaded_by_email is not None
+                    else None
+                ),
+                uploaded_at=r.created_at,
+            )
+            for r in rows
+        ]
+    )
+
+
+@router.post(
+    "/photos/{photo_id}/approve",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def approve_photo_endpoint(
+    photo_id: int,
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
+    response: Response,
+) -> Response:
+    """Flip a pending photo to ``approved``. Embedding was computed
+    on upload (matcher filter kept it dormant); approval simply
+    invalidates the matcher cache so the new vector loads.
+    """
+
+    from sqlalchemy import select as _select  # noqa: PLC0415
+    from sqlalchemy import update as _update  # noqa: PLC0415
+    from maugood.db import employee_photos as _photos  # noqa: PLC0415
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    engine = get_engine()
+    with engine.begin() as conn:
+        row = conn.execute(
+            _select(
+                _photos.c.id,
+                _photos.c.employee_id,
+                _photos.c.approval_status,
+            ).where(
+                _photos.c.tenant_id == scope.tenant_id,
+                _photos.c.id == photo_id,
+            )
+        ).first()
+        if row is None:
+            raise HTTPException(status_code=404, detail="photo not found")
+        if row.approval_status != "pending":
+            raise HTTPException(
+                status_code=409,
+                detail=f"photo not pending (status={row.approval_status})",
+            )
+
+        from sqlalchemy import func as _func  # noqa: PLC0415
+
+        conn.execute(
+            _update(_photos)
+            .where(
+                _photos.c.tenant_id == scope.tenant_id,
+                _photos.c.id == photo_id,
+            )
+            .values(
+                approval_status="approved",
+                approved_by_user_id=user.id,
+                approved_at=_func.now(),
+            )
+        )
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="photo.approved",
+            entity_type="photo",
+            entity_id=str(photo_id),
+            after={"employee_id": int(row.employee_id)},
+        )
+
+    matcher_cache.invalidate_employee(int(row.employee_id))
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response
+
+
+@router.post(
+    "/photos/{photo_id}/reject",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def reject_photo_endpoint(
+    photo_id: int,
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
+    response: Response,
+) -> Response:
+    """Reject a pending photo — drops the file + row outright. The
+    operator's audit row keeps the trail. Refuses 409 when the
+    photo isn't pending so an idle approval doesn't accidentally
+    nuke an already-approved row.
+    """
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    engine = get_engine()
+
+    # The standard ``get_photo`` requires an employee_id; this
+    # entrypoint only knows the photo id, so fetch directly.
+    from sqlalchemy import select as _select  # noqa: PLC0415
+    from maugood.db import employee_photos as _photos  # noqa: PLC0415
+
+    with engine.begin() as conn:
+        row = conn.execute(
+            _select(
+                _photos.c.id,
+                _photos.c.employee_id,
+                _photos.c.angle,
+                _photos.c.file_path,
+                _photos.c.approval_status,
+            ).where(
+                _photos.c.tenant_id == scope.tenant_id,
+                _photos.c.id == photo_id,
+            )
+        ).first()
+        if row is None:
+            raise HTTPException(status_code=404, detail="photo not found")
+        if row.approval_status != "pending":
+            raise HTTPException(
+                status_code=409,
+                detail=f"photo not pending (status={row.approval_status})",
+            )
+        photos_io.delete_photo_row(conn, scope, photo_id=photo_id)
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="photo.rejected",
+            entity_type="photo",
+            entity_id=str(photo_id),
+            before={
+                "employee_id": int(row.employee_id),
+                "angle": str(row.angle),
+            },
+        )
+
+    _drop_file(str(row.file_path))
+    matcher_cache.invalidate_employee(int(row.employee_id))
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response
+
+
+@router.delete(
+    "/me/photos/{photo_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+def delete_my_photo_endpoint(
+    photo_id: int,
+    user: Annotated[CurrentUser, Depends(current_user)],
+    response: Response,
+) -> Response:
+    """Employee deletes their own photo.
+
+    Refuses with **403** when ``uploaded_by_user_id != self.user_id`` —
+    legacy rows (NULL uploader) and Admin/HR-uploaded rows are both
+    protected from the Employee self-delete path. The Admin/HR
+    override (``DELETE /api/employees/{employee_id}/photos/{photo_id}``)
+    can still wipe anything.
+    """
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    employee_id = _resolve_self_employee_id(user, scope)
+    engine = get_engine()
+    with engine.begin() as conn:
+        row = photos_io.get_photo(
+            conn, scope, photo_id=photo_id, employee_id=employee_id
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail="photo not found")
+        if row.uploaded_by_user_id != user.id:
+            raise HTTPException(
+                status_code=403, detail="cannot_delete_others_photo"
+            )
+        photos_io.delete_photo_row(conn, scope, photo_id=photo_id)
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="photo.deleted_self",
+            entity_type="photo",
+            entity_id=str(photo_id),
+            before={
+                "employee_id": employee_id,
+                "angle": row.angle,
+                "approval_status": row.approval_status,
+            },
+        )
+
+    _drop_file(row.file_path)
+    matcher_cache.invalidate_employee(employee_id)
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response
+
+
 @router.get("/{employee_id}", response_model=EmployeeOut)
 def get_employee_endpoint(
     employee_id: int,
@@ -2214,6 +2690,10 @@ async def bulk_ingest_photos_endpoint(
                 angle=parsed.angle,
                 file_path=file_path,
                 approved_by_user_id=user.id,
+                # Migration 0036: Admin/HR upload paths track the
+                # uploader and auto-approve.
+                uploaded_by_user_id=user.id,
+                approval_status="approved",
             )
             write_audit(
                 conn,
@@ -2312,6 +2792,8 @@ async def upload_photos_endpoint(
                 angle=angle,
                 file_path=file_path,
                 approved_by_user_id=user.id,
+                uploaded_by_user_id=user.id,
+                approval_status="approved",
             )
             write_audit(
                 conn,
@@ -2363,7 +2845,13 @@ def list_photos_endpoint(
         rows = photos_io.list_photos_for_employee(conn, scope, employee_id)
     return PhotoListOut(
         items=[
-            PhotoOut(id=r.id, employee_id=r.employee_id, angle=r.angle)  # type: ignore[arg-type]
+            PhotoOut(
+                id=r.id,
+                employee_id=r.employee_id,
+                angle=r.angle,  # type: ignore[arg-type]
+                uploaded_by_user_id=r.uploaded_by_user_id,
+                approval_status=r.approval_status,  # type: ignore[arg-type]
+            )
             for r in rows
         ]
     )

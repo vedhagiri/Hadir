@@ -212,6 +212,10 @@ class PhotoOut(BaseModel):
     id: int
     employee_id: int
     angle: Literal["front", "left", "right", "other"]
+    # Migration 0036: provenance + approval state. Both nullable on
+    # legacy rows that pre-date the migration.
+    uploaded_by_user_id: Optional[int] = None
+    approval_status: Literal["approved", "pending", "rejected"] = "approved"
 
 
 class PhotoListOut(BaseModel):

@@ -185,6 +185,9 @@ class MatcherCache:
                     ).where(
                         employee_photos.c.tenant_id == tenant_id,
                         employee_photos.c.embedding.is_not(None),
+                        # Migration 0036: pending self-uploads sit dormant
+                        # until Admin/HR approves them.
+                        employee_photos.c.approval_status == "approved",
                     )
                 ).first()
             if row is None:
@@ -251,6 +254,8 @@ class MatcherCache:
                 ).where(
                     employee_photos.c.tenant_id == scope.tenant_id,
                     employee_photos.c.embedding.is_not(None),
+                    # Migration 0036: only approved photos enrol.
+                    employee_photos.c.approval_status == "approved",
                 )
             ).all()
             # P28.7: load lifecycle metadata for every employee that
@@ -335,6 +340,8 @@ class MatcherCache:
                     employee_photos.c.tenant_id == scope.tenant_id,
                     employee_photos.c.employee_id == employee_id,
                     employee_photos.c.embedding.is_not(None),
+                    # Migration 0036: only approved photos enrol.
+                    employee_photos.c.approval_status == "approved",
                 )
             ).all()
         vectors: list[np.ndarray] = []

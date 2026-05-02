@@ -1639,6 +1639,26 @@ employee_photos = Table(
         nullable=True,
     ),
     Column("approved_at", DateTime(timezone=True), nullable=True),
+    # Migration 0036: explicit provenance — who put the photo in the
+    # system. Null on legacy rows that pre-date the column → the
+    # Employee self-delete path treats those as "not mine" and
+    # refuses; only Admin/HR can wipe them.
+    Column(
+        "uploaded_by_user_id",
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    # Migration 0036: approval gate. Admin/HR uploads auto-approve;
+    # Employee self-uploads land as 'pending' and need an Admin/HR
+    # action via the approval queue. The matcher cache filters on
+    # this column so a pending photo doesn't enrol until approved.
+    Column(
+        "approval_status",
+        Text,
+        nullable=False,
+        server_default="approved",
+    ),
     Column(
         "created_at",
         DateTime(timezone=True),
@@ -1650,6 +1670,10 @@ employee_photos = Table(
     Column("embedding", LargeBinary, nullable=True),
     CheckConstraint(
         "angle IN ('front','left','right','other')", name="ck_employee_photos_angle"
+    ),
+    CheckConstraint(
+        "approval_status IN ('approved', 'pending', 'rejected')",
+        name="ck_employee_photos_approval_status",
     ),
 )
 
