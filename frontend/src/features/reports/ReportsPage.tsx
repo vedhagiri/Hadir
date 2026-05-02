@@ -18,12 +18,14 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
 import { api } from "../../api/client";
+import { useMe } from "../../auth/AuthProvider";
 import { DatePicker } from "../../components/DatePicker";
 import { PdfOptionsModal } from "../../components/PdfOptionsModal";
 import { Icon, type IconName } from "../../shell/Icon";
 import { useAttendance } from "../attendance/hooks";
 import type { AttendanceItem } from "../attendance/types";
 import { useDepartments } from "../departments/hooks";
+import { RematchModal } from "./RematchModal";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -167,6 +169,9 @@ export function ReportsPage() {
   const [info, setInfo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pdfModalOpen, setPdfModalOpen] = useState(false);
+  const [rematchOpen, setRematchOpen] = useState(false);
+  const me = useMe();
+  const isAdmin = !!me.data?.roles?.includes("Admin");
 
   useEffect(() => {
     setInfo(null);
@@ -183,7 +188,17 @@ export function ReportsPage() {
             managers
           </p>
         </div>
-        <div className="page-actions">
+        <div className="page-actions" style={{ display: "flex", gap: 8 }}>
+          {isAdmin && activeReport === "attendance" && (
+            <button
+              className="btn"
+              onClick={() => setRematchOpen(true)}
+              title="Replay past camera events through the current reference photos. Re-runnable any number of times — refreshes Camera events + attendance for the affected days, and reflects on every employee's profile."
+            >
+              <Icon name="refresh" size={12} />
+              Re-match detections
+            </button>
+          )}
           <button
             className="btn"
             onClick={() => setActiveReport(activeReport)}
@@ -328,6 +343,10 @@ export function ReportsPage() {
         }}
         busy={downloading === "pdf"}
       />
+
+      {rematchOpen && (
+        <RematchModal onClose={() => setRematchOpen(false)} />
+      )}
     </>
   );
 }

@@ -27,7 +27,6 @@ import { DeleteConfirmModal } from "./DeleteConfirmModal";
 import { EmployeeDrawer } from "./EmployeeDrawer";
 import { EmployeeViewDrawer } from "./EmployeeViewDrawer";
 import { ImportModal } from "./ImportModal";
-import { RematchModal } from "./RematchModal";
 import {
   useDeleteRequestList,
   useEmployeeList,
@@ -49,7 +48,6 @@ export function EmployeesPage() {
   const [departmentId, setDepartmentId] = useState<number | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
   const [importOpen, setImportOpen] = useState(false);
-  const [rematchOpen, setRematchOpen] = useState(false);
   const [drawerId, setDrawerId] = useState<number | null | undefined>(undefined);
   const [viewId, setViewId] = useState<number | null>(null);
   const [deletingEmployee, setDeletingEmployee] = useState<Employee | null>(null);
@@ -224,23 +222,6 @@ export function EmployeesPage() {
             <Icon name="upload" size={12} />
             {t("employees.importButton") as string}
           </button>
-          {isAdmin && (
-            <button
-              className="btn"
-              onClick={() => setRematchOpen(true)}
-              title={
-                t("employees.rematchTooltip", {
-                  defaultValue:
-                    "Replay past camera events through the current reference photos",
-                }) as string
-              }
-            >
-              <Icon name="refresh" size={12} />
-              {t("employees.rematchButton", {
-                defaultValue: "Re-match detections",
-              }) as string}
-            </button>
-          )}
           <button
             className="btn btn-primary"
             onClick={() => setDrawerId(null)}
@@ -542,9 +523,6 @@ export function EmployeesPage() {
       </div>
 
       {importOpen && <ImportModal onClose={() => setImportOpen(false)} />}
-      {rematchOpen && (
-        <RematchModal onClose={() => setRematchOpen(false)} />
-      )}
       {viewId !== null && (
         <EmployeeViewDrawer
           employeeId={viewId}
