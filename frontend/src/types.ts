@@ -28,6 +28,10 @@ export interface MeResponse {
   // (the design's default).
   preferred_theme?: "system" | "light" | "dark" | null;
   preferred_density?: "compact" | "comfortable" | null;
+  // Display name of the active tenant (``public.tenants.name``).
+  // Empty string on a fresh install before the operator's setup
+  // wizard runs; the sidebar falls back to "Maugood" in that case.
+  tenant_name?: string;
 }
 
 // Used by the shell to decide which NAV to render when a user holds more

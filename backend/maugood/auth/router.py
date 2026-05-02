@@ -132,6 +132,12 @@ class MeResponse(BaseModel):
     # ``None`` on density = "comfortable" (the design's default).
     preferred_theme: str | None = None
     preferred_density: str | None = None
+    # Display name of the active tenant — read directly from
+    # ``public.tenants.name``. Empty string on a fresh install before
+    # the operator's setup wizard renames it; the frontend falls back
+    # to the product name ("Maugood") in that case so the brand row
+    # never renders blank.
+    tenant_name: str = ""
 
 
 class PreferredLanguageRequest(BaseModel):
@@ -510,6 +516,7 @@ def login(
         preferred_language=bundle.preferred_language,
         preferred_theme=bundle.preferred_theme,
         preferred_density=bundle.preferred_density,
+        tenant_name=_resolve_tenant_name(target_tenant_id),
     )
 
 
@@ -557,6 +564,24 @@ def me(
     return _to_me_response(user, is_imp=is_imp, sa_user_id=sa_user_id)
 
 
+def _resolve_tenant_name(tenant_id: int) -> str:
+    """Look up ``public.tenants.name`` for the active tenant.
+
+    Used to thread the display name through ``/api/auth/me`` so the
+    frontend brand row reflects whatever the operator's setup wizard
+    set the value to. Returns an empty string for a missing row (new
+    deployment before the wizard ran) — the frontend falls back to the
+    product name when the value is empty.
+    """
+
+    engine = get_engine()
+    with engine.begin() as conn:
+        row = conn.execute(
+            select(tenants.c.name).where(tenants.c.id == tenant_id)
+        ).first()
+    return str(row.name) if row and row.name else ""
+
+
 def _to_me_response(
     user: CurrentUser,
     *,
@@ -576,6 +601,7 @@ def _to_me_response(
         preferred_language=user.preferred_language,
         preferred_theme=user.preferred_theme,
         preferred_density=user.preferred_density,
+        tenant_name=_resolve_tenant_name(user.tenant_id),
     )
 
 

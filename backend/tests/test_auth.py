@@ -51,6 +51,46 @@ def test_login_happy_path_sets_cookie_and_me_returns_profile(
     assert "password" not in str(success["after"]).lower()
 
 
+def test_me_carries_tenant_name_from_public_tenants(
+    client: TestClient, admin_user: dict, admin_engine
+) -> None:
+    """``MeResponse.tenant_name`` mirrors ``public.tenants.name`` so the
+    sidebar brand row reflects whatever the operator's setup wizard
+    set the value to. Renaming the tenant updates the next /me call —
+    no client-side cache trick required."""
+
+    from maugood.db import tenants  # noqa: PLC0415
+    from tests.conftest import TENANT_ID  # noqa: PLC0415
+
+    resp = client.post(
+        "/api/auth/login",
+        json={"email": admin_user["email"], "password": admin_user["password"]},
+    )
+    assert resp.status_code == 200, resp.text
+    initial = resp.json().get("tenant_name")
+    assert isinstance(initial, str)
+
+    # Rename the row directly via the admin engine (the app role can't
+    # mutate ``tenants`` rows from the API in single mode).
+    new_name = "ACME Corporation Test"
+    with admin_engine.begin() as conn:
+        conn.execute(
+            update(tenants).where(tenants.c.id == TENANT_ID).values(name=new_name)
+        )
+    try:
+        me = client.get("/api/auth/me")
+        assert me.status_code == 200
+        assert me.json()["tenant_name"] == new_name
+    finally:
+        # Restore original so the rest of the suite isn't surprised.
+        with admin_engine.begin() as conn:
+            conn.execute(
+                update(tenants).where(tenants.c.id == TENANT_ID).values(
+                    name=initial or ""
+                )
+            )
+
+
 def test_login_email_is_case_insensitive(
     client: TestClient, admin_user: dict
 ) -> None:

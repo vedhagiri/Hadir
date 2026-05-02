@@ -316,9 +316,19 @@ def upgrade() -> None:
     )
 
     # --- Seed data ----------------------------------------------------------
-    # Pilot tenant (PROJECT_CONTEXT §3): one row, id=1, name='Omran'. Force
-    # the id so application code can rely on the default_tenant_id=1 setting.
-    op.execute(f"INSERT INTO \"{SCHEMA}\".tenants (id, name) VALUES (1, 'Omran')")
+    # Default tenant: one row, id=1, name=''. The empty string is a
+    # placeholder the operator's setup wizard fills in (e.g. via
+    # ``scripts/seed_admin.py --tenant-name "<Customer Name>"``). Until
+    # then the frontend falls back to the product name ("Maugood") so
+    # the UI doesn't render a blank brand.
+    #
+    # The pilot's ``Omran`` literal lived here through v0.1; v1.0 takes
+    # it out so a fresh deploy to any client doesn't surface another
+    # customer's name in their sidebar. Existing deployments are
+    # unaffected — Alembic only runs each migration once, so a DB whose
+    # tenants row is already named ``Omran`` keeps that value until the
+    # operator renames it.
+    op.execute(f"INSERT INTO \"{SCHEMA}\".tenants (id, name) VALUES (1, '')")
     op.execute(
         f'SELECT setval(pg_get_serial_sequence(\'"{SCHEMA}".tenants\', \'id\'), 1, true)'
     )

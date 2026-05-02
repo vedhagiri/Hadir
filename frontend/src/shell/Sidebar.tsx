@@ -10,7 +10,8 @@ import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
 import { NavLink } from "react-router-dom";
 
-import omranLogo from "../assets/omran_logo.png";
+import productLogo from "../assets/mts_logo.png";
+import { useMe } from "../auth/AuthProvider";
 import { APP_VERSION_FULL } from "../config";
 import { SPRING } from "../motion/tokens";
 import { useInboxSummary } from "../requests/hooks";
@@ -55,6 +56,13 @@ export function Sidebar({ role }: Props) {
   const items = NAV[role];
   const sidebarState = useSidebarState();
   const collapsed = sidebarState === "collapsed";
+  // Brand row reads ``tenant_name`` from /api/auth/me — the value the
+  // operator's setup wizard wrote into ``public.tenants.name``. We
+  // fall back to the product name ("Maugood") when empty so a fresh
+  // install (migration 0001 seeds an empty string) still renders a
+  // sensible brand instead of a blank.
+  const me = useMe();
+  const brandName = (me.data?.tenant_name?.trim() || "Maugood");
   // Only Manager / HR / Admin have an Approvals link; Employees don't,
   // so we skip the inbox query for them.
   const approvalsRoles = role === "Admin" || role === "HR" || role === "Manager";
@@ -71,8 +79,8 @@ export function Sidebar({ role }: Props) {
     <aside className="sidebar">
       <div className="sidebar-brand">
         <img
-          src={omranLogo}
-          alt="Omran"
+          src={productLogo}
+          alt={brandName}
           className="brand-logo"
           style={{
             width: 28,
@@ -81,7 +89,7 @@ export function Sidebar({ role }: Props) {
             flexShrink: 0,
           }}
         />
-        <div className="brand-name">Omran</div>
+        <div className="brand-name">{brandName}</div>
         {/* P28.5d: collapse/expand toggle in the top-right of the
             brand row, replacing the version chip. ">" when expanded
             (clicking collapses); "<" when collapsed (clicking

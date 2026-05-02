@@ -25,10 +25,10 @@ import sys
 from typing import Optional
 
 from argon2 import PasswordHasher
-from sqlalchemy import insert, select
+from sqlalchemy import insert, select, update
 from sqlalchemy.engine import Engine
 
-from maugood.db import make_engine, roles, user_roles, users
+from maugood.db import make_engine, roles, tenants, user_roles, users
 
 logger = logging.getLogger("maugood.seed_admin")
 
@@ -55,6 +55,19 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         default=os.environ.get("MAUGOOD_SEED_FULL_NAME", "Pilot Admin"),
         help="Display name. Defaults to $MAUGOOD_SEED_FULL_NAME or 'Pilot Admin'.",
     )
+    # Optional one-shot tenant rename. Migration 0001 seeds the default
+    # tenant row with an empty name; the operator's setup wizard runs
+    # this script with ``--tenant-name "<Customer>"`` so the brand row
+    # in the sidebar reflects the customer's name from first login.
+    parser.add_argument(
+        "--tenant-name",
+        default=os.environ.get("MAUGOOD_SEED_TENANT_NAME"),
+        help=(
+            "Set ``public.tenants.name`` for the default tenant (id=1). "
+            "Defaults to $MAUGOOD_SEED_TENANT_NAME. Omitting it leaves "
+            "the existing value untouched."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -78,6 +91,23 @@ def _resolve_password(cli_password: Optional[str]) -> str:
         )
         sys.exit(3)
     return password
+
+
+def set_tenant_name(engine: Engine, name: str, tenant_id: int = PILOT_TENANT_ID) -> None:
+    """Update the display name on ``public.tenants`` for the active row.
+
+    Idempotent — re-running with the same value is a no-op write. Used
+    by the operator's setup wizard so the customer's name shows up in
+    the brand row from first login. Migration 0001 seeds the row with
+    an empty name; this is what fills it in."""
+
+    name = name.strip()
+    if not name:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            update(tenants).where(tenants.c.id == tenant_id).values(name=name)
+        )
 
 
 def seed_admin(
@@ -168,6 +198,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     password = _resolve_password(args.password)
 
     engine = make_engine()
+    if args.tenant_name:
+        set_tenant_name(engine, args.tenant_name)
+        logger.info(
+            "Renamed default tenant: id=%s name=%r",
+            PILOT_TENANT_ID,
+            args.tenant_name.strip(),
+        )
     user_id = seed_admin(
         engine,
         email=email,
