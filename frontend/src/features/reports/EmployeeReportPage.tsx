@@ -14,6 +14,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api/client";
 import { DatePicker } from "../../components/DatePicker";
 import { PdfOptionsModal } from "../../components/PdfOptionsModal";
+import { useConfidentialDownload } from "../../components/useConfidentialDownload";
 import { Icon } from "../../shell/Icon";
 import { useEmployeeList, useEmployeeDetail } from "../employees/hooks";
 import type { Employee } from "../employees/types";
@@ -119,6 +120,12 @@ export function EmployeeReportPage() {
   const [info, setInfo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pdfModalOpen, setPdfModalOpen] = useState(false);
+
+  // Every download (XLSX / PDF / CSV) is gated behind a one-time
+  // confidentiality acknowledgement. ``gateDownload`` opens the
+  // warning; only on confirm does ``action`` actually run.
+  const { gate: gateDownload, modal: confidentialModal } =
+    useConfidentialDownload();
 
   useEffect(() => {
     setInfo(null);
@@ -289,7 +296,14 @@ export function EmployeeReportPage() {
         <div className="page-actions">
           <button
             className="btn"
-            onClick={downloadXlsx}
+            onClick={() => {
+              const code = employee?.employee_code ?? selectedEmployeeId ?? "";
+              gateDownload({
+                format: "xlsx",
+                reportName: `Employee report — ${employee?.full_name ?? code} · ${start} → ${end}`,
+                action: downloadXlsx,
+              });
+            }}
             disabled={selectedEmployeeId === null || downloading !== null}
           >
             <Icon name="download" size={12} />
@@ -297,7 +311,14 @@ export function EmployeeReportPage() {
           </button>
           <button
             className="btn btn-primary"
-            onClick={() => setPdfModalOpen(true)}
+            onClick={() => {
+              const code = employee?.employee_code ?? selectedEmployeeId ?? "";
+              gateDownload({
+                format: "pdf",
+                reportName: `Employee report — ${employee?.full_name ?? code} · ${start} → ${end}`,
+                action: () => setPdfModalOpen(true),
+              });
+            }}
             disabled={selectedEmployeeId === null || downloading !== null}
           >
             <Icon name="fileText" size={12} />
@@ -550,11 +571,18 @@ export function EmployeeReportPage() {
                 </label>
                 <button
                   className="btn btn-sm"
-                  onClick={downloadDaysCsv}
+                  onClick={() => {
+                    if (!employee) return;
+                    gateDownload({
+                      format: "csv",
+                      reportName: `Employee report — ${employee.full_name} · ${start} → ${end}`,
+                      action: downloadDaysCsv,
+                    });
+                  }}
                   disabled={!employee}
                 >
                   <Icon name="download" size={11} />
-                  XLSX
+                  CSV
                 </button>
               </div>
             </div>
@@ -648,6 +676,7 @@ export function EmployeeReportPage() {
         }}
         busy={downloading === "pdf"}
       />
+      {confidentialModal}
     </>
   );
 }

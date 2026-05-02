@@ -12,6 +12,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { api } from "../../api/client";
 import { DatePicker, todayIso } from "../../components/DatePicker";
+import { useConfidentialDownload } from "../../components/useConfidentialDownload";
 import { Icon } from "../../shell/Icon";
 
 interface Sighting {
@@ -62,10 +63,19 @@ export function FormerEmployeesSeenReport() {
     staleTime: 30 * 1000,
   });
 
+  const { gate: gateDownload, modal: confidentialModal } =
+    useConfidentialDownload();
+
   const onExport = () => {
-    window.location.assign(
-      `/api/reports/former-employees-seen?from=${fromDate}&to=${toDate}&format=xlsx`,
-    );
+    gateDownload({
+      format: "xlsx",
+      reportName: `Former employees seen — ${fromDate} → ${toDate}`,
+      action: () => {
+        window.location.assign(
+          `/api/reports/former-employees-seen?from=${fromDate}&to=${toDate}&format=xlsx`,
+        );
+      },
+    });
   };
 
   return (
@@ -180,6 +190,7 @@ export function FormerEmployeesSeenReport() {
           </tbody>
         </table>
       </div>
+      {confidentialModal}
     </>
   );
 }

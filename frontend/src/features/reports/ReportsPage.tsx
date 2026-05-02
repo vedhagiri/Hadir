@@ -22,6 +22,7 @@ import { api } from "../../api/client";
 import { useMe } from "../../auth/AuthProvider";
 import { DatePicker } from "../../components/DatePicker";
 import { PdfOptionsModal } from "../../components/PdfOptionsModal";
+import { useConfidentialDownload } from "../../components/useConfidentialDownload";
 import { Icon, type IconName } from "../../shell/Icon";
 import { useAttendance } from "../attendance/hooks";
 import type {
@@ -200,6 +201,12 @@ export function ReportsPage() {
     !!me.data?.roles?.includes("Admin") ||
     !!me.data?.roles?.includes("HR");
 
+  // Every report download (XLSX / PDF / CSV) is gated through this
+  // confidentiality modal so the operator has to acknowledge the
+  // org-internal red line before the file leaves the browser.
+  const { gate: gateDownload, modal: confidentialModal } =
+    useConfidentialDownload();
+
   useEffect(() => {
     setInfo(null);
     setError(null);
@@ -296,18 +303,29 @@ export function ReportsPage() {
           }}
           setEnd={setEndDate}
           downloading={downloading}
-          onDownload={async (format) => {
-            if (format === "pdf") {
-              setPdfModalOpen(true);
-              return;
-            }
-            await downloadAttendance({
+          onDownload={(format) => {
+            const rangeLabel =
+              date === endDate ? date : `${date} → ${endDate}`;
+            gateDownload({
               format,
-              start: date,
-              end: endDate,
-              setDownloading,
-              setInfo,
-              setError,
+              reportName: `Attendance — ${rangeLabel}`,
+              action: async () => {
+                if (format === "pdf") {
+                  // PDF flow: warning modal first, then PdfOptionsModal,
+                  // then the actual download (the options modal owns its
+                  // own busy state).
+                  setPdfModalOpen(true);
+                  return;
+                }
+                await downloadAttendance({
+                  format,
+                  start: date,
+                  end: endDate,
+                  setDownloading,
+                  setInfo,
+                  setError,
+                });
+              },
             });
           }}
         />
@@ -317,12 +335,17 @@ export function ReportsPage() {
           date={date}
           setDate={setDate}
           downloading={downloading}
-          onDownload={async () => {
-            await downloadEventLog({
-              date,
-              setDownloading,
-              setInfo,
-              setError,
+          onDownload={() => {
+            gateDownload({
+              format: "csv",
+              reportName: `Event log — ${date}`,
+              action: () =>
+                downloadEventLog({
+                  date,
+                  setDownloading,
+                  setInfo,
+                  setError,
+                }),
             });
           }}
         />
@@ -332,12 +355,17 @@ export function ReportsPage() {
           date={date}
           setDate={setDate}
           downloading={downloading}
-          onDownload={async () => {
-            await downloadDepartmentSummary({
-              date,
-              setDownloading,
-              setInfo,
-              setError,
+          onDownload={() => {
+            gateDownload({
+              format: "csv",
+              reportName: `Department summary — ${date}`,
+              action: () =>
+                downloadDepartmentSummary({
+                  date,
+                  setDownloading,
+                  setInfo,
+                  setError,
+                }),
             });
           }}
         />
@@ -366,6 +394,8 @@ export function ReportsPage() {
       {rematchOpen && (
         <RematchModal onClose={() => setRematchOpen(false)} />
       )}
+
+      {confidentialModal}
     </>
   );
 }
@@ -462,7 +492,7 @@ function AttendancePreview({
   setStart: (d: string) => void;
   setEnd: (d: string) => void;
   downloading: "xlsx" | "pdf" | null;
-  onDownload: (format: "xlsx" | "pdf") => Promise<void>;
+  onDownload: (format: "xlsx" | "pdf") => void;
 }) {
   const [preset, setPreset] = useState<PresetKey>("today");
   const [page, setPage] = useState(1);
@@ -802,7 +832,7 @@ function EventLogPreview({
   date: string;
   setDate: (d: string) => void;
   downloading: "xlsx" | "pdf" | null;
-  onDownload: () => Promise<void>;
+  onDownload: () => void;
 }) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
@@ -848,14 +878,6 @@ function EventLogPreview({
             max={todayIso()}
             ariaLabel="Event log date"
           />
-          <button
-            className="btn btn-primary btn-sm"
-            onClick={onDownload}
-            disabled={downloading !== null}
-          >
-            <Icon name="download" size={11} />
-            {downloading === "xlsx" ? "Downloading…" : "Run & download"}
-          </button>
         </div>
       </div>
       <table className="table">
@@ -1162,7 +1184,7 @@ function DepartmentSummaryPreview({
   date: string;
   setDate: (d: string) => void;
   downloading: "xlsx" | "pdf" | null;
-  onDownload: () => Promise<void>;
+  onDownload: () => void;
 }) {
   const { rows, loading, error } = useDepartmentSummary(date);
   // Show every department, not just a preview slice.
@@ -1179,7 +1201,7 @@ function DepartmentSummaryPreview({
       downloadXlsx={onDownload}
       downloadingXlsx={downloading === "xlsx"}
       downloadingPdf={false}
-      runAndDownload={onDownload}
+      downloadXlsxLabel="Download CSV"
       columns={[
         "#",
         "Department",
@@ -1323,6 +1345,7 @@ function PreviewCard({
   downloadingPdf,
   onDownloadPdf,
   runAndDownload,
+  downloadXlsxLabel = "Download XLSX",
   columns,
   children,
 }: {
@@ -1353,6 +1376,10 @@ function PreviewCard({
   // Download XLSX / PDF buttons carry the action — avoids two
   // visually competing download CTAs.
   runAndDownload?: () => void;
+  // Footer button label for the primary download. Defaults to
+  // "Download XLSX". Reports that emit CSV pass "Download CSV"
+  // so the label matches the file the operator actually gets.
+  downloadXlsxLabel?: string;
   columns: string[];
   children: ReactNode;
 }) {
@@ -1484,7 +1511,7 @@ function PreviewCard({
             disabled={downloadingXlsx || downloadingPdf}
           >
             <Icon name="download" size={11} />
-            {downloadingXlsx ? "Downloading…" : "Download XLSX"}
+            {downloadingXlsx ? "Downloading…" : downloadXlsxLabel}
           </button>
         </div>
       </div>

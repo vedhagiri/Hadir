@@ -13,6 +13,7 @@ import { useMemo, useState } from "react";
 import { useMe } from "../../auth/AuthProvider";
 import { DatePicker, todayIso } from "../../components/DatePicker";
 import { PdfOptionsModal } from "../../components/PdfOptionsModal";
+import { useConfidentialDownload } from "../../components/useConfidentialDownload";
 import { primaryRole } from "../../types";
 import { useDepartments } from "../departments/hooks";
 import { useEmployeeList } from "../employees/hooks";
@@ -35,6 +36,24 @@ export function DailyAttendancePage() {
   const [regenInfo, setRegenInfo] = useState<string | null>(null);
   const [pdfModalOpen, setPdfModalOpen] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
+
+  // Every report download is gated through the confidentiality modal.
+  const { gate: gateDownload, modal: confidentialModal } =
+    useConfidentialDownload();
+  const reportName = `Daily attendance — ${date}`;
+  const requestXlsx = () =>
+    gateDownload({
+      format: "xlsx",
+      reportName,
+      action: () => downloadReport("xlsx"),
+    });
+  const requestPdf = () =>
+    gateDownload({
+      format: "pdf",
+      reportName,
+      // Warning first, then PdfOptionsModal owns the rest of the flow.
+      action: () => setPdfModalOpen(true),
+    });
 
   // Wire the active scope to backend filters. "Team" is a manager-team
   // filter that we don't have a dedicated endpoint for yet — it falls
@@ -146,7 +165,6 @@ export function DailyAttendancePage() {
     URL.revokeObjectURL(url);
   };
 
-  const handlePdfRequest = () => setPdfModalOpen(true);
   const handlePdfConfirm = async (includePhotos: boolean) => {
     setPdfBusy(true);
     try {
@@ -183,7 +201,7 @@ export function DailyAttendancePage() {
           </button>
           <button
             className="btn btn-primary"
-            onClick={() => downloadReport("xlsx")}
+            onClick={requestXlsx}
             disabled={!list.data}
           >
             <span aria-hidden style={{ marginInlineEnd: 4 }}>⬇</span>
@@ -362,7 +380,7 @@ export function DailyAttendancePage() {
           <div style={{ display: "flex", gap: 6 }}>
             <button
               className="btn btn-sm"
-              onClick={handlePdfRequest}
+              onClick={requestPdf}
               disabled={!list.data || pdfBusy}
             >
               <span aria-hidden style={{ marginInlineEnd: 4 }}>📄</span>
@@ -370,7 +388,7 @@ export function DailyAttendancePage() {
             </button>
             <button
               className="btn btn-sm"
-              onClick={() => downloadReport("xlsx")}
+              onClick={requestXlsx}
               disabled={!list.data}
             >
               <span aria-hidden style={{ marginInlineEnd: 4 }}>⬇</span>
@@ -507,6 +525,7 @@ export function DailyAttendancePage() {
         onConfirm={handlePdfConfirm}
         busy={pdfBusy}
       />
+      {confidentialModal}
     </>
   );
 }

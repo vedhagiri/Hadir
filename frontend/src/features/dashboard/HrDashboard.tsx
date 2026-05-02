@@ -15,6 +15,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import { useMe } from "../../auth/AuthProvider";
 import { DatePicker, todayIso } from "../../components/DatePicker";
+import { useConfidentialDownload } from "../../components/useConfidentialDownload";
 import { usePolicies } from "../../policies/hooks";
 import { useInboxPending, useInboxSummary } from "../../requests/hooks";
 import {
@@ -211,6 +212,11 @@ export function HrDashboard() {
   // attendance day.
   const [selectedDate, setSelectedDate] = useState<string>(todayIso());
   const isToday = selectedDate === todayIso();
+
+  // Every report download (XLSX) is gated behind a one-time
+  // confidentiality acknowledgement.
+  const { gate: gateDownload, modal: confidentialModal } =
+    useConfidentialDownload();
 
   const { series, selectedItems: todayItems } = useAttendanceSeries(selectedDate);
   const todaySummary = series[series.length - 1];
@@ -577,7 +583,16 @@ export function HrDashboard() {
               Today
             </button>
           )}
-          <button className="btn" onClick={downloadSelectedXlsx}>
+          <button
+            className="btn"
+            onClick={() =>
+              gateDownload({
+                format: "xlsx",
+                reportName: `Attendance — ${selectedDate}`,
+                action: downloadSelectedXlsx,
+              })
+            }
+          >
             <Icon name="download" size={12} />{" "}
             {isToday ? "Export today" : `Export ${selectedDate}`}
           </button>
@@ -1158,6 +1173,7 @@ export function HrDashboard() {
         isToday={isToday}
         onSeeAll={() => navigate("/daily-attendance")}
       />
+      {confidentialModal}
     </>
   );
 }
