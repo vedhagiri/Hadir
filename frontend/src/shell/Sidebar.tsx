@@ -247,8 +247,16 @@ export function Sidebar({ role }: Props) {
           // logo is rendered on a near-white gradient, so a coloured
           // background made it look mismatched.
           background: "#ffffff",
-          padding: "10px 12px",
+          padding: "12px 12px 14px",
           borderTop: "1px solid var(--border)",
+          // The .sidebar container has ``padding: 12px 10px`` (see
+          // styles.css). Negative margins on the footer break out of
+          // that padding so the white card spans edge-to-edge — left
+          // wall to right wall, then all the way down to the bottom
+          // of the viewport. Without this the card sits inset by 10px
+          // sides + 12px bottom and looks like a floating tile.
+          marginInline: "-10px",
+          marginBottom: "-12px",
         }}
       >
         {/* Product logo — wide banner ("MaugoodAI · CCTV-Based AI
