@@ -1,31 +1,42 @@
 # Maugood alertmanager config (v1.0 P26).
 #
-# Two delivery paths, both operator-configurable:
+# The pre-fix version of this file used ``${VAR:-default}`` shell-
+# style placeholders for SMTP host / webhook URL / admin inbox.
+# Alertmanager DOES NOT expand environment variables in its config —
+# v0.27.0 has no expansion flag at all, and v0.28+ requires an
+# explicit opt-in. Result: the binary tried to parse literal
+# ``${...}`` strings as an email address, failed config validation,
+# crashed, and Docker restarted it forever.
 #
-#   * webhook  — POSTs the JSON alert payload to a URL the
-#                operator owns. Most teams wire this to Slack,
-#                PagerDuty, or a tenant-specific incident bus.
-#   * email    — falls back to the operator-configured Admin
-#                inbox when no webhook is set.
+# This rewrite ships a clean static config that runs out of the box
+# with no delivery configured. Alerts still group, dedup, and show
+# up on the Alertmanager UI at localhost:9093 — they just don't fan
+# out to email or Slack until an operator wires that up below.
 #
-# Both endpoints come from environment variables so the same
-# YAML works across environments without templating:
+# To turn on Slack / PagerDuty / etc.:
+#   1. Replace the empty ``webhook_configs`` block under the
+#      ``maugood-default`` receiver with the receiver block your
+#      provider documents. Alertmanager docs:
+#      https://prometheus.io/docs/alerting/latest/configuration/
+#   2. ``docker compose -f docker-compose-https-local.yaml restart alertmanager``
 #
-#   MAUGOOD_ALERTMANAGER_WEBHOOK_URL   (e.g. https://hooks.slack.com/...)
-#   MAUGOOD_ALERTMANAGER_SMTP_HOST     SMTP relay
-#   MAUGOOD_ALERTMANAGER_SMTP_FROM     "Maugood Alerts <alerts@example.com>"
-#   MAUGOOD_ALERTMANAGER_ADMIN_EMAIL   Admin inbox (comma-separated)
+# To turn on email:
+#   1. Fill in ``global.smtp_smarthost``, ``global.smtp_from``, and
+#      uncomment the ``email_configs`` block under
+#      ``maugood-default``. Use a real SMTP relay address — the
+#      service won't accept ``${...}`` placeholders here either.
+#   2. Restart the alertmanager container.
 #
-# Keep the routing tree shallow for the pilot: warnings + criticals
-# all fan out the same way. Per-tenant fan-out via Alertmanager
-# routes is M3 hardening territory once we know how Omran wants
-# to slice incidents across tenants.
+# Keep the routing tree shallow for now: warnings + criticals fan
+# out the same way. Per-tenant route splits are M3 hardening
+# territory once we know how operators want to slice incidents.
 
 global:
   resolve_timeout: 5m
-  smtp_smarthost: "${MAUGOOD_ALERTMANAGER_SMTP_HOST:-}"
-  smtp_from: "${MAUGOOD_ALERTMANAGER_SMTP_FROM:-alerts@maugood.local}"
-  smtp_require_tls: true
+  # smtp_smarthost / smtp_from intentionally absent — uncomment +
+  # fill in to enable email delivery. Alertmanager raises a clear
+  # error when an email_config refers to an empty smtp_smarthost,
+  # which is what we want during config bring-up.
 
 route:
   receiver: maugood-default
@@ -41,13 +52,9 @@ route:
       repeat_interval: 1h
 
 receivers:
+  # Default receiver runs in "store-only" mode — alerts are grouped,
+  # dedup'd, and visible on the Alertmanager UI but not pushed to
+  # any external service. Add webhook_configs / email_configs blocks
+  # here to enable delivery (see the comments at the top of the file
+  # for the wire-up steps).
   - name: maugood-default
-    webhook_configs:
-      - url: "${MAUGOOD_ALERTMANAGER_WEBHOOK_URL:-http://localhost:5001/_devnull}"
-        send_resolved: true
-    email_configs:
-      - to: "${MAUGOOD_ALERTMANAGER_ADMIN_EMAIL:-}"
-        send_resolved: true
-        # Fall back to "skip" when no SMTP is configured —
-        # Alertmanager refuses to send mail when smtp_smarthost
-        # is empty, so the empty-string defaults above are safe.
