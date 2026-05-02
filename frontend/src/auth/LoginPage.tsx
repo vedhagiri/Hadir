@@ -17,6 +17,7 @@ import { z } from "zod";
 import { ApiError } from "../api/client";
 import mtsLogo from "../assets/mts_logo.png";
 import { useOidcStatus } from "../auth-oidc/hooks";
+import { APP_VERSION_FULL } from "../config";
 import { Icon } from "../shell/Icon";
 import { useLogin, useMe } from "./AuthProvider";
 
@@ -339,6 +340,22 @@ function LoginFooter() {
       </div>
       <div style={{ marginTop: 2, opacity: 0.85 }}>
         © {year} Muscat Tech Solutions. All rights reserved.
+      </div>
+      {/* Product version — pinned from frontend/package.json via the
+          ``__APP_VERSION__`` Vite define. Lets a customer-support
+          ticket carry the exact build the operator was on without a
+          shell session. Same source as the sidebar version chip so
+          the two never drift. */}
+      <div
+        className="mono"
+        style={{
+          marginTop: 6,
+          fontSize: 10.5,
+          opacity: 0.7,
+          letterSpacing: "0.02em",
+        }}
+      >
+        Maugood v{APP_VERSION_FULL}
       </div>
     </footer>
   );

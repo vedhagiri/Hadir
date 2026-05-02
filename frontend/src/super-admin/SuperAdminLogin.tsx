@@ -8,6 +8,7 @@ import { Navigate, useNavigate } from "react-router-dom";
 import { z } from "zod";
 
 import { ApiError } from "../api/client";
+import { APP_VERSION_FULL } from "../config";
 import { useSuperLogin, useSuperMe } from "./SuperAdminProvider";
 
 const loginSchema = z.object({
@@ -191,6 +192,22 @@ export function SuperAdminLogin() {
           {isSubmitting || login.isPending ? "Signing in…" : "Sign in"}
         </button>
       </form>
+
+      {/* Product version — same source as the sidebar version chip.
+          A support ticket carrying "Super-Admin login on v1.1.9"
+          spares the operator a shell session to read .version. */}
+      <div
+        className="mono"
+        style={{
+          marginTop: 14,
+          fontSize: 10.5,
+          color: "var(--text-tertiary)",
+          opacity: 0.75,
+          letterSpacing: "0.02em",
+        }}
+      >
+        Maugood v{APP_VERSION_FULL}
+      </div>
     </main>
   );
 }
