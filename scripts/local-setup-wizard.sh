@@ -64,9 +64,13 @@ SUPERADMIN_NAME="MTS Super Admin"
 # fallback inside the YAML is the safety net if .env doesn't carry
 # them. Same env-var names as the compose, set in .env below.
 #
-# HTTPS (443) + HTTP (80) are intentionally **not** prompted —
-# they're the standard public-facing ports operators expect to find
-# on the documented URL. If they conflict, edit .env directly.
+# HTTPS (443) + HTTP (80) are not interactively prompted — they're
+# the standard public-facing ports. The wizard probes them silently;
+# if a canonical port is already held, it auto-picks a free alternate
+# and announces the swap. ``--port-https`` / ``--port-http`` overrides
+# the auto-pick for non-interactive runs.
+PORT_HTTPS=""
+PORT_HTTP=""
 PORT_POSTGRES=""
 PORT_BACKEND=""
 PORT_GRAFANA=""
@@ -86,6 +90,8 @@ while [[ $# -gt 0 ]]; do
         --admin-password)    ADMIN_PASSWORD="$2"; shift 2 ;;
         --superadmin-email)  SUPERADMIN_EMAIL="$2"; shift 2 ;;
         --superadmin-name)   SUPERADMIN_NAME="$2"; shift 2 ;;
+        --port-https)        PORT_HTTPS="$2"; shift 2 ;;
+        --port-http)         PORT_HTTP="$2"; shift 2 ;;
         --port-postgres)     PORT_POSTGRES="$2"; shift 2 ;;
         --port-backend)      PORT_BACKEND="$2"; shift 2 ;;
         --port-grafana)      PORT_GRAFANA="$2"; shift 2 ;;
@@ -308,10 +314,22 @@ if [[ ${REUSE} -eq 0 ]]; then
     prompt PORT_PROMETHEUS   "Prometheus (loopback)"          "${_DEF_PROMETHEUS}"
     prompt PORT_ALERTMANAGER "Alertmanager (loopback)"        "${_DEF_ALERTMANAGER}"
 
+    # HTTPS / HTTP are not prompted — silently probe the canonical
+    # ports and auto-fall-back to a free alternate when they're busy
+    # (Docker Desktop's vpnkit, another nginx, sharing-services-on-80,
+    # etc.). The operator only sees a "note: …" line if the swap
+    # actually happens, so the common case stays clean.
+    if [[ -z "${PORT_HTTPS}" ]]; then
+        PORT_HTTPS="$(port_default 443 8443 8444 9443 10443)"
+    fi
+    if [[ -z "${PORT_HTTP}" ]]; then
+        PORT_HTTP="$(port_default 80 8080 8081 8082 9080)"
+    fi
+
     # Validate every port: 1-65535. Catch typos before docker compose
     # bombs with a confusing yaml error.
-    for _name in PORT_POSTGRES PORT_BACKEND PORT_GRAFANA \
-                 PORT_PROMETHEUS PORT_ALERTMANAGER; do
+    for _name in PORT_HTTPS PORT_HTTP PORT_POSTGRES PORT_BACKEND \
+                 PORT_GRAFANA PORT_PROMETHEUS PORT_ALERTMANAGER; do
         _val="${!_name}"
         if ! [[ "${_val}" =~ ^[0-9]+$ ]] || (( _val < 1 || _val > 65535 )); then
             echo "error: ${_name}='${_val}' is not a valid port (1-65535)" >&2
@@ -369,9 +387,10 @@ MAUGOOD_OIDC_REDIRECT_BASE_URL=https://${DOMAIN}
 
 # Host ports — picked by the wizard, read by docker-compose.
 # Override later by editing .env and running ``docker compose up -d``.
-# HTTPS (443) and HTTP (80) inherit the compose YAML defaults so they
-# stay on the canonical ports unless the operator overrides them by
-# hand-editing this file.
+# HTTPS / HTTP default to 443 / 80; the wizard auto-picks an alternate
+# (8443 / 8080 / etc.) when those are already held by another service.
+MAUGOOD_NGINX_HTTPS_HOST_PORT=${PORT_HTTPS}
+MAUGOOD_NGINX_HTTP_HOST_PORT=${PORT_HTTP}
 MAUGOOD_POSTGRES_HOST_PORT=${PORT_POSTGRES}
 MAUGOOD_BACKEND_HOST_PORT=${PORT_BACKEND}
 MAUGOOD_GRAFANA_HOST_PORT=${PORT_GRAFANA}
@@ -482,9 +501,14 @@ docker compose -f docker-compose-https-local.yaml up -d
 
 echo
 echo ">> Waiting for backend to be healthy"
+# Probe URL must include the actual HTTPS port — when the wizard's
+# auto-fallback picked something other than 443 (e.g. 8443) the
+# canonical URL would otherwise 404 because no listener is on 443.
+_probe_suffix=""
+if [[ "${PORT_HTTPS}" != "443" ]]; then _probe_suffix=":${PORT_HTTPS}"; fi
 DEADLINE=$(( $(date +%s) + 180 ))
 while [[ $(date +%s) -lt ${DEADLINE} ]]; do
-    if curl -sk -m 5 "https://${DOMAIN}/api/health" 2>/dev/null \
+    if curl -sk -m 5 "https://${DOMAIN}${_probe_suffix}/api/health" 2>/dev/null \
         | grep -q '"status":"ok"'; then
         echo "  ✓ backend healthy"
         break
@@ -528,14 +552,21 @@ echo "================================================================"
 echo " ✓ Maugood ${VERSION} is running"
 echo "================================================================"
 echo
+# Build the public URL from the actual HTTPS port — only show
+# ``:port`` when the wizard auto-picked a non-default value, so the
+# common-case URL stays clean.
+_https_suffix=""
+if [[ "${PORT_HTTPS}" != "443" ]]; then _https_suffix=":${PORT_HTTPS}"; fi
+TENANT_URL="https://${DOMAIN}${_https_suffix}"
+
 echo " Tenant login"
-echo "   URL          : https://${DOMAIN}/login"
+echo "   URL          : ${TENANT_URL}/login"
 echo "   Tenant slug  : ${TENANT_SLUG}"
 echo "   Email        : ${ADMIN_EMAIL}"
 echo "   Password     : ${ADMIN_PASSWORD:-<from --admin-password>}"
 echo
 echo " Super-Admin console"
-echo "   URL          : https://${DOMAIN}/super-admin/login"
+echo "   URL          : ${TENANT_URL}/super-admin/login"
 echo "   Email        : ${SUPERADMIN_EMAIL}"
 if [[ ${REUSE} -eq 0 ]]; then
     echo "   Password     : ${SUPER_PASSWORD}"
