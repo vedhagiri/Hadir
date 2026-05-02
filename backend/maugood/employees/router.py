@@ -1006,6 +1006,33 @@ class PendingPhotoListOut(_PA_BaseModel):
     items: list[PendingPhotoOut]
 
 
+class ApprovedPhotoOut(_PA_BaseModel):
+    """Same shape as PendingPhotoOut + the approver's identity. Used
+    by the "Approved" tab on the photo-approvals page so operators
+    can audit which Admin / HR signed off on each photo."""
+
+    photo_id: int
+    employee_id: int
+    employee_code: str
+    employee_full_name: str
+    angle: Literal["front", "left", "right", "other"]
+    uploaded_by_user_id: Optional[int] = None
+    uploaded_by_email: Optional[str] = None
+    uploaded_at: datetime
+    approved_by_user_id: Optional[int] = None
+    approved_by_email: Optional[str] = None
+    # Highest-priority role the approver holds (Admin > HR). Picked
+    # client-side via the same primaryRole helper the rest of the UI
+    # uses; surfaced here pre-resolved so the table doesn't have to
+    # cross-join user_roles itself.
+    approved_by_role: Optional[str] = None
+    approved_at: Optional[datetime] = None
+
+
+class ApprovedPhotoListOut(_PA_BaseModel):
+    items: list[ApprovedPhotoOut]
+
+
 @router.get("/photos/pending", response_model=PendingPhotoListOut)
 def list_pending_photos_endpoint(
     user: Annotated[CurrentUser, ADMIN_OR_HR],
@@ -1072,6 +1099,144 @@ def list_pending_photos_endpoint(
                     else None
                 ),
                 uploaded_at=r.created_at,
+            )
+            for r in rows
+        ]
+    )
+
+
+@router.get("/photos/approved", response_model=ApprovedPhotoListOut)
+def list_approved_photos_endpoint(
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
+    limit: Annotated[int, Query(ge=1, le=500)] = 200,
+) -> ApprovedPhotoListOut:
+    """Tenant-wide list of recently-approved photos with approver
+    identity. Sorted newest-first (latest approval at the top).
+
+    Joined identities: the uploader (Employee who self-served) and
+    the approver (Admin / HR who clicked Approve). The approver's
+    highest-priority role is resolved here (Admin > HR > Manager >
+    Employee) so the frontend can paint a role pill without a second
+    round trip.
+    """
+
+    from sqlalchemy import select as _select  # noqa: PLC0415
+    from maugood.db import (  # noqa: PLC0415
+        employee_photos as _photos,
+        roles as _roles,
+        user_roles as _user_roles,
+        users as _users,
+    )
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    # Alias the users table so we can join it twice — once for the
+    # uploader, once for the approver — without an ambiguous-column
+    # error. SQLAlchemy's ``alias()`` does this safely.
+    uploaders = _users.alias("uploaders")
+    approvers = _users.alias("approvers")
+
+    with get_engine().begin() as conn:
+        rows = conn.execute(
+            _select(
+                _photos.c.id.label("photo_id"),
+                _photos.c.employee_id,
+                _photos.c.angle,
+                _photos.c.uploaded_by_user_id,
+                _photos.c.created_at,
+                _photos.c.approved_by_user_id,
+                _photos.c.approved_at,
+                repo.employees.c.employee_code,
+                repo.employees.c.full_name.label("employee_full_name"),
+                uploaders.c.email.label("uploaded_by_email"),
+                approvers.c.email.label("approved_by_email"),
+            )
+            .select_from(
+                _photos.join(
+                    repo.employees,
+                    (repo.employees.c.id == _photos.c.employee_id)
+                    & (repo.employees.c.tenant_id == _photos.c.tenant_id),
+                )
+                .outerjoin(
+                    uploaders, uploaders.c.id == _photos.c.uploaded_by_user_id
+                )
+                .outerjoin(
+                    approvers, approvers.c.id == _photos.c.approved_by_user_id
+                )
+            )
+            .where(
+                _photos.c.tenant_id == scope.tenant_id,
+                _photos.c.approval_status == "approved",
+            )
+            .order_by(_photos.c.approved_at.desc().nulls_last())
+            .limit(limit)
+        ).all()
+
+        # Resolve every approver's highest-priority role in one query
+        # (avoids N+1 against user_roles).
+        approver_ids = sorted(
+            {int(r.approved_by_user_id) for r in rows if r.approved_by_user_id is not None}
+        )
+        role_by_user: dict[int, str] = {}
+        if approver_ids:
+            role_rows = conn.execute(
+                _select(
+                    _user_roles.c.user_id,
+                    _roles.c.code,
+                ).select_from(
+                    _user_roles.join(_roles, _roles.c.id == _user_roles.c.role_id)
+                ).where(
+                    _user_roles.c.tenant_id == scope.tenant_id,
+                    _user_roles.c.user_id.in_(approver_ids),
+                )
+            ).all()
+            # Pick the highest-priority role per user. Mirrors the
+            # frontend's ``primaryRole()`` helper — Admin > HR >
+            # Manager > Employee.
+            priority = {"Admin": 4, "HR": 3, "Manager": 2, "Employee": 1}
+            best: dict[int, tuple[int, str]] = {}
+            for rr in role_rows:
+                uid = int(rr.user_id)
+                code = str(rr.code)
+                rank = priority.get(code, 0)
+                if uid not in best or rank > best[uid][0]:
+                    best[uid] = (rank, code)
+            role_by_user = {uid: code for uid, (_, code) in best.items()}
+
+    return ApprovedPhotoListOut(
+        items=[
+            ApprovedPhotoOut(
+                photo_id=int(r.photo_id),
+                employee_id=int(r.employee_id),
+                employee_code=str(r.employee_code),
+                employee_full_name=str(r.employee_full_name),
+                angle=str(r.angle),  # type: ignore[arg-type]
+                uploaded_by_user_id=(
+                    int(r.uploaded_by_user_id)
+                    if r.uploaded_by_user_id is not None
+                    else None
+                ),
+                uploaded_by_email=(
+                    str(r.uploaded_by_email)
+                    if r.uploaded_by_email is not None
+                    else None
+                ),
+                uploaded_at=r.created_at,
+                approved_by_user_id=(
+                    int(r.approved_by_user_id)
+                    if r.approved_by_user_id is not None
+                    else None
+                ),
+                approved_by_email=(
+                    str(r.approved_by_email)
+                    if r.approved_by_email is not None
+                    else None
+                ),
+                approved_by_role=(
+                    role_by_user.get(int(r.approved_by_user_id))
+                    if r.approved_by_user_id is not None
+                    else None
+                ),
+                approved_at=r.approved_at,
             )
             for r in rows
         ]
