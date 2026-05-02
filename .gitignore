@@ -86,3 +86,8 @@ prototype-reference/backend/reports/
 prototype-reference/backend/captures/
 prototype-reference/backend/saved_crops/
 
+# Tenant-specific seed CSVs / import staging — operator drops the
+# real employee roster here before invoking the seed scripts. Kept
+# local-only because the contents are PII (real names, designations).
+docs/scripts/import/
+
