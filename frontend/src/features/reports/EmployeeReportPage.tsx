@@ -137,7 +137,11 @@ export function EmployeeReportPage() {
   const range = useEmployeeAttendance(selectedEmployeeId, start, end);
   const items = range.data?.items ?? [];
 
-  // Stats panel — derived client-side from the loaded rows.
+  // Stats panel — derived client-side from the loaded rows. Buckets
+  // mirror DayStatusPill so the tiles agree with the day-by-day
+  // table. Pre-fix bug: rows with ``absent=false`` but ``in_time=null``
+  // (scheduler-seeded empty rows for past days the operator hasn't
+  // computed) were counted as Present and inflated the percentage.
   const stats = useMemo(() => {
     const allDates = rowsBetween(start, end);
     const workingDates = allDates.filter((d) => !isWeekend(d));
@@ -152,20 +156,27 @@ export function EmployeeReportPage() {
     for (const d of workingDates) {
       const it = itemByDate.get(d);
       if (!it) continue;
+      // Leave wins over everything (an approved leave on a holiday
+      // is still leave, server resolves the priority).
       if (it.absent && it.leave_type_id !== null) {
         leave += 1;
-      } else if (it.absent) {
-        absent += 1;
-      } else if (it.late) {
-        late += 1;
-        present += 1;
-        totalMinutes += it.total_minutes ?? 0;
-        otMinutes += it.overtime_minutes;
-      } else {
-        present += 1;
-        totalMinutes += it.total_minutes ?? 0;
-        otMinutes += it.overtime_minutes;
+        continue;
       }
+      // Holiday / weekend rows without a check-in aren't part of the
+      // working set — skip them so they don't pull the present % down.
+      if ((it.is_holiday || it.is_weekend) && !it.in_time) continue;
+      // Today's row before the operator clocked in — not absent yet.
+      if (it.pending) continue;
+      // No check-in on a past working day → absent.
+      if (!it.in_time) {
+        absent += 1;
+        continue;
+      }
+      // Got a check-in: late or on-time, both count toward present.
+      present += 1;
+      if (it.late) late += 1;
+      totalMinutes += it.total_minutes ?? 0;
+      otMinutes += it.overtime_minutes;
     }
     const presentPct =
       workingDates.length > 0
@@ -886,6 +897,13 @@ function StatTile({
   );
 }
 
+// Status priority mirrors DailyStatusPill in DailyAttendancePage /
+// ReportsPage so all three surfaces agree on the meaning of a row.
+// The previous version of this pill ignored ``pending`` / ``is_weekend``
+// / ``is_holiday`` and any row with ``absent=false`` fell through to
+// "Present" — even rows whose ``in_time`` was null (scheduler-seeded
+// empty row, no events that day). Result: empty days were shown as
+// green Present pills and inflated the Present stat tile.
 function DayStatusPill({
   item,
   isoDate,
@@ -904,7 +922,20 @@ function DayStatusPill({
   if (item.absent && item.leave_type_id !== null) {
     return <span className="pill pill-info">On leave</span>;
   }
-  if (item.absent) {
+  if (item.is_holiday && !item.in_time) {
+    return (
+      <span className="pill pill-info">
+        Holiday{item.holiday_name ? ` — ${item.holiday_name}` : ""}
+      </span>
+    );
+  }
+  if (item.is_weekend && !item.in_time) {
+    return <span className="pill pill-neutral">Weekend</span>;
+  }
+  if (item.pending) {
+    return <span className="pill pill-info">Waiting for login</span>;
+  }
+  if (!item.in_time) {
     return <span className="pill pill-danger">Absent</span>;
   }
   if (item.late) {
@@ -916,7 +947,14 @@ function DayStatusPill({
 function statusLabel(item: AttendanceItem | null): string {
   if (!item) return "No record";
   if (item.absent && item.leave_type_id !== null) return "On leave";
-  if (item.absent) return "Absent";
+  if (item.is_holiday && !item.in_time) {
+    return item.holiday_name
+      ? `Holiday — ${item.holiday_name}`
+      : "Holiday";
+  }
+  if (item.is_weekend && !item.in_time) return "Weekend";
+  if (item.pending) return "Waiting for login";
+  if (!item.in_time) return "Absent";
   if (item.late) return "Late";
   return "Present";
 }
