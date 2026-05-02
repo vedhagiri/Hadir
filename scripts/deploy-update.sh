@@ -118,6 +118,43 @@ if [[ ! -f "${INSTALL_DIR}/docker-compose.yml" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Detect which compose file is actually running so down/up target the
+# right stack. Customer installs run docker-compose-https-local.yaml
+# (HTTPS via nginx + self-signed cert) — without ``-f`` docker would
+# silently default to docker-compose.yml (the dev stack) and the live
+# HTTPS containers would never be rebuilt. The script then prints a
+# successful "update applied" while the running images stay stale.
+# ---------------------------------------------------------------------------
+
+COMPOSE_FILE_REL="docker-compose.yml"
+# Prefer whichever compose file currently has containers running. If
+# both are dormant fall back to the file that exists; if both exist
+# default to the HTTPS-local one (production-like deploy is the more
+# common case for this script).
+if command -v docker >/dev/null 2>&1; then
+    if [[ -f "${INSTALL_DIR}/docker-compose-https-local.yaml" ]]; then
+        running_https="$(
+            docker compose -f "${INSTALL_DIR}/docker-compose-https-local.yaml" \
+                ps -q 2>/dev/null | wc -l | tr -d ' '
+        )"
+        running_default="$(
+            docker compose -f "${INSTALL_DIR}/docker-compose.yml" \
+                ps -q 2>/dev/null | wc -l | tr -d ' '
+        )"
+        if [[ "${running_https:-0}" -gt 0 ]]; then
+            COMPOSE_FILE_REL="docker-compose-https-local.yaml"
+        elif [[ "${running_default:-0}" -gt 0 ]]; then
+            COMPOSE_FILE_REL="docker-compose.yml"
+        else
+            # Nothing running — pick the prod-style file by default
+            # since this script's day-job is updating customer installs.
+            COMPOSE_FILE_REL="docker-compose-https-local.yaml"
+        fi
+    fi
+fi
+COMPOSE_FILE_PATH="${INSTALL_DIR}/${COMPOSE_FILE_REL}"
+
+# ---------------------------------------------------------------------------
 # Resolve the new release version from the zip's top-level dir name
 # ---------------------------------------------------------------------------
 
@@ -156,6 +193,7 @@ echo "================================================================"
 echo " Maugood update applier"
 echo "================================================================"
 echo " install dir       : ${INSTALL_DIR}"
+echo " compose file      : ${COMPOSE_FILE_REL}"
 echo " current version   : ${CURRENT_VERSION}"
 if [[ ${BACKUP_ONLY} -eq 1 ]]; then
     echo " mode              : BACKUP ONLY (no code change)"
@@ -236,14 +274,16 @@ fi
 
 if [[ ${DO_STOP} -eq 1 ]]; then
     echo
-    echo ">> Stopping the running stack"
-    # Subshell so the cd doesn't leak.
+    echo ">> Stopping the running stack (${COMPOSE_FILE_REL})"
+    # Subshell so the cd doesn't leak. ``docker compose down`` with no
+    # ``-v`` keeps every named volume — Postgres data, branding logos,
+    # face crops, and the model cache all survive.
     (
         cd "${INSTALL_DIR}"
         if [[ ${DRY_RUN} -eq 1 ]]; then
-            echo "[dry-run] docker compose down"
+            echo "[dry-run] docker compose -f ${COMPOSE_FILE_REL} down"
         else
-            docker compose down 2>&1 | tail -5 || true
+            docker compose -f "${COMPOSE_FILE_REL}" down 2>&1 | tail -5 || true
         fi
     )
 fi
@@ -319,20 +359,25 @@ fi
 # ---------------------------------------------------------------------------
 
 echo
-echo ">> Bringing the stack back up"
+echo ">> Bringing the stack back up (${COMPOSE_FILE_REL})"
 (
     cd "${INSTALL_DIR}"
     if [[ ${DO_REBUILD} -eq 1 ]]; then
         if [[ ${DRY_RUN} -eq 1 ]]; then
-            echo "[dry-run] docker compose up -d --build"
+            echo "[dry-run] docker compose -f ${COMPOSE_FILE_REL} up -d --build"
         else
-            docker compose up -d --build 2>&1 | tail -8
+            # Stream build output live (--progress=plain) — the same
+            # pattern the setup wizard uses. The pre-fix ``| tail -8``
+            # buffered the build until done so operators thought the
+            # script had hung on a long upgrade.
+            docker compose -f "${COMPOSE_FILE_REL}" build --progress=plain
+            docker compose -f "${COMPOSE_FILE_REL}" up -d 2>&1 | tail -8
         fi
     else
         if [[ ${DRY_RUN} -eq 1 ]]; then
-            echo "[dry-run] docker compose up -d"
+            echo "[dry-run] docker compose -f ${COMPOSE_FILE_REL} up -d"
         else
-            docker compose up -d 2>&1 | tail -5
+            docker compose -f "${COMPOSE_FILE_REL}" up -d 2>&1 | tail -5
         fi
     fi
 )
@@ -383,7 +428,8 @@ echo "  Backup       : ${BACKUP_DIR}.tar.gz"
 echo
 echo "  If anything looks wrong:"
 echo "    cd ${INSTALL_DIR}"
-echo "    docker compose down"
+echo "    docker compose -f ${COMPOSE_FILE_REL} down"
 echo "    tar -xzf ${BACKUP_DIR}.tar.gz -C ./backups"
 echo "    cp -a backups/${TIMESTAMP}-pre-update/.env ./.env  # restore env"
-echo "    # then ``git checkout <prev-tag>`` and ``docker compose up -d --build``"
+echo "    # then re-extract the previous release zip on top, and:"
+echo "    docker compose -f ${COMPOSE_FILE_REL} up -d --build"
