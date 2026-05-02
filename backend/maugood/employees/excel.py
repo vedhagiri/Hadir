@@ -464,6 +464,201 @@ def build_export(
     return buf
 
 
+# ---------------------------------------------------------------------------
+# Import template (sample XLSX the import modal links to)
+# ---------------------------------------------------------------------------
+
+
+def build_import_template() -> BytesIO:
+    """Produce a fresh import-template XLSX in-memory.
+
+    Two sheets:
+
+    * ``Employees`` (the active sheet — the parser only reads this one):
+      header row + three sample data rows showing required + optional
+      cells. Sample codes are intentionally obvious (``SAMPLE_001`` etc.)
+      so an operator who confirms the template by mistake gets rows that
+      stand out and are easy to clean up.
+    * ``Field guide``: column-by-column reference (required / optional,
+      what the field is, an example value). Lives on a second sheet so
+      it never collides with the parser, which only reads ``wb.active``.
+
+    Header form uses the operator-friendly aliases (``department``,
+    ``division``, ``section``) — the parser folds them onto the
+    canonical ``*_code`` columns at parse time.
+    """
+
+    wb = Workbook()
+    ws = wb.active
+    assert ws is not None  # always present on a fresh workbook
+    ws.title = "Employees"
+
+    template_headers: tuple[str, ...] = (
+        "employee_code",
+        "full_name",
+        "email",
+        "department",
+        "division",
+        "section",
+        "designation",
+        "phone",
+        "reports_to_email",
+        "joining_date",
+        "relieving_date",
+    )
+    ws.append(list(template_headers))
+
+    # Three sample rows. The first is a "complete" row showing every
+    # cell populated; the other two demonstrate the optional-cell
+    # ladder so an operator sees what blanks are allowed.
+    sample_rows: tuple[tuple[str, ...], ...] = (
+        (
+            "SAMPLE_001",
+            "Aisha Al-Hinai",
+            "aisha.alhinai@example.com",
+            "ENG",
+            "TECH",
+            "BACKEND",
+            "Senior Software Engineer",
+            "+968 9000 0001",
+            "manager.alhinai@example.com",
+            "2024-03-15",
+            "",
+        ),
+        (
+            "SAMPLE_002",
+            "Khalid Al-Maamari",
+            "khalid.almaamari@example.com",
+            "OPS",
+            "",
+            "",
+            "Operations Lead",
+            "+968 9000 0002",
+            "",
+            "2023-06-01",
+            "",
+        ),
+        (
+            "SAMPLE_003",
+            "Maryam Al-Said",
+            "",
+            "ADM",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+        ),
+    )
+    for row in sample_rows:
+        ws.append(list(row))
+
+    # Modest column widths so the operator opening the file can read
+    # the headers without dragging every column. openpyxl's column
+    # letters are 1-indexed (A, B, C, ...).
+    width_by_column: dict[str, int] = {
+        "A": 14,  # employee_code
+        "B": 22,  # full_name
+        "C": 30,  # email
+        "D": 14,  # department
+        "E": 14,  # division
+        "F": 14,  # section
+        "G": 24,  # designation
+        "H": 18,  # phone
+        "I": 30,  # reports_to_email
+        "J": 14,  # joining_date
+        "K": 14,  # relieving_date
+    }
+    for col, width in width_by_column.items():
+        ws.column_dimensions[col].width = width
+
+    # ---- Field guide sheet ------------------------------------------------
+    guide = wb.create_sheet("Field guide")
+    guide.append(["Column", "Required", "Description", "Example"])
+    guide_rows: tuple[tuple[str, str, str, str], ...] = (
+        (
+            "employee_code",
+            "yes",
+            "Stable identifier per employee. Used as the upsert key — re-importing the same code updates the existing row.",
+            "EMP0042",
+        ),
+        (
+            "full_name",
+            "yes",
+            "Display name as you want it to appear in lists and reports.",
+            "Aisha Al-Hinai",
+        ),
+        (
+            "department",
+            "yes",
+            "Department code or name. Unknown values are auto-created on the fly. The header may also be 'department_code'.",
+            "ENG",
+        ),
+        (
+            "email",
+            "no",
+            "Optional company email. Used to link the employee to a platform login when you promote them later.",
+            "aisha.alhinai@example.com",
+        ),
+        (
+            "division",
+            "no",
+            "Optional tier above department. Auto-created if unknown. Header may also be 'division_code'.",
+            "TECH",
+        ),
+        (
+            "section",
+            "no",
+            "Optional finest tier. Must belong to the resolved department. Auto-created if unknown. Header may also be 'section_code'.",
+            "BACKEND",
+        ),
+        (
+            "designation",
+            "no",
+            "Job title. Free text up to 80 characters.",
+            "Senior Software Engineer",
+        ),
+        (
+            "phone",
+            "no",
+            "Contact number. Free text up to 30 characters.",
+            "+968 9000 0001",
+        ),
+        (
+            "reports_to_email",
+            "no",
+            "Email of the platform user this employee reports to. Resolved at import time; an unknown email is logged as a row warning, not an error.",
+            "manager.alhinai@example.com",
+        ),
+        (
+            "joining_date",
+            "no",
+            "ISO date (YYYY-MM-DD). Blank cells default to today at import time.",
+            "2024-03-15",
+        ),
+        (
+            "relieving_date",
+            "no",
+            "ISO date (YYYY-MM-DD). Must be on or after joining_date. Past relieving dates flip the employee to inactive automatically.",
+            "2026-08-31",
+        ),
+    )
+    for row in guide_rows:
+        guide.append(list(row))
+
+    guide.column_dimensions["A"].width = 22
+    guide.column_dimensions["B"].width = 10
+    guide.column_dimensions["C"].width = 80
+    guide.column_dimensions["D"].width = 32
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+
 def parse_iso_date(value: Optional[str]) -> Optional[_date]:
     """Parse a date cell value (already stringified by ``parse_import``).
 

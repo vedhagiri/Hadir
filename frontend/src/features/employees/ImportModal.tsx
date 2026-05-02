@@ -115,6 +115,17 @@ export function ImportModal({ onClose }: Props) {
                     <span className="mono">section</span>,{" "}
                     <span className="mono">joining_date</span>,{" "}
                     <span className="mono">relieving_date</span>.
+                    {" "}
+                    <a
+                      href="/api/employees/import-template"
+                      style={{
+                        color: "var(--accent)",
+                        textDecoration: "underline",
+                      }}
+                    >
+                      Download sample template
+                    </a>
+                    {" "}with three example rows + a Field guide sheet.
                   </>
                 )}
                 {step === "preview" && preview && (
@@ -203,6 +214,35 @@ export function ImportModal({ onClose }: Props) {
                       {file.name} · {Math.round(file.size / 1024)} KB
                     </div>
                   )}
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 10,
+                    padding: "10px 12px",
+                    background: "var(--bg-sunken)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "var(--radius-sm)",
+                    fontSize: 12.5,
+                    color: "var(--text-secondary)",
+                  }}
+                >
+                  <span>
+                    Not sure about the format? Grab the sample workbook —
+                    three example rows plus a Field guide sheet
+                    documenting every column.
+                  </span>
+                  <a
+                    className="btn btn-sm"
+                    href="/api/employees/import-template"
+                    style={{ flexShrink: 0 }}
+                  >
+                    <Icon name="download" size={11} />
+                    Download template
+                  </a>
                 </div>
 
                 {previewMutation.error && (

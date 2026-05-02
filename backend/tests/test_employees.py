@@ -291,3 +291,75 @@ def test_employee_role_is_forbidden(
     assert client.post("/api/employees", json={
         "employee_code": "X", "full_name": "X", "department_code": "ENG"
     }).status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Import template — sample workbook served by /api/employees/import-template
+# ---------------------------------------------------------------------------
+
+
+def test_import_template_round_trips_through_parser(
+    client: TestClient, admin_user: dict
+) -> None:
+    """The sample template the import modal hands operators must
+    parse cleanly through ``parse_import`` — three sample rows, no
+    errors, no warnings. Guards against header drift between the
+    template builder and the parser."""
+
+    _login(client, admin_user)
+
+    resp = client.get("/api/employees/import-template")
+    assert resp.status_code == 200, resp.text
+    assert "spreadsheetml" in resp.headers["content-type"]
+    assert resp.headers["content-disposition"].endswith(
+        'filename="employees-import-template.xlsx"'
+    )
+    # Valid XLSX is a ZIP archive — magic bytes ``PK``.
+    assert resp.content[:2] == b"PK"
+
+    # Sheet shape: ``Employees`` (active, parsed) + ``Field guide``
+    # (operator reference, ignored by the parser).
+    wb = load_workbook(BytesIO(resp.content))
+    assert wb.sheetnames == ["Employees", "Field guide"]
+    employees = wb["Employees"]
+    rows = list(employees.iter_rows(values_only=True))
+    assert rows[0][0] == "employee_code"
+    # 1 header + 3 sample rows.
+    assert len(rows) == 4
+    # Every sample row carries the three required cells.
+    for sample in rows[1:]:
+        assert sample[0]  # employee_code
+        assert sample[1]  # full_name
+        assert sample[3]  # department
+
+    # Round-trip: feeding the template back through the parser must
+    # produce three valid rows with no errors / no warnings, and the
+    # friendly ``department`` header must fold onto ``department_code``.
+    from maugood.employees.excel import parse_import  # noqa: PLC0415
+
+    parsed = list(parse_import(BytesIO(resp.content)))
+    assert len(parsed) == 3
+    codes = [r.employee_code for r in parsed]
+    assert codes == ["SAMPLE_001", "SAMPLE_002", "SAMPLE_003"]
+    # First row demonstrates every optional column — assert they all
+    # threaded through (this would catch a header-typo regression).
+    full = parsed[0]
+    assert full.email == "aisha.alhinai@example.com"
+    assert full.department_code == "ENG"
+    assert full.division_code == "TECH"
+    assert full.section_code == "BACKEND"
+    assert full.designation == "Senior Software Engineer"
+    assert full.phone == "+968 9000 0001"
+    assert full.reports_to_email == "manager.alhinai@example.com"
+    assert full.joining_date == "2024-03-15"
+
+
+def test_import_template_requires_admin_or_hr(
+    client: TestClient, employee_user: dict
+) -> None:
+    """Same role gate as the rest of the employees module — Employee
+    cannot pull the template (it carries no PII but stays inside the
+    operator surface)."""
+
+    _login(client, employee_user)
+    assert client.get("/api/employees/import-template").status_code == 403

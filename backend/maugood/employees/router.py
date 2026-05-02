@@ -521,6 +521,29 @@ def list_employees_endpoint(
     )
 
 
+@router.get("/import-template")
+def employee_import_template_endpoint(
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
+) -> StreamingResponse:
+    """Stream a sample import XLSX with three example rows + a
+    Field guide sheet. The operator clicks "Download sample" in the
+    import modal, edits the file, and uploads it back through the
+    same flow. No DB writes — purely a static template."""
+
+    buf = excel_io.build_import_template()
+    return StreamingResponse(
+        buf,
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        headers={
+            "Content-Disposition": (
+                'attachment; filename="employees-import-template.xlsx"'
+            )
+        },
+    )
+
+
 @router.get("/export")
 def export_employees_endpoint(
     user: Annotated[CurrentUser, ADMIN_OR_HR],
