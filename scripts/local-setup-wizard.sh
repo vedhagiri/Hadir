@@ -58,6 +58,17 @@ ADMIN_NAME=""
 ADMIN_PASSWORD=""
 SUPERADMIN_EMAIL="superadmin@mts-staff.example.com"
 SUPERADMIN_NAME="MTS Super Admin"
+# Host port mappings — empty defaults so the prompt section can offer
+# the canonical values (or whatever was passed via flags). The
+# compose file already reads these via ``${VAR:-fallback}`` so the
+# fallback inside the YAML is the safety net if .env doesn't carry
+# them. Same env-var names as the compose, set in .env below.
+PORT_HTTPS=""
+PORT_HTTP=""
+PORT_POSTGRES=""
+PORT_GRAFANA=""
+PORT_PROMETHEUS=""
+PORT_ALERTMANAGER=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -72,6 +83,12 @@ while [[ $# -gt 0 ]]; do
         --admin-password)    ADMIN_PASSWORD="$2"; shift 2 ;;
         --superadmin-email)  SUPERADMIN_EMAIL="$2"; shift 2 ;;
         --superadmin-name)   SUPERADMIN_NAME="$2"; shift 2 ;;
+        --port-https)        PORT_HTTPS="$2"; shift 2 ;;
+        --port-http)         PORT_HTTP="$2"; shift 2 ;;
+        --port-postgres)     PORT_POSTGRES="$2"; shift 2 ;;
+        --port-grafana)      PORT_GRAFANA="$2"; shift 2 ;;
+        --port-prometheus)   PORT_PROMETHEUS="$2"; shift 2 ;;
+        --port-alertmanager) PORT_ALERTMANAGER="$2"; shift 2 ;;
         -h|--help)
             sed -n '3,40p' "$0"
             exit 0 ;;
@@ -216,6 +233,40 @@ if [[ ${REUSE} -eq 0 ]]; then
         echo "error: tenant slug must match ^[a-z][a-z0-9_-]{1,39}\$" >&2
         exit 2
     fi
+
+    echo
+    echo "Host ports"
+    echo "  Press Enter to accept the defaults; pick custom values if"
+    echo "  you're running another stack on the same host. Postgres /"
+    echo "  Prometheus / Alertmanager bind to 127.0.0.1 only — they're"
+    echo "  not reachable from the LAN."
+    prompt PORT_HTTPS        "HTTPS (browser → nginx)"        "443"
+    prompt PORT_HTTP         "HTTP (redirect → HTTPS)"        "80"
+    prompt PORT_POSTGRES     "Postgres (loopback)"            "5432"
+    prompt PORT_GRAFANA      "Grafana"                        "3000"
+    prompt PORT_PROMETHEUS   "Prometheus (loopback)"          "9090"
+    prompt PORT_ALERTMANAGER "Alertmanager (loopback)"        "9093"
+
+    # Validate every port: 1-65535. Catch typos before docker compose
+    # bombs with a confusing yaml error.
+    for _name in PORT_HTTPS PORT_HTTP PORT_POSTGRES PORT_GRAFANA \
+                 PORT_PROMETHEUS PORT_ALERTMANAGER; do
+        _val="${!_name}"
+        if ! [[ "${_val}" =~ ^[0-9]+$ ]] || (( _val < 1 || _val > 65535 )); then
+            echo "error: ${_name}='${_val}' is not a valid port (1-65535)" >&2
+            exit 2
+        fi
+    done
+
+    if (( PORT_HTTPS < 1024 || PORT_HTTP < 1024 )) \
+       && [[ "$(id -u)" != "0" ]]; then
+        echo
+        echo "  note: ports below 1024 (HTTP / HTTPS) need root or"
+        echo "        CAP_NET_BIND_SERVICE on the docker daemon. Docker"
+        echo "        Desktop handles this transparently; on a bare"
+        echo "        Linux host you may need to pick higher ports or"
+        echo "        run docker as root."
+    fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -265,10 +316,19 @@ MAUGOOD_PUBLIC_HOSTNAME=${DOMAIN}
 MAUGOOD_ALLOWED_ORIGINS=https://${DOMAIN}
 MAUGOOD_OIDC_REDIRECT_BASE_URL=https://${DOMAIN}
 
+# Host ports — picked by the wizard, read by docker-compose.
+# Override later by editing .env and running ``docker compose up -d``.
+MAUGOOD_NGINX_HTTPS_HOST_PORT=${PORT_HTTPS}
+MAUGOOD_NGINX_HTTP_HOST_PORT=${PORT_HTTP}
+MAUGOOD_POSTGRES_HOST_PORT=${PORT_POSTGRES}
+MAUGOOD_GRAFANA_HOST_PORT=${PORT_GRAFANA}
+MAUGOOD_PROMETHEUS_HOST_PORT=${PORT_PROMETHEUS}
+MAUGOOD_ALERTMANAGER_HOST_PORT=${PORT_ALERTMANAGER}
+
 # Grafana
 MAUGOOD_GRAFANA_ADMIN_USER=admin
 MAUGOOD_GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
-MAUGOOD_GRAFANA_ROOT_URL=http://localhost:3000
+MAUGOOD_GRAFANA_ROOT_URL=http://localhost:${PORT_GRAFANA}
 EOF
 
     echo ">> Writing backend/.env"
@@ -354,14 +414,29 @@ echo "${VERSION} installed $(date -u +%Y-%m-%dT%H:%M:%SZ)" > .version-history.lo
 # ---------------------------------------------------------------------------
 
 echo
-echo ">> Bringing up the stack"
-docker compose -f docker-compose-https-local.yaml up -d --build 2>&1 | tail -8
+echo ">> Building images (first run pulls bases + builds — typically 3–5 min)"
+echo "   Streaming docker output below; cancel with Ctrl-C if it stalls."
+echo
+# Build first, with plain progress output so every layer + step is
+# visible. ``--progress=plain`` overrides the default TTY redraw —
+# the redraw mode hides scrollback and (worse) silently buffers
+# output through pipes / log captures, which is what made the
+# previous ``| tail -8`` look like nothing was happening.
+docker compose -f docker-compose-https-local.yaml build --progress=plain
+echo
+echo ">> Starting containers"
+docker compose -f docker-compose-https-local.yaml up -d
 
 echo
 echo ">> Waiting for backend to be healthy"
+# The probe URL must include the operator-picked HTTPS port — without
+# it, a custom port (e.g. 8443) would 404 because the host browser
+# would never reach the nginx container.
+_probe_suffix=""
+if [[ "${PORT_HTTPS}" != "443" ]]; then _probe_suffix=":${PORT_HTTPS}"; fi
 DEADLINE=$(( $(date +%s) + 180 ))
 while [[ $(date +%s) -lt ${DEADLINE} ]]; do
-    if curl -sk -m 5 "https://${DOMAIN}/api/health" 2>/dev/null \
+    if curl -sk -m 5 "https://${DOMAIN}${_probe_suffix}/api/health" 2>/dev/null \
         | grep -q '"status":"ok"'; then
         echo "  ✓ backend healthy"
         break
@@ -405,23 +480,32 @@ echo "================================================================"
 echo " ✓ Maugood ${VERSION} is running"
 echo "================================================================"
 echo
+# Build the URLs from the actual ports — only show ``:port`` when the
+# operator picked a non-default value, so the common case stays clean.
+_https_port_suffix=""
+if [[ "${PORT_HTTPS}" != "443" ]]; then _https_port_suffix=":${PORT_HTTPS}"; fi
+TENANT_URL="https://${DOMAIN}${_https_port_suffix}"
+
 echo " Tenant login"
-echo "   URL          : https://${DOMAIN}/login"
+echo "   URL          : ${TENANT_URL}/login"
 echo "   Tenant slug  : ${TENANT_SLUG}"
 echo "   Email        : ${ADMIN_EMAIL}"
 echo "   Password     : ${ADMIN_PASSWORD:-<from --admin-password>}"
 echo
 echo " Super-Admin console"
-echo "   URL          : https://${DOMAIN}/super-admin/login"
+echo "   URL          : ${TENANT_URL}/super-admin/login"
 echo "   Email        : ${SUPERADMIN_EMAIL}"
 if [[ ${REUSE} -eq 0 ]]; then
     echo "   Password     : ${SUPER_PASSWORD}"
 fi
 echo
 echo " Observability"
-echo "   Grafana      : http://localhost:3000  (admin / see .env GRAFANA_ADMIN_PASSWORD)"
-echo "   Prometheus   : http://localhost:9090  (loopback only)"
-echo "   Alertmanager : http://localhost:9093  (loopback only)"
+echo "   Grafana      : http://localhost:${PORT_GRAFANA}  (admin / see .env GRAFANA_ADMIN_PASSWORD)"
+echo "   Prometheus   : http://localhost:${PORT_PROMETHEUS}  (loopback only)"
+echo "   Alertmanager : http://localhost:${PORT_ALERTMANAGER}  (loopback only)"
+echo
+echo " Database"
+echo "   Postgres     : localhost:${PORT_POSTGRES}  (loopback only — see backend/.env for the URL)"
 echo
 echo " Stop the stack:"
 echo "   docker compose -f docker-compose-https-local.yaml down"
