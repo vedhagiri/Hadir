@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import and_, select, update
 
 from maugood.auth.audit import write_audit
-from maugood.auth.dependencies import CurrentUser, require_role
+from maugood.auth.dependencies import CurrentUser, require_any_role, require_role
 from maugood.db import detection_events, get_engine
 from maugood.identification import enrollment
 from maugood.identification.embeddings import decrypt_embedding
@@ -23,6 +23,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/identification", tags=["identification"])
 
 ADMIN = Depends(require_role("Admin"))
+# Rematch widens to HR — both operator roles already have full org
+# visibility on attendance + reports, so the natural follow-up
+# (upload a reference photo, then replay history) is HR-equivalent
+# work too. Manager + Employee stay 403.
+ADMIN_OR_HR = Depends(require_any_role("Admin", "HR"))
 
 
 class ReembedResult(BaseModel):
@@ -105,7 +110,7 @@ class RematchResult(BaseModel):
 @router.post("/rematch", response_model=RematchResult)
 def rematch_endpoint(
     payload: RematchRequest,
-    user: Annotated[CurrentUser, ADMIN],
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
 ) -> RematchResult:
     """Replay past detection_events through the current matcher cache.
 

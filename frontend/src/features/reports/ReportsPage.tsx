@@ -171,7 +171,12 @@ export function ReportsPage() {
   const [pdfModalOpen, setPdfModalOpen] = useState(false);
   const [rematchOpen, setRematchOpen] = useState(false);
   const me = useMe();
-  const isAdmin = !!me.data?.roles?.includes("Admin");
+  // Re-match rewrites detection history + triggers attendance
+  // recompute, so it's gated to operator roles. Admin + HR both
+  // already have full org visibility; Manager + Employee stay out.
+  const canRematch =
+    !!me.data?.roles?.includes("Admin") ||
+    !!me.data?.roles?.includes("HR");
 
   useEffect(() => {
     setInfo(null);
@@ -189,7 +194,7 @@ export function ReportsPage() {
           </p>
         </div>
         <div className="page-actions" style={{ display: "flex", gap: 8 }}>
-          {isAdmin && activeReport === "attendance" && (
+          {canRematch && activeReport === "attendance" && (
             <button
               className="btn"
               onClick={() => setRematchOpen(true)}
@@ -199,14 +204,6 @@ export function ReportsPage() {
               Re-match detections
             </button>
           )}
-          <button
-            className="btn"
-            onClick={() => setActiveReport(activeReport)}
-            title="Refresh the live preview"
-          >
-            <Icon name="download" size={12} />
-            Download current
-          </button>
         </div>
       </div>
 
