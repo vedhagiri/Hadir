@@ -184,6 +184,54 @@ print(''.join(secrets.choice(chars) for _ in range($1)))
 "
 }
 
+# suggest_port DEFAULT [ALT1 ALT2 ...]
+#
+# Print the first port from the candidate list that's free on the
+# host. If every candidate is busy, fall back to the first one
+# (DEFAULT) and let the operator override at the prompt.
+#
+# "Free" means the kernel will let us bind ``0.0.0.0:port`` —
+# catches both Linux servers listening on 0.0.0.0:port and
+# loopback-only services like Postgres on 127.0.0.1:port (the
+# kernel refuses to give us 0.0.0.0:port if any specific interface
+# is already holding it).
+suggest_port() {
+    python3 - "$@" <<'PY'
+import socket, sys
+
+candidates = [int(p) for p in sys.argv[1:]]
+for port in candidates:
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
+    try:
+        s.bind(("0.0.0.0", port))
+    except OSError:
+        s.close()
+        continue
+    s.close()
+    print(port)
+    sys.exit(0)
+# Every candidate busy — fall back to the canonical default.
+print(candidates[0] if candidates else "")
+PY
+}
+
+# port_default DEFAULT [ALT1 ALT2 ...]
+#
+# Wraps suggest_port + announces the swap when the canonical default
+# is taken. Returns the chosen port via stdout. The note goes to
+# stderr so it shows in the operator's terminal but doesn't pollute
+# command substitution.
+port_default() {
+    local _default="$1"
+    local _picked
+    _picked="$(suggest_port "$@")"
+    if [[ "${_picked}" != "${_default}" ]]; then
+        echo "  note: port ${_default} is in use — suggesting ${_picked}" >&2
+    fi
+    echo "${_picked}"
+}
+
 # ---------------------------------------------------------------------------
 # 0. --reset wipes data + .env (with confirmation)
 # ---------------------------------------------------------------------------
@@ -239,13 +287,25 @@ if [[ ${REUSE} -eq 0 ]]; then
     echo "  Press Enter to accept the defaults; pick custom values if"
     echo "  you're running another stack on the same host. Postgres /"
     echo "  Prometheus / Alertmanager bind to 127.0.0.1 only — they're"
-    echo "  not reachable from the LAN."
-    prompt PORT_HTTPS        "HTTPS (browser → nginx)"        "443"
-    prompt PORT_HTTP         "HTTP (redirect → HTTPS)"        "80"
-    prompt PORT_POSTGRES     "Postgres (loopback)"            "5432"
-    prompt PORT_GRAFANA      "Grafana"                        "3000"
-    prompt PORT_PROMETHEUS   "Prometheus (loopback)"          "9090"
-    prompt PORT_ALERTMANAGER "Alertmanager (loopback)"        "9093"
+    echo "  not reachable from the LAN. If a canonical default is"
+    echo "  already in use the wizard probes a fallback list and"
+    echo "  shows the first free port instead."
+    # Each call: canonical default first, then a short list of safe
+    # alternates the wizard rotates through if the default is busy.
+    # The note "port X in use, suggesting Y" prints on stderr from
+    # port_default() so the operator sees the swap before the prompt.
+    _DEF_HTTPS="$(port_default 443 8443 8444 9443 10443)"
+    _DEF_HTTP="$(port_default 80 8080 8081 8082 9080)"
+    _DEF_POSTGRES="$(port_default 5432 5433 15432 15433 54320)"
+    _DEF_GRAFANA="$(port_default 3000 3001 3030 3300 13000)"
+    _DEF_PROMETHEUS="$(port_default 9090 9091 9092 19090 29090)"
+    _DEF_ALERTMANAGER="$(port_default 9093 9094 9095 19093 29093)"
+    prompt PORT_HTTPS        "HTTPS (browser → nginx)"        "${_DEF_HTTPS}"
+    prompt PORT_HTTP         "HTTP (redirect → HTTPS)"        "${_DEF_HTTP}"
+    prompt PORT_POSTGRES     "Postgres (loopback)"            "${_DEF_POSTGRES}"
+    prompt PORT_GRAFANA      "Grafana"                        "${_DEF_GRAFANA}"
+    prompt PORT_PROMETHEUS   "Prometheus (loopback)"          "${_DEF_PROMETHEUS}"
+    prompt PORT_ALERTMANAGER "Alertmanager (loopback)"        "${_DEF_ALERTMANAGER}"
 
     # Validate every port: 1-65535. Catch typos before docker compose
     # bombs with a confusing yaml error.
