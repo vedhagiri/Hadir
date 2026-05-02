@@ -228,9 +228,17 @@ export function Sidebar({ role }: Props) {
         className="sidebar-footer"
         style={{
           fontSize: 11,
-          color: "var(--muted)",
+          color: "#4a4a4a",
           textAlign: "center",
           lineHeight: 1.4,
+          // White card under the product logo + tagline + version
+          // chip. Anchors the bottom of the sidebar regardless of the
+          // operator's theme (light / dark / system) — the source
+          // logo is rendered on a near-white gradient, so a coloured
+          // background made it look mismatched.
+          background: "#ffffff",
+          padding: "10px 12px",
+          borderTop: "1px solid var(--border)",
         }}
       >
         {/* Product logo — wide banner ("MaugoodAI · CCTV-Based AI
@@ -253,7 +261,6 @@ export function Sidebar({ role }: Props) {
               maxWidth: 200,
               height: "auto",
               display: "block",
-              opacity: 0.92,
             }}
           />
         </div>
@@ -269,7 +276,7 @@ export function Sidebar({ role }: Props) {
             gap: 6,
             marginBottom: 4,
             fontSize: 10.5,
-            color: "var(--text-tertiary)",
+            color: "#6b7280",
           }}
         >
           <span aria-hidden style={{ fontSize: 24, lineHeight: 1 }}>
@@ -277,11 +284,11 @@ export function Sidebar({ role }: Props) {
           </span>
           <span>Made with ♥ in Oman</span>
         </div>
-        <div className="nav-label-text">
+        <div className="nav-label-text" style={{ color: "#4a4a4a" }}>
           Powered by{" "}
           <span style={{ fontWeight: 600 }}>Muscat Tech Solutions</span>
         </div>
-        <div style={{ marginTop: 2, opacity: 0.8 }}>
+        <div style={{ marginTop: 2, opacity: 0.8, color: "#6b7280" }}>
           <span className="nav-label-text">Maugood </span>
           v{APP_VERSION_FULL}
         </div>
