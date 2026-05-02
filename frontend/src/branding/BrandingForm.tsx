@@ -121,8 +121,8 @@ export function BrandingForm({
     e.target.value = "";
     if (!file) return;
     setLogoError(null);
-    if (file.size > 200 * 1024) {
-      setLogoError("Logo must be 200 KB or smaller.");
+    if (file.size > 2 * 1024 * 1024) {
+      setLogoError("Logo must be 2 MB or smaller.");
       return;
     }
     setLogoBusy(true);
@@ -255,7 +255,8 @@ export function BrandingForm({
               )}
             </div>
             <span style={{ fontSize: 11.5, color: "var(--text-tertiary)" }}>
-              PNG or SVG, ≤ 200 KB.
+              PNG or SVG, ≤ 2 MB. Large PNGs are auto-resized to fit
+              the brand row — upload anything you have.
             </span>
             {logoError && (
               <span style={{ fontSize: 12, color: "var(--danger-text)" }}>

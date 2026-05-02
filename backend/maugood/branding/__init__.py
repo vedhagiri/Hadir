@@ -5,10 +5,13 @@ font upload. Three storables per tenant:
 
 * ``primary_color_key`` — one of ``BRAND_PALETTE`` (8 OKLCH triples).
 * ``font_key`` — one of ``FONT_OPTIONS`` (3 curated families).
-* ``logo_path`` — optional PNG/SVG ≤200KB at
+* ``logo_path`` — optional PNG/SVG ≤2MB at
   ``/data/branding/{tenant_id}/logo.{ext}`` (Fernet-encrypted-at-rest
   is *not* required here — the logo is intentionally public-by-design
   inside the tenant; what we encrypt is the per-employee face data).
+  PNGs larger than ~512px on the longest side are auto-resized down
+  on upload so a marketing-asset drop still produces a sensibly-sized
+  brand row; SVGs (vector) pass through.
 
 Module map:
 

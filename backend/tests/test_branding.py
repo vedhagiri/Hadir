@@ -238,8 +238,11 @@ def test_logo_upload_round_trip_and_validations(
     )
     assert fake.status_code == 400
 
-    # Reject oversized (>200 KB) PNGs.
-    huge = _TINY_PNG + b"\x00" * (200 * 1024)
+    # Reject oversized (>2 MB) PNGs. Trailing zeros are enough to
+    # blow past the size cap before any image-decoder ever sees the
+    # payload — the magic-byte check is fine since the file starts
+    # with a real PNG header.
+    huge = _TINY_PNG + b"\x00" * (2 * 1024 * 1024)
     big = client.post(
         "/api/branding/logo",
         files={"logo": ("logo.png", huge, "image/png")},
@@ -277,6 +280,76 @@ def test_logo_upload_round_trip_and_validations(
     assert after.json()["has_logo"] is False
     gone = client.get("/api/branding/logo")
     assert gone.status_code == 404
+
+
+def test_oversized_png_is_resized_to_max_dimension(
+    client: TestClient, admin_user: dict, reset_branding_row: None
+) -> None:
+    """A 1024×1024 PNG upload must be resized to ≤ 512 px on the
+    longest side before storage. Smaller PNGs round-trip byte-for-byte
+    (covered by the round-trip test above)."""
+
+    from io import BytesIO  # noqa: PLC0415
+
+    from PIL import Image  # noqa: PLC0415
+
+    _login_admin(client, admin_user)
+
+    # Build a real 1024×1024 RGBA PNG. Magic bytes pass the validator;
+    # Pillow can decode it, so the resize path runs.
+    img = Image.new("RGBA", (1024, 1024), color=(70, 100, 220, 255))
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    big_png = buf.getvalue()
+    assert len(big_png) > 0
+
+    resp = client.post(
+        "/api/branding/logo",
+        files={"logo": ("big.png", big_png, "image/png")},
+    )
+    assert resp.status_code == 200, resp.text
+
+    # The bytes served back should decode to a PNG whose longest side
+    # is ≤ 512 px — the resize cap. Aspect ratio preserved (1:1 in,
+    # 1:1 out).
+    served = client.get("/api/branding/logo")
+    assert served.status_code == 200
+    assert served.headers["content-type"] == "image/png"
+    out = Image.open(BytesIO(served.content))
+    assert max(out.size) <= 512, out.size
+    assert out.size[0] == out.size[1], out.size  # 1:1 preserved
+    # Re-encode + downsize must produce smaller bytes than the source.
+    assert len(served.content) < len(big_png)
+
+
+def test_small_png_passes_through_byte_for_byte(
+    client: TestClient, admin_user: dict, reset_branding_row: None
+) -> None:
+    """A PNG already within the dimension cap must NOT be re-encoded —
+    the served bytes equal the uploaded bytes. Operators who tuned a
+    256×256 logo for sharpness shouldn't lose that to a needless
+    Pillow round-trip."""
+
+    from io import BytesIO  # noqa: PLC0415
+
+    from PIL import Image  # noqa: PLC0415
+
+    _login_admin(client, admin_user)
+
+    img = Image.new("RGBA", (256, 256), color=(0, 0, 0, 0))
+    buf = BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    small_png = buf.getvalue()
+
+    resp = client.post(
+        "/api/branding/logo",
+        files={"logo": ("small.png", small_png, "image/png")},
+    )
+    assert resp.status_code == 200, resp.text
+
+    served = client.get("/api/branding/logo")
+    assert served.status_code == 200
+    assert served.content == small_png  # byte-for-byte
 
 
 # ---------------------------------------------------------------------------
