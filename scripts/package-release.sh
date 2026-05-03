@@ -214,6 +214,205 @@ print(f'   backend/pyproject.toml  -> ${NEW_VERSION}')
 EOF
 
 # ---------------------------------------------------------------------------
+# Compute the upgrade manifest by diffing against the previous release.
+#
+# The packager looks back through ``release-history/*.json`` for the
+# most recent record whose ``version`` is strictly less than the one
+# we're cutting now, reads its ``commit_id``, then runs
+# ``git diff --name-only <prev_commit>..HEAD`` to bucket changed files
+# into a small fixed schema the update flow consumes verbatim:
+#
+#   - new_migrations             : paths under backend/alembic/versions/
+#   - services_changed.backend   : any path under backend/ (sans alembic)
+#   - services_changed.frontend  : any path under frontend/ (sans node_modules/dist)
+#   - services_changed.nginx     : any path under ops/nginx/
+#   - services_changed.postgres  : currently always false (we never
+#                                  mutate the postgres image; left as
+#                                  a slot so the schema is stable)
+#   - compose_changed            : docker-compose.yml touched
+#   - https_compose_changed      : docker-compose-https-local.yaml touched
+#   - env_keys_added/removed     : diff of ``MAUGOOD_*`` keys in any
+#                                  .env.example file
+#   - upgrade_scripts            : backend/scripts/upgrade-*.py touched
+#
+# First-release fallback: if no prior release-history record exists,
+# every bucket is "true" and ``previous_version`` is null. The update
+# script treats null-prev as "fresh install — apply everything."
+# ---------------------------------------------------------------------------
+PREV_VERSION=""
+PREV_COMMIT=""
+
+# Find the most recent release-history record with a version strictly
+# less than ${NEW_VERSION}. We'd just sort filenames but ``v1.1.10``
+# sorts before ``v1.1.9`` lexically — use Python's split-by-dots
+# tuple comparison instead.
+if [[ -d release-history ]]; then
+    PREV_INFO="$(python3 - "${NEW_VERSION}" <<'PY'
+import json, pathlib, sys
+target = tuple(int(x) for x in sys.argv[1].split('.'))
+best = None
+for p in sorted(pathlib.Path("release-history").glob("v*.json")):
+    try:
+        data = json.loads(p.read_text())
+        v = tuple(int(x) for x in data.get("version", "0.0.0").split("."))
+    except Exception:
+        continue
+    if v < target and (best is None or v > best[0]):
+        best = (v, data.get("commit_id", ""), data.get("version", ""))
+if best is None:
+    print("|")
+else:
+    print(f"{best[2]}|{best[1]}")
+PY
+)"
+    PREV_VERSION="${PREV_INFO%%|*}"
+    PREV_COMMIT="${PREV_INFO##*|}"
+fi
+
+CHANGED_FILES_ARGS=()
+if [[ -n "${PREV_COMMIT}" ]]; then
+    # Use HEAD~1 if --no-commit (HEAD is still pre-bump) — we want
+    # the diff to cover the actual code being shipped. With the
+    # default --commit path, HEAD IS the bump commit, but the bump
+    # only touches version files (no functional change), so the
+    # diff <prev_commit>..HEAD is what we want.
+    CHANGED_FILES_ARGS=( "${PREV_COMMIT}..HEAD" )
+fi
+
+CHANGED_FILES=""
+if [[ ${#CHANGED_FILES_ARGS[@]} -gt 0 ]]; then
+    # Use a here-string so an empty diff doesn't blow up on set -e.
+    CHANGED_FILES="$(git diff --name-only "${CHANGED_FILES_ARGS[@]}" 2>/dev/null || true)"
+fi
+
+MANIFEST_PATH="release-history/${VERSION_LABEL}-manifest.json"
+
+echo
+echo ">> Writing ${MANIFEST_PATH}"
+mkdir -p release-history
+python3 - <<EOF
+import json, pathlib, re
+
+# Inputs from shell ---------------------------------------------------------
+new_version = "${NEW_VERSION}"
+prev_version = "${PREV_VERSION}" or None
+prev_commit = "${PREV_COMMIT}" or None
+new_commit = "${GIT_COMMIT}"
+changed = """${CHANGED_FILES}""".strip().splitlines()
+
+# When there's no previous version, treat everything as "changed"
+# from a fresh install. We don't try to enumerate every file in the
+# tree — empty diff with prev=null is the signal.
+all_new = prev_commit is None
+
+# Bucket the changed file list ---------------------------------------------
+def under(prefix, path):
+    return path == prefix or path.startswith(prefix + "/")
+
+new_migrations = sorted({
+    pathlib.Path(p).name
+    for p in changed
+    if under("backend/alembic/versions", p) and p.endswith(".py")
+})
+
+backend_changed = any(
+    under("backend", p)
+    and not under("backend/alembic/versions", p)
+    and not under("backend/scripts/upgrade-", p)  # upgrade scripts are tracked separately
+    for p in changed
+)
+frontend_changed = any(
+    under("frontend", p)
+    and not under("frontend/node_modules", p)
+    and not under("frontend/dist", p)
+    for p in changed
+)
+nginx_changed = any(under("ops/nginx", p) for p in changed)
+compose_changed = any(p == "docker-compose.yml" for p in changed)
+https_compose_changed = any(p == "docker-compose-https-local.yaml" for p in changed)
+
+# .env.example diff: collect MAUGOOD_* keys from current files,
+# parse the previous-version copy from git, diff sets.
+env_files = ["backend/.env.example", "frontend/.env.example", ".env.example"]
+def env_keys_at(rev, file):
+    import subprocess
+    try:
+        out = subprocess.check_output(
+            ["git", "show", f"{rev}:{file}"], stderr=subprocess.DEVNULL
+        ).decode()
+    except subprocess.CalledProcessError:
+        return set()
+    keys = set()
+    for line in out.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        m = re.match(r"^([A-Z][A-Z0-9_]*)=", line)
+        if m and m.group(1).startswith("MAUGOOD_"):
+            keys.add(m.group(1))
+    return keys
+
+env_keys_added = []
+env_keys_removed = []
+if prev_commit:
+    new_keys = set()
+    old_keys = set()
+    for f in env_files:
+        new_keys |= env_keys_at(new_commit, f)
+        old_keys |= env_keys_at(prev_commit, f)
+    env_keys_added = sorted(new_keys - old_keys)
+    env_keys_removed = sorted(old_keys - new_keys)
+
+# Upgrade scripts — by convention backend/scripts/upgrade-*.py
+upgrade_scripts = sorted({
+    p
+    for p in changed
+    if under("backend/scripts", p)
+    and pathlib.Path(p).name.startswith("upgrade-")
+    and p.endswith(".py")
+})
+
+# All-new fallback ---------------------------------------------------------
+if all_new:
+    backend_changed = True
+    frontend_changed = True
+    nginx_changed = True
+    compose_changed = True
+    https_compose_changed = True
+
+manifest = {
+    "version": new_version,
+    "previous_version": prev_version,
+    "commit_id": new_commit,
+    "previous_commit_id": prev_commit,
+    "all_new_install": all_new,
+    "new_migrations": new_migrations,
+    "services_changed": {
+        "backend":  backend_changed,
+        "frontend": frontend_changed,
+        "nginx":    nginx_changed,
+        "postgres": False,  # we never mutate the postgres image
+    },
+    "compose_changed":       compose_changed,
+    "https_compose_changed": https_compose_changed,
+    "env_keys_added":   env_keys_added,
+    "env_keys_removed": env_keys_removed,
+    "upgrade_scripts":  upgrade_scripts,
+}
+pathlib.Path("${MANIFEST_PATH}").write_text(
+    json.dumps(manifest, indent=2, sort_keys=False) + "\n"
+)
+print(f"   prev version       : {prev_version}")
+print(f"   new migrations     : {len(new_migrations)}")
+print(f"   services changed   : "
+      f"{'B' if backend_changed else '-'}"
+      f"{'F' if frontend_changed else '-'}"
+      f"{'N' if nginx_changed else '-'}")
+print(f"   env keys added/rem : {len(env_keys_added)}/{len(env_keys_removed)}")
+print(f"   upgrade scripts    : {len(upgrade_scripts)}")
+EOF
+
+# ---------------------------------------------------------------------------
 # Write the per-release meta record
 # ---------------------------------------------------------------------------
 echo
@@ -252,7 +451,8 @@ EOF
 if [[ ${DO_COMMIT} -eq 1 ]]; then
     echo
     echo ">> Committing version bump"
-    git add .version frontend/package.json backend/pyproject.toml "${META_PATH}"
+    git add .version frontend/package.json backend/pyproject.toml \
+        "${META_PATH}" "${MANIFEST_PATH}"
     git commit -m "chore: release ${VERSION_LABEL}"
 fi
 
@@ -272,19 +472,22 @@ git archive \
     -o "${ZIP_PATH}" \
     HEAD
 
-# Stamp a top-level VERSION + RELEASE-META.json inside the zip
-# alongside whatever git archive produced. zip CLI is the simplest
-# way to inject extra files.
+# Stamp a top-level VERSION + RELEASE-META.json + RELEASE-MANIFEST.json
+# inside the zip alongside whatever git archive produced. The
+# manifest is what update-time tooling reads to decide which
+# services need rebuilding, whether migrations apply, etc.
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 mkdir -p "${TMP_DIR}/maugood-${VERSION_LABEL}"
 echo "${NEW_VERSION}" > "${TMP_DIR}/maugood-${VERSION_LABEL}/VERSION"
 cp "${META_PATH}" "${TMP_DIR}/maugood-${VERSION_LABEL}/RELEASE-META.json"
+cp "${MANIFEST_PATH}" "${TMP_DIR}/maugood-${VERSION_LABEL}/RELEASE-MANIFEST.json"
 (
     cd "${TMP_DIR}"
     zip -q "${REPO_ROOT}/${ZIP_PATH}" \
         "maugood-${VERSION_LABEL}/VERSION" \
-        "maugood-${VERSION_LABEL}/RELEASE-META.json"
+        "maugood-${VERSION_LABEL}/RELEASE-META.json" \
+        "maugood-${VERSION_LABEL}/RELEASE-MANIFEST.json"
 )
 
 # ---------------------------------------------------------------------------
@@ -298,12 +501,14 @@ echo "================================================================"
 echo " ✓ Built ${ZIP_PATH}  (${SIZE}, ${ENTRIES} files)"
 echo "================================================================"
 echo " Inside the zip:"
-echo "   maugood-${VERSION_LABEL}/VERSION              (plain text)"
-echo "   maugood-${VERSION_LABEL}/RELEASE-META.json    (build provenance)"
+echo "   maugood-${VERSION_LABEL}/VERSION                  (plain text)"
+echo "   maugood-${VERSION_LABEL}/RELEASE-META.json        (build provenance)"
+echo "   maugood-${VERSION_LABEL}/RELEASE-MANIFEST.json    (upgrade plan input)"
 echo
 echo " Repo trail:"
 echo "   .version                                  -> ${NEW_VERSION}"
 echo "   ${META_PATH}"
+echo "   ${MANIFEST_PATH}"
 echo
 echo " Next steps:"
 [[ ${DO_COMMIT} -eq 1 ]] && echo "   git push                     # publish the version-bump commit"
