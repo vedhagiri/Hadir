@@ -1,0 +1,18 @@
+{
+  "version": "1.1.13",
+  "label": "v1.1.13",
+  "git_url": "https://github.com/vedhagiri/Hadir.git",
+  "branch": "main",
+  "commit_id": "e093e43f6f6de18094b00e083d4f9bd8207693d0",
+  "commit_short": "e093e43",
+  "built_at_utc": "2026-05-03T07:16:47Z",
+  "built_at_local": "2026-05-03 11:16:47 +04",
+  "machine": {
+    "hostname": "Vedhagiris-MacBook-Pro-2.local",
+    "os": "Darwin",
+    "kernel": "Darwin 25.2.0 arm64",
+    "user": "vedhagiri",
+    "python_version": "3.14.4",
+    "node_version": "25.6.1"
+  }
+}
