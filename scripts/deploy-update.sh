@@ -2,60 +2,64 @@
 #
 # deploy-update.sh — apply a Maugood release zip to a live install.
 #
+# Targets the full HTTPS-local stack (postgres + backend + nginx +
+# prometheus + alertmanager + grafana). Reads RELEASE-MANIFEST.json
+# from the zip via scripts/_update_planner.py, prints what will
+# change, and rebuilds + restarts only the services whose code (or
+# config, or migrations) actually changed.
+#
+# For the lighter 3-service quick-start install, use quick-update.sh
+# instead — same planner, smaller service universe.
+#
 # Usage:
 #   ./scripts/deploy-update.sh --zip /path/to/maugood-vX.Y.Z.zip
 #   ./scripts/deploy-update.sh --zip ./maugood-v1.2.0.zip --install-dir /opt/maugood
-#   ./scripts/deploy-update.sh --zip ./bundle.zip --no-rebuild
 #   ./scripts/deploy-update.sh --zip ./bundle.zip --dry-run
 #   ./scripts/deploy-update.sh --backup-only --install-dir /opt/maugood
 #
 # Flags:
-#   --zip <path>            Required (unless --backup-only). The release zip
-#                           produced by ``scripts/package-release.sh``.
-#   --install-dir <path>    Where the live install lives. Defaults to the
-#                           script's parent directory (i.e. "this repo").
-#   --no-rebuild            Skip ``docker compose up --build``. Use only for
-#                           code-only changes that don't touch any image
-#                           layer (rare; default rebuilds because Docker is
-#                           cheap and a missed rebuild is a debugging trap).
-#   --dry-run               Print every step that would run, write nothing.
-#   --backup-only           Dump operator-state (env + certs + branding) to
-#                           a timestamped tarball, then exit. No code change.
-#   --skip-stop             Don't ``docker compose down`` first. The
-#                           extraction step rsync-mirrors the new code while
-#                           the stack is still running; backend hot-reload
-#                           on the next request. Use only when the change
-#                           is frontend-only (the backend image needs a
-#                           restart to pick up Python changes).
-#   --yes                   Don't prompt for confirmation. For automation.
+#   --zip <path>             Required (unless --backup-only). The release zip
+#                            produced by ``scripts/package-release.sh``.
+#   --install-dir <path>     Where the live install lives. Defaults to the
+#                            script's parent directory.
+#   --no-rebuild             Skip the ``docker compose build`` step. Use only
+#                            for code-only changes that don't need a new image
+#                            layer (rare; default rebuilds because Docker is
+#                            cheap and a missed rebuild is a debugging trap).
+#   --skip-stop              Don't stop services before rsync. The new code
+#                            lands on disk under the running containers; a
+#                            mounted backend bind mount picks it up on the
+#                            next module reload but Python processes need a
+#                            container restart for real changes to take. Use
+#                            sparingly.
+#   --dry-run                Print every step that would run, write nothing.
+#   --backup-only            Snapshot operator-state to a tarball, then exit.
+#   --force-skip-versions    Bypass the planner's "you skipped a release"
+#                            refusal. Data-migration scripts in skipped
+#                            releases will NOT run.
+#   --yes                    Don't prompt for confirmation. For automation.
 #
 # What it does, in order:
 #
-#   1. Validates the zip path + install dir.
-#   2. Snapshots operator-state into ``backups/<timestamp>/`` BEFORE
-#      doing anything destructive: ``.env``, ``ops/certs/``,
-#      ``frontend/src/assets/`` (per-client logos), and ``data/`` symlink
-#      pointer (the volume itself is preserved by Docker; we just record
-#      where it pointed). This is the recovery seed if the update breaks.
-#   3. Stops the running stack (unless --skip-stop).
-#   4. Extracts the zip to a temp dir, then ``rsync -a --delete`` mirrors
-#      the new code into the install dir — except for paths the operator
-#      owns: ``.env``, ``backend/.env``, ``frontend/.env``, ``ops/certs/``,
-#      ``backend/logs/``, ``backups/``, ``dist/``, every ``data/`` mount,
-#      ``frontend/node_modules/``, ``frontend/dist/``. Source-side updates
-#      land; operator-state stays.
-#   5. Brings the stack back up with ``--build`` (unless --no-rebuild).
-#      The backend's entrypoint runs Alembic migrations on boot — every
-#      tenant schema upgrades to the new revision automatically.
-#   6. Polls ``/api/health`` for up to 90s and prints the verdict.
+#   1. Pre-flight: validate paths, detect which compose file is in use
+#      (docker-compose-https-local.yaml vs docker-compose.yml).
+#   2. Read RELEASE-MANIFEST.json from the zip; build an upgrade plan.
+#      Refuse if the install is downgrading or skipping versions
+#      (unless --force-skip-versions).
+#   3. Snapshot operator-state into ``backups/<timestamp>-pre-update/``
+#      (env files, certs, in-tree branding assets, credentials.txt).
+#   4. Stop only the services the plan flagged for rebuild/restart.
+#   5. Extract the zip, rsync the new code over the install dir
+#      excluding every operator-owned path (.env, ops/certs/, data/,
+#      backend/logs/, backups/, etc).
+#   6. Build only the services the plan flagged for rebuild.
+#   7. Up only the services the plan flagged for restart.
+#   8. Backend entrypoint runs Alembic migrations on boot — every
+#      tenant schema upgrades automatically.
+#   9. Poll /api/health, then stamp VERSION + .version-history.log.
 #
 # Recovery: every run leaves a tarball under
 # ``backups/<timestamp>-pre-update.tar.gz`` with the prior operator-state.
-# To roll back code: ``git checkout <prev-tag>`` (or extract the previous
-# release zip on top), then untar the backup.
-#
-# Idempotent: running with the same zip twice is harmless. The rsync is
-# content-aware; a second pass copies nothing new.
 
 set -euo pipefail
 
@@ -72,19 +76,21 @@ DO_REBUILD=1
 DO_STOP=1
 DRY_RUN=0
 BACKUP_ONLY=0
+FORCE_SKIP=0
 ASSUME_YES=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --zip)            ZIP_PATH="$2"; shift 2 ;;
-        --install-dir)    INSTALL_DIR="$(cd "$2" && pwd)"; shift 2 ;;
-        --no-rebuild)     DO_REBUILD=0; shift ;;
-        --skip-stop)      DO_STOP=0; shift ;;
-        --dry-run)        DRY_RUN=1; shift ;;
-        --backup-only)    BACKUP_ONLY=1; shift ;;
-        --yes|-y)         ASSUME_YES=1; shift ;;
+        --zip)                  ZIP_PATH="$2"; shift 2 ;;
+        --install-dir)          INSTALL_DIR="$(cd "$2" && pwd)"; shift 2 ;;
+        --no-rebuild)           DO_REBUILD=0; shift ;;
+        --skip-stop)            DO_STOP=0; shift ;;
+        --dry-run)              DRY_RUN=1; shift ;;
+        --backup-only)          BACKUP_ONLY=1; shift ;;
+        --force-skip-versions)  FORCE_SKIP=1; shift ;;
+        --yes|-y)               ASSUME_YES=1; shift ;;
         -h|--help)
-            sed -n '3,55p' "$0"
+            sed -n '3,60p' "$0"
             exit 0 ;;
         *)
             echo "error: unknown flag '$1'" >&2
@@ -100,37 +106,41 @@ if [[ ${BACKUP_ONLY} -eq 0 && -z "${ZIP_PATH}" ]]; then
     echo "error: --zip is required (or pass --backup-only)" >&2
     exit 2
 fi
-
 if [[ -n "${ZIP_PATH}" && ! -f "${ZIP_PATH}" ]]; then
     echo "error: zip not found at '${ZIP_PATH}'" >&2
     exit 1
 fi
-
 if [[ ! -d "${INSTALL_DIR}" ]]; then
     echo "error: install dir not found at '${INSTALL_DIR}'" >&2
     exit 1
 fi
-
 if [[ ! -f "${INSTALL_DIR}/docker-compose.yml" ]]; then
     echo "error: '${INSTALL_DIR}' doesn't look like a Maugood install" >&2
     echo "       (no docker-compose.yml found)" >&2
+    exit 1
+fi
+for cmd in docker python3 unzip rsync; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo "error: '$cmd' is required but not installed." >&2
+        exit 1
+    fi
+done
+
+PLANNER="${SCRIPT_DIR}/_update_planner.py"
+if [[ ${BACKUP_ONLY} -eq 0 && ! -f "${PLANNER}" ]]; then
+    echo "error: planner module missing at '${PLANNER}'" >&2
     exit 1
 fi
 
 # ---------------------------------------------------------------------------
 # Detect which compose file is actually running so down/up target the
 # right stack. Customer installs run docker-compose-https-local.yaml
-# (HTTPS via nginx + self-signed cert) — without ``-f`` docker would
-# silently default to docker-compose.yml (the dev stack) and the live
-# HTTPS containers would never be rebuilt. The script then prints a
-# successful "update applied" while the running images stay stale.
+# (HTTPS via nginx + self-signed cert); without ``-f`` docker would
+# default to docker-compose.yml (the dev stack) and the live HTTPS
+# containers would never be rebuilt.
 # ---------------------------------------------------------------------------
 
 COMPOSE_FILE_REL="docker-compose.yml"
-# Prefer whichever compose file currently has containers running. If
-# both are dormant fall back to the file that exists; if both exist
-# default to the HTTPS-local one (production-like deploy is the more
-# common case for this script).
 if command -v docker >/dev/null 2>&1; then
     if [[ -f "${INSTALL_DIR}/docker-compose-https-local.yaml" ]]; then
         running_https="$(
@@ -146,63 +156,169 @@ if command -v docker >/dev/null 2>&1; then
         elif [[ "${running_default:-0}" -gt 0 ]]; then
             COMPOSE_FILE_REL="docker-compose.yml"
         else
-            # Nothing running — pick the prod-style file by default
-            # since this script's day-job is updating customer installs.
             COMPOSE_FILE_REL="docker-compose-https-local.yaml"
         fi
     fi
 fi
-COMPOSE_FILE_PATH="${INSTALL_DIR}/${COMPOSE_FILE_REL}"
 
-# ---------------------------------------------------------------------------
-# Resolve the new release version from the zip's top-level dir name
-# ---------------------------------------------------------------------------
-
-NEW_VERSION=""
-if [[ -n "${ZIP_PATH}" ]]; then
-    # The packaging script names the zip's prefix ``maugood-v<X.Y.Z>/``
-    # and that's also what unzip -l reports first. Extract it via the
-    # filename to avoid spawning unzip just for the version.
-    NEW_VERSION="$(basename "${ZIP_PATH}" .zip | sed -n 's|^maugood-\(v[0-9.]*\)$|\1|p')"
-    if [[ -z "${NEW_VERSION}" ]]; then
-        # Fall back to peeking at the zip's prefix dir.
-        NEW_VERSION="$(unzip -l "${ZIP_PATH}" 2>/dev/null \
-            | awk 'NR>3 && $4 ~ /^maugood-v/ { print $4; exit }' \
-            | sed 's|^maugood-||;s|/.*||')"
-    fi
+# Per-compose service universe + the manifest-key → service-name mapping.
+# In HTTPS-local the frontend bundle is built INTO the nginx image, so
+# a manifest entry with frontend_changed=true still has to rebuild
+# nginx. quick-update.sh handles this with a different service_set;
+# here we keep the planner's view simple and merge frontend→nginx at
+# the script layer.
+HTTPS_LOCAL=0
+if [[ "${COMPOSE_FILE_REL}" == "docker-compose-https-local.yaml" ]]; then
+    HTTPS_LOCAL=1
+    SERVICE_SET="postgres,backend,nginx,prometheus,alertmanager,grafana"
+else
+    SERVICE_SET="postgres,backend,frontend"
 fi
 
-if [[ -f "${INSTALL_DIR}/frontend/package.json" ]]; then
-    CURRENT_VERSION="v$(python3 -c "
-import json, pathlib
-p = pathlib.Path('${INSTALL_DIR}/frontend/package.json')
-print(json.loads(p.read_text()).get('version', '?'))
-")"
-else
-    CURRENT_VERSION="?"
+# ---------------------------------------------------------------------------
+# Snapshot helper (used by both --backup-only and the full update path)
+# ---------------------------------------------------------------------------
+
+TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+BACKUP_DIR="${INSTALL_DIR}/backups/${TIMESTAMP}-pre-update"
+
+run() {
+    if [[ ${DRY_RUN} -eq 1 ]]; then
+        echo "[dry-run] $*"
+    else
+        echo "+ $*"
+        eval "$@"
+    fi
+}
+
+snapshot_operator_state() {
+    echo
+    echo ">> Snapshotting operator-state to ${BACKUP_DIR}"
+    run "mkdir -p '${BACKUP_DIR}'"
+    local paths=(
+        ".env"
+        "backend/.env"
+        "frontend/.env"
+        "ops/certs"
+        "frontend/src/assets"
+        "credentials.txt"
+    )
+    for p in "${paths[@]}"; do
+        local src="${INSTALL_DIR}/${p}"
+        if [[ -e "${src}" ]]; then
+            local dest_dir="${BACKUP_DIR}/$(dirname "${p}")"
+            run "mkdir -p '${dest_dir}'"
+            run "cp -a '${src}' '${dest_dir}/'"
+        fi
+    done
+    run "tar -czf '${BACKUP_DIR}.tar.gz' -C '${INSTALL_DIR}/backups' '${TIMESTAMP}-pre-update'"
+}
+
+if [[ ${BACKUP_ONLY} -eq 1 ]]; then
+    echo "================================================================"
+    echo " Maugood update applier — BACKUP ONLY"
+    echo "================================================================"
+    echo " install dir       : ${INSTALL_DIR}"
+    echo " compose file      : ${COMPOSE_FILE_REL}"
+    echo " backup snapshot   : ${BACKUP_DIR}"
+    echo "================================================================"
+    snapshot_operator_state
+    echo
+    echo "================================================================"
+    echo " ✓ Backup-only complete"
+    echo "================================================================"
+    echo "  Snapshot dir : ${BACKUP_DIR}"
+    echo "  Tarball      : ${BACKUP_DIR}.tar.gz"
+    exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Build + display the upgrade plan
+# ---------------------------------------------------------------------------
+
+echo
+echo ">> Inspecting ${ZIP_PATH}"
+PLAN_TEXT="$(
+    python3 "${PLANNER}" \
+        --zip "${ZIP_PATH}" \
+        --install-dir "${INSTALL_DIR}" \
+        --service-set "${SERVICE_SET}" \
+        $([[ ${FORCE_SKIP} -eq 1 ]] && echo --force-skip-versions) \
+        2>&1 || true
+)"
+echo "${PLAN_TEXT}"
+
+if grep -q '^WOULD REFUSE:' <<<"${PLAN_TEXT}"; then
+    echo
+    echo "Refusing to proceed — see the message above."
+    exit 1
+fi
+
+# Pull the resolved plan back out so the script can act on it. The
+# Python module is the single source of truth for what to do.
+# Render the FORCE_SKIP int into a real Python literal — bash's
+# ``${var:+True}${var:-False}`` form silently produces ``True0`` when
+# the variable is set to ``0`` (both substitutions fire), so build
+# the literal explicitly here.
+if [[ ${FORCE_SKIP} -eq 1 ]]; then FORCE_SKIP_PY="True"; else FORCE_SKIP_PY="False"; fi
+
+PLAN_JSON="$(python3 - <<PY
+import json, sys
+sys.path.insert(0, "${SCRIPT_DIR}")
+from _update_planner import (
+    load_manifest_from_zip, current_install_version, build_plan,
+)
+from pathlib import Path
+m = load_manifest_from_zip(Path("${ZIP_PATH}"))
+cur = current_install_version(Path("${INSTALL_DIR}"))
+plan = build_plan(
+    m, cur,
+    service_set=tuple(s for s in "${SERVICE_SET}".split(",") if s),
+    force_skip_versions=${FORCE_SKIP_PY},
+)
+# In HTTPS-local the frontend bundle is built INTO the nginx image,
+# so a manifest "frontend_changed" -> "nginx rebuild" at the script
+# layer (the planner stays compose-agnostic).
+rebuild = list(plan.services_to_rebuild)
+restart = list(plan.services_to_restart)
+if ${HTTPS_LOCAL} == 1 and m.services_changed.get("frontend"):
+    if "nginx" not in rebuild: rebuild.append("nginx")
+    if "nginx" not in restart: restart.append("nginx")
+print(json.dumps({
+    "current": plan.current_version,
+    "target": plan.target_version,
+    "rebuild": rebuild,
+    "restart": restart,
+    "scripts": plan.upgrade_scripts,
+}))
+PY
+)"
+
+CUR_V="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['current'])" "${PLAN_JSON}")"
+TGT_V="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['target'])" "${PLAN_JSON}")"
+REBUILD_LIST="$(python3 -c "import json,sys; print(' '.join(json.loads(sys.argv[1])['rebuild']))" "${PLAN_JSON}")"
+RESTART_LIST="$(python3 -c "import json,sys; print(' '.join(json.loads(sys.argv[1])['restart']))" "${PLAN_JSON}")"
+
+# Honour --no-rebuild: drop rebuild_list (services already in
+# restart_list will still bounce, just on the existing image).
+if [[ ${DO_REBUILD} -eq 0 ]]; then
+    REBUILD_LIST=""
 fi
 
 # ---------------------------------------------------------------------------
 # Confirmation banner
 # ---------------------------------------------------------------------------
 
-TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
-BACKUP_DIR="${INSTALL_DIR}/backups/${TIMESTAMP}-pre-update"
-
+echo
 echo "================================================================"
 echo " Maugood update applier"
 echo "================================================================"
 echo " install dir       : ${INSTALL_DIR}"
 echo " compose file      : ${COMPOSE_FILE_REL}"
-echo " current version   : ${CURRENT_VERSION}"
-if [[ ${BACKUP_ONLY} -eq 1 ]]; then
-    echo " mode              : BACKUP ONLY (no code change)"
-else
-    echo " new release zip   : ${ZIP_PATH}"
-    echo " new version       : ${NEW_VERSION:-?}"
-    echo " stop stack first  : $([[ ${DO_STOP} -eq 1 ]] && echo yes || echo NO --skip-stop)"
-    echo " rebuild images    : $([[ ${DO_REBUILD} -eq 1 ]] && echo yes || echo NO --no-rebuild)"
-fi
+echo " from version      : v${CUR_V}"
+echo " to version        : v${TGT_V}"
+echo " stop services     : $([[ ${DO_STOP} -eq 1 ]] && echo yes || echo NO --skip-stop)"
+echo " rebuild images    : $([[ ${DO_REBUILD} -eq 1 ]] && echo yes || echo NO --no-rebuild)"
 echo " backup snapshot   : ${BACKUP_DIR}"
 echo " dry run           : $([[ ${DRY_RUN} -eq 1 ]] && echo yes || echo no)"
 echo "================================================================"
@@ -215,81 +331,37 @@ if [[ ${ASSUME_YES} -eq 0 && ${DRY_RUN} -eq 0 ]]; then
     fi
 fi
 
-run() {
-    if [[ ${DRY_RUN} -eq 1 ]]; then
-        echo "[dry-run] $*"
-    else
-        echo "+ $*"
-        eval "$@"
-    fi
-}
-
 # ---------------------------------------------------------------------------
-# 1. Snapshot operator-state. The backend "data" volume is Docker-managed;
-#    we don't touch it. We DO snapshot every operator-edited file in the
-#    install tree so a botched update is recoverable.
+# 1. Snapshot operator-state
 # ---------------------------------------------------------------------------
 
-echo
-echo ">> Snapshotting operator-state to ${BACKUP_DIR}"
-run "mkdir -p '${BACKUP_DIR}'"
+snapshot_operator_state
 
-# Files that may not exist (.env on a brand-new install). Use an explicit
-# loop so a missing file doesn't abort the whole snapshot.
-SNAPSHOT_PATHS=(
-    ".env"
-    "backend/.env"
-    "frontend/.env"
-    "ops/certs"
-    "frontend/src/assets"
-    "credentials.txt"
-)
-for p in "${SNAPSHOT_PATHS[@]}"; do
-    src="${INSTALL_DIR}/${p}"
-    if [[ -e "${src}" ]]; then
-        # Preserve relative path inside the backup dir for clean restore.
-        dest_dir="${BACKUP_DIR}/$(dirname "${p}")"
-        run "mkdir -p '${dest_dir}'"
-        run "cp -a '${src}' '${dest_dir}/'"
-    fi
-done
+# ---------------------------------------------------------------------------
+# 2. Stop only the services the plan flagged
+# ---------------------------------------------------------------------------
 
-# Compress to a single tarball alongside the dir so the operator can
-# stash one file off-machine.
-run "tar -czf '${BACKUP_DIR}.tar.gz' -C '${INSTALL_DIR}/backups' '${TIMESTAMP}-pre-update'"
-
-if [[ ${BACKUP_ONLY} -eq 1 ]]; then
+STOP_LIST="$(echo "${REBUILD_LIST} ${RESTART_LIST}" | tr ' ' '\n' | sort -u | xargs)"
+if [[ ${DO_STOP} -eq 1 && -n "${STOP_LIST}" ]]; then
     echo
-    echo "================================================================"
-    echo " ✓ Backup-only complete"
-    echo "================================================================"
-    echo "  Snapshot dir : ${BACKUP_DIR}"
-    echo "  Tarball      : ${BACKUP_DIR}.tar.gz"
-    exit 0
-fi
-
-# ---------------------------------------------------------------------------
-# 2. Stop the running stack (unless skipped)
-# ---------------------------------------------------------------------------
-
-if [[ ${DO_STOP} -eq 1 ]]; then
-    echo
-    echo ">> Stopping the running stack (${COMPOSE_FILE_REL})"
-    # Subshell so the cd doesn't leak. ``docker compose down`` with no
-    # ``-v`` keeps every named volume — Postgres data, branding logos,
-    # face crops, and the model cache all survive.
+    echo ">> Stopping ${STOP_LIST}"
+    # ``docker compose stop`` keeps unchanged services running and the
+    # network attached. ``docker compose down`` would tear the network
+    # too — slower, more invasive, no win when the plan tells us
+    # exactly what to bounce.
     (
         cd "${INSTALL_DIR}"
         if [[ ${DRY_RUN} -eq 1 ]]; then
-            echo "[dry-run] docker compose -f ${COMPOSE_FILE_REL} down"
+            echo "[dry-run] docker compose -f ${COMPOSE_FILE_REL} stop ${STOP_LIST}"
         else
-            docker compose -f "${COMPOSE_FILE_REL}" down 2>&1 | tail -5 || true
+            docker compose -f "${COMPOSE_FILE_REL}" stop ${STOP_LIST} \
+                2>&1 | tail -5 || true
         fi
     )
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Extract zip to a temp dir + rsync into install dir
+# 3. Extract zip + rsync into install dir
 # ---------------------------------------------------------------------------
 
 TEMP_DIR="$(mktemp -d)"
@@ -299,29 +371,17 @@ echo
 echo ">> Extracting ${ZIP_PATH} into a staging dir"
 run "unzip -q '${ZIP_PATH}' -d '${TEMP_DIR}'"
 
-# The release zip uses ``maugood-vX.Y.Z/`` as its prefix dir.
 EXTRACT_ROOT="$(find "${TEMP_DIR}" -mindepth 1 -maxdepth 1 -type d | head -1)"
 if [[ ${DRY_RUN} -eq 0 ]]; then
-    if [[ -z "${EXTRACT_ROOT}" ]]; then
-        echo "error: zip didn't extract a top-level directory" >&2
+    if [[ -z "${EXTRACT_ROOT}" || ! -f "${EXTRACT_ROOT}/docker-compose.yml" ]]; then
+        echo "error: extracted tree doesn't look like Maugood" >&2
         exit 1
     fi
-    if [[ ! -f "${EXTRACT_ROOT}/docker-compose.yml" ]]; then
-        echo "error: staged tree at '${EXTRACT_ROOT}' doesn't look like Maugood" >&2
-        exit 1
-    fi
-else
-    # In dry-run we never ran unzip, so synthesise the path for the
-    # rsync echo below.
-    EXTRACT_ROOT="${TEMP_DIR}/maugood-${NEW_VERSION:-vX.Y.Z}"
 fi
 
 echo
 echo ">> Mirroring new code over the install dir (preserving operator-state)"
 
-# Operator-state paths excluded from the mirror. ``rsync --delete``
-# combined with ``--exclude=path`` leaves the destination's matching
-# paths alone — which is exactly what we want for env/certs/logs/data.
 RSYNC_EXCLUDES=(
     --exclude=".env"
     --exclude="backend/.env"
@@ -345,7 +405,7 @@ RSYNC_EXCLUDES=(
 )
 
 if [[ ${DRY_RUN} -eq 1 ]]; then
-    echo "[dry-run] rsync -avh --delete ${RSYNC_EXCLUDES[*]} '${EXTRACT_ROOT}/' '${INSTALL_DIR}/'"
+    echo "[dry-run] rsync -ah --delete ${RSYNC_EXCLUDES[*]} '${EXTRACT_ROOT}/' '${INSTALL_DIR}/'"
 else
     rsync -ah --delete \
         "${RSYNC_EXCLUDES[@]}" \
@@ -355,50 +415,48 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 4. Bring the stack back up
+# 4. Build + restart only what changed
 # ---------------------------------------------------------------------------
 
-echo
-echo ">> Bringing the stack back up (${COMPOSE_FILE_REL})"
-(
-    cd "${INSTALL_DIR}"
-    if [[ ${DO_REBUILD} -eq 1 ]]; then
+if [[ -n "${REBUILD_LIST}" ]]; then
+    echo
+    echo ">> Building ${REBUILD_LIST}"
+    (
+        cd "${INSTALL_DIR}"
         if [[ ${DRY_RUN} -eq 1 ]]; then
-            echo "[dry-run] docker compose -f ${COMPOSE_FILE_REL} up -d --build"
+            echo "[dry-run] docker compose -f ${COMPOSE_FILE_REL} build --progress=plain ${REBUILD_LIST}"
         else
-            # Stream build output live (--progress=plain) — the same
-            # pattern the setup wizard uses. The pre-fix ``| tail -8``
-            # buffered the build until done so operators thought the
-            # script had hung on a long upgrade.
-            docker compose -f "${COMPOSE_FILE_REL}" build --progress=plain
-            docker compose -f "${COMPOSE_FILE_REL}" up -d 2>&1 | tail -8
+            # --progress=plain so the operator sees live build output
+            # instead of the TTY-redraw mode silently buffering through
+            # any pipe. Same pattern the setup wizard uses.
+            docker compose -f "${COMPOSE_FILE_REL}" build --progress=plain ${REBUILD_LIST}
         fi
-    else
+    )
+fi
+
+if [[ -n "${RESTART_LIST}" ]]; then
+    echo
+    echo ">> Starting ${RESTART_LIST}"
+    (
+        cd "${INSTALL_DIR}"
         if [[ ${DRY_RUN} -eq 1 ]]; then
-            echo "[dry-run] docker compose -f ${COMPOSE_FILE_REL} up -d"
+            echo "[dry-run] docker compose -f ${COMPOSE_FILE_REL} up -d ${RESTART_LIST}"
         else
-            docker compose -f "${COMPOSE_FILE_REL}" up -d 2>&1 | tail -5
+            docker compose -f "${COMPOSE_FILE_REL}" up -d ${RESTART_LIST} \
+                2>&1 | tail -8
         fi
-    fi
-)
+    )
+else
+    echo
+    echo ">> No services to restart — install code on disk reflects the"
+    echo "   new release, but no container needed a bounce."
+fi
 
 # ---------------------------------------------------------------------------
-# 5. Health probe
+# 5. Health probe + version stamp
 # ---------------------------------------------------------------------------
 
 if [[ ${DRY_RUN} -eq 0 ]]; then
-    # Update the VERSION file at the install root (the zip ships
-    # one at maugood-vX.Y.Z/VERSION and rsync mirrored it across; we
-    # also append to .version-history.log so the operator can see
-    # every upgrade this install has been through).
-    if [[ -f "${INSTALL_DIR}/VERSION" ]]; then
-        echo
-        echo ">> Stamping VERSION + .version-history.log"
-        STAMPED_VERSION="$(cat "${INSTALL_DIR}/VERSION")"
-        echo "${STAMPED_VERSION:-${NEW_VERSION:-?}} updated $(date -u +%Y-%m-%dT%H:%M:%SZ) from ${CURRENT_VERSION}" \
-            >> "${INSTALL_DIR}/.version-history.log"
-    fi
-
     echo
     echo ">> Probing /api/health (up to 90s)"
     DEADLINE=$(( $(date +%s) + 90 ))
@@ -407,11 +465,15 @@ if [[ ${DRY_RUN} -eq 0 ]]; then
             | grep -q '"status":"ok"' \
             || curl -s -m 5 http://localhost:8000/api/health 2>/dev/null \
             | grep -q '"status":"ok"'; then
-            echo "✓ backend healthy"
+            echo "  ✓ backend healthy"
             break
         fi
         sleep 2
     done
+
+    echo "${TGT_V}" > "${INSTALL_DIR}/VERSION" 2>/dev/null || true
+    echo "v${TGT_V} updated $(date -u +%Y-%m-%dT%H:%M:%SZ) from v${CUR_V}" \
+        >> "${INSTALL_DIR}/.version-history.log"
 fi
 
 # ---------------------------------------------------------------------------
@@ -422,14 +484,28 @@ echo
 echo "================================================================"
 echo " ✓ Update applied"
 echo "================================================================"
-echo "  From version : ${CURRENT_VERSION}"
-echo "  To version   : ${NEW_VERSION:-?}"
+echo "  From version : v${CUR_V}"
+echo "  To version   : v${TGT_V}"
+echo "  Compose      : ${COMPOSE_FILE_REL}"
+echo "  Rebuilt      : ${REBUILD_LIST:-none}"
+echo "  Restarted    : ${RESTART_LIST:-none}"
 echo "  Backup       : ${BACKUP_DIR}.tar.gz"
+SCRIPTS_LIST="$(python3 -c "import json,sys; print(' '.join(json.loads(sys.argv[1])['scripts']))" "${PLAN_JSON}")"
+if [[ -n "${SCRIPTS_LIST}" ]]; then
+    echo
+    echo " Manual upgrade scripts shipped in this release:"
+    for s in ${SCRIPTS_LIST}; do
+        modname="$(basename "${s}" .py)"
+        echo "   docker compose -f ${COMPOSE_FILE_REL} exec backend python -m scripts.${modname}"
+    done
+    echo
+    echo " Run them in the order listed above. Each is idempotent."
+fi
 echo
 echo "  If anything looks wrong:"
 echo "    cd ${INSTALL_DIR}"
 echo "    docker compose -f ${COMPOSE_FILE_REL} down"
 echo "    tar -xzf ${BACKUP_DIR}.tar.gz -C ./backups"
-echo "    cp -a backups/${TIMESTAMP}-pre-update/.env ./.env  # restore env"
+echo "    cp -a backups/${TIMESTAMP}-pre-update/.env ./.env"
 echo "    # then re-extract the previous release zip on top, and:"
 echo "    docker compose -f ${COMPOSE_FILE_REL} up -d --build"

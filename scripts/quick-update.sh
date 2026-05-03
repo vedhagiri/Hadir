@@ -179,6 +179,10 @@ fi
 # Pull the resolved target_version + service rebuild list back out of
 # the planner so the rest of the script can act on them. The planner
 # is the single source of truth.
+# Render FORCE_SKIP int as a Python literal — see deploy-update.sh
+# for why the ``${var:+True}${var:-False}`` form is wrong here.
+if [[ ${FORCE_SKIP} -eq 1 ]]; then FORCE_SKIP_PY="True"; else FORCE_SKIP_PY="False"; fi
+
 PLAN_JSON="$(python3 - <<PY
 import json, sys
 sys.path.insert(0, "${SCRIPT_DIR}")
@@ -191,7 +195,7 @@ cur = current_install_version(Path("${INSTALL_DIR}"))
 plan = build_plan(
     m, cur,
     service_set=("postgres", "backend", "frontend"),
-    force_skip_versions=${FORCE_SKIP:+True}${FORCE_SKIP:-False},
+    force_skip_versions=${FORCE_SKIP_PY},
 )
 print(json.dumps({
     "current": plan.current_version,
