@@ -170,6 +170,11 @@ const paths = {
     </>
   ),
   filter: <path d="M4 5h16l-6 8v6l-4-2v-4L4 5z" />,
+  videocam: (
+    <>
+      <path d="M23 7l-6 4.5V8a2 2 0 00-2-2H4a2 2 0 00-2 2v8a2 2 0 002 2h11a2 2 0 002-2v-3.5L23 17V7z" />
+    </>
+  ),
   download: <path d="M12 3v12M7 10l5 5 5-5M4 21h16" />,
   edit: (
     <>
