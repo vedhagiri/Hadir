@@ -33,6 +33,8 @@ import { DailyAttendancePage } from "./features/attendance/DailyAttendancePage";
 import { MyAttendancePage } from "./features/attendance/MyAttendancePage";
 import { CameraLogsPage } from "./features/camera-logs/CameraLogsPage";
 import { CamerasPage } from "./features/cameras/CamerasPage";
+import { FaceCropsPage } from "./features/face-crops/FaceCropsPage";
+import { PersonClipsPage } from "./features/person-clips/PersonClipsPage";
 import { DashboardRouter } from "./features/dashboard/DashboardRouter";
 import { EmployeesPage } from "./features/employees/EmployeesPage";
 import { MyProfilePage } from "./features/employees/MyProfilePage";
@@ -128,6 +130,8 @@ export function App() {
         <Route path="employees" element={<EmployeesPage />} />
         <Route path="cameras" element={<CamerasPage />} />
         <Route path="camera-logs" element={<CameraLogsPage />} />
+        <Route path="person-clips" element={<PersonClipsPage />} />
+        <Route path="face-crops" element={<FaceCropsPage />} />
         <Route path="live" element={<LiveCapturePage />} />
         <Route path="system" element={<SystemPage />} />
         <Route path="system-settings" element={<SystemSettingsPage />} />
@@ -175,6 +179,8 @@ export function App() {
             id !== "photo-approvals" &&
             id !== "cameras" &&
             id !== "camera-logs" &&
+            id !== "person-clips" &&
+            id !== "face-crops" &&
             id !== "live" &&
             id !== "system" &&
             id !== "audit" &&

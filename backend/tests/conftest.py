@@ -256,6 +256,25 @@ def admin_user(admin_engine: Engine) -> Iterator[dict]:
 
 
 @pytest.fixture
+def hr_user(admin_engine: Engine) -> Iterator[dict]:
+    """Create an HR user, yield its credentials, then clean up."""
+
+    email = f"hr-{secrets.token_hex(4)}@test.maugood"
+    password = "test-hr-pw-" + secrets.token_hex(6)
+    user_id = _create_user(
+        admin_engine,
+        email=email,
+        password=password,
+        role_code="HR",
+        full_name="Test HR",
+    )
+    try:
+        yield {"id": user_id, "email": email, "password": password}
+    finally:
+        _cleanup_user(admin_engine, user_id)
+
+
+@pytest.fixture
 def employee_user(admin_engine: Engine) -> Iterator[dict]:
     """Create an Employee user, yield its credentials, then clean up."""
 

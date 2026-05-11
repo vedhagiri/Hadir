@@ -193,6 +193,30 @@ class Settings(BaseSettings):
             return []
         return [item.strip() for item in raw.split(",") if item.strip()]
 
+    # --- Person clips -------------------------------------------------------
+    # Root directory for person clip videos. Each clip is stored under
+    # ``{root}/camera_{id}/{YYYY-MM-DD}_{HH-MM-SS}.mp4`` and Fernet-encrypted
+    # at rest using the same key as face crops. This path is NOT under /data
+    # (which maps to ./data/faces on the host) — the docker-compose mounts
+    # ./data/person_clips → /person_clips separately.
+    person_clips_storage_path: str = "/person_clips"
+
+    # --- Face crops ---------------------------------------------------------
+    # Root directory for face crop images extracted from person clips. Each
+    # crop is stored under
+    # ``{root}/camera_{id}/event_{timestamp}/face_{xxx}.jpg`` and Fernet-
+    # encrypted at rest. The docker-compose mounts ./data/face_crops → /face_crops.
+    face_crops_storage_path: str = "/face_crops"
+    # Maximum number of face crops to keep per event clip (safety limit).
+    face_crops_max_per_clip: int = 5
+    # Minimum quality score threshold for a face crop to be saved (0-1).
+    # Crops below this threshold are discarded as too blurry/low-res.
+    face_crops_min_quality: float = 0.15
+    # Maximum duration of any single clip (safety limit in seconds).
+    clip_max_duration_seconds: float = 30.0
+    # Whether clip recording is enabled globally.
+    clip_save_enabled: bool = True
+
     # --- Approvals SLA (v1.0 P15) ------------------------------------------
     # Business hours after which a non-terminal request is flagged as
     # breaching SLA. BRD Open Item Q6 — operators tune per tenant; the

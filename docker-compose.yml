@@ -69,6 +69,13 @@ services:
       # my face crops?" → "right here, just ``ls``"). Override via
       # MAUGOOD_FACES_DATA_DIR for a different host location.
       - ${MAUGOOD_FACES_DATA_DIR:-./data/faces}:/data
+      # Person clip videos. Mounted separately because the /data
+      # volume maps to ./data/faces and person clips need their own
+      # directory at ./data/person_clips/ (not under ./data/faces/).
+      - ${MAUGOOD_PERSON_CLIPS_DIR:-./data/person_clips}:/person_clips
+      # Face crop images extracted from person clips. Each crop is
+      # stored camera-wise/event-wise at this path.
+      - ${MAUGOOD_FACE_CROPS_DIR:-./data/face_crops}:/face_crops
       # InsightFace model cache (~250 MB buffalo_l). Downloaded once
       # on first detection; persisted via a bind mount so the
       # download doesn't repeat on every container rebuild. Override

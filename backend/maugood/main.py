@@ -53,6 +53,8 @@ from maugood.notifications import (
     router as notifications_router,
 )
 from maugood.operations import router as operations_router
+from maugood.face_crops import router as face_crops_router
+from maugood.person_clips import router as person_clips_router
 from maugood.retention import retention_scheduler
 from maugood.scheduled_reports import (
     report_runner,
@@ -278,6 +280,8 @@ def create_app() -> FastAPI:
     app.include_router(notifications_router)
     app.include_router(live_capture_router)
     app.include_router(operations_router)
+    app.include_router(person_clips_router)
+    app.include_router(face_crops_router)
 
     # Dev-only test endpoints — used by the Playwright smoke test in
     # frontend/tests/. Mounted ONLY when MAUGOOD_ENV=dev so a production

@@ -50,14 +50,17 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional, Protocol
 
+import numpy as np
 from sqlalchemy import select, update
 from sqlalchemy.engine import Engine
 
 from maugood.capture import events as events_io
 from maugood.capture.analyzer import Analyzer
 from maugood.capture.annotate import AnnotationBox, annotate_frame, encode_jpeg
+from maugood.capture.clip_worker import ClipWorker
 from maugood.capture.directory import employee_directory
 from maugood.capture.tracker import Bbox, IoUTracker, TrackMatch
+from maugood.config import get_settings
 from maugood.db import attendance_records, cameras, detection_events
 from maugood.identification.matcher import matcher_cache
 from maugood.tenants.scope import TenantScope
@@ -141,6 +144,14 @@ class ReaderConfig:
     # slow analyzer can't backlog forever; tests flip it to True for
     # deterministic frame-by-frame processing of a scripted feed.
     analyzer_consume_every_seq: bool = False
+
+    # Detection-state hysteresis: how many consecutive empty-detection
+    # cycles must occur before the analyzer signals "person absent".
+    # At 6 fps, 5 frames ≈ 0.8 s of missed detections before the clip
+    # recording debounce even starts counting. Combined with the 3.5 s
+    # clip-finalize debounce, this prevents brief occlusion or detection
+    # flicker from prematurely ending a clip.
+    consecutive_no_person_threshold: int = 5
 
     # Preview JPEG quality. 70 is the LAN sweet spot — sharp face IDs
     # at ~80 KB for 1280×720. P28.5 chose 70; we keep it.
@@ -332,6 +343,56 @@ class CaptureWorker:
             "last_error": None,
         }
 
+        # P37 — person presence flag. Set by the analyzer thread with
+        # detection-state hysteresis (N consecutive empty cycles before
+        # flipping to False). Read by the reader thread to decide when
+        # to start/stop clip recording.
+        self._person_present_lock = threading.Lock()
+        self._person_present: bool = False
+        # Face count per analyzer cycle (for clip person_count).
+        self._face_count: int = 0
+        # P37.5 — detection-state hysteresis counter. Incremented by the
+        # analyzer thread each cycle with zero detections; reset on any
+        # detection. Prevents brief occlusion or detection flicker from
+        # immediately signalling "person absent".
+        self._no_person_consecutive_count: int = 0
+        self._no_person_consecutive_threshold: int = (
+            self._config.consecutive_no_person_threshold
+        )
+
+        # Simple clip recording state: when a person is detected,
+        # frames are collected immediately; when they leave, the clip
+        # is submitted to the background ClipWorker for finalization.
+        # No pre-buffer, no post-buffer, no ring buffer.
+        self._clip_frames: list[tuple[float, bytes]] = []
+        self._clip_recording: bool = False
+        self._clip_start_ts: float = 0.0
+        self._clip_max_person_count: int = 0
+        # P37 — matched employee IDs accumulated during clip recording.
+        # The analyzer thread adds IDs when matcher_cache.match() returns
+        # a hit; _finalize_current_clip snapshots and clears the set.
+        self._clip_matched_ids_lock = threading.Lock()
+        self._clip_matched_employee_ids: set[int] = set()
+        # P37.5 — person-absent debounce. When no person is detected, we
+        # keep recording for this many seconds before finalizing. This
+        # prevents premature clip splits caused by brief occlusion or
+        # inter-cycle timing gaps between the reader and analyzer threads.
+        # The effective tolerance is this value + (threshold / analyzer_fps)
+        # ≈ 3.5 + 0.8 = ~4.3 seconds of continuous absence before a clip
+        # is finalised.
+        self._last_person_seen_ts: float = 0.0
+        self._CLIP_FINALIZE_AFTER_NO_PERSON_SEC: float = 3.5
+
+        # P37 — dedicated clip worker thread that runs finalization
+        # (ffmpeg encode + encrypt + file write + DB INSERT) off the
+        # reader's hot path so the frame-read loop is never blocked.
+        self._clip_worker = ClipWorker(
+            engine=self._engine,
+            scope=self._scope,
+            camera_id=self.camera_id,
+            camera_name=self.camera_name,
+        )
+
         # P28.8 — pipeline stage tracking. Timestamps default to None
         # (= "never"); the get_stats() consumer treats an unset
         # timestamp as max age.
@@ -389,6 +450,7 @@ class CaptureWorker:
         if self._reader_thread is not None and self._reader_thread.is_alive():
             return
         self._stop.clear()
+        self._clip_worker.start()
         self._reader_thread = threading.Thread(
             target=self._run_reader,
             name=f"capread-{self.camera_id}",
@@ -404,6 +466,7 @@ class CaptureWorker:
 
     def stop(self, timeout: float = 5.0) -> None:
         self._stop.set()
+        self._clip_worker.stop(timeout=timeout)
         for t in (self._reader_thread, self._analyzer_thread):
             if t is not None and t.is_alive():
                 t.join(timeout=timeout)
@@ -584,6 +647,141 @@ class CaptureWorker:
         )
 
     # ------------------------------------------------------------------
+    # P37 — Person clip recording (simplified binary presence detection)
+    # ------------------------------------------------------------------
+
+    def _encode_clip_frame(self, frame_bgr):
+        """JPEG-encode a frame at full resolution for the clip video.
+        Uses high quality so the subsequent ffmpeg H.264 encoding
+        preserves the original stream clarity with minimal generation
+        loss.
+        """
+
+        import cv2  # noqa: PLC0415
+
+        try:
+            ok, buf = cv2.imencode(
+                ".jpg", frame_bgr,
+                [cv2.IMWRITE_JPEG_QUALITY, 95],
+            )
+            if not ok:
+                return None
+            return bytes(buf.tobytes())
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _check_and_record_clip(self, frame_bgr) -> None:
+        """Called by the reader thread on every frame.
+
+        When a person is detected (``person_present == True``), starts
+        recording immediately — no pre-buffer. When the person leaves
+        (``person_present == False`` and we were recording), waits for a
+        short debounce period (``_CLIP_FINALIZE_AFTER_NO_PERSON_SEC``)
+        before finalizing. If the person reappears within that window,
+        recording continues uninterrupted.
+
+        The debounce prevents premature clip splits caused by:
+          * Brief face occlusion (person turns away)
+          * Detection flicker (face alternately detected/not)
+          * Timing gaps between the reader and analyzer threads
+        """
+
+        from maugood.config import get_settings as _gs  # noqa: PLC0415
+        settings = _gs()
+        if not settings.clip_save_enabled:
+            return
+
+        with self._person_present_lock:
+            person_here = self._person_present
+            face_count = self._face_count
+
+        now = time.time()
+
+        if person_here:
+            # Person detected — update last-seen timestamp.
+            self._last_person_seen_ts = now
+
+            if not self._clip_recording:
+                # Start new clip immediately.
+                self._clip_recording = True
+                self._clip_frames = []
+                self._clip_start_ts = now
+                self._clip_max_person_count = 0
+                with self._clip_matched_ids_lock:
+                    self._clip_matched_employee_ids.clear()
+                logger.debug(
+                    "clip started: camera=%s",
+                    self.camera_id,
+                )
+            # Track max persons seen during this clip.
+            if face_count > self._clip_max_person_count:
+                self._clip_max_person_count = face_count
+            # Safety cap: max duration reached → finalize and start a
+            # new clip on the next frame.
+            duration = now - self._clip_start_ts
+            if duration >= settings.clip_max_duration_seconds:
+                self._finalize_current_clip()
+                # Start a fresh clip immediately (person still present).
+                self._clip_recording = True
+                self._clip_frames = []
+                self._clip_start_ts = now
+                with self._clip_matched_ids_lock:
+                    self._clip_matched_employee_ids.clear()
+            # Collect the current frame.
+            jpeg = self._encode_clip_frame(frame_bgr)
+            if jpeg is not None:
+                self._clip_frames.append((now, jpeg))
+        else:
+            if self._clip_recording:
+                # No person detected right now. Use debounce: only
+                # finalize if the person has been absent for the grace
+                # period. During the grace period we keep collecting
+                # frames (acts as a post-recording buffer).
+                absent_for = now - self._last_person_seen_ts
+                if absent_for >= self._CLIP_FINALIZE_AFTER_NO_PERSON_SEC:
+                    self._finalize_current_clip()
+                else:
+                    jpeg = self._encode_clip_frame(frame_bgr)
+                    if jpeg is not None:
+                        self._clip_frames.append((now, jpeg))
+
+    def _finalize_current_clip(self) -> None:
+        """Submit the current clip to the ClipWorker and reset recording
+        state. Called when a person leaves the frame OR when the max
+        duration safety cap is reached.
+        """
+
+        self._clip_recording = False
+        frames = list(self._clip_frames)
+        self._clip_frames = []
+        if len(frames) >= 3:
+            # Pass the detected FPS from camera metadata so ffmpeg
+            # encodes at the correct playback speed. Falls back to 10
+            # when metadata is not yet available (e.g. first frames).
+            with self._metadata_lock:
+                camera_fps = self._detected_metadata.get("fps") or 10.0
+            with self._clip_matched_ids_lock:
+                matched_ids = sorted(self._clip_matched_employee_ids)
+                self._clip_matched_employee_ids.clear()
+            clip_data = {
+                "frames": frames,
+                "start_ts": self._clip_start_ts,
+                "person_count": max(self._clip_max_person_count, 0),
+                "fps": float(camera_fps),
+                "matched_employees": matched_ids,
+            }
+            self._clip_worker.submit_clip(clip_data)
+            logger.debug(
+                "clip submitted: camera=%s frames=%d",
+                self.camera_id, len(frames),
+            )
+        else:
+            logger.debug(
+                "clip too short (%d frames) skipping: camera=%s",
+                len(frames), self.camera_id,
+            )
+
+    # ------------------------------------------------------------------
     # Reader thread
 
     def _run_reader(self) -> None:
@@ -666,6 +864,11 @@ class CaptureWorker:
                     # thread so preview pace tracks read pace, not detect
                     # pace.
                     self._update_preview(frame)
+
+                    # P37: check person presence and record clip frames.
+                    # Starts immediately when a person is detected,
+                    # stops immediately when they leave — no buffers.
+                    self._check_and_record_clip(frame)
 
                     now = time.time()
                     if now - last_fps_ts >= 1.0:
@@ -777,6 +980,23 @@ class CaptureWorker:
                         "analyzer", f"detect failed: {type(exc).__name__}"
                     )
                     detections = []
+                # P37: update person presence for clip recording.
+                # Uses hysteresis: person is only marked absent after
+                # N consecutive empty-detection cycles. This prevents
+                # brief occlusion or detection flicker from prematurely
+                # ending a clip. Track face count for clip person_count.
+                with self._person_present_lock:
+                    if len(detections) > 0:
+                        self._no_person_consecutive_count = 0
+                        self._person_present = True
+                    else:
+                        self._no_person_consecutive_count += 1
+                        if (
+                            self._no_person_consecutive_count
+                            >= self._no_person_consecutive_threshold
+                        ):
+                            self._person_present = False
+                    self._face_count = len(detections)
             elif (moved or force) and not detection_enabled:
                 # Migration 0033: detection_enabled=False short-circuits
                 # the expensive ``detect`` call. Bump ``last_detect_ts``
@@ -786,6 +1006,17 @@ class CaptureWorker:
                 # still driven below with an empty detections list so
                 # any leftover tracks idle-expire on schedule.
                 last_detect_ts = now
+                # P37: detection disabled → ramp up consecutive counter
+                # so any ongoing clip gets a graceful wind-down rather
+                # than an instant cutoff (same hysteresis as above).
+                with self._person_present_lock:
+                    self._no_person_consecutive_count += 1
+                    if (
+                        self._no_person_consecutive_count
+                        >= self._no_person_consecutive_threshold
+                    ):
+                        self._person_present = False
+                    self._face_count = 0
             else:
                 with self._stats_lock:
                     cur = int(self._stats["motion_skipped"] or 0)
@@ -815,6 +1046,8 @@ class CaptureWorker:
                 # actually flowing.
                 if mm and mm.classification == "active":
                     self.record_successful_match()
+                    with self._clip_matched_ids_lock:
+                        self._clip_matched_employee_ids.add(mm.employee_id)
                     per_detection_match.append((mm.employee_id, mm.score))
                 else:
                     per_detection_match.append(None)

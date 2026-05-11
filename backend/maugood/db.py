@@ -2061,6 +2061,130 @@ delete_requests = Table(
 )
 
 
+# --- Person clips (P37) -----------------------------------------------------
+# One row per short video clip saved when the capture pipeline identifies a
+# person. Clips are Fernet-encrypted at rest under
+# ``/data/clips/{tenant_id}/{camera_id}/{YYYY-MM-DD}/{uuid}.avi``.
+
+person_clips = Table(
+    "person_clips",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "camera_id",
+        Integer,
+        ForeignKey("cameras.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "employee_id",
+        Integer,
+        ForeignKey("employees.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    ),
+    Column("track_id", Text, nullable=True),
+    Column(
+        "detection_event_id",
+        Integer,
+        ForeignKey("detection_events.id", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    Column("clip_start", DateTime(timezone=True), nullable=False),
+    Column("clip_end", DateTime(timezone=True), nullable=False),
+    Column("duration_seconds", Float, nullable=False, server_default="0"),
+    Column("file_path", Text, nullable=True),
+    Column("filesize_bytes", Integer, nullable=False, server_default="0"),
+    Column("frame_count", Integer, nullable=False, server_default="0"),
+    Column("person_count", Integer, nullable=False, server_default="0"),
+    Column(
+        "face_crops_status",
+        Text,
+        nullable=False,
+        server_default="pending",
+    ),
+    Column(
+        "matched_employees",
+        JSONB,
+        nullable=False,
+        server_default="[]",
+    ),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    Index(
+        "ix_person_clips_tenant_camera_created",
+        "tenant_id",
+        "camera_id",
+        "created_at",
+    ),
+    Index(
+        "ix_person_clips_tenant_employee_created",
+        "tenant_id",
+        "employee_id",
+        "created_at",
+    ),
+)
+
+
+# One row per face crop extracted from a person clip video. Crops are
+# Fernet-encrypted at rest under ``/face_crops/camera_{id}/event_{ts}/face_{xxx}.jpg``.
+# Extracted asynchronously after the clip is finalized.
+face_crops = Table(
+    "face_crops",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "camera_id",
+        Integer,
+        ForeignKey("cameras.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "person_clip_id",
+        Integer,
+        ForeignKey("person_clips.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column("event_timestamp", Text, nullable=False),
+    Column("face_index", Integer, nullable=False, server_default="1"),
+    Column("file_path", Text, nullable=True),
+    Column("quality_score", Float, nullable=False, server_default="0"),
+    Column("sharpness", Float, nullable=False, server_default="0"),
+    Column("detection_score", Float, nullable=False, server_default="0"),
+    Column("width", Integer, nullable=False, server_default="0"),
+    Column("height", Integer, nullable=False, server_default="0"),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    Index("ix_face_crops_tenant_camera_created", "tenant_id", "camera_id", "created_at"),
+    Index("ix_face_crops_tenant_clip", "tenant_id", "person_clip_id"),
+)
+
+
 # --- Engines ----------------------------------------------------------------
 
 

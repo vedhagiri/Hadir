@@ -615,7 +615,7 @@ def test_day_detail_returns_evidence_when_events_exist(
     # Each evidence entry carries a crop URL pointing at the existing
     # detection-events crop endpoint (P11).
     for e in body["evidence"]:
-        assert e["crop_url"].startswith("/api/detection-events/")
+        assert "/api/attendance/calendar/evidence/" in e["crop_url"]
 
 
 def test_day_detail_evidence_empty_for_absent_day(

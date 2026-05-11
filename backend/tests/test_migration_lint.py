@@ -42,6 +42,10 @@ _WHITELIST: frozenset[str] = frozenset(
         # column is part of public.tenants by definition. Idempotency
         # guards make per-tenant re-execution safe.
         "0026_tenants_slug.py",
+        # 0037 creates person_clips with a FK to public.tenants.id —
+        # the global tenants registry must be referenced cross-schema
+        # from every per-tenant table.
+        "0037_person_clips.py",
     }
 )
 

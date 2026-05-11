@@ -27,6 +27,7 @@ RUN apt-get update \
         libffi-dev \
         shared-mime-info \
         fonts-liberation \
+        ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml ./
