@@ -354,13 +354,17 @@ def _detect_insightface(frame_bgr, config: DetectorConfig) -> list[dict]:  # typ
     return out
 
 
-def _detect_yolo_face(frame_bgr, config: DetectorConfig) -> list[dict]:  # type: ignore[no-untyped-def]
-    """YOLO finds person boxes; InsightFace runs inside each box.
+def _run_yolo_face(  # type: ignore[no-untyped-def]
+    frame_bgr, config: DetectorConfig
+) -> "tuple[list[dict], int]":
+    """Core YOLO+InsightFace detection pass (shared by both callers below).
 
-    For high-traffic / outdoor cameras where most of the frame is
-    background, this is faster than full-frame InsightFace at the
-    cost of one extra YOLO pass per analyzer cycle. Port verbatim
-    from the prototype.
+    Returns ``(face_dicts, yolo_person_count)`` where
+    ``yolo_person_count`` is the raw count of YOLO person boxes —
+    including persons whose face is not visible. Both ``_detect_yolo_face``
+    (the mode="yolo+face" branch of ``detect()``) and
+    ``detect_and_count()`` in yolo+face mode delegate here so YOLO
+    never runs twice in the same analyzer cycle.
     """
 
     H, W = frame_bgr.shape[:2]
@@ -377,6 +381,8 @@ def _detect_yolo_face(frame_bgr, config: DetectorConfig) -> list[dict]:  # type:
             verbose=False,
         )[0]
 
+    # Count ALL YOLO person boxes — persons with back to camera still count.
+    person_count = len(result.boxes)
     out: list[dict] = []
     for box in result.boxes:
         bx1, by1, bx2, by2 = [int(v) for v in box.xyxy[0]]
@@ -419,7 +425,93 @@ def _detect_yolo_face(frame_bgr, config: DetectorConfig) -> list[dict]:  # type:
                 "face_height": fh,
                 "pose_score": _pose_score_from_landmarks(kps, fw),
             })
-    return out
+    return out, person_count
+
+
+def _detect_yolo_face(frame_bgr, config: DetectorConfig) -> list[dict]:  # type: ignore[no-untyped-def]
+    """YOLO finds person boxes; InsightFace runs inside each box.
+
+    For high-traffic / outdoor cameras where most of the frame is
+    background, this is faster than full-frame InsightFace at the
+    cost of one extra YOLO pass per analyzer cycle. Port verbatim
+    from the prototype.
+    """
+
+    return _run_yolo_face(frame_bgr, config)[0]
+
+
+def detect_and_count(  # type: ignore[no-untyped-def]
+    frame_bgr, config: DetectorConfig
+) -> "tuple[list[dict], int]":
+    """Run face detection AND YOLO person-body detection in a single pass.
+
+    Returns ``(face_dicts, person_count)`` where ``person_count`` comes
+    from YOLO body detection — not face detection. This ensures the
+    clip-recording gate is driven by person *presence* rather than face
+    *visibility*. A seated employee with their back to the camera still
+    produces a non-zero ``person_count``, keeping the clip alive.
+
+    Mode dispatch:
+    * ``yolo+face``:  YOLO runs once; face dicts + YOLO person count are
+      returned together. No duplicate YOLO call.
+    * ``insightface``: InsightFace for face dicts + one YOLO pass for
+      person count.
+
+    Falls back to ``person_count=0`` (face-based clip gating) when
+    ``ultralytics`` is not installed.
+
+    Thread-safe: both calls funnel through ``_detect_lock``.
+    """
+
+    if config.mode == "yolo+face":
+        return _run_yolo_face(frame_bgr, config)
+
+    # insightface mode: face detection + separate YOLO person count.
+    faces = _detect_insightface(frame_bgr, config)
+    try:
+        person_count = _detect_person_count_yolo(frame_bgr, config)
+    except Exception:  # noqa: BLE001  ultralytics not installed, YOLO load fail
+        person_count = 0
+    return faces, person_count
+
+
+def detect_persons(frame_bgr, config: DetectorConfig) -> int:  # type: ignore[no-untyped-def]
+    """Return the number of persons detected in the frame.
+
+    In ``yolo+face`` mode this runs a cheap YOLO person-detection pass
+    (``classes=[0]``) and returns the count of person boxes. This is
+    used by the clip-recording gate to start/stop clips based on
+    person presence rather than face visibility.
+
+    In ``insightface`` mode there is no person-detection capability, so
+    this returns 0. The caller falls back to face-detection-based
+    gating (existing behaviour).
+
+    Thread-safe: funnels through ``_detect_lock`` like ``detect``.
+    """
+
+    if config.mode == "yolo+face":
+        return _detect_person_count_yolo(frame_bgr, config)
+    return 0
+
+
+def _detect_person_count_yolo(frame_bgr, config: DetectorConfig) -> int:  # type: ignore[no-untyped-def]
+    """Run YOLO ``classes=[0]`` and return the count of person boxes.
+
+    Cheap (~20-40 ms on CPU for 480p) compared to InsightFace face
+    detection. Only YOLO — no InsightFace pass.
+    """
+
+    with _detect_lock:
+        yolo = _load_yolo()
+        result = yolo(
+            frame_bgr,
+            classes=[0],
+            imgsz=480,
+            conf=config.yolo_conf,
+            verbose=False,
+        )[0]
+    return len(result.boxes)
 
 
 def quality_score(face: dict) -> float:

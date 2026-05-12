@@ -64,7 +64,7 @@ def _reset_rate_limiter() -> Iterator[None]:
 
 
 class _NoopAnalyzer:
-    """Session-wide stub so tests never load InsightFace.
+    """Session-wide stub so tests never load InsightFace or YOLO.
 
     ``detect`` returns no faces and ``embed_crop`` returns None. The
     P6 photo upload path and the P9 lifespan backfill both call
@@ -75,6 +75,12 @@ class _NoopAnalyzer:
 
     def detect(self, _frame) -> list:  # type: ignore[no-untyped-def]
         return []
+
+    def detect_and_count(self, _frame) -> "tuple[list, int]":  # type: ignore[no-untyped-def]
+        return [], 0
+
+    def detect_persons(self, _frame) -> int:  # type: ignore[no-untyped-def]
+        return 0
 
     def embed_crop(self, _crop):  # type: ignore[no-untyped-def]
         return None

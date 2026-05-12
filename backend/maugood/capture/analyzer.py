@@ -30,6 +30,8 @@ import numpy as np
 from maugood.capture.tracker import Bbox
 from maugood.detection import DetectorConfig
 from maugood.detection import detect as detector_detect
+from maugood.detection import detect_and_count as detector_detect_and_count
+from maugood.detection import detect_persons as detector_detect_persons
 from maugood.detection import quality_score as detector_quality_score
 
 logger = logging.getLogger(__name__)
@@ -55,6 +57,29 @@ class Analyzer(Protocol):
 
     def detect(self, frame_bgr) -> list[Detection]:  # type: ignore[no-untyped-def]
         ...
+
+    def detect_and_count(  # type: ignore[no-untyped-def]
+        self, frame_bgr
+    ) -> "tuple[list[Detection], int]":
+        """Run face detection and YOLO person-body detection in one pass.
+
+        Returns ``(detections, person_count)`` where ``person_count``
+        uses YOLO body detection regardless of the configured face-
+        detection mode. Persons with their back to the camera produce a
+        non-zero count even when InsightFace finds no face.
+
+        This is the primary entry point for ``_analyzer_loop`` —
+        replaces the old separate ``detect`` + ``detect_persons`` calls
+        so YOLO never runs twice in the same cycle.
+        """
+        ...
+
+    def detect_persons(self, frame_bgr) -> int:  # type: ignore[no-untyped-def]
+        """Return the number of persons detected in the frame.
+
+        Kept for backward compatibility. The main analyzer loop now uses
+        ``detect_and_count`` instead to avoid running YOLO twice.
+        """
 
     def embed_crop(self, crop_bgr) -> Optional[np.ndarray]:  # type: ignore[no-untyped-def]
         """Compute an embedding for a single face crop (already cropped).
@@ -100,6 +125,41 @@ class InsightFaceAnalyzer:
     def _snapshot_config(self) -> DetectorConfig:
         with self._lock:
             return self._config
+
+    def detect_persons(self, frame_bgr) -> int:  # type: ignore[no-untyped-def]
+        """Return YOLO person count (kept for backward compat)."""
+        cfg = self._snapshot_config()
+        return detector_detect_persons(frame_bgr, cfg)
+
+    def detect_and_count(  # type: ignore[no-untyped-def]
+        self, frame_bgr
+    ) -> "tuple[list[Detection], int]":
+        """Face detection + YOLO person count in one pass.
+
+        In ``yolo+face`` mode YOLO runs once and contributes both the
+        person boxes (for face crops) and the raw person count (for the
+        clip gate). In ``insightface`` mode InsightFace runs for face
+        crops and YOLO runs separately for the person count — adding
+        ~20-40 ms but ensuring clips keep recording even when faces are
+        not visible (seated employees, back-to-camera, partial occlusion).
+        """
+        cfg = self._snapshot_config()
+        raw_faces, person_count = detector_detect_and_count(frame_bgr, cfg)
+        detections: list[Detection] = []
+        for d in raw_faces:
+            x1, y1, x2, y2 = d["bbox"]
+            detections.append(
+                Detection(
+                    bbox=Bbox(
+                        x=int(x1), y=int(y1),
+                        w=max(0, int(x2 - x1)),
+                        h=max(0, int(y2 - y1)),
+                    ),
+                    det_score=float(d.get("det_score", 1.0)),
+                    embedding=d.get("embedding"),
+                )
+            )
+        return detections, person_count
 
     def detect(self, frame_bgr) -> list[Detection]:  # type: ignore[no-untyped-def]
         cfg = self._snapshot_config()

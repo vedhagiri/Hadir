@@ -44,10 +44,12 @@ from __future__ import annotations
 
 import collections
 import logging
+import tempfile
 import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable, Optional, Protocol
 
 import numpy as np
@@ -147,11 +149,12 @@ class ReaderConfig:
 
     # Detection-state hysteresis: how many consecutive empty-detection
     # cycles must occur before the analyzer signals "person absent".
-    # At 6 fps, 5 frames ≈ 0.8 s of missed detections before the clip
-    # recording debounce even starts counting. Combined with the 3.5 s
-    # clip-finalize debounce, this prevents brief occlusion or detection
-    # flicker from prematurely ending a clip.
-    consecutive_no_person_threshold: int = 5
+    # At 6 fps, 30 cycles ≈ 5 s of missed detections before the clip
+    # recording debounce even starts counting. Combined with the 10 s
+    # clip-finalize debounce, this gives ~15 s of tolerance for brief
+    # occlusion, detection flicker, or a person turning away from the
+    # camera — the clip keeps recording throughout.
+    consecutive_no_person_threshold: int = 30
 
     # Preview JPEG quality. 70 is the LAN sweet spot — sharp face IDs
     # at ~80 KB for 1280×720. P28.5 chose 70; we keep it.
@@ -360,11 +363,14 @@ class CaptureWorker:
             self._config.consecutive_no_person_threshold
         )
 
-        # Simple clip recording state: when a person is detected,
-        # frames are collected immediately; when they leave, the clip
-        # is submitted to the background ClipWorker for finalization.
-        # No pre-buffer, no post-buffer, no ring buffer.
-        self._clip_frames: list[tuple[float, bytes]] = []
+        # Clip recording state. Frames are written to a temp directory on
+        # disk immediately as they arrive (native FPS, no subsampling) so
+        # memory use stays bounded. The temp dir is passed to ClipWorker
+        # when the clip is finalised; ClipWorker calls cleanup() when done.
+        self._clip_tmpdir: Optional[tempfile.TemporaryDirectory] = None  # type: ignore[type-arg]
+        self._clip_frame_idx: int = 0       # counter → frame_{i:06d}.jpg names
+        self._clip_first_ts: float = 0.0    # wall-clock of first frame in clip
+        self._clip_last_ts: float = 0.0     # wall-clock of most recent frame
         self._clip_recording: bool = False
         self._clip_start_ts: float = 0.0
         self._clip_max_person_count: int = 0
@@ -378,10 +384,14 @@ class CaptureWorker:
         # prevents premature clip splits caused by brief occlusion or
         # inter-cycle timing gaps between the reader and analyzer threads.
         # The effective tolerance is this value + (threshold / analyzer_fps)
-        # ≈ 3.5 + 0.8 = ~4.3 seconds of continuous absence before a clip
+        # ≈ 10 + 5 = ~15 seconds of continuous absence before a clip
         # is finalised.
         self._last_person_seen_ts: float = 0.0
-        self._CLIP_FINALIZE_AFTER_NO_PERSON_SEC: float = 3.5
+        # How long to keep recording after the last person detection
+        # before finalising the clip. 10 s gives ample tolerance for
+        # brief occlusion, detection flicker, or a person momentarily
+        # turning away from the camera.
+        self._CLIP_FINALIZE_AFTER_NO_PERSON_SEC: float = 10.0
 
         # P37 — dedicated clip worker thread that runs finalization
         # (ffmpeg encode + encrypt + file write + DB INSERT) off the
@@ -673,17 +683,23 @@ class CaptureWorker:
     def _check_and_record_clip(self, frame_bgr) -> None:
         """Called by the reader thread on every frame.
 
-        When a person is detected (``person_present == True``), starts
-        recording immediately — no pre-buffer. When the person leaves
-        (``person_present == False`` and we were recording), waits for a
-        short debounce period (``_CLIP_FINALIZE_AFTER_NO_PERSON_SEC``)
-        before finalizing. If the person reappears within that window,
-        recording continues uninterrupted.
+        Writes every frame directly to a temp directory on disk at the
+        camera's native FPS — no subsampling, no memory buffering. Disk
+        I/O per frame is an 80-100 KB JPEG write (~1 ms on SSD), which
+        is negligible compared to the RTSP read latency.
 
-        The debounce prevents premature clip splits caused by:
-          * Brief face occlusion (person turns away)
-          * Detection flicker (face alternately detected/not)
-          * Timing gaps between the reader and analyzer threads
+        Clip lifecycle:
+          * Person arrives  → create temp dir, start writing frames
+          * Person present  → write every frame to frame_{i:06d}.jpg
+          * Person leaves   → keep writing (grace period) until
+                              _CLIP_FINALIZE_AFTER_NO_PERSON_SEC elapses
+          * Grace expired   → submit tmpdir to ClipWorker, which runs
+                              ffmpeg then cleans up the tmpdir
+
+        The temp dir is owned by the TemporaryDirectory object that
+        lives in clip_data["tmpdir"]. ClipWorker calls .cleanup() when
+        ffmpeg finishes — the disk space is freed at that point, not
+        when the reader moves on.
         """
 
         from maugood.config import get_settings as _gs  # noqa: PLC0415
@@ -702,10 +718,15 @@ class CaptureWorker:
             self._last_person_seen_ts = now
 
             if not self._clip_recording:
-                # Start new clip immediately.
+                # Start new clip: create a temp directory for frame files.
+                self._clip_tmpdir = tempfile.TemporaryDirectory(
+                    prefix="maugood_clip_"
+                )
                 self._clip_recording = True
-                self._clip_frames = []
                 self._clip_start_ts = now
+                self._clip_first_ts = now
+                self._clip_last_ts = now
+                self._clip_frame_idx = 0
                 self._clip_max_person_count = 0
                 with self._clip_matched_ids_lock:
                     self._clip_matched_employee_ids.clear()
@@ -713,59 +734,80 @@ class CaptureWorker:
                     "clip started: camera=%s",
                     self.camera_id,
                 )
+
             # Track max persons seen during this clip.
             if face_count > self._clip_max_person_count:
                 self._clip_max_person_count = face_count
-            # Safety cap: max duration reached → finalize and start a
-            # new clip on the next frame.
-            duration = now - self._clip_start_ts
-            if duration >= settings.clip_max_duration_seconds:
-                self._finalize_current_clip()
-                # Start a fresh clip immediately (person still present).
-                self._clip_recording = True
-                self._clip_frames = []
-                self._clip_start_ts = now
-                with self._clip_matched_ids_lock:
-                    self._clip_matched_employee_ids.clear()
-            # Collect the current frame.
-            jpeg = self._encode_clip_frame(frame_bgr)
-            if jpeg is not None:
-                self._clip_frames.append((now, jpeg))
+
+            # Write the current frame to disk — every native-FPS frame,
+            # no subsampling. Memory usage stays at O(1) regardless of
+            # clip length; temp space is freed after ffmpeg encodes.
+            if self._clip_tmpdir is not None:
+                jpeg = self._encode_clip_frame(frame_bgr)
+                if jpeg is not None:
+                    try:
+                        frame_path = (
+                            Path(self._clip_tmpdir.name)
+                            / f"frame_{self._clip_frame_idx:08d}.jpg"
+                        )
+                        frame_path.write_bytes(jpeg)
+                        self._clip_frame_idx += 1
+                        self._clip_last_ts = now
+                    except OSError:
+                        logger.debug(
+                            "clip frame write failed: camera=%s",
+                            self.camera_id,
+                        )
+
         else:
             if self._clip_recording:
-                # No person detected right now. Use debounce: only
-                # finalize if the person has been absent for the grace
-                # period. During the grace period we keep collecting
-                # frames (acts as a post-recording buffer).
+                # No person detected. Use debounce: only finalize after
+                # the person has been absent for the full grace period.
+                # During the grace period we keep writing frames so the
+                # clip captures the person walking out of frame.
                 absent_for = now - self._last_person_seen_ts
                 if absent_for >= self._CLIP_FINALIZE_AFTER_NO_PERSON_SEC:
                     self._finalize_current_clip()
-                else:
+                elif self._clip_tmpdir is not None:
                     jpeg = self._encode_clip_frame(frame_bgr)
                     if jpeg is not None:
-                        self._clip_frames.append((now, jpeg))
+                        try:
+                            frame_path = (
+                                Path(self._clip_tmpdir.name)
+                                / f"frame_{self._clip_frame_idx:08d}.jpg"
+                            )
+                            frame_path.write_bytes(jpeg)
+                            self._clip_frame_idx += 1
+                            self._clip_last_ts = now
+                        except OSError:
+                            pass
 
     def _finalize_current_clip(self) -> None:
         """Submit the current clip to the ClipWorker and reset recording
-        state. Called when a person leaves the frame OR when the max
-        duration safety cap is reached.
+        state. The TemporaryDirectory object is transferred to the
+        ClipWorker which owns cleanup after ffmpeg finishes.
         """
 
         self._clip_recording = False
-        frames = list(self._clip_frames)
-        self._clip_frames = []
-        if len(frames) >= 3:
-            # Pass the detected FPS from camera metadata so ffmpeg
-            # encodes at the correct playback speed. Falls back to 10
-            # when metadata is not yet available (e.g. first frames).
+        tmpdir = self._clip_tmpdir
+        self._clip_tmpdir = None
+        frame_count = self._clip_frame_idx
+        self._clip_frame_idx = 0
+        first_ts = self._clip_first_ts
+        last_ts = self._clip_last_ts
+
+        if frame_count >= 3 and tmpdir is not None:
             with self._metadata_lock:
-                camera_fps = self._detected_metadata.get("fps") or 10.0
+                camera_fps = self._detected_metadata.get("fps") or 25.0
             with self._clip_matched_ids_lock:
                 matched_ids = sorted(self._clip_matched_employee_ids)
                 self._clip_matched_employee_ids.clear()
             clip_data = {
-                "frames": frames,
+                "tmpdir": tmpdir,          # TemporaryDirectory — ClipWorker calls .cleanup()
+                "frame_count": frame_count,
                 "start_ts": self._clip_start_ts,
+                "first_ts": first_ts,
+                "last_ts": last_ts,
                 "person_count": max(self._clip_max_person_count, 0),
                 "fps": float(camera_fps),
                 "matched_employees": matched_ids,
@@ -773,12 +815,18 @@ class CaptureWorker:
             self._clip_worker.submit_clip(clip_data)
             logger.debug(
                 "clip submitted: camera=%s frames=%d",
-                self.camera_id, len(frames),
+                self.camera_id, frame_count,
             )
         else:
+            # Too short — clean up tmpdir immediately.
+            if tmpdir is not None:
+                try:
+                    tmpdir.cleanup()
+                except Exception:  # noqa: BLE001
+                    pass
             logger.debug(
                 "clip too short (%d frames) skipping: camera=%s",
-                len(frames), self.camera_id,
+                frame_count, self.camera_id,
             )
 
     # ------------------------------------------------------------------
@@ -968,7 +1016,13 @@ class CaptureWorker:
             detections: list = []
             if (moved or force) and detection_enabled:
                 try:
-                    detections = self._analyzer.detect(frame)
+                    # detect_and_count runs YOLO person-body detection
+                    # alongside face detection in a single pass — YOLO
+                    # never runs twice even in yolo+face mode.
+                    # person_count comes from YOLO body boxes, so a
+                    # seated employee with their back to the camera still
+                    # produces person_count > 0, keeping the clip alive.
+                    detections, person_count = self._analyzer.detect_and_count(frame)
                     last_detect_ts = now
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(
@@ -980,13 +1034,14 @@ class CaptureWorker:
                         "analyzer", f"detect failed: {type(exc).__name__}"
                     )
                     detections = []
+                    person_count = 0
                 # P37: update person presence for clip recording.
                 # Uses hysteresis: person is only marked absent after
-                # N consecutive empty-detection cycles. This prevents
-                # brief occlusion or detection flicker from prematurely
-                # ending a clip. Track face count for clip person_count.
+                # N consecutive empty-detection cycles.
+                face_count = len(detections)
+                any_person = (face_count > 0) or (person_count > 0)
                 with self._person_present_lock:
-                    if len(detections) > 0:
+                    if any_person:
                         self._no_person_consecutive_count = 0
                         self._person_present = True
                     else:
@@ -996,7 +1051,7 @@ class CaptureWorker:
                             >= self._no_person_consecutive_threshold
                         ):
                             self._person_present = False
-                    self._face_count = len(detections)
+                    self._face_count = face_count
             elif (moved or force) and not detection_enabled:
                 # Migration 0033: detection_enabled=False short-circuits
                 # the expensive ``detect`` call. Bump ``last_detect_ts``

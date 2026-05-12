@@ -4,6 +4,16 @@ Runs asynchronously so live capture, clip recording, and UI stay
 responsive. For each clip: decrypt → sample frames at ~2 fps →
 InsightFace detect + matcher.match() → update ``matched_employees``
 JSONB column on the ``person_clips`` row.
+
+Two entry points:
+
+* ``process_single_clip(clip_id, scope)`` — standalone function that
+  processes one clip and updates the DB synchronously. Called from the
+  clip worker in a fire-and-forget daemon thread immediately after a
+  new clip is saved.
+
+* ``ReprocessFaceMatchWorker`` — batch worker that processes all (or
+  filtered) clips. Triggered manually via the API endpoint.
 """
 
 from __future__ import annotations
@@ -404,6 +414,210 @@ class ReprocessFaceMatchWorker:
                     "errors": len(self._status.get("errors", [])),
                 },
             )
+
+
+# ---------------------------------------------------------------------------
+# Single-clip processor — called from clip_worker.py after each save
+# ---------------------------------------------------------------------------
+
+
+def process_single_clip(clip_id: int, scope: TenantScope) -> None:
+    """Process one saved clip for face matching.
+
+    Called from the ``ClipWorker`` in a fire-and-forget daemon thread
+    immediately after a new clip is saved. Decrypts the clip, samples
+    frames at ~2 fps, runs face detection + matching, and updates the
+    ``matched_employees`` + ``matched_status`` columns.
+
+    This is the same detection + matching logic used by the batch
+    re-processor (``ReprocessFaceMatchWorker``), but scoped to a single
+    clip so the live-recording pipeline never waits on matching.
+    """
+
+    from maugood.db import tenant_context  # noqa: PLC0415
+
+    engine = get_engine()
+    settings = get_settings()
+
+    with tenant_context(scope.tenant_schema):
+        try:
+            with engine.begin() as conn:
+                row = conn.execute(
+                    sa_select(
+                        person_clips.c.id,
+                        person_clips.c.file_path,
+                    ).where(
+                        person_clips.c.id == clip_id,
+                        person_clips.c.tenant_id == scope.tenant_id,
+                    )
+                ).first()
+
+            if row is None:
+                logger.debug(
+                    "single-clip match: clip %s not found (tenant=%s)",
+                    clip_id, scope.tenant_id,
+                )
+                return
+
+            file_path_str = str(row.file_path or "")
+            if not file_path_str or not Path(file_path_str).exists():
+                logger.debug(
+                    "single-clip match: clip %s file missing (tenant=%s)",
+                    clip_id, scope.tenant_id,
+                )
+                _set_matched_status(engine, scope, clip_id, "failed")
+                return
+
+            # Mark as processing.
+            _set_matched_status(engine, scope, clip_id, "processing")
+
+            # Decrypt to temp file.
+            encrypted = Path(file_path_str).read_bytes()
+            plain = decrypt_bytes(encrypted)
+
+            with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+                tmp.write(plain)
+                tmp_path = Path(tmp.name)
+
+            try:
+                camera_fps = 10.0
+                frames = _sample_frames_standalone(tmp_path, camera_fps)
+
+                if not frames:
+                    logger.debug(
+                        "single-clip match: no frames extracted from clip %s",
+                        clip_id,
+                    )
+                    _set_matched_status(engine, scope, clip_id, "failed")
+                    return
+
+                matched_ids = _detect_and_match_standalone(
+                    frames, scope
+                )
+            finally:
+                tmp_path.unlink(missing_ok=True)
+
+            # Update the DB row.
+            matched_list = sorted(matched_ids)
+            with engine.begin() as conn:
+                conn.execute(
+                    sa_update(person_clips)
+                    .where(
+                        person_clips.c.id == clip_id,
+                        person_clips.c.tenant_id == scope.tenant_id,
+                    )
+                    .values(
+                        matched_employees=matched_list,
+                        matched_status="processed",
+                    )
+                )
+
+            if matched_list:
+                logger.info(
+                    "single-clip match: clip %s matched %d employee(s) "
+                    "(tenant=%s)",
+                    clip_id, len(matched_list), scope.tenant_id,
+                )
+            else:
+                logger.debug(
+                    "single-clip match: clip %s no matches (tenant=%s)",
+                    clip_id, scope.tenant_id,
+                )
+
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "single-clip match failed: clip=%s tenant=%s reason=%s",
+                clip_id, scope.tenant_id, type(exc).__name__,
+            )
+            try:
+                _set_matched_status(engine, scope, clip_id, "failed")
+            except Exception:  # noqa: BLE001
+                pass
+
+
+def _set_matched_status(
+    engine, scope: TenantScope, clip_id: int, status: str
+) -> None:
+    """Update just the ``matched_status`` column for a clip."""
+    with engine.begin() as conn:
+        conn.execute(
+            sa_update(person_clips)
+            .where(
+                person_clips.c.id == clip_id,
+                person_clips.c.tenant_id == scope.tenant_id,
+            )
+            .values(matched_status=status)
+        )
+
+
+def _sample_frames_standalone(
+    video_path: Path, fps: float
+) -> list[np.ndarray]:
+    """Sample frames at ~2 fps from a decrypted video file.
+
+    Standalone copy of ``ReprocessFaceMatchWorker._sample_frames``
+    so the single-clip path doesn't depend on the batch worker.
+    """
+    import cv2  # noqa: PLC0415
+
+    frames: list[np.ndarray] = []
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        cap.release()
+        return frames
+
+    actual_fps = max(1.0, cap.get(cv2.CAP_PROP_FPS) or fps)
+    sample_interval = max(
+        1, int(round(actual_fps / _FRAMES_PER_SECOND_SAMPLE))
+    )
+
+    frame_idx = 0
+    sampled = 0
+    while sampled < _MAX_FRAMES_PER_CLIP:
+        ok, frame = cap.read()
+        if not ok or frame is None:
+            break
+        if frame_idx % sample_interval == 0:
+            frames.append(frame)
+            sampled += 1
+        frame_idx += 1
+
+    cap.release()
+    return frames
+
+
+def _detect_and_match_standalone(
+    frames: list[np.ndarray], scope: TenantScope
+) -> set[int]:
+    """Run face detection + matching on sampled frames.
+
+    Standalone copy of ``ReprocessFaceMatchWorker._detect_and_match``
+    so the single-clip path doesn't depend on the batch worker.
+    """
+    from maugood.detection import DetectorConfig, detect as detector_detect  # noqa: PLC0415
+
+    matched_ids: set[int] = set()
+    cfg = DetectorConfig()
+
+    for frame in frames:
+        try:
+            results = detector_detect(frame, cfg)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "detect failed on frame: %s", type(exc).__name__
+            )
+            continue
+
+        for det in results:
+            emb = det.get("embedding")
+            if emb is None:
+                continue
+            probe = np.asarray(emb, dtype=np.float32)
+            mm = matcher_cache.match(scope, probe)
+            if mm is not None and mm.classification == "active":
+                matched_ids.add(mm.employee_id)
+
+    return matched_ids
 
 
 # Module-level singleton so status persists across requests.

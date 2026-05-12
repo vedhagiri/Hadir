@@ -142,190 +142,234 @@ class ClipWorker:
                     )
 
     def _finalize_clip(self, clip_data: dict) -> None:
-        """Assemble collected frames into an MP4 video using ffmpeg,
-        Fernet-encrypt it, persist to disk, and INSERT a
-        ``person_clips`` row.
+        """Encode the collected frames into an H.264 MP4, Fernet-encrypt
+        it, persist to disk, and INSERT a ``person_clips`` row.
 
-        Called from the clip worker thread — never blocks the reader.
+        Frames are already on disk in clip_data["tmpdir"] (a
+        TemporaryDirectory object). This method calls tmpdir.cleanup()
+        in its finally block so the disk space is freed after ffmpeg
+        finishes regardless of success or failure.
         """
 
-        from maugood.config import get_settings as _gs  # noqa: PLC0415
         import sqlalchemy as sa  # noqa: PLC0415
+        from maugood.config import get_settings as _gs  # noqa: PLC0415
         from maugood.db import person_clips as _pc  # noqa: PLC0415
 
         settings = _gs()
         if not settings.clip_save_enabled:
             return
 
-        frames: list = clip_data.get("frames", [])
-        start_ts: float = clip_data.get("start_ts", 0.0)
-        person_count: int = clip_data.get("person_count", 0)
-        fps: float = float(clip_data.get("fps", 10.0))
+        tmpdir = clip_data.get("tmpdir")       # TemporaryDirectory object
+        frame_count = int(clip_data.get("frame_count", 0))
+        start_ts = float(clip_data.get("start_ts", 0.0))
+        first_ts = float(clip_data.get("first_ts", 0.0))
+        last_ts = float(clip_data.get("last_ts", 0.0))
+        camera_fps = float(clip_data.get("fps", 25.0))
+        person_count = int(clip_data.get("person_count", 0))
         matched_employees: list[int] = clip_data.get("matched_employees", [])
 
-        if len(frames) < _MIN_CLIP_FRAMES:
-            logger.debug(
-                "clip too short (%d frames) skipping: camera=%s",
-                len(frames), self._camera_id,
-            )
-            return
-
-        first_ts: float = frames[0][0]
-        last_ts: float = frames[-1][0]
-        clip_start_dt = datetime.fromtimestamp(first_ts, tz=timezone.utc)
-        clip_end_dt = datetime.fromtimestamp(last_ts, tz=timezone.utc)
-        duration = last_ts - first_ts
-
-        # Build the file path.
-        # Structure: person_clips_storage_path / camera_{id} / {timestamp}.mp4
-        clip_dir = Path(settings.person_clips_storage_path) / f"camera_{self._camera_id}"
-        start_dt = datetime.fromtimestamp(start_ts, tz=timezone.utc)
-        filename = f"{start_dt.strftime('%Y-%m-%d_%H-%M-%S')}.mp4"
-        file_path = clip_dir / filename
-
-        plain_bytes: Optional[bytes] = None
         try:
-            clip_dir.mkdir(parents=True, exist_ok=True)
-
-            # Write frames as temp JPEGs and encode via ffmpeg for a
-            # reliable H.264 MP4 with a proper moov atom. The plain
-            # bytes are returned in-memory — ffmpeg writes to a temp
-            # file inside the tmpdir, never to the final path.
-            plain_bytes = self._encode_ffmpeg(frames, fps=fps)
-            if plain_bytes is None:
+            if tmpdir is None or frame_count < _MIN_CLIP_FRAMES:
+                logger.debug(
+                    "clip too short (%d frames) skipping: camera=%s",
+                    frame_count, self._camera_id,
+                )
                 return
 
-            encrypted = encrypt_bytes(plain_bytes)
-            file_path.write_bytes(encrypted)
+            # Compute actual FPS from the real wall-clock timestamps so
+            # playback duration exactly matches the recorded duration.
+            # Example: 7500 frames recorded over 300 s → fps = 25.0 →
+            # MP4 plays for 7500/25 = 300 s. Using camera-reported FPS
+            # here would be wrong when the delivery rate differed from
+            # the RTSP header value.
+            duration = last_ts - first_ts
+            if duration > 0.5 and frame_count >= 2:
+                actual_fps = frame_count / duration
+                actual_fps = max(0.5, min(actual_fps, 120.0))  # sane clamp
+            else:
+                actual_fps = camera_fps
 
-            # Save thumbnail (first frame) alongside the MP4.
+            clip_start_dt = datetime.fromtimestamp(first_ts, tz=timezone.utc)
+            clip_end_dt = datetime.fromtimestamp(last_ts, tz=timezone.utc)
+
+            clip_dir = (
+                Path(settings.person_clips_storage_path)
+                / f"camera_{self._camera_id}"
+            )
+            start_dt = datetime.fromtimestamp(start_ts, tz=timezone.utc)
+            filename = f"{start_dt.strftime('%Y-%m-%d_%H-%M-%S')}.mp4"
+            file_path = clip_dir / filename
             thumb_path = file_path.with_suffix(".thumb.jpg")
-            thumb_encrypted = encrypt_bytes(frames[0][1])
-            thumb_path.write_bytes(thumb_encrypted)
 
-            filesize = file_path.stat().st_size
-            logger.info(
-                "clip saved: camera=%s frames=%d "
-                "duration=%.1fs size=%d path=%s",
-                self._camera_id,
-                len(frames), duration, filesize, file_path,
-            )
+            filesize = 0
+            try:
+                clip_dir.mkdir(parents=True, exist_ok=True)
 
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "clip write failed: camera=%s reason=%s",
-                self._camera_id, type(exc).__name__,
-            )
-            file_path.unlink(missing_ok=True)
-            thumb_path.unlink(missing_ok=True)
-            return
-
-        clip_id: Optional[int] = None
-        try:
-            with self._engine.begin() as conn:
-                result = conn.execute(
-                    sa.insert(_pc).values(
-                        tenant_id=self._scope.tenant_id,
-                        camera_id=self._camera_id,
-                        employee_id=None,
-                        track_id=None,
-                        detection_event_id=None,
-                        clip_start=clip_start_dt,
-                        clip_end=clip_end_dt,
-                        duration_seconds=duration,
-                        file_path=str(file_path),
-                        filesize_bytes=filesize,
-                        frame_count=len(frames),
-                        person_count=person_count,
-                        matched_employees=matched_employees,
-                    )
+                # Frames are already in tmpdir — encode directly.
+                plain_bytes = self._encode_from_tmpdir(
+                    tmpdir_path=tmpdir.name,
+                    fps=actual_fps,
                 )
-                clip_id = result.inserted_primary_key[0] if result.inserted_primary_key else None  # type: ignore[arg-type]
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "clip INSERT failed: camera=%s reason=%s",
-                self._camera_id, type(exc).__name__,
-            )
+                if plain_bytes is None:
+                    return
 
-        # Face crop extraction is NOT triggered automatically — the
-        # user manually initiates it from the Face Crops tab. The clip
-        # row starts with face_crops_status='pending'.
+                encrypted = encrypt_bytes(plain_bytes)
+                file_path.write_bytes(encrypted)
 
-    def _encode_ffmpeg(
+                # Thumbnail: first frame already on disk.
+                # Use a glob so this works regardless of digit-width format
+                # (reader writes 8-digit, keep compatible with both).
+                thumb_srcs = sorted(Path(tmpdir.name).glob("frame_*.jpg"))
+                if thumb_srcs:
+                    thumb_encrypted = encrypt_bytes(thumb_srcs[0].read_bytes())
+                    thumb_path.write_bytes(thumb_encrypted)
+
+                filesize = file_path.stat().st_size
+                logger.info(
+                    "clip saved: camera=%s frames=%d fps=%.2f "
+                    "duration=%.1fs size=%d path=%s",
+                    self._camera_id,
+                    frame_count, actual_fps, duration, filesize, file_path,
+                )
+
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "clip write failed: camera=%s reason=%s",
+                    self._camera_id, type(exc).__name__,
+                )
+                file_path.unlink(missing_ok=True)
+                thumb_path.unlink(missing_ok=True)
+                return
+
+            clip_id: Optional[int] = None
+            try:
+                with self._engine.begin() as conn:
+                    result = conn.execute(
+                        sa.insert(_pc).values(
+                            tenant_id=self._scope.tenant_id,
+                            camera_id=self._camera_id,
+                            employee_id=None,
+                            track_id=None,
+                            detection_event_id=None,
+                            clip_start=clip_start_dt,
+                            clip_end=clip_end_dt,
+                            duration_seconds=duration,
+                            file_path=str(file_path),
+                            filesize_bytes=filesize,
+                            frame_count=frame_count,
+                            person_count=person_count,
+                            matched_employees=matched_employees,
+                        )
+                    )
+                    clip_id = (  # type: ignore[arg-type]
+                        result.inserted_primary_key[0]
+                        if result.inserted_primary_key
+                        else None
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "clip INSERT failed: camera=%s reason=%s",
+                    self._camera_id, type(exc).__name__,
+                )
+
+            # Trigger asynchronous face matching. Fire-and-forget daemon
+            # thread — never blocks the ClipWorker drain loop. Row starts
+            # with matched_status='pending' (server_default).
+            if clip_id is not None:
+                _trigger_face_match(clip_id, self._scope)
+
+        finally:
+            # Always free temp disk space, regardless of success/failure.
+            if tmpdir is not None:
+                try:
+                    tmpdir.cleanup()
+                except Exception:  # noqa: BLE001
+                    pass
+
+    def _encode_from_tmpdir(
         self,
-        frames: list[tuple[float, bytes]],
-        fps: float = 10.0,
+        tmpdir_path: str,
+        fps: float = 25.0,
     ) -> Optional[bytes]:
-        """Encode a list of ``(timestamp, jpeg_bytes)`` into an H.264 MP4
-        using ffmpeg.
+        """Encode frames already on disk in ``tmpdir_path`` into H.264 MP4.
 
-        Args:
-            frames: list of ``(timestamp, jpeg_bytes)`` tuples.
-            fps: playback framerate. Uses the camera's detected FPS
-                 when available; falls back to 10.0.
+        Frame files are named ``frame_000000.jpg``, ``frame_000001.jpg``,
+        etc. — as written by the reader thread. ffmpeg reads them via a
+        glob pattern; ``output.mp4`` is written to the same directory
+        (the glob only matches ``*.jpg`` so no collision).
 
-        Returns the plain MP4 bytes on success, or ``None`` on failure.
-        The output is written to a temporary file inside the temp dir
-        and read back into memory — no plaintext ever touches the
-        final output path.
+        The ``fps`` argument must be the actual frame rate computed from
+        real timestamps, not the camera-reported value, so that playback
+        duration matches recorded duration exactly.
         """
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Write each frame as a numbered JPEG file.
-            for i, (_ts, jpeg_bytes) in enumerate(frames):
-                frame_path = Path(tmpdir) / f"frame_{i:06d}.jpg"
-                frame_path.write_bytes(jpeg_bytes)
+        tmp_output = Path(tmpdir_path) / "output.mp4"
 
-            tmp_output = Path(tmpdir) / "output.mp4"
+        # -framerate: actual FPS derived from real wall-clock timestamps.
+        #   This is the key to correct playback duration: if 7500 frames
+        #   were captured over 300 s, fps=25 → MP4 plays for 300 s.
+        # -pattern_type glob -i '*.jpg': reads frame_NNNNNN.jpg in order.
+        # -c:v libx264 / -pix_fmt yuv420p: maximum browser compatibility.
+        # -crf 18: visually lossless at reasonable file size.
+        # -movflags +faststart: moov atom at front for browser streaming.
+        cmd = [
+            "ffmpeg", "-y",
+            "-framerate", f"{fps:.6f}",
+            "-pattern_type", "glob",
+            "-i", "*.jpg",
+            "-c:v", "libx264",
+            "-pix_fmt", "yuv420p",
+            "-preset", "medium",
+            "-crf", "18",
+            "-movflags", "+faststart",
+            str(tmp_output),
+        ]
 
-            # ffmpeg command: read the JPEG sequence and encode to H.264.
-            # -y: overwrite output without asking
-            # -framerate: matches the source camera FPS so playback speed
-            #   and timing match the original stream exactly
-            # -pattern_type glob -i '*.jpg': read all JPEGs in sequence
-            # -c:v libx264: H.264 video codec
-            # -pix_fmt yuv420p: ensure maximum compatibility
-            # -preset medium: good compression efficiency without
-            #   sacrificing encoding speed
-            # -crf 18: high quality (visually lossless), preserves
-            #   the original stream clarity
-            # -movflags +faststart: moov atom at front for streaming
-            cmd = [
-                "ffmpeg", "-y",
-                "-framerate", str(fps),
-                "-pattern_type", "glob",
-                "-i", "*.jpg",
-                "-c:v", "libx264",
-                "-pix_fmt", "yuv420p",
-                "-preset", "medium",
-                "-crf", "18",
-                "-movflags", "+faststart",
-                str(tmp_output),
-            ]
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            cwd=tmpdir_path,
+            timeout=300,  # 5 min — large clips take time to encode
+        )
 
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                cwd=tmpdir,
-                timeout=60,
+        if result.returncode != 0:
+            stderr = result.stderr.decode("utf-8", errors="replace")[:500]
+            logger.warning(
+                "ffmpeg failed: camera=%s fps=%.2f returncode=%d stderr=%s",
+                self._camera_id, fps, result.returncode, stderr,
+            )
+            return None
+
+        if not tmp_output.exists() or tmp_output.stat().st_size == 0:
+            logger.warning("ffmpeg output empty: camera=%s", self._camera_id)
+            return None
+
+        plain_bytes = tmp_output.read_bytes()
+        return plain_bytes if plain_bytes else None
+
+
+def _trigger_face_match(clip_id: int, scope: "TenantScope") -> None:
+    """Launch a fire-and-forget daemon thread to process face matching
+    for a single clip. Never blocks the caller — errors are logged at
+    WARNING, never raised.
+    """
+
+    def _run() -> None:
+        try:
+            from maugood.person_clips.reprocess import (  # noqa: PLC0415
+                process_single_clip,
+            )
+            process_single_clip(clip_id, scope)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "face-match trigger failed: clip=%s camera=%s",
+                clip_id, scope.tenant_id,
+                exc_info=True,
             )
 
-            if result.returncode != 0:
-                stderr = result.stderr.decode("utf-8", errors="replace")[:500]
-                logger.warning(
-                    "ffmpeg failed: camera=%s returncode=%d stderr=%s",
-                    self._camera_id, result.returncode, stderr,
-                )
-                return None
-
-            if not tmp_output.exists() or tmp_output.stat().st_size == 0:
-                logger.warning(
-                    "ffmpeg output empty: camera=%s", self._camera_id,
-                )
-                return None
-
-            plain_bytes = tmp_output.read_bytes()
-            if len(plain_bytes) == 0:
-                return None
-
-            return plain_bytes
+    t = threading.Thread(
+        target=_run,
+        name=f"facematch-{clip_id}",
+        daemon=True,
+    )
+    t.start()

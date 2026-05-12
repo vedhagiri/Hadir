@@ -77,6 +77,15 @@ class _StubAnalyzer:
         self._i += 1
         return out
 
+    def detect_and_count(self, frame) -> "tuple[list[Detection], int]":
+        """Delegates to ``detect`` for face detections; person_count=0 so
+        existing tests remain purely face-detection driven."""
+        return self.detect(frame), self.detect_persons(frame)
+
+    def detect_persons(self, _frame) -> int:
+        """Stub returns 0 — capture tests drive clip presence via faces."""
+        return 0
+
 
 @pytest.fixture
 def clean_capture(admin_engine):  # type: ignore[no-untyped-def]
@@ -1344,6 +1353,12 @@ def test_detection_enabled_short_circuits_detect_call(
         def detect(self, _frame):  # type: ignore[no-untyped-def]
             detect_call_count["n"] += 1
             return [Detection(bbox=Bbox(x=10, y=10, w=80, h=80), det_score=0.9)]
+
+        def detect_and_count(self, frame):  # type: ignore[no-untyped-def]
+            return self.detect(frame), 0
+
+        def detect_persons(self, _frame) -> int:  # type: ignore[no-untyped-def]
+            return 0
 
         def embed_crop(self, _crop):  # type: ignore[no-untyped-def]
             return None

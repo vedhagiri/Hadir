@@ -81,6 +81,7 @@ def _row_to_out(row, name_map: dict[int, str] | None = None) -> PersonClipOut:
         person_count=int(getattr(row, "person_count", 0) or 0),
         matched_employees=matched,
         matched_employee_names=names,
+        matched_status=str(getattr(row, "matched_status", "pending") or "pending"),
         created_at=row.created_at,
     )
 

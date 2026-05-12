@@ -2118,6 +2118,12 @@ person_clips = Table(
         server_default="[]",
     ),
     Column(
+        "matched_status",
+        Text,
+        nullable=False,
+        server_default="pending",
+    ),
+    Column(
         "created_at",
         DateTime(timezone=True),
         nullable=False,

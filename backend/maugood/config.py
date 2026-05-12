@@ -212,8 +212,6 @@ class Settings(BaseSettings):
     # Minimum quality score threshold for a face crop to be saved (0-1).
     # Crops below this threshold are discarded as too blurry/low-res.
     face_crops_min_quality: float = 0.15
-    # Maximum duration of any single clip (safety limit in seconds).
-    clip_max_duration_seconds: float = 30.0
     # Whether clip recording is enabled globally.
     clip_save_enabled: bool = True
 
