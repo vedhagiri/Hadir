@@ -26,6 +26,10 @@ class PersonClipOut(BaseModel):
     matched_employees: list[int] = []
     matched_employee_names: list[str] = []
     matched_status: str = "pending"
+    person_start: Optional[datetime] = None
+    person_end: Optional[datetime] = None
+    face_matching_duration_ms: Optional[int] = None
+    face_matching_progress: int = 0
     created_at: datetime
 
 

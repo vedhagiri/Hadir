@@ -123,11 +123,11 @@ class ReprocessFaceMatchWorker:
 
     def _sample_frames(
         self, video_path: Path, fps: float
-    ) -> list[np.ndarray]:
+    ) -> tuple[list[np.ndarray], int, float]:
         """Open a decrypted video file and sample frames at ~2 fps.
 
-        Uses OpenCV ``VideoCapture``. Returns a list of BGR frames
-        as numpy arrays. Caps at ``_MAX_FRAMES_PER_CLIP``.
+        Uses OpenCV ``VideoCapture``. Returns ``(frames, sample_interval, actual_fps)``.
+        Caps at ``_MAX_FRAMES_PER_CLIP``.
         """
         import cv2  # noqa: PLC0415
 
@@ -135,7 +135,7 @@ class ReprocessFaceMatchWorker:
         cap = cv2.VideoCapture(str(video_path))
         if not cap.isOpened():
             cap.release()
-            return frames
+            return frames, 1, fps
 
         actual_fps = max(1.0, cap.get(cv2.CAP_PROP_FPS) or fps)
         sample_interval = max(1, int(round(actual_fps / _FRAMES_PER_SECOND_SAMPLE)))
@@ -152,21 +152,23 @@ class ReprocessFaceMatchWorker:
             frame_idx += 1
 
         cap.release()
-        return frames
+        return frames, sample_interval, actual_fps
 
     def _detect_and_match(
         self, frames: list[np.ndarray], scope: TenantScope
-    ) -> set[int]:
+    ) -> tuple[set[int], int | None, int | None]:
         """Run face detection + matching on sampled frames.
 
-        Returns a set of matched employee IDs across all frames.
+        Returns ``(matched_ids, first_detection_sample_idx, last_detection_sample_idx)``.
         """
         from maugood.detection import DetectorConfig, detect as detector_detect  # noqa: PLC0415
 
         matched_ids: set[int] = set()
+        first_idx: int | None = None
+        last_idx: int | None = None
         cfg = DetectorConfig()
 
-        for frame in frames:
+        for i, frame in enumerate(frames):
             if self._stop.is_set():
                 break
             try:
@@ -177,6 +179,7 @@ class ReprocessFaceMatchWorker:
                 )
                 continue
 
+            found = False
             for det in results:
                 emb = det.get("embedding")
                 if emb is None:
@@ -185,8 +188,14 @@ class ReprocessFaceMatchWorker:
                 mm = matcher_cache.match(scope, probe)
                 if mm is not None and mm.classification == "active":
                     matched_ids.add(mm.employee_id)
+                    found = True
 
-        return matched_ids
+            if found:
+                if first_idx is None:
+                    first_idx = i
+                last_idx = i
+
+        return matched_ids, first_idx, last_idx
 
     def _run(
         self,
@@ -238,6 +247,8 @@ class ReprocessFaceMatchWorker:
                 person_clips.c.file_path,
                 person_clips.c.matched_employees,
                 person_clips.c.clip_start,
+                person_clips.c.duration_seconds,
+                person_clips.c.frame_count,
             ).where(person_clips.c.tenant_id == scope.tenant_id)
 
             if mode == "skip_existing":
@@ -325,7 +336,9 @@ class ReprocessFaceMatchWorker:
                 try:
                     # Detect camera FPS from stored metadata or fallback.
                     camera_fps = 10.0
-                    frames = self._sample_frames(tmp_path, camera_fps)
+                    frames, sample_interval, actual_fps = self._sample_frames(
+                        tmp_path, camera_fps
+                    )
 
                     if not frames:
                         self._handle_error(
@@ -335,7 +348,38 @@ class ReprocessFaceMatchWorker:
                         self._set_status(processed_clips=processed)
                         continue
 
-                    matched_ids = self._detect_and_match(frames, scope)
+                    clip_start: datetime = row.clip_start
+                    duration_seconds: float = float(getattr(row, "duration_seconds", 0) or 0)
+                    frame_count: int = int(getattr(row, "frame_count", 0) or 0)
+                    matching_start_ts = time.time()
+
+                    matched_ids, first_sample_idx, last_sample_idx = (
+                        self._detect_and_match(frames, scope)
+                    )
+
+                    # Compute person_start/person_end from frame indices.
+                    person_start: Optional[datetime] = None
+                    person_end: Optional[datetime] = None
+                    if (
+                        first_sample_idx is not None
+                        and last_sample_idx is not None
+                        and frame_count > 0
+                        and duration_seconds > 0
+                    ):
+                        time_per_frame = duration_seconds / frame_count
+                        first_orig_frame = first_sample_idx * sample_interval
+                        last_orig_frame = last_sample_idx * sample_interval
+                        from datetime import timedelta  # noqa: PLC0415
+                        person_start = clip_start + timedelta(
+                            seconds=first_orig_frame * time_per_frame
+                        )
+                        person_end = clip_start + timedelta(
+                            seconds=last_orig_frame * time_per_frame
+                        )
+
+                    matching_duration_ms = int(
+                        (time.time() - matching_start_ts) * 1000
+                    )
 
                 finally:
                     tmp_path.unlink(missing_ok=True)
@@ -358,7 +402,13 @@ class ReprocessFaceMatchWorker:
                             person_clips.c.id == clip_id,
                             person_clips.c.tenant_id == scope.tenant_id,
                         )
-                        .values(matched_employees=matched_list)
+                        .values(
+                            matched_employees=matched_list,
+                            person_start=person_start,
+                            person_end=person_end,
+                            face_matching_duration_ms=matching_duration_ms,
+                            face_matching_progress=100,
+                        )
                     )
             except Exception as exc:  # noqa: BLE001
                 self._handle_error(
@@ -446,6 +496,9 @@ def process_single_clip(clip_id: int, scope: TenantScope) -> None:
                     sa_select(
                         person_clips.c.id,
                         person_clips.c.file_path,
+                        person_clips.c.clip_start,
+                        person_clips.c.duration_seconds,
+                        person_clips.c.frame_count,
                     ).where(
                         person_clips.c.id == clip_id,
                         person_clips.c.tenant_id == scope.tenant_id,
@@ -465,11 +518,20 @@ def process_single_clip(clip_id: int, scope: TenantScope) -> None:
                     "single-clip match: clip %s file missing (tenant=%s)",
                     clip_id, scope.tenant_id,
                 )
-                _set_matched_status(engine, scope, clip_id, "failed")
+                _update_clip_face_matching(engine, scope, clip_id, matched_status="failed")
                 return
 
-            # Mark as processing.
-            _set_matched_status(engine, scope, clip_id, "processing")
+            clip_start: datetime = row.clip_start
+            duration_seconds: float = float(row.duration_seconds or 0)
+            frame_count: int = int(row.frame_count or 0)
+            matching_start_ts = time.time()
+
+            # Mark as processing with progress=0.
+            _update_clip_face_matching(
+                engine, scope, clip_id,
+                matched_status="processing",
+                progress=0,
+            )
 
             # Decrypt to temp file.
             encrypted = Path(file_path_str).read_bytes()
@@ -481,21 +543,54 @@ def process_single_clip(clip_id: int, scope: TenantScope) -> None:
 
             try:
                 camera_fps = 10.0
-                frames = _sample_frames_standalone(tmp_path, camera_fps)
+                frames, sample_interval, actual_fps = _sample_frames_standalone(
+                    tmp_path, camera_fps
+                )
 
                 if not frames:
                     logger.debug(
                         "single-clip match: no frames extracted from clip %s",
                         clip_id,
                     )
-                    _set_matched_status(engine, scope, clip_id, "failed")
+                    _update_clip_face_matching(
+                        engine, scope, clip_id, matched_status="failed"
+                    )
                     return
 
-                matched_ids = _detect_and_match_standalone(
-                    frames, scope
+                # Update progress to 50 after frame extraction.
+                _update_clip_face_matching(
+                    engine, scope, clip_id, progress=50
+                )
+
+                matched_ids, first_sample_idx, last_sample_idx = (
+                    _detect_and_match_standalone(frames, scope)
                 )
             finally:
                 tmp_path.unlink(missing_ok=True)
+
+            # Compute person_start/person_end from frame indices.
+            person_start: Optional[datetime] = None
+            person_end: Optional[datetime] = None
+            if (
+                first_sample_idx is not None
+                and last_sample_idx is not None
+                and frame_count > 0
+                and duration_seconds > 0
+            ):
+                time_per_frame = duration_seconds / frame_count
+                first_orig_frame = first_sample_idx * sample_interval
+                last_orig_frame = last_sample_idx * sample_interval
+                from datetime import timedelta  # noqa: PLC0415
+                person_start = clip_start + timedelta(
+                    seconds=first_orig_frame * time_per_frame
+                )
+                person_end = clip_start + timedelta(
+                    seconds=last_orig_frame * time_per_frame
+                )
+
+            matching_duration_ms = int(
+                (time.time() - matching_start_ts) * 1000
+            )
 
             # Update the DB row.
             matched_list = sorted(matched_ids)
@@ -509,6 +604,10 @@ def process_single_clip(clip_id: int, scope: TenantScope) -> None:
                     .values(
                         matched_employees=matched_list,
                         matched_status="processed",
+                        person_start=person_start,
+                        person_end=person_end,
+                        face_matching_duration_ms=matching_duration_ms,
+                        face_matching_progress=100,
                     )
                 )
 
@@ -530,15 +629,26 @@ def process_single_clip(clip_id: int, scope: TenantScope) -> None:
                 clip_id, scope.tenant_id, type(exc).__name__,
             )
             try:
-                _set_matched_status(engine, scope, clip_id, "failed")
+                _update_clip_face_matching(engine, scope, clip_id, matched_status="failed")
             except Exception:  # noqa: BLE001
                 pass
 
 
-def _set_matched_status(
-    engine, scope: TenantScope, clip_id: int, status: str
+def _update_clip_face_matching(
+    engine,
+    scope: TenantScope,
+    clip_id: int,
+    matched_status: Optional[str] = None,
+    progress: Optional[int] = None,
 ) -> None:
-    """Update just the ``matched_status`` column for a clip."""
+    """Update face-matching columns for a clip."""
+    values: dict[str, Any] = {}
+    if matched_status is not None:
+        values["matched_status"] = matched_status
+    if progress is not None:
+        values["face_matching_progress"] = progress
+    if not values:
+        return
     with engine.begin() as conn:
         conn.execute(
             sa_update(person_clips)
@@ -546,17 +656,19 @@ def _set_matched_status(
                 person_clips.c.id == clip_id,
                 person_clips.c.tenant_id == scope.tenant_id,
             )
-            .values(matched_status=status)
+            .values(**values)
         )
 
 
 def _sample_frames_standalone(
     video_path: Path, fps: float
-) -> list[np.ndarray]:
+) -> tuple[list[np.ndarray], int, float]:
     """Sample frames at ~2 fps from a decrypted video file.
 
     Standalone copy of ``ReprocessFaceMatchWorker._sample_frames``
     so the single-clip path doesn't depend on the batch worker.
+
+    Returns ``(frames, sample_interval, actual_fps)``.
     """
     import cv2  # noqa: PLC0415
 
@@ -564,7 +676,7 @@ def _sample_frames_standalone(
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         cap.release()
-        return frames
+        return frames, 1, fps
 
     actual_fps = max(1.0, cap.get(cv2.CAP_PROP_FPS) or fps)
     sample_interval = max(
@@ -583,23 +695,27 @@ def _sample_frames_standalone(
         frame_idx += 1
 
     cap.release()
-    return frames
+    return frames, sample_interval, actual_fps
 
 
 def _detect_and_match_standalone(
-    frames: list[np.ndarray], scope: TenantScope
-) -> set[int]:
+    frames: list[np.ndarray], scope: TenantScope,
+) -> tuple[set[int], int | None, int | None]:
     """Run face detection + matching on sampled frames.
 
     Standalone copy of ``ReprocessFaceMatchWorker._detect_and_match``
     so the single-clip path doesn't depend on the batch worker.
+
+    Returns ``(matched_ids, first_detection_sample_idx, last_detection_sample_idx)``.
     """
     from maugood.detection import DetectorConfig, detect as detector_detect  # noqa: PLC0415
 
     matched_ids: set[int] = set()
+    first_idx: int | None = None
+    last_idx: int | None = None
     cfg = DetectorConfig()
 
-    for frame in frames:
+    for i, frame in enumerate(frames):
         try:
             results = detector_detect(frame, cfg)
         except Exception as exc:  # noqa: BLE001
@@ -608,6 +724,7 @@ def _detect_and_match_standalone(
             )
             continue
 
+        found = False
         for det in results:
             emb = det.get("embedding")
             if emb is None:
@@ -616,8 +733,14 @@ def _detect_and_match_standalone(
             mm = matcher_cache.match(scope, probe)
             if mm is not None and mm.classification == "active":
                 matched_ids.add(mm.employee_id)
+                found = True
 
-    return matched_ids
+        if found:
+            if first_idx is None:
+                first_idx = i
+            last_idx = i
+
+    return matched_ids, first_idx, last_idx
 
 
 # Module-level singleton so status persists across requests.

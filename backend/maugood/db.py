@@ -2124,6 +2124,27 @@ person_clips = Table(
         server_default="pending",
     ),
     Column(
+        "person_start",
+        DateTime(timezone=True),
+        nullable=True,
+    ),
+    Column(
+        "person_end",
+        DateTime(timezone=True),
+        nullable=True,
+    ),
+    Column(
+        "face_matching_duration_ms",
+        Integer,
+        nullable=True,
+    ),
+    Column(
+        "face_matching_progress",
+        Integer,
+        nullable=False,
+        server_default="0",
+    ),
+    Column(
         "created_at",
         DateTime(timezone=True),
         nullable=False,

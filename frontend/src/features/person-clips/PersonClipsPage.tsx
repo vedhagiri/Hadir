@@ -422,6 +422,11 @@ function ClipCard({
   const approxFps = clip.duration_seconds > 0 ? Math.round(clip.frame_count / clip.duration_seconds) : 0;
   const isMatched = matchedCount > 0;
   const hasUnknown = unknownCount > 0;
+  const matchProgress = clip.face_matching_progress ?? 0;
+  const isMatching = matchProgress > 0 && matchProgress < 100;
+  const matchDuration = clip.face_matching_duration_ms;
+  const personStart = clip.person_start ? new Date(clip.person_start) : null;
+  const personEnd = clip.person_end ? new Date(clip.person_end) : null;
 
   useEffect(() => {
     return () => {
@@ -563,6 +568,38 @@ function ClipCard({
         )}
       </div>
 
+      {/* Face matching progress bar */}
+      {isMatching && (
+        <div
+          style={{
+            padding: "6px 12px 0",
+          }}
+        >
+          <div
+            style={{
+              width: "100%",
+              height: 4,
+              background: "rgba(0,0,0,0.06)",
+              borderRadius: 2,
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                width: `${Math.max(2, matchProgress)}%`,
+                height: "100%",
+                background: "var(--accent)",
+                borderRadius: 2,
+                transition: "width 0.5s ease",
+              }}
+            />
+          </div>
+          <span style={{ fontSize: 9, color: "var(--text-secondary)", marginTop: 2, display: "block" }}>
+            Matching {matchProgress}%
+          </span>
+        </div>
+      )}
+
       {/* Header row: Camera name + Event ID */}
       <div
         style={{
@@ -578,33 +615,44 @@ function ClipCard({
         >
           {clip.camera_name}
         </span>
-        <span
+          <span
+            style={{
+              fontSize: 10,
+              color: "var(--text-secondary)",
+              fontFamily: "var(--font-mono, monospace)",
+              letterSpacing: "0.3px",
+            }}
+          >
+            #{clip.id}
+          </span>
+        </div>
+
+        {/* Timestamp + duration row */}
+        <div
           style={{
-            fontSize: 10,
+            padding: "0 12px 8px",
+            fontSize: 11,
             color: "var(--text-secondary)",
-            fontFamily: "var(--font-mono, monospace)",
-            letterSpacing: "0.3px",
+            display: "flex",
+            gap: 12,
+            alignItems: "center",
+            flexWrap: "wrap",
           }}
         >
-          #{clip.id}
-        </span>
-      </div>
-
-      {/* Timestamp + duration row */}
-      <div
-        style={{
-          padding: "0 12px 8px",
-          fontSize: 11,
-          color: "var(--text-secondary)",
-          display: "flex",
-          gap: 12,
-          alignItems: "center",
-        }}
-      >
-        <span>{dateStr} {hourStr}</span>
-        <span style={{ opacity: 0.4 }}>|</span>
-        <span>{fmtDuration(clip.duration_seconds)}</span>
-      </div>
+          <span>{dateStr} {hourStr}</span>
+          <span style={{ opacity: 0.4 }}>|</span>
+          <span>{fmtDuration(clip.duration_seconds)}</span>
+          {personStart && personEnd && (
+            <>
+              <span style={{ opacity: 0.4 }}>|</span>
+              <span>
+                Person {personStart.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+                &ndash;
+                {personEnd.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            </>
+          )}
+        </div>
 
       {/* Separator */}
       <div style={{ height: 1, background: "var(--border)", margin: "0 12px" }} />
@@ -671,11 +719,11 @@ function ClipCard({
           <div
             style={{
               fontSize: 10,
-              color: "var(--text-secondary)",
+              color: isMatching ? "var(--accent)" : "var(--text-secondary)",
               marginTop: 4,
             }}
           >
-            {t("personClips.pendingMatch")}
+            {isMatching ? "Matching…" : t("personClips.pendingMatch")}
           </div>
         )}
       </div>
@@ -710,9 +758,15 @@ function ClipCard({
               <span>{approxFps} fps</span>
             </>
           )}
+          {matchDuration !== null && matchDuration !== undefined && (
+            <>
+              <span style={{ opacity: 0.3 }}>·</span>
+              <span>{matchDuration < 1000 ? `${matchDuration}ms` : `${(matchDuration / 1000).toFixed(1)}s`}</span>
+            </>
+          )}
         </div>
         <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-          {isMatched && (
+          {matchProgress >= 100 && isMatched && (
             <span
               style={{
                 fontSize: 9,

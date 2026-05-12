@@ -15,6 +15,11 @@ export interface PersonClipOut {
   person_count: number;
   matched_employees: number[];
   matched_employee_names: string[];
+  matched_status: string;
+  person_start: string | null;
+  person_end: string | null;
+  face_matching_duration_ms: number | null;
+  face_matching_progress: number;
   created_at: string;
 }
 
