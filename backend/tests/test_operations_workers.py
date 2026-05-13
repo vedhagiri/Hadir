@@ -59,11 +59,14 @@ def _make_worker(admin_engine: Engine, *, camera_id: int = 999_001) -> CaptureWo
         def detect(self, frame):  # type: ignore[no-untyped-def]
             return []
 
-        def detect_and_count(self, frame) -> "tuple[list, int]":  # type: ignore[no-untyped-def]
-            return [], 0
+        def detect_and_count(self, frame) -> "tuple[list, int, list]":  # type: ignore[no-untyped-def]
+            return [], 0, []
 
         def detect_persons(self, frame) -> int:  # type: ignore[no-untyped-def]
             return 0
+
+        def detect_person_boxes(self, frame) -> list:  # type: ignore[no-untyped-def]
+            return []
 
         def embed_crop(self, crop):  # type: ignore[no-untyped-def]
             return None

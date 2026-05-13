@@ -30,6 +30,15 @@ export function usePersonClips(
   if (filters.employee_id !== null) params.set("employee_id", String(filters.employee_id));
   if (filters.start) params.set("start", filters.start);
   if (filters.end) params.set("end", filters.end);
+  if (filters.detection_source !== "all") {
+    params.set("detection_source", filters.detection_source);
+  }
+  if (filters.matched_status !== null) {
+    params.set("matched_status", filters.matched_status);
+  }
+  if (filters.recording_status !== null) {
+    params.set("recording_status", filters.recording_status);
+  }
   params.set("page", String(filters.page));
   params.set("page_size", String(filters.page_size));
   const path = `/api/person-clips?${params.toString()}`;
@@ -37,7 +46,22 @@ export function usePersonClips(
     queryKey: [...LIST_KEY, filters],
     queryFn: () => api<PersonClipListResponse>(path),
     staleTime: 10 * 1000,
-    refetchInterval: 15_000,
+    // Migration 0054 / 0055 — speed up polling while any clip is
+    // in-flight so the recording→finalizing→completed transitions
+    // surface promptly. ``finalizing`` rows can take real wall-clock
+    // minutes to encode for long native-resolution clips, so faster
+    // polling is what makes the "Encoding…" pill flip to "Play" the
+    // moment the encode lands.
+    refetchInterval: (q) => {
+      const data = q.state.data;
+      if (!data) return 15_000;
+      const anyInFlight = data.items.some(
+        (c) =>
+          c.recording_status === "recording" ||
+          c.recording_status === "finalizing",
+      );
+      return anyInFlight ? 5_000 : 15_000;
+    },
     refetchIntervalInBackground: false,
   });
 }

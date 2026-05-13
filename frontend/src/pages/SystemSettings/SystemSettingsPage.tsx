@@ -15,17 +15,24 @@ import { ApiError } from "../../api/client";
 import { ModalShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
 import {
+  useClipEncodingConfig,
   useDetectionConfig,
+  usePutClipEncodingConfig,
   usePutDetectionConfig,
   useTrackerConfig,
   usePutTrackerConfig,
 } from "./hooks";
 import {
+  CLIP_ENCODING_DEFAULTS,
   DETECTION_DEFAULTS,
   DET_SIZE_OPTIONS,
+  RESOLUTION_OPTIONS,
   TRACKER_DEFAULTS,
+  X264_PRESETS,
+  type ClipEncodingConfig,
   type DetectionConfig,
   type TrackerConfig,
+  type X264Preset,
 } from "./types";
 
 export function SystemSettingsPage() {
@@ -42,6 +49,8 @@ export function SystemSettingsPage() {
       <DetectionCard />
       <div style={{ height: 16 }} />
       <TrackerCard />
+      <div style={{ height: 16 }} />
+      <ClipEncodingCard />
     </>
   );
 }
@@ -334,6 +343,187 @@ function TrackerCard() {
         <ConfirmModal
           title={t("systemSettings.resetConfirm.title")}
           message={t("systemSettings.tracker.resetConfirm")}
+          onConfirm={onReset}
+          onCancel={() => setConfirmReset(false)}
+          confirmLabel={t("common.reset")}
+          cancelLabel={t("common.cancel")}
+        />
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Clip encoding card (Phase C — migration 0052)
+
+function ClipEncodingCard() {
+  const { t } = useTranslation();
+  const remote = useClipEncodingConfig();
+  const put = usePutClipEncodingConfig();
+  const [draft, setDraft] = useState<ClipEncodingConfig>(
+    CLIP_ENCODING_DEFAULTS,
+  );
+  const [toast, setToast] = useState<string | null>(null);
+  const [confirmReset, setConfirmReset] = useState(false);
+
+  useEffect(() => {
+    if (remote.data) setDraft(remote.data);
+  }, [remote.data]);
+
+  const dirty = JSON.stringify(draft) !== JSON.stringify(remote.data ?? {});
+
+  const onSave = async () => {
+    setToast(null);
+    try {
+      await put.mutateAsync(draft);
+      setToast(t("systemSettings.savedToast") as string);
+      setTimeout(() => setToast(null), 4000);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setToast(formatApiError(err, t));
+      } else {
+        setToast(t("common.errorGeneric") as string);
+      }
+    }
+  };
+
+  const onReset = () => {
+    setDraft(CLIP_ENCODING_DEFAULTS);
+    setConfirmReset(false);
+  };
+
+  return (
+    <div className="card">
+      <div className="card-head">
+        <h3 className="card-title">
+          {t("systemSettings.clipEncoding.title")}
+        </h3>
+        <p className="card-sub">
+          {t("systemSettings.clipEncoding.subtitle")}
+        </p>
+      </div>
+      <div
+        style={{
+          padding: 16,
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+        }}
+      >
+        <FieldGroup
+          label={t("systemSettings.clipEncoding.chunkDuration.label")}
+          hint={t("systemSettings.clipEncoding.chunkDuration.hint")}
+        >
+          <SliderRow
+            value={draft.chunk_duration_sec}
+            min={60}
+            max={600}
+            step={10}
+            displayDigits={0}
+            onChange={(v) =>
+              setDraft({
+                ...draft,
+                chunk_duration_sec: clampInt(v, 60, 600),
+              })
+            }
+          />
+        </FieldGroup>
+
+        <FieldGroup
+          label={t("systemSettings.clipEncoding.crf.label")}
+          hint={t("systemSettings.clipEncoding.crf.hint")}
+        >
+          <SliderRow
+            value={draft.video_crf}
+            min={18}
+            max={30}
+            step={1}
+            displayDigits={0}
+            onChange={(v) =>
+              setDraft({
+                ...draft,
+                video_crf: clampInt(v, 18, 30),
+              })
+            }
+          />
+        </FieldGroup>
+
+        <FieldGroup
+          label={t("systemSettings.clipEncoding.preset.label")}
+          hint={t("systemSettings.clipEncoding.preset.hint")}
+        >
+          <select
+            value={draft.video_preset}
+            onChange={(e) =>
+              setDraft({
+                ...draft,
+                video_preset: e.target.value as X264Preset,
+              })
+            }
+            style={inputStyle}
+          >
+            {X264_PRESETS.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+        </FieldGroup>
+
+        <FieldGroup
+          label={t("systemSettings.clipEncoding.resolution.label")}
+          hint={t("systemSettings.clipEncoding.resolution.hint")}
+        >
+          <select
+            value={
+              draft.resolution_max_height == null
+                ? "native"
+                : String(draft.resolution_max_height)
+            }
+            onChange={(e) =>
+              setDraft({
+                ...draft,
+                resolution_max_height:
+                  e.target.value === "native"
+                    ? null
+                    : parseInt(e.target.value, 10),
+              })
+            }
+            style={inputStyle}
+          >
+            <option value="native">
+              {t("systemSettings.clipEncoding.resolution.native")}
+            </option>
+            {RESOLUTION_OPTIONS.filter((h) => h != null).map((h) => (
+              <option key={String(h)} value={String(h)}>
+                {h}p
+              </option>
+            ))}
+          </select>
+        </FieldGroup>
+
+        <ToggleRow
+          checked={draft.keep_chunks_after_merge}
+          onChange={(v) =>
+            setDraft({ ...draft, keep_chunks_after_merge: v })
+          }
+          label={t("systemSettings.clipEncoding.keepChunks.label")}
+          hint={t("systemSettings.clipEncoding.keepChunks.hint")}
+        />
+
+        <CardFooter
+          dirty={dirty}
+          onSave={onSave}
+          saving={put.isPending}
+          onReset={() => setConfirmReset(true)}
+          toast={toast}
+        />
+      </div>
+
+      {confirmReset && (
+        <ConfirmModal
+          title={t("systemSettings.resetConfirm.title")}
+          message={t("systemSettings.clipEncoding.resetConfirm")}
           onConfirm={onReset}
           onCancel={() => setConfirmReset(false)}
           confirmLabel={t("common.reset")}

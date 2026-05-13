@@ -139,12 +139,24 @@ class CaptureManager:
         )
 
         spawn_count = 0
+        abandoned_total = 0
         for tenant_id, schema in tenants_to_scan:
+            # Migration 0054 — sweep any person_clips rows left as
+            # 'recording' by an unclean shutdown. We do this BEFORE
+            # spawning workers so a worker that immediately starts
+            # recording can't race with the sweep and lose its row.
+            abandoned_total += self._sweep_abandoned_recordings(
+                tenant_id=tenant_id, schema=schema
+            )
             spawn_count += self._auto_start_for_tenant(
                 tenant_id=tenant_id, schema=schema
             )
 
-        logger.info("capture manager started with %d worker(s)", spawn_count)
+        logger.info(
+            "capture manager started with %d worker(s) "
+            "(swept %d abandoned recording rows)",
+            spawn_count, abandoned_total,
+        )
 
         # P28.5b: start the periodic reconcile tick. The scheduler is
         # daemon-threaded so a SIGTERM unwinds cleanly. ``coalesce=True``
@@ -236,6 +248,8 @@ class CaptureManager:
         detection_config: Optional[dict[str, Any]] = None,
         detection_enabled: bool = True,
         clip_recording_enabled: bool = True,
+        clip_detection_source: str = "body",
+        clip_encoding_config: Optional[dict[str, Any]] = None,
         schema: Optional[str] = None,
     ) -> bool:
         """Start a worker for ``(tenant_id, camera_id)`` with the given
@@ -278,6 +292,8 @@ class CaptureManager:
                 detection_config=detection_config,
                 detection_enabled=detection_enabled,
                 clip_recording_enabled=clip_recording_enabled,
+                clip_detection_source=clip_detection_source,
+                clip_encoding_config=clip_encoding_config,
             )
             worker.start()
         except Exception as exc:  # noqa: BLE001
@@ -393,6 +409,29 @@ class CaptureManager:
             return False
         return worker.is_preview_fresh(max_age_s=max_age_s)
 
+    def get_persons_preview(
+        self, tenant_id: int, camera_id: int
+    ) -> Optional[tuple[bytes, float]]:
+        """Migration 0055 — persons-only preview slot. Served by the
+        live-persons.mjpg endpoint to the Watch-Live modal on the
+        Person Clips page. Same tenant scoping as ``get_preview``.
+        """
+
+        with self._lock:
+            worker = self._workers.get((tenant_id, camera_id))
+        if worker is None:
+            return None
+        return worker.get_latest_persons_jpeg()
+
+    def is_persons_preview_fresh(
+        self, tenant_id: int, camera_id: int, *, max_age_s: float = 5.0
+    ) -> bool:
+        with self._lock:
+            worker = self._workers.get((tenant_id, camera_id))
+        if worker is None:
+            return False
+        return worker.is_persons_preview_fresh(max_age_s=max_age_s)
+
     def get_worker_stats(
         self, tenant_id: int, camera_id: int
     ) -> Optional[dict]:
@@ -496,6 +535,7 @@ class CaptureManager:
                             cameras_table.c.worker_enabled,
                             cameras_table.c.detection_enabled,
                             cameras_table.c.clip_recording_enabled,
+                            cameras_table.c.clip_detection_source,
                             cameras_table.c.capture_config,
                         ).where(
                             cameras_table.c.tenant_id == tenant_id,
@@ -530,8 +570,9 @@ class CaptureManager:
             return False
 
         # Reuse the existing tenant_settings detection / tracker
-        # config so a restart doesn't drop the tenant's choices.
-        tracker_cfg, detection_cfg = self._read_tenant_configs(
+        # / clip-encoding config so a restart doesn't drop the
+        # tenant's choices.
+        tracker_cfg, detection_cfg, encoding_cfg = self._read_tenant_configs(
             tenant_id=tenant_id, schema=schema
         )
 
@@ -545,6 +586,10 @@ class CaptureManager:
             detection_config=detection_cfg,
             detection_enabled=bool(cam_row.detection_enabled),
             clip_recording_enabled=bool(cam_row.clip_recording_enabled),
+            clip_detection_source=str(
+                getattr(cam_row, "clip_detection_source", "body") or "body"
+            ),
+            clip_encoding_config=encoding_cfg,
             schema=schema,
         )
 
@@ -644,10 +689,11 @@ class CaptureManager:
 
     def _read_tenant_configs(
         self, *, tenant_id: int, schema: str
-    ) -> tuple[Optional[dict], Optional[dict]]:
-        """Read the tenant's ``tracker_config`` + ``detection_config`` for
-        a fresh worker spawn. Returns ``(None, None)`` on failure so the
-        worker uses its built-in defaults."""
+    ) -> tuple[Optional[dict], Optional[dict], Optional[dict]]:
+        """Read the tenant's ``tracker_config``, ``detection_config``,
+        and ``clip_encoding_config`` for a fresh worker spawn. Returns
+        ``(None, None, None)`` on failure so the worker uses its
+        built-in defaults."""
 
         try:
             from maugood.db import tenant_context  # noqa: PLC0415
@@ -659,16 +705,55 @@ class CaptureManager:
                         select(
                             ts_table.c.tracker_config,
                             ts_table.c.detection_config,
+                            ts_table.c.clip_encoding_config,
                         ).where(ts_table.c.tenant_id == tenant_id)
                     ).first()
             if row is None:
-                return None, None
+                return None, None, None
             return (
                 dict(row.tracker_config) if row.tracker_config else None,
                 dict(row.detection_config) if row.detection_config else None,
+                (
+                    dict(row.clip_encoding_config)
+                    if row.clip_encoding_config
+                    else None
+                ),
             )
         except Exception:  # noqa: BLE001
-            return None, None
+            return None, None, None
+
+    def get_live_person_counts(
+        self, *, tenant_id: int
+    ) -> dict[int, int]:
+        """Return ``{camera_id: live_person_count}`` for every running
+        worker in this tenant (migration 0054).
+
+        Used by the person-clips list endpoint to overlay the live
+        occupancy on each ``recording_status='recording'`` row so the
+        🔴 LIVE card shows the real number of people currently in
+        frame, not the placeholder 0 from the start-INSERT.
+
+        Workers that aren't alive are skipped. Defensive ``getattr``
+        on the count method so a stub analyzer in tests doesn't
+        crash the endpoint.
+        """
+
+        with self._lock:
+            keys = [k for k in self._workers if k[0] == tenant_id]
+            workers = [(k[1], self._workers[k]) for k in keys]
+        out: dict[int, int] = {}
+        for camera_id, worker in workers:
+            if not worker.is_alive():
+                continue
+            getter = getattr(worker, "get_live_person_count", None)
+            if getter is None:
+                continue
+            try:
+                out[int(camera_id)] = int(getter())
+            except Exception:  # noqa: BLE001
+                # A flaky worker shouldn't poison the whole response.
+                continue
+        return out
 
     def active_camera_ids(
         self, *, tenant_id: Optional[int] = None
@@ -742,6 +827,64 @@ class CaptureManager:
 
         return tenants_to_scan
 
+    def _sweep_abandoned_recordings(
+        self, *, tenant_id: int, schema: Optional[str]
+    ) -> int:
+        """Sweep person_clips rows left as 'recording' by an unclean
+        shutdown (migration 0054). Returns the count swept.
+
+        Called once per tenant at manager start, before workers are
+        spawned. A bare UPDATE under the tenant's search_path — the
+        per-row tenant_id filter is defence in depth.
+        """
+
+        from sqlalchemy import update as sql_update  # noqa: PLC0415
+
+        from maugood.db import (  # noqa: PLC0415
+            person_clips as _pc,
+            tenant_context,
+        )
+
+        def _do_sweep(conn) -> int:
+            # Migration 0055 — sweep both 'recording' AND 'finalizing'.
+            # A 'finalizing' row left over from an unclean shutdown
+            # had its handoff happen but ClipWorker never got to
+            # complete the encode + UPDATE → no playable file. Mark
+            # it abandoned so the UI doesn't carry a stuck "Encoding…"
+            # entry forever.
+            result = conn.execute(
+                sql_update(_pc)
+                .where(
+                    _pc.c.tenant_id == tenant_id,
+                    _pc.c.recording_status.in_(("recording", "finalizing")),
+                )
+                .values(recording_status="abandoned")
+            )
+            return int(result.rowcount or 0)
+
+        try:
+            engine = get_engine()
+            if schema is None:
+                with engine.begin() as conn:
+                    swept = _do_sweep(conn)
+            else:
+                with tenant_context(schema):
+                    with engine.begin() as conn:
+                        swept = _do_sweep(conn)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "abandoned-recording sweep failed: tenant=%s schema=%s reason=%s",
+                tenant_id, schema, type(exc).__name__,
+            )
+            return 0
+
+        if swept > 0:
+            logger.info(
+                "swept %d abandoned recording row(s): tenant=%s schema=%s",
+                swept, tenant_id, schema,
+            )
+        return swept
+
     def _auto_start_for_tenant(
         self, *, tenant_id: int, schema: Optional[str]
     ) -> int:
@@ -777,9 +920,12 @@ class CaptureManager:
             return 0
 
         # P28.5c: tenant-level detection + tracker settings shared
-        # across this tenant's workers.
-        detection_config, tracker_config = self._load_tenant_capture_settings(
-            engine, tenant_id=tenant_id, schema=schema
+        # across this tenant's workers. Migration 0052 adds the clip
+        # encoding config to the same loader.
+        detection_config, tracker_config, encoding_config = (
+            self._load_tenant_capture_settings(
+                engine, tenant_id=tenant_id, schema=schema
+            )
         )
 
         spawned = 0
@@ -824,6 +970,10 @@ class CaptureManager:
                 clip_recording_enabled=bool(
                     getattr(row, "clip_recording_enabled", True)
                 ),
+                clip_detection_source=str(
+                    getattr(row, "clip_detection_source", "body") or "body"
+                ),
+                clip_encoding_config=encoding_config,
                 schema=schema,
             )
             plain_url = ""  # noqa: F841
@@ -870,6 +1020,7 @@ class CaptureManager:
             cameras_table.c.rtsp_url_encrypted,
             cameras_table.c.detection_enabled,
             cameras_table.c.clip_recording_enabled,
+            cameras_table.c.clip_detection_source,
             cameras_table.c.capture_config,
         ).where(
             cameras_table.c.tenant_id == tenant_id,
@@ -1078,13 +1229,14 @@ class CaptureManager:
         tenants = self._discover_tenants()
         # desired[(t, c)] = (name, plain_url, capture_config, tracker_config,
         #                    detection_config, detection_enabled,
-        #                    clip_recording_enabled, schema)
+        #                    clip_recording_enabled, clip_detection_source,
+        #                    clip_encoding_config, schema)
         desired: dict[
             WorkerKey,
             tuple[
                 str, str, dict[str, Any],
                 dict[str, Any], dict[str, Any],
-                bool, bool, Optional[str],
+                bool, bool, str, dict[str, Any], Optional[str],
             ],
         ] = {}
         for tenant_id, schema in tenants:
@@ -1103,7 +1255,8 @@ class CaptureManager:
                 continue
 
             # P28.5c: tenant-level detection + tracker settings.
-            tenant_detection, tenant_tracker = (
+            # Migration 0052 adds the clip encoding config to the load.
+            tenant_detection, tenant_tracker, tenant_encoding = (
                 self._load_tenant_capture_settings(
                     get_engine(), tenant_id=tenant_id, schema=schema
                 )
@@ -1130,6 +1283,10 @@ class CaptureManager:
                     tenant_tracker, tenant_detection,
                     bool(getattr(row, "detection_enabled", True)),
                     bool(getattr(row, "clip_recording_enabled", True)),
+                    str(
+                        getattr(row, "clip_detection_source", "body") or "body"
+                    ),
+                    tenant_encoding,
                     schema,
                 )
 
@@ -1162,6 +1319,8 @@ class CaptureManager:
                 tenant_detection,
                 desired_detection_enabled,
                 desired_clip_recording_enabled,
+                desired_clip_detection_source,
+                desired_clip_encoding,
                 schema,
             ) = desired[key]
             tid, cid = key
@@ -1181,6 +1340,8 @@ class CaptureManager:
                     detection_config=tenant_detection,
                     detection_enabled=desired_detection_enabled,
                     clip_recording_enabled=desired_clip_recording_enabled,
+                    clip_detection_source=desired_clip_detection_source,
+                    clip_encoding_config=desired_clip_encoding,
                     schema=schema,
                 ):
                     report["started"] += 1
@@ -1288,6 +1449,52 @@ class CaptureManager:
                             },
                         },
                     )
+
+                # Migration 0052: clip_detection_source drift. Hot-swaps
+                # which detector drives the clip-recording trigger.
+                # When the value actually changes the worker finalizes
+                # any in-flight clip immediately so the next clip
+                # starts cleanly under the new source.
+                current_clip_source = existing.get_clip_detection_source()
+                if current_clip_source != desired_clip_detection_source:
+                    existing.update_clip_detection_source(
+                        desired_clip_detection_source
+                    )
+                    report["config_updated"] += 1
+                    self._audit_worker_event(
+                        tenant_id=tid,
+                        schema=schema,
+                        action="capture.worker.clip_detection_source_updated",
+                        entity_id=str(cid),
+                        payload={
+                            "before": {
+                                "clip_detection_source": current_clip_source
+                            },
+                            "after": {
+                                "clip_detection_source": desired_clip_detection_source
+                            },
+                        },
+                    )
+
+                # Migration 0052 / Phase B: clip_encoding_config drift.
+                # The current in-flight clip is NOT finalized — the
+                # worker snapshots the config at clip start so chunks
+                # within one clip stay codec-consistent for concat.
+                # The new values apply to the next clip.
+                current_encoding = existing.get_clip_encoding_config()
+                if current_encoding != desired_clip_encoding:
+                    existing.update_clip_encoding_config(desired_clip_encoding)
+                    report["config_updated"] += 1
+                    self._audit_worker_event(
+                        tenant_id=tid,
+                        schema=schema,
+                        action="capture.worker.clip_encoding_config_updated",
+                        entity_id=str(cid),
+                        payload={
+                            "before": current_encoding,
+                            "after": desired_clip_encoding,
+                        },
+                    )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "reconcile: config update failed tenant=%s "
@@ -1318,6 +1525,19 @@ class CaptureManager:
         "timeout_sec": 2.0,
         "max_duration_sec": 60.0,
     }
+    # Migration 0056 — faster encoding defaults. Native-resolution
+    # ``fast``/CRF-23 encoding was real-time-ish on 1440p sources,
+    # meaning a 4 min clip took ~4 min to encode and landed as a
+    # ~400 MB MP4. Bumped to veryfast / CRF 26 / downscale to 720p
+    # for ~6-10× speedup with quality that's still well above what
+    # a person-presence review needs.
+    _DEFAULT_CLIP_ENCODING_CONFIG: dict = {
+        "chunk_duration_sec": 180,
+        "video_crf": 26,
+        "video_preset": "veryfast",
+        "resolution_max_height": 720,
+        "keep_chunks_after_merge": False,
+    }
 
     def _load_tenant_capture_settings(
         self,
@@ -1325,10 +1545,11 @@ class CaptureManager:
         *,
         tenant_id: int,
         schema: Optional[str],
-    ) -> tuple[dict, dict]:
-        """Return ``(detection_config, tracker_config)`` for one tenant.
+    ) -> tuple[dict, dict, dict]:
+        """Return ``(detection_config, tracker_config, clip_encoding_config)``
+        for one tenant.
 
-        Both fall back to module-level defaults when the row is
+        All three fall back to module-level defaults when the row is
         missing or a key is absent — defence in depth on top of the
         migration's server_default. The reconcile tick calls this
         every pass; cheap raw SELECT, no model state involved.
@@ -1341,6 +1562,7 @@ class CaptureManager:
         stmt = select(
             tenant_settings.c.detection_config,
             tenant_settings.c.tracker_config,
+            tenant_settings.c.clip_encoding_config,
         ).where(tenant_settings.c.tenant_id == tenant_id)
 
         try:
@@ -1363,16 +1585,22 @@ class CaptureManager:
             return (
                 dict(self._DEFAULT_DETECTION_CONFIG),
                 dict(self._DEFAULT_TRACKER_CONFIG),
+                dict(self._DEFAULT_CLIP_ENCODING_CONFIG),
             )
 
         detection = dict(self._DEFAULT_DETECTION_CONFIG)
         tracker = dict(self._DEFAULT_TRACKER_CONFIG)
+        encoding = dict(self._DEFAULT_CLIP_ENCODING_CONFIG)
         if row is not None:
             if isinstance(row.detection_config, dict):
                 detection.update(row.detection_config)
             if isinstance(row.tracker_config, dict):
                 tracker.update(row.tracker_config)
-        return detection, tracker
+            if isinstance(
+                getattr(row, "clip_encoding_config", None), dict
+            ):
+                encoding.update(row.clip_encoding_config)
+        return detection, tracker, encoding
 
     # ------------------------------------------------------------------
 

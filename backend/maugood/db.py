@@ -531,6 +531,25 @@ tenant_settings = Table(
             '"max_duration_sec": 60.0}'
         ),
     ),
+    # Migration 0052 — Option 2 (body-presence) recording knobs.
+    # chunk_duration_sec: rotate the ffmpeg sink every N seconds while
+    #   recording (default 180 = 3 min).
+    # video_crf / video_preset: libx264 quality + speed knobs.
+    # resolution_max_height: optional downscale (null = keep native).
+    # keep_chunks_after_merge: if true, intermediate chunk MP4s stay on
+    #   disk after the concat-merge as a defence-in-depth record.
+    Column(
+        "clip_encoding_config",
+        JSONB,
+        nullable=False,
+        server_default=(
+            '{"chunk_duration_sec": 180, '
+            '"video_crf": 23, '
+            '"video_preset": "fast", '
+            '"resolution_max_height": null, '
+            '"keep_chunks_after_merge": false}'
+        ),
+    ),
     Column(
         "updated_at",
         DateTime(timezone=True),
@@ -1730,6 +1749,19 @@ cameras = Table(
     Column(
         "clip_recording_enabled", Boolean, nullable=False, server_default="true"
     ),
+    # Migration 0052 — per-camera override of which detector drives
+    # clip recording. 'face' = InsightFace face count (the pre-0052
+    # default trigger). 'body' = YOLO person count. 'both' = OR of
+    # the two. Hot-swappable via the reconcile loop.
+    # Migration 0053 changed the default from 'face' to 'body' — new
+    # cameras start with body presence as their trigger so seated
+    # employees with hidden faces still keep recording.
+    Column(
+        "clip_detection_source",
+        Text,
+        nullable=False,
+        server_default="body",
+    ),
     # P28.5b: per-camera capture knob bag. Defaults match the
     # prototype's tested constants. Schema is open by design — the
     # set of knobs evolves between phases without a migration. The
@@ -2158,6 +2190,35 @@ person_clips = Table(
     Column("fps_recorded", Float, nullable=True),
     Column("resolution_w", Integer, nullable=True),
     Column("resolution_h", Integer, nullable=True),
+    # Migration 0052 — Option 2 (body-presence) clip metadata.
+    # detection_source: which detector triggered the clip start —
+    #   'face' (pre-0052 default), 'body' (YOLO person), 'both' (OR).
+    # chunk_count: number of intermediate chunks merged into this clip.
+    #   1 for short clips (no rotation); >1 for long clips.
+    Column(
+        "detection_source",
+        Text,
+        nullable=False,
+        server_default="face",
+    ),
+    Column(
+        "chunk_count",
+        Integer,
+        nullable=False,
+        server_default="1",
+    ),
+    # Migration 0054 — recording lifecycle status. New row at clip
+    # start is INSERTed with 'recording'; ClipWorker UPDATEs to
+    # 'completed' on finalize (or 'failed' on encode error). The
+    # startup janitor sweeps stale 'recording' rows to 'abandoned'.
+    # CHECK constraint at the DB level prevents drift into unknown
+    # states.
+    Column(
+        "recording_status",
+        Text,
+        nullable=False,
+        server_default="completed",
+    ),
     Column(
         "created_at",
         DateTime(timezone=True),
@@ -2175,6 +2236,56 @@ person_clips = Table(
         "tenant_id",
         "employee_id",
         "created_at",
+    ),
+)
+
+
+# Migration 0052 — One row per intermediate chunk written during clip
+# recording. Chunks are merged into a single final MP4 on clip end
+# (no re-encode, ffmpeg concat-demuxer). After merge the chunks may
+# be deleted from disk depending on tenant config
+# (clip_encoding_config.keep_chunks_after_merge). Rows persist either
+# way as the verifiable record of how a long clip was assembled.
+person_clip_chunks = Table(
+    "person_clip_chunks",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "person_clip_id",
+        Integer,
+        ForeignKey("person_clips.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column("chunk_index", Integer, nullable=False),
+    Column("chunk_start", DateTime(timezone=True), nullable=False),
+    Column("chunk_end", DateTime(timezone=True), nullable=False),
+    Column("file_path", Text, nullable=True),
+    Column("filesize_bytes", Integer, nullable=False, server_default="0"),
+    Column("frame_count", Integer, nullable=False, server_default="0"),
+    Column("merged", Boolean, nullable=False, server_default="false"),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    UniqueConstraint(
+        "person_clip_id",
+        "chunk_index",
+        name="uq_person_clip_chunks_clip_idx",
+    ),
+    Index(
+        "ix_person_clip_chunks_tenant_clip",
+        "tenant_id",
+        "person_clip_id",
     ),
 )
 

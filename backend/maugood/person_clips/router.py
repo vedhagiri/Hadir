@@ -117,6 +117,13 @@ def _row_to_out(row, name_map: dict[int, str] | None = None) -> PersonClipOut:
         fps_recorded=getattr(row, "fps_recorded", None),
         resolution_w=getattr(row, "resolution_w", None),
         resolution_h=getattr(row, "resolution_h", None),
+        detection_source=str(
+            getattr(row, "detection_source", "face") or "face"
+        ),
+        chunk_count=int(getattr(row, "chunk_count", 1) or 1),
+        recording_status=str(
+            getattr(row, "recording_status", "completed") or "completed"
+        ),
         created_at=row.created_at,
     )
 
@@ -325,6 +332,32 @@ def list_person_clips(
     employee_id: Optional[int] = Query(default=None),
     start: Optional[str] = Query(default=None, description="ISO datetime"),
     end: Optional[str] = Query(default=None, description="ISO datetime"),
+    detection_source: Optional[str] = Query(
+        default=None,
+        description=(
+            "Filter by which detector triggered the clip. "
+            "One of 'face', 'body', 'both'. Omitted = all."
+        ),
+        pattern=r"^(face|body|both)$",
+    ),
+    recording_status: Optional[str] = Query(
+        default=None,
+        description=(
+            "Filter by recording lifecycle. One of 'recording', "
+            "'finalizing', 'completed', 'failed', 'abandoned'. "
+            "Omitted = all (default also hides failed/abandoned)."
+        ),
+        pattern=r"^(recording|finalizing|completed|failed|abandoned)$",
+    ),
+    matched_status: Optional[str] = Query(
+        default=None,
+        description=(
+            "Filter by face-matching pipeline status. One of "
+            "'pending', 'processing', 'processed', 'failed'. "
+            "Omitted = no matched_status filter."
+        ),
+        pattern=r"^(pending|processing|processed|failed)$",
+    ),
 ) -> PersonClipListResponse:
     """List person clips, with optional filters."""
 
@@ -347,6 +380,9 @@ def list_person_clips(
             conn, scope, page=page, page_size=page_size,
             camera_id=camera_id, employee_id=employee_id,
             start=start_dt, end=end_dt,
+            detection_source=detection_source,
+            recording_status=recording_status,
+            matched_status=matched_status,
         )
         all_ids: set[int] = set()
         for r in rows:
@@ -357,8 +393,32 @@ def list_person_clips(
                         all_ids.add(int(eid))
         name_map = _resolve_employee_names(conn, scope, all_ids)
 
+    # Migration 0054 — overlay live person counts on the 🔴 LIVE
+    # rows. The placeholder INSERT at clip start sets person_count=0;
+    # without this overlay every recording card would show "0 person"
+    # until the clip finalizes. Fetch the per-camera live counts from
+    # the in-memory worker state in one batch.
+    items = [_row_to_out(r, name_map) for r in rows]
+    has_recording = any(c.recording_status == "recording" for c in items)
+    if has_recording:
+        try:
+            from maugood.capture import capture_manager  # noqa: PLC0415
+
+            live_counts = capture_manager.get_live_person_counts(
+                tenant_id=scope.tenant_id
+            )
+        except Exception:  # noqa: BLE001
+            live_counts = {}
+        if live_counts:
+            for c in items:
+                if c.recording_status != "recording":
+                    continue
+                live = live_counts.get(int(c.camera_id))
+                if live is not None:
+                    c.person_count = int(live)
+
     return PersonClipListResponse(
-        items=[_row_to_out(r, name_map) for r in rows],
+        items=items,
         total=total,
         page=page,
         page_size=page_size,
@@ -859,6 +919,24 @@ def delete_person_clip(
     if row is None:
         response.status_code = status.HTTP_204_NO_CONTENT
         return response
+
+    # Migration 0054 / 0055 — refuse to delete a row in any in-flight
+    # state. ``recording`` = reader is still writing frames.
+    # ``finalizing`` = reader handed off, ClipWorker is encoding.
+    # Deleting now leaks intermediate files + races with the in-flight
+    # UPDATE that flips status → 'completed'.
+    if getattr(row, "recording_status", None) in ("recording", "finalizing"):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "field": "recording_status",
+                "message": (
+                    "clip is still being processed — disable clip "
+                    "recording on the camera or wait for the encode "
+                    "to finish, then delete"
+                ),
+            },
+        )
 
     if row.file_path:
         mp4 = Path(str(row.file_path))

@@ -44,6 +44,11 @@ export interface Camera {
   // When disabled, the reader keeps reading + detection keeps running,
   // but no video files are written and no person_clips rows are created.
   clip_recording_enabled: boolean;
+  // Migration 0052 — which detector triggers clip recording on this
+  // camera. 'face' = InsightFace face count (pre-0052 default),
+  // 'body' = YOLO person count (records even when faces aren't
+  // visible), 'both' = OR of the two.
+  clip_detection_source: ClipDetectionSource;
   capture_config: CaptureConfig;
   created_at: string;
   last_seen_at: string | null;
@@ -75,6 +80,7 @@ export interface CameraCreateInput {
   display_enabled: boolean;
   detection_enabled: boolean;
   clip_recording_enabled: boolean;
+  clip_detection_source: ClipDetectionSource;
   capture_config: CaptureConfig;
   brand?: string | null;
 }
@@ -89,9 +95,18 @@ export interface CameraPatchInput {
   display_enabled?: boolean;
   detection_enabled?: boolean;
   clip_recording_enabled?: boolean;
+  clip_detection_source?: ClipDetectionSource;
   capture_config?: CaptureConfig;
   brand?: string | null;
 }
+
+export type ClipDetectionSource = "face" | "body" | "both";
+
+export const CLIP_DETECTION_SOURCES: readonly ClipDetectionSource[] = [
+  "face",
+  "body",
+  "both",
+] as const;
 
 export const ZONE_OPTIONS = [
   "Entry",

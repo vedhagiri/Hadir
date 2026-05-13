@@ -164,12 +164,13 @@ class ReaderConfig:
 
     # Detection-state hysteresis: how many consecutive empty-detection
     # cycles must occur before the analyzer signals "person absent".
-    # At 6 fps, 30 cycles ≈ 5 s of missed detections before the clip
-    # recording debounce even starts counting. Combined with the 10 s
-    # clip-finalize debounce, this gives ~15 s of tolerance for brief
-    # occlusion, detection flicker, or a person turning away from the
-    # camera — the clip keeps recording throughout.
-    consecutive_no_person_threshold: int = 30
+    # At 6 fps, 3 cycles ≈ 0.5 s — a brief noise filter to absorb a
+    # single-cycle detection miss, but no more. The real user-facing
+    # tolerance window is ``_CLIP_FINALIZE_AFTER_NO_PERSON_SEC``
+    # (3 s by default); we want the absent-flag flip to be quick so
+    # the 3 s grace starts measuring from close to the real "person
+    # left frame" moment.
+    consecutive_no_person_threshold: int = 3
 
     # Preview JPEG quality. 70 is the LAN sweet spot — sharp face IDs
     # at ~80 KB for 1280×720. P28.5 chose 70; we keep it.
@@ -237,6 +238,16 @@ class CaptureWorker:
         "save_full_frames": False,
     }
 
+    # Migration 0056 — faster encoding defaults. See the manager's
+    # _DEFAULT_CLIP_ENCODING_CONFIG comment for the rationale.
+    DEFAULT_CLIP_ENCODING_CONFIG: dict = {
+        "chunk_duration_sec": 180,
+        "video_crf": 26,
+        "video_preset": "veryfast",
+        "resolution_max_height": 720,
+        "keep_chunks_after_merge": False,
+    }
+
     def __init__(
         self,
         *,
@@ -253,6 +264,8 @@ class CaptureWorker:
         detection_config: Optional[dict] = None,
         detection_enabled: bool = True,
         clip_recording_enabled: bool = True,
+        clip_detection_source: str = "body",
+        clip_encoding_config: Optional[dict] = None,
     ) -> None:
         self._engine = engine
         self._scope = scope
@@ -287,6 +300,40 @@ class CaptureWorker:
         self._clip_recording_enabled_lock = threading.Lock()
         self._clip_recording_enabled: bool = bool(clip_recording_enabled)
 
+        # Migration 0052 / 0053 — per-camera clip recording trigger
+        # source.
+        # 'body' — YOLO person count drives any_person (default since
+        #          migration 0053). Faces don't have to be visible
+        #          for a clip to start; stationary seated employees
+        #          keep clips alive via YOLO body detection.
+        # 'face' — InsightFace face count drives any_person (was the
+        #          pre-0052 implicit default). YOLO body count is
+        #          ignored — only used now when the operator wants
+        #          face-only recording.
+        # 'both' — OR of the two signals.
+        # Hot-swappable via ``update_clip_detection_source``; an active
+        # clip is finalized immediately on swap so the new source's
+        # first clip starts clean.
+        self._clip_detection_source_lock = threading.Lock()
+        self._clip_detection_source: str = (
+            clip_detection_source
+            if clip_detection_source in ("face", "body", "both")
+            else "body"
+        )
+
+        # Migration 0052 / Phase B — tenant-level clip encoding config.
+        # Keys: chunk_duration_sec, video_crf, video_preset,
+        # resolution_max_height, keep_chunks_after_merge. Mid-clip
+        # changes are intentionally not applied to the in-flight clip
+        # — the worker snapshots this into ``_clip_encoding_snapshot``
+        # at clip start so every chunk in one clip uses identical
+        # encode params (otherwise ``ffmpeg -c copy`` concat fails).
+        # The next clip picks up the latest values.
+        self._clip_encoding_config_lock = threading.Lock()
+        self._clip_encoding_config: dict = dict(self.DEFAULT_CLIP_ENCODING_CONFIG)
+        if clip_encoding_config:
+            self._clip_encoding_config.update(clip_encoding_config)
+
         # P28.5c: tenant-level tracker + detection config snapshots.
         # Kept under their own locks so the manager's reconcile tick
         # can swap them without coordinating with the analyzer thread.
@@ -317,6 +364,38 @@ class CaptureWorker:
             max_duration_sec=float(
                 self._capture_config["max_event_duration_sec"]
             ),
+        )
+
+        # Migration 0057 — dedicated IoU tracker for YOLO body
+        # detections. Runs in parallel to the face tracker so the
+        # live person count + persons-only overlay reflect stable
+        # cross-frame identities instead of raw per-frame YOLO
+        # output. Two failure modes this fixes:
+        #
+        # 1. One person → two overlapping YOLO boxes → counted as 2.
+        #    NMS (iou=0.45 in detectors.py) covers the egregious
+        #    case; the tracker smooths the rest by claiming both
+        #    boxes for the same track on the next frame.
+        # 2. Person briefly invisible (turning, leaning forward,
+        #    occluded by chair) → YOLO misses one frame → next
+        #    detection treats them as new → count flickers 1→0→1
+        #    and the overlay re-creates tracks.
+        #
+        # Tuning:
+        # * iou_threshold 0.3: loose enough to handle walking
+        #   between-frame motion; loose enough to bridge
+        #   pose/posture changes for seated people.
+        # * idle_timeout 6.0 s: longer than the face tracker
+        #   (typically 2 s). Body presence is more persistent —
+        #   a person who briefly disappears between force-detect
+        #   cycles (every 3 s) shouldn't lose their identity.
+        # * max_duration 7200 s (2 h): seated employees can stay
+        #   in frame for a long meeting; we don't want their track
+        #   to force-retire prematurely.
+        self._body_tracker = IoUTracker(
+            iou_threshold=0.3,
+            idle_timeout_s=6.0,
+            max_duration_sec=7200.0,
         )
 
         # P28.5c: hand the detection config to the analyzer so the
@@ -350,6 +429,12 @@ class CaptureWorker:
         # bypasses detection.
         self._cached_boxes_lock = threading.Lock()
         self._cached_boxes: list[AnnotationBox] = []
+        # Migration 0055 — separate cache of YOLO person bboxes for
+        # the "Watch Live" overlay on the Person Clips page. That
+        # view is body-presence based — face boxes don't belong on
+        # it. Updated under the same lock as ``_cached_boxes`` by
+        # ``_publish_cached_boxes`` so both stay coherent.
+        self._cached_person_boxes: list[AnnotationBox] = []
 
         # Per-worker latest preview JPEG (replaces frame_buffer.py).
         # The reader writes here on every successful read; readers in
@@ -358,6 +443,14 @@ class CaptureWorker:
         self._preview_lock = threading.Lock()
         self._latest_jpeg: Optional[bytes] = None
         self._latest_jpeg_ts: float = 0.0
+        # Migration 0055 — second JPEG slot annotated with PERSON
+        # bboxes only (no face boxes, no employee labels). Served by
+        # the live-persons.mjpg endpoint to the Person Clips
+        # Watch-Live modal. Updated under the same ``_preview_lock``
+        # as the primary slot so a reader thread refresh of one
+        # doesn't tear the other.
+        self._latest_persons_jpeg: Optional[bytes] = None
+        self._latest_persons_jpeg_ts: float = 0.0
 
         # Stats consumed by the WebSocket heartbeat + /live-stats.
         self._stats_lock = threading.Lock()
@@ -378,6 +471,12 @@ class CaptureWorker:
         self._person_present: bool = False
         # Face count per analyzer cycle (for clip person_count).
         self._face_count: int = 0
+        # Migration 0054 — YOLO body count from the latest analyzer
+        # cycle. Updated under ``_person_present_lock`` alongside
+        # ``_face_count``. Read by ``get_live_person_count`` so the
+        # PersonClipsPage 🔴 LIVE card shows the real-time number of
+        # people visible to the camera (not just faces).
+        self._yolo_person_count: int = 0
         # P37.5 — detection-state hysteresis counter. Incremented by the
         # analyzer thread each cycle with zero detections; reset on any
         # detection. Prevents brief occlusion or detection flicker from
@@ -393,36 +492,70 @@ class CaptureWorker:
         # when the current per-cycle detection missed them.
         self._active_track_count: int = 0
 
-        # Clip recording state. Frames are written to a temp directory on
-        # disk immediately as they arrive (native FPS, no subsampling) so
-        # memory use stays bounded. The temp dir is passed to ClipWorker
-        # when the clip is finalised; ClipWorker calls cleanup() when done.
-        self._clip_tmpdir: Optional[tempfile.TemporaryDirectory] = None  # type: ignore[type-arg]
-        self._clip_frame_idx: int = 0       # counter → frame_{i:06d}.jpg names
-        self._clip_first_ts: float = 0.0    # wall-clock of first frame in clip
-        self._clip_last_ts: float = 0.0     # wall-clock of most recent frame
+        # Clip recording state — Phase B chunked recording.
+        # While the clip is active, frames are written to the "current
+        # chunk" temp directory at native FPS. When the chunk's age
+        # passes ``chunk_duration_sec`` from the encoding config and
+        # a person is still in frame, the current chunk is closed and
+        # a fresh one opened — the clip continues without interruption.
+        # On clip end every chunk (closed + the one in progress) is
+        # submitted to ClipWorker as a list; ClipWorker per-chunk
+        # encodes then concat-merges into one final MP4.
+        #
+        # ``_current_chunk`` shape:
+        #   {
+        #     "tmpdir": TemporaryDirectory,
+        #     "chunk_index": int,
+        #     "chunk_start_ts": float,   # when this chunk's first frame landed
+        #     "first_ts": float,
+        #     "last_ts": float,
+        #     "frame_count": int,
+        #   }
+        # ``_clip_chunks`` holds dicts of the same shape for already-
+        # closed chunks. Single-chunk clips have an empty list at
+        # finalize time — ClipWorker treats that as the single-chunk
+        # fast path (no concat).
+        self._current_chunk: Optional[dict] = None
+        self._clip_chunks: list[dict] = []
+        self._clip_first_ts: float = 0.0    # wall-clock of first frame in clip (across all chunks)
+        self._clip_last_ts: float = 0.0     # wall-clock of most recent frame written
         self._clip_recording: bool = False
         self._clip_has_had_person: bool = False
         self._clip_start_ts: float = 0.0
         self._clip_max_person_count: int = 0
+        # Migration 0054 — id of the person_clips row INSERTed at clip
+        # start with recording_status='recording'. ClipWorker UPDATEs
+        # this row at finalize. ``None`` falls back to today's
+        # INSERT-at-end path (if the start-INSERT failed, the clip
+        # still lands as a fresh row at clip end so no data is lost).
+        self._current_clip_id: Optional[int] = None
+        # Snapshot of the encoding config taken at clip start. Holds
+        # the values used by both the reader (chunk_duration_sec) and
+        # ClipWorker (crf/preset/resolution/keep_chunks) so a mid-clip
+        # config change doesn't produce chunks with mismatched codec
+        # params (which would break ``ffmpeg -c copy`` concat). The
+        # next clip picks up the latest config.
+        self._clip_encoding_snapshot: dict = {}
         # P37 — matched employee IDs accumulated during clip recording.
         # The analyzer thread adds IDs when matcher_cache.match() returns
         # a hit; _finalize_current_clip snapshots and clears the set.
         self._clip_matched_ids_lock = threading.Lock()
         self._clip_matched_employee_ids: set[int] = set()
-        # P37.5 — person-absent debounce. When no person is detected, we
-        # keep recording for this many seconds before finalizing. This
-        # prevents premature clip splits caused by brief occlusion or
-        # inter-cycle timing gaps between the reader and analyzer threads.
-        # The effective tolerance is this value + (threshold / analyzer_fps)
-        # ≈ 10 + 5 = ~15 seconds of continuous absence before a clip
-        # is finalised.
+        # Person-absent debounce. When no person is detected, we keep
+        # recording for this many seconds before finalizing. The
+        # 3-second window is the user-facing spec: "if no person is
+        # detected continuously for 3 seconds, stop the clip".
+        #
+        # Combined with the 0.5 s hysteresis from
+        # ``consecutive_no_person_threshold = 3`` cycles at 6 fps,
+        # total wall-clock tolerance from "person actually left
+        # frame" to "clip finalized" is ≈ 3.5 s. Brief occlusions or
+        # turning away from the camera within that 3 s window keep
+        # the clip alive — ``_last_person_seen_ts`` resets on every
+        # ``has_person`` cycle, so a single re-detect during the
+        # grace period restarts the 3 s timer.
         self._last_person_seen_ts: float = 0.0
-        # How long to keep recording after the last person detection
-        # before finalising the clip. 10 s gives ample tolerance for
-        # brief occlusion, detection flicker, or a person momentarily
-        # turning away from the camera.
-        self._CLIP_FINALIZE_AFTER_NO_PERSON_SEC: float = 10.0
+        self._CLIP_FINALIZE_AFTER_NO_PERSON_SEC: float = 3.0
 
         # P37 — dedicated clip worker thread that runs finalization
         # (ffmpeg encode + encrypt + file write + DB INSERT) off the
@@ -539,11 +672,31 @@ class CaptureWorker:
                 return None
             return self._latest_jpeg, self._latest_jpeg_ts
 
+    def get_latest_persons_jpeg(self) -> Optional[tuple[bytes, float]]:
+        """Return ``(jpeg, ts)`` for the most recent persons-only
+        preview, or None. Migration 0055 — served by the
+        live-persons.mjpg endpoint to the Person Clips Watch-Live
+        modal so the overlay shows YOLO body boxes only (no face
+        boxes, no employee names)."""
+
+        with self._preview_lock:
+            if self._latest_persons_jpeg is None:
+                return None
+            return self._latest_persons_jpeg, self._latest_persons_jpeg_ts
+
     def is_preview_fresh(self, max_age_s: float = 5.0) -> bool:
         with self._preview_lock:
             if self._latest_jpeg is None:
                 return False
             return (time.time() - self._latest_jpeg_ts) <= max_age_s
+
+    def is_persons_preview_fresh(self, max_age_s: float = 5.0) -> bool:
+        with self._preview_lock:
+            if self._latest_persons_jpeg is None:
+                return False
+            return (
+                (time.time() - self._latest_persons_jpeg_ts) <= max_age_s
+            )
 
     def get_stats(self) -> dict:
         with self._stats_lock:
@@ -697,6 +850,114 @@ class CaptureWorker:
                 new,
             )
 
+    def get_live_person_count(self) -> int:
+        """Return the live number of people the worker currently
+        believes are in frame.
+
+        Used by the PersonClipsPage's 🔴 LIVE card to show real-time
+        occupancy. Returns ``max(face_count, yolo_person_count,
+        active_tracks)`` so the displayed count reflects whichever
+        signal is most informative right now:
+
+        * For a back-to-camera or seated occluded employee the
+          ``yolo_person_count`` rules (face_count = 0).
+        * For a face-only camera angle the ``face_count`` rules
+          (yolo_person_count may be 0 if YOLO missed the partial body).
+        * Across motion-skip cycles where detection didn't run this
+          tick, the tracker's ``active_tracks`` preserves continuity.
+        """
+
+        with self._person_present_lock:
+            return max(
+                int(self._face_count),
+                int(self._yolo_person_count),
+                int(self._active_track_count),
+            )
+
+    def get_clip_detection_source(self) -> str:
+        """Read the live clip-recording detection-source mode.
+
+        One of ``'face'``, ``'body'``, ``'both'`` (migration 0052).
+        Hot-swapped via ``update_clip_detection_source`` from the
+        reconcile loop.
+        """
+
+        with self._clip_detection_source_lock:
+            return self._clip_detection_source
+
+    def update_clip_detection_source(self, source: str) -> None:
+        """Hot-swap which detector drives clip recording.
+
+        On a real change, finalizes the currently-active clip
+        immediately so the next clip recorded under the new source
+        starts cleanly (avoids a clip that switched signal mid-flight
+        having ambiguous semantics on the row).
+
+        Invalid values are clamped to ``'body'`` (the migration 0053
+        default) rather than raised — the reconcile loop must never
+        crash a worker over a bad row.
+        """
+
+        new = source if source in ("face", "body", "both") else "body"
+        with self._clip_detection_source_lock:
+            old = self._clip_detection_source
+            self._clip_detection_source = new
+        if old != new:
+            if self._clip_recording:
+                self._finalize_current_clip()
+            logger.info(
+                "capture worker clip_detection_source updated: tenant=%s "
+                "camera_id=%s old=%s new=%s",
+                self._scope.tenant_id,
+                self.camera_id,
+                old,
+                new,
+            )
+
+    def get_clip_encoding_config(self) -> dict:
+        """Snapshot of the live tenant encoding config.
+
+        Returns a copy so callers can't mutate the worker's state.
+        The worker takes its own snapshot at each clip start to
+        guarantee per-clip encode consistency for ``-c copy`` concat.
+        """
+
+        with self._clip_encoding_config_lock:
+            return dict(self._clip_encoding_config)
+
+    def update_clip_encoding_config(self, new_config: dict) -> None:
+        """Hot-swap the tenant encoding config.
+
+        The in-flight clip is **not** finalized — that would interrupt
+        a long recording every time an operator nudged a slider. The
+        snapshot already taken at clip start continues to drive the
+        current clip's chunks (so every chunk in one clip has matching
+        encode params, which the final concat-merge requires). The
+        next clip picks up the new values.
+
+        Unknown keys are dropped silently. Validation of value ranges
+        happens at the API layer (P28.6 Phase C); the worker is
+        defensive against odd input but doesn't enforce bounds.
+        """
+
+        cleaned = dict(self.DEFAULT_CLIP_ENCODING_CONFIG)
+        if new_config:
+            for k in self.DEFAULT_CLIP_ENCODING_CONFIG:
+                if k in new_config:
+                    cleaned[k] = new_config[k]
+        with self._clip_encoding_config_lock:
+            old = dict(self._clip_encoding_config)
+            self._clip_encoding_config = cleaned
+        if old != cleaned:
+            logger.info(
+                "capture worker clip_encoding_config updated: tenant=%s "
+                "camera_id=%s old=%s new=%s",
+                self._scope.tenant_id,
+                self.camera_id,
+                old,
+                cleaned,
+            )
+
     def update_detection_config(self, new_config: dict) -> None:
         """Hot-reload entry point for tenant-level detection_config
         changes. Forwards to the analyzer's ``update_config`` which
@@ -753,26 +1014,253 @@ class CaptureWorker:
         except Exception:  # noqa: BLE001
             return None
 
+    def _insert_recording_row(self, start_ts: float) -> Optional[int]:
+        """INSERT a person_clips row at clip start (migration 0054).
+
+        Returns the new clip_id on success, ``None`` on failure. The
+        caller falls back to INSERT-at-end in either case — the
+        placeholder is purely a UX surface for the 🔴 LIVE indicator.
+
+        Best-effort: errors are logged at WARN and swallowed. A DB
+        outage at the moment a person walks into frame must not
+        prevent the recording itself.
+        """
+
+        from datetime import datetime, timezone  # noqa: PLC0415
+
+        import sqlalchemy as sa  # noqa: PLC0415
+
+        from maugood.db import person_clips as _pc  # noqa: PLC0415
+
+        start_dt = datetime.fromtimestamp(start_ts, tz=timezone.utc)
+        source = self.get_clip_detection_source()
+        try:
+            with self._engine.begin() as conn:
+                result = conn.execute(
+                    sa.insert(_pc).values(
+                        tenant_id=self._scope.tenant_id,
+                        camera_id=self.camera_id,
+                        employee_id=None,
+                        track_id=None,
+                        detection_event_id=None,
+                        clip_start=start_dt,
+                        # clip_end is NOT NULL on this table; use the
+                        # start as a placeholder. ClipWorker updates
+                        # it to the real value at finalize.
+                        clip_end=start_dt,
+                        duration_seconds=0.0,
+                        file_path=None,
+                        filesize_bytes=0,
+                        frame_count=0,
+                        person_count=0,
+                        matched_employees=[],
+                        encoding_start_at=None,
+                        encoding_end_at=None,
+                        fps_recorded=None,
+                        resolution_w=None,
+                        resolution_h=None,
+                        detection_source=source,
+                        chunk_count=1,
+                        recording_status="recording",
+                    )
+                )
+                pk = result.inserted_primary_key
+                return int(pk[0]) if pk else None
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "recording-row INSERT failed: camera=%s reason=%s — "
+                "live indicator unavailable for this clip; final row "
+                "will land at clip end",
+                self.camera_id, type(exc).__name__,
+            )
+            return None
+
+    def _mark_recording_finalizing(
+        self,
+        clip_id: Optional[int],
+        last_ts: float,
+        frame_count: int,
+    ) -> None:
+        """Flip a placeholder ``recording`` row to ``finalizing``
+        (migration 0055) at the moment of clip-end handoff.
+
+        Surfaces the real clip_end + frame_count + duration +
+        person_count so the card numbers are accurate immediately,
+        instead of waiting for ClipWorker's encode + final UPDATE
+        (which can take real wall-clock time for a long clip).
+        Migration 0058 added person_count to this UPDATE — the
+        operator sees the true occupancy as soon as the card flips
+        to Encoding, no longer needing to wait for the encode to
+        complete. Best-effort: a failure is logged but never raised
+        — ClipWorker will set the right status itself.
+        """
+
+        if clip_id is None:
+            return
+
+        from datetime import datetime, timezone  # noqa: PLC0415
+
+        import sqlalchemy as sa  # noqa: PLC0415
+
+        from maugood.db import person_clips as _pc  # noqa: PLC0415
+
+        clip_end_dt = datetime.fromtimestamp(last_ts, tz=timezone.utc)
+        duration = max(0.0, last_ts - self._clip_first_ts)
+        person_count_at_handoff = max(0, int(self._clip_max_person_count))
+        try:
+            with self._engine.begin() as conn:
+                conn.execute(
+                    sa.update(_pc)
+                    .where(
+                        _pc.c.id == int(clip_id),
+                        _pc.c.tenant_id == self._scope.tenant_id,
+                        _pc.c.recording_status == "recording",
+                    )
+                    .values(
+                        recording_status="finalizing",
+                        clip_end=clip_end_dt,
+                        frame_count=int(frame_count),
+                        duration_seconds=float(duration),
+                        person_count=person_count_at_handoff,
+                    )
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "recording-row finalizing-flip failed: camera=%s "
+                "clip_id=%s reason=%s",
+                self.camera_id, clip_id, type(exc).__name__,
+            )
+
+    def _delete_recording_row(self, clip_id: Optional[int]) -> None:
+        """Delete a placeholder ``recording`` row that never produced
+        a real clip (false positive trigger / too-short clip).
+
+        Best-effort: failure is logged but never raised. Worst case
+        the row lingers as ``recording`` until the next startup
+        janitor sweeps it to ``abandoned``.
+        """
+
+        if clip_id is None:
+            return
+
+        import sqlalchemy as sa  # noqa: PLC0415
+
+        from maugood.db import person_clips as _pc  # noqa: PLC0415
+
+        try:
+            with self._engine.begin() as conn:
+                conn.execute(
+                    sa.delete(_pc).where(
+                        _pc.c.id == int(clip_id),
+                        _pc.c.tenant_id == self._scope.tenant_id,
+                        _pc.c.recording_status == "recording",
+                    )
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "recording-row cleanup failed: camera=%s clip_id=%s reason=%s",
+                self.camera_id, clip_id, type(exc).__name__,
+            )
+
+    def _open_new_chunk(self, now: float, chunk_index: int) -> dict:
+        """Open a fresh chunk: tempdir + zero counters.
+
+        Each chunk owns its own ``TemporaryDirectory`` so ClipWorker can
+        encode them in turn and call ``.cleanup()`` on each as it
+        finishes. The dict shape mirrors the worker-side contract
+        (frame_count / first_ts / last_ts feed the per-chunk DB row
+        and the per-chunk FPS calculation).
+        """
+
+        return {
+            "tmpdir": tempfile.TemporaryDirectory(
+                prefix=f"maugood_clip_chunk{chunk_index:03d}_"
+            ),
+            "chunk_index": chunk_index,
+            "chunk_start_ts": now,
+            "first_ts": now,
+            "last_ts": now,
+            "frame_count": 0,
+        }
+
+    def _write_frame_to_current_chunk(self, frame_bgr, now: float) -> None:
+        """Encode + write one frame to the active chunk's tmpdir.
+
+        Filename is ``frame_{N:08d}.jpg`` within the chunk — so each
+        chunk's ffmpeg-glob input is self-contained.
+        """
+
+        if self._current_chunk is None:
+            return
+        jpeg = self._encode_clip_frame(frame_bgr)
+        if jpeg is None:
+            return
+        try:
+            idx = self._current_chunk["frame_count"]
+            frame_path = (
+                Path(self._current_chunk["tmpdir"].name)
+                / f"frame_{idx:08d}.jpg"
+            )
+            frame_path.write_bytes(jpeg)
+            self._current_chunk["frame_count"] = idx + 1
+            self._current_chunk["last_ts"] = now
+            self._clip_last_ts = now
+        except OSError:
+            logger.debug(
+                "clip frame write failed: camera=%s",
+                self.camera_id,
+            )
+
+    def _rotate_chunk(self, now: float) -> None:
+        """Close the active chunk + open a new one. Clip stays active.
+
+        Called when ``(now - chunk_start_ts) >= chunk_duration_sec``
+        and the clip is still recording. The closed chunk lands in
+        ``_clip_chunks``; a fresh chunk takes its place. The clip's
+        overall first_ts / last_ts / has-had-person state are untouched.
+        """
+
+        if self._current_chunk is None:
+            return
+        # Don't rotate empty chunks — they're a sign the clip just
+        # started and no frame landed yet. Skip the rotation; the
+        # next "person here" cycle will write a frame and reset
+        # ``chunk_start_ts`` is already set at construction.
+        if self._current_chunk["frame_count"] <= 0:
+            return
+
+        closed = self._current_chunk
+        self._clip_chunks.append(closed)
+        next_index = closed["chunk_index"] + 1
+        self._current_chunk = self._open_new_chunk(now, next_index)
+        logger.debug(
+            "clip chunk rotated: camera=%s closed_index=%d frames=%d",
+            self.camera_id, closed["chunk_index"], closed["frame_count"],
+        )
+
     def _check_and_record_clip(self, frame_bgr) -> None:
         """Called by the reader thread on every frame.
 
-        Writes every frame directly to a temp directory on disk at the
-        camera's native FPS — no subsampling, no memory buffering. Disk
-        I/O per frame is an 80-100 KB JPEG write (~1 ms on SSD), which
-        is negligible compared to the RTSP read latency.
+        Writes every frame directly to the **current chunk's** temp
+        directory at the camera's native FPS — no subsampling, no
+        memory buffering. Disk I/O per frame is an 80-100 KB JPEG
+        write (~1 ms on SSD), negligible compared to RTSP read latency.
 
-        Clip lifecycle:
-          * Person arrives  → create temp dir, start writing frames
-          * Person present  → write every frame to frame_{i:06d}.jpg
-          * Person leaves   → keep writing (grace period) until
-                              _CLIP_FINALIZE_AFTER_NO_PERSON_SEC elapses
-          * Grace expired   → submit tmpdir to ClipWorker, which runs
-                              ffmpeg then cleans up the tmpdir
+        Clip lifecycle (Phase B chunked):
+          * Person arrives           → open chunk 0, start writing frames
+          * Person present > N sec   → rotate to chunk 1, keep writing
+                                       (N = clip_encoding_config.chunk_duration_sec)
+          * Person leaves            → keep writing through grace period
+                                       (still in current chunk; no rotation
+                                       on the way out)
+          * Grace expired            → submit ALL chunks to ClipWorker
+                                       in one batch; ClipWorker per-chunk
+                                       encodes then ffmpeg-concat-merges
+                                       into one final MP4.
 
-        The temp dir is owned by the TemporaryDirectory object that
-        lives in clip_data["tmpdir"]. ClipWorker calls .cleanup() when
-        ffmpeg finishes — the disk space is freed at that point, not
-        when the reader moves on.
+        Each chunk owns its own TemporaryDirectory; ClipWorker calls
+        .cleanup() on each after its encode finishes. The reader's
+        memory + disk footprint stays O(1) regardless of clip length.
         """
 
         # Migration 0049: per-camera clip-recording gate. When False
@@ -807,47 +1295,58 @@ class CaptureWorker:
             self._clip_has_had_person = True
 
             if not self._clip_recording:
-                # Start new clip: create a temp directory for frame files.
-                self._clip_tmpdir = tempfile.TemporaryDirectory(
-                    prefix="maugood_clip_"
-                )
+                # Start new clip: snapshot encoding config + open chunk 0.
+                # The snapshot guarantees every chunk in this clip uses
+                # identical encode params, which ``ffmpeg -c copy``
+                # concat requires.
+                self._clip_encoding_snapshot = self.get_clip_encoding_config()
+                self._current_chunk = self._open_new_chunk(now, 0)
+                self._clip_chunks = []
                 self._clip_recording = True
                 self._clip_has_had_person = True
                 self._clip_start_ts = now
                 self._clip_first_ts = now
                 self._clip_last_ts = now
-                self._clip_frame_idx = 0
                 self._clip_max_person_count = 0
                 with self._clip_matched_ids_lock:
                     self._clip_matched_employee_ids.clear()
+                # Migration 0054 — INSERT a placeholder row with
+                # recording_status='recording' so the PersonClipsPage
+                # can render a 🔴 LIVE entry immediately. Best-effort:
+                # on DB failure we just record the warning and leave
+                # ``_current_clip_id=None`` — at clip end ClipWorker
+                # falls back to its INSERT path so no data is lost.
+                self._current_clip_id = self._insert_recording_row(now)
                 logger.debug(
-                    "clip started: camera=%s",
+                    "clip started: camera=%s chunk_duration_sec=%s clip_id=%s",
                     self.camera_id,
+                    self._clip_encoding_snapshot.get("chunk_duration_sec"),
+                    self._current_clip_id,
                 )
+
+            # Check if the active chunk has exceeded the rotation
+            # threshold from the snapshot. Rotation only fires while a
+            # person is still in frame — on the way out (grace period)
+            # we keep writing into the current chunk so the trailing
+            # frames stay together.
+            if self._current_chunk is not None:
+                chunk_age = now - self._current_chunk["chunk_start_ts"]
+                chunk_duration = float(
+                    self._clip_encoding_snapshot.get(
+                        "chunk_duration_sec",
+                        self.DEFAULT_CLIP_ENCODING_CONFIG["chunk_duration_sec"],
+                    )
+                )
+                if chunk_age >= chunk_duration:
+                    self._rotate_chunk(now)
 
             # Track max persons seen during this clip.
             if face_count > self._clip_max_person_count:
                 self._clip_max_person_count = face_count
 
             # Write the current frame to disk — every native-FPS frame,
-            # no subsampling. Memory usage stays at O(1) regardless of
-            # clip length; temp space is freed after ffmpeg encodes.
-            if self._clip_tmpdir is not None:
-                jpeg = self._encode_clip_frame(frame_bgr)
-                if jpeg is not None:
-                    try:
-                        frame_path = (
-                            Path(self._clip_tmpdir.name)
-                            / f"frame_{self._clip_frame_idx:08d}.jpg"
-                        )
-                        frame_path.write_bytes(jpeg)
-                        self._clip_frame_idx += 1
-                        self._clip_last_ts = now
-                    except OSError:
-                        logger.debug(
-                            "clip frame write failed: camera=%s",
-                            self.camera_id,
-                        )
+            # no subsampling.
+            self._write_frame_to_current_chunk(frame_bgr, now)
 
         else:
             if self._clip_recording:
@@ -858,52 +1357,59 @@ class CaptureWorker:
                 absent_for = now - self._last_person_seen_ts
                 if absent_for >= self._CLIP_FINALIZE_AFTER_NO_PERSON_SEC:
                     self._finalize_current_clip()
-                elif self._clip_tmpdir is not None:
-                    jpeg = self._encode_clip_frame(frame_bgr)
-                    if jpeg is not None:
-                        try:
-                            frame_path = (
-                                Path(self._clip_tmpdir.name)
-                                / f"frame_{self._clip_frame_idx:08d}.jpg"
-                            )
-                            frame_path.write_bytes(jpeg)
-                            self._clip_frame_idx += 1
-                            self._clip_last_ts = now
-                        except OSError:
-                            pass
+                else:
+                    self._write_frame_to_current_chunk(frame_bgr, now)
 
     def _finalize_current_clip(self) -> None:
-        """Submit the current clip to the ClipWorker and reset recording
-        state. The TemporaryDirectory object is transferred to the
-        ClipWorker which owns cleanup after ffmpeg finishes.
+        """Submit the current clip (all chunks) to the ClipWorker and
+        reset recording state.
+
+        The list of chunk dicts is transferred to the ClipWorker, which
+        owns each TemporaryDirectory's cleanup after ffmpeg finishes.
+        Single-chunk clips skip the concat-merge (ClipWorker fast path).
         """
 
         self._clip_recording = False
         had_person = self._clip_has_had_person
         self._clip_has_had_person = False
-        tmpdir = self._clip_tmpdir
-        self._clip_tmpdir = None
-        frame_count = self._clip_frame_idx
-        self._clip_frame_idx = 0
-        first_ts = self._clip_first_ts
-        last_ts = self._clip_last_ts
 
-        if not had_person and tmpdir is not None:
+        # Move the current chunk (if any) to the completed list so
+        # the worker sees a single ordered list of chunks.
+        if self._current_chunk is not None:
+            self._clip_chunks.append(self._current_chunk)
+            self._current_chunk = None
+
+        chunks = self._clip_chunks
+        self._clip_chunks = []
+
+        total_frames = sum(int(c.get("frame_count", 0)) for c in chunks)
+        first_ts = chunks[0]["first_ts"] if chunks else self._clip_first_ts
+        last_ts = chunks[-1]["last_ts"] if chunks else self._clip_last_ts
+
+        if not had_person and chunks:
             # Clip recorded zero frames with a confirmed person —
-            # likely a false-positive detection trigger. Discard
-            # the temp dir without submitting to ClipWorker.
+            # likely a false-positive detection trigger. Discard all
+            # chunk tmpdirs without submitting to ClipWorker.
             logger.debug(
-                "clip discarded (no person): camera=%s frames=%d",
+                "clip discarded (no person): camera=%s frames=%d chunks=%d",
                 self.camera_id,
-                frame_count,
+                total_frames,
+                len(chunks),
             )
-            try:
-                tmpdir.cleanup()
-            except Exception:  # noqa: BLE001
-                pass
+            for c in chunks:
+                tmpdir = c.get("tmpdir")
+                if tmpdir is not None:
+                    try:
+                        tmpdir.cleanup()
+                    except Exception:  # noqa: BLE001
+                        pass
+            # Migration 0054 — clean up the placeholder row so the
+            # PersonClipsPage doesn't carry a ghost 🔴 LIVE entry.
+            self._delete_recording_row(self._current_clip_id)
+            self._current_clip_id = None
             return
 
-        if frame_count >= 3 and tmpdir is not None:
+        if total_frames >= 3 and chunks:
             with self._metadata_lock:
                 camera_fps = self._detected_metadata.get("fps") or 25.0
                 resolution_w = self._detected_metadata.get("resolution_w")
@@ -912,8 +1418,10 @@ class CaptureWorker:
                 matched_ids = sorted(self._clip_matched_employee_ids)
                 self._clip_matched_employee_ids.clear()
             clip_data = {
-                "tmpdir": tmpdir,          # TemporaryDirectory — ClipWorker calls .cleanup()
-                "frame_count": frame_count,
+                # Phase B: list of chunk dicts. ClipWorker handles the
+                # single-chunk / multi-chunk dispatch internally.
+                "chunks": chunks,
+                "frame_count": total_frames,
                 "start_ts": self._clip_start_ts,
                 "first_ts": first_ts,
                 "last_ts": last_ts,
@@ -922,23 +1430,59 @@ class CaptureWorker:
                 "matched_employees": matched_ids,
                 "resolution_w": resolution_w,
                 "resolution_h": resolution_h,
+                # Migration 0052: which detector triggered the clip.
+                # ClipWorker persists this on the person_clips row and
+                # uses it to decide whether the post-finalize face-
+                # match auto-trigger should fire (body-only clips skip).
+                "detection_source": self.get_clip_detection_source(),
+                # Snapshot of the encoding config taken at clip start.
+                # ClipWorker uses this for per-chunk encode params +
+                # the keep-chunks-after-merge decision.
+                "encoding_config": dict(self._clip_encoding_snapshot),
+                # Migration 0054: id of the row INSERTed at clip
+                # start. When present, ClipWorker UPDATEs that row
+                # and flips recording_status='completed'. When None
+                # (start INSERT failed), it falls back to a fresh
+                # INSERT at finalize.
+                "clip_id": self._current_clip_id,
             }
+            # Migration 0055 — flip the row to 'finalizing' BEFORE
+            # handing off to the ClipWorker queue. Encoding a long
+            # clip can take real wall-clock minutes (multi-chunk x264
+            # at native resolution); without this flip the row would
+            # stay 'recording' across that window and a new clip
+            # starting on the same camera produces two rows that both
+            # look "live" to the UI. ``last_ts`` is the real clip end
+            # — surface it now so the card duration is accurate
+            # immediately, not after the encode lands.
+            self._mark_recording_finalizing(
+                self._current_clip_id, last_ts, total_frames,
+            )
+            # Hand off the recording-row claim before resetting so a
+            # back-to-back start doesn't try to UPDATE the same row.
+            self._current_clip_id = None
             self._clip_worker.submit_clip(clip_data)
             logger.debug(
-                "clip submitted: camera=%s frames=%d",
-                self.camera_id, frame_count,
+                "clip submitted: camera=%s frames=%d chunks=%d",
+                self.camera_id, total_frames, len(chunks),
             )
         else:
-            # Too short — clean up tmpdir immediately.
-            if tmpdir is not None:
-                try:
-                    tmpdir.cleanup()
-                except Exception:  # noqa: BLE001
-                    pass
+            # Too short — clean up every chunk tmpdir immediately.
+            for c in chunks:
+                tmpdir = c.get("tmpdir")
+                if tmpdir is not None:
+                    try:
+                        tmpdir.cleanup()
+                    except Exception:  # noqa: BLE001
+                        pass
             logger.debug(
                 "clip too short (%d frames) skipping: camera=%s",
-                frame_count, self.camera_id,
+                total_frames, self.camera_id,
             )
+            # Migration 0054 — clean up the placeholder row so the
+            # PersonClipsPage doesn't carry a ghost 🔴 LIVE entry.
+            self._delete_recording_row(self._current_clip_id)
+            self._current_clip_id = None
 
     # ------------------------------------------------------------------
     # Reader thread
@@ -1125,15 +1669,20 @@ class CaptureWorker:
             detection_enabled = self.is_detection_enabled()
 
             detections: list = []
+            person_boxes_xyxy: list = []
             if (moved or force) and detection_enabled:
                 try:
                     # detect_and_count runs YOLO person-body detection
                     # alongside face detection in a single pass — YOLO
                     # never runs twice even in yolo+face mode.
-                    # person_count comes from YOLO body boxes, so a
-                    # seated employee with their back to the camera still
-                    # produces person_count > 0, keeping the clip alive.
-                    detections, person_count = self._analyzer.detect_and_count(frame)
+                    # person_count + person_boxes come from YOLO body
+                    # boxes, so a seated employee with their back to the
+                    # camera still produces person_count > 0, keeping
+                    # the clip alive. ``person_boxes_xyxy`` feeds the
+                    # persons-only live overlay (Watch-Live modal).
+                    detections, person_count, person_boxes_xyxy = (
+                        self._analyzer.detect_and_count(frame)
+                    )
                     last_detect_ts = now
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(
@@ -1146,11 +1695,24 @@ class CaptureWorker:
                     )
                     detections = []
                     person_count = 0
+                    person_boxes_xyxy = []
                 # P37: update person presence for clip recording.
                 # Uses hysteresis: person is only marked absent after
                 # N consecutive empty-detection cycles.
                 face_count = len(detections)
-                any_person = (face_count > 0) or (person_count > 0)
+                # Migration 0052: per-camera clip detection source picks
+                # which signal drives the clip-recording trigger.
+                #   face — InsightFace face count only.
+                #   body — YOLO person count only (back-to-camera /
+                #          occluded faces still keep the clip alive).
+                #   both — OR of the two (pre-0052 default).
+                _src = self.get_clip_detection_source()
+                if _src == "face":
+                    any_person = face_count > 0
+                elif _src == "body":
+                    any_person = person_count > 0
+                else:  # "both"
+                    any_person = (face_count > 0) or (person_count > 0)
                 with self._person_present_lock:
                     if any_person:
                         self._no_person_consecutive_count = 0
@@ -1163,6 +1725,12 @@ class CaptureWorker:
                         ):
                             self._person_present = False
                     self._face_count = face_count
+                    # ``_yolo_person_count`` is OVERWRITTEN at the end
+                    # of the cycle with the body tracker's stable
+                    # count (migration 0057). Setting the raw count
+                    # here as a safety net for the unlikely path
+                    # where the body tracker update fails.
+                    self._yolo_person_count = int(person_count)
             elif (moved or force) and not detection_enabled:
                 # Migration 0033: detection_enabled=False short-circuits
                 # the expensive ``detect`` call. Bump ``last_detect_ts``
@@ -1183,6 +1751,7 @@ class CaptureWorker:
                     ):
                         self._person_present = False
                     self._face_count = 0
+                    self._yolo_person_count = 0
             else:
                 with self._stats_lock:
                     cur = int(self._stats["motion_skipped"] or 0)
@@ -1194,6 +1763,49 @@ class CaptureWorker:
             matches = self._tracker.update(
                 [d.bbox for d in detections], now
             )
+
+            # Migration 0057 — drive the body tracker in parallel.
+            # Convert raw YOLO xyxy boxes to Bbox + push through the
+            # tracker. Empty list keeps existing tracks alive up to
+            # their idle_timeout (6 s) so a brief detection miss
+            # doesn't drop the count. Tracked bboxes (from the
+            # tracker's match output) replace the raw YOLO list for
+            # both the live overlay and the live count — same person
+            # across frames = same identity, no double counting.
+            from maugood.capture.tracker import Bbox as _BBox  # noqa: PLC0415
+
+            body_bboxes_in = [
+                _BBox(
+                    x=int(x1), y=int(y1),
+                    w=max(0, int(x2 - x1)),
+                    h=max(0, int(y2 - y1)),
+                )
+                for (x1, y1, x2, y2) in person_boxes_xyxy
+            ]
+            body_matches = self._body_tracker.update(body_bboxes_in, now)
+            # Stable count + bboxes from the tracker. ``active_tracks``
+            # collapses NMS-missed overlapping detections to a single
+            # ID (the tracker's greedy match claims both boxes for
+            # the same track on the next frame).
+            tracked_body_count = self._body_tracker.active_tracks
+            tracked_body_boxes_xyxy: list[tuple[int, int, int, int]] = [
+                (
+                    int(m.bbox.x),
+                    int(m.bbox.y),
+                    int(m.bbox.x + m.bbox.w),
+                    int(m.bbox.y + m.bbox.h),
+                )
+                for m in body_matches
+            ]
+            # Migration 0057 — publish the stable tracker count to
+            # the shared state read by ``get_live_person_count``.
+            # Overwrites the raw YOLO count set inside the detect
+            # branch above; that was just a safety net. Done outside
+            # the if/elif/else so motion-skip cycles also see the
+            # tracker's idle-expired count (without this update the
+            # count would lag by up to 6 s during motion-skip runs).
+            with self._person_present_lock:
+                self._yolo_person_count = int(tracked_body_count)
 
             # Publish the tracker's live track count for the clip-
             # recording logic to read. The tracker provides temporal
@@ -1231,8 +1843,18 @@ class CaptureWorker:
             # overwrite the cached list when we actually ran detection
             # — motion-skip cycles leave the previous boxes in place
             # so a still subject keeps their label.
+            #
+            # Migration 0057 — pass the tracker-smoothed bboxes
+            # (``tracked_body_boxes_xyxy``) to the persons overlay,
+            # not the raw YOLO output. Tracked bboxes are stable
+            # across frames (same person → same identity), so the
+            # overlay doesn't flicker when YOLO occasionally misses
+            # a frame.
             if moved or force:
-                self._publish_cached_boxes(detections, matches, per_detection_match)
+                self._publish_cached_boxes(
+                    detections, matches, per_detection_match,
+                    tracked_body_boxes_xyxy,
+                )
 
             # One detection_events row per NEW track, never per frame.
             # Snapshot the capture_config + detection_config under the
@@ -1306,7 +1928,8 @@ class CaptureWorker:
     # Cached-box hand-off (analyzer → reader's preview encoding)
 
     def _publish_cached_boxes(
-        self, detections, matches, per_detection_match
+        self, detections, matches, per_detection_match,
+        person_boxes_xyxy: "list[tuple[int, int, int, int]]" = (),
     ) -> None:
         boxes: list[AnnotationBox] = []
         for det, match, pm in zip(detections, matches, per_detection_match):
@@ -1329,36 +1952,74 @@ class CaptureWorker:
                         label="Unknown", known=False,
                     )
                 )
+        # Migration 0055 — also publish person bboxes as a separate
+        # cache for the persons-only preview overlay. Label is just
+        # "Person" (no employee name) and ``known=False`` so the
+        # amber/yellow style applies — clear visual distinction from
+        # face-match green/amber on the primary preview.
+        person_anno: list[AnnotationBox] = []
+        for x1, y1, x2, y2 in person_boxes_xyxy:
+            person_anno.append(
+                AnnotationBox(
+                    x=int(x1), y=int(y1),
+                    w=int(x2 - x1), h=int(y2 - y1),
+                    label="Person", known=False,
+                )
+            )
         with self._cached_boxes_lock:
             self._cached_boxes = boxes
+            self._cached_person_boxes = person_anno
 
     # ------------------------------------------------------------------
     # Preview JPEG (reader thread)
 
     def _update_preview(self, frame_bgr) -> None:  # type: ignore[no-untyped-def]
-        """Annotate a copy of the frame with cached boxes, encode JPEG,
-        store. Failures are swallowed at DEBUG — preview is a viewer
-        feature; the underlying capture loop must keep running.
+        """Annotate two copies of the frame — one with face boxes,
+        one with person bboxes — encode each as JPEG, store both.
+
+        Two slots exist so the Live Capture viewer (face matching)
+        and the Person Clips Watch-Live modal (person presence) can
+        each see the overlay that fits their context without
+        cross-contamination. Failures are swallowed at DEBUG — preview
+        is a viewer feature; the underlying capture loop must keep
+        running.
         """
 
         try:
             with self._cached_boxes_lock:
                 boxes = list(self._cached_boxes)
+                person_boxes = list(self._cached_person_boxes)
 
             # Always copy: OpenCV's cap.read() reuses the same buffer on the
             # next call, so if encode_jpeg is still running when cap.read()
             # fires, the bottom of the frame gets overwritten and produces
             # gray/corrupted pixels in the MJPEG stream.
-            preview = frame_bgr.copy()
+            face_preview = frame_bgr.copy()
             if boxes:
-                annotate_frame(preview, boxes)
+                annotate_frame(face_preview, boxes)
+            face_jpeg = encode_jpeg(
+                face_preview, quality=self._config.preview_jpeg_quality
+            )
 
-            jpeg = encode_jpeg(preview, quality=self._config.preview_jpeg_quality)
-            if jpeg is None:
-                return
+            # Persons-only preview. We always render this (even with
+            # empty box list) so the slot stays fresh — viewers
+            # connecting mid-stream still get current frames.
+            persons_preview = frame_bgr.copy()
+            if person_boxes:
+                annotate_frame(persons_preview, person_boxes)
+            persons_jpeg = encode_jpeg(
+                persons_preview,
+                quality=self._config.preview_jpeg_quality,
+            )
+
+            now_ts = time.time()
             with self._preview_lock:
-                self._latest_jpeg = jpeg
-                self._latest_jpeg_ts = time.time()
+                if face_jpeg is not None:
+                    self._latest_jpeg = face_jpeg
+                    self._latest_jpeg_ts = now_ts
+                if persons_jpeg is not None:
+                    self._latest_persons_jpeg = persons_jpeg
+                    self._latest_persons_jpeg_ts = now_ts
         except Exception as exc:  # noqa: BLE001
             logger.debug(
                 "camera %s: preview update failed: %s",

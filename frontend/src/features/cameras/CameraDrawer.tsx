@@ -18,12 +18,14 @@ import { BrandLogo } from "./BrandLogo";
 import { useCreateCamera, usePatchCamera } from "./hooks";
 import {
   BRAND_OPTIONS,
+  CLIP_DETECTION_SOURCES,
   DEFAULT_CAPTURE_CONFIG,
   ZONE_OPTIONS,
   type Camera,
   type CameraCreateInput,
   type CameraPatchInput,
   type CaptureConfig,
+  type ClipDetectionSource,
 } from "./types";
 
 interface Props {
@@ -62,6 +64,14 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
   const [clipRecordingEnabled, setClipRecordingEnabled] = useState(
     initial?.clip_recording_enabled ?? true,
   );
+  // Migration 0053: default for new cameras is 'body' so seated /
+  // back-to-camera employees still keep clips recording (YOLO finds
+  // a still body just fine). Existing cameras keep whatever value
+  // was persisted on the row.
+  const [clipDetectionSource, setClipDetectionSource] =
+    useState<ClipDetectionSource>(
+      initial?.clip_detection_source ?? "body",
+    );
   const [config, setConfig] = useState<CaptureConfig>(
     initial?.capture_config ?? DEFAULT_CAPTURE_CONFIG,
   );
@@ -78,6 +88,7 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
     setDisplayEnabled(initial?.display_enabled ?? true);
     setDetectionEnabled(initial?.detection_enabled ?? true);
     setClipRecordingEnabled(initial?.clip_recording_enabled ?? true);
+    setClipDetectionSource(initial?.clip_detection_source ?? "body");
     setConfig(initial?.capture_config ?? DEFAULT_CAPTURE_CONFIG);
     setRtspUrl("");
     setShowSettings(false);
@@ -108,6 +119,7 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
           display_enabled: displayEnabled,
           detection_enabled: detectionEnabled,
           clip_recording_enabled: clipRecordingEnabled,
+          clip_detection_source: clipDetectionSource,
           capture_config: config,
           brand: brandNorm,
         };
@@ -132,6 +144,12 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
         }
         if (clipRecordingEnabled !== initial.clip_recording_enabled) {
           patchBody.clip_recording_enabled = clipRecordingEnabled;
+        }
+        if (
+          clipDetectionSource !==
+          (initial.clip_detection_source ?? "face")
+        ) {
+          patchBody.clip_detection_source = clipDetectionSource;
         }
         if (!configsEqual(config, initial.capture_config)) {
           patchBody.capture_config = config;
@@ -318,6 +336,66 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
               label={t("cameras.fields.clipRecordingEnabled")}
               hint={t("cameras.hints.clipRecordingEnabled")}
             />
+            {/* Migration 0052 — clip detection source. Disabled UI
+                hint when clip recording is off, but the value still
+                round-trips so toggling recording back on preserves
+                the operator's choice. */}
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 6,
+                opacity: clipRecordingEnabled ? 1 : 0.55,
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 11,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.04em",
+                  color: "var(--text-tertiary)",
+                }}
+              >
+                {t("cameras.fields.clipDetectionSource")}
+              </span>
+              <div
+                role="radiogroup"
+                aria-label={
+                  t("cameras.fields.clipDetectionSource") as string
+                }
+                style={{ display: "flex", gap: 12, flexWrap: "wrap" }}
+              >
+                {CLIP_DETECTION_SOURCES.map((s) => (
+                  <label
+                    key={s}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      cursor: clipRecordingEnabled
+                        ? "pointer"
+                        : "not-allowed",
+                      fontSize: 13,
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="clip_detection_source"
+                      value={s}
+                      checked={clipDetectionSource === s}
+                      disabled={!clipRecordingEnabled}
+                      onChange={() =>
+                        setClipDetectionSource(s as ClipDetectionSource)
+                      }
+                    />
+                    {t(`cameras.clipSource.${s}.label`)}
+                  </label>
+                ))}
+              </div>
+              <span className="text-xs text-dim">
+                {t(`cameras.clipSource.${clipDetectionSource}.hint`)}
+              </span>
+            </div>
           </div>
 
           {/* P28.5b: capture settings (collapsed by default) */}

@@ -54,6 +54,7 @@ def _row_to_out(row: repo.CameraRow) -> CameraOut:
         display_enabled=row.display_enabled,
         detection_enabled=row.detection_enabled,
         clip_recording_enabled=row.clip_recording_enabled,
+        clip_detection_source=row.clip_detection_source,
         capture_config=CaptureConfig.model_validate(row.capture_config),
         created_at=row.created_at,
         last_seen_at=row.last_seen_at,
@@ -88,6 +89,7 @@ def _audit_payload(row: repo.CameraRow) -> dict:
         "display_enabled": row.display_enabled,
         "detection_enabled": row.detection_enabled,
         "clip_recording_enabled": row.clip_recording_enabled,
+        "clip_detection_source": row.clip_detection_source,
         "capture_config": dict(row.capture_config),
     }
 
@@ -125,6 +127,7 @@ def create_camera_endpoint(
                 display_enabled=payload.display_enabled,
                 detection_enabled=payload.detection_enabled,
                 clip_recording_enabled=payload.clip_recording_enabled,
+                clip_detection_source=payload.clip_detection_source,
                 camera_code=payload.camera_code,
                 zone=payload.zone,
                 capture_config=payload.capture_config.model_dump(),
@@ -190,6 +193,20 @@ def patch_camera_endpoint(
             values["detection_enabled"] = provided["detection_enabled"]
         if "clip_recording_enabled" in provided:
             values["clip_recording_enabled"] = provided["clip_recording_enabled"]
+        if (
+            "clip_detection_source" in provided
+            and provided["clip_detection_source"] is not None
+        ):
+            v = provided["clip_detection_source"]
+            if v not in ("face", "body", "both"):
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "field": "clip_detection_source",
+                        "message": "must be 'face', 'body', or 'both'",
+                    },
+                )
+            values["clip_detection_source"] = v
         if "capture_config" in provided and provided["capture_config"] is not None:
             # CaptureConfig is a Pydantic model — model_dump() canonicalises
             # the JSONB shape so two writes of equivalent payloads produce

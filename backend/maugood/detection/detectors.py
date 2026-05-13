@@ -146,6 +146,15 @@ class DetectorConfig:
     min_face_pixels: int = 60 * 60
     # YOLO+face mode only.
     yolo_conf: float = 0.35
+    # YOLO input image size. Ultralytics' default is 640; we run live
+    # capture at 480 for speed. UC1 reprocess overrides to 960 (or
+    # higher) to recover small/distant persons that 480 misses.
+    yolo_imgsz: int = 480
+    # Padding (pixels) added to each YOLO person box before face
+    # detection runs on the crop. Faces frequently sit at the top
+    # edge of the body box — a too-small pad clips them. 10 is the
+    # live-capture default; reprocess uses 40.
+    yolo_face_pad: int = 10
 
     @classmethod
     def from_dict(cls, raw: Optional[dict]) -> "DetectorConfig":
@@ -356,15 +365,17 @@ def _detect_insightface(frame_bgr, config: DetectorConfig) -> list[dict]:  # typ
 
 def _run_yolo_face(  # type: ignore[no-untyped-def]
     frame_bgr, config: DetectorConfig
-) -> "tuple[list[dict], int]":
+) -> "tuple[list[dict], int, list[tuple[int, int, int, int]]]":
     """Core YOLO+InsightFace detection pass (shared by both callers below).
 
-    Returns ``(face_dicts, yolo_person_count)`` where
-    ``yolo_person_count`` is the raw count of YOLO person boxes —
-    including persons whose face is not visible. Both ``_detect_yolo_face``
-    (the mode="yolo+face" branch of ``detect()``) and
-    ``detect_and_count()`` in yolo+face mode delegate here so YOLO
-    never runs twice in the same analyzer cycle.
+    Returns ``(face_dicts, yolo_person_count, person_boxes_xyxy)``
+    where ``yolo_person_count`` is the raw count of YOLO person
+    boxes — including persons whose face is not visible — and
+    ``person_boxes_xyxy`` is the raw xyxy list (no padding) used by
+    the live persons overlay. Both ``_detect_yolo_face`` (the
+    mode="yolo+face" branch of ``detect()``) and ``detect_and_count()``
+    in yolo+face mode delegate here so YOLO never runs twice in the
+    same analyzer cycle.
     """
 
     H, W = frame_bgr.shape[:2]
@@ -372,22 +383,36 @@ def _run_yolo_face(  # type: ignore[no-untyped-def]
     with _detect_lock:
         yolo = _load_yolo()
         app = _load_face_app(config.det_size)
-        # classes=[0] restricts YOLO to "person".
+        # classes=[0] restricts YOLO to "person". ``iou=0.45`` tightens
+        # ultralytics' internal NMS (default 0.7) so two boxes
+        # overlapping the same person more aggressively merge into one
+        # — fixes the "single person counted as two" failure mode on
+        # busy office cameras.
         result = yolo(
             frame_bgr,
             classes=[0],
-            imgsz=480,
+            imgsz=config.yolo_imgsz,
             conf=config.yolo_conf,
+            iou=0.45,
             verbose=False,
         )[0]
 
     # Count ALL YOLO person boxes — persons with back to camera still count.
     person_count = len(result.boxes)
+    # Raw (unpadded) person bboxes for the persons-only preview
+    # overlay. Padding below is for face-crop inflation; the overlay
+    # wants the tight YOLO box.
+    person_boxes_xyxy: list[tuple[int, int, int, int]] = []
     out: list[dict] = []
     for box in result.boxes:
         bx1, by1, bx2, by2 = [int(v) for v in box.xyxy[0]]
-        # Slight padding so we catch faces at the body-box edges.
-        pad = 10
+        if bx2 > bx1 and by2 > by1:
+            person_boxes_xyxy.append((bx1, by1, bx2, by2))
+        # Padding so we catch faces at the body-box edges. Live
+        # capture uses pad=10 (speed); reprocess overrides to 40 so
+        # faces at the top of a tightly-drawn body box aren't clipped
+        # before InsightFace runs on the crop.
+        pad = config.yolo_face_pad
         bx1 = max(0, bx1 - pad)
         by1 = max(0, by1 - pad)
         bx2 = min(W, bx2 + pad)
@@ -425,7 +450,7 @@ def _run_yolo_face(  # type: ignore[no-untyped-def]
                 "face_height": fh,
                 "pose_score": _pose_score_from_landmarks(kps, fw),
             })
-    return out, person_count
+    return out, person_count, person_boxes_xyxy
 
 
 def _detect_yolo_face(frame_bgr, config: DetectorConfig) -> list[dict]:  # type: ignore[no-untyped-def]
@@ -442,22 +467,22 @@ def _detect_yolo_face(frame_bgr, config: DetectorConfig) -> list[dict]:  # type:
 
 def detect_and_count(  # type: ignore[no-untyped-def]
     frame_bgr, config: DetectorConfig
-) -> "tuple[list[dict], int]":
+) -> "tuple[list[dict], int, list[tuple[int, int, int, int]]]":
     """Run face detection AND YOLO person-body detection in a single pass.
 
-    Returns ``(face_dicts, person_count)`` where ``person_count`` comes
-    from YOLO body detection — not face detection. This ensures the
-    clip-recording gate is driven by person *presence* rather than face
-    *visibility*. A seated employee with their back to the camera still
-    produces a non-zero ``person_count``, keeping the clip alive.
+    Returns ``(face_dicts, person_count, person_boxes_xyxy)`` where
+    ``person_count`` and ``person_boxes_xyxy`` come from YOLO body
+    detection — not face detection. This ensures the clip-recording
+    gate is driven by person *presence* rather than face *visibility*,
+    AND the persons-only live overlay has body bboxes to draw.
 
     Mode dispatch:
-    * ``yolo+face``:  YOLO runs once; face dicts + YOLO person count are
-      returned together. No duplicate YOLO call.
+    * ``yolo+face``:  YOLO runs once; face dicts + YOLO person count +
+      person boxes are returned together. No duplicate YOLO call.
     * ``insightface``: InsightFace for face dicts + one YOLO pass for
-      person count.
+      person count + boxes.
 
-    Falls back to ``person_count=0`` (face-based clip gating) when
+    Falls back to ``person_count=0`` + empty bbox list when
     ``ultralytics`` is not installed.
 
     Thread-safe: both calls funnel through ``_detect_lock``.
@@ -466,13 +491,30 @@ def detect_and_count(  # type: ignore[no-untyped-def]
     if config.mode == "yolo+face":
         return _run_yolo_face(frame_bgr, config)
 
-    # insightface mode: face detection + separate YOLO person count.
+    # insightface mode: face detection + separate YOLO person pass
+    # that yields both the count AND the bboxes from a single YOLO
+    # run.
     faces = _detect_insightface(frame_bgr, config)
     try:
-        person_count = _detect_person_count_yolo(frame_bgr, config)
+        person_boxes = _detect_person_boxes_yolo(frame_bgr, config)
     except Exception:  # noqa: BLE001  ultralytics not installed, YOLO load fail
-        person_count = 0
-    return faces, person_count
+        person_boxes = []
+    return faces, len(person_boxes), person_boxes
+
+
+def detect_person_boxes(  # type: ignore[no-untyped-def]
+    frame_bgr, config: DetectorConfig
+) -> list[tuple[int, int, int, int]]:
+    """Return YOLO person bboxes (xyxy) for the frame.
+
+    Used by the live preview overlay to draw person-only boxes on
+    the Watch-Live modal — that view records based on human
+    presence, not face matching, so the face boxes don't belong
+    there. Works in both ``insightface`` and ``yolo+face`` detection
+    modes (YOLO body detection runs in both).
+    """
+
+    return _detect_person_boxes_yolo(frame_bgr, config)
 
 
 def detect_persons(frame_bgr, config: DetectorConfig) -> int:  # type: ignore[no-untyped-def]
@@ -495,8 +537,17 @@ def detect_persons(frame_bgr, config: DetectorConfig) -> int:  # type: ignore[no
     return 0
 
 
-def _detect_person_count_yolo(frame_bgr, config: DetectorConfig) -> int:  # type: ignore[no-untyped-def]
-    """Run YOLO ``classes=[0]`` and return the count of person boxes.
+def _detect_person_boxes_yolo(  # type: ignore[no-untyped-def]
+    frame_bgr, config: DetectorConfig
+) -> list[tuple[int, int, int, int]]:
+    """Run YOLO ``classes=[0]`` and return person bboxes scaled back
+    to the frame's pixel space.
+
+    YOLO is fed a downscaled copy (``imgsz=480`` — driven by the
+    ultralytics resize) and returns coordinates in the model's input
+    space. Ultralytics' ``boxes.xyxy`` is already mapped back to the
+    INPUT frame's pixel coordinates (the library does this for us),
+    so we can use them directly without re-scaling.
 
     Cheap (~20-40 ms on CPU for 480p) compared to InsightFace face
     detection. Only YOLO — no InsightFace pass.
@@ -504,14 +555,49 @@ def _detect_person_count_yolo(frame_bgr, config: DetectorConfig) -> int:  # type
 
     with _detect_lock:
         yolo = _load_yolo()
+        # iou=0.45 — tighter NMS than ultralytics' 0.7 default so the
+        # same person doesn't get returned as two overlapping boxes.
         result = yolo(
             frame_bgr,
             classes=[0],
             imgsz=480,
             conf=config.yolo_conf,
+            iou=0.45,
             verbose=False,
         )[0]
-    return len(result.boxes)
+
+    out: list[tuple[int, int, int, int]] = []
+    boxes = getattr(result, "boxes", None)
+    if boxes is None:
+        return out
+    xyxy = getattr(boxes, "xyxy", None)
+    if xyxy is None:
+        return out
+    # Convert torch tensor / numpy array → list of int tuples. The
+    # ``.cpu().numpy()`` path handles both backends; if it's already a
+    # numpy array (CPU-only ultralytics) the .cpu() is a no-op.
+    try:
+        arr = xyxy.cpu().numpy()
+    except AttributeError:
+        arr = xyxy
+    for row in arr:
+        x1, y1, x2, y2 = (int(v) for v in row[:4])
+        if x2 > x1 and y2 > y1:
+            out.append((x1, y1, x2, y2))
+    return out
+
+
+def _detect_person_count_yolo(frame_bgr, config: DetectorConfig) -> int:  # type: ignore[no-untyped-def]
+    """Return only the count of person boxes (legacy wrapper).
+
+    Kept so the existing ``detect_persons`` / ``detect_and_count``
+    callers don't have to be touched everywhere — they only need a
+    count. New callers that need the boxes themselves use
+    ``_detect_person_boxes_yolo`` directly (or the public
+    ``detect_person_boxes`` re-export).
+    """
+
+    return len(_detect_person_boxes_yolo(frame_bgr, config))
 
 
 def quality_score(face: dict) -> float:

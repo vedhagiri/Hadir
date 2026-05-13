@@ -11,6 +11,10 @@ export interface LiveStats {
   fps_reader: number;
   fps_analyzer: number;
   motion_skipped: number;
+  /** Migration 0054 — live count of people currently in frame.
+   * ``max(face_count, yolo_person_count, active_tracks)`` from the
+   * worker's most recent analyzer cycle. */
+  live_person_count: number;
   status: "online" | "offline";
 }
 

@@ -705,3 +705,144 @@ def put_tracker_config(
             after=new_config,
         )
     return TrackerConfigOut.model_validate(new_config)
+
+
+# ---------------------------------------------------------------------------
+# Migration 0052 — Phase C: clip encoding config endpoints.
+# ---------------------------------------------------------------------------
+
+
+# Migration 0056 — faster defaults. Mirrors the JSONB server_default
+# on tenant_settings.clip_encoding_config and the worker's own
+# DEFAULT_CLIP_ENCODING_CONFIG. Used as the fallback for tenants
+# whose row is missing or has a missing key (defence in depth).
+_CLIP_ENCODING_DEFAULTS: dict = {
+    "chunk_duration_sec": 180,
+    "video_crf": 26,
+    "video_preset": "veryfast",
+    "resolution_max_height": 720,
+    "keep_chunks_after_merge": False,
+}
+
+# x264 presets, ordered fastest → slowest. The full set ffmpeg ships
+# with — operators rarely want the extremes but we accept them.
+_ALLOWED_PRESETS = (
+    "ultrafast", "superfast", "veryfast", "faster",
+    "fast", "medium", "slow", "slower", "veryslow",
+)
+
+# Allowed downscale heights. ``None`` keeps native — most operators
+# leave it there. 480 / 720 / 1080 cover the typical surveillance
+# resolutions; arbitrary values would be a footgun for the merge step
+# (chunks at one height can't concat with chunks at another).
+_ALLOWED_RESOLUTIONS = (None, 480, 720, 1080)
+
+
+class ClipEncodingConfigIn(BaseModel):
+    """Inbound shape for ``PUT /api/system/clip-encoding-config``.
+
+    Bounds:
+      * ``chunk_duration_sec`` 60–600 s. Shorter than 60 explodes the
+        ``person_clip_chunks`` row count on long clips; longer than
+        600 defeats the chunking purpose.
+      * ``video_crf`` 18–30. libx264 sweet spot — 18 is visually
+        lossless, 30 is small-but-fuzzy.
+      * ``video_preset`` one of the standard x264 presets.
+      * ``resolution_max_height`` in the curated set above or null.
+      * ``keep_chunks_after_merge`` boolean.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    chunk_duration_sec: int = Field(ge=60, le=600)
+    video_crf: int = Field(ge=18, le=30)
+    video_preset: str
+    resolution_max_height: Optional[int] = None
+    keep_chunks_after_merge: bool
+
+    @field_validator("video_preset")
+    @classmethod
+    def _check_preset(cls, v: str) -> str:
+        if v not in _ALLOWED_PRESETS:
+            raise ValueError(
+                "video_preset must be one of: " + ", ".join(_ALLOWED_PRESETS)
+            )
+        return v
+
+    @field_validator("resolution_max_height")
+    @classmethod
+    def _check_resolution(cls, v: Optional[int]) -> Optional[int]:
+        if v not in _ALLOWED_RESOLUTIONS:
+            allowed = ", ".join(
+                "null" if x is None else str(x) for x in _ALLOWED_RESOLUTIONS
+            )
+            raise ValueError(
+                f"resolution_max_height must be one of: {allowed}"
+            )
+        return v
+
+
+class ClipEncodingConfigOut(ClipEncodingConfigIn):
+    """Outbound shape — same fields as inbound."""
+
+    model_config = ConfigDict(extra="ignore")
+
+
+def _load_clip_encoding_row(scope: TenantScope) -> dict:
+    """Read the row + merge over defaults so missing keys are filled."""
+
+    engine = get_engine()
+    with engine.begin() as conn:
+        row = conn.execute(
+            select(
+                tenant_settings.c.clip_encoding_config,
+            ).where(tenant_settings.c.tenant_id == scope.tenant_id)
+        ).first()
+    out = dict(_CLIP_ENCODING_DEFAULTS)
+    if row is not None and isinstance(row.clip_encoding_config, dict):
+        out.update(row.clip_encoding_config)
+    return out
+
+
+@router.get(
+    "/clip-encoding-config", response_model=ClipEncodingConfigOut
+)
+def get_clip_encoding_config(
+    user: Annotated[CurrentUser, ADMIN],
+) -> ClipEncodingConfigOut:
+    scope = TenantScope(tenant_id=user.tenant_id)
+    return ClipEncodingConfigOut.model_validate(
+        _load_clip_encoding_row(scope)
+    )
+
+
+@router.put(
+    "/clip-encoding-config", response_model=ClipEncodingConfigOut
+)
+def put_clip_encoding_config(
+    payload: dict,
+    user: Annotated[CurrentUser, ADMIN],
+) -> ClipEncodingConfigOut:
+    parsed = _validation_to_400(ClipEncodingConfigIn, payload)
+    scope = TenantScope(tenant_id=user.tenant_id)
+    new_config = parsed.model_dump()
+    before = _load_clip_encoding_row(scope)
+    engine = get_engine()
+    with engine.begin() as conn:
+        _ensure_tenant_settings_row(conn, scope.tenant_id)
+        conn.execute(
+            sql_update(tenant_settings)
+            .where(tenant_settings.c.tenant_id == scope.tenant_id)
+            .values(clip_encoding_config=new_config)
+        )
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="system.clip_encoding_config.updated",
+            entity_type="tenant_settings",
+            entity_id=str(scope.tenant_id),
+            before=before,
+            after=new_config,
+        )
+    return ClipEncodingConfigOut.model_validate(new_config)

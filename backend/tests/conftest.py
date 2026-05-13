@@ -76,11 +76,14 @@ class _NoopAnalyzer:
     def detect(self, _frame) -> list:  # type: ignore[no-untyped-def]
         return []
 
-    def detect_and_count(self, _frame) -> "tuple[list, int]":  # type: ignore[no-untyped-def]
-        return [], 0
+    def detect_and_count(self, _frame) -> "tuple[list, int, list]":  # type: ignore[no-untyped-def]
+        return [], 0, []
 
     def detect_persons(self, _frame) -> int:  # type: ignore[no-untyped-def]
         return 0
+
+    def detect_person_boxes(self, _frame) -> list:  # type: ignore[no-untyped-def]
+        return []
 
     def embed_crop(self, _crop):  # type: ignore[no-untyped-def]
         return None

@@ -26,8 +26,43 @@ export interface PersonClipOut {
   fps_recorded: number | null;
   resolution_w: number | null;
   resolution_h: number | null;
+  // Migration 0052 — which detector triggered the clip.
+  // 'face' (default, pre-0052), 'body', or 'both'.
+  detection_source: ClipDetectionSource;
+  // Number of intermediate chunks merged into the final file.
+  // 1 for short clips; >1 for long-duration clips.
+  chunk_count: number;
+  // Migration 0054 — lifecycle status. While 'recording' the card
+  // renders a 🔴 LIVE badge and offers MJPEG preview from the
+  // camera's live stream (/api/cameras/{id}/live.mjpg).
+  recording_status: RecordingStatus;
   created_at: string;
 }
+
+// Migration 0052 — clip recording trigger source.
+export type ClipDetectionSource = "face" | "body" | "both";
+
+// Migration 0054 / 0055 — clip recording lifecycle status.
+//
+//   recording  reader is actively writing chunk frames
+//   finalizing reader handed off; ClipWorker is encoding the file
+//              (multi-minute window for long clips at native res)
+//   completed  file on disk, fully encoded
+//   failed     encode / write error
+//   abandoned  startup janitor swept a stale in-flight row
+export type RecordingStatus =
+  | "recording"
+  | "finalizing"
+  | "completed"
+  | "failed"
+  | "abandoned";
+
+// Filter value for the segmented control on PersonClipsPage. "all"
+// omits the ``detection_source`` query param; the others map directly
+// to the backend ``?detection_source=`` filter.
+export type ClipDetectionSourceFilter =
+  | "all"
+  | ClipDetectionSource;
 
 export interface PersonClipListResponse {
   items: PersonClipOut[];
@@ -51,11 +86,36 @@ export interface PersonClipStats {
   failed_match: number;
 }
 
+// Face-match pipeline status filter — matches DB ``matched_status``.
+// ``null`` omits the query param (all matched_status values returned).
+export type ClipMatchedStatusFilter =
+  | null
+  | "pending"
+  | "processing"
+  | "processed"
+  | "failed";
+
+// Recording lifecycle filter — matches DB ``recording_status``.
+// ``null`` omits the query param (default backend hides
+// failed/abandoned regardless).
+export type ClipRecordingStatusFilter =
+  | null
+  | "recording"
+  | "finalizing"
+  | "completed";
+
 export interface PersonClipFilters {
   camera_id: number | null;
   employee_id: number | null;
   start: string | null;
   end: string | null;
+  // Migration 0052: filter by detector source. "all" omits the
+  // query param so legacy clips (predating the column) still appear.
+  detection_source: ClipDetectionSourceFilter;
+  // Click-driven filters from the Face-matching pills and the
+  // Summary band. ``null`` = pill/tile not active.
+  matched_status: ClipMatchedStatusFilter;
+  recording_status: ClipRecordingStatusFilter;
   page: number;
   page_size: number;
 }

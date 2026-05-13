@@ -371,6 +371,8 @@
       "workerEnabled": "Capture worker",
       "displayEnabled": "Live preview",
       "detectionEnabled": "Face detection",
+      "clipRecordingEnabled": "Save person clips",
+      "clipDetectionSource": "Clip detection source",
       "captureSettings": "Capture settings",
       "maxFacesPerEvent": "Max faces per event",
       "maxEventDurationSec": "Max event duration (seconds)",
@@ -408,6 +410,20 @@
       "Office": "Office",
       "Outdoor": "Outdoor",
       "Other": "Other"
+    },
+    "clipSource": {
+      "face": {
+        "label": "Face",
+        "hint": "Start recording only when a face is detected (Option 1, default). Works best for entry / lobby cameras where faces are always visible."
+      },
+      "body": {
+        "label": "Body",
+        "hint": "Start recording when a person's body is detected, even if their face is not visible. Best for desk / seated cameras where faces are often hidden."
+      },
+      "both": {
+        "label": "Both",
+        "hint": "Start recording when either a face or a body is detected (OR). The most permissive trigger; captures every presence."
+      }
     }
   },
   "systemSettings": {
@@ -473,6 +489,32 @@
       "maxDuration": {
         "label": "Max event duration (seconds)",
         "hint": "Stop saving new face crops after a person has been in frame this long. Per-camera setting (Cameras → Capture settings) overrides this default."
+      }
+    },
+    "clipEncoding": {
+      "title": "Clip recording",
+      "subtitle": "How long person-presence clips are split into chunks during recording, and the H.264 encoding parameters used for the final merged file.",
+      "resetConfirm": "This will revert clip recording settings to the defaults (3 min chunks, CRF 23, preset 'fast', native resolution, do not keep chunks).",
+      "chunkDuration": {
+        "label": "Chunk duration (seconds)",
+        "hint": "While a person stays in frame the recording rotates to a new chunk every N seconds. On clip end the chunks merge into one MP4. Default 180 s (3 min)."
+      },
+      "crf": {
+        "label": "Video quality (CRF)",
+        "hint": "x264 constant rate factor. 18 = visually lossless (larger files), 30 = small and fuzzy. 23 is the recommended default."
+      },
+      "preset": {
+        "label": "Encoding preset",
+        "hint": "Speed vs file size trade-off. 'fast' is the sweet spot for live recording; 'slower' produces ~10% smaller files but uses more CPU."
+      },
+      "resolution": {
+        "label": "Output resolution",
+        "hint": "Downscale captured frames before encoding. 'Native' preserves the camera's resolution; 720p / 480p reduce file size substantially.",
+        "native": "Native (keep camera resolution)"
+      },
+      "keepChunks": {
+        "label": "Keep chunks after merge",
+        "hint": "When on, each intermediate chunk MP4 is also saved alongside the merged clip (encrypted). Useful for crash recovery; uses more disk."
       }
     }
   },
@@ -855,6 +897,40 @@
   },
   "personClips": {
     "title": "Person Clips",
+    "headerSub": "Person-presence recordings, clip pipeline and storage.",
+    "tabClips": "Clips",
+    "tabPipeline": "Pipeline",
+    "tabSystem": "System",
+    "tabComparison": "Use Case Comparison",
+    "summary": {
+      "totalClips": "Total clips",
+      "storage": "Storage used",
+      "liveNow": "Recording now",
+      "cameras": "Active cameras",
+      "showAll": "Show all clips (clear filters)",
+      "showLiveOnly": "Show only live recordings",
+      "clearLiveFilter": "Clear live filter"
+    },
+    "facePipeline": {
+      "heading": "Face matching",
+      "pending": "Match pending",
+      "processing": "Matching",
+      "matched": "Matched",
+      "failed": "Match failed",
+      "applyFilter": "Filter clips by this status",
+      "clearFilter": "Clear status filter",
+      "helpInline": "(click any pill to filter — face matching is opt-in via right-click on a clip)",
+      "helpTitle": "Face-matching pipeline status. Click a pill to filter the clip list. Clips are saved without auto face-matching since migration 0058 — right-click any clip card to run Use Case 1 + Use Case 2."
+    },
+    "contextMenu": {
+      "title": "Run face matching",
+      "uc1": "Use Case 1 — YOLO + face crops",
+      "uc1Hint": "Person-box detection → face crops → match",
+      "uc2": "Use Case 2 — InsightFace + crops",
+      "uc2Hint": "Full-frame face detection → crops → match",
+      "uc3": "Use Case 3 — Direct match (no crops)",
+      "uc3Hint": "Face detection → match in one pass, no crop save"
+    },
     "totalSuffix": "clips",
     "totalSizeSuffix": "total",
     "listTitle": "Saved clips",
@@ -862,6 +938,29 @@
     "allCameras": "All cameras",
     "from": "From",
     "to": "To",
+    "source": {
+      "label": "Filter by detector source",
+      "all": "All",
+      "face": "Face",
+      "body": "Body",
+      "both": "Both"
+    },
+    "live": {
+      "badge": "Live",
+      "finalizing": "Encoding",
+      "encodingProgress": "Encoding video…",
+      "watchLive": "Watch live",
+      "modalTitle": "Live camera preview",
+      "modalHint": "Live MJPEG from the source camera while this clip is recording.",
+      "deleteDisabled": "Cannot delete while recording — wait until the person leaves the frame.",
+      "peopleCountAria": "People currently in frame (updates every second)",
+      "fpsAria": "Reader {{reader}} fps · Analyzer {{analyzer}} fps. Reader is the RTSP read rate; analyzer is how often detection actually runs (motion-skip drops this on quiet frames)."
+    },
+    "startEnd": {
+      "recording": "Recording…",
+      "titleCompleted": "Clip start → end time",
+      "titleRecording": "Clip started at this time; still recording"
+    },
     "loadFailed": "Could not load clips.",
     "empty": "No clips found. Clips are automatically saved when a person is detected.",
     "page": "Page",

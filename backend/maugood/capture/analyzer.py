@@ -31,6 +31,7 @@ from maugood.capture.tracker import Bbox
 from maugood.detection import DetectorConfig
 from maugood.detection import detect as detector_detect
 from maugood.detection import detect_and_count as detector_detect_and_count
+from maugood.detection import detect_person_boxes as detector_detect_person_boxes
 from maugood.detection import detect_persons as detector_detect_persons
 from maugood.detection import quality_score as detector_quality_score
 
@@ -60,13 +61,15 @@ class Analyzer(Protocol):
 
     def detect_and_count(  # type: ignore[no-untyped-def]
         self, frame_bgr
-    ) -> "tuple[list[Detection], int]":
+    ) -> "tuple[list[Detection], int, list[tuple[int, int, int, int]]]":
         """Run face detection and YOLO person-body detection in one pass.
 
-        Returns ``(detections, person_count)`` where ``person_count``
-        uses YOLO body detection regardless of the configured face-
-        detection mode. Persons with their back to the camera produce a
-        non-zero count even when InsightFace finds no face.
+        Returns ``(detections, person_count, person_boxes_xyxy)``.
+        ``person_count`` and ``person_boxes_xyxy`` come from YOLO
+        body detection regardless of the configured face-detection
+        mode. Persons with their back to the camera produce a non-zero
+        count even when InsightFace finds no face. The bboxes feed the
+        persons-only live overlay (Watch-Live modal).
 
         This is the primary entry point for ``_analyzer_loop`` —
         replaces the old separate ``detect`` + ``detect_persons`` calls
@@ -79,6 +82,15 @@ class Analyzer(Protocol):
 
         Kept for backward compatibility. The main analyzer loop now uses
         ``detect_and_count`` instead to avoid running YOLO twice.
+        """
+
+    def detect_person_boxes(  # type: ignore[no-untyped-def]
+        self, frame_bgr
+    ) -> "list[tuple[int, int, int, int]]":
+        """Return YOLO person bboxes (xyxy) for the frame.
+
+        Used by the persons-preview overlay (Watch-Live modal on
+        Person Clips). Stub analyzers may return ``[]``.
         """
 
     def embed_crop(self, crop_bgr) -> Optional[np.ndarray]:  # type: ignore[no-untyped-def]
@@ -131,20 +143,38 @@ class InsightFaceAnalyzer:
         cfg = self._snapshot_config()
         return detector_detect_persons(frame_bgr, cfg)
 
+    def detect_person_boxes(  # type: ignore[no-untyped-def]
+        self, frame_bgr
+    ) -> "list[tuple[int, int, int, int]]":
+        """Return YOLO person bboxes (xyxy) for the frame.
+
+        Used by the reader's persons-preview overlay so the
+        Watch-Live modal renders body boxes instead of face boxes.
+        Works regardless of the configured detector ``mode`` — both
+        ``insightface`` and ``yolo+face`` paths have YOLO available.
+        """
+
+        cfg = self._snapshot_config()
+        return detector_detect_person_boxes(frame_bgr, cfg)
+
     def detect_and_count(  # type: ignore[no-untyped-def]
         self, frame_bgr
-    ) -> "tuple[list[Detection], int]":
-        """Face detection + YOLO person count in one pass.
+    ) -> "tuple[list[Detection], int, list[tuple[int, int, int, int]]]":
+        """Face detection + YOLO person count + YOLO person bboxes in
+        a single pass.
 
-        In ``yolo+face`` mode YOLO runs once and contributes both the
-        person boxes (for face crops) and the raw person count (for the
-        clip gate). In ``insightface`` mode InsightFace runs for face
-        crops and YOLO runs separately for the person count — adding
-        ~20-40 ms but ensuring clips keep recording even when faces are
-        not visible (seated employees, back-to-camera, partial occlusion).
+        In ``yolo+face`` mode YOLO runs once and contributes face
+        crops, person count, AND raw person bboxes — no duplicate
+        YOLO call. In ``insightface`` mode InsightFace runs for face
+        crops and YOLO runs separately for the person pass (count +
+        bboxes from the SAME YOLO inference). The bboxes feed the
+        persons-only live overlay served from the
+        ``live-persons.mjpg`` endpoint.
         """
         cfg = self._snapshot_config()
-        raw_faces, person_count = detector_detect_and_count(frame_bgr, cfg)
+        raw_faces, person_count, person_boxes = (
+            detector_detect_and_count(frame_bgr, cfg)
+        )
         detections: list[Detection] = []
         for d in raw_faces:
             x1, y1, x2, y2 = d["bbox"]
@@ -159,7 +189,7 @@ class InsightFaceAnalyzer:
                     embedding=d.get("embedding"),
                 )
             )
-        return detections, person_count
+        return detections, person_count, person_boxes
 
     def detect(self, frame_bgr) -> list[Detection]:  # type: ignore[no-untyped-def]
         cfg = self._snapshot_config()

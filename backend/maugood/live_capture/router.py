@@ -343,6 +343,193 @@ def live_mjpg(
 
 
 # ---------------------------------------------------------------------------
+# /live-persons.mjpg — persons-only annotated MJPEG stream
+# (Migration 0055 — served to the Person Clips Watch-Live modal)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{camera_id}/live-persons.mjpg")
+def live_persons_mjpg(
+    camera_id: int,
+    request: Request,
+    user: Annotated[CurrentUser, Depends(require_role("Admin"))],
+    scope: Annotated[TenantScope, Depends(get_tenant_scope)],
+) -> StreamingResponse:
+    """Stream the latest annotated frames with PERSON bboxes only.
+
+    Migration 0055 — the Person Clips "Watch Live" modal opens on a
+    body-presence recording; face boxes + employee labels don't
+    belong on that view. The worker maintains a second JPEG slot
+    annotated with YOLO body boxes only; this endpoint serves it.
+
+    Same tenant scoping, throttling, and audit rules as
+    ``live.mjpg`` — cross-tenant 404, MJPEG viewer cap, 503 on
+    ``display_enabled=false``.
+    """
+
+    cam = _resolve_camera_in_tenant(tenant_id=scope.tenant_id, camera_id=camera_id)
+    if cam is None:
+        raise HTTPException(status_code=404, detail="camera not found")
+
+    if not cam["display_enabled"]:
+        raise HTTPException(
+            status_code=503, detail="camera_display_disabled"
+        )
+
+    if not _try_acquire_mjpeg(scope.tenant_id, camera_id):
+        raise HTTPException(
+            status_code=503, detail="too many viewers; try again later"
+        )
+
+    engine = get_engine()
+    with engine.begin() as conn:
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id if user.id > 0 else None,
+            action="live_capture.persons_mjpg.subscribed",
+            entity_type="camera",
+            entity_id=str(camera_id),
+            after={"camera_name": cam["name"]},
+        )
+
+    captured_tenant_id = scope.tenant_id
+    captured_schema = scope.tenant_schema
+    actor_id_for_close = user.id if user.id > 0 else None
+    boundary = b"--frame"
+
+    async def gen():  # type: ignore[no-untyped-def]
+        cold_deadline = time.time() + COLD_START_WAIT_S
+        idle_ticks = 0
+        last_ts: float = 0.0
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                got = capture_manager.get_persons_preview(
+                    captured_tenant_id, camera_id
+                )
+                fresh = (
+                    got is not None
+                    and (time.time() - got[1]) <= FRAME_FRESH_MAX_AGE_S
+                )
+                if not fresh:
+                    if time.time() < cold_deadline:
+                        await asyncio.sleep(MJPEG_FRAME_INTERVAL_S)
+                        continue
+                    idle_ticks += 1
+                    if idle_ticks > MJPEG_IDLE_TICK_LIMIT:
+                        break
+                    await asyncio.sleep(MJPEG_FRAME_INTERVAL_S)
+                    continue
+                idle_ticks = 0
+                jpg, ts = got  # type: ignore[misc]
+                if ts == last_ts:
+                    await asyncio.sleep(MJPEG_FRAME_INTERVAL_S)
+                    continue
+                last_ts = ts
+                yield boundary + b"\r\n"
+                yield b"Content-Type: image/jpeg\r\n"
+                yield f"Content-Length: {len(jpg)}\r\n\r\n".encode()
+                yield jpg + b"\r\n"
+                await asyncio.sleep(MJPEG_FRAME_INTERVAL_S)
+        finally:
+            _release_mjpeg(captured_tenant_id, camera_id)
+            try:
+                with tenant_context(captured_schema):
+                    with get_engine().begin() as conn:
+                        write_audit(
+                            conn,
+                            tenant_id=captured_tenant_id,
+                            actor_user_id=actor_id_for_close,
+                            action="live_capture.persons_mjpg.unsubscribed",
+                            entity_type="camera",
+                            entity_id=str(camera_id),
+                        )
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "live_persons_mjpg unsubscribe audit failed for camera %d",
+                    camera_id,
+                )
+
+    return StreamingResponse(
+        gen(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate, private",
+            "Pragma": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# /live-persons.jpg — single-JPEG snapshot
+# (Migration 0058 — thumbnail-mode preview for Person Clips cards)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{camera_id}/live-persons.jpg")
+def live_persons_jpg(
+    camera_id: int,
+    user: Annotated[CurrentUser, Depends(require_role("Admin"))],
+    scope: Annotated[TenantScope, Depends(get_tenant_scope)],
+) -> Response:
+    """Return one JPEG from the cached persons-overlay slot.
+
+    Migration 0058 — single-shot variant of ``live-persons.mjpg``.
+    Designed for the Person Clips card thumbnail-poll mode: each
+    card fetches one JPEG every ~3 s instead of streaming MJPEG,
+    cutting card-level network + CPU by ~100× compared to
+    continuous video.
+
+    No MJPEG viewer slot is consumed (this is a regular HTTP GET,
+    not multipart-streaming), so unlimited cards can poll
+    concurrently without hitting the per-camera viewer cap.
+
+    Headers force the browser to revalidate every fetch — the
+    frontend also adds a cache-bust query param as belt-and-braces,
+    but ``no-store`` is the load-bearing line.
+
+    Returns:
+      * 200 ``image/jpeg`` — fresh JPEG bytes
+      * 404 — camera not in tenant scope
+      * 503 — display_enabled=false (parity with the MJPEG path)
+      * 503 — no fresh frame yet (worker still cold-starting)
+    """
+
+    cam = _resolve_camera_in_tenant(tenant_id=scope.tenant_id, camera_id=camera_id)
+    if cam is None:
+        raise HTTPException(status_code=404, detail="camera not found")
+    if not cam["display_enabled"]:
+        raise HTTPException(
+            status_code=503, detail="camera_display_disabled"
+        )
+
+    got = capture_manager.get_persons_preview(
+        scope.tenant_id, camera_id
+    )
+    if got is None:
+        raise HTTPException(
+            status_code=503, detail="no fresh frame; worker starting"
+        )
+    jpg, ts = got
+    if (time.time() - ts) > FRAME_FRESH_MAX_AGE_S:
+        raise HTTPException(
+            status_code=503, detail="frame stale; reader may be reconnecting"
+        )
+
+    return Response(
+        content=jpg,
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, private",
+            "Pragma": "no-cache",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
 # /events.ws — WebSocket
 # ---------------------------------------------------------------------------
 
@@ -630,6 +817,17 @@ def _stats_for_camera(*, scope: TenantScope, camera_id: int) -> dict:
         )
         fps_analyzer = 0.0
         motion_skipped = 0
+    # Migration 0054 — live person count for the 🔴 LIVE modal
+    # header. ``max(face_count, yolo_person_count, active_tracks)``
+    # under the hood — see CaptureWorker.get_live_person_count.
+    live_person_count = 0
+    try:
+        per_camera = capture_manager.get_live_person_counts(
+            tenant_id=scope.tenant_id
+        )
+        live_person_count = int(per_camera.get(camera_id, 0))
+    except Exception:  # noqa: BLE001
+        pass
     return {
         "detections_last_10m": total,
         "known_count": known,
@@ -638,6 +836,7 @@ def _stats_for_camera(*, scope: TenantScope, camera_id: int) -> dict:
         "fps_reader": round(fps_reader, 2),
         "fps_analyzer": round(fps_analyzer, 2),
         "motion_skipped": motion_skipped,
+        "live_person_count": live_person_count,
         "status": _camera_status_for_stats(tenant_id=scope.tenant_id, camera_id=camera_id),
     }
 

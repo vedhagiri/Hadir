@@ -36,6 +36,16 @@ class PersonClipOut(BaseModel):
     fps_recorded: Optional[float] = None
     resolution_w: Optional[int] = None
     resolution_h: Optional[int] = None
+    # Migration 0052 — which detector triggered the clip.
+    # 'face' (default, pre-0052), 'body', or 'both'.
+    detection_source: str = "face"
+    # Number of intermediate chunks merged into the final file
+    # (Phase B). Phase A always emits 1.
+    chunk_count: int = 1
+    # Migration 0054 — recording lifecycle status. 'recording' means
+    # the clip is in progress; the frontend renders a 🔴 LIVE badge
+    # and offers MJPEG live preview. Completed clips play the MP4.
+    recording_status: str = "completed"
     created_at: datetime
 
 

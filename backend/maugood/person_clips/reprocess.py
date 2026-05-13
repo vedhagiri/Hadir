@@ -108,12 +108,50 @@ def _run_detection(
 
     Returns ``([(frame_idx, detections), ...], extract_duration_s)``.
     Stops early if ``stop_event`` is set.
+
+    Reprocess uses **quality-tuned** detector settings (~2× the
+    per-frame cost of the live-capture path), not bare defaults.
+    Specifically for UC1 (yolo+face), 480-px YOLO + 10-px face pad +
+    60-px min face are the live-capture compromise — fast enough for
+    real-time but they silently drop small/distant persons. UC1's
+    job is to find every face we can, so we bump:
+
+      * yolo_imgsz 480 → 960  (small/distant persons recoverable)
+      * yolo_face_pad 10 → 40 (face escape at top of body box fixed)
+      * min_face_pixels 60² → 30² (~900 px²)
+      * yolo_conf 0.35 → 0.25 (partial-occluded persons recoverable)
+      * min_det_score 0.5 → 0.35 (low-confidence faces survive
+        to the matcher, which has its own threshold anyway)
     """
     from maugood.detection import DetectorConfig, detect as detector_detect  # noqa: PLC0415
 
-    cfg = DetectorConfig(mode=mode)
+    if mode == "yolo+face":
+        cfg = DetectorConfig(
+            mode=mode,
+            yolo_imgsz=960,
+            yolo_face_pad=40,
+            yolo_conf=0.25,
+            min_face_pixels=30 * 30,
+            min_det_score=0.35,
+        )
+    else:
+        # UC2 / UC3 — direct InsightFace path. Also loosen the face
+        # quality floors so reprocess can find faces UC1 missed.
+        cfg = DetectorConfig(
+            mode=mode,
+            min_face_pixels=30 * 30,
+            min_det_score=0.35,
+        )
+
     results: list[tuple[int, list[dict]]] = []
     t0 = time.time()
+
+    # Diagnostics so an operator running UC1 with "no faces found"
+    # can see at a glance whether YOLO failed (zero detections across
+    # every frame) or InsightFace failed (YOLO found persons but
+    # zero faces inside any box).
+    total_dets = 0
+    frames_with_any = 0
 
     for i, frame in enumerate(frames):
         if stop_event is not None and stop_event.is_set():
@@ -122,8 +160,19 @@ def _run_detection(
             dets = detector_detect(frame, cfg)
             if dets:
                 results.append((i, dets))
+                total_dets += len(dets)
+                frames_with_any += 1
         except Exception as exc:  # noqa: BLE001
             logger.debug("detect failed on frame %d: %s", i, type(exc).__name__)
+
+    logger.info(
+        "reprocess detect: mode=%s frames=%d frames_with_faces=%d "
+        "total_faces=%d imgsz=%s pad=%s min_face_pixels=%s",
+        mode, len(frames), frames_with_any, total_dets,
+        getattr(cfg, "yolo_imgsz", "n/a"),
+        getattr(cfg, "yolo_face_pad", "n/a"),
+        cfg.min_face_pixels,
+    )
 
     return results, time.time() - t0
 
@@ -191,14 +240,26 @@ def _save_face_crops_to_db(
     sample_interval: int,
     use_case: str = "uc2",
     det_employee_map: Optional[dict[tuple[int, int], Optional[int]]] = None,
-) -> int:
+    max_crops_override: Optional[int] = None,
+    return_index: bool = False,
+) -> "int | tuple[int, dict[tuple[int, int], int]]":
     """Write face crops from detections to the ``face_crops`` table.
 
     Crops are extracted from ``frames`` using each detection's ``bbox``
-    coordinates and Fernet-encrypted at rest.
+    coordinates, padded with surrounding context, upscaled to a usable
+    minimum size, and Fernet-encrypted at rest.
 
     ``det_employee_map`` maps ``(frame_idx, det_idx)`` → ``employee_id | None``
     so each crop row records who was matched (NULL = unknown person).
+    Passing ``det_employee_map=None`` means "save the crops now, the
+    match step hasn't run yet" — every crop row lands with
+    ``employee_id=NULL`` and the matcher can backfill the column later.
+
+    ``max_crops_override`` overrides ``settings.face_crops_max_per_clip``.
+    UC1 reprocess uses a higher cap (currently 30) because the 5-default
+    is sized for the live-capture path; reprocess wants to retain all
+    available evidence for the detail drawer.
+
     Returns the number of crops saved.
     """
     import cv2  # noqa: PLC0415
@@ -207,7 +268,27 @@ def _save_face_crops_to_db(
     settings = _gs()
     crops_root = Path(settings.face_crops_storage_path)
     saved = 0
-    max_crops = settings.face_crops_max_per_clip
+    max_crops = (
+        max_crops_override
+        if max_crops_override is not None
+        else settings.face_crops_max_per_clip
+    )
+    # When ``return_index=True`` the caller (UC1 backfill path) wants
+    # to know which face_crops.id was created for each (frame, det)
+    # pair so it can UPDATE the employee_id after the match runs.
+    save_index: dict[tuple[int, int], int] = {}
+
+    # Visual-context padding around the raw face bbox before save. The
+    # bbox itself is what InsightFace returned — typically chin-to-
+    # forehead, ear-to-ear. With no padding the saved crop looks like
+    # a tight mug-shot and visual review is hard. 30% pad each side
+    # gives the reviewer enough hair/shoulders to confirm identity.
+    PAD_RATIO = 0.30
+    # Minimum saved-crop dimension. Faces detected at low resolution
+    # (small/distant) get bicubic-upscaled to this size so the saved
+    # JPEG is reviewable. Embeddings have already been computed at the
+    # native resolution — upscaling here is for HUMANS only.
+    MIN_SAVE_DIM = 200
 
     for frame_idx, dets in frame_results:
         if saved >= max_crops:
@@ -216,6 +297,7 @@ def _save_face_crops_to_db(
         frame = frames[frame_idx] if 0 <= frame_idx < len(frames) else None
         if frame is None:
             continue
+        H, W = frame.shape[:2]
         for det_idx, det in enumerate(dets):
             if saved >= max_crops:
                 break
@@ -224,19 +306,39 @@ def _save_face_crops_to_db(
             if bbox is None:
                 continue
             x1, y1, x2, y2 = [int(v) for v in bbox]
-            H, W = frame.shape[:2]
             x1, y1 = max(0, x1), max(0, y1)
             x2, y2 = min(W, x2), min(H, y2)
             if x2 <= x1 or y2 <= y1:
                 continue
-            crop_arr = frame[y1:y2, x1:x2]
+            # Expand bbox with visual-context padding.
+            bw = x2 - x1
+            bh = y2 - y1
+            pad_x = int(bw * PAD_RATIO)
+            pad_y = int(bh * PAD_RATIO)
+            cx1 = max(0, x1 - pad_x)
+            cy1 = max(0, y1 - pad_y)
+            cx2 = min(W, x2 + pad_x)
+            cy2 = min(H, y2 + pad_y)
+            crop_arr = frame[cy1:cy2, cx1:cx2]
             if getattr(crop_arr, "size", 0) == 0:
                 continue
+            # Upscale small crops so the saved JPEG is human-reviewable.
+            ch, cw = crop_arr.shape[:2]
+            short_side = min(ch, cw)
+            if short_side < MIN_SAVE_DIM and short_side > 0:
+                scale = MIN_SAVE_DIM / short_side
+                new_w = int(round(cw * scale))
+                new_h = int(round(ch * scale))
+                crop_arr = cv2.resize(
+                    crop_arr, (new_w, new_h), interpolation=cv2.INTER_CUBIC
+                )
             q_score = float(det.get("quality_score", det.get("det_score", 0.0)))
             if q_score < settings.face_crops_min_quality:
                 continue
             try:
-                ok, buf = cv2.imencode(".jpg", crop_arr)
+                ok, buf = cv2.imencode(
+                    ".jpg", crop_arr, [int(cv2.IMWRITE_JPEG_QUALITY), 92]
+                )
                 if not ok or buf is None:
                     continue
                 crop_bytes = bytes(buf)
@@ -274,7 +376,7 @@ def _save_face_crops_to_db(
             h, w = (crop_arr.shape[0], crop_arr.shape[1]) if hasattr(crop_arr, "shape") else (0, 0)
             try:
                 with engine.begin() as conn:
-                    conn.execute(
+                    result = conn.execute(
                         sa_insert(face_crops).values(
                             tenant_id=scope.tenant_id,
                             camera_id=camera_id,
@@ -289,15 +391,54 @@ def _save_face_crops_to_db(
                             height=h,
                             use_case=use_case,
                             employee_id=emp_id,
-                        )
+                        ).returning(face_crops.c.id)
                     )
+                    inserted_id = int(result.scalar_one())
             except Exception:  # noqa: BLE001
                 crop_path.unlink(missing_ok=True)
                 continue
 
+            save_index[(frame_idx, det_idx)] = inserted_id
             saved += 1
 
+    if return_index:
+        return saved, save_index
     return saved
+
+
+def _backfill_crop_matches(
+    engine,
+    scope: TenantScope,
+    save_index: dict[tuple[int, int], int],
+    det_employee_map: dict[tuple[int, int], Optional[int]],
+) -> None:
+    """UPDATE ``face_crops.employee_id`` for the rows saved before the
+    match step ran. UC1's save-first ordering means every crop landed
+    with ``employee_id=NULL``; the matcher then produced
+    ``det_employee_map``, and this helper threads the match back onto
+    the persisted rows. Rows without a match (employee_id=None) are
+    left alone — they already carry NULL.
+    """
+    updates: list[tuple[int, int]] = []
+    for key, crop_id in save_index.items():
+        emp_id = det_employee_map.get(key)
+        if emp_id is None:
+            continue
+        updates.append((crop_id, emp_id))
+
+    if not updates:
+        return
+
+    with engine.begin() as conn:
+        for crop_id, emp_id in updates:
+            conn.execute(
+                sa_update(face_crops)
+                .where(
+                    face_crops.c.id == crop_id,
+                    face_crops.c.tenant_id == scope.tenant_id,
+                )
+                .values(employee_id=emp_id)
+            )
 
 
 def _upsert_processing_result(
@@ -444,14 +585,41 @@ def _process_clip_for_use_case(
             face_extract_duration_ms=int(extract_s * 1000),
         )
 
+        # UC1's job is to give the operator every face we found, with
+        # or without a successful match. Save crops FIRST so a matcher
+        # crash never strands the evidence; the rows initially carry
+        # employee_id=NULL and we backfill the matched ones after the
+        # match step runs. UC2 / UC3 keep the original "match-then-save"
+        # order so the live-capture single-pass shape is unchanged.
+        #
+        # UC1 also gets a larger ``max_crops_override`` (30 vs the
+        # 5-default) because reprocess wants the full evidence trail —
+        # the live-capture path's 5-cap was sized for the realtime
+        # write rate, not for the offline reprocess.
+        face_crop_count = 0
+        match_index: Optional[dict[tuple[int, int], int]] = None
+        if use_case == "uc1" and frame_results:
+            face_crop_count, match_index = _save_face_crops_to_db(
+                engine, scope, clip_id, camera_id,
+                frames, frame_results,
+                clip_start, duration_seconds, frame_count, sample_interval,
+                use_case=use_case,
+                det_employee_map=None,
+                max_crops_override=30,
+                return_index=True,
+            )
+
         # Match first so each crop can be tagged with the matched employee.
         det_employee_map, matched_ids, unknown_count, match_details, match_s = (
             _match_detections(frame_results, scope)
         )
 
-        # Save crops with employee attribution (matched or None for unknown).
-        face_crop_count = 0
-        if frame_results:
+        if use_case == "uc1" and match_index is not None and frame_results:
+            # Backfill the just-saved crop rows with their match result.
+            _backfill_crop_matches(engine, scope, match_index, det_employee_map)
+        elif frame_results:
+            # UC2 / UC3 unchanged — save after match with employee_id
+            # baked into the INSERT.
             face_crop_count = _save_face_crops_to_db(
                 engine, scope, clip_id, camera_id,
                 frames, frame_results,

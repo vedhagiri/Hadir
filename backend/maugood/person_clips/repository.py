@@ -22,6 +22,9 @@ def list_clips(
     employee_id: Optional[int] = None,
     start: Optional[datetime] = None,
     end: Optional[datetime] = None,
+    detection_source: Optional[str] = None,
+    recording_status: Optional[str] = None,
+    matched_status: Optional[str] = None,
 ) -> tuple[list[Row], int]:
     """Return ``(rows, total_count)`` for the given filters.
 
@@ -56,14 +59,58 @@ def list_clips(
         base = base.where(person_clips.c.clip_start >= start)
     if end is not None:
         base = base.where(person_clips.c.clip_end <= end)
+    if detection_source is not None and detection_source in (
+        "face", "body", "both"
+    ):
+        base = base.where(
+            person_clips.c.detection_source == detection_source
+        )
+    # Face-matching status filter (matched_status column). Clicking a
+    # pill on the page passes one of pending|processing|processed|failed.
+    if matched_status is not None and matched_status in (
+        "pending", "processing", "processed", "failed"
+    ):
+        base = base.where(
+            person_clips.c.matched_status == matched_status
+        )
+
+    if recording_status is not None and recording_status in (
+        "recording", "finalizing", "completed", "failed", "abandoned"
+    ):
+        # Explicit filter — return exactly that status.
+        base = base.where(
+            person_clips.c.recording_status == recording_status
+        )
+    else:
+        # Migration 0054 / 0055 — default list view hides failure
+        # states. ``abandoned`` rows have no file on disk (the worker
+        # never got to finalize before a shutdown / crash); ``failed``
+        # rows had a file write that errored out. Clicking either
+        # would 410 with "clip file missing". They stay in the DB for
+        # ops-side debugging and can be retrieved with an explicit
+        # ?recording_status=abandoned / =failed query param. The
+        # transient ``finalizing`` state is included — encoding is in
+        # progress, the card shows "Encoding…" and the camera's live
+        # stream is still watchable.
+        base = base.where(
+            person_clips.c.recording_status.in_(
+                ("recording", "finalizing", "completed")
+            )
+        )
 
     count_q = select(func.count()).select_from(base.subquery())
     total = conn.execute(count_q).scalar_one()
 
     offset = (page - 1) * page_size
+    # Migration 0054 — live clips pin to the top of the list so the
+    # operator never has to scroll for the 🔴 LIVE entry. Among rows
+    # with the same recording status, newest first as before.
     rows = (
         conn.execute(
-            base.order_by(person_clips.c.created_at.desc())
+            base.order_by(
+                (person_clips.c.recording_status == "recording").desc(),
+                person_clips.c.created_at.desc(),
+            )
             .limit(page_size)
             .offset(offset)
         )
@@ -123,6 +170,13 @@ def bulk_delete_clips(
     """Delete multiple clip rows scoped to the tenant.
 
     Returns the list of deleted rows (for file cleanup + audit).
+
+    Migration 0054 / 0055: rows in the in-flight states are silently
+    skipped. ``recording`` = reader is still writing chunk frames.
+    ``finalizing`` = reader has handed off, ClipWorker is encoding
+    the file. Deleting now would race with the in-flight UPDATEs +
+    leak partial intermediate files. The frontend disables the
+    delete button on these states; this filter is defence in depth.
     """
 
     rows = (
@@ -130,6 +184,9 @@ def bulk_delete_clips(
             select(person_clips).where(
                 person_clips.c.id.in_(clip_ids),
                 person_clips.c.tenant_id == scope.tenant_id,
+                person_clips.c.recording_status.notin_(
+                    ("recording", "finalizing")
+                ),
             )
         )
         .all()
