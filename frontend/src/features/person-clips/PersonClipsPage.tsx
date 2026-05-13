@@ -17,6 +17,7 @@ import {
   useReprocessStatus,
   useSingleClipReprocess,
   useSystemStats,
+  useUcComparison,
 } from "./hooks";
 import type {
   ClipMatchedStatusFilter,
@@ -30,6 +31,7 @@ import type {
   ReprocessFaceMatchStatus,
   StorageStats,
   SystemResourceStats,
+  UseCaseStatsRow,
 } from "./types";
 
 const PAGE_SIZE = 24;
@@ -689,12 +691,7 @@ export function PersonClipsPage() {
       )}
 
       {/* ── Use Case Comparison tab ── */}
-      {activeTab === "comparison" && (
-        <ComparisonTab
-          pipeline={systemStats.data?.pipeline ?? null}
-          loading={systemStats.isLoading}
-        />
-      )}
+      {activeTab === "comparison" && <ComparisonTab />}
 
       {/* ── Modals ── */}
       {deleteTarget && (
@@ -1398,106 +1395,9 @@ function PipelineTab({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      {/* Processing lifecycle funnel */}
-      <div className="card">
-        <div className="card-head">
-          <h3 className="card-title">Processing Lifecycle</h3>
-        </div>
-        <div style={{ padding: 16 }}>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-              gap: 8,
-            }}
-          >
-            {[
-              { label: "Total Clips", value: pipeline?.total_clips ?? 0, color: "var(--text)" },
-              { label: "Pending", value: pipeline?.clips_pending ?? 0, color: "var(--text-secondary)" },
-              { label: "Processing", value: pipeline?.clips_processing ?? 0, color: "var(--accent)" },
-              { label: "Completed", value: pipeline?.clips_completed ?? 0, color: "#2e7d32" },
-              { label: "Failed", value: pipeline?.clips_failed ?? 0, color: "var(--danger-text)" },
-            ].map((item) => (
-              <div
-                key={item.label}
-                style={{
-                  padding: "14px 16px",
-                  background: "var(--bg)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--radius-sm)",
-                  textAlign: "center",
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 28,
-                    fontWeight: 700,
-                    color: item.color,
-                    lineHeight: 1,
-                    marginBottom: 4,
-                  }}
-                >
-                  {item.value}
-                </div>
-                <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                  {item.label}
-                </div>
-              </div>
-            ))}
-          </div>
+      {/* Processing Lifecycle — two-stage funnel with rich data */}
+      <_ProcessingLifecycleCard pipeline={pipeline} />
 
-          {/* Progress bar */}
-          {pipeline && pipeline.total_clips > 0 && (
-            <div style={{ marginTop: 16 }}>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  fontSize: 11,
-                  color: "var(--text-secondary)",
-                  marginBottom: 4,
-                }}
-              >
-                <span>Overall completion</span>
-                <span>
-                  {Math.round((pipeline.clips_completed / pipeline.total_clips) * 100)}%
-                </span>
-              </div>
-              <div
-                style={{
-                  height: 8,
-                  background: "var(--border)",
-                  borderRadius: 4,
-                  overflow: "hidden",
-                  display: "flex",
-                }}
-              >
-                <div
-                  style={{
-                    width: `${(pipeline.clips_completed / pipeline.total_clips) * 100}%`,
-                    background: "#2e7d32",
-                    transition: "width 0.5s ease",
-                  }}
-                />
-                <div
-                  style={{
-                    width: `${(pipeline.clips_processing / pipeline.total_clips) * 100}%`,
-                    background: "var(--accent)",
-                    transition: "width 0.5s ease",
-                  }}
-                />
-                <div
-                  style={{
-                    width: `${(pipeline.clips_failed / pipeline.total_clips) * 100}%`,
-                    background: "var(--danger-text)",
-                    transition: "width 0.5s ease",
-                  }}
-                />
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
 
       {/* Clip worker queue */}
       <div className="card">
@@ -1641,6 +1541,27 @@ function PipelineTab({
 }
 
 // ── SystemTab ────────────────────────────────────────────────────────────────
+// Rich resource dashboard: host info, full CPU breakdown (count + freq +
+// load avg + per-core), memory + swap, GPU (when available), disk I/O
+// rates, network throughput, top processes, backend process self-view,
+// detector lock contention, worker queue, and clip storage.
+
+function _fmtUptime(s: number): string {
+  if (!Number.isFinite(s) || s <= 0) return "—";
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h ${m}m`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+function _coreColor(pct: number): string {
+  if (pct > 85) return "#dc2626";
+  if (pct > 60) return "#f59e0b";
+  if (pct > 30) return "#15803d";
+  return "#94a3b8";
+}
 
 function SystemTab({
   resources,
@@ -1654,82 +1575,238 @@ function SystemTab({
   loading: boolean;
 }) {
   if (loading && !resources) {
-    return <div className="text-sm text-dim" style={{ padding: 16 }}>Loading…</div>;
+    return (
+      <div className="text-sm text-dim" style={{ padding: 16 }}>
+        Loading…
+      </div>
+    );
+  }
+  if (!resources) {
+    return (
+      <div className="text-sm text-dim" style={{ padding: 16 }}>
+        No data
+      </div>
+    );
   }
 
+  const memUsedPct =
+    resources.memory_total_mb > 0
+      ? (resources.memory_used_mb / resources.memory_total_mb) * 100
+      : 0;
+  const swapUsedPct =
+    resources.swap_total_mb > 0
+      ? (resources.swap_used_mb / resources.swap_total_mb) * 100
+      : 0;
+  const storageUsedPct =
+    storage && storage.total_gb > 0 ? (storage.used_gb / storage.total_gb) * 100 : 0;
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      {/* CPU + Memory */}
-      <div className="card">
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* ── Host header strip ── */}
+      <div
+        style={{
+          background:
+            "linear-gradient(135deg, rgba(37,99,235,0.06) 0%, transparent 100%)",
+          border: "1px solid var(--border)",
+          borderRadius: 14,
+          padding: "14px 18px",
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+          gap: 12,
+        }}
+      >
+        <_HostStat icon="🖥" label="Hostname" value={resources.hostname || "—"} />
+        <_HostStat icon="🐧" label="Platform" value={resources.platform || "—"} />
+        <_HostStat
+          icon="⏱"
+          label="Uptime"
+          value={_fmtUptime(resources.uptime_seconds)}
+          sub={resources.boot_time_iso}
+        />
+        <_HostStat
+          icon="#"
+          label="Processes"
+          value={resources.process_count.toLocaleString()}
+        />
+        <_HostStat
+          icon="◇"
+          label="Backend PID"
+          value={resources.backend_pid.toString()}
+          sub={`${resources.backend_thread_count} threads`}
+        />
+      </div>
+
+      {/* ── CPU panel ── */}
+      <div className="card" style={{ borderRadius: 14 }}>
         <div className="card-head">
-          <h3 className="card-title">CPU & Memory</h3>
-          {resources && (
-            <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-              CPU {resources.cpu_percent_total.toFixed(1)}% ·{" "}
-              RAM {resources.memory_percent.toFixed(1)}%
-            </span>
-          )}
+          <h3 className="card-title">CPU</h3>
+          <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+            {resources.cpu_count_logical} logical · {resources.cpu_count_physical}{" "}
+            physical
+            {resources.cpu_freq_current_mhz !== null && (
+              <>
+                {" · "}
+                {(resources.cpu_freq_current_mhz / 1000).toFixed(2)} GHz
+                {resources.cpu_freq_max_mhz !== null &&
+                  ` / ${(resources.cpu_freq_max_mhz / 1000).toFixed(2)} GHz max`}
+              </>
+            )}
+          </span>
         </div>
-        {resources && (
-          <div style={{ padding: 16 }}>
-            {/* CPU per-core bars */}
-            <div style={{ marginBottom: 16 }}>
-              <div
-                style={{
-                  fontSize: 11,
-                  color: "var(--text-secondary)",
-                  marginBottom: 8,
-                  fontWeight: 500,
-                }}
-              >
-                CPU per core
-              </div>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fill, minmax(60px, 1fr))",
-                  gap: 6,
-                }}
-              >
-                {resources.cpu_percent_per_core.map((pct, i) => (
-                  <div key={i} style={{ textAlign: "center" }}>
+        <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+              gap: 10,
+            }}
+          >
+            <_BigStat
+              label="Total CPU"
+              value={`${resources.cpu_percent_total.toFixed(1)}%`}
+              color={_coreColor(resources.cpu_percent_total)}
+            />
+            <_BigStat
+              label="Load avg (1m)"
+              value={
+                resources.load_avg_1m !== null
+                  ? resources.load_avg_1m.toFixed(2)
+                  : "—"
+              }
+              {...(resources.load_avg_1m !== null && {
+                sub: `per logical core: ${(resources.load_avg_1m / Math.max(1, resources.cpu_count_logical)).toFixed(2)}`,
+              })}
+            />
+            <_BigStat
+              label="Load avg (5m)"
+              value={
+                resources.load_avg_5m !== null
+                  ? resources.load_avg_5m.toFixed(2)
+                  : "—"
+              }
+            />
+            <_BigStat
+              label="Load avg (15m)"
+              value={
+                resources.load_avg_15m !== null
+                  ? resources.load_avg_15m.toFixed(2)
+                  : "—"
+              }
+            />
+          </div>
+
+          <div>
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--text-secondary)",
+                marginBottom: 8,
+                fontWeight: 600,
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+              }}
+            >
+              Per-core utilisation
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(50px, 1fr))",
+                gap: 6,
+              }}
+            >
+              {resources.cpu_percent_per_core.map((pct, i) => (
+                <div
+                  key={i}
+                  style={{ textAlign: "center" }}
+                  title={`Core ${i}: ${pct.toFixed(1)}%`}
+                >
+                  <div
+                    style={{
+                      height: 56,
+                      background: "var(--bg-elev)",
+                      borderRadius: 4,
+                      overflow: "hidden",
+                      display: "flex",
+                      alignItems: "flex-end",
+                      marginBottom: 4,
+                      border: "1px solid var(--border)",
+                    }}
+                  >
                     <div
                       style={{
-                        height: 40,
-                        background: "var(--border)",
-                        borderRadius: 3,
-                        overflow: "hidden",
-                        display: "flex",
-                        alignItems: "flex-end",
-                        marginBottom: 3,
+                        width: "100%",
+                        height: `${Math.max(2, Math.min(100, pct))}%`,
+                        background: _coreColor(pct),
+                        transition: "height 0.5s ease",
                       }}
-                    >
-                      <div
-                        style={{
-                          width: "100%",
-                          height: `${Math.max(2, pct)}%`,
-                          background:
-                            pct > 80
-                              ? "var(--danger-text)"
-                              : pct > 50
-                                ? "var(--accent)"
-                                : "#2e7d32",
-                          transition: "height 0.5s ease",
-                        }}
-                      />
-                    </div>
-                    <div style={{ fontSize: 9, color: "var(--text-secondary)" }}>
-                      C{i}
-                    </div>
-                    <div style={{ fontSize: 9, fontWeight: 600 }}>
-                      {pct.toFixed(0)}%
-                    </div>
+                    />
                   </div>
-                ))}
-              </div>
+                  <div
+                    style={{
+                      fontSize: 9,
+                      color: "var(--text-secondary)",
+                      letterSpacing: "0.05em",
+                    }}
+                  >
+                    C{i}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: _coreColor(pct),
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
+                    {pct.toFixed(0)}%
+                  </div>
+                </div>
+              ))}
             </div>
+          </div>
+        </div>
+      </div>
 
-            {/* Memory bar */}
+      {/* ── Memory + Swap ── */}
+      <div className="card" style={{ borderRadius: 14 }}>
+        <div className="card-head">
+          <h3 className="card-title">Memory</h3>
+          <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+            {(resources.memory_used_mb / 1024).toFixed(2)} /{" "}
+            {(resources.memory_total_mb / 1024).toFixed(2)} GB
+          </span>
+        </div>
+        <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
+          <div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                fontSize: 11,
+                color: "var(--text-secondary)",
+                marginBottom: 4,
+              }}
+            >
+              <span style={{ fontWeight: 600 }}>RAM</span>
+              <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                {resources.memory_percent.toFixed(1)}% used ·{" "}
+                {(resources.memory_available_mb / 1024).toFixed(2)} GB available
+              </span>
+            </div>
+            <BarGauge
+              value={resources.memory_used_mb}
+              total={resources.memory_total_mb}
+              color={
+                memUsedPct > 85
+                  ? "#dc2626"
+                  : memUsedPct > 65
+                    ? "#f59e0b"
+                    : "#15803d"
+              }
+            />
+          </div>
+          {resources.swap_total_mb > 0 && (
             <div>
               <div
                 style={{
@@ -1740,144 +1817,674 @@ function SystemTab({
                   marginBottom: 4,
                 }}
               >
-                <span style={{ fontWeight: 500 }}>Memory</span>
-                <span>
-                  {(resources.memory_used_mb / 1024).toFixed(1)} GB /{" "}
-                  {(resources.memory_total_mb / 1024).toFixed(1)} GB
+                <span style={{ fontWeight: 600 }}>Swap</span>
+                <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                  {resources.swap_percent.toFixed(1)}% used ·{" "}
+                  {(resources.swap_used_mb / 1024).toFixed(2)} /{" "}
+                  {(resources.swap_total_mb / 1024).toFixed(2)} GB
                 </span>
               </div>
               <BarGauge
-                value={resources.memory_used_mb}
-                total={resources.memory_total_mb}
-                color={resources.memory_percent > 85 ? "var(--danger-text)" : "var(--accent)"}
+                value={resources.swap_used_mb}
+                total={resources.swap_total_mb}
+                color={
+                  swapUsedPct > 50
+                    ? "#dc2626"
+                    : swapUsedPct > 20
+                      ? "#f59e0b"
+                      : "#94a3b8"
+                }
               />
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
-      {/* GPU */}
-      {resources && resources.gpu_available && (
-        <div className="card">
+      {/* ── GPU (only if present) ── */}
+      {resources.gpu_available && (
+        <div className="card" style={{ borderRadius: 14 }}>
           <div className="card-head">
             <h3 className="card-title">GPU</h3>
           </div>
-          <div style={{ padding: 16 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+          <div
+            style={{
+              padding: 16,
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 16,
+            }}
+          >
+            <div>
+              <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 4, fontWeight: 600 }}>
+                GPU utilisation
+              </div>
+              <BarGauge
+                value={resources.gpu_percent ?? 0}
+                total={100}
+                label={`${(resources.gpu_percent ?? 0).toFixed(1)}%`}
+                color="#7c3aed"
+              />
+            </div>
+            {resources.gpu_memory_total_mb != null && (
               <div>
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: "var(--text-secondary)",
-                    marginBottom: 4,
-                    fontWeight: 500,
-                  }}
-                >
-                  GPU utilisation
+                <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 4, fontWeight: 600 }}>
+                  GPU memory
                 </div>
                 <BarGauge
-                  value={resources.gpu_percent ?? 0}
-                  total={100}
-                  label={`${(resources.gpu_percent ?? 0).toFixed(1)}%`}
-                  color="var(--accent)"
+                  value={resources.gpu_memory_used_mb ?? 0}
+                  total={resources.gpu_memory_total_mb}
+                  label={`${((resources.gpu_memory_used_mb ?? 0) / 1024).toFixed(1)} / ${(resources.gpu_memory_total_mb / 1024).toFixed(1)} GB`}
+                  color="#7c3aed"
                 />
               </div>
-              {resources.gpu_memory_total_mb != null && (
-                <div>
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: "var(--text-secondary)",
-                      marginBottom: 4,
-                      fontWeight: 500,
-                    }}
-                  >
-                    GPU memory
-                  </div>
-                  <BarGauge
-                    value={resources.gpu_memory_used_mb ?? 0}
-                    total={resources.gpu_memory_total_mb}
-                    label={`${((resources.gpu_memory_used_mb ?? 0) / 1024).toFixed(1)} / ${(resources.gpu_memory_total_mb / 1024).toFixed(1)} GB`}
-                    color="var(--accent)"
-                  />
-                </div>
-              )}
-            </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* Storage */}
-      <div className="card">
-        <div className="card-head">
-          <h3 className="card-title">Clip Storage</h3>
-          {storage && (
+      {/* ── Disk + Network panel (two-column) ── */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+          gap: 14,
+        }}
+      >
+        <div className="card" style={{ borderRadius: 14 }}>
+          <div className="card-head">
+            <h3 className="card-title">Disk I/O</h3>
+          </div>
+          <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+            <_RateRow
+              label="Read"
+              rate={resources.disk_read_mb_per_s}
+              total={resources.disk_read_total_mb}
+              accent="#15803d"
+              arrow="↓"
+            />
+            <_RateRow
+              label="Write"
+              rate={resources.disk_write_mb_per_s}
+              total={resources.disk_write_total_mb}
+              accent="#dc2626"
+              arrow="↑"
+            />
+          </div>
+        </div>
+        <div className="card" style={{ borderRadius: 14 }}>
+          <div className="card-head">
+            <h3 className="card-title">Network</h3>
+          </div>
+          <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+            <_RateRow
+              label="Received"
+              rate={resources.net_recv_mb_per_s}
+              total={resources.net_recv_total_mb}
+              accent="#15803d"
+              arrow="↓"
+            />
+            <_RateRow
+              label="Sent"
+              rate={resources.net_sent_mb_per_s}
+              total={resources.net_sent_total_mb}
+              accent="#2563eb"
+              arrow="↑"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* ── Backend process + detector lock panel ── */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+          gap: 14,
+        }}
+      >
+        <div className="card" style={{ borderRadius: 14 }}>
+          <div className="card-head">
+            <h3 className="card-title">Backend process</h3>
+            <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+              PID {resources.backend_pid}
+            </span>
+          </div>
+          <div
+            style={{
+              padding: 16,
+              display: "grid",
+              gridTemplateColumns: "repeat(2, 1fr)",
+              gap: 12,
+            }}
+          >
+            <_BigStat
+              label="CPU"
+              value={`${resources.backend_cpu_percent.toFixed(1)}%`}
+              color="#2563eb"
+            />
+            <_BigStat
+              label="Memory"
+              value={`${resources.backend_memory_mb.toFixed(1)} MB`}
+              color="#7c3aed"
+            />
+            <_BigStat
+              label="Threads"
+              value={resources.backend_thread_count.toString()}
+            />
+            <_BigStat
+              label="Open files"
+              value={resources.backend_open_files.toString()}
+            />
+          </div>
+        </div>
+
+        <div className="card" style={{ borderRadius: 14 }}>
+          <div className="card-head">
+            <h3 className="card-title">Detector lock</h3>
+            <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+              Last 60 s
+            </span>
+          </div>
+          <div style={{ padding: 16 }}>
+            <div
+              style={{
+                fontSize: 36,
+                fontWeight: 700,
+                lineHeight: 1,
+                color:
+                  resources.detector_lock_contention_pct > 80
+                    ? "#dc2626"
+                    : resources.detector_lock_contention_pct > 50
+                      ? "#f59e0b"
+                      : "#15803d",
+                fontVariantNumeric: "tabular-nums",
+              }}
+            >
+              {resources.detector_lock_contention_pct.toFixed(1)}%
+            </div>
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--text-secondary)",
+                marginTop: 6,
+                lineHeight: 1.4,
+              }}
+            >
+              How long the InsightFace / YOLO module lock was held across
+              all camera workers. Above 80% means a single detector is
+              saturated — adding cameras won't help until the lock eases.
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <BarGauge
+                value={resources.detector_lock_contention_pct}
+                total={100}
+                color={
+                  resources.detector_lock_contention_pct > 80
+                    ? "#dc2626"
+                    : resources.detector_lock_contention_pct > 50
+                      ? "#f59e0b"
+                      : "#15803d"
+                }
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Top processes (two tables side by side) ── */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+          gap: 14,
+        }}
+      >
+        <_TopProcessesCard
+          title="Top processes by CPU"
+          rows={resources.top_cpu_processes}
+          sortKey="cpu"
+        />
+        <_TopProcessesCard
+          title="Top processes by memory"
+          rows={resources.top_memory_processes}
+          sortKey="mem"
+        />
+      </div>
+
+      {/* ── Clip storage ── */}
+      {storage && (
+        <div className="card" style={{ borderRadius: 14 }}>
+          <div className="card-head">
+            <h3 className="card-title">Clip storage</h3>
             <span
-              style={{ fontSize: 11, color: "var(--text-secondary)", fontFamily: "monospace" }}
+              style={{
+                fontSize: 11,
+                color: "var(--text-secondary)",
+                fontFamily: "ui-monospace, monospace",
+              }}
             >
               {storage.clips_root}
             </span>
-          )}
-        </div>
-        {storage && (
-          <div style={{ padding: 16 }}>
+          </div>
+          <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
             <div
-              style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12, marginBottom: 16 }}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))",
+                gap: 10,
+              }}
             >
-              {[
-                { label: "Total", value: `${storage.total_gb.toFixed(1)} GB` },
-                { label: "Used", value: `${storage.used_gb.toFixed(1)} GB` },
-                { label: "Free", value: `${storage.free_gb.toFixed(1)} GB` },
-                { label: "Clip files", value: `${storage.clip_files_count}` },
-                { label: "Clip data", value: `${(storage.clip_files_total_mb / 1024).toFixed(2)} GB` },
-              ].map((item) => (
-                <div key={item.label} style={{ textAlign: "center" }}>
-                  <div style={{ fontSize: 18, fontWeight: 700 }}>{item.value}</div>
-                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                    {item.label}
-                  </div>
-                </div>
-              ))}
+              <_BigStat label="Total" value={`${storage.total_gb.toFixed(1)} GB`} />
+              <_BigStat label="Used" value={`${storage.used_gb.toFixed(1)} GB`} color="#f59e0b" />
+              <_BigStat label="Free" value={`${storage.free_gb.toFixed(1)} GB`} color="#15803d" />
+              <_BigStat
+                label="Clip files"
+                value={storage.clip_files_count.toLocaleString()}
+              />
+              <_BigStat
+                label="Clip data"
+                value={`${(storage.clip_files_total_mb / 1024).toFixed(2)} GB`}
+              />
             </div>
             <BarGauge
               value={storage.used_gb}
               total={storage.total_gb}
               color={
-                storage.used_gb / storage.total_gb > 0.9
-                  ? "var(--danger-text)"
-                  : storage.used_gb / storage.total_gb > 0.75
-                    ? "var(--accent)"
-                    : "#2e7d32"
+                storageUsedPct > 90
+                  ? "#dc2626"
+                  : storageUsedPct > 75
+                    ? "#f59e0b"
+                    : "#15803d"
               }
             />
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* Queue summary */}
+      {/* ── Worker queue ── */}
       {queue && (
-        <div className="card">
+        <div className="card" style={{ borderRadius: 14 }}>
           <div className="card-head">
-            <h3 className="card-title">Worker Queue</h3>
+            <h3 className="card-title">Worker queue</h3>
           </div>
           <div
-            style={{ padding: 16, display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}
+            style={{
+              padding: 16,
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+              gap: 10,
+            }}
           >
-            {[
-              { label: "Total workers", value: queue.total_workers },
-              { label: "Alive workers", value: queue.alive_workers },
-              { label: "Queue depth", value: queue.total_queue_depth },
-            ].map((item) => (
-              <div key={item.label} style={{ textAlign: "center" }}>
-                <div style={{ fontSize: 24, fontWeight: 700 }}>{item.value}</div>
-                <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                  {item.label}
-                </div>
-              </div>
-            ))}
+            <_BigStat label="Total workers" value={queue.total_workers.toString()} />
+            <_BigStat
+              label="Alive workers"
+              value={queue.alive_workers.toString()}
+              color={
+                queue.alive_workers === queue.total_workers ? "#15803d" : "#f59e0b"
+              }
+            />
+            <_BigStat
+              label="Queue depth"
+              value={queue.total_queue_depth.toString()}
+              {...(queue.total_queue_depth > 0 && { color: "#f59e0b" })}
+            />
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function _HostStat({
+  icon,
+  label,
+  value,
+  sub,
+}: {
+  icon: string;
+  label: string;
+  value: string;
+  sub?: string;
+}) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+      <span
+        aria-hidden
+        style={{
+          width: 28,
+          height: 28,
+          borderRadius: 7,
+          background: "var(--bg-elev)",
+          border: "1px solid var(--border)",
+          display: "grid",
+          placeItems: "center",
+          fontSize: 14,
+          flexShrink: 0,
+        }}
+      >
+        {icon}
+      </span>
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div
+          style={{
+            fontSize: 10,
+            color: "var(--text-secondary)",
+            textTransform: "uppercase",
+            letterSpacing: "0.04em",
+            fontWeight: 700,
+          }}
+        >
+          {label}
+        </div>
+        <div
+          style={{
+            fontSize: 12.5,
+            fontWeight: 600,
+            color: "var(--text)",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            fontVariantNumeric: "tabular-nums",
+          }}
+          title={value}
+        >
+          {value}
+        </div>
+        {sub && (
+          <div
+            style={{
+              fontSize: 10,
+              color: "var(--text-secondary)",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              fontVariantNumeric: "tabular-nums",
+            }}
+            title={sub}
+          >
+            {sub}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function _BigStat({
+  label,
+  value,
+  color,
+  sub,
+}: {
+  label: string;
+  value: string;
+  color?: string;
+  sub?: string;
+}) {
+  return (
+    <div
+      style={{
+        background: "var(--bg-elev)",
+        border: "1px solid var(--border)",
+        borderRadius: 8,
+        padding: "10px 12px",
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          color: "var(--text-secondary)",
+          textTransform: "uppercase",
+          letterSpacing: "0.04em",
+          fontWeight: 600,
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          fontSize: 20,
+          fontWeight: 700,
+          color: color ?? "var(--text)",
+          lineHeight: 1.15,
+          marginTop: 2,
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {value}
+      </div>
+      {sub && (
+        <div
+          style={{
+            fontSize: 10,
+            color: "var(--text-secondary)",
+            marginTop: 2,
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {sub}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function _RateRow({
+  label,
+  rate,
+  total,
+  accent,
+  arrow,
+}: {
+  label: string;
+  rate: number;
+  total: number;
+  accent: string;
+  arrow: string;
+}) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "auto 1fr auto",
+        alignItems: "center",
+        gap: 10,
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          width: 28,
+          height: 28,
+          borderRadius: 999,
+          background: `${accent}15`,
+          color: accent,
+          display: "grid",
+          placeItems: "center",
+          fontSize: 14,
+          fontWeight: 700,
+        }}
+      >
+        {arrow}
+      </span>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>
+          {label}
+        </div>
+        <div
+          style={{
+            fontSize: 11,
+            color: "var(--text-secondary)",
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {total >= 1024
+            ? `${(total / 1024).toFixed(2)} GB total`
+            : `${total.toFixed(1)} MB total`}
+        </div>
+      </div>
+      <div
+        style={{
+          fontSize: 18,
+          fontWeight: 700,
+          color: accent,
+          fontVariantNumeric: "tabular-nums",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {rate.toFixed(2)} MB/s
+      </div>
+    </div>
+  );
+}
+
+function _TopProcessesCard({
+  title,
+  rows,
+  sortKey,
+}: {
+  title: string;
+  rows: { pid: number; name: string; cpu_percent: number; memory_mb: number }[];
+  sortKey: "cpu" | "mem";
+}) {
+  return (
+    <div className="card" style={{ borderRadius: 14 }}>
+      <div className="card-head">
+        <h3 className="card-title">{title}</h3>
+        <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+          {rows.length} shown
+        </span>
+      </div>
+      <div>
+        {rows.length === 0 ? (
+          <div
+            style={{
+              padding: 16,
+              fontSize: 12,
+              color: "var(--text-secondary)",
+              textAlign: "center",
+            }}
+          >
+            No processes reported
+          </div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: "var(--bg-elev)" }}>
+                <th
+                  style={{
+                    textAlign: "start",
+                    padding: "8px 14px",
+                    fontSize: 10,
+                    color: "var(--text-secondary)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                    fontWeight: 700,
+                  }}
+                >
+                  PID
+                </th>
+                <th
+                  style={{
+                    textAlign: "start",
+                    padding: "8px 14px",
+                    fontSize: 10,
+                    color: "var(--text-secondary)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                    fontWeight: 700,
+                  }}
+                >
+                  Name
+                </th>
+                <th
+                  style={{
+                    textAlign: "end",
+                    padding: "8px 14px",
+                    fontSize: 10,
+                    color: sortKey === "cpu" ? "#2563eb" : "var(--text-secondary)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                    fontWeight: 700,
+                  }}
+                >
+                  CPU
+                </th>
+                <th
+                  style={{
+                    textAlign: "end",
+                    padding: "8px 14px",
+                    fontSize: 10,
+                    color: sortKey === "mem" ? "#7c3aed" : "var(--text-secondary)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                    fontWeight: 700,
+                  }}
+                >
+                  Memory
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr
+                  key={r.pid}
+                  style={{
+                    background: i % 2 === 1 ? "var(--bg-elev)" : "transparent",
+                  }}
+                >
+                  <td
+                    style={{
+                      padding: "8px 14px",
+                      fontFamily: "ui-monospace, monospace",
+                      fontSize: 11,
+                      color: "var(--text-secondary)",
+                    }}
+                  >
+                    {r.pid}
+                  </td>
+                  <td
+                    style={{
+                      padding: "8px 14px",
+                      color: "var(--text)",
+                      fontWeight: 500,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      maxWidth: 200,
+                    }}
+                    title={r.name}
+                  >
+                    {r.name}
+                  </td>
+                  <td
+                    style={{
+                      padding: "8px 14px",
+                      textAlign: "end",
+                      fontVariantNumeric: "tabular-nums",
+                      fontWeight: sortKey === "cpu" ? 700 : 500,
+                      color: sortKey === "cpu" ? "#2563eb" : "var(--text)",
+                    }}
+                  >
+                    {r.cpu_percent.toFixed(1)}%
+                  </td>
+                  <td
+                    style={{
+                      padding: "8px 14px",
+                      textAlign: "end",
+                      fontVariantNumeric: "tabular-nums",
+                      fontWeight: sortKey === "mem" ? 700 : 500,
+                      color: sortKey === "mem" ? "#7c3aed" : "var(--text)",
+                    }}
+                  >
+                    {r.memory_mb.toFixed(0)} MB
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
     </div>
   );
 }
@@ -1899,9 +2506,10 @@ function BarGauge({
       <div
         style={{
           height: 10,
-          background: "var(--border)",
+          background: "var(--bg-elev)",
           borderRadius: 5,
           overflow: "hidden",
+          border: "1px solid var(--border)",
         }}
       >
         <div
@@ -1921,6 +2529,7 @@ function BarGauge({
             color: "var(--text-secondary)",
             marginTop: 3,
             textAlign: "right",
+            fontVariantNumeric: "tabular-nums",
           }}
         >
           {label}
@@ -1930,240 +2539,1882 @@ function BarGauge({
   );
 }
 
-// ── ComparisonTab ─────────────────────────────────────────────────────────────
 
-function ComparisonTab({
-  pipeline,
-  loading,
-}: {
-  pipeline: PipelineStats | null;
-  loading: boolean;
-}) {
-  if (loading && !pipeline) {
-    return <div className="text-sm text-dim" style={{ padding: 16 }}>Loading…</div>;
+// ── ComparisonTab ─────────────────────────────────────────────────────────────
+// Dashboard-style side-by-side comparison. Reads from the dedicated
+// /api/person-clips/uc-comparison endpoint that aggregates per-UC
+// stats: completed runs, timings, faces detected, crops saved,
+// matched/unknown counts, avg crop quality, avg match confidence,
+// and disk storage. Winners are computed server-side so the frontend
+// stays presentation-only.
+
+const _UC_COLORS: Record<string, { accent: string; soft: string }> = {
+  uc1: { accent: "#2563eb", soft: "rgba(37, 99, 235, 0.10)" },
+  uc2: { accent: "#7c3aed", soft: "rgba(124, 58, 237, 0.10)" },
+  uc3: { accent: "#0b6e4f", soft: "rgba(11, 110, 79, 0.10)" },
+};
+
+function _fmtMsCompact(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined || !Number.isFinite(ms)) return "—";
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(s < 10 ? 2 : 1)} s`;
+  const m = Math.floor(s / 60);
+  const rem = s - m * 60;
+  return `${m}m ${rem.toFixed(0)}s`;
+}
+
+function _fmtPct(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return "—";
+  return `${(n * 100).toFixed(1)}%`;
+}
+
+function _fmtScore01(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return "—";
+  return n.toFixed(3);
+}
+
+function _fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function ComparisonTab() {
+  const { data, isLoading, isError } = useUcComparison();
+
+  if (isLoading && !data) {
+    return (
+      <div className="text-sm text-dim" style={{ padding: 24 }}>
+        Loading comparison…
+      </div>
+    );
+  }
+  if (isError || !data) {
+    return (
+      <div
+        style={{
+          padding: 16,
+          color: "var(--danger-text)",
+          fontSize: 13,
+        }}
+      >
+        Failed to load comparison data.
+      </div>
+    );
   }
 
-  const ucs = [
+  const ucs = data.use_cases;
+  const anyData = ucs.some((u) => u.has_data);
+
+  // Precompute per-metric maxes/mins for cross-card visual bars.
+  const minTimeFinite = Math.min(
+    ...ucs
+      .filter((u) => u.avg_total_ms !== null)
+      .map((u) => u.avg_total_ms as number),
+  );
+  // Slowest among with-data — used as the upper bound for the speed bar
+  // so the fastest UC fills ~100%.
+  const maxTime = Math.max(
+    ...ucs
+      .filter((u) => u.avg_total_ms !== null)
+      .map((u) => u.avg_total_ms as number),
+    1,
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* ── Headline / winners banner ── */}
+      <div
+        style={{
+          background:
+            "linear-gradient(135deg, rgba(79,70,229,0.06) 0%, transparent 100%)",
+          border: "1px solid var(--border)",
+          borderRadius: 14,
+          padding: "16px 20px",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 16,
+            marginBottom: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontSize: 17,
+                fontWeight: 700,
+                lineHeight: 1.2,
+              }}
+            >
+              Use Case Comparison
+            </div>
+            <div
+              style={{
+                fontSize: 12,
+                color: "var(--text-secondary)",
+                marginTop: 3,
+              }}
+            >
+              At-a-glance: which pipeline performs best on this tenant's
+              data.
+            </div>
+          </div>
+        </div>
+        {anyData ? (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+              gap: 10,
+            }}
+          >
+            <_WinnerPill label="Fastest" winner={data.fastest} ucs={ucs} icon="⚡" />
+            <_WinnerPill
+              label="Best Quality"
+              winner={data.best_quality}
+              ucs={ucs}
+              icon="★"
+            />
+            <_WinnerPill
+              label="Most Accurate"
+              winner={data.most_accurate}
+              ucs={ucs}
+              icon="◎"
+            />
+            <_WinnerPill label="Most Used" winner={data.most_used} ucs={ucs} icon="↑" />
+          </div>
+        ) : (
+          <div
+            style={{
+              fontSize: 13,
+              color: "var(--text-secondary)",
+              fontStyle: "italic",
+            }}
+          >
+            No comparison data yet. Right-click a clip card and pick a
+            use case to begin.
+          </div>
+        )}
+      </div>
+
+      {/* ── Per-UC summary cards ── */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+          gap: 12,
+        }}
+      >
+        {ucs.map((u) => {
+          const colors = _UC_COLORS[u.use_case] ?? _UC_COLORS.uc1;
+          // Speed bar — fastest fills, slowest looks small. Invert
+          // the duration so smaller = bigger bar.
+          const speedFraction =
+            u.avg_total_ms !== null && minTimeFinite > 0
+              ? Math.max(0.1, minTimeFinite / u.avg_total_ms)
+              : 0;
+          const qualityFraction = u.avg_quality_score ?? 0;
+          const accuracyFraction = u.match_rate ?? 0;
+          const winners: string[] = [];
+          if (data.fastest === u.use_case) winners.push("Fastest");
+          if (data.best_quality === u.use_case) winners.push("Best Quality");
+          if (data.most_accurate === u.use_case) winners.push("Most Accurate");
+
+          return (
+            <div
+              key={u.use_case}
+              style={{
+                background: "var(--bg)",
+                border: "1px solid var(--border)",
+                borderRadius: 14,
+                overflow: "hidden",
+                opacity: u.has_data ? 1 : 0.7,
+                boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+              }}
+            >
+              <div
+                style={{
+                  padding: "12px 16px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  background: `linear-gradient(135deg, ${colors!.soft} 0%, transparent 100%)`,
+                  borderBottom: "1px solid var(--border)",
+                }}
+              >
+                <div
+                  aria-hidden
+                  style={{
+                    width: 30,
+                    height: 30,
+                    borderRadius: 8,
+                    background: colors!.accent,
+                    color: "#fff",
+                    display: "grid",
+                    placeItems: "center",
+                    fontWeight: 700,
+                    fontSize: 13,
+                  }}
+                >
+                  {u.use_case.replace("uc", "")}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: "var(--text)" }}>
+                    {u.label}
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                    {u.mode}
+                  </div>
+                </div>
+              </div>
+
+              {!u.has_data ? (
+                <div
+                  style={{
+                    padding: 18,
+                    fontSize: 12,
+                    color: "var(--text-secondary)",
+                    textAlign: "center",
+                  }}
+                >
+                  Not yet processed
+                </div>
+              ) : (
+                <>
+                  {winners.length > 0 && (
+                    <div
+                      style={{
+                        padding: "8px 14px 0",
+                        display: "flex",
+                        gap: 6,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      {winners.map((w) => (
+                        <span
+                          key={w}
+                          style={{
+                            fontSize: 10,
+                            fontWeight: 700,
+                            background: "#fde68a",
+                            color: "#92400e",
+                            padding: "2px 7px",
+                            borderRadius: 999,
+                            letterSpacing: "0.02em",
+                            textTransform: "uppercase",
+                          }}
+                        >
+                          ★ {w}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  <div style={{ padding: "12px 16px 14px" }}>
+                    {/* KPI strip — runs / faces / matched / unknown */}
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(2, 1fr)",
+                        gap: 8,
+                        marginBottom: 12,
+                      }}
+                    >
+                      <_KpiMini label="Runs" value={u.completed_runs} accent={colors!.accent} />
+                      <_KpiMini label="Faces" value={u.total_faces_detected} />
+                      <_KpiMini label="Matched" value={u.matched_crop_count} accent="#15803d" />
+                      <_KpiMini label="Unknown" value={u.total_unknown_count} />
+                    </div>
+
+                    <_BarMetric
+                      label="Processing speed"
+                      valueText={_fmtMsCompact(u.avg_total_ms)}
+                      fraction={speedFraction}
+                      accent={colors!.accent}
+                      hint={
+                        u.avg_total_ms !== null && u.avg_total_ms === maxTime
+                          ? "slowest"
+                          : u.avg_total_ms === minTimeFinite
+                            ? "fastest"
+                            : null
+                      }
+                    />
+                    <_BarMetric
+                      label="Crop quality"
+                      valueText={_fmtScore01(u.avg_quality_score)}
+                      fraction={qualityFraction}
+                      accent={colors!.accent}
+                    />
+                    <_BarMetric
+                      label="Match accuracy"
+                      valueText={_fmtPct(u.match_rate)}
+                      fraction={accuracyFraction}
+                      accent={colors!.accent}
+                    />
+
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        marginTop: 10,
+                        paddingTop: 10,
+                        borderTop: "1px solid var(--border)",
+                        fontSize: 11,
+                        color: "var(--text-secondary)",
+                      }}
+                    >
+                      <span>Storage</span>
+                      <span
+                        style={{
+                          fontWeight: 700,
+                          color: "var(--text)",
+                          fontVariantNumeric: "tabular-nums",
+                        }}
+                      >
+                        {_fmtBytes(u.storage_bytes)}
+                      </span>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ── Detailed metrics — grouped, bar-chart cards ── */}
+      <_DetailedMetrics ucs={ucs} />
+
+      {/* ── Compact 7-row stats table — quick-reference summary ── */}
+      <_CompactStatsTable ucs={ucs} />
+
+      {/* ── Recommendations ── */}
+      {data.recommendations.length > 0 && (
+        <div className="card">
+          <div className="card-head">
+            <h3 className="card-title">Recommendations</h3>
+          </div>
+          <ul
+            style={{
+              margin: 0,
+              padding: "12px 18px 16px 18px",
+              listStyle: "none",
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+            }}
+          >
+            {data.recommendations.map((r, i) => (
+              <li
+                key={i}
+                style={{
+                  fontSize: 13,
+                  color: "var(--text)",
+                  paddingInlineStart: 22,
+                  position: "relative",
+                  lineHeight: 1.5,
+                }}
+              >
+                <span
+                  aria-hidden
+                  style={{
+                    position: "absolute",
+                    insetInlineStart: 0,
+                    top: 1,
+                    color: "var(--accent, #0b6e4f)",
+                    fontWeight: 700,
+                  }}
+                >
+                  →
+                </span>
+                {r}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ── _ProcessingLifecycleCard ─────────────────────────────────────────────
+// Two-stage funnel: Recording (camera → encoded MP4) followed by Face-
+// match (pending → processing → matched / failed). Surrounded by a
+// "Today's activity" strip and a per-UC completion grid so the operator
+// sees both health and throughput in one card.
+
+function _ProcessingLifecycleCard({
+  pipeline,
+}: {
+  pipeline: PipelineStats | null;
+}) {
+  const p = pipeline;
+  const totalRec =
+    (p?.recording_active ?? 0) +
+    (p?.recording_encoding ?? 0) +
+    (p?.recording_completed ?? 0) +
+    (p?.recording_failed ?? 0) +
+    (p?.recording_abandoned ?? 0);
+  const totalMatch =
+    (p?.clips_pending ?? 0) +
+    (p?.clips_processing ?? 0) +
+    (p?.clips_completed ?? 0) +
+    (p?.clips_failed ?? 0);
+
+  // Per-UC completion expressed against the matched-stage population
+  // (clips that successfully reached the face-match pipeline).
+  const matchablePop = Math.max(1, totalMatch);
+
+  const ucRows = [
     {
-      id: "UC1",
-      desc: "YOLO + Face detection, crop save",
-      completed: pipeline?.uc1_completed ?? 0,
-      avgMs: pipeline?.avg_uc1_duration_ms ?? null,
+      key: "uc1",
+      label: "UC1",
+      mode: "YOLO + Face crops",
+      done: p?.uc1_completed ?? 0,
+      avg: p?.avg_uc1_duration_ms ?? null,
     },
     {
-      id: "UC2",
-      desc: "InsightFace Buffalo, crop save",
-      completed: pipeline?.uc2_completed ?? 0,
-      avgMs: pipeline?.avg_uc2_duration_ms ?? null,
+      key: "uc2",
+      label: "UC2",
+      mode: "InsightFace + best-per-track",
+      done: p?.uc2_completed ?? 0,
+      avg: p?.avg_uc2_duration_ms ?? null,
     },
     {
-      id: "UC3",
-      desc: "InsightFace Buffalo, direct match",
-      completed: pipeline?.uc3_completed ?? 0,
-      avgMs: pipeline?.avg_uc3_duration_ms ?? null,
+      key: "uc3",
+      label: "UC3",
+      mode: "InsightFace direct match",
+      done: p?.uc3_completed ?? 0,
+      avg: p?.avg_uc3_duration_ms ?? null,
     },
   ];
 
-  const maxCompleted = Math.max(...ucs.map((u) => u.completed), 1);
-
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div className="card">
-        <div className="card-head">
-          <h3 className="card-title">Use Case Comparison</h3>
-          <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-            UC1 · UC2 · UC3 — side-by-side
-          </span>
-        </div>
-        <div style={{ padding: 16 }}>
-          <table
+    <div
+      className="card"
+      style={{
+        overflow: "hidden",
+        border: "1px solid var(--border)",
+        borderRadius: 14,
+      }}
+    >
+      {/* Card header */}
+      <div
+        className="card-head"
+        style={{
+          padding: "16px 20px",
+          borderBottom: "1px solid var(--border)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 14,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span
+            aria-hidden
             style={{
-              width: "100%",
-              borderCollapse: "collapse",
-              fontSize: 13,
+              width: 36,
+              height: 36,
+              borderRadius: 10,
+              background: "linear-gradient(135deg, #2563eb 0%, #0b6e4f 100%)",
+              color: "#fff",
+              display: "grid",
+              placeItems: "center",
+              fontSize: 18,
             }}
           >
-            <thead>
-              <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                {["Use Case", "Description", "Completed", "Avg Duration", "Throughput"].map(
-                  (h) => (
-                    <th
-                      key={h}
-                      style={{
-                        textAlign: "left",
-                        padding: "8px 12px",
-                        fontSize: 11,
-                        color: "var(--text-secondary)",
-                        fontWeight: 500,
-                      }}
-                    >
-                      {h}
-                    </th>
-                  ),
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {ucs.map((uc) => {
-                const throughputPct =
-                  pipeline && pipeline.total_clips > 0
-                    ? (uc.completed / pipeline.total_clips) * 100
-                    : 0;
-                return (
-                  <tr
-                    key={uc.id}
-                    style={{ borderBottom: "1px solid var(--border)" }}
-                  >
-                    <td style={{ padding: "12px 12px" }}>
-                      <span
-                        className="pill pill-neutral"
-                        style={{ fontSize: 11, fontWeight: 600 }}
-                      >
-                        {uc.id}
-                      </span>
-                    </td>
-                    <td
-                      style={{
-                        padding: "12px 12px",
-                        color: "var(--text-secondary)",
-                        fontSize: 12,
-                      }}
-                    >
-                      {uc.desc}
-                    </td>
-                    <td style={{ padding: "12px 12px" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <div
-                          style={{
-                            width: 80,
-                            height: 8,
-                            background: "var(--border)",
-                            borderRadius: 4,
-                            overflow: "hidden",
-                          }}
-                        >
-                          <div
-                            style={{
-                              width: `${(uc.completed / maxCompleted) * 100}%`,
-                              height: "100%",
-                              background: "#2e7d32",
-                              borderRadius: 4,
-                              transition: "width 0.5s ease",
-                            }}
-                          />
-                        </div>
-                        <span style={{ fontWeight: 600 }}>{uc.completed}</span>
-                      </div>
-                    </td>
-                    <td
-                      style={{
-                        padding: "12px 12px",
-                        fontFamily: "monospace",
-                        fontSize: 12,
-                      }}
-                    >
-                      {fmtMs(uc.avgMs)}
-                    </td>
-                    <td style={{ padding: "12px 12px", fontSize: 12 }}>
-                      {pipeline && pipeline.total_clips > 0
-                        ? `${throughputPct.toFixed(1)}% of clips`
-                        : "—"}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+            ⛓
+          </span>
+          <div>
+            <h3 className="card-title" style={{ margin: 0, fontSize: 15 }}>
+              Processing Lifecycle
+            </h3>
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--text-secondary)",
+                marginTop: 2,
+              }}
+            >
+              From camera capture to face-matched on disk
+            </div>
+          </div>
+        </div>
+
+        {/* Today's activity strip */}
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            flexWrap: "wrap",
+            alignItems: "center",
+          }}
+        >
+          <_TodayChip
+            label="Today"
+            value={p ? `${p.clips_today} clip(s)` : "—"}
+            accent="#2563eb"
+          />
+          <_TodayChip
+            label="Matched today"
+            value={p ? `${p.matched_today}` : "—"}
+            accent="#0b6e4f"
+          />
+          <_TodayChip
+            label="Avg duration"
+            value={
+              p && p.avg_clip_duration_seconds !== null
+                ? _humanSecondsLabel(p.avg_clip_duration_seconds)
+                : "—"
+            }
+            accent="#7c3aed"
+          />
+          <_TodayChip
+            label="Storage"
+            value={p ? _fmtBytes(p.total_storage_bytes) : "—"}
+            accent="#c2410c"
+          />
         </div>
       </div>
 
-      <div className="card">
-        <div className="card-head">
-          <h3 className="card-title">Mode Notes</h3>
-        </div>
-        <div style={{ padding: 16 }}>
+      {/* Body */}
+      <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 20 }}>
+        {/* ── Stage 1: Recording ── */}
+        <_LifecycleStage
+          title="Stage 1 · Recording"
+          subtitle="Camera capture → ffmpeg encode → encrypted MP4 on disk"
+          accent="#2563eb"
+          icon="🎥"
+          steps={[
+            {
+              key: "live",
+              label: "Live",
+              hint: "Camera currently capturing",
+              value: p?.recording_active ?? 0,
+              color: "#dc2626",
+              pulse: (p?.recording_active ?? 0) > 0,
+            },
+            {
+              key: "encoding",
+              label: "Encoding",
+              hint: "ffmpeg merging chunks",
+              value: p?.recording_encoding ?? 0,
+              color: "#f59e0b",
+            },
+            {
+              key: "saved",
+              label: "Saved",
+              hint: "MP4 ready on disk",
+              value: p?.recording_completed ?? 0,
+              color: "#15803d",
+              isWinnerStage: true,
+            },
+            {
+              key: "failed",
+              label: "Failed",
+              hint: "Encode error",
+              value: p?.recording_failed ?? 0,
+              color: "#b91c1c",
+            },
+            {
+              key: "abandoned",
+              label: "Abandoned",
+              hint: "Swept by janitor",
+              value: p?.recording_abandoned ?? 0,
+              color: "var(--text-secondary)",
+            },
+          ]}
+          total={totalRec}
+        />
+
+        {/* ── Stage 2: Face Match ── */}
+        <_LifecycleStage
+          title="Stage 2 · Face Match"
+          subtitle="Saved MP4 → detect & embed faces → match against employee gallery"
+          accent="#0b6e4f"
+          icon="◎"
+          steps={[
+            {
+              key: "pending",
+              label: "Pending",
+              hint: "Awaiting operator trigger",
+              value: p?.clips_pending ?? 0,
+              color: "var(--text-secondary)",
+            },
+            {
+              key: "processing",
+              label: "Processing",
+              hint: "Running UC1 / UC2 / UC3",
+              value: p?.clips_processing ?? 0,
+              color: "#2563eb",
+              pulse: (p?.clips_processing ?? 0) > 0,
+            },
+            {
+              key: "matched",
+              label: "Matched",
+              hint: "Identified to an employee",
+              value: p?.clips_completed ?? 0,
+              color: "#15803d",
+              isWinnerStage: true,
+            },
+            {
+              key: "failed",
+              label: "Failed",
+              hint: "Match error",
+              value: p?.clips_failed ?? 0,
+              color: "#b91c1c",
+            },
+          ]}
+          total={totalMatch}
+        />
+
+        {/* ── Per-UC completion progress ── */}
+        <div
+          style={{
+            background: "var(--bg-elev)",
+            border: "1px solid var(--border)",
+            borderRadius: 12,
+            padding: "14px 18px",
+          }}
+        >
           <div
-            style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}
+            style={{
+              fontSize: 12,
+              fontWeight: 700,
+              color: "var(--text-secondary)",
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+              marginBottom: 12,
+            }}
           >
-            {[
-              {
-                id: "UC1",
-                title: "UC1 — YOLO + Face",
-                points: [
-                  "Person detection via YOLOv8",
-                  "InsightFace inside YOLO boxes",
-                  "Face crops saved to DB",
-                  "Best for: high-traffic, crowds",
-                ],
-              },
-              {
-                id: "UC2",
-                title: "UC2 — InsightFace Direct + Crops",
-                points: [
-                  "Full-frame InsightFace detection",
-                  "Face crops saved to DB",
-                  "Best for: close-range, single entry",
-                ],
-              },
-              {
-                id: "UC3",
-                title: "UC3 — InsightFace No Crops",
-                points: [
-                  "Full-frame InsightFace detection",
-                  "No crop storage — faster",
-                  "Updates legacy matched_status",
-                  "Best for: quick identification",
-                ],
-              },
-            ].map((card) => (
-              <div
-                key={card.id}
-                style={{
-                  padding: 14,
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--radius-sm)",
-                }}
-              >
-                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
-                  {card.title}
-                </div>
-                <ul
+            Completed runs by use case
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {ucRows.map((r) => {
+              const ucColors = _UC_COLORS[r.key] ?? _UC_COLORS.uc1;
+              const frac = r.done / matchablePop;
+              return (
+                <div
+                  key={r.key}
                   style={{
-                    margin: 0,
-                    padding: 0,
-                    listStyle: "none",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 4,
+                    display: "grid",
+                    gridTemplateColumns: "auto 1fr auto",
+                    alignItems: "center",
+                    gap: 12,
                   }}
                 >
-                  {card.points.map((p) => (
-                    <li
-                      key={p}
+                  <span
+                    style={{
+                      background: ucColors!.accent,
+                      color: "#fff",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      padding: "3px 9px",
+                      borderRadius: 999,
+                      letterSpacing: "0.04em",
+                    }}
+                  >
+                    {r.label}
+                  </span>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 4,
+                      minWidth: 0,
+                    }}
+                  >
+                    <span
                       style={{
-                        fontSize: 11.5,
-                        color: "var(--text-secondary)",
-                        paddingLeft: 12,
-                        position: "relative",
+                        fontSize: 12,
+                        color: "var(--text)",
+                        fontWeight: 500,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
                       }}
                     >
-                      <span
+                      {r.mode}
+                    </span>
+                    <div
+                      style={{
+                        height: 6,
+                        borderRadius: 3,
+                        background: "var(--bg)",
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div
                         style={{
-                          position: "absolute",
-                          left: 0,
-                          color: "var(--accent)",
+                          height: "100%",
+                          width: `${Math.min(100, Math.max(2, frac * 100))}%`,
+                          background: `linear-gradient(90deg, ${ucColors!.accent} 0%, ${ucColors!.accent}cc 100%)`,
+                          transition: "width 0.4s ease",
                         }}
-                      >
-                        ·
-                      </span>
-                      {p}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
+                      />
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      textAlign: "end",
+                      fontVariantNumeric: "tabular-nums",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 700,
+                        color: ucColors!.accent,
+                      }}
+                    >
+                      {r.done.toLocaleString()} of{" "}
+                      {matchablePop.toLocaleString()}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text-secondary)",
+                      }}
+                    >
+                      Avg {_fmtMsCompact(r.avg)}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
+
+        {/* ── Health summary ── */}
+        {p && totalRec > 0 && (
+          <_HealthSummary pipeline={p} totalRec={totalRec} totalMatch={totalMatch} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function _LifecycleStage({
+  title,
+  subtitle,
+  accent,
+  icon,
+  steps,
+  total,
+}: {
+  title: string;
+  subtitle: string;
+  accent: string;
+  icon: string;
+  steps: Array<{
+    key: string;
+    label: string;
+    hint: string;
+    value: number;
+    color: string;
+    pulse?: boolean;
+    isWinnerStage?: boolean;
+  }>;
+  total: number;
+}) {
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <span
+          aria-hidden
+          style={{
+            width: 24,
+            height: 24,
+            borderRadius: 6,
+            background: `${accent}1a`,
+            color: accent,
+            display: "grid",
+            placeItems: "center",
+            fontSize: 13,
+          }}
+        >
+          {icon}
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 700,
+              color: "var(--text)",
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+            }}
+          >
+            {title}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+            {subtitle}
+          </div>
+        </div>
+        <span
+          style={{
+            fontSize: 11,
+            color: "var(--text-secondary)",
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {total.toLocaleString()} total
+        </span>
+      </div>
+
+      {/* Step cards with arrow connectors */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: `repeat(${steps.length}, 1fr)`,
+          gap: 6,
+          alignItems: "stretch",
+        }}
+      >
+        {steps.map((s, idx) => {
+          const pct = total > 0 ? (s.value / total) * 100 : 0;
+          return (
+            <div
+              key={s.key}
+              style={{
+                position: "relative",
+                background: "var(--bg)",
+                border: `1px solid ${s.value > 0 ? s.color + "40" : "var(--border)"}`,
+                borderRadius: 10,
+                padding: "12px 12px 14px",
+                display: "flex",
+                flexDirection: "column",
+                gap: 4,
+                minWidth: 0,
+                boxShadow:
+                  s.isWinnerStage && s.value > 0
+                    ? `0 1px 3px ${s.color}22`
+                    : "none",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                {s.pulse ? (
+                  <span
+                    aria-hidden
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: 999,
+                      background: s.color,
+                      animation: "maugood-live-pulse 1.4s ease-in-out infinite",
+                      flexShrink: 0,
+                    }}
+                  />
+                ) : (
+                  <span
+                    aria-hidden
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: 999,
+                      background: s.value > 0 ? s.color : "var(--border)",
+                      flexShrink: 0,
+                    }}
+                  />
+                )}
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: s.value > 0 ? s.color : "var(--text-secondary)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.04em",
+                  }}
+                >
+                  {s.label}
+                </span>
+              </div>
+              <div
+                style={{
+                  fontSize: 24,
+                  fontWeight: 700,
+                  color: s.value > 0 ? "var(--text)" : "var(--text-secondary)",
+                  lineHeight: 1,
+                  fontVariantNumeric: "tabular-nums",
+                }}
+              >
+                {s.value.toLocaleString()}
+              </div>
+              <div
+                style={{
+                  fontSize: 10.5,
+                  color: "var(--text-secondary)",
+                  lineHeight: 1.3,
+                }}
+              >
+                {s.hint}
+              </div>
+              <div
+                style={{
+                  marginTop: 6,
+                  height: 3,
+                  borderRadius: 2,
+                  background: "var(--bg-elev)",
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${Math.min(100, Math.max(2, pct))}%`,
+                    background: s.color,
+                    transition: "width 0.5s ease",
+                  }}
+                />
+              </div>
+              <div
+                style={{
+                  fontSize: 10,
+                  color: "var(--text-secondary)",
+                  fontVariantNumeric: "tabular-nums",
+                  marginTop: 2,
+                }}
+              >
+                {pct.toFixed(0)}% of total
+              </div>
+
+              {/* Arrow connector — render between cards */}
+              {idx < steps.length - 1 && (
+                <span
+                  aria-hidden
+                  style={{
+                    position: "absolute",
+                    insetInlineEnd: -10,
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    color: "var(--text-secondary)",
+                    fontSize: 14,
+                    background: "var(--bg)",
+                    width: 16,
+                    height: 16,
+                    borderRadius: 999,
+                    display: "grid",
+                    placeItems: "center",
+                    zIndex: 1,
+                    fontWeight: 600,
+                  }}
+                >
+                  →
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function _TodayChip({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: string;
+  accent: string;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 1,
+        padding: "6px 12px",
+        background: `${accent}10`,
+        border: `1px solid ${accent}30`,
+        borderRadius: 8,
+        minWidth: 90,
+      }}
+    >
+      <span
+        style={{
+          fontSize: 9,
+          fontWeight: 700,
+          color: accent,
+          textTransform: "uppercase",
+          letterSpacing: "0.04em",
+        }}
+      >
+        {label}
+      </span>
+      <span
+        style={{
+          fontSize: 13,
+          fontWeight: 700,
+          color: "var(--text)",
+          fontVariantNumeric: "tabular-nums",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function _HealthSummary({
+  pipeline,
+  totalRec,
+  totalMatch,
+}: {
+  pipeline: PipelineStats;
+  totalRec: number;
+  totalMatch: number;
+}) {
+  const recSuccessRate =
+    totalRec > 0 ? pipeline.recording_completed / totalRec : 0;
+  const matchSuccessRate =
+    totalMatch > 0 ? pipeline.clips_completed / totalMatch : 0;
+  const matchPendingRate =
+    totalMatch > 0 ? pipeline.clips_pending / totalMatch : 0;
+
+  const items = [
+    {
+      label: "Recording success",
+      value: `${(recSuccessRate * 100).toFixed(1)}%`,
+      hint: `${pipeline.recording_completed} of ${totalRec} clips successfully encoded`,
+      good: recSuccessRate > 0.9,
+    },
+    {
+      label: "Match completion",
+      value: `${(matchSuccessRate * 100).toFixed(1)}%`,
+      hint: `${pipeline.clips_completed} of ${totalMatch} clips reached the matched state`,
+      good: matchSuccessRate > 0.5,
+    },
+    {
+      label: "Awaiting match",
+      value: `${(matchPendingRate * 100).toFixed(1)}%`,
+      hint: `${pipeline.clips_pending} clips waiting for operator to trigger UC1/UC2/UC3`,
+      good: matchPendingRate < 0.5,
+    },
+  ];
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+        gap: 10,
+      }}
+    >
+      {items.map((it) => (
+        <div
+          key={it.label}
+          style={{
+            background: "var(--bg)",
+            border: `1px solid ${it.good ? "#15803d40" : "var(--border)"}`,
+            borderRadius: 10,
+            padding: "10px 14px",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 11,
+              color: "var(--text-secondary)",
+              fontWeight: 600,
+              textTransform: "uppercase",
+              letterSpacing: "0.04em",
+            }}
+          >
+            <span
+              aria-hidden
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: 999,
+                background: it.good ? "#15803d" : "#f59e0b",
+              }}
+            />
+            {it.label}
+          </div>
+          <div
+            style={{
+              fontSize: 20,
+              fontWeight: 700,
+              color: it.good ? "#15803d" : "var(--text)",
+              marginTop: 2,
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {it.value}
+          </div>
+          <div
+            style={{
+              fontSize: 11,
+              color: "var(--text-secondary)",
+              marginTop: 2,
+              lineHeight: 1.3,
+            }}
+          >
+            {it.hint}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function _humanSecondsLabel(s: number): string {
+  if (!Number.isFinite(s) || s <= 0) return "—";
+  if (s < 60) return `${s.toFixed(1)} s`;
+  const m = Math.floor(s / 60);
+  const rem = Math.round(s - m * 60);
+  return `${m}m ${rem}s`;
+}
+
+
+// ── _CompactStatsTable — 7-row quick-reference table ───────────────────────
+// Mirrors the operator's preferred compact format:
+//   Completed runs / Avg processing / Faces detected / Crops saved /
+//   Avg quality / Match rate / Storage  vs  UC1 / UC2 / UC3
+// Renders as a clean styled HTML table — no bars, no icons, just numbers.
+
+function _CompactStatsTable({ ucs }: { ucs: UseCaseStatsRow[] }) {
+  const rows: Array<{
+    label: string;
+    cell: (u: UseCaseStatsRow) => string;
+  }> = [
+    {
+      label: "Completed runs",
+      cell: (u) => (u.has_data ? u.completed_runs.toLocaleString() : "—"),
+    },
+    {
+      label: "Avg processing",
+      cell: (u) =>
+        u.has_data && u.avg_total_ms !== null
+          ? _fmtSecondsShort(u.avg_total_ms)
+          : "—",
+    },
+    {
+      label: "Faces detected",
+      cell: (u) =>
+        u.has_data ? u.total_faces_detected.toLocaleString() : "—",
+    },
+    {
+      label: "Crops saved",
+      cell: (u) =>
+        u.has_data ? u.total_crops_saved.toLocaleString() : "—",
+    },
+    {
+      label: "Avg quality",
+      cell: (u) =>
+        u.has_data && u.avg_quality_score !== null
+          ? u.avg_quality_score.toFixed(3)
+          : "—",
+    },
+    {
+      label: "Match rate",
+      cell: (u) =>
+        u.has_data && u.match_rate !== null
+          ? `${(u.match_rate * 100).toFixed(1)}%`
+          : "—",
+    },
+    {
+      label: "Storage",
+      cell: (u) => (u.has_data ? _fmtBytes(u.storage_bytes) : "—"),
+    },
+  ];
+
+  return (
+    <div
+      style={{
+        background: "var(--bg)",
+        border: "1px solid var(--border)",
+        borderRadius: 12,
+        overflow: "hidden",
+        // Compact width — operators read this as a reference, not a
+        // dashboard. Cap it and centre so it doesn't stretch.
+        maxWidth: 720,
+        marginInline: "auto",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+      }}
+    >
+      <div
+        style={{
+          padding: "12px 18px",
+          borderBottom: "1px solid var(--border)",
+          background: "var(--bg-elev)",
+        }}
+      >
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 700,
+            color: "var(--text)",
+            textTransform: "uppercase",
+            letterSpacing: "0.06em",
+          }}
+        >
+          Quick reference
+        </div>
+        <div
+          style={{
+            fontSize: 11,
+            color: "var(--text-secondary)",
+            marginTop: 2,
+          }}
+        >
+          The seven numbers, side by side
+        </div>
+      </div>
+      <table
+        style={{
+          width: "100%",
+          borderCollapse: "collapse",
+          fontFamily:
+            "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+          fontSize: 13,
+        }}
+      >
+        <thead>
+          <tr style={{ background: "var(--bg-elev)" }}>
+            <th
+              style={{
+                textAlign: "start",
+                padding: "10px 16px",
+                fontSize: 11,
+                color: "var(--text-secondary)",
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                fontWeight: 700,
+                borderBottom: "1px solid var(--border)",
+              }}
+            >
+              Metric
+            </th>
+            {ucs.map((u) => {
+              const colors = _UC_COLORS[u.use_case] ?? _UC_COLORS.uc1;
+              return (
+                <th
+                  key={u.use_case}
+                  style={{
+                    textAlign: "end",
+                    padding: "10px 16px",
+                    fontSize: 11,
+                    color: colors!.accent,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                    fontWeight: 700,
+                    borderBottom: "1px solid var(--border)",
+                    borderTop: `3px solid ${colors!.accent}`,
+                  }}
+                >
+                  {u.label.replace("Use Case ", "UC")}
+                </th>
+              );
+            })}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, idx) => (
+            <tr
+              key={r.label}
+              style={{
+                background:
+                  idx % 2 === 1 ? "var(--bg-elev)" : "transparent",
+              }}
+            >
+              <td
+                style={{
+                  padding: "10px 16px",
+                  color: "var(--text)",
+                  fontFamily: "var(--font-sans)",
+                  fontWeight: 500,
+                }}
+              >
+                {r.label}
+              </td>
+              {ucs.map((u) => (
+                <td
+                  key={u.use_case}
+                  style={{
+                    padding: "10px 16px",
+                    textAlign: "end",
+                    color: u.has_data ? "var(--text)" : "var(--text-secondary)",
+                    fontVariantNumeric: "tabular-nums",
+                  }}
+                >
+                  {r.cell(u)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function _fmtSecondsShort(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "—";
+  const s = ms / 1000;
+  if (s < 1) return `${Math.round(ms)}ms`;
+  if (s < 10) return `${s.toFixed(2)}s`;
+  if (s < 60) return `${s.toFixed(1)}s`;
+  const m = Math.floor(s / 60);
+  return `${m}m ${Math.round(s - m * 60)}s`;
+}
+
+
+// ── _DetailedMetrics — plain-language Q&A cards ────────────────────────────
+// One card per business question (Speed / Accuracy / Quality / Storage /
+// Activity). Each row reads as a sentence with units; the winner gets a
+// "★ BEST" badge. No floats, no jargon, no inline bars.
+
+interface _AnswerRow {
+  uc: string;
+  label: string;
+  mode: string;
+  has: boolean;
+  value: string;
+  rawForSort: number | null;
+  subtext?: string | null;
+}
+
+function _DetailedMetrics({ ucs }: { ucs: UseCaseStatsRow[] }) {
+  const cards: Array<{
+    icon: string;
+    question: string;
+    accent: string;
+    dir: "min" | "max";
+    rows: _AnswerRow[];
+    footnote?: string;
+  }> = [
+    {
+      icon: "⏱",
+      question: "How fast does each pipeline run?",
+      accent: "#2563eb",
+      dir: "min",
+      footnote: "Time to process one clip end-to-end",
+      rows: ucs.map((u) => ({
+        uc: u.use_case,
+        label: u.label,
+        mode: u.mode,
+        has: u.has_data && u.avg_total_ms !== null,
+        value: _humanSecondsPerClip(u.avg_total_ms),
+        rawForSort: u.avg_total_ms,
+      })),
+    },
+    {
+      icon: "◎",
+      question: "How accurately are faces matched to employees?",
+      accent: "#0b6e4f",
+      dir: "max",
+      footnote:
+        "Out of all saved face crops, how many were identified to an employee",
+      rows: ucs.map((u) => {
+        const total = u.face_crop_row_count;
+        const matched = u.matched_crop_count;
+        const pct = total > 0 ? Math.round((matched / total) * 100) : null;
+        return {
+          uc: u.use_case,
+          label: u.label,
+          mode: u.mode,
+          has: u.has_data,
+          value:
+            total > 0
+              ? `${matched.toLocaleString()} of ${total.toLocaleString()} matched`
+              : "No data",
+          rawForSort: u.match_rate,
+          subtext: pct !== null ? `${pct}% accuracy` : null,
+        };
+      }),
+    },
+    {
+      icon: "★",
+      question: "How good are the saved face crops?",
+      accent: "#7c3aed",
+      dir: "max",
+      footnote:
+        "Average composite quality of saved crops — 0 = bad, 100 = perfect",
+      rows: ucs.map((u) => {
+        const score = u.avg_quality_score;
+        return {
+          uc: u.use_case,
+          label: u.label,
+          mode: u.mode,
+          has: u.has_data && score !== null,
+          value:
+            score !== null
+              ? `Quality: ${Math.round(score * 100)} / 100`
+              : "No data",
+          rawForSort: score,
+        };
+      }),
+    },
+    {
+      icon: "▢",
+      question: "How much disk space does it use?",
+      accent: "#c2410c",
+      dir: "min",
+      footnote: "Total size of all saved face crops on disk",
+      rows: ucs.map((u) => ({
+        uc: u.use_case,
+        label: u.label,
+        mode: u.mode,
+        has: u.has_data,
+        value: _fmtBytes(u.storage_bytes),
+        rawForSort: u.storage_bytes > 0 ? u.storage_bytes : null,
+      })),
+    },
+    {
+      icon: "▦",
+      question: "How much has each pipeline been used?",
+      accent: "#0891b2",
+      dir: "max",
+      footnote: "Clips processed and crops collected per pipeline",
+      rows: ucs.map((u) => ({
+        uc: u.use_case,
+        label: u.label,
+        mode: u.mode,
+        has: u.has_data,
+        value: `${u.completed_runs.toLocaleString()} clip(s) processed`,
+        rawForSort: u.completed_runs,
+        subtext: `${u.total_crops_saved.toLocaleString()} crops saved · ${u.total_unknown_count.toLocaleString()} unknown`,
+      })),
+    },
+  ];
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
+        gap: 14,
+      }}
+    >
+      {cards.map((c) => (
+        <_AnswerCard key={c.question} {...c} />
+      ))}
+    </div>
+  );
+}
+
+function _AnswerCard({
+  icon,
+  question,
+  accent,
+  dir,
+  rows,
+  footnote,
+}: {
+  icon: string;
+  question: string;
+  accent: string;
+  dir: "min" | "max";
+  rows: _AnswerRow[];
+  footnote?: string;
+}) {
+  const valid = rows.filter(
+    (r) => r.has && r.rawForSort !== null && Number.isFinite(r.rawForSort),
+  );
+  let bestUc: string | null = null;
+  if (valid.length >= 1) {
+    const sorted = [...valid].sort((a, b) =>
+      dir === "min"
+        ? (a.rawForSort as number) - (b.rawForSort as number)
+        : (b.rawForSort as number) - (a.rawForSort as number),
+    );
+    const top = sorted[0]!;
+    const second = sorted[1];
+    if (!second || top.rawForSort !== second.rawForSort) {
+      bestUc = top.uc;
+    }
+  }
+
+  return (
+    <div
+      style={{
+        background: "var(--bg)",
+        border: "1px solid var(--border)",
+        borderRadius: 14,
+        overflow: "hidden",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+      }}
+    >
+      <div
+        style={{
+          padding: "14px 18px",
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          borderBottom: "1px solid var(--border)",
+          background: `linear-gradient(135deg, ${accent}0d 0%, transparent 100%)`,
+        }}
+      >
+        <span
+          aria-hidden
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: 10,
+            background: accent,
+            color: "#fff",
+            display: "grid",
+            placeItems: "center",
+            fontSize: 18,
+            flexShrink: 0,
+          }}
+        >
+          {icon}
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 14,
+              fontWeight: 700,
+              color: "var(--text)",
+              lineHeight: 1.3,
+            }}
+          >
+            {question}
+          </div>
+          {footnote && (
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--text-secondary)",
+                marginTop: 2,
+              }}
+            >
+              {footnote}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div>
+        {rows.map((r, idx) => {
+          const colors = _UC_COLORS[r.uc] ?? _UC_COLORS.uc1;
+          const isWinner = bestUc === r.uc;
+          return (
+            <div
+              key={r.uc}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "auto 1fr auto",
+                alignItems: "center",
+                columnGap: 14,
+                padding: "12px 18px",
+                borderBottom:
+                  idx < rows.length - 1 ? "1px solid var(--border)" : "none",
+                background: isWinner ? `${colors!.soft}` : "transparent",
+                opacity: r.has ? 1 : 0.55,
+              }}
+            >
+              <span
+                style={{
+                  background: colors!.accent,
+                  color: "#fff",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  padding: "3px 9px",
+                  borderRadius: 999,
+                  letterSpacing: "0.04em",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {r.label.replace("Use Case ", "UC")}
+              </span>
+
+              <span
+                style={{
+                  fontSize: 12.5,
+                  color: "var(--text)",
+                  fontWeight: 500,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {r.mode}
+              </span>
+
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "flex-end",
+                  gap: 2,
+                  minWidth: 0,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "baseline",
+                    gap: 6,
+                    fontVariantNumeric: "tabular-nums",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 14,
+                      fontWeight: isWinner ? 700 : 600,
+                      color: isWinner ? colors!.accent : "var(--text)",
+                      letterSpacing: "-0.01em",
+                    }}
+                  >
+                    {r.value}
+                  </span>
+                  {isWinner && (
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        color: "#92400e",
+                        background: "#fde68a",
+                        padding: "2px 7px",
+                        borderRadius: 999,
+                        letterSpacing: "0.04em",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      ★ Best
+                    </span>
+                  )}
+                </div>
+                {r.subtext && (
+                  <span
+                    style={{
+                      fontSize: 11,
+                      color: "var(--text-secondary)",
+                      fontVariantNumeric: "tabular-nums",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {r.subtext}
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function _humanSecondsPerClip(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined || !Number.isFinite(ms)) return "No data";
+  const s = ms / 1000;
+  if (s < 1) return `${Math.round(ms)} ms per clip`;
+  if (s < 10) return `${s.toFixed(2)} sec per clip`;
+  if (s < 60) return `${s.toFixed(1)} sec per clip`;
+  const m = Math.floor(s / 60);
+  const rem = Math.round(s - m * 60);
+  return `${m} min ${rem} sec per clip`;
+}
+
+
+function _WinnerPill({
+  label,
+  winner,
+  ucs,
+  icon,
+}: {
+  label: string;
+  winner: string | null;
+  ucs: UseCaseStatsRow[];
+  icon: string;
+}) {
+  const u = ucs.find((x) => x.use_case === winner) ?? null;
+  const colors = u ? _UC_COLORS[u.use_case] ?? _UC_COLORS.uc1 : null;
+  return (
+    <div
+      style={{
+        background: u ? `${colors!.soft}` : "var(--bg-elev)",
+        border: u
+          ? `1px solid ${colors!.accent}`
+          : "1px solid var(--border)",
+        borderRadius: 10,
+        padding: "10px 14px",
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          width: 30,
+          height: 30,
+          borderRadius: 8,
+          background: u ? colors!.accent : "var(--bg)",
+          color: "#fff",
+          display: "grid",
+          placeItems: "center",
+          fontSize: 16,
+          fontWeight: 700,
+          flexShrink: 0,
+        }}
+      >
+        {icon}
+      </span>
+      <div style={{ minWidth: 0 }}>
+        <div
+          style={{
+            fontSize: 10,
+            textTransform: "uppercase",
+            letterSpacing: "0.04em",
+            color: "var(--text-secondary)",
+            fontWeight: 600,
+          }}
+        >
+          {label}
+        </div>
+        <div
+          style={{
+            fontSize: 14,
+            fontWeight: 700,
+            color: u ? colors!.accent : "var(--text-secondary)",
+            marginTop: 1,
+          }}
+        >
+          {u ? u.label : "—"}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function _KpiMini({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: number;
+  accent?: string;
+}) {
+  return (
+    <div
+      style={{
+        background: "var(--bg-elev)",
+        border: "1px solid var(--border)",
+        borderRadius: 6,
+        padding: "6px 8px",
+      }}
+    >
+      <div
+        style={{
+          fontSize: 9,
+          textTransform: "uppercase",
+          letterSpacing: "0.04em",
+          color: "var(--text-secondary)",
+          fontWeight: 600,
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          fontSize: 16,
+          fontWeight: 700,
+          color: accent ?? "var(--text)",
+          fontVariantNumeric: "tabular-nums",
+          lineHeight: 1.1,
+          marginTop: 1,
+        }}
+      >
+        {value.toLocaleString()}
+      </div>
+    </div>
+  );
+}
+
+function _BarMetric({
+  label,
+  valueText,
+  fraction,
+  accent,
+  hint,
+}: {
+  label: string;
+  valueText: string;
+  fraction: number;
+  accent: string;
+  hint?: string | null;
+}) {
+  const pct = Math.max(0, Math.min(100, fraction * 100));
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "baseline",
+          fontSize: 11,
+          marginBottom: 3,
+        }}
+      >
+        <span style={{ color: "var(--text-secondary)" }}>{label}</span>
+        <span
+          style={{
+            fontWeight: 700,
+            color: "var(--text)",
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {valueText}
+          {hint && (
+            <span
+              style={{
+                marginInlineStart: 6,
+                fontSize: 10,
+                fontWeight: 500,
+                color: "var(--text-secondary)",
+                fontStyle: "italic",
+              }}
+            >
+              {hint}
+            </span>
+          )}
+        </span>
+      </div>
+      <div
+        style={{
+          height: 6,
+          borderRadius: 3,
+          background: "var(--bg-elev)",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            height: "100%",
+            width: `${pct}%`,
+            background: `linear-gradient(90deg, ${accent} 0%, ${accent}cc 100%)`,
+            transition: "width 0.4s ease",
+          }}
+        />
       </div>
     </div>
   );
@@ -4568,7 +6819,9 @@ function Kpi({
 
 function ClipDetailDrawer({ clip, onClose }: { clip: PersonClipOut; onClose: () => void }) {
   const [showReprocessForm, setShowReprocessForm] = useState(false);
-  const [selectedUcs, setSelectedUcs] = useState<Set<string>>(new Set(["uc3"]));
+  // Empty by default; seeded from the actual processing-results when
+  // the form opens (see ``openReprocessForm`` below).
+  const [selectedUcs, setSelectedUcs] = useState<Set<string>>(new Set());
   const [thumbError, setThumbError] = useState(false);
 
   const processingResults = useClipProcessingResults(clip.id, true);
@@ -4577,6 +6830,20 @@ function ClipDetailDrawer({ clip, onClose }: { clip: PersonClipOut; onClose: () 
   const uc1Result = results.find((r) => r.use_case === "uc1") ?? null;
   const uc2Result = results.find((r) => r.use_case === "uc2") ?? null;
   const uc3Result = results.find((r) => r.use_case === "uc3") ?? null;
+
+  // Open-the-form handler. Pre-checks whichever UCs already have a
+  // ``clip_processing_results`` row for this clip so "Reprocess" means
+  // "re-run everything that was run before" by default. If nothing has
+  // ever run on this clip, fall back to UC3 (the original default).
+  const openReprocessForm = () => {
+    const seeded = new Set<string>();
+    if (uc1Result) seeded.add("uc1");
+    if (uc2Result) seeded.add("uc2");
+    if (uc3Result) seeded.add("uc3");
+    if (seeded.size === 0) seeded.add("uc3");
+    setSelectedUcs(seeded);
+    setShowReprocessForm(true);
+  };
 
   const uc1Crops = useClipFaceCrops(uc1Result ? clip.id : null, "uc1");
   const uc2Crops = useClipFaceCrops(uc2Result ? clip.id : null, "uc2");
@@ -4833,7 +7100,7 @@ function ClipDetailDrawer({ clip, onClose }: { clip: PersonClipOut; onClose: () 
               type="button"
               className="btn btn-primary"
               style={{ display: "flex", alignItems: "center", gap: 6 }}
-              onClick={() => setShowReprocessForm(true)}
+              onClick={openReprocessForm}
             >
               <Icon name="refresh" size={12} /> Reprocess clip
             </button>

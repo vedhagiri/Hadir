@@ -167,7 +167,11 @@ def process_face_crops(
         scope.tenant_id, camera_id, reprocess,
     )
 
-    # Fire off background processing on a daemon thread.
+    # Fire off background processing on a daemon thread. BUG-056 —
+    # we reset any clip rows stuck at ``processing`` from a prior
+    # crashed run inside ``process_all_pending`` (see extractor.py)
+    # so the UI no longer shows "Processing" indefinitely when the
+    # batch fails partway.
     result_holder: dict = {}
 
     def _run() -> None:
@@ -183,6 +187,17 @@ def process_face_crops(
                 scope.tenant_id, res,
             )
         except Exception as exc:  # noqa: BLE001
+            # Belt-and-braces: if the batch raises before the
+            # try/finally in process_all_pending clears the active
+            # flag, force-clear it here too. Without this an
+            # uncaught exception strands every future request at
+            # 409 "processing already in progress".
+            from maugood.face_crops.extractor import (  # noqa: PLC0415
+                _processing_active as _pa,
+            )
+            del _pa  # name kept for clarity; mutation below
+            import maugood.face_crops.extractor as _ex  # noqa: PLC0415
+            _ex._processing_active = False  # type: ignore[attr-defined]
             logger.error(
                 "face_crop.processing.failed tenant=%s reason=%s",
                 scope.tenant_id, type(exc).__name__,

@@ -88,7 +88,10 @@ ADMIN_OR_HR = Depends(require_any_role("Admin", "HR"))
 
 
 class DeleteRequestSubmitIn(BaseModel):
-    reason: str = Field(min_length=10, max_length=500)
+    # Operator request — reason is optional. The 500-char cap stays
+    # so the audit row can't be flooded; empty/missing reasons land
+    # as None.
+    reason: Optional[str] = Field(default=None, max_length=500)
 
 
 class DeleteRequestDecideIn(BaseModel):
@@ -108,7 +111,8 @@ class DeleteRequestOut(BaseModel):
     employee_full_name: str
     requested_by: Optional[int]
     requested_by_full_name: Optional[str]
-    reason: str
+    # Optional since 0058 — operators may submit without a reason.
+    reason: Optional[str] = None
     status: str
     hr_decided_by: Optional[int]
     hr_decided_at: Optional[datetime]
@@ -202,7 +206,7 @@ def _hydrate_request(conn: Connection, scope: TenantScope, req_id: int) -> Optio
         employee_full_name=str(row.employee_full_name),
         requested_by=int(row.requested_by) if row.requested_by is not None else None,
         requested_by_full_name=row.requested_by_full_name,
-        reason=str(row.reason),
+        reason=str(row.reason) if row.reason is not None else None,
         status=str(row.status),
         hr_decided_by=int(row.hr_decided_by) if row.hr_decided_by is not None else None,
         hr_decided_at=row.hr_decided_at,
@@ -273,7 +277,7 @@ def _execute_hard_delete(
     scope: TenantScope,
     employee_id: int,
     actor_user_id: int,
-    reason: str,
+    reason: Optional[str],
     requester_user_id: Optional[int],
     via: Literal["hr_approve", "hr_self", "admin_override"],
     delete_request_id: Optional[int],
@@ -637,7 +641,7 @@ def hr_decide_delete_request(
             scope=scope,
             employee_id=employee_id,
             actor_user_id=user.id,
-            reason=str(row.reason),
+            reason=str(row.reason) if row.reason is not None else None,
             requester_user_id=int(row.requested_by) if row.requested_by else None,
             via="hr_approve",
             delete_request_id=req_id,
@@ -650,7 +654,7 @@ def hr_decide_delete_request(
             employee_full_name="",
             requested_by=int(row.requested_by) if row.requested_by else None,
             requested_by_full_name=None,
-            reason=str(row.reason),
+            reason=str(row.reason) if row.reason is not None else None,
             status="approved",
             hr_decided_by=user.id,
             hr_decided_at=now,
@@ -750,7 +754,7 @@ def admin_override_delete_request(
             scope=scope,
             employee_id=employee_id,
             actor_user_id=user.id,
-            reason=str(row.reason),
+            reason=str(row.reason) if row.reason is not None else None,
             requester_user_id=int(row.requested_by) if row.requested_by else None,
             via="admin_override",
             delete_request_id=req_id,
@@ -762,7 +766,7 @@ def admin_override_delete_request(
             employee_full_name="",
             requested_by=int(row.requested_by) if row.requested_by else None,
             requested_by_full_name=None,
-            reason=str(row.reason),
+            reason=str(row.reason) if row.reason is not None else None,
             status="admin_override",
             hr_decided_by=None,
             hr_decided_at=None,

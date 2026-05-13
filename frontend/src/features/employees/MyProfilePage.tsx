@@ -118,11 +118,186 @@ export function MyProfilePage() {
 
 function ProfileCard({ employee: e }: { employee: Employee }) {
   const { t } = useTranslation();
+  // BUG-035 — employees can now self-edit phone + designation.
+  // Other fields stay HR/Admin-managed (the panel surfaces a hint).
+  const [editing, setEditing] = useState(false);
+  const [draftPhone, setDraftPhone] = useState(e.phone ?? "");
+  const [draftDesignation, setDraftDesignation] = useState(e.designation ?? "");
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const qc = useQueryClient();
+  const onSaveProfile = async () => {
+    setSavingProfile(true);
+    setProfileError(null);
+    try {
+      await api<Employee>("/api/employees/me", {
+        method: "PATCH",
+        body: {
+          phone: draftPhone.trim() || null,
+          designation: draftDesignation.trim() || null,
+        },
+      });
+      qc.invalidateQueries({ queryKey: ["employees", "me"] });
+      setEditing(false);
+    } catch (err) {
+      const detail =
+        err instanceof ApiError
+          ? typeof err.body === "object" &&
+            err.body !== null &&
+            "detail" in (err.body as Record<string, unknown>)
+            ? String(
+                (err.body as { detail: unknown }).detail ??
+                  `Save failed (${err.status})`,
+              )
+            : `Save failed (${err.status})`
+          : "Could not save profile.";
+      setProfileError(detail);
+    } finally {
+      setSavingProfile(false);
+    }
+  };
   return (
     <div className="card" style={{ marginBottom: 16, padding: 18 }}>
-      <h3 className="card-title" style={{ marginBottom: 12 }}>
-        {t("myProfile.facts", { defaultValue: "Profile" }) as string}
-      </h3>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 12,
+        }}
+      >
+        <h3 className="card-title" style={{ margin: 0 }}>
+          {t("myProfile.facts", { defaultValue: "Profile" }) as string}
+        </h3>
+        {!editing ? (
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => {
+              setDraftPhone(e.phone ?? "");
+              setDraftDesignation(e.designation ?? "");
+              setEditing(true);
+              setProfileError(null);
+            }}
+          >
+            <Icon name="edit" size={11} /> Edit
+          </button>
+        ) : (
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => {
+                setEditing(false);
+                setProfileError(null);
+              }}
+              disabled={savingProfile}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              onClick={onSaveProfile}
+              disabled={savingProfile}
+            >
+              {savingProfile ? "Saving…" : "Save"}
+            </button>
+          </div>
+        )}
+      </div>
+      {editing && (
+        <div
+          style={{
+            background: "var(--bg-elev)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            padding: 12,
+            marginBottom: 14,
+          }}
+        >
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 12,
+            }}
+          >
+            <div>
+              <label
+                className="text-xs text-dim"
+                style={{ display: "block", marginBottom: 3 }}
+              >
+                {t("employees.field.designation", {
+                  defaultValue: "Designation",
+                }) as string}
+              </label>
+              <input
+                type="text"
+                value={draftDesignation}
+                onChange={(ev) => setDraftDesignation(ev.target.value)}
+                maxLength={80}
+                style={{
+                  width: "100%",
+                  padding: "6px 8px",
+                  fontSize: 13,
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius-sm)",
+                  background: "var(--bg)",
+                }}
+              />
+            </div>
+            <div>
+              <label
+                className="text-xs text-dim"
+                style={{ display: "block", marginBottom: 3 }}
+              >
+                {t("employees.field.phone", {
+                  defaultValue: "Phone",
+                }) as string}
+              </label>
+              <input
+                type="tel"
+                value={draftPhone}
+                onChange={(ev) =>
+                  setDraftPhone(ev.target.value.replace(/[^\d+\-\s]/g, ""))
+                }
+                maxLength={30}
+                inputMode="tel"
+                style={{
+                  width: "100%",
+                  padding: "6px 8px",
+                  fontSize: 13,
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius-sm)",
+                  background: "var(--bg)",
+                }}
+              />
+            </div>
+          </div>
+          {profileError && (
+            <div
+              style={{
+                color: "var(--danger-text)",
+                fontSize: 12,
+                marginTop: 8,
+              }}
+            >
+              {profileError}
+            </div>
+          )}
+          <div
+            style={{
+              fontSize: 11,
+              color: "var(--text-secondary)",
+              marginTop: 10,
+            }}
+          >
+            Other fields (name, email, department) are managed by HR /
+            Admin. Ask them to update those if you need a change.
+          </div>
+        </div>
+      )}
       <div
         style={{
           display: "grid",

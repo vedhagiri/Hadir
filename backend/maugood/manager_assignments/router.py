@@ -21,7 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import and_, select
 
 from maugood.auth.audit import write_audit
-from maugood.auth.dependencies import CurrentUser, require_role
+from maugood.auth.dependencies import CurrentUser, require_any_role, require_role
 from maugood.db import (
     departments,
     employees,
@@ -46,6 +46,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/manager-assignments", tags=["manager-assignments"])
 
 ADMIN = Depends(require_role("Admin"))
+# BUG-057 — HR opens this page too; read should be allowed for HR
+# while mutations stay Admin-only.
+ADMIN_OR_HR = Depends(require_any_role("Admin", "HR"))
 
 
 def _to_chip(d: dict) -> EmployeeChip:
@@ -63,7 +66,7 @@ def _to_chip(d: dict) -> EmployeeChip:
 
 @router.get("", response_model=AssignmentsListResponse)
 def list_assignments(
-    user: Annotated[CurrentUser, ADMIN],
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
 ) -> AssignmentsListResponse:
     scope = TenantScope(tenant_id=user.tenant_id)
     engine = get_engine()

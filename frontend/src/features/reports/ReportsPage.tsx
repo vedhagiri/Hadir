@@ -1490,16 +1490,37 @@ function PreviewCard({
       >
         {pagerSlot ?? (
           <span>
-            {previewCount} preview row{previewCount === 1 ? "" : "s"} · full
-            dataset would be ~{totalCount} rows
+            {totalCount === 0 ? (
+              // BUG-029 — explicit "no data" message instead of just
+              // disabling the download button silently.
+              <strong style={{ color: "var(--danger-text)" }}>
+                No data to export. Adjust the filters above and try again.
+              </strong>
+            ) : (
+              <>
+                {previewCount} preview row{previewCount === 1 ? "" : "s"} ·
+                full dataset would be ~{totalCount} rows
+              </>
+            )}
           </span>
         )}
+        {/* BUG-028 / BUG-029 — disable both download buttons when the
+            preview has zero rows. Without this the operator could
+            "Download XLSX" on an empty dataset and get a one-row
+            (header only) file with no warning. */}
         <div style={{ display: "flex", gap: 8 }}>
           {onDownloadPdf && (
             <button
               className="btn btn-sm"
               onClick={onDownloadPdf}
-              disabled={downloadingXlsx || downloadingPdf}
+              disabled={
+                downloadingXlsx || downloadingPdf || totalCount === 0
+              }
+              title={
+                totalCount === 0
+                  ? "No data to export — adjust the filters above"
+                  : undefined
+              }
             >
               <Icon name="fileText" size={11} />
               {downloadingPdf ? "Generating PDF…" : "Download PDF"}
@@ -1508,7 +1529,14 @@ function PreviewCard({
           <button
             className="btn btn-sm"
             onClick={downloadXlsx}
-            disabled={downloadingXlsx || downloadingPdf}
+            disabled={
+              downloadingXlsx || downloadingPdf || totalCount === 0
+            }
+            title={
+              totalCount === 0
+                ? "No data to export — adjust the filters above"
+                : undefined
+            }
           >
             <Icon name="download" size={11} />
             {downloadingXlsx ? "Downloading…" : downloadXlsxLabel}

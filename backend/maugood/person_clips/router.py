@@ -57,6 +57,9 @@ from maugood.person_clips.schemas import (
     StorageStats,
     SystemResourceStats,
     ClipQueueStats,
+    TopProcessInfo,
+    UseCaseComparisonResponse,
+    UseCaseStats,
     WorkerStatus,
     SystemStatsResponse,
 )
@@ -143,12 +146,156 @@ def get_system_stats(
     settings = get_settings()
 
     # --- Resources (psutil) -------------------------------------------------
+    import os  # noqa: PLC0415
+    import platform as _plat  # noqa: PLC0415
+    import socket  # noqa: PLC0415
+    import time as _time  # noqa: PLC0415
+
     import psutil  # noqa: PLC0415
 
+    # CPU + memory baseline (same as before).
     cpu_per_core = psutil.cpu_percent(percpu=True, interval=0.1)
     cpu_per_core_list = cpu_per_core if isinstance(cpu_per_core, list) else [float(cpu_per_core)]
     cpu_total = sum(cpu_per_core_list) / max(1, len(cpu_per_core_list))
     mem = psutil.virtual_memory()
+
+    # CPU extras — count, frequency, load average.
+    cpu_count_logical = psutil.cpu_count(logical=True) or 0
+    cpu_count_physical = psutil.cpu_count(logical=False) or 0
+    cpu_freq_current: Optional[float] = None
+    cpu_freq_max: Optional[float] = None
+    try:
+        freq = psutil.cpu_freq()
+        if freq is not None:
+            cpu_freq_current = float(freq.current) if freq.current else None
+            cpu_freq_max = float(freq.max) if freq.max else None
+    except Exception:  # noqa: BLE001
+        pass
+    load_1, load_5, load_15 = (None, None, None)
+    try:
+        loads = os.getloadavg()  # Linux/macOS — Windows raises
+        load_1, load_5, load_15 = (
+            float(loads[0]),
+            float(loads[1]),
+            float(loads[2]),
+        )
+    except (OSError, AttributeError):
+        pass
+
+    # Swap.
+    swap = psutil.swap_memory()
+
+    # Disk + network I/O rates — cached previous sample on the function
+    # object so a second hit produces a real rate. First hit returns 0.
+    now = _time.time()
+    disk_io = psutil.disk_io_counters()
+    net_io = psutil.net_io_counters()
+
+    prev = getattr(get_system_stats, "_io_sample", None)
+    disk_read_rate = disk_write_rate = 0.0
+    net_sent_rate = net_recv_rate = 0.0
+    if prev and disk_io and net_io:
+        dt = max(0.001, now - prev["t"])
+        disk_read_rate = max(
+            0.0, (disk_io.read_bytes - prev["disk_r"]) / 1024 / 1024 / dt
+        )
+        disk_write_rate = max(
+            0.0, (disk_io.write_bytes - prev["disk_w"]) / 1024 / 1024 / dt
+        )
+        net_sent_rate = max(
+            0.0, (net_io.bytes_sent - prev["net_s"]) / 1024 / 1024 / dt
+        )
+        net_recv_rate = max(
+            0.0, (net_io.bytes_recv - prev["net_r"]) / 1024 / 1024 / dt
+        )
+    if disk_io and net_io:
+        get_system_stats._io_sample = {  # type: ignore[attr-defined]
+            "t": now,
+            "disk_r": disk_io.read_bytes,
+            "disk_w": disk_io.write_bytes,
+            "net_s": net_io.bytes_sent,
+            "net_r": net_io.bytes_recv,
+        }
+
+    # Host info.
+    hostname = socket.gethostname()
+    plat_str = f"{_plat.system()} {_plat.release()} ({_plat.machine()})"
+    boot_time = psutil.boot_time()
+    uptime = max(0.0, _time.time() - boot_time)
+    boot_iso = datetime.fromtimestamp(boot_time, tz=timezone.utc).isoformat(
+        timespec="seconds"
+    )
+
+    # Backend process self-introspection.
+    proc = psutil.Process(os.getpid())
+    try:
+        backend_cpu = float(proc.cpu_percent(interval=None))
+    except Exception:  # noqa: BLE001
+        backend_cpu = 0.0
+    try:
+        backend_mem_mb = round(proc.memory_info().rss / 1024 / 1024, 1)
+    except Exception:  # noqa: BLE001
+        backend_mem_mb = 0.0
+    try:
+        backend_threads = int(proc.num_threads())
+    except Exception:  # noqa: BLE001
+        backend_threads = 0
+    try:
+        backend_files = int(len(proc.open_files()))
+    except Exception:  # noqa: BLE001
+        backend_files = 0
+
+    # Top processes (CPU + memory). Limit iterations to keep this fast.
+    top_cpu: list[TopProcessInfo] = []
+    top_mem: list[TopProcessInfo] = []
+    try:
+        snapshot: list[tuple[int, str, float, float]] = []
+        for p in psutil.process_iter(attrs=["pid", "name"]):
+            try:
+                snapshot.append(
+                    (
+                        int(p.info["pid"]),
+                        str(p.info["name"] or "")[:48],
+                        float(p.cpu_percent(interval=None)),
+                        round(p.memory_info().rss / 1024 / 1024, 1),
+                    )
+                )
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        snapshot.sort(key=lambda x: -x[2])
+        top_cpu = [
+            TopProcessInfo(
+                pid=pid, name=name, cpu_percent=cpu, memory_mb=memv
+            )
+            for pid, name, cpu, memv in snapshot[:5]
+            if cpu > 0
+        ]
+        snapshot.sort(key=lambda x: -x[3])
+        top_mem = [
+            TopProcessInfo(
+                pid=pid, name=name, cpu_percent=cpu, memory_mb=memv
+            )
+            for pid, name, cpu, memv in snapshot[:5]
+        ]
+    except Exception:  # noqa: BLE001
+        pass
+
+    process_count = 0
+    try:
+        process_count = len(psutil.pids())
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Detector lock contention — sourced from the detector module.
+    detector_lock_pct = 0.0
+    try:
+        from maugood.detection.detectors import _detect_lock  # noqa: PLC0415
+
+        detector_lock_pct = float(
+            _detect_lock.contention_pct_60s()  # type: ignore[union-attr]
+        )
+    except Exception:  # noqa: BLE001
+        pass
 
     # GPU — try py3nvml; gracefully skip if not available
     gpu_available = False
@@ -171,13 +318,53 @@ def get_system_stats(
     resources = SystemResourceStats(
         cpu_percent_per_core=cpu_per_core_list,
         cpu_percent_total=round(cpu_total, 1),
+        cpu_count_logical=cpu_count_logical,
+        cpu_count_physical=cpu_count_physical,
+        cpu_freq_current_mhz=cpu_freq_current,
+        cpu_freq_max_mhz=cpu_freq_max,
+        load_avg_1m=load_1,
+        load_avg_5m=load_5,
+        load_avg_15m=load_15,
         memory_total_mb=round(mem.total / 1024 / 1024, 1),
         memory_used_mb=round(mem.used / 1024 / 1024, 1),
+        memory_available_mb=round(mem.available / 1024 / 1024, 1),
         memory_percent=round(mem.percent, 1),
+        swap_total_mb=round(swap.total / 1024 / 1024, 1) if swap else 0.0,
+        swap_used_mb=round(swap.used / 1024 / 1024, 1) if swap else 0.0,
+        swap_percent=round(swap.percent, 1) if swap else 0.0,
         gpu_available=gpu_available,
         gpu_percent=gpu_percent,
         gpu_memory_used_mb=gpu_memory_used_mb,
         gpu_memory_total_mb=gpu_memory_total_mb,
+        disk_read_mb_per_s=round(disk_read_rate, 2),
+        disk_write_mb_per_s=round(disk_write_rate, 2),
+        disk_read_total_mb=round(disk_io.read_bytes / 1024 / 1024, 1)
+        if disk_io
+        else 0.0,
+        disk_write_total_mb=round(disk_io.write_bytes / 1024 / 1024, 1)
+        if disk_io
+        else 0.0,
+        net_sent_mb_per_s=round(net_sent_rate, 2),
+        net_recv_mb_per_s=round(net_recv_rate, 2),
+        net_sent_total_mb=round(net_io.bytes_sent / 1024 / 1024, 1)
+        if net_io
+        else 0.0,
+        net_recv_total_mb=round(net_io.bytes_recv / 1024 / 1024, 1)
+        if net_io
+        else 0.0,
+        hostname=hostname,
+        platform=plat_str,
+        boot_time_iso=boot_iso,
+        uptime_seconds=uptime,
+        process_count=process_count,
+        backend_pid=os.getpid(),
+        backend_cpu_percent=round(backend_cpu, 1),
+        backend_memory_mb=backend_mem_mb,
+        backend_thread_count=backend_threads,
+        backend_open_files=backend_files,
+        top_cpu_processes=top_cpu,
+        top_memory_processes=top_mem,
+        detector_lock_contention_pct=round(detector_lock_pct, 1),
     )
 
     # --- Storage --------------------------------------------------------------
@@ -266,6 +453,20 @@ def get_system_stats(
         ).all()
         sc = {r.matched_status: r.cnt for r in status_counts}
 
+        # Recording-status counts — the upstream half of the
+        # Processing Lifecycle funnel. Pre-encoding rows
+        # ('recording', 'finalizing') aren't yet face-matchable; the
+        # lifecycle UI surfaces them as a separate stage.
+        rec_counts = conn.execute(
+            select(
+                person_clips.c.recording_status,
+                func.count(person_clips.c.id).label("cnt"),
+            )
+            .where(person_clips.c.tenant_id == scope.tenant_id)
+            .group_by(person_clips.c.recording_status)
+        ).all()
+        rc = {r.recording_status: int(r.cnt) for r in rec_counts}
+
         # Per-UC aggregates from clip_processing_results
         uc_stats = conn.execute(
             select(
@@ -281,18 +482,67 @@ def get_system_stats(
         ).all()
         uc_map = {r.use_case: {"cnt": r.cnt, "avg_ms": r.avg_ms} for r in uc_stats}
 
+        # Today's activity (UTC). Use UTC midnight as the day boundary
+        # for consistency with audit + timestamps. Frontends that need
+        # tenant-local day buckets can re-bucket later.
+        today_utc_start = datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        today_clips = conn.execute(
+            select(func.count(person_clips.c.id)).where(
+                person_clips.c.tenant_id == scope.tenant_id,
+                person_clips.c.created_at >= today_utc_start,
+            )
+        ).scalar_one()
+        today_matched = conn.execute(
+            select(func.count(person_clips.c.id)).where(
+                person_clips.c.tenant_id == scope.tenant_id,
+                person_clips.c.matched_status == "processed",
+                person_clips.c.created_at >= today_utc_start,
+            )
+        ).scalar_one()
+
+        # Avg clip duration + total storage (across all clips, all time).
+        avg_dur_total_storage = conn.execute(
+            select(
+                func.avg(person_clips.c.duration_seconds).label("avg_dur"),
+                func.coalesce(
+                    func.sum(person_clips.c.filesize_bytes), 0
+                ).label("total_storage"),
+            ).where(person_clips.c.tenant_id == scope.tenant_id)
+        ).first()
+        avg_dur = (
+            float(avg_dur_total_storage.avg_dur)  # type: ignore[union-attr]
+            if avg_dur_total_storage and avg_dur_total_storage.avg_dur is not None
+            else None
+        )
+        total_storage = (
+            int(avg_dur_total_storage.total_storage)  # type: ignore[union-attr]
+            if avg_dur_total_storage
+            else 0
+        )
+
     pipeline = PipelineStats(
         total_clips=int(total_clips),
         clips_pending=int(sc.get("pending", 0)),
         clips_processing=int(sc.get("processing", 0)),
         clips_completed=int(sc.get("processed", 0)),
         clips_failed=int(sc.get("failed", 0)),
+        recording_active=rc.get("recording", 0),
+        recording_encoding=rc.get("finalizing", 0),
+        recording_completed=rc.get("completed", 0),
+        recording_failed=rc.get("failed", 0),
+        recording_abandoned=rc.get("abandoned", 0),
         uc1_completed=int(uc_map.get("uc1", {}).get("cnt", 0)),
         uc2_completed=int(uc_map.get("uc2", {}).get("cnt", 0)),
         uc3_completed=int(uc_map.get("uc3", {}).get("cnt", 0)),
         avg_uc1_duration_ms=uc_map.get("uc1", {}).get("avg_ms"),
         avg_uc2_duration_ms=uc_map.get("uc2", {}).get("avg_ms"),
         avg_uc3_duration_ms=uc_map.get("uc3", {}).get("avg_ms"),
+        clips_today=int(today_clips or 0),
+        matched_today=int(today_matched or 0),
+        avg_clip_duration_seconds=avg_dur,
+        total_storage_bytes=total_storage,
     )
 
     # Reprocess status
@@ -455,6 +705,273 @@ def person_clip_stats(
         processing_match=sc.get("processing", 0),
         completed_match=sc.get("processed", 0),
         failed_match=sc.get("failed", 0),
+    )
+
+
+# ---------------------------------------------------------------------------
+# UC Comparison (dashboard data for the Comparison tab)
+# ---------------------------------------------------------------------------
+
+_UC_META: dict[str, dict[str, str]] = {
+    "uc1": {"label": "Use Case 1", "mode": "YOLO + Face crops"},
+    "uc2": {"label": "Use Case 2", "mode": "InsightFace + best-per-track"},
+    "uc3": {"label": "Use Case 3", "mode": "InsightFace direct match"},
+}
+
+
+@router.get("/uc-comparison", response_model=UseCaseComparisonResponse)
+def get_uc_comparison(
+    user: Annotated[CurrentUser, HR_OR_ADMIN],
+) -> UseCaseComparisonResponse:
+    """Per-UC aggregate stats used by the Comparison tab.
+
+    Joins ``clip_processing_results`` (timing + counts) with
+    ``face_crops`` (quality + matched). Stats the saved JPEGs on disk
+    once per use_case to compute real storage bytes.
+    """
+    scope = TenantScope(tenant_id=user.tenant_id)
+    engine = get_engine()
+
+    per_uc: dict[str, UseCaseStats] = {}
+
+    with engine.begin() as conn:
+        # --- From clip_processing_results -----------------------------------
+        cpr_rows = conn.execute(
+            select(
+                clip_processing_results.c.use_case,
+                func.count(clip_processing_results.c.id).label("total"),
+                func.count(clip_processing_results.c.id).filter(
+                    clip_processing_results.c.status == "completed"
+                ).label("completed"),
+                func.count(clip_processing_results.c.id).filter(
+                    clip_processing_results.c.status == "failed"
+                ).label("failed"),
+                func.count(func.distinct(clip_processing_results.c.person_clip_id)).filter(
+                    clip_processing_results.c.status == "completed"
+                ).label("distinct_clips"),
+                func.avg(clip_processing_results.c.duration_ms).filter(
+                    clip_processing_results.c.status == "completed"
+                ).label("avg_total"),
+                func.avg(clip_processing_results.c.face_extract_duration_ms).filter(
+                    clip_processing_results.c.status == "completed"
+                ).label("avg_extract"),
+                func.avg(clip_processing_results.c.match_duration_ms).filter(
+                    clip_processing_results.c.status == "completed"
+                ).label("avg_match"),
+                func.coalesce(
+                    func.sum(clip_processing_results.c.face_crop_count).filter(
+                        clip_processing_results.c.status == "completed"
+                    ),
+                    0,
+                ).label("crops_saved"),
+                func.coalesce(
+                    func.sum(clip_processing_results.c.unknown_count).filter(
+                        clip_processing_results.c.status == "completed"
+                    ),
+                    0,
+                ).label("unknown_count"),
+            )
+            .where(clip_processing_results.c.tenant_id == scope.tenant_id)
+            .where(clip_processing_results.c.use_case.in_(("uc1", "uc2", "uc3")))
+            .group_by(clip_processing_results.c.use_case)
+        ).all()
+
+        cpr_map: dict[str, dict] = {}
+        for r in cpr_rows:
+            cpr_map[r.use_case] = {
+                "completed": int(r.completed or 0),
+                "failed": int(r.failed or 0),
+                "distinct_clips": int(r.distinct_clips or 0),
+                "avg_total": float(r.avg_total) if r.avg_total is not None else None,
+                "avg_extract": float(r.avg_extract) if r.avg_extract is not None else None,
+                "avg_match": float(r.avg_match) if r.avg_match is not None else None,
+                "crops_saved": int(r.crops_saved or 0),
+                "unknown_count": int(r.unknown_count or 0),
+            }
+
+        # --- Match-confidence aggregate via JSONB unnest --------------------
+        # ``match_details`` is stored as JSONB; some legacy rows are
+        # scalars (None / strings) rather than arrays of objects. The
+        # CTE filters down to rows where the column is a JSON array
+        # before unnesting so a stray non-array doesn't tank the query.
+        conf_rows = conn.execute(
+            text(
+                """
+                WITH valid AS (
+                  SELECT use_case, match_details
+                    FROM clip_processing_results
+                   WHERE tenant_id = :tid
+                     AND use_case IN ('uc1', 'uc2', 'uc3')
+                     AND status = 'completed'
+                     AND match_details IS NOT NULL
+                     AND jsonb_typeof(match_details) = 'array'
+                )
+                SELECT v.use_case,
+                       AVG((md->>'confidence')::float) AS avg_conf
+                  FROM valid v,
+                       LATERAL jsonb_array_elements(v.match_details) md
+                 WHERE jsonb_typeof(md) = 'object'
+                   AND md ? 'confidence'
+                 GROUP BY v.use_case
+                """
+            ),
+            {"tid": scope.tenant_id},
+        ).all()
+        conf_map: dict[str, Optional[float]] = {
+            r.use_case: (float(r.avg_conf) if r.avg_conf is not None else None)
+            for r in conf_rows
+        }
+
+        # --- From face_crops -------------------------------------------------
+        fc_rows = conn.execute(
+            select(
+                face_crops.c.use_case,
+                func.count(face_crops.c.id).label("row_count"),
+                func.count(face_crops.c.id).filter(
+                    face_crops.c.employee_id.is_not(None)
+                ).label("matched"),
+                func.avg(face_crops.c.quality_score).label("avg_quality"),
+                func.avg(face_crops.c.detection_score).label("avg_det"),
+            )
+            .where(face_crops.c.tenant_id == scope.tenant_id)
+            .where(face_crops.c.use_case.in_(("uc1", "uc2", "uc3")))
+            .group_by(face_crops.c.use_case)
+        ).all()
+
+        fc_map: dict[str, dict] = {}
+        for r in fc_rows:
+            fc_map[r.use_case] = {
+                "row_count": int(r.row_count or 0),
+                "matched": int(r.matched or 0),
+                "avg_quality": float(r.avg_quality) if r.avg_quality is not None else None,
+                "avg_det": float(r.avg_det) if r.avg_det is not None else None,
+            }
+
+        # --- Storage bytes — stat the JPEGs ---------------------------------
+        # Limit to a representative sample if the tenant has many crops
+        # so we don't burn 10s on disk I/O for a dashboard tab.
+        storage_by_uc: dict[str, int] = {"uc1": 0, "uc2": 0, "uc3": 0}
+        path_rows = conn.execute(
+            select(face_crops.c.use_case, face_crops.c.file_path)
+            .where(face_crops.c.tenant_id == scope.tenant_id)
+            .where(face_crops.c.use_case.in_(("uc1", "uc2", "uc3")))
+            .where(face_crops.c.file_path.is_not(None))
+        ).all()
+        for r in path_rows:
+            try:
+                size = Path(str(r.file_path)).stat().st_size
+                storage_by_uc[r.use_case] = (
+                    storage_by_uc.get(r.use_case, 0) + size
+                )
+            except OSError:
+                pass  # file missing — skip silently
+
+    # Assemble per-UC stats; UCs with no data still appear (has_data=False)
+    # so the frontend can render an "Not yet processed" placeholder for them.
+    for uc_key, meta in _UC_META.items():
+        cpr = cpr_map.get(uc_key, {})
+        fc = fc_map.get(uc_key, {})
+        completed = int(cpr.get("completed", 0))
+        crops_saved = int(cpr.get("crops_saved", 0))
+        unknown = int(cpr.get("unknown_count", 0))
+        row_count = int(fc.get("row_count", 0))
+        matched = int(fc.get("matched", 0))
+        match_rate = (
+            matched / row_count
+            if row_count > 0
+            else None
+        )
+        has_data = completed > 0 or row_count > 0
+        per_uc[uc_key] = UseCaseStats(
+            use_case=uc_key,
+            label=meta["label"],
+            mode=meta["mode"],
+            has_data=has_data,
+            completed_runs=completed,
+            failed_runs=int(cpr.get("failed", 0)),
+            distinct_clips=int(cpr.get("distinct_clips", 0)),
+            avg_total_ms=cpr.get("avg_total"),
+            avg_extract_ms=cpr.get("avg_extract"),
+            avg_match_ms=cpr.get("avg_match"),
+            total_faces_detected=crops_saved + unknown,
+            total_crops_saved=crops_saved,
+            total_unknown_count=unknown,
+            face_crop_row_count=row_count,
+            matched_crop_count=matched,
+            avg_quality_score=fc.get("avg_quality"),
+            avg_detection_score=fc.get("avg_det"),
+            avg_match_confidence=conf_map.get(uc_key),
+            match_rate=match_rate,
+            storage_bytes=storage_by_uc.get(uc_key, 0),
+        )
+
+    use_cases_list = [per_uc[k] for k in ("uc1", "uc2", "uc3")]
+
+    # --- Winners ------------------------------------------------------------
+    with_data = [u for u in use_cases_list if u.has_data]
+
+    def _winner_min(field: str) -> Optional[str]:
+        candidates = [
+            (u.use_case, getattr(u, field))
+            for u in with_data
+            if getattr(u, field) is not None
+        ]
+        if not candidates:
+            return None
+        candidates.sort(key=lambda kv: kv[1])
+        return candidates[0][0]
+
+    def _winner_max(field: str) -> Optional[str]:
+        candidates = [
+            (u.use_case, getattr(u, field))
+            for u in with_data
+            if getattr(u, field) is not None
+        ]
+        if not candidates:
+            return None
+        candidates.sort(key=lambda kv: -kv[1])
+        return candidates[0][0]
+
+    fastest = _winner_min("avg_total_ms")
+    best_quality = _winner_max("avg_quality_score")
+    most_accurate = _winner_max("match_rate")
+    most_used = _winner_max("completed_runs")
+
+    # --- Recommendations ----------------------------------------------------
+    recs: list[str] = []
+    if not with_data:
+        recs.append(
+            "No use cases have been run yet. Right-click any clip card "
+            "and pick a use case to start populating this dashboard."
+        )
+    else:
+        if best_quality is not None and most_accurate == best_quality:
+            recs.append(
+                f"For most clips, prefer {_UC_META[best_quality]['label']} — "
+                "it leads on both crop quality and match accuracy."
+            )
+        elif best_quality is not None:
+            recs.append(
+                f"For the cleanest saved crops, use {_UC_META[best_quality]['label']}."
+            )
+        if fastest is not None and fastest != best_quality:
+            recs.append(
+                f"For fastest processing, use {_UC_META[fastest]['label']} — "
+                "trades crop quality for throughput."
+            )
+        if "uc1" in [u.use_case for u in with_data]:
+            recs.append(
+                "Use Case 1 (YOLO + Face crops) excels on wide / multi-person "
+                "scenes where InsightFace alone misses small or partly-occluded faces."
+            )
+
+    return UseCaseComparisonResponse(
+        use_cases=use_cases_list,
+        fastest=fastest,
+        best_quality=best_quality,
+        most_accurate=most_accurate,
+        most_used=most_used,
+        recommendations=recs,
     )
 
 

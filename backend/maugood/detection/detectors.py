@@ -315,10 +315,14 @@ def _face_to_dict(face, frame_shape) -> Optional[dict]:  # type: ignore[no-untyp
     if x2 <= x1 or y2 <= y1:
         return None
     fw, fh = x2 - x1, y2 - y1
-    pose = _pose_score_from_landmarks(getattr(face, "kps", None), fw)
+    kps_raw = getattr(face, "kps", None)
+    pose = _pose_score_from_landmarks(kps_raw, fw)
     emb = getattr(face, "normed_embedding", None)
     if emb is not None:
         emb = np.asarray(emb, dtype=np.float32)
+    kps_arr: Optional[np.ndarray] = None
+    if kps_raw is not None:
+        kps_arr = np.asarray(kps_raw, dtype=np.float32)
     return {
         "bbox": (x1, y1, x2, y2),
         "det_score": float(getattr(face, "det_score", 1.0)),
@@ -326,6 +330,9 @@ def _face_to_dict(face, frame_shape) -> Optional[dict]:  # type: ignore[no-untyp
         "face_width": fw,
         "face_height": fh,
         "pose_score": pose,
+        # 5-point landmarks in frame coords. Consumed by the offline
+        # UC2 reprocess for composite quality scoring (pose + yaw).
+        "kps": kps_arr,
     }
 
 
@@ -449,6 +456,7 @@ def _run_yolo_face(  # type: ignore[no-untyped-def]
                 "face_width": fw,
                 "face_height": fh,
                 "pose_score": _pose_score_from_landmarks(kps, fw),
+                "kps": kps,
             })
     return out, person_count, person_boxes_xyxy
 

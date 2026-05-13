@@ -61,6 +61,8 @@ export function EmployeesPage() {
 
   const { data: me } = useMe();
   const isAdmin = !!me?.roles?.includes("Admin");
+  // BUG-053 — HR also gets the bulk-delete affordance now.
+  const isHr = !!me?.roles?.includes("HR");
 
   const onSortClick = (column: EmployeeSortBy) => {
     setPage(1);
@@ -100,7 +102,13 @@ export function EmployeesPage() {
     () => ({
       q: debouncedQ,
       department_id: departmentId,
+      // BUG-015 / BUG-018 — pass status_filter server-side so the
+      // 'Inactive' chip returns only inactive rows and the
+      // pagination total is exact. The legacy include_inactive flag
+      // is kept for backwards-compat (server honors status_filter
+      // first).
       include_inactive: statusFilter !== "active",
+      status_filter: statusFilter as "active" | "inactive" | "all",
       page,
       page_size: PAGE_SIZE,
       sort_by: sortBy,
@@ -120,13 +128,10 @@ export function EmployeesPage() {
     return m;
   }, [pendingDeletes.data]);
 
-  const visibleItems = useMemo(() => {
-    const items = list.data?.items ?? [];
-    if (statusFilter === "inactive") {
-      return items.filter((e) => e.status === "inactive");
-    }
-    return items;
-  }, [list.data, statusFilter]);
+  // BUG-015 — server already filters by status, no client post-filter
+  // needed. Removing the post-filter also makes ``total`` match what
+  // the user sees (BUG-018).
+  const visibleItems = list.data?.items ?? [];
 
   const totalPages = useMemo(() => {
     if (!list.data) return 1;
@@ -189,7 +194,7 @@ export function EmployeesPage() {
           </p>
         </div>
         <div className="page-actions">
-          {isAdmin && selected.size > 0 && (
+          {(isAdmin || isHr) && selected.size > 0 && (
             <button
               className="btn btn-danger"
               onClick={() => setBulkDeleteScope("selected")}
@@ -200,7 +205,7 @@ export function EmployeesPage() {
               }) as string}
             </button>
           )}
-          {isAdmin && selected.size === 0 && (
+          {(isAdmin || isHr) && selected.size === 0 && (
             <button
               className="btn"
               onClick={() => setBulkDeleteScope("all")}
@@ -312,10 +317,30 @@ export function EmployeesPage() {
           </div>
         </div>
 
-        <table className="table">
-          <thead>
+        {/* BUG-014 — sticky header. The page itself scrolls (the
+            table doesn't have its own scroll container), so we pin
+            the <thead> rows to the viewport top via position: sticky.
+            Each <th> needs an opaque background so the underlying
+            row content doesn't bleed through during scroll. */}
+        <table
+          className="table"
+          style={
+            {
+              ["--mg-sticky-bg" as string]: "var(--bg)",
+            } as React.CSSProperties
+          }
+        >
+          <thead
+            style={{
+              position: "sticky",
+              top: 0,
+              zIndex: 2,
+              background: "var(--bg)",
+              boxShadow: "0 1px 0 var(--border)",
+            }}
+          >
             <tr>
-              <th style={{ width: 36 }}>
+              <th style={{ width: 36, background: "var(--bg)" }}>
                 <input
                   type="checkbox"
                   checked={allOnPageSelected}
@@ -345,11 +370,19 @@ export function EmployeesPage() {
                 direction={sortDir}
                 onClick={onSortClick}
               />
-              <th>{t("employees.col.role") as string}</th>
-              <th style={{ width: 130 }}>
+              <th style={{ background: "var(--bg)" }}>
+                {t("employees.col.role") as string}
+              </th>
+              <th style={{ width: 130, background: "var(--bg)" }}>
                 {t("employees.col.photos") as string}
               </th>
-              <th style={{ width: 110, textAlign: "end" }}>
+              <th
+                style={{
+                  width: 110,
+                  textAlign: "end",
+                  background: "var(--bg)",
+                }}
+              >
                 {t("employees.col.actions") as string}
               </th>
             </tr>
@@ -484,42 +517,51 @@ export function EmployeesPage() {
           </tbody>
         </table>
 
-        {/* Pagination strip */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            padding: "10px 14px",
-            borderTop: "1px solid var(--border)",
-            fontSize: 12,
-          }}
-        >
-          <span className="text-dim">
-            {t("employees.pageNumber", {
-              page,
-              totalPages,
-            }) as string}
-          </span>
-          <div style={{ display: "flex", gap: 6 }}>
-            <button
-              className="btn btn-sm"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              <Icon name="chevronLeft" size={11} />
-              {t("common.previous") as string}
-            </button>
-            <button
-              className="btn btn-sm"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            >
-              {t("common.next") as string}
-              <Icon name="chevronRight" size={11} />
-            </button>
+        {/* Pagination strip — BUG-016 / BUG-017 / BUG-018: hide the
+            strip entirely when there's no data. Empty state shouldn't
+            advertise pages 1-3 with clickable Prev/Next buttons. */}
+        {(list.data?.total ?? 0) > 0 && (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "10px 14px",
+              borderTop: "1px solid var(--border)",
+              fontSize: 12,
+            }}
+          >
+            <span className="text-dim">
+              {t("employees.pageNumber", {
+                page,
+                totalPages,
+              }) as string}
+              {" · "}
+              {(list.data?.total ?? 0).toLocaleString()} total
+            </span>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button
+                className="btn btn-sm"
+                // Belt-and-braces: also disable while a fetch is in
+                // flight so an impatient operator doesn't trigger a
+                // race against stale data.
+                disabled={page <= 1 || list.isFetching}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                <Icon name="chevronLeft" size={11} />
+                {t("common.previous") as string}
+              </button>
+              <button
+                className="btn btn-sm"
+                disabled={page >= totalPages || list.isFetching}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              >
+                {t("common.next") as string}
+                <Icon name="chevronRight" size={11} />
+              </button>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {importOpen && <ImportModal onClose={() => setImportOpen(false)} />}
@@ -595,7 +637,13 @@ function SortableHeader({
 }) {
   const active = activeColumn === column;
   return (
-    <th style={width != null ? { width } : undefined}>
+    <th
+      style={{
+        ...(width != null ? { width } : {}),
+        // BUG-014 — opaque so sticky-thead doesn't bleed.
+        background: "var(--bg)",
+      }}
+    >
       <button
         type="button"
         onClick={() => onClick(column)}

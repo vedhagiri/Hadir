@@ -70,7 +70,7 @@ export function LoginPage() {
     watch,
   } = useForm<LoginValues>({
     resolver: zodResolver,
-    defaultValues: { email: "", password: "", tenant_slug: initialTenant },
+    defaultValues: { email: "harikrishnan@inaisys.co", password: "Hari@123", tenant_slug: initialTenant || "inaisys" },
   });
 
   const watchedTenant = watch("tenant_slug") ?? "";

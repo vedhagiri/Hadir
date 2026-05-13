@@ -188,11 +188,15 @@ class UserCreateOut(BaseModel):
 @router.post("", response_model=UserCreateOut, status_code=201)
 def create_user(
     payload: UserCreateIn,
-    user: Annotated[CurrentUser, ADMIN],
+    # BUG-054 — HR adds employees and the Add Employee drawer needs to
+    # also create the platform login + assign roles. Original
+    # Admin-only gate forced HR to ask an Admin for every new user,
+    # which is what triggered "Roles list not available".
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
 ) -> UserCreateOut:
     """Create a platform user + assign roles.
 
-    Admin-only — creating a login with role grants is sensitive. The
+    Admin + HR — creating a login with role grants is sensitive. The
     plain password is hashed via Argon2id (``hash_password``) before
     persistence; it never appears in the request log, the audit row,
     or the response body. 409 on duplicate email; 422 on unknown role

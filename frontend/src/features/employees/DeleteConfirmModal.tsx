@@ -1,24 +1,20 @@
-// P28.7 — confirmation modal for the trash icon on the employees row.
+// Direct-delete confirmation modal for the trash action on the
+// employees row. Operator request: Admin / HR / Manager can all
+// soft-delete an employee directly (sets status=inactive) without
+// routing through the HR-approval workflow.
 //
-// Role-aware copy:
-//   - HR    → "Delete employee" + "Confirm". The submission runs the
-//             auto-approve path on the backend and the row is gone in
-//             a single click.
-//   - Admin → "Submit delete request to HR" + the same reason
-//             textarea. Backend creates a pending row and HR decides.
-//
-// Both surfaces share the same shape — only the verb on the button
-// and the help text below the textarea differ.
+// The previous P28.7 delete-request workflow stays available as a
+// secondary "Submit delete request" option that runs PDPL hard-delete
+// (purges crops + history) — surface that explicitly so the operator
+// chooses deliberately.
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { ApiError } from "../../api/client";
-import { useMe } from "../../auth/AuthProvider";
+import { extractApiError } from "../../api/client";
 import { ModalShell } from "../../components/DrawerShell";
-import { primaryRole } from "../../types";
 import { Icon } from "../../shell/Icon";
-import { useSubmitDeleteRequest } from "./hooks";
+import { useSoftDeleteEmployee, useSubmitDeleteRequest } from "./hooks";
 import type { Employee } from "./types";
 
 interface Props {
@@ -27,37 +23,47 @@ interface Props {
   onSubmitted: () => void;
 }
 
+type DeleteMode = "deactivate" | "permanent";
+
 export function DeleteConfirmModal({ employee, onClose, onSubmitted }: Props) {
   const { t } = useTranslation();
-  const me = useMe();
-  const role = me.data ? primaryRole(me.data.roles) : "Employee";
-  const isHr = role === "HR";
+  // Default to the reversible soft-delete. Permanent hard-delete is
+  // explicit opt-in (requires a reason ≥ 10 chars and routes through
+  // the HR-approval workflow).
+  const [mode, setMode] = useState<DeleteMode>("deactivate");
 
+  const softDelete = useSoftDeleteEmployee();
   const submit = useSubmitDeleteRequest();
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const onSubmit = async () => {
-    if (reason.trim().length < 10) {
-      setError(t("employees.delete.reasonMin") as string);
+    setError(null);
+    if (mode === "deactivate") {
+      try {
+        await softDelete.mutateAsync(employee.id);
+        onSubmitted();
+      } catch (e) {
+        setError(extractApiError(e, "Could not deactivate employee"));
+      }
       return;
     }
-    setError(null);
+    // Permanent (hard-delete via approval workflow). Reason is
+    // optional — operator request. The hint below the textarea
+    // explains it's audited so an operator who wants to write
+    // context still can.
     try {
       await submit.mutateAsync({
         employeeId: employee.id,
-        reason: reason.trim(),
+        reason: reason.trim() || null,
       });
       onSubmitted();
     } catch (e) {
-      if (e instanceof ApiError) {
-        const detail = (e.body as { detail?: string })?.detail;
-        setError(typeof detail === "string" ? detail : `Error ${e.status}`);
-      } else {
-        setError("Could not submit");
-      }
+      setError(extractApiError(e, "Could not submit"));
     }
   };
+
+  const busy = softDelete.isPending || submit.isPending;
 
   return (
     <ModalShell onClose={onClose}>
@@ -112,43 +118,88 @@ export function DeleteConfirmModal({ employee, onClose, onSubmitted }: Props) {
             <Icon name="trash" size={14} />
           </div>
           <div style={{ fontSize: 15, fontWeight: 600 }}>
-            {isHr
-              ? (t("employees.delete.hrTitle") as string)
-              : (t("employees.delete.adminTitle") as string)}
+            {mode === "deactivate"
+              ? `Delete ${employee.full_name}?`
+              : `Permanently delete ${employee.full_name}?`}
           </div>
         </div>
 
-        <div className="text-sm text-dim" style={{ marginBottom: 12 }}>
-          {isHr
-            ? (t("employees.delete.hrBody", { name: employee.full_name }) as string)
-            : (t("employees.delete.adminBody", { name: employee.full_name }) as string)}
+        {/* Mode picker — two radio cards so the operator picks
+            deliberately between reversible and permanent. */}
+        <div
+          role="radiogroup"
+          aria-label="Delete mode"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 8,
+            marginBottom: 14,
+          }}
+        >
+          <ModeCard
+            checked={mode === "deactivate"}
+            onSelect={() => setMode("deactivate")}
+            title="Deactivate"
+            sub="Sets status to Inactive. Reversible — can be reactivated."
+            recommended
+          />
+          <ModeCard
+            checked={mode === "permanent"}
+            onSelect={() => setMode("permanent")}
+            title="Permanent"
+            sub="Submits a delete request that purges photos + history after approval."
+            danger
+          />
         </div>
 
-        <label
-          className="text-xs"
-          style={{ fontWeight: 500, color: "var(--text-secondary)" }}
-        >
-          {t("employees.delete.reasonLabel") as string} *
-        </label>
-        <textarea
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          rows={3}
-          placeholder={t("employees.delete.reasonPlaceholder") as string}
-          style={{
-            width: "100%",
-            marginTop: 4,
-            padding: 8,
-            fontSize: 13,
-            border: "1px solid var(--border)",
-            borderRadius: "var(--radius-sm)",
-            background: "var(--bg-elev)",
-            color: "var(--text)",
-          }}
-        />
-        <div className="text-xs text-dim" style={{ marginTop: 4 }}>
-          {t("employees.delete.reasonHint") as string}
-        </div>
+        {mode === "deactivate" ? (
+          <div
+            className="text-sm text-dim"
+            style={{
+              padding: "10px 12px",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius-sm)",
+              background: "var(--bg)",
+              marginBottom: 4,
+            }}
+          >
+            The employee row will be marked <strong>Inactive</strong>{" "}
+            immediately. Their attendance + clip history is preserved
+            and they can be reactivated from the Inactive tab.
+          </div>
+        ) : (
+          <>
+            <label
+              className="text-xs"
+              style={{ fontWeight: 500, color: "var(--text-secondary)" }}
+            >
+              {t("employees.delete.reasonLabel") as string}{" "}
+              <span style={{ color: "var(--text-tertiary, var(--text-secondary))" }}>
+                (optional)
+              </span>
+            </label>
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              rows={3}
+              maxLength={500}
+              placeholder="Optional — add context for the audit trail (max 500 chars)."
+              style={{
+                width: "100%",
+                marginTop: 4,
+                padding: 8,
+                fontSize: 13,
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius-sm)",
+                background: "var(--bg-elev)",
+                color: "var(--text)",
+              }}
+            />
+            <div className="text-xs text-dim" style={{ marginTop: 4 }}>
+              The reason is recorded in the audit log if provided.
+            </div>
+          </>
+        )}
 
         {error && (
           <div
@@ -173,7 +224,7 @@ export function DeleteConfirmModal({ employee, onClose, onSubmitted }: Props) {
             marginTop: 16,
           }}
         >
-          <button type="button" className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose} disabled={busy}>
             {t("common.cancel") as string}
           </button>
           <button
@@ -181,15 +232,97 @@ export function DeleteConfirmModal({ employee, onClose, onSubmitted }: Props) {
             className="btn btn-primary"
             style={{ background: "var(--danger)", color: "white" }}
             onClick={() => void onSubmit()}
-            disabled={submit.isPending}
+            disabled={busy}
           >
-            {isHr
-              ? (t("employees.delete.hrConfirm") as string)
-              : (t("employees.delete.adminConfirm") as string)}
+            {busy
+              ? "Working…"
+              : mode === "deactivate"
+                ? "Deactivate now"
+                : "Submit delete request"}
           </button>
         </div>
       </div>
       </div>
     </ModalShell>
+  );
+}
+
+
+function ModeCard({
+  checked,
+  onSelect,
+  title,
+  sub,
+  recommended,
+  danger,
+}: {
+  checked: boolean;
+  onSelect: () => void;
+  title: string;
+  sub: string;
+  recommended?: boolean;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      role="radio"
+      aria-checked={checked}
+      style={{
+        textAlign: "start",
+        padding: "10px 12px",
+        border: checked
+          ? `2px solid ${danger ? "var(--danger)" : "var(--accent, #0b6e4f)"}`
+          : "1px solid var(--border)",
+        borderRadius: "var(--radius-sm)",
+        background: checked
+          ? danger
+            ? "var(--danger-soft)"
+            : "var(--accent-soft, rgba(11,110,79,0.10))"
+          : "var(--bg)",
+        cursor: "pointer",
+        fontFamily: "var(--font-sans)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+      }}
+    >
+      <span
+        style={{
+          fontSize: 12.5,
+          fontWeight: 700,
+          color: checked
+            ? danger
+              ? "var(--danger-text)"
+              : "var(--accent, #0b6e4f)"
+            : "var(--text)",
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+        }}
+      >
+        {title}
+        {recommended && (
+          <span
+            style={{
+              fontSize: 9,
+              fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+              color: "#0b6e4f",
+              background: "rgba(11,110,79,0.12)",
+              padding: "1px 6px",
+              borderRadius: 999,
+            }}
+          >
+            Recommended
+          </span>
+        )}
+      </span>
+      <span style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.4 }}>
+        {sub}
+      </span>
+    </button>
   );
 }

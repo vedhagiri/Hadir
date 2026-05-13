@@ -146,7 +146,10 @@ def test_employee_role_cannot_manage_leave_types(
     _login(
         client, email=employee_user["email"], password=employee_user["password"]
     )
-    assert client.get("/api/leave-types").status_code == 403
+    # BUG-058 / BUG-059 — Employees submitting a leave request need to
+    # read the list. GET is now open to every authenticated user;
+    # POST / PATCH / DELETE stay Admin/HR-only.
+    assert client.get("/api/leave-types").status_code == 200
     assert (
         client.post(
             "/api/leave-types",
@@ -216,9 +219,15 @@ def test_holiday_xlsx_import_idempotent(
         )
         assert first.status_code == 200, first.text
         body1 = first.json()
-        assert len(body1) == 2
+        # BUG-025 — response shape is now ``HolidayImportResponse``
+        # with explicit imported/skipped lists rather than a bare list
+        # of imported rows.
+        assert body1["imported_count"] == 2
+        assert body1["skipped_count"] == 0
+        assert len(body1["imported"]) == 2
 
-        # Re-import the same file → no new rows (idempotent).
+        # Re-import the same file → no new rows, both rows reported as
+        # skipped so the import is no longer silently a no-op.
         buf.seek(0)
         second = client.post(
             "/api/holidays/import",
@@ -231,7 +240,10 @@ def test_holiday_xlsx_import_idempotent(
             },
         )
         assert second.status_code == 200
-        assert second.json() == []
+        body2 = second.json()
+        assert body2["imported_count"] == 0
+        assert body2["skipped_count"] == 2
+        assert len(body2["skipped"]) == 2
     finally:
         with admin_engine.begin() as conn:
             conn.execute(

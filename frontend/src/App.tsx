@@ -77,16 +77,19 @@ function AdminOnly({ children }: { children: React.ReactNode }) {
 }
 
 /** Role-aware redirect for the Settings hub: Admin → workspace,
- *  HR → divisions, anyone else → dashboard. Used by the bare
- *  ``/settings`` route so HR doesn't get bounced to a tab they
- *  can't read. */
+ *  HR → divisions, Manager/Employee → display preferences.
+ *  BUG-050 — previously Manager/Employee got redirected back to the
+ *  dashboard which made the topbar "Settings" link look broken. */
 function SettingsRedirect() {
   const me = useMe();
   if (me.isLoading) return null;
   const role = me.data?.active_role;
   if (role === "Admin") return <Navigate to="/settings/workspace" replace />;
   if (role === "HR") return <Navigate to="/settings/divisions" replace />;
-  return <Navigate to="/dashboard" replace />;
+  // Manager + Employee land on Display — the only per-user settings
+  // page they can access (theme / density / language). The Settings
+  // sub-nav (SettingsTabs) hides admin-only tabs for them.
+  return <Navigate to="/settings/display" replace />;
 }
 
 /** Settings tabs that stay Admin-only — branding, OIDC, email
@@ -160,8 +163,11 @@ export function App() {
         <Route path="settings/email" element={<SettingsAdminOnly><EmailConfigPage /></SettingsAdminOnly>} />
         <Route path="settings/schedules" element={<SettingsAdminOnly><SchedulesPage /></SettingsAdminOnly>} />
         <Route path="settings/erp-export" element={<SettingsAdminOnly><ErpExportPage /></SettingsAdminOnly>} />
-        <Route path="settings/notifications" element={<SettingsAdminOnly><NotificationPreferencesPage /></SettingsAdminOnly>} />
-        <Route path="settings/display" element={<SettingsAdminOnly><DisplaySettingsPage /></SettingsAdminOnly>} />
+        {/* BUG-050 — Display + Notifications are per-user preferences,
+            not admin surfaces. Allow Manager / Employee through so the
+            topbar Settings link doesn't bounce them to the dashboard. */}
+        <Route path="settings/notifications" element={<NotificationPreferencesPage />} />
+        <Route path="settings/display" element={<DisplaySettingsPage />} />
         <Route path="notifications" element={<NotificationsPage />} />
         <Route path="my-requests" element={<MyRequestsPage />} />
         <Route path="approvals" element={<ApprovalsPage />} />

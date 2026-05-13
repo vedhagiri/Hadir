@@ -14,10 +14,21 @@ from __future__ import annotations
 
 import logging
 from datetime import date as date_type, timedelta
-from typing import Annotated
+from io import BytesIO
+from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import and_, delete, insert, select, update
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Response,
+    UploadFile,
+    status,
+)
+from openpyxl import load_workbook
+from pydantic import BaseModel
+from sqlalchemy import and_, delete, func, insert, select, update
 
 from maugood.auth.audit import write_audit
 from maugood.auth.dependencies import CurrentUser, require_any_role
@@ -95,6 +106,25 @@ def create_policy(
     scope = TenantScope(tenant_id=user.tenant_id)
     engine = get_engine()
     with engine.begin() as conn:
+        # BUG-042 — duplicate-policy-name guard. Compare case-
+        # insensitively against active (non-soft-deleted) rows so the
+        # operator sees a friendly 409 instead of accidentally creating
+        # two "Default 07:30–15:30" policies for the same tenant.
+        existing = conn.execute(
+            select(shift_policies.c.id, shift_policies.c.name).where(
+                shift_policies.c.tenant_id == scope.tenant_id,
+                func.lower(shift_policies.c.name) == payload.name.strip().lower(),
+            )
+        ).first()
+        if existing is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"A shift policy named '{existing.name}' already exists "
+                    f"for this tenant. Pick a different name or edit the "
+                    f"existing entry."
+                ),
+            )
         new_id = int(
             conn.execute(
                 insert(shift_policies)
@@ -278,6 +308,233 @@ def soft_delete_policy(
             after={"active_until": yesterday.isoformat()},
         )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
+# BUG-040 — Shift policy XLSX import
+# ---------------------------------------------------------------------------
+#
+# Expected columns (header row, case-insensitive):
+#   name              required, ≤200 chars
+#   type              one of Fixed / Flex / Ramadan / Custom (default Fixed)
+#   start             HH:MM  (Fixed / Ramadan / Custom-Fixed)
+#   end               HH:MM
+#   grace_minutes     int    (Fixed) — defaults to 15
+#   required_hours    int    — defaults to 8
+#   active_from       YYYY-MM-DD (defaults to today)
+#
+# Rows whose name already exists for the tenant are reported as
+# ``skipped`` instead of failing the whole batch (mirrors the holiday
+# import shape).
+
+
+class PolicyImportSkipped(BaseModel):
+    row_number: int
+    submitted_name: str
+    reason: str
+
+
+class PolicyImportResponse(BaseModel):
+    imported: list[PolicyResponse] = []
+    skipped: list[PolicyImportSkipped] = []
+    imported_count: int = 0
+    skipped_count: int = 0
+
+
+@router.post("/api/policies/import", response_model=PolicyImportResponse)
+async def import_policies_xlsx(
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
+    file: UploadFile = File(...),
+) -> PolicyImportResponse:
+    """Bulk-create Fixed/Flex/Ramadan/Custom policies from an .xlsx
+    file. Rows whose ``name`` already exists for the tenant are
+    skipped (not failed); every other parse error returns 400 so the
+    operator can fix the file and re-import."""
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    raw = await file.read()
+    try:
+        wb = load_workbook(BytesIO(raw), read_only=True, data_only=True)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=400,
+            detail=f"could not parse .xlsx: {type(exc).__name__}",
+        )
+    try:
+        ws = wb.active
+        if ws is None:
+            raise HTTPException(status_code=400, detail="empty workbook")
+
+        rows_iter = ws.iter_rows(values_only=True)
+        try:
+            header = next(rows_iter)
+        except StopIteration:
+            raise HTTPException(status_code=400, detail="empty workbook")
+        norm = [
+            str(c).strip().lower() if c is not None else "" for c in header
+        ]
+
+        def _idx(name: str) -> Optional[int]:
+            try:
+                return norm.index(name)
+            except ValueError:
+                return None
+
+        i_name = _idx("name")
+        if i_name is None:
+            raise HTTPException(
+                status_code=400, detail="missing 'name' column in header"
+            )
+        i_type = _idx("type")
+        i_start = _idx("start")
+        i_end = _idx("end")
+        i_grace = _idx("grace_minutes")
+        i_hours = _idx("required_hours")
+        i_active_from = _idx("active_from")
+
+        def _cell(row_tuple: tuple, idx: Optional[int]) -> Optional[str]:
+            if idx is None or idx >= len(row_tuple):
+                return None
+            v = row_tuple[idx]
+            if v is None:
+                return None
+            return str(v).strip()
+
+        from datetime import date as _date_type  # noqa: PLC0415
+
+        from maugood.policies.schemas import PolicyConfig  # noqa: PLC0415
+
+        parsed: list[tuple[int, PolicyCreateRequest]] = []
+        for row_number, raw_row in enumerate(rows_iter, start=2):
+            if not raw_row:
+                continue
+            name = _cell(raw_row, i_name)
+            if not name:
+                continue
+            ptype_str = (_cell(raw_row, i_type) or "Fixed").capitalize()
+            if ptype_str not in ("Fixed", "Flex", "Ramadan", "Custom"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"row {row_number}: unsupported type {ptype_str!r}",
+                )
+            start = _cell(raw_row, i_start)
+            end = _cell(raw_row, i_end)
+            grace = _cell(raw_row, i_grace)
+            hours = _cell(raw_row, i_hours)
+            af_raw = _cell(raw_row, i_active_from)
+            try:
+                af = _date_type.fromisoformat(af_raw) if af_raw else _date_type.today()
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"row {row_number}: active_from {af_raw!r} not ISO-parseable",
+                )
+
+            cfg_kwargs: dict = {
+                "required_hours": int(hours) if hours else 8,
+            }
+            if ptype_str in ("Fixed", "Ramadan"):
+                if not (start and end):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"row {row_number}: Fixed/Ramadan requires start and end",
+                    )
+                cfg_kwargs["start"] = start
+                cfg_kwargs["end"] = end
+                cfg_kwargs["grace_minutes"] = int(grace) if grace else 15
+            try:
+                cfg = PolicyConfig(**cfg_kwargs)
+                req = PolicyCreateRequest(
+                    name=name,
+                    type=ptype_str,
+                    config=cfg,
+                    active_from=af,
+                )
+            except Exception as exc:  # noqa: BLE001
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"row {row_number}: {exc}",
+                )
+            parsed.append((row_number, req))
+    finally:
+        wb.close()
+
+    if not parsed:
+        return PolicyImportResponse()
+
+    engine = get_engine()
+    imported: list[PolicyResponse] = []
+    skipped: list[PolicyImportSkipped] = []
+    with engine.begin() as conn:
+        # Snapshot existing policy names (case-folded) so a re-import
+        # is idempotent and surfaces per-row what was skipped.
+        existing_names = {
+            r.name.strip().lower()
+            for r in conn.execute(
+                select(shift_policies.c.name).where(
+                    shift_policies.c.tenant_id == scope.tenant_id,
+                )
+            ).all()
+        }
+        for row_number, req in parsed:
+            if req.name.strip().lower() in existing_names:
+                skipped.append(
+                    PolicyImportSkipped(
+                        row_number=row_number,
+                        submitted_name=req.name,
+                        reason="A policy with this name already exists.",
+                    )
+                )
+                continue
+            new_id = int(
+                conn.execute(
+                    insert(shift_policies)
+                    .values(
+                        tenant_id=scope.tenant_id,
+                        name=req.name,
+                        type=req.type,
+                        config=req.config.model_dump(exclude_none=True),
+                        active_from=req.active_from,
+                        active_until=req.active_until,
+                    )
+                    .returning(shift_policies.c.id)
+                ).scalar_one()
+            )
+            existing_names.add(req.name.strip().lower())
+            row = conn.execute(
+                select(
+                    shift_policies.c.id,
+                    shift_policies.c.tenant_id,
+                    shift_policies.c.name,
+                    shift_policies.c.type,
+                    shift_policies.c.config,
+                    shift_policies.c.active_from,
+                    shift_policies.c.active_until,
+                ).where(shift_policies.c.id == new_id)
+            ).first()
+            assert row is not None
+            imported.append(_policy_to_response(row))
+        if imported:
+            write_audit(
+                conn,
+                tenant_id=scope.tenant_id,
+                actor_user_id=user.id,
+                action="shift_policy.bulk_imported",
+                entity_type="shift_policy",
+                entity_id=None,
+                after={
+                    "count": len(imported),
+                    "ids": [int(p.id) for p in imported],
+                    "skipped_count": len(skipped),
+                },
+            )
+
+    return PolicyImportResponse(
+        imported=imported,
+        skipped=skipped,
+        imported_count=len(imported),
+        skipped_count=len(skipped),
+    )
 
 
 # ---------------------------------------------------------------------------

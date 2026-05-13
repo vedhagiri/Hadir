@@ -283,8 +283,20 @@ export function NewRequestDrawer({
               rows={3}
               value={reasonText}
               onChange={(e) => setReasonText(e.target.value)}
+              maxLength={1000}
               style={{ marginBottom: 14, resize: "vertical" }}
             />
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--text-secondary)",
+                marginTop: -10,
+                marginBottom: 14,
+                textAlign: "end",
+              }}
+            >
+              {reasonText.length} / 1000
+            </div>
 
             <SectionLabel>Attachment (optional)</SectionLabel>
             <div

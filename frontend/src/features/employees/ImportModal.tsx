@@ -356,12 +356,19 @@ export function ImportModal({ onClose }: Props) {
                     maxHeight: 380,
                   }}
                 >
-                  <table className="table" style={{ minWidth: 880 }}>
+                  {/* Operator request — show Email + Phone in the
+                      preview so the operator can sanity-check the
+                      contact fields before committing the import.
+                      Both were already in the ImportPreviewRow shape
+                      but weren't rendered. */}
+                  <table className="table" style={{ minWidth: 1080 }}>
                     <thead>
                       <tr>
                         <th style={{ width: 50 }}>Row</th>
                         <th>Code</th>
                         <th>Name</th>
+                        <th>Email</th>
+                        <th>Phone</th>
                         <th>Designation</th>
                         <th>Department</th>
                         <th>Division</th>
@@ -376,6 +383,21 @@ export function ImportModal({ onClose }: Props) {
                           <td className="mono text-xs">{r.row}</td>
                           <td className="mono text-sm">{r.employee_code}</td>
                           <td className="text-sm">{r.full_name}</td>
+                          <td
+                            className="text-sm"
+                            style={{
+                              maxWidth: 200,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                            title={r.email ?? undefined}
+                          >
+                            {r.email ?? "—"}
+                          </td>
+                          <td className="mono text-xs">
+                            {r.phone ?? "—"}
+                          </td>
                           <td className="text-sm">{r.designation ?? "—"}</td>
                           <td className="text-sm">{r.department}</td>
                           <td className="text-sm">{r.division ?? "—"}</td>
@@ -407,7 +429,7 @@ export function ImportModal({ onClose }: Props) {
                       {preview.rows.length === 0 && (
                         <tr>
                           <td
-                            colSpan={9}
+                            colSpan={11}
                             className="text-sm text-dim"
                             style={{ padding: 16 }}
                           >

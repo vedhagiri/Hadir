@@ -156,7 +156,7 @@ export interface DeleteRequest {
   employee_full_name: string;
   requested_by: number | null;
   requested_by_full_name: string | null;
-  reason: string;
+  reason: string | null;
   status: DeleteRequestStatus;
   hr_decided_by: number | null;
   hr_decided_at: string | null;

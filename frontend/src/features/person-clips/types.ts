@@ -182,16 +182,63 @@ export interface ClipQueueStats {
   workers: WorkerStatus[];
 }
 
+export interface TopProcessInfo {
+  pid: number;
+  name: string;
+  cpu_percent: number;
+  memory_mb: number;
+}
+
 export interface SystemResourceStats {
+  // CPU
   cpu_percent_per_core: number[];
   cpu_percent_total: number;
+  cpu_count_logical: number;
+  cpu_count_physical: number;
+  cpu_freq_current_mhz: number | null;
+  cpu_freq_max_mhz: number | null;
+  load_avg_1m: number | null;
+  load_avg_5m: number | null;
+  load_avg_15m: number | null;
+  // Memory
   memory_total_mb: number;
   memory_used_mb: number;
+  memory_available_mb: number;
   memory_percent: number;
+  swap_total_mb: number;
+  swap_used_mb: number;
+  swap_percent: number;
+  // GPU
   gpu_available: boolean;
   gpu_percent: number | null;
   gpu_memory_used_mb: number | null;
   gpu_memory_total_mb: number | null;
+  // Disk I/O
+  disk_read_mb_per_s: number;
+  disk_write_mb_per_s: number;
+  disk_read_total_mb: number;
+  disk_write_total_mb: number;
+  // Network
+  net_sent_mb_per_s: number;
+  net_recv_mb_per_s: number;
+  net_sent_total_mb: number;
+  net_recv_total_mb: number;
+  // Host
+  hostname: string;
+  platform: string;
+  boot_time_iso: string;
+  uptime_seconds: number;
+  process_count: number;
+  // Backend process
+  backend_pid: number;
+  backend_cpu_percent: number;
+  backend_memory_mb: number;
+  backend_thread_count: number;
+  backend_open_files: number;
+  // Top processes + detector lock
+  top_cpu_processes: TopProcessInfo[];
+  top_memory_processes: TopProcessInfo[];
+  detector_lock_contention_pct: number;
 }
 
 export interface StorageStats {
@@ -209,12 +256,24 @@ export interface PipelineStats {
   clips_processing: number;
   clips_completed: number;
   clips_failed: number;
+  // Recording lifecycle (camera → encoded MP4)
+  recording_active: number;
+  recording_encoding: number;
+  recording_completed: number;
+  recording_failed: number;
+  recording_abandoned: number;
+  // Per-UC completed run counts
   uc1_completed: number;
   uc2_completed: number;
   uc3_completed: number;
   avg_uc1_duration_ms: number | null;
   avg_uc2_duration_ms: number | null;
   avg_uc3_duration_ms: number | null;
+  // Throughput / activity
+  clips_today: number;
+  matched_today: number;
+  avg_clip_duration_seconds: number | null;
+  total_storage_bytes: number;
 }
 
 export interface SystemStatsResponse {
@@ -260,4 +319,38 @@ export interface FaceCropListResponse {
   use_case_filter: string | null;
   items: FaceCropOut[];
   total: number;
+}
+
+// ── UC Comparison ────────────────────────────────────────────────────────────
+
+export interface UseCaseStatsRow {
+  use_case: "uc1" | "uc2" | "uc3";
+  label: string;
+  mode: string;
+  has_data: boolean;
+  completed_runs: number;
+  failed_runs: number;
+  distinct_clips: number;
+  avg_total_ms: number | null;
+  avg_extract_ms: number | null;
+  avg_match_ms: number | null;
+  total_faces_detected: number;
+  total_crops_saved: number;
+  total_unknown_count: number;
+  face_crop_row_count: number;
+  matched_crop_count: number;
+  avg_quality_score: number | null;
+  avg_detection_score: number | null;
+  avg_match_confidence: number | null;
+  match_rate: number | null;
+  storage_bytes: number;
+}
+
+export interface UseCaseComparisonResponse {
+  use_cases: UseCaseStatsRow[];
+  fastest: string | null;
+  best_quality: string | null;
+  most_accurate: string | null;
+  most_used: string | null;
+  recommendations: string[];
 }

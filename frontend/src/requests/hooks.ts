@@ -30,6 +30,18 @@ export function useRequests(): UseQueryResult<RequestRecord[], Error> {
   });
 }
 
+// BUG-055 — MyRequestsPage needs the caller's OWN submitted requests
+// regardless of role. The shared ``useRequests`` returns role-default
+// visibility (Admin = all, HR = inbox, etc) which makes HR's "My
+// Requests" page surface their inbox instead of their own.
+export function useMyRequests(): UseQueryResult<RequestRecord[], Error> {
+  return useQuery({
+    queryKey: ["requests", "mine"],
+    queryFn: () => api<RequestRecord[]>("/api/requests?mine=true"),
+    staleTime: 30 * 1000,
+  });
+}
+
 export function useRequest(
   id: number | null,
 ): UseQueryResult<RequestRecord, Error> {

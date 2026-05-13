@@ -68,6 +68,38 @@ export function useDeletePolicy() {
   });
 }
 
+// BUG-040 — XLSX import for shift policies. Response carries
+// imported/skipped lists so the operator sees per-row what happened.
+export interface PolicyImportSkipped {
+  row_number: number;
+  submitted_name: string;
+  reason: string;
+}
+
+export interface PolicyImportResponse {
+  imported: PolicyResponse[];
+  skipped: PolicyImportSkipped[];
+  imported_count: number;
+  skipped_count: number;
+}
+
+export function useImportPoliciesXlsx() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (file: File): Promise<PolicyImportResponse> => {
+      const fd = new FormData();
+      fd.append("file", file);
+      return api<PolicyImportResponse>("/api/policies/import", {
+        method: "POST",
+        body: fd,
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: POLICIES_KEY });
+    },
+  });
+}
+
 export function useCreateAssignment() {
   const qc = useQueryClient();
   return useMutation({

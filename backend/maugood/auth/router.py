@@ -15,6 +15,7 @@ email and a short reason string.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -148,6 +149,24 @@ class MeResponse(BaseModel):
     # (server already sends Cache-Control: no-store, but the
     # cache-buster guards against intermediaries).
     brand_logo_version: str | None = None
+    # Session expiry surface for the frontend's "session about to expire"
+    # warning modal. Every authenticated request slides the expiry; the
+    # modal computes a countdown from ``session_expires_at`` and the
+    # "Stay signed in" button POSTs ``/api/auth/refresh`` to extend it.
+    session_expires_at: datetime | None = None
+    session_idle_minutes: int = 0
+
+
+class RefreshSessionResponse(BaseModel):
+    """Returned from ``POST /api/auth/refresh``.
+
+    The endpoint itself is a no-op besides the sliding-expiry side
+    effect on ``current_user``; this response just gives the frontend
+    the new ``session_expires_at`` so it can reset its countdown.
+    """
+
+    session_expires_at: datetime
+    session_idle_minutes: int
 
 
 class PreferredLanguageRequest(BaseModel):
@@ -574,7 +593,46 @@ def me(
     sa_user_id: int | None = (
         int(getattr(request.state, "super_admin_user_id", 0)) if is_imp else None
     )
-    return _to_me_response(user, is_imp=is_imp, sa_user_id=sa_user_id)
+    return _to_me_response(user, is_imp=is_imp, sa_user_id=sa_user_id, request=request)
+
+
+# ── Session refresh ─────────────────────────────────────────────────────
+# A no-op endpoint: the dependency chain calls ``current_user`` which
+# slides ``expires_at`` and refreshes the cookie. The body just returns
+# the new expiry so the frontend's "session about to expire" modal can
+# reset its countdown.
+@router.post("/refresh", response_model=RefreshSessionResponse)
+def refresh_session(
+    request: Request,
+    user: Annotated[CurrentUser, Depends(current_user)],
+) -> RefreshSessionResponse:
+    settings = get_settings()
+    session_exp = getattr(request.state, "session_expires_at", None)
+    # Defensive fallback — if the synthetic Super-Admin path hits this,
+    # touch_session wasn't called, so we hand back a synthetic expiry
+    # one idle-window from now. (Won't actually happen in production —
+    # super-admin sessions use their own cookie path.)
+    if session_exp is None:
+        session_exp = datetime.now(tz=timezone.utc) + timedelta(
+            minutes=settings.session_idle_minutes
+        )
+    # Silent audit. Useful when an operator wants to inspect "did the
+    # user actually click 'Stay signed in' or was their browser idle?"
+    engine = get_engine()
+    with engine.begin() as conn:
+        write_audit(
+            conn,
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id or None,
+            action="auth.session.refreshed",
+            entity_type="session",
+            entity_id=str(user.session_id),
+            after={"new_expires_at": session_exp.isoformat()},
+        )
+    return RefreshSessionResponse(
+        session_expires_at=session_exp,
+        session_idle_minutes=settings.session_idle_minutes,
+    )
 
 
 def _resolve_tenant_name(tenant_id: int) -> str:
@@ -627,8 +685,17 @@ def _to_me_response(
     *,
     is_imp: bool = False,
     sa_user_id: int | None = None,
+    request: Request | None = None,
 ) -> MeResponse:
     has_logo, version = _resolve_brand_logo_meta(user.tenant_id)
+    settings = get_settings()
+    # The session expiry is stashed on ``request.state`` by
+    # ``current_user`` as a side effect of touch_session. Synthetic
+    # Super-Admin impersonation doesn't go through ``touch_session``
+    # so it'll be missing — we just omit the field in that case.
+    session_exp: datetime | None = (
+        getattr(request.state, "session_expires_at", None) if request else None
+    )
     return MeResponse(
         id=user.id,
         email=user.email,
@@ -645,6 +712,8 @@ def _to_me_response(
         tenant_name=_resolve_tenant_name(user.tenant_id),
         has_brand_logo=has_logo,
         brand_logo_version=version,
+        session_expires_at=session_exp,
+        session_idle_minutes=settings.session_idle_minutes,
     )
 
 

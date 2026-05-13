@@ -253,6 +253,7 @@ def list_employees(
     q: Optional[str] = None,
     department_id: Optional[int] = None,
     include_inactive: bool = False,
+    only_status: Optional[str] = None,
     page: int = 1,
     page_size: int = 50,
     sort_by: str = "employee_code",
@@ -278,7 +279,12 @@ def list_employees(
         return [], 0
 
     base = _employee_select(scope)
-    if not include_inactive:
+    if only_status in ("active", "inactive"):
+        # BUG-015 / BUG-018 — explicit single-status filter so the
+        # totals + pagination reflect only the requested subset.
+        # Takes precedence over the legacy ``include_inactive`` flag.
+        base = base.where(employees.c.status == only_status)
+    elif not include_inactive:
         base = base.where(employees.c.status == "active")
     if department_id is not None:
         base = base.where(employees.c.department_id == department_id)

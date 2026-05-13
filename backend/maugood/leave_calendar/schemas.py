@@ -46,16 +46,45 @@ class HolidayResponse(BaseModel):
     tenant_id: int
     date: date_type
     name: str
+    # BUG-021 — free-text description (optional).
+    description: Optional[str] = None
     active: bool
 
 
 class HolidayCreateRequest(BaseModel):
     date: date_type
     name: str = Field(min_length=1, max_length=200)
+    # BUG-021 — accept an optional description on create.
+    description: Optional[str] = Field(default=None, max_length=500)
 
 
 class HolidayBulkCreateRequest(BaseModel):
     holidays: list[HolidayCreateRequest] = Field(default_factory=list, max_length=500)
+
+
+class HolidayImportSkipped(BaseModel):
+    """One row that was skipped because a holiday already existed on
+    the same date. Surfaced in the import response so the operator
+    sees exactly what changed and what didn't."""
+
+    date: date_type
+    submitted_name: str
+    existing_name: str
+
+
+class HolidayImportResponse(BaseModel):
+    """Result of POST /api/holidays/import.
+
+    Replaces the old "list[HolidayResponse]" return shape so a same-
+    date import is no longer silently a no-op (BUG-025): the frontend
+    can now show 'imported: N, skipped: M' with a per-row list of the
+    skips.
+    """
+
+    imported: list[HolidayResponse] = Field(default_factory=list)
+    skipped: list[HolidayImportSkipped] = Field(default_factory=list)
+    imported_count: int = 0
+    skipped_count: int = 0
 
 
 class ApprovedLeaveResponse(BaseModel):

@@ -42,6 +42,83 @@ router = APIRouter(prefix="/api/cameras", tags=["cameras"])
 ADMIN = Depends(require_role("Admin"))
 
 
+def _canonical_stream_id(plain_url: str) -> str:
+    """Return a normalised "stream identity" for an RTSP URL — host:port
+    plus the path, lower-cased, credentials stripped. Two RTSP URLs that
+    point at the same physical stream should produce the same string
+    even if the operator typed them with different usernames/passwords
+    or capitalisation. Used by the duplicate-camera check for BUG-032 /
+    BUG-033."""
+    from urllib.parse import urlparse  # noqa: PLC0415
+
+    try:
+        parts = urlparse(plain_url.strip().lower())
+    except Exception:  # noqa: BLE001
+        return plain_url.strip().lower()
+    host = parts.hostname or ""
+    port = parts.port if parts.port is not None else 554
+    path = parts.path or ""
+    return f"{host}:{port}{path}".rstrip("/")
+
+
+def _check_duplicate_url(
+    scope: TenantScope,
+    plain_url: str,
+    brand: str | None,
+    *,
+    excluding_id: int | None = None,
+) -> None:
+    """BUG-032 / BUG-033 — refuse to save a camera that points at a
+    stream another camera in the same tenant already uses. Pre-check
+    instead of an IntegrityError because RTSP URLs are stored
+    Fernet-encrypted (so a database-level UNIQUE on ciphertext doesn't
+    help — every encrypt() returns a different ciphertext)."""
+    new_canon = _canonical_stream_id(plain_url)
+    new_brand = (brand or "").strip().lower()
+    with get_engine().begin() as conn:
+        rows = repo.list_cameras(conn, scope)
+    for row in rows:
+        if excluding_id is not None and row.id == excluding_id:
+            continue
+        try:
+            existing_plain = rtsp_io.decrypt_url(row.rtsp_url_encrypted)
+        except Exception:  # noqa: BLE001
+            continue
+        existing_canon = _canonical_stream_id(existing_plain)
+        if existing_canon == new_canon:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "field": "rtsp_url",
+                    "message": (
+                        f"Camera '{row.name}' already uses this RTSP stream "
+                        f"({rtsp_io.rtsp_host(existing_plain)}). Edit that "
+                        f"entry instead of creating a duplicate."
+                    ),
+                },
+            )
+        # BUG-033 — same brand + same host = almost certainly the same
+        # physical device (some cameras expose multiple sub-streams via
+        # different paths). Block this combo too so the operator isn't
+        # tracking the same hardware under two names.
+        if (
+            new_brand
+            and (row.brand or "").strip().lower() == new_brand
+            and rtsp_io.rtsp_host(existing_plain) == rtsp_io.rtsp_host(plain_url)
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "field": "rtsp_url",
+                    "message": (
+                        f"Camera '{row.name}' uses the same brand and host "
+                        f"({brand} @ {rtsp_io.rtsp_host(existing_plain)}). "
+                        f"Confirm this isn't the same physical device."
+                    ),
+                },
+            )
+
+
 def _row_to_out(row: repo.CameraRow) -> CameraOut:
     return CameraOut(
         id=row.id,
@@ -112,6 +189,10 @@ def create_camera_endpoint(
         parts = rtsp_io.parse_rtsp_url(payload.rtsp_url)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # BUG-032 / BUG-033 — refuse duplicate RTSP URL (same stream) and
+    # the same brand+host combo before we encrypt + persist.
+    _check_duplicate_url(scope, payload.rtsp_url, payload.brand)
 
     encrypted = rtsp_io.encrypt_url(payload.rtsp_url)
 
@@ -220,6 +301,14 @@ def patch_camera_endpoint(
                 parts = rtsp_io.parse_rtsp_url(provided["rtsp_url"])
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
+            # BUG-032 / BUG-033 — same dedup check on patch, excluding
+            # the row being edited.
+            _check_duplicate_url(
+                scope,
+                provided["rtsp_url"],
+                provided.get("brand") or before.brand,
+                excluding_id=camera_id,
+            )
             values["rtsp_url_encrypted"] = rtsp_io.encrypt_url(
                 provided["rtsp_url"]
             )

@@ -678,6 +678,28 @@ def _do_batch(
     if not settings.clip_save_enabled:
         return {"total": 0, "processed": 0, "failed": 0, "saved_crops": 0}
 
+    # BUG-056 — reset any rows stuck at ``processing`` from a previous
+    # crashed run. Without this, a failed _do_extract that also
+    # couldn't mark the row 'failed' (rare, but possible) would leave
+    # the UI thinking the batch is still running. ``processing`` is a
+    # transient state owned by a single in-flight thread, and we
+    # already hold the module-level ``_processing_lock`` here, so
+    # anything still flagged ``processing`` is necessarily stale.
+    with engine.begin() as conn:
+        stale = conn.execute(
+            sa.update(_pc)
+            .where(
+                _pc.c.tenant_id == scope.tenant_id,
+                _pc.c.face_crops_status == "processing",
+            )
+            .values(face_crops_status="failed")
+        )
+        if stale.rowcount and stale.rowcount > 0:
+            logger.info(
+                "face_crop.batch.stale_reset tenant=%s rows=%d",
+                scope.tenant_id, stale.rowcount,
+            )
+
     with engine.begin() as conn:
         q = (
             sa.select(_pc)

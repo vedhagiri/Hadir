@@ -486,10 +486,25 @@ _resolve_team_employee_ids = repo.resolve_team_employee_ids
 
 @router.get("", response_model=EmployeeListOut)
 def list_employees_endpoint(
-    user: Annotated[CurrentUser, ADMIN_OR_HR],
+    # BUG-051 / BUG-052 — Manager opens Team Attendance / Calendar
+    # Per Person and the picker hits this endpoint; previously the
+    # gate was ADMIN_OR_HR so Manager got a 403 → blank picker. Open
+    # to Manager too; the repo call below narrows the result set to
+    # their visible employees via ``restrict_to_ids``.
+    user: Annotated[CurrentUser, ADMIN_HR_MANAGER],
     q: Annotated[Optional[str], Query(description="Text search")] = None,
     department_id: Annotated[Optional[int], Query()] = None,
     include_inactive: Annotated[bool, Query()] = False,
+    # BUG-015 / BUG-018 — when the frontend picks the "Inactive"
+    # segmented chip, we want a server-side restriction to status='
+    # inactive' so the total + pagination reflect just that subset.
+    # ``include_inactive`` alone is a UNION (active + inactive),
+    # which made the inactive view show phantom pages full of
+    # actives that the frontend then had to filter away.
+    status_filter: Annotated[
+        Optional[Literal["active", "inactive", "all"]],
+        Query(description="Restrict to active | inactive | all."),
+    ] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
     sort_by: Annotated[
@@ -501,13 +516,35 @@ def list_employees_endpoint(
     ] = "asc",
 ) -> EmployeeListOut:
     scope = TenantScope(tenant_id=user.tenant_id)
+    # Manager scoping: narrow the result set to the manager's visible
+    # employees (department membership ∪ explicit assignments).
+    restrict_ids: Optional[frozenset[int]] = None
+    if "Manager" in user.roles and "Admin" not in user.roles and "HR" not in user.roles:
+        from maugood.attendance.repository import (  # noqa: PLC0415
+            get_manager_visible_employee_ids,
+        )
+
+        with get_engine().begin() as conn:
+            visible = get_manager_visible_employee_ids(
+                conn, scope, manager_user_id=user.id
+            )
+        restrict_ids = frozenset(visible)
+    # Backwards compat: if the caller passes status_filter explicitly,
+    # honor it; otherwise fall back to the legacy include_inactive flag.
+    effective_status = status_filter or (
+        "all" if include_inactive else "active"
+    )
     with get_engine().begin() as conn:
         rows, total = repo.list_employees(
             conn,
             scope,
             q=q,
             department_id=department_id,
-            include_inactive=include_inactive,
+            restrict_to_ids=restrict_ids,
+            include_inactive=(effective_status != "active"),
+            only_status=(
+                effective_status if effective_status in ("active", "inactive") else None
+            ),
             page=page,
             page_size=page_size,
             sort_by=sort_by,
@@ -697,6 +734,66 @@ def create_employee_endpoint(
                 detail=f"employee_code '{payload.employee_code}' already exists",
             )
 
+        # BUG-009 — duplicate email pre-check. The frontend previously
+        # showed an error toast but the row still landed because no
+        # backend guard existed; now we 409 before INSERT.
+        if payload.email:
+            from sqlalchemy import select as _select  # noqa: PLC0415
+            from maugood.db import employees as _employees  # noqa: PLC0415
+
+            dup_email = conn.execute(
+                _select(_employees.c.employee_code, _employees.c.full_name).where(
+                    _employees.c.tenant_id == scope.tenant_id,
+                    _employees.c.email == payload.email.strip().lower(),
+                )
+            ).first()
+            if dup_email is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Email '{payload.email}' is already used by "
+                        f"{dup_email.full_name} ({dup_email.employee_code})."
+                    ),
+                )
+
+        # BUG-008 — duplicate phone pre-check. Whitespace + +/- chars
+        # are normalised first so '+968 1234 5678' and '+96812345678'
+        # collide.
+        if payload.phone:
+            import re  # noqa: PLC0415
+            from sqlalchemy import select as _select2  # noqa: PLC0415
+            from sqlalchemy import func as _func  # noqa: PLC0415
+            from maugood.db import employees as _employees2  # noqa: PLC0415
+
+            normalise_re = r"[\s\-]"
+
+            def _norm(s: str) -> str:
+                return re.sub(normalise_re, "", s)
+
+            target_phone = _norm(payload.phone)
+            # Pull every non-null phone for the tenant and compare in
+            # Python — small enough at our scale (≤ a few thousand
+            # rows per tenant) and avoids a Postgres-specific regex.
+            existing = conn.execute(
+                _select2(
+                    _employees2.c.employee_code,
+                    _employees2.c.full_name,
+                    _employees2.c.phone,
+                ).where(
+                    _employees2.c.tenant_id == scope.tenant_id,
+                    _employees2.c.phone.is_not(None),
+                )
+            ).all()
+            for row in existing:
+                if row.phone and _norm(str(row.phone)) == target_phone:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"Phone '{payload.phone}' is already used by "
+                            f"{row.full_name} ({row.employee_code})."
+                        ),
+                    )
+
         deactivated_at = (
             datetime.now(tz=timezone.utc) if payload.status == "inactive" else None
         )
@@ -752,6 +849,94 @@ def create_employee_endpoint(
             },
         )
     return _row_to_out(created)
+
+
+from pydantic import BaseModel as _SE_BaseModel, Field as _SE_Field  # noqa: E402
+
+
+class EmployeeSelfPatchIn(_SE_BaseModel):
+    """BUG-035 — employees can self-update a safe subset of their own
+    profile. Intentionally narrow: phone + designation only. Name,
+    email, department, section, status all stay Admin/HR-managed."""
+
+    phone: Optional[str] = _SE_Field(default=None, max_length=30)
+    designation: Optional[str] = _SE_Field(default=None, max_length=80)
+
+
+@router.patch("/me", response_model=EmployeeOut)
+def patch_my_employee_endpoint(
+    payload: EmployeeSelfPatchIn,
+    user: Annotated[CurrentUser, Depends(current_user)],
+) -> EmployeeOut:
+    """Self-update for the logged-in employee. Only safe fields —
+    phone + designation. Anything else has to go through HR/Admin."""
+    if not user.email:
+        raise HTTPException(
+            status_code=404, detail="no employee linked to this account"
+        )
+    scope = TenantScope(tenant_id=user.tenant_id)
+    provided = payload.model_dump(exclude_unset=True)
+
+    with get_engine().begin() as conn:
+        before = repo.get_employee_by_email(conn, scope, user.email)
+        if before is None:
+            raise HTTPException(
+                status_code=404, detail="no employee linked to this account"
+            )
+
+        # BUG-008 — phone dedup also applies to self-update.
+        if "phone" in provided and provided["phone"]:
+            import re as _re_sp  # noqa: PLC0415
+            from sqlalchemy import select as _se_sp  # noqa: PLC0415
+            from maugood.db import employees as _emps_sp  # noqa: PLC0415
+
+            def _np_sp(s: str) -> str:
+                return _re_sp.sub(r"[\s\-]", "", s)
+
+            tgt = _np_sp(str(provided["phone"]))
+            rows = conn.execute(
+                _se_sp(
+                    _emps_sp.c.employee_code,
+                    _emps_sp.c.full_name,
+                    _emps_sp.c.phone,
+                ).where(
+                    _emps_sp.c.tenant_id == scope.tenant_id,
+                    _emps_sp.c.id != before.id,
+                    _emps_sp.c.phone.is_not(None),
+                )
+            ).all()
+            for r in rows:
+                if r.phone and _np_sp(str(r.phone)) == tgt:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"Phone '{provided['phone']}' is already "
+                            f"used by {r.full_name} ({r.employee_code})."
+                        ),
+                    )
+
+        values: dict[str, object] = {}
+        for key in ("phone", "designation"):
+            if key in provided:
+                values[key] = provided[key]
+        if values:
+            repo.update_employee(conn, scope, before.id, values=values)
+            write_audit(
+                conn,
+                tenant_id=scope.tenant_id,
+                actor_user_id=user.id,
+                action="employee.self_updated",
+                entity_type="employee",
+                entity_id=str(before.id),
+                before={
+                    "phone": before.phone,
+                    "designation": before.designation,
+                },
+                after=values,
+            )
+        after = repo.get_employee(conn, scope, before.id)
+    assert after is not None
+    return _row_to_out(after)
 
 
 @router.get("/me", response_model=EmployeeOut)
@@ -1479,6 +1664,58 @@ def patch_employee_endpoint(
                     detail="reports_to_user_id is not a user in this tenant",
                 )
 
+        # BUG-008 / BUG-009 — duplicate email/phone pre-check on
+        # PATCH too. Excludes the row being edited so an unrelated
+        # update doesn't false-positive against its own values.
+        if "email" in provided and provided["email"]:
+            from sqlalchemy import select as _se  # noqa: PLC0415
+            from maugood.db import employees as _emps  # noqa: PLC0415
+
+            dup_e = conn.execute(
+                _se(_emps.c.employee_code, _emps.c.full_name).where(
+                    _emps.c.tenant_id == scope.tenant_id,
+                    _emps.c.id != employee_id,
+                    _emps.c.email == str(provided["email"]).strip().lower(),
+                )
+            ).first()
+            if dup_e is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Email '{provided['email']}' is already used by "
+                        f"{dup_e.full_name} ({dup_e.employee_code})."
+                    ),
+                )
+        if "phone" in provided and provided["phone"]:
+            import re as _re  # noqa: PLC0415
+            from sqlalchemy import select as _se2  # noqa: PLC0415
+            from maugood.db import employees as _emps2  # noqa: PLC0415
+
+            def _np(s: str) -> str:
+                return _re.sub(r"[\s\-]", "", s)
+
+            tgt = _np(str(provided["phone"]))
+            rows_p = conn.execute(
+                _se2(
+                    _emps2.c.employee_code,
+                    _emps2.c.full_name,
+                    _emps2.c.phone,
+                ).where(
+                    _emps2.c.tenant_id == scope.tenant_id,
+                    _emps2.c.id != employee_id,
+                    _emps2.c.phone.is_not(None),
+                )
+            ).all()
+            for r in rows_p:
+                if r.phone and _np(str(r.phone)) == tgt:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"Phone '{provided['phone']}' is already used by "
+                            f"{r.full_name} ({r.employee_code})."
+                        ),
+                    )
+
         # Translate the patch into a column dict. We only include
         # keys the caller actually set, so omitted fields stay untouched.
         values: dict[str, object] = {}
@@ -1884,22 +2121,42 @@ def list_team_members_endpoint(
 @router.delete("/{employee_id}", status_code=status.HTTP_204_NO_CONTENT)
 def soft_delete_employee_endpoint(
     employee_id: int,
-    user: Annotated[CurrentUser, ADMIN_OR_HR],
+    # Operator request — Admin/HR/Manager can soft-delete employees
+    # directly. Manager is additionally scoped to their visible set
+    # (department membership ∪ explicit assignments) so a Manager
+    # can't deactivate someone outside their team. Hard-delete still
+    # routes through ``POST /api/employees/{id}/delete-request``.
+    user: Annotated[CurrentUser, ADMIN_HR_MANAGER],
     response: Response,
 ) -> Response:
-    """Soft delete (legacy) — sets ``status='inactive'``.
+    """Soft delete — sets ``status='inactive'``. Admin/HR/Manager.
 
-    P28.7: prefer the delete-request workflow at
-    ``POST /api/employees/{id}/delete-request`` for hard-delete with
-    HR approval. This endpoint stays for backward compat + bulk
-    soft-deactivation scripts; it does NOT remove crops or rows.
+    Hard-delete with PDPL audit trail still goes through
+    ``POST /api/employees/{id}/delete-request``. This endpoint
+    deactivates the row without removing crops or history.
     """
 
     scope = TenantScope(tenant_id=user.tenant_id)
+    is_admin_or_hr = "Admin" in user.roles or "HR" in user.roles
     with get_engine().begin() as conn:
         existing = repo.get_employee(conn, scope, employee_id)
         if existing is None:
             raise HTTPException(status_code=404, detail="employee not found")
+
+        # Manager-scope check: 404 (not 403) so existence isn't leaked
+        # to a Manager who doesn't manage the target employee.
+        if not is_admin_or_hr:
+            from maugood.attendance.repository import (  # noqa: PLC0415
+                get_manager_visible_employee_ids,
+            )
+
+            visible = get_manager_visible_employee_ids(
+                conn, scope, manager_user_id=user.id
+            )
+            if employee_id not in visible:
+                raise HTTPException(
+                    status_code=404, detail="employee not found"
+                )
         if existing.status == "inactive":
             # Idempotent — DELETE on an already-deleted row is a no-op
             # but we still audit so operators can trace repeated attempts.
@@ -2067,11 +2324,15 @@ class BulkDeleteResponse(BaseModel):
 @router.post("/bulk-delete", response_model=BulkDeleteResponse)
 def bulk_delete_endpoint(
     payload: BulkDeleteRequest,
-    user: Annotated[CurrentUser, ADMIN],
+    # BUG-053 — HR also needs the bulk-delete affordance for employee
+    # data management. Soft-delete is reversible and audited; hard-
+    # delete still requires the per-row delete-request flow when
+    # there's any captured-faces history (the PDPL guard rejects it).
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
 ) -> BulkDeleteResponse:
     """Soft- or hard-delete multiple employees in one call.
 
-    Admin-only. Selected scope drives the row set off the request body's
+    Admin + HR. Selected scope drives the row set off the request body's
     ``ids``; ``all`` scope walks every employee in the tenant.
 
     Hard delete reuses ``pdpl_delete_employee`` per row inside its own
@@ -2759,6 +3020,32 @@ async def import_employees_endpoint(
                 "filename": file.filename,
             },
         )
+
+    # BUG-048 — newly-imported employees previously didn't appear in
+    # the Department Summary report for today because the attendance
+    # scheduler hadn't yet emitted today's rows for them (the cron
+    # runs every 15 min). Trigger an immediate per-tenant recompute
+    # so the report's headcount + buckets reflect the import within
+    # seconds. Failures here are non-fatal — the scheduler will catch
+    # up on its next tick.
+    if created > 0 or updated > 0:
+        try:
+            from maugood.attendance.scheduler import (  # noqa: PLC0415
+                recompute_today,
+            )
+
+            upserted = recompute_today(scope)
+            logger.info(
+                "employee.import: attendance recompute_today "
+                "tenant=%s upserted=%d (created=%d updated=%d)",
+                scope.tenant_id, upserted, created, updated,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "employee.import: attendance recompute failed "
+                "tenant=%s reason=%s",
+                scope.tenant_id, type(exc).__name__,
+            )
 
     return ImportResult(
         created=created, updated=updated, errors=errors, warnings=warnings

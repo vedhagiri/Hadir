@@ -427,10 +427,41 @@ def _apply_post_approval_side_effects(
 
 
 @router.get("", response_model=list[RequestResponse])
-def list_requests(user: Annotated[CurrentUser, USER]) -> list[RequestResponse]:
+def list_requests(
+    user: Annotated[CurrentUser, USER],
+    mine: bool = False,
+) -> list[RequestResponse]:
+    """List requests visible to the caller.
+
+    Role-default visibility:
+      * Admin   → every request in the tenant
+      * HR      → requests that have reached HR (manager-approved+)
+      * Manager → assigned + own
+      * Employee → own only
+
+    BUG-055 — pass ``?mine=true`` to override role visibility and return
+    only requests the caller themselves submitted. Used by the
+    "My Requests" page so HR / Admin see THEIR OWN requests there
+    instead of the inbox content.
+    """
+
     scope = TenantScope(tenant_id=user.tenant_id)
     rows: list[repo.RequestRow] = []
     primary_ids: frozenset[int] = frozenset()
+
+    if mine:
+        # Match the Employee semantic for any role: resolve the
+        # caller's employee row by email, then list their requests.
+        with get_engine().begin() as conn:
+            employee_id = repo.employee_for_user_email(
+                conn, scope, email=user.email
+            )
+            if employee_id is None:
+                return []
+            rows = repo.list_requests_for_employee(
+                conn, scope, employee_id=employee_id
+            )
+        return _enrich_responses(rows, scope=scope, viewer_primary_ids=primary_ids)
 
     if _has_role(user, "Admin"):
         with get_engine().begin() as conn:

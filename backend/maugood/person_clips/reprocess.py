@@ -103,25 +103,27 @@ def _run_detection(
     frames: list[np.ndarray],
     mode: str,
     stop_event: Optional[threading.Event] = None,
+    *,
+    use_case: str = "",
 ) -> tuple[list[tuple[int, list[dict]]], float]:
     """Run face detection on sampled frames.
 
     Returns ``([(frame_idx, detections), ...], extract_duration_s)``.
     Stops early if ``stop_event`` is set.
 
-    Reprocess uses **quality-tuned** detector settings (~2× the
-    per-frame cost of the live-capture path), not bare defaults.
-    Specifically for UC1 (yolo+face), 480-px YOLO + 10-px face pad +
-    60-px min face are the live-capture compromise — fast enough for
-    real-time but they silently drop small/distant persons. UC1's
-    job is to find every face we can, so we bump:
+    Per-UC tuning:
 
-      * yolo_imgsz 480 → 960  (small/distant persons recoverable)
-      * yolo_face_pad 10 → 40 (face escape at top of body box fixed)
-      * min_face_pixels 60² → 30² (~900 px²)
-      * yolo_conf 0.35 → 0.25 (partial-occluded persons recoverable)
-      * min_det_score 0.5 → 0.35 (low-confidence faces survive
-        to the matcher, which has its own threshold anyway)
+    * **UC1** (``yolo+face``) — recall-first. YOLO at imgsz=960,
+      face-pad 40, min_face 30², min_det 0.35. Catches small/distant
+      persons the live-capture 480-px path drops.
+    * **UC2** (``insightface``) — quality-first, mirrors the reference
+      InsightFace+SCRFD crop pipeline at
+      ``Face_Recogination/files (3)/``. det_size=640, min_face 60²,
+      min_det 0.45. The save layer adds the composite quality scorer
+      + best-per-track selection.
+    * **UC3** (``insightface``) — canonical match, permissive recall.
+      Defaults except a loosened min_face / min_det so it never
+      under-finds vs UC2.
     """
     from maugood.detection import DetectorConfig, detect as detector_detect  # noqa: PLC0415
 
@@ -134,9 +136,19 @@ def _run_detection(
             min_face_pixels=30 * 30,
             min_det_score=0.35,
         )
+    elif use_case == "uc2":
+        # Reference parity for UC2: SCRFD at 640×640 input, 60-px
+        # face minimum, 0.45 detection threshold. The composite
+        # quality scorer downstream is the actual quality gate;
+        # this just gives it good candidates to score.
+        cfg = DetectorConfig(
+            mode=mode,
+            det_size=640,
+            min_face_pixels=60 * 60,
+            min_det_score=0.45,
+        )
     else:
-        # UC2 / UC3 — direct InsightFace path. Also loosen the face
-        # quality floors so reprocess can find faces UC1 missed.
+        # UC3 + any other future insightface caller — recall-first.
         cfg = DetectorConfig(
             mode=mode,
             min_face_pixels=30 * 30,
@@ -225,6 +237,423 @@ def _match_detections(
         for eid, conf in seen_employees.items()
     ]
     return det_employee_map, matched_ids, unknown_count, match_details, time.time() - t0
+
+
+# ---------------------------------------------------------------------------
+# UC2 — reference-parity quality scorer + best-per-track save
+# ---------------------------------------------------------------------------
+#
+# These helpers port the working pipeline from
+# ``Face_Recogination/files (3)/`` (quality.py + saver.py + tracker.py)
+# verbatim in behaviour. The reference produces noticeably better crops
+# than UC2's old per-frame save path; this is what closes the gap.
+#
+# Composite quality (0-100) is a weighted sum of four cheap signals:
+#   blur  (W=0.35) — Laplacian variance on the face ROI
+#   size  (W=0.25) — min face dimension normalised against 180px ref
+#   pose  (W=0.25) — yaw + nose-centering from 5-pt landmarks
+#   conf  (W=0.15) — SCRFD detection score
+#
+# Track-aware save: IoU-greedy associate detections into face tracks
+# across frames, keep one BEST frame per track (highest composite
+# quality), drop tracks whose best frame falls below MIN_QUALITY or
+# MIN_POSE. This is what stops UC2 from saving 30 mediocre crops of
+# the same person; we save one good one per person instead.
+
+
+# Weights mirror the reference's quality.py.
+_UC2_W_BLUR = 0.35
+_UC2_W_SIZE = 0.25
+_UC2_W_POSE = 0.25
+_UC2_W_CONF = 0.15
+
+# Laplacian-variance normalisation band.
+_UC2_BLUR_MIN = 20.0
+_UC2_BLUR_MAX = 400.0
+
+# Size score saturates at this face short-side (px).
+_UC2_SIZE_GOOD = 180
+_UC2_SIZE_MIN = 60
+
+# Gates applied to the composite + pose sub-score before save.
+_UC2_MIN_QUALITY = 55.0
+_UC2_MIN_POSE = 50.0
+
+# Asymmetric padding around the SCRFD bbox before the crop is cut.
+# Bottom is intentionally heavier so the chin + a strip of neck are
+# captured — the reference found that crops cropped tight to the
+# bbox were visually weaker for human review.
+_UC2_PAD_LEFT = 0.28
+_UC2_PAD_RIGHT = 0.28
+_UC2_PAD_TOP = 0.30
+_UC2_PAD_BOTTOM = 0.55
+
+# Final save dimensions + encoding.
+_UC2_CROP_SIZE = 320  # square output via LANCZOS4
+_UC2_JPEG_QUALITY = 95
+
+# IoU threshold for track association (matches reference's 0.35).
+_UC2_TRACK_IOU = 0.35
+# Per-frame match — at our 2-3 fps sampling, the same person typically
+# moves ≤30% bbox between samples; 0.35 catches them. Above this they
+# spawn a new track (different person OR re-entering frame).
+
+
+def _uc2_blur_score(roi: np.ndarray) -> float:
+    """Laplacian variance → 0-100 sharpness score."""
+    import cv2  # noqa: PLC0415
+
+    if roi is None or roi.size == 0:
+        return 0.0
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    lap = cv2.Laplacian(gray, cv2.CV_64F).var()
+    s = (lap - _UC2_BLUR_MIN) / (_UC2_BLUR_MAX - _UC2_BLUR_MIN)
+    return float(np.clip(s * 100.0, 0.0, 100.0))
+
+
+def _uc2_size_score(face_w: int, face_h: int) -> float:
+    """Larger face → higher score. Uses the SHORT side so narrow boxes
+    don't game the metric."""
+    short = min(int(face_w), int(face_h))
+    s = (short - _UC2_SIZE_MIN) / (_UC2_SIZE_GOOD - _UC2_SIZE_MIN)
+    return float(np.clip(s * 100.0, 0.0, 100.0))
+
+
+def _uc2_pose_score(kps: Optional[np.ndarray]) -> float:
+    """Yaw + nose-centering frontality score (port of reference).
+    100 = perfect frontal, 0 = full profile.
+
+    The reference's key insight: on a profile face SCRFD places the
+    occluded eye near the visible one, so symmetry-ratio reads ~1.0
+    (false 'frontal'). Eye-span / face-height *collapses* on a
+    profile, so it's the reliable signal."""
+    if kps is None or len(kps) < 5:
+        return 50.0
+    arr = np.asarray(kps, dtype=np.float32).reshape(-1, 2)
+    if arr.shape != (5, 2):
+        return 50.0
+    le, re, nose, ml, mr = arr[0], arr[1], arr[2], arr[3], arr[4]
+    eye_cx = (le[0] + re[0]) / 2.0
+    eye_cy = (le[1] + re[1]) / 2.0
+    mouth_cy = (ml[1] + mr[1]) / 2.0
+    face_v = abs(mouth_cy - eye_cy) + 1e-6
+    eye_x_span = float(re[0] - le[0])
+    yaw = float(np.clip(eye_x_span / face_v * 120.0, 0.0, 100.0))
+    eye_x_half = max(eye_x_span / 2.0, 1.0)
+    nose_h_ratio = abs(nose[0] - eye_cx) / eye_x_half
+    center = float(np.clip((1.0 - nose_h_ratio * 0.6) * 100.0, 0.0, 100.0))
+    return yaw * 0.7 + center * 0.3
+
+
+def _uc2_composite_quality(
+    frame_bgr: np.ndarray, det: dict
+) -> tuple[float, dict]:
+    """Return ``(total_0_100, sub_scores)`` for one detection."""
+    bbox = det.get("bbox")
+    if bbox is None:
+        return 0.0, {}
+    x1, y1, x2, y2 = (int(v) for v in bbox)
+    H, W = frame_bgr.shape[:2]
+    x1 = max(0, x1)
+    y1 = max(0, y1)
+    x2 = min(W, x2)
+    y2 = min(H, y2)
+    if x2 <= x1 or y2 <= y1:
+        return 0.0, {}
+    roi = frame_bgr[y1:y2, x1:x2]
+    s_blur = _uc2_blur_score(roi)
+    s_size = _uc2_size_score(x2 - x1, y2 - y1)
+    s_pose = _uc2_pose_score(det.get("kps"))
+    s_conf = float(det.get("det_score", 0.0)) * 100.0
+    total = (
+        _UC2_W_BLUR * s_blur
+        + _UC2_W_SIZE * s_size
+        + _UC2_W_POSE * s_pose
+        + _UC2_W_CONF * s_conf
+    )
+    return round(total, 2), {
+        "blur": round(s_blur, 1),
+        "size": round(s_size, 1),
+        "pose": round(s_pose, 1),
+        "conf": round(s_conf, 1),
+    }
+
+
+def _uc2_iou(a: tuple, b: tuple) -> float:
+    """IoU between two (x1, y1, x2, y2) tuples."""
+    ax1, ay1, ax2, ay2 = a
+    bx1, by1, bx2, by2 = b
+    ix1 = max(ax1, bx1)
+    iy1 = max(ay1, by1)
+    ix2 = min(ax2, bx2)
+    iy2 = min(ay2, by2)
+    iw = max(0, ix2 - ix1)
+    ih = max(0, iy2 - iy1)
+    inter = float(iw * ih)
+    aa = max(0, (ax2 - ax1)) * max(0, (ay2 - ay1))
+    bb = max(0, (bx2 - bx1)) * max(0, (by2 - by1))
+    union = float(aa + bb - inter)
+    if union <= 0:
+        return 0.0
+    return inter / union
+
+
+def _uc2_associate_into_tracks(
+    frame_results: list[tuple[int, list[dict]]],
+) -> dict[int, list[tuple[int, int]]]:
+    """Greedy IoU association of detections across frames into tracks.
+
+    Returns ``{track_id: [(frame_idx, det_idx), ...]}``. Walks frames
+    in order; for each detection in the current frame, picks the
+    best-IoU match against any track whose latest bbox satisfies
+    ``IoU >= _UC2_TRACK_IOU``. Unmatched detections spawn new tracks.
+
+    This is offline (operates on already-sampled frames) so there's
+    no max-lost ageing; gaps between sample frames are handled by
+    the IoU threshold alone.
+    """
+    next_id = 1
+    tracks: dict[int, list[tuple[int, int]]] = {}
+    last_bbox: dict[int, tuple[int, int, int, int]] = {}
+
+    for frame_idx, dets in frame_results:
+        # Greedy: each track claims its single best detection in this
+        # frame; once claimed, that detection can't be reused.
+        claimed: set[int] = set()
+        # Score all (track, det) IoU pairs above threshold.
+        pairs: list[tuple[float, int, int]] = []
+        for tid, last in last_bbox.items():
+            for di, det in enumerate(dets):
+                bbox = det.get("bbox")
+                if bbox is None:
+                    continue
+                iou = _uc2_iou(tuple(bbox), last)
+                if iou >= _UC2_TRACK_IOU:
+                    pairs.append((iou, tid, di))
+        pairs.sort(key=lambda p: -p[0])
+        used_dets: set[int] = set()
+        used_tracks: set[int] = set()
+        for iou, tid, di in pairs:
+            if tid in used_tracks or di in used_dets:
+                continue
+            tracks[tid].append((frame_idx, di))
+            bbox = dets[di].get("bbox")
+            if bbox is not None:
+                last_bbox[tid] = tuple(int(v) for v in bbox)  # type: ignore[assignment]
+            used_tracks.add(tid)
+            used_dets.add(di)
+            claimed.add(di)
+
+        # Spawn new tracks for unmatched detections.
+        for di, det in enumerate(dets):
+            if di in claimed:
+                continue
+            bbox = det.get("bbox")
+            if bbox is None:
+                continue
+            tid = next_id
+            next_id += 1
+            tracks[tid] = [(frame_idx, di)]
+            last_bbox[tid] = tuple(int(v) for v in bbox)  # type: ignore[assignment]
+
+    return tracks
+
+
+def _uc2_extract_padded_crop(
+    frame_bgr: np.ndarray, bbox: tuple
+) -> Optional[np.ndarray]:
+    """Asymmetric-pad + clamp + return the BGR crop. Mirrors reference
+    ``saver._extract_crop`` (28/28/30/55 LRTB ratios)."""
+    fh, fw = frame_bgr.shape[:2]
+    x1, y1, x2, y2 = (int(v) for v in bbox)
+    bw = x2 - x1
+    bh = y2 - y1
+    if bw < 4 or bh < 4:
+        return None
+    pad_l = int(bw * _UC2_PAD_LEFT)
+    pad_r = int(bw * _UC2_PAD_RIGHT)
+    pad_t = int(bh * _UC2_PAD_TOP)
+    pad_b = int(bh * _UC2_PAD_BOTTOM)
+    cx1 = max(0, x1 - pad_l)
+    cy1 = max(0, y1 - pad_t)
+    cx2 = min(fw, x2 + pad_r)
+    cy2 = min(fh, y2 + pad_b)
+    crop = frame_bgr[cy1:cy2, cx1:cx2]
+    if crop.size == 0:
+        return None
+    return crop.copy()
+
+
+def _save_face_crops_uc2_best_per_track(
+    engine,
+    scope: TenantScope,
+    clip_id: int,
+    camera_id: int,
+    frames: list["np.ndarray"],
+    frame_results: list[tuple[int, list[dict]]],
+    clip_start: datetime,
+    duration_s: float,
+    frame_count: int,
+    sample_interval: int,
+    det_employee_map: Optional[dict[tuple[int, int], Optional[int]]] = None,
+) -> int:
+    """UC2's reference-parity save path.
+
+    Returns ``saved_count``. Side effects: writes Fernet-encrypted
+    320×320 LANCZOS4 JPEGs to ``/face_crops/...`` and inserts one
+    ``face_crops`` row per saved track.
+    """
+    import cv2  # noqa: PLC0415
+
+    if not frame_results:
+        return 0
+
+    # 1. Compute composite quality for every detection (cheap — pure
+    #    numpy + one Laplacian per face).
+    qualities: dict[tuple[int, int], tuple[float, dict]] = {}
+    for frame_idx, dets in frame_results:
+        frame = frames[frame_idx] if 0 <= frame_idx < len(frames) else None
+        if frame is None:
+            continue
+        for det_idx, det in enumerate(dets):
+            qualities[(frame_idx, det_idx)] = _uc2_composite_quality(frame, det)
+
+    # 2. Associate detections into face tracks via greedy IoU.
+    tracks = _uc2_associate_into_tracks(frame_results)
+    logger.info(
+        "uc2 save: %d tracks across %d frames (avg %.1f faces/track)",
+        len(tracks),
+        len(frame_results),
+        sum(len(v) for v in tracks.values()) / max(1, len(tracks)),
+    )
+
+    # 3. For each track, pick the single highest-composite-quality
+    #    detection. Then apply pose + quality gates.
+    saved = 0
+    for track_id, members in tracks.items():
+        if not members:
+            continue
+        best_key: Optional[tuple[int, int]] = None
+        best_q: float = -1.0
+        best_subs: dict = {}
+        for key in members:
+            q, subs = qualities.get(key, (0.0, {}))
+            if q > best_q:
+                best_q = q
+                best_key = key
+                best_subs = subs
+
+        if best_key is None:
+            continue
+        if best_q < _UC2_MIN_QUALITY:
+            continue
+        if best_subs.get("pose", 0.0) < _UC2_MIN_POSE:
+            continue
+
+        frame_idx, det_idx = best_key
+        frame = frames[frame_idx] if 0 <= frame_idx < len(frames) else None
+        if frame is None:
+            continue
+        det = frame_results[
+            next(i for i, (fi, _) in enumerate(frame_results) if fi == frame_idx)
+        ][1][det_idx]
+        bbox = det.get("bbox")
+        if bbox is None:
+            continue
+
+        crop = _uc2_extract_padded_crop(frame, bbox)
+        if crop is None:
+            continue
+
+        # Resize to fixed 320×320 via LANCZOS4 (reference uses the same
+        # combo). This is what makes the saved JPEG actually look like
+        # a portrait instead of an upscaled thumbnail.
+        try:
+            out = cv2.resize(
+                crop, (_UC2_CROP_SIZE, _UC2_CROP_SIZE),
+                interpolation=cv2.INTER_LANCZOS4,
+            )
+            ok, buf = cv2.imencode(
+                ".jpg", out, [int(cv2.IMWRITE_JPEG_QUALITY), _UC2_JPEG_QUALITY]
+            )
+            if not ok or buf is None:
+                continue
+            crop_bytes = bytes(buf)
+        except Exception:  # noqa: BLE001
+            continue
+
+        # Approximate frame timestamp for the event_timestamp column.
+        approx_offset = 0.0
+        if frame_count > 0 and duration_s > 0:
+            orig_frame = frame_idx * sample_interval
+            approx_offset = (orig_frame / frame_count) * duration_s
+        ts_dt = clip_start + __import__("datetime").timedelta(seconds=approx_offset)
+        ts_str = ts_dt.strftime("%Y%m%d_%H%M%S")
+
+        # Look up matched employee (None for unknowns).
+        emp_id: Optional[int] = None
+        if det_employee_map is not None:
+            emp_id = det_employee_map.get(best_key)
+
+        # Storage path mirrors _save_face_crops_to_db.
+        from maugood.config import get_settings as _gs  # noqa: PLC0415
+        settings = _gs()
+        crops_root = Path(settings.face_crops_storage_path)
+        crop_dir = crops_root / f"camera_{camera_id}" / f"event_{ts_str}"
+        try:
+            crop_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            continue
+
+        import uuid as _uuid  # noqa: PLC0415
+        fname = f"face_{_uuid.uuid4().hex[:12]}.jpg"
+        crop_path = crop_dir / fname
+        try:
+            enc = encrypt_bytes(crop_bytes)
+            crop_path.write_bytes(enc)
+        except Exception:  # noqa: BLE001
+            continue
+
+        # INSERT row. ``quality_score`` carries the composite (0-100,
+        # divided by 100 to fit the 0-1 column contract);
+        # ``detection_score`` carries the raw SCRFD det_score so the
+        # detail drawer can still surface both.
+        try:
+            with engine.begin() as conn:
+                conn.execute(
+                    sa_insert(face_crops).values(
+                        tenant_id=scope.tenant_id,
+                        camera_id=camera_id,
+                        person_clip_id=clip_id,
+                        event_timestamp=ts_str,
+                        face_index=saved + 1,
+                        file_path=str(crop_path),
+                        quality_score=best_q / 100.0,
+                        sharpness=best_subs.get("blur", 0.0) / 100.0,
+                        detection_score=float(det.get("det_score", 0.0)),
+                        width=_UC2_CROP_SIZE,
+                        height=_UC2_CROP_SIZE,
+                        use_case="uc2",
+                        employee_id=emp_id,
+                    )
+                )
+        except Exception:  # noqa: BLE001
+            crop_path.unlink(missing_ok=True)
+            continue
+
+        logger.info(
+            "uc2 saved: track=%d composite=%.1f blur=%.0f size=%.0f "
+            "pose=%.0f conf=%.0f emp_id=%s",
+            track_id, best_q,
+            best_subs.get("blur", 0.0),
+            best_subs.get("size", 0.0),
+            best_subs.get("pose", 0.0),
+            best_subs.get("conf", 0.0),
+            emp_id,
+        )
+        saved += 1
+
+    return saved
 
 
 def _save_face_crops_to_db(
@@ -573,7 +1002,9 @@ def _process_clip_for_use_case(
         else:
             mode = "insightface"
 
-        frame_results, extract_s = _run_detection(frames, mode, stop_event)
+        frame_results, extract_s = _run_detection(
+            frames, mode, stop_event, use_case=use_case
+        )
 
         # Intermediate update: extraction done, matching starting.
         # The frontend uses face_extract_duration_ms being set (but
@@ -617,9 +1048,21 @@ def _process_clip_for_use_case(
         if use_case == "uc1" and match_index is not None and frame_results:
             # Backfill the just-saved crop rows with their match result.
             _backfill_crop_matches(engine, scope, match_index, det_employee_map)
+        elif use_case == "uc2" and frame_results:
+            # UC2 = reference-parity pipeline: composite quality
+            # scoring + IoU track association + one best frame per
+            # track at 320×320 LANCZOS4 with asymmetric padding.
+            # Produces noticeably better crops than the old per-frame
+            # save path. See ``_save_face_crops_uc2_best_per_track``.
+            face_crop_count = _save_face_crops_uc2_best_per_track(
+                engine, scope, clip_id, camera_id,
+                frames, frame_results,
+                clip_start, duration_seconds, frame_count, sample_interval,
+                det_employee_map=det_employee_map,
+            )
         elif frame_results:
-            # UC2 / UC3 unchanged — save after match with employee_id
-            # baked into the INSERT.
+            # UC3 unchanged — save after match with employee_id baked
+            # into the INSERT, raw bbox crop + 30% pad + 200-px upscale.
             face_crop_count = _save_face_crops_to_db(
                 engine, scope, clip_id, camera_id,
                 frames, frame_results,

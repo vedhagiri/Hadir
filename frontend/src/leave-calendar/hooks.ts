@@ -9,6 +9,7 @@ import type {
   ApprovedLeaveCreateInput,
   Holiday,
   HolidayCreateInput,
+  HolidayImportResponse,
   LeaveType,
   LeaveTypeCreateInput,
   LeaveTypePatchInput,
@@ -52,6 +53,19 @@ export function usePatchLeaveType(id: number) {
   });
 }
 
+// BUG-043 — Leave Types had no delete option in the UI. Backend
+// returns 409 when the type is still referenced by approved_leaves;
+// the row caller surfaces that message.
+export function useDeleteLeaveType() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: number) => {
+      await api<null>(`/api/leave-types/${id}`, { method: "DELETE" });
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: LEAVE_TYPES_KEY }),
+  });
+}
+
 // ---- Holidays ------------------------------------------------------------
 
 export function useHolidays(year: number): UseQueryResult<Holiday[], Error> {
@@ -87,10 +101,10 @@ export function useDeleteHoliday() {
 export function useImportHolidaysXlsx() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (file: File): Promise<Holiday[]> => {
+    mutationFn: async (file: File): Promise<HolidayImportResponse> => {
       const fd = new FormData();
       fd.append("file", file);
-      return api<Holiday[]>("/api/holidays/import", {
+      return api<HolidayImportResponse>("/api/holidays/import", {
         method: "POST",
         body: fd,
       });

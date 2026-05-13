@@ -15,6 +15,7 @@ import type {
   SingleClipReprocessRequest,
   SingleClipReprocessResponse,
   SystemStatsResponse,
+  UseCaseComparisonResponse,
 } from "./types";
 
 const LIST_KEY = ["person-clips", "list"] as const;
@@ -135,6 +136,19 @@ export function useSystemStats(): UseQueryResult<SystemStatsResponse, Error> {
     refetchInterval: 5_000,
     refetchIntervalInBackground: false,
     staleTime: 4_000,
+  });
+}
+
+export function useUcComparison(): UseQueryResult<UseCaseComparisonResponse, Error> {
+  return useQuery({
+    queryKey: ["person-clips", "uc-comparison"],
+    queryFn: () =>
+      api<UseCaseComparisonResponse>("/api/person-clips/uc-comparison"),
+    // Dashboard tab — refresh on tab focus is enough; comparison data
+    // changes only when a new UC run completes.
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
   });
 }
 

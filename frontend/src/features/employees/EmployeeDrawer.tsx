@@ -147,11 +147,15 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
   const upload = useEmployeePhotoUpload();
   const deletePhoto = useDeletePhoto();
 
-  // Manager picker — query users in the tenant. Cached for the drawer's
-  // lifetime; the dropdown filters client-side via the search input.
+  // Manager picker — BUG-038: only show users who actually hold the
+  // ``Manager`` role. The previous "list every user" behaviour
+  // surfaced HR / Admin / Employee entries that wouldn't be valid
+  // ``reports_to`` targets in a chain-of-command sense. Backend
+  // already supports the ``role`` filter (see ``list_tenant_users``).
   const managers = useQuery({
-    queryKey: ["users", "tenant-list"],
-    queryFn: () => api<ManagerListResponse>("/api/users?active_only=true"),
+    queryKey: ["users", "tenant-list", "manager"],
+    queryFn: () =>
+      api<ManagerListResponse>("/api/users?active_only=true&role=Manager"),
     staleTime: 5 * 60 * 1000,
   });
 
@@ -190,7 +194,10 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
         "/api/users/roles",
       ),
     staleTime: 10 * 60 * 1000,
-    enabled: isAdmin,
+    // BUG-054 — HR also needs the roles list when adding an employee
+    // with platform access. Backend already permits HR on /roles +
+    // POST /api/users.
+    enabled: isAdmin || isHr,
   });
 
   // Edit-mode: look up the linked user by email so we can show
@@ -265,6 +272,39 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
     if (isAddMode) {
       if (!form.employee_code.trim() || !form.full_name.trim()) {
         setServerError(t("employees.errors.codeAndNameRequired") as string);
+        return null;
+      }
+    }
+    // BUG-003 / BUG-004 / BUG-005 — explicit length-cap message rather
+    // than the silent maxLength truncation (which the input already
+    // enforces). Belt-and-braces in case browser autofill bypasses.
+    if (form.employee_code.trim().length > 64) {
+      setServerError("Employee ID must be 64 characters or fewer.");
+      return null;
+    }
+    if (form.full_name.trim().length > 200) {
+      setServerError("Full name must be 200 characters or fewer.");
+      return null;
+    }
+    if (form.designation.trim().length > 80) {
+      setServerError("Designation must be 80 characters or fewer.");
+      return null;
+    }
+    // BUG-006 — email format validation. Empty string is allowed (the
+    // field is optional); when present it must be a plausible
+    // ``user@host.tld`` shape (matches the backend's lenient regex).
+    if (form.email.trim()) {
+      const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim());
+      if (!emailOk) {
+        setServerError("Email address is not valid.");
+        return null;
+      }
+    }
+    // BUG-007 — phone must be digit-only (with optional + and separators).
+    if (form.phone.trim()) {
+      const phoneOk = /^\+?[\d\s\-]{4,30}$/.test(form.phone.trim());
+      if (!phoneOk) {
+        setServerError("Phone number must contain digits only (with optional + and - or spaces).");
         return null;
       }
     }
@@ -490,12 +530,14 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
                   ).toLocaleDateString(),
                 }) as string}
               </div>
-              <div
-                className="text-xs"
-                style={{ marginTop: 4, color: "var(--text-secondary)" }}
-              >
-                {t("employees.delete.reasonLabel")}: {pendingDelete.data.reason}
-              </div>
+              {pendingDelete.data.reason && (
+                <div
+                  className="text-xs"
+                  style={{ marginTop: 4, color: "var(--text-secondary)" }}
+                >
+                  {t("employees.delete.reasonLabel")}: {pendingDelete.data.reason}
+                </div>
+              )}
               {isHr && (
                 <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
                   <button
@@ -586,12 +628,14 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
               disabled={!isAddMode}
               mono
               required
+              maxLength={64}
             />
             <Field
               label={t("employees.field.fullName") as string}
               value={form.full_name}
               onChange={(v) => onField("full_name", v)}
               required
+              maxLength={200}
             />
             <Field
               label={t("employees.field.designation") as string}
@@ -606,12 +650,18 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
               value={form.email}
               onChange={(v) => onField("email", v)}
               type="email"
+              maxLength={120}
             />
             <Field
               label={t("employees.field.phone") as string}
               value={form.phone}
-              onChange={(v) => onField("phone", v)}
+              // Strip any non-digit / +/- chars on input so the field
+              // simply refuses string letters (BUG-007).
+              onChange={(v) =>
+                onField("phone", v.replace(/[^\d+\-\s]/g, ""))
+              }
               maxLength={30}
+              inputMode="tel"
             />
           </div>
 
@@ -647,7 +697,21 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
                 });
               }}
               options={[
-                { value: "", label: t("employees.field.allDivisions") as string },
+                {
+                  value: "",
+                  // BUG-011 / BUG-036 — when the tenant hasn't
+                  // configured any divisions yet, surface the empty
+                  // state in the dropdown placeholder rather than
+                  // silently showing a single "All Divisions" entry
+                  // (which an operator can reasonably mistake for
+                  // dummy data).
+                  label:
+                    divisionsQuery.isLoading
+                      ? (t("common.loading") as string)
+                      : (divisionsQuery.data?.items.length ?? 0) === 0
+                        ? "No divisions yet — add in Settings → Divisions"
+                        : (t("employees.field.allDivisions") as string),
+                },
                 ...(divisionsQuery.data?.items ?? []).map((d) => ({
                   value: String(d.id),
                   label: `${d.name} (${d.code})`,
@@ -692,12 +756,18 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
               options={[
                 {
                   value: "",
+                  // BUG-012 / BUG-037 — same empty-state treatment as
+                  // Division. If no department is picked yet, prompt
+                  // for that first; if a department is picked but has
+                  // no sections, point at Settings → Sections.
                   label:
                     sectionsQuery.isLoading
                       ? (t("common.loading") as string)
-                      : (sectionsQuery.data?.items.length ?? 0) === 0
-                        ? (t("employees.field.noSectionsInDept") as string)
-                        : (t("employees.field.noSection") as string),
+                      : form.department_id === 0 || form.department_id === null
+                        ? "Pick a department first"
+                        : (sectionsQuery.data?.items.length ?? 0) === 0
+                          ? "No sections in this department — add in Settings → Sections"
+                          : (t("employees.field.noSection") as string),
                 },
                 ...(sectionsQuery.data?.items ?? []).map((s) => ({
                   value: String(s.id),
@@ -734,12 +804,38 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
               type="date"
             />
             {(form.status === "active" || form.relieving_date) && (
-              <Field
-                label={t("employees.field.relievingDate") as string}
-                value={form.relieving_date}
-                onChange={(v) => onField("relieving_date", v)}
-                type="date"
-              />
+              <div>
+                <Field
+                  label={t("employees.field.relievingDate") as string}
+                  value={form.relieving_date}
+                  onChange={(v) => onField("relieving_date", v)}
+                  type="date"
+                />
+                {/* BUG-013 — the DatePicker doesn't expose a "clear"
+                    affordance, so once a date is picked there was no
+                    way to un-pick it. This small button reverts the
+                    relieving date to empty (which the backend treats
+                    as null on PATCH). */}
+                {form.relieving_date && (
+                  <button
+                    type="button"
+                    onClick={() => onField("relieving_date", "")}
+                    style={{
+                      marginTop: 4,
+                      background: "transparent",
+                      border: "none",
+                      padding: 0,
+                      fontSize: 11,
+                      color: "var(--text-secondary)",
+                      cursor: "pointer",
+                      textDecoration: "underline",
+                    }}
+                    aria-label="Clear relieving date"
+                  >
+                    Clear date
+                  </button>
+                )}
+              </div>
             )}
           </div>
 
@@ -747,7 +843,9 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
               optional toggle that, when on, creates a login user with
               the chosen roles right after the employee row is
               persisted. */}
-          {isAddMode && isAdmin && (
+          {/* BUG-054 — HR can also create platform logins for new
+              employees; backend permits POST /api/users for HR. */}
+          {isAddMode && (isAdmin || isHr) && (
             <>
               <SectionLabel>
                 {t("employees.section.platformAccess") as string}
@@ -914,17 +1012,17 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
                   </div>
                 )}
                 {linkedUser.isError && (
-                  <div>
-                    <div
-                      className="text-sm"
-                      style={{ marginBottom: 6, fontWeight: 500 }}
-                    >
-                      {t("employees.login.notLinked") as string}
-                    </div>
-                    <div className="text-xs text-dim">
-                      {t("employees.login.notLinkedHint") as string}
-                    </div>
-                  </div>
+                  // BUG-019 — when an employee has been added without
+                  // platform access, the drawer now offers an explicit
+                  // "Enable platform access" inline form (Admin only)
+                  // so the operator can grant a login after creation.
+                  <EnablePlatformAccessPanel
+                    employeeEmail={(detail.data?.email ?? "").trim()}
+                    employeeName={(detail.data?.full_name ?? "").trim()}
+                    canEnable={isAdmin || isHr}
+                    availableRoles={rolesQuery.data?.items ?? []}
+                    onEnabled={() => linkedUser.refetch()}
+                  />
                 )}
                 {linkedUser.data && (
                   <LinkedUserPanel
@@ -1107,6 +1205,22 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
                   ))}
                 </div>
 
+                {/* BUG-010 — operator confusion: photo uploads commit
+                    instantly, no Save needed. Spell that out so they
+                    don't get stuck looking for a "save photos" button
+                    when the form's Save is disabled (because no other
+                    field changed). */}
+                <div
+                  className="text-xs"
+                  style={{
+                    marginBottom: 8,
+                    color: "var(--accent, #0b6e4f)",
+                    fontWeight: 500,
+                  }}
+                >
+                  Photo uploads commit immediately — you can close the
+                  drawer right after.
+                </div>
                 <div className="text-xs text-dim" style={{ marginBottom: 6 }}>
                   {t("employees.photos.uploadHint", {
                     defaultValue:
@@ -1360,6 +1474,7 @@ function Field({
   required,
   disabled,
   maxLength,
+  inputMode,
 }: {
   label: string;
   value: string;
@@ -1369,6 +1484,7 @@ function Field({
   required?: boolean;
   disabled?: boolean;
   maxLength?: number;
+  inputMode?: "text" | "tel" | "email" | "numeric" | "decimal";
 }) {
   return (
     <div>
@@ -1396,6 +1512,7 @@ function Field({
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
           maxLength={maxLength}
+          inputMode={inputMode}
           className={mono ? "mono" : ""}
           style={{
             width: "100%",
@@ -1481,6 +1598,241 @@ interface LinkedUser {
   is_active: boolean;
   role_codes: string[];
 }
+
+// BUG-019 — "Enable Platform Access" inline form. Shown in the Edit
+// drawer when an employee has no matching ``users`` row by email
+// (i.e. they were added without platform access at creation time).
+// Admin-only; HR gets a read-only "Not linked yet" message instead.
+function EnablePlatformAccessPanel({
+  employeeEmail,
+  employeeName,
+  canEnable,
+  availableRoles,
+  onEnabled,
+}: {
+  employeeEmail: string;
+  employeeName: string;
+  canEnable: boolean;
+  availableRoles: { id: number; code: string; name: string }[];
+  onEnabled: () => void;
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const [password, setPassword] = useState("");
+  const [roleCodes, setRoleCodes] = useState<string[]>(["Employee"]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const hasEmail = !!employeeEmail;
+  const toggleRole = (code: string) => {
+    setRoleCodes((prev) =>
+      prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code],
+    );
+  };
+
+  const onSubmit = async () => {
+    setError(null);
+    if (!hasEmail) {
+      setError("This employee has no email. Add one in the Identity section first.");
+      return;
+    }
+    if (password.length < 12) {
+      setError(t("employees.errors.passwordTooShort") as string);
+      return;
+    }
+    if (roleCodes.length === 0) {
+      setError(t("employees.errors.atLeastOneRole") as string);
+      return;
+    }
+    setBusy(true);
+    try {
+      await api("/api/users", {
+        method: "POST",
+        body: {
+          email: employeeEmail.toLowerCase(),
+          full_name: employeeName || employeeEmail,
+          password,
+          role_codes: roleCodes,
+        },
+      });
+      toast.success(t("employees.toast.loginCreated") as string);
+      setOpen(false);
+      setPassword("");
+      onEnabled();
+    } catch (e) {
+      const msg =
+        e instanceof ApiError
+          ? typeof (e.body as { detail?: { message?: string } })?.detail === "object"
+            ? ((e.body as { detail?: { message?: string } }).detail?.message
+                ?? `Login creation error ${e.status}`)
+            : `Login creation error ${e.status}`
+          : "Could not create login";
+      setError(msg);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!canEnable) {
+    return (
+      <div>
+        <div className="text-sm" style={{ marginBottom: 6, fontWeight: 500 }}>
+          {t("employees.login.notLinked") as string}
+        </div>
+        <div className="text-xs text-dim">
+          {t("employees.login.notLinkedHint") as string}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="text-sm" style={{ marginBottom: 6, fontWeight: 500 }}>
+        {t("employees.login.notLinked") as string}
+      </div>
+      <div className="text-xs text-dim" style={{ marginBottom: 10 }}>
+        This employee can log in to Maugood after you enable platform access.
+        {!hasEmail && " Add an email in the Identity section above first."}
+      </div>
+      {!open && (
+        <button
+          type="button"
+          className="btn btn-sm btn-primary"
+          onClick={() => {
+            setOpen(true);
+            setError(null);
+          }}
+          disabled={!hasEmail}
+          style={{
+            background: "var(--accent, #0b6e4f)",
+            color: "#fff",
+            fontWeight: 600,
+          }}
+        >
+          Enable platform access
+        </button>
+      )}
+      {open && (
+        <div
+          style={{
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            padding: 12,
+            marginTop: 8,
+            background: "var(--bg)",
+          }}
+        >
+          <div className="text-xs text-dim" style={{ marginBottom: 8 }}>
+            A login will be created for <strong>{employeeEmail}</strong>. The
+            password must be at least 12 characters.
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <label
+              className="text-xs"
+              style={{ display: "block", marginBottom: 4, fontWeight: 500 }}
+            >
+              {t("employees.field.password") as string}
+            </label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="new-password"
+              style={{
+                width: "100%",
+                padding: "6px 8px",
+                fontSize: 13,
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius-sm)",
+              }}
+              placeholder="Minimum 12 characters"
+            />
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <label
+              className="text-xs"
+              style={{ display: "block", marginBottom: 4, fontWeight: 500 }}
+            >
+              {t("employees.field.roles") as string}
+            </label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {availableRoles.map((r) => {
+                const checked = roleCodes.includes(r.code);
+                return (
+                  <label
+                    key={r.code}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                      padding: "4px 9px",
+                      borderRadius: 999,
+                      border: `1px solid ${checked ? "var(--accent, #0b6e4f)" : "var(--border)"}`,
+                      background: checked
+                        ? "var(--accent-soft, rgba(11, 110, 79, 0.10))"
+                        : "var(--bg-elev)",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleRole(r.code)}
+                      style={{ accentColor: "var(--accent, #0b6e4f)" }}
+                    />
+                    {r.name}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+          {error && (
+            <div
+              style={{
+                color: "var(--danger-text)",
+                fontSize: 12,
+                marginBottom: 8,
+              }}
+            >
+              {error}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => {
+                setOpen(false);
+                setPassword("");
+                setError(null);
+              }}
+              disabled={busy}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              onClick={onSubmit}
+              disabled={busy}
+              style={{
+                background: "var(--accent, #0b6e4f)",
+                color: "#fff",
+                fontWeight: 600,
+              }}
+            >
+              {busy ? "Enabling…" : "Enable access"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 function LinkedUserPanel({
   user,

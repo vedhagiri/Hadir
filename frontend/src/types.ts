@@ -40,6 +40,11 @@ export interface MeResponse {
   // ``?v=…`` cache-buster on ``/api/branding/logo`` so browsers
   // refetch after a fresh upload.
   brand_logo_version?: string | null;
+  // Sliding-expiry surface. Every authenticated request bumps
+  // ``session_expires_at`` server-side; the SessionExpiryWatcher
+  // reads it to schedule the "about to expire" warning modal.
+  session_expires_at?: string | null;
+  session_idle_minutes?: number;
 }
 
 // Used by the shell to decide which NAV to render when a user holds more

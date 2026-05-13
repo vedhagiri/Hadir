@@ -27,6 +27,10 @@ export interface EmployeeListFilters {
   q: string;
   department_id: number | null;
   include_inactive: boolean;
+  // BUG-015 / BUG-018 — server-side restriction so total + pagination
+  // reflect a single status subset. Pass null to honour the legacy
+  // include_inactive flag.
+  status_filter?: "active" | "inactive" | "all" | null;
   page: number;
   page_size: number;
   // Sort knobs. Optional so existing call sites that don't care
@@ -45,6 +49,9 @@ export function useEmployeeList(
     params.set("department_id", String(filters.department_id));
   }
   if (filters.include_inactive) params.set("include_inactive", "true");
+  if (filters.status_filter) {
+    params.set("status_filter", filters.status_filter);
+  }
   params.set("page", String(filters.page));
   params.set("page_size", String(filters.page_size));
   params.set("sort_by", filters.sort_by ?? "employee_code");
@@ -227,6 +234,25 @@ export function useCreateEmployee() {
   });
 }
 
+
+// Direct soft-delete — sets status='inactive'. Operator request: Admin /
+// HR / Manager can all do this without the HR-approval workflow.
+// Hard-delete still routes through useSubmitDeleteRequest below.
+export function useSoftDeleteEmployee() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (employeeId: number): Promise<void> => {
+      await api<null>(`/api/employees/${employeeId}`, { method: "DELETE" });
+    },
+    onSuccess: (_v, employeeId) => {
+      qc.invalidateQueries({ queryKey: ["employees", "list"] });
+      qc.invalidateQueries({
+        queryKey: ["employees", "detail", employeeId],
+      });
+    },
+  });
+}
+
 export function useUpdateEmployee() {
   const qc = useQueryClient();
   return useMutation({
@@ -279,7 +305,8 @@ export function useSubmitDeleteRequest() {
   return useMutation({
     mutationFn: async (args: {
       employeeId: number;
-      reason: string;
+      // Optional — operator may submit without a reason.
+      reason: string | null;
     }): Promise<DeleteRequest> => {
       return api<DeleteRequest>(
         `/api/employees/${args.employeeId}/delete-request`,

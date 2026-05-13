@@ -30,6 +30,16 @@ const HR_TABS: ReadonlyArray<(typeof TABS)[number]["key"]> = [
   "divisions",
   "departments",
   "sections",
+  // BUG-050 — HR can also tweak their per-user preferences here.
+  "notifications",
+  "display",
+];
+
+// BUG-050 — Manager + Employee only get the per-user preference tabs.
+// Admin/HR tabs (branding, divisions, etc.) stay hidden.
+const PER_USER_TABS: ReadonlyArray<(typeof TABS)[number]["key"]> = [
+  "notifications",
+  "display",
 ];
 
 export function SettingsTabs() {
@@ -39,7 +49,9 @@ export function SettingsTabs() {
   const visibleTabs =
     role === "Admin"
       ? TABS
-      : TABS.filter((tab) => HR_TABS.includes(tab.key));
+      : role === "HR"
+        ? TABS.filter((tab) => HR_TABS.includes(tab.key))
+        : TABS.filter((tab) => PER_USER_TABS.includes(tab.key));
   return (
     <nav
       style={{

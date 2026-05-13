@@ -15,6 +15,7 @@
 // from this page in a follow-up — for now it surfaces the count.
 
 import { useEffect, useMemo, useState } from "react";
+import type { ChangeEvent } from "react";
 
 import { ApiError } from "../api/client";
 import { DatePicker } from "../components/DatePicker";
@@ -25,6 +26,7 @@ import {
   useAssignments,
   useCreatePolicy,
   useDeletePolicy,
+  useImportPoliciesXlsx,
   usePolicies,
 } from "./hooks";
 import type {
@@ -43,6 +45,37 @@ export function PoliciesPage() {
   const assignments = useAssignments();
   const create = useCreatePolicy();
   const del = useDeletePolicy();
+  const importer = useImportPoliciesXlsx();
+  const [importSummary, setImportSummary] = useState<string | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+
+  // BUG-040 — XLSX import handler. Mirrors the holiday-import flow:
+  // surfaces imported / skipped counts plus the first few skipped
+  // names so the operator can fix the spreadsheet and re-run.
+  const onImportPolicies = async (e: ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    setImportSummary(null);
+    setImportError(null);
+    try {
+      const res = await importer.mutateAsync(f);
+      const parts: string[] = [`${res.imported_count} policies imported`];
+      if (res.skipped_count > 0) {
+        const names = res.skipped
+          .slice(0, 3)
+          .map((s) => `"${s.submitted_name}"`)
+          .join(", ");
+        const more =
+          res.skipped_count > 3 ? `, +${res.skipped_count - 3} more` : "";
+        parts.push(`${res.skipped_count} skipped (${names}${more})`);
+      }
+      setImportSummary(parts.join(" · "));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Import failed";
+      setImportError(msg);
+    }
+  };
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -140,10 +173,29 @@ export function PoliciesPage() {
           </p>
         </div>
         <div className="page-actions">
-          <button className="btn" disabled title="Coming soon">
+          {/* BUG-040 — XLSX import for shift policies. The label
+              wraps a hidden file input so the same .btn styling can
+              double as a file picker without extra UI. */}
+          <label
+            className="btn"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              cursor: importer.isPending ? "wait" : "pointer",
+            }}
+            title="Import shift policies from an .xlsx file"
+          >
             <Icon name="upload" size={12} />
-            Import
-          </button>
+            {importer.isPending ? "Importing…" : "Import"}
+            <input
+              type="file"
+              accept=".xlsx"
+              hidden
+              onChange={onImportPolicies}
+              disabled={importer.isPending}
+            />
+          </label>
           <button
             className="btn btn-primary"
             onClick={() => setDrawerOpen(true)}
@@ -153,6 +205,38 @@ export function PoliciesPage() {
           </button>
         </div>
       </div>
+      {/* BUG-040 — import summary banner so a same-name re-import
+          shows what was actually written. */}
+      {importSummary && (
+        <div
+          style={{
+            padding: "8px 12px",
+            margin: "0 0 12px 0",
+            border: "1px solid #0b6e4f55",
+            background: "#0b6e4f0d",
+            color: "#0b6e4f",
+            borderRadius: 8,
+            fontSize: 12.5,
+          }}
+        >
+          {importSummary}
+        </div>
+      )}
+      {importError && (
+        <div
+          style={{
+            padding: "8px 12px",
+            margin: "0 0 12px 0",
+            border: "1px solid var(--danger-text)",
+            background: "var(--danger-bg, rgba(220,38,38,0.06))",
+            color: "var(--danger-text)",
+            borderRadius: 8,
+            fontSize: 12.5,
+          }}
+        >
+          {importError}
+        </div>
+      )}
 
       {policies.isLoading && (
         <p className="text-sm text-dim">Loading shift policies…</p>
@@ -968,6 +1052,7 @@ function PolicyForm({
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
+            maxLength={120}
             style={inputStyle}
           />
         </FormField>

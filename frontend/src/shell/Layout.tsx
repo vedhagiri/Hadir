@@ -5,6 +5,7 @@
 import { Outlet, useLocation } from "react-router-dom";
 
 import { useMe } from "../auth/AuthProvider";
+import { SessionExpiryWatcher } from "../auth/SessionExpiryWatcher";
 import { BrandingProvider } from "../branding/BrandingProvider";
 import { PageTransition } from "../motion/PageTransition";
 import { ImpersonationBanner } from "./ImpersonationBanner";
@@ -33,6 +34,12 @@ export function Layout() {
       {/* Mounts a <style> tag in document.head with --accent + body
           font-family overrides for the active tenant. Returns null. */}
       <BrandingProvider />
+      {/* Polls ``me.session_expires_at`` and shows a "session about to
+          expire" modal with a Stay-signed-in / Sign-out choice, then
+          a "session expired" modal if the user lets it run out. Sits
+          inside the authenticated shell so it never appears on the
+          login page itself. */}
+      <SessionExpiryWatcher />
       {me.is_super_admin_impersonation && (
         <ImpersonationBanner superAdminUserId={me.super_admin_user_id ?? null} />
       )}

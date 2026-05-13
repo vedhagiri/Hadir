@@ -219,6 +219,7 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
               placeholder={t("cameras.placeholders.name")}
               style={inputStyle}
               autoFocus
+              maxLength={120}
             />
           </Field>
 
@@ -228,6 +229,7 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
               onChange={(e) => setLocation(e.target.value)}
               placeholder={t("cameras.placeholders.location")}
               style={inputStyle}
+              maxLength={200}
             />
           </Field>
 

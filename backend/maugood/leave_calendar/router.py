@@ -24,9 +24,10 @@ from fastapi import (
 )
 from openpyxl import load_workbook
 from sqlalchemy import and_, delete, insert, select, update
+from sqlalchemy.exc import IntegrityError
 
 from maugood.auth.audit import write_audit
-from maugood.auth.dependencies import CurrentUser, require_any_role
+from maugood.auth.dependencies import CurrentUser, current_user, require_any_role
 from maugood.db import (
     approved_leaves,
     employees,
@@ -40,6 +41,8 @@ from maugood.leave_calendar.schemas import (
     ApprovedLeaveResponse,
     HolidayBulkCreateRequest,
     HolidayCreateRequest,
+    HolidayImportResponse,
+    HolidayImportSkipped,
     HolidayResponse,
     LeaveTypeCreateRequest,
     LeaveTypePatchRequest,
@@ -73,7 +76,10 @@ def _to_leave_type_response(row) -> LeaveTypeResponse:  # type: ignore[no-untype
 
 @router.get("/api/leave-types", response_model=list[LeaveTypeResponse])
 def list_leave_types(
-    user: Annotated[CurrentUser, ADMIN_OR_HR],
+    # BUG-058 / BUG-059 — Employees submitting a leave request need to
+    # see the available leave types. Read is open to every authenticated
+    # user; writes (POST / PATCH / DELETE) stay Admin/HR.
+    user: Annotated[CurrentUser, Depends(current_user)],
 ) -> list[LeaveTypeResponse]:
     scope = TenantScope(tenant_id=user.tenant_id)
     engine = get_engine()
@@ -220,17 +226,79 @@ def patch_leave_type(
     return _to_leave_type_response(row)
 
 
+# BUG-043 — Leave Types had no delete endpoint. Refuse to hard-delete
+# rows that are referenced by approved_leaves so audit + reporting
+# history doesn't lose its leave_type pointer; the caller is told to
+# deactivate instead.
+@router.delete(
+    "/api/leave-types/{leave_type_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_leave_type(
+    leave_type_id: int,
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
+) -> Response:
+    scope = TenantScope(tenant_id=user.tenant_id)
+    engine = get_engine()
+    with engine.begin() as conn:
+        before = conn.execute(
+            select(
+                leave_types.c.code,
+                leave_types.c.name,
+            ).where(
+                leave_types.c.id == leave_type_id,
+                leave_types.c.tenant_id == scope.tenant_id,
+            )
+        ).first()
+        if before is None:
+            raise HTTPException(status_code=404, detail="leave_type not found")
+        # Refuse if any approved_leaves still references this type.
+        in_use = conn.execute(
+            select(approved_leaves.c.id).where(
+                approved_leaves.c.tenant_id == scope.tenant_id,
+                approved_leaves.c.leave_type_id == leave_type_id,
+            ).limit(1)
+        ).first()
+        if in_use is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Leave type '{before.name}' is in use by one or more "
+                    f"approved leaves. Mark it inactive instead of "
+                    f"deleting to preserve the audit trail."
+                ),
+            )
+        conn.execute(
+            delete(leave_types).where(
+                leave_types.c.id == leave_type_id,
+                leave_types.c.tenant_id == scope.tenant_id,
+            )
+        )
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="leave_type.deleted",
+            entity_type="leave_type",
+            entity_id=str(leave_type_id),
+            before={"code": str(before.code), "name": str(before.name)},
+        )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 # ---------------------------------------------------------------------------
 # Holidays
 # ---------------------------------------------------------------------------
 
 
 def _to_holiday_response(row) -> HolidayResponse:  # type: ignore[no-untyped-def]
+    desc = getattr(row, "description", None)
     return HolidayResponse(
         id=int(row.id),
         tenant_id=int(row.tenant_id),
         date=row.date,
         name=str(row.name),
+        description=str(desc) if desc is not None else None,
         active=bool(row.active),
     )
 
@@ -248,6 +316,7 @@ def list_holidays(
             holidays_table.c.tenant_id,
             holidays_table.c.date,
             holidays_table.c.name,
+            holidays_table.c.description,
             holidays_table.c.active,
         )
         .where(holidays_table.c.tenant_id == scope.tenant_id)
@@ -276,6 +345,25 @@ def create_holiday(
 ) -> HolidayResponse:
     scope = TenantScope(tenant_id=user.tenant_id)
     engine = get_engine()
+    # BUG-023 / BUG-044 — friendly error for duplicate date. Pre-check
+    # against the existing row so the operator sees the holiday's
+    # current name instead of a raw IntegrityError.
+    with engine.begin() as conn:
+        dup = conn.execute(
+            select(holidays_table.c.name).where(
+                holidays_table.c.tenant_id == scope.tenant_id,
+                holidays_table.c.date == payload.date,
+            )
+        ).first()
+        if dup is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"A holiday is already configured for "
+                    f"{payload.date.isoformat()} ('{dup.name}'). "
+                    f"Edit the existing entry or pick a different date."
+                ),
+            )
     with engine.begin() as conn:
         try:
             new_id = int(
@@ -285,10 +373,22 @@ def create_holiday(
                         tenant_id=scope.tenant_id,
                         date=payload.date,
                         name=payload.name,
+                        description=payload.description,
                     )
                     .returning(holidays_table.c.id)
                 ).scalar_one()
             )
+        except IntegrityError as exc:
+            # Race: another request inserted the same date between our
+            # pre-check and the insert. Surface the same friendly
+            # message rather than a 500.
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"A holiday is already configured for "
+                    f"{payload.date.isoformat()}."
+                ),
+            ) from exc
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(
                 status_code=400,
@@ -352,17 +452,18 @@ def delete_holiday(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/api/holidays/import", response_model=list[HolidayResponse])
+@router.post("/api/holidays/import", response_model=HolidayImportResponse)
 async def import_holidays_xlsx(
     user: Annotated[CurrentUser, ADMIN_OR_HR],
     file: UploadFile = File(...),
-) -> list[HolidayResponse]:
+) -> HolidayImportResponse:
     """Bulk-import holidays from an .xlsx file.
 
     Expected columns (header row, case-insensitive): ``date`` (an
     ISO date, an Excel serial date, or a Python date) and ``name``
-    (free text). Rows whose date already exists for the tenant are
-    skipped silently — re-import is idempotent.
+    (free text). Returns both ``imported`` and ``skipped`` lists so
+    the operator can see exactly which dates already existed —
+    re-import is still idempotent but no longer silent (BUG-025).
     """
 
     scope = TenantScope(tenant_id=user.tenant_id)
@@ -394,6 +495,12 @@ async def import_holidays_xlsx(
                 status_code=400,
                 detail="missing 'date' or 'name' column in header",
             )
+        # BUG-021 — Description is optional; absent column = None on
+        # every row.
+        try:
+            desc_idx: Optional[int] = normalised.index("description")
+        except ValueError:
+            desc_idx = None
 
         parsed: list[HolidayCreateRequest] = []
         for raw_row in rows_iter:
@@ -421,30 +528,50 @@ async def import_holidays_xlsx(
                     status_code=400,
                     detail=f"unsupported date cell type: {type(d_raw).__name__}",
                 )
+            desc_val: Optional[str] = None
+            if desc_idx is not None and desc_idx < len(raw_row):
+                v = raw_row[desc_idx]
+                if v is not None:
+                    desc_val = str(v).strip() or None
             parsed.append(
-                HolidayCreateRequest(date=d_value, name=str(n_raw).strip())
+                HolidayCreateRequest(
+                    date=d_value,
+                    name=str(n_raw).strip(),
+                    description=desc_val,
+                )
             )
     finally:
         wb.close()
 
     if not parsed:
-        return []
+        return HolidayImportResponse()
 
     engine = get_engine()
     created_ids: list[int] = []
+    skipped: list[HolidayImportSkipped] = []
     with engine.begin() as conn:
-        # Pull existing dates so we can skip dupes silently.
-        existing = {
-            r.date
-            for r in conn.execute(
-                select(holidays_table.c.date).where(
-                    holidays_table.c.tenant_id == scope.tenant_id,
-                    holidays_table.c.date.in_([h.date for h in parsed]),
-                )
-            ).all()
-        }
+        # Pull existing rows for the dates we're about to insert so we
+        # can both skip and *report* the dupes (BUG-025).
+        existing_rows = conn.execute(
+            select(
+                holidays_table.c.date,
+                holidays_table.c.name,
+            ).where(
+                holidays_table.c.tenant_id == scope.tenant_id,
+                holidays_table.c.date.in_([h.date for h in parsed]),
+            )
+        ).all()
+        existing_by_date = {r.date: str(r.name) for r in existing_rows}
+
         for h in parsed:
-            if h.date in existing:
+            if h.date in existing_by_date:
+                skipped.append(
+                    HolidayImportSkipped(
+                        date=h.date,
+                        submitted_name=h.name,
+                        existing_name=existing_by_date[h.date],
+                    )
+                )
                 continue
             new_id = int(
                 conn.execute(
@@ -453,6 +580,7 @@ async def import_holidays_xlsx(
                         tenant_id=scope.tenant_id,
                         date=h.date,
                         name=h.name,
+                        description=h.description,
                     )
                     .returning(holidays_table.c.id)
                 ).scalar_one()
@@ -466,18 +594,31 @@ async def import_holidays_xlsx(
                 action="holiday.bulk_imported",
                 entity_type="holiday",
                 entity_id=None,
-                after={"count": len(created_ids), "ids": created_ids},
+                after={
+                    "count": len(created_ids),
+                    "ids": created_ids,
+                    "skipped_count": len(skipped),
+                },
             )
-        rows = conn.execute(
-            select(
-                holidays_table.c.id,
-                holidays_table.c.tenant_id,
-                holidays_table.c.date,
-                holidays_table.c.name,
-                holidays_table.c.active,
-            ).where(holidays_table.c.id.in_(created_ids))
-        ).all() if created_ids else []
-    return [_to_holiday_response(r) for r in rows]
+        rows = (
+            conn.execute(
+                select(
+                    holidays_table.c.id,
+                    holidays_table.c.tenant_id,
+                    holidays_table.c.date,
+                    holidays_table.c.name,
+                    holidays_table.c.active,
+                ).where(holidays_table.c.id.in_(created_ids))
+            ).all()
+            if created_ids
+            else []
+        )
+    return HolidayImportResponse(
+        imported=[_to_holiday_response(r) for r in rows],
+        skipped=skipped,
+        imported_count=len(rows),
+        skipped_count=len(skipped),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -560,8 +701,10 @@ def create_approved_leave(
     engine = get_engine()
     with engine.begin() as conn:
         # Validate employee + leave type both belong to the tenant.
+        # BUG-027 — friendlier wording on the employee-id error so a
+        # non-developer reading the dialog understands what went wrong.
         ok_emp = conn.execute(
-            select(employees.c.id).where(
+            select(employees.c.id, employees.c.full_name).where(
                 employees.c.id == payload.employee_id,
                 employees.c.tenant_id == scope.tenant_id,
             )
@@ -569,10 +712,13 @@ def create_approved_leave(
         if ok_emp is None:
             raise HTTPException(
                 status_code=400,
-                detail="employee_id is not an employee in this tenant",
+                detail=(
+                    f"No employee with ID {payload.employee_id} exists for "
+                    f"this tenant. Pick the correct employee from the list."
+                ),
             )
         ok_lt = conn.execute(
-            select(leave_types.c.id).where(
+            select(leave_types.c.id, leave_types.c.name).where(
                 leave_types.c.id == payload.leave_type_id,
                 leave_types.c.tenant_id == scope.tenant_id,
             )
@@ -580,7 +726,38 @@ def create_approved_leave(
         if ok_lt is None:
             raise HTTPException(
                 status_code=400,
-                detail="leave_type_id is not a leave type in this tenant",
+                detail=(
+                    "Pick a leave type — the selected entry does not "
+                    "belong to this tenant."
+                ),
+            )
+
+        # BUG-047 — refuse overlapping leaves for the same employee.
+        # Two leave rows overlap when ``start_date <= other.end_date AND
+        # end_date >= other.start_date``. SQL-side check so two parallel
+        # requests can't both win a duplicate.
+        overlap = conn.execute(
+            select(
+                approved_leaves.c.id,
+                approved_leaves.c.start_date,
+                approved_leaves.c.end_date,
+            ).where(
+                approved_leaves.c.tenant_id == scope.tenant_id,
+                approved_leaves.c.employee_id == payload.employee_id,
+                approved_leaves.c.start_date <= payload.end_date,
+                approved_leaves.c.end_date >= payload.start_date,
+            )
+        ).first()
+        if overlap is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"This employee already has approved leave from "
+                    f"{overlap.start_date.isoformat()} to "
+                    f"{overlap.end_date.isoformat()}. Overlapping leave "
+                    f"is not allowed — edit or remove the existing entry "
+                    f"first."
+                ),
             )
 
         new_id = int(

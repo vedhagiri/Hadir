@@ -16,6 +16,29 @@ export class ApiError extends Error {
   }
 }
 
+
+// BUG-002 — unified error-to-string extractor. Every Maugood backend
+// endpoint returns errors as either a plain string ``detail`` or a
+// structured ``{field, message}`` dict (the validation pattern).
+// Callers across the frontend re-implement this same parse — this
+// helper folds it into one place so error wording stays consistent.
+export function extractApiError(err: unknown, fallback = "Something went wrong"): string {
+  if (err instanceof ApiError) {
+    const body = err.body as { detail?: unknown } | null;
+    const detail = body?.detail;
+    if (typeof detail === "string") return detail;
+    if (detail && typeof detail === "object") {
+      const d = detail as { message?: string; field?: string };
+      if (d.message) {
+        return d.field ? `${d.field}: ${d.message}` : d.message;
+      }
+    }
+    return `${fallback} (HTTP ${err.status})`;
+  }
+  if (err instanceof Error) return err.message || fallback;
+  return fallback;
+}
+
 export interface ApiRequest {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   // JSON by default. Pass a FormData to send multipart (the browser then

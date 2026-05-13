@@ -406,6 +406,8 @@ holidays = Table(
     ),
     Column("date", Date, nullable=False),
     Column("name", Text, nullable=False),
+    # BUG-021 — free-text description for the holiday import column.
+    Column("description", Text, nullable=True),
     Column("active", Boolean, nullable=False, server_default="true"),
     Column(
         "created_at",
@@ -2070,7 +2072,8 @@ delete_requests = Table(
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     ),
-    Column("reason", Text, nullable=False),
+    # Operator request — reason is optional. Was NOT NULL pre-0058.
+    Column("reason", Text, nullable=True),
     Column("status", Text, nullable=False, server_default="pending"),
     Column(
         "hr_decided_by",

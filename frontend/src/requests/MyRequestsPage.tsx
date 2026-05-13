@@ -9,7 +9,7 @@ import { Icon } from "../shell/Icon";
 import { NewRequestDrawer } from "./NewRequestDrawer";
 import { RequestDetailDrawer } from "./RequestDetailDrawer";
 import { StatusPill } from "./StatusPill";
-import { useRequests } from "./hooks";
+import { useMyRequests } from "./hooks";
 import type { RequestStatus, RequestType } from "./types";
 
 type StatusFilter = "all" | "open" | "approved" | "rejected" | "cancelled";
@@ -25,7 +25,7 @@ const STATUS_GROUPS: Record<StatusFilter, ReadonlyArray<RequestStatus>> = {
 
 export function MyRequestsPage() {
   const { t } = useTranslation();
-  const requests = useRequests();
+  const requests = useMyRequests();
   const [openDrawer, setOpenDrawer] = useState<"new" | null>(null);
   const [openRequestId, setOpenRequestId] = useState<number | null>(null);
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");

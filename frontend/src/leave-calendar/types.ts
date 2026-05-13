@@ -35,6 +35,19 @@ export interface HolidayCreateInput {
   name: string;
 }
 
+export interface HolidayImportSkipped {
+  date: string;
+  submitted_name: string;
+  existing_name: string;
+}
+
+export interface HolidayImportResponse {
+  imported: Holiday[];
+  skipped: HolidayImportSkipped[];
+  imported_count: number;
+  skipped_count: number;
+}
+
 export interface ApprovedLeave {
   id: number;
   tenant_id: number;

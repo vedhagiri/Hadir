@@ -439,9 +439,16 @@ function Chip({
   source_manager_id: number | null;
   onTogglePrimary?: () => void;
 }) {
+  // BUG-034 — better drag affordance: chip fades + flips cursor to
+  // "grabbing" while a drag is in flight; subtle hover lift so the
+  // operator sees the chip is interactive.
+  const [dragging, setDragging] = useState(false);
+  const [hover, setHover] = useState(false);
   return (
     <div
       draggable
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
       onDragStart={(e) => {
         const payload: DragPayload = {
           employee_id: chip.employee_id,
@@ -451,7 +458,9 @@ function Chip({
         };
         e.dataTransfer.setData(MIME, JSON.stringify(payload));
         e.dataTransfer.effectAllowed = "move";
+        setDragging(true);
       }}
+      onDragEnd={() => setDragging(false)}
       style={{
         display: "flex",
         alignItems: "center",
@@ -460,10 +469,16 @@ function Chip({
         background: chip.is_primary ? "var(--accent-soft)" : "var(--bg)",
         border: chip.is_primary
           ? "1px solid var(--accent-border)"
-          : "1px solid var(--border)",
+          : `1px solid ${hover ? "var(--accent-border, var(--text-secondary))" : "var(--border)"}`,
         borderRadius: "var(--radius-sm)",
-        cursor: "grab",
+        cursor: dragging ? "grabbing" : "grab",
         userSelect: "none",
+        opacity: dragging ? 0.45 : 1,
+        transform: hover && !dragging ? "translateY(-1px)" : "translateY(0)",
+        boxShadow:
+          hover && !dragging ? "0 2px 6px rgba(0,0,0,0.08)" : "none",
+        transition:
+          "opacity 0.12s ease, transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease",
       }}
       title={`${chip.employee_code} • ${chip.department_code}`}
     >

@@ -21,6 +21,7 @@ import {
   useCreateLeaveType,
   useDeleteApprovedLeave,
   useDeleteHoliday,
+  useDeleteLeaveType,
   useHolidays,
   useImportHolidaysXlsx,
   useLeaveTypes,
@@ -161,7 +162,26 @@ function LeaveTypesTab() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div>
+      {/* BUG-020 — title + button aligned in a header row instead of a
+          bare button stuck against the left edge. */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+        }}
+      >
+        <h3
+          style={{
+            margin: 0,
+            fontSize: 14,
+            fontWeight: 700,
+            color: "var(--text)",
+          }}
+        >
+          Leave types
+        </h3>
         <button
           type="button"
           onClick={() => setShowForm((v) => !v)}
@@ -179,6 +199,7 @@ function LeaveTypesTab() {
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 required
+                maxLength={32}
                 style={inputStyle}
               />
             </Field>
@@ -188,6 +209,7 @@ function LeaveTypesTab() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
+                maxLength={80}
                 style={inputStyle}
               />
             </Field>
@@ -203,7 +225,7 @@ function LeaveTypesTab() {
             </Field>
           </div>
           {error && <div style={errorBox}>{error}</div>}
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
             <button type="submit" disabled={create.isPending} style={btnPrimary}>
               {create.isPending ? "Saving…" : "Create"}
             </button>
@@ -217,6 +239,7 @@ function LeaveTypesTab() {
             <th style={th}>Name</th>
             <th style={th}>Paid</th>
             <th style={th}>Active</th>
+            <th style={th}></th>
           </tr>
         </thead>
         <tbody>
@@ -225,7 +248,7 @@ function LeaveTypesTab() {
           ))}
           {rows.length === 0 && (
             <tr>
-              <td colSpan={4} style={{ ...td, color: "var(--text-tertiary)", textAlign: "center" }}>
+              <td colSpan={5} style={{ ...td, color: "var(--text-tertiary)", textAlign: "center" }}>
                 None yet.
               </td>
             </tr>
@@ -239,6 +262,8 @@ function LeaveTypesTab() {
 
 function LeaveTypeRow({ row }: { row: LeaveType }) {
   const patch = usePatchLeaveType(row.id);
+  const del = useDeleteLeaveType();
+  const [delError, setDelError] = useState<string | null>(null);
   const onToggle = async (field: "is_paid" | "active") => {
     try {
       await patch.mutateAsync({ [field]: !row[field] });
@@ -246,12 +271,33 @@ function LeaveTypeRow({ row }: { row: LeaveType }) {
       // surfaced lazily in the toggle below
     }
   };
+  // BUG-043 — leave types had no delete. Confirm then DELETE; on 409
+  // (still referenced by approved_leaves) we surface the backend's
+  // friendly "deactivate instead" message inline.
+  const onDelete = async () => {
+    if (!confirm(`Delete leave type "${row.name}"? This cannot be undone.`)) {
+      return;
+    }
+    setDelError(null);
+    try {
+      await del.mutateAsync(row.id);
+    } catch (err) {
+      handleApi(err, setDelError, "Delete failed");
+    }
+  };
   return (
     <tr style={{ borderTop: "1px solid var(--border)" }}>
       <td style={{ ...td, fontFamily: "var(--font-mono)", fontSize: 12 }}>
         {row.code}
       </td>
-      <td style={td}>{row.name}</td>
+      <td style={td}>
+        {row.name}
+        {delError && (
+          <div style={{ marginTop: 4, color: "var(--danger-text)", fontSize: 11 }}>
+            {delError}
+          </div>
+        )}
+      </td>
       <td style={td}>
         <button
           type="button"
@@ -270,6 +316,17 @@ function LeaveTypeRow({ row }: { row: LeaveType }) {
           style={chipStyle(row.active)}
         >
           {row.active ? "active" : "inactive"}
+        </button>
+      </td>
+      <td style={{ ...td, textAlign: "right" }}>
+        <button
+          type="button"
+          onClick={() => void onDelete()}
+          disabled={del.isPending}
+          style={btnGhost}
+          aria-label={`Delete leave type ${row.name}`}
+        >
+          {del.isPending ? "Deleting…" : "Delete"}
         </button>
       </td>
     </tr>
@@ -311,13 +368,32 @@ function HolidaysTab() {
     }
   };
 
+  // BUG-025 — surface the imported / skipped counts so the operator
+  // sees whether a same-date file actually inserted anything.
+  const [importSummary, setImportSummary] = useState<string | null>(null);
   const onImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     e.target.value = "";
     if (!f) return;
     setError(null);
+    setImportSummary(null);
     try {
-      await importer.mutateAsync(f);
+      const res = await importer.mutateAsync(f);
+      const parts: string[] = [];
+      parts.push(
+        `${res.imported_count} imported`,
+      );
+      if (res.skipped_count > 0) {
+        const dates = res.skipped
+          .slice(0, 3)
+          .map((s) => s.date)
+          .join(", ");
+        const more = res.skipped_count > 3 ? `, +${res.skipped_count - 3} more` : "";
+        parts.push(
+          `${res.skipped_count} skipped (already exist: ${dates}${more})`,
+        );
+      }
+      setImportSummary(parts.join(" · "));
     } catch (err) {
       handleApi(err, setError, "Import failed");
     }
@@ -352,9 +428,29 @@ function HolidaysTab() {
           <input type="file" accept=".xlsx" hidden onChange={onImport} />
         </label>
       </div>
+      {/* BUG-025 — explicit import summary banner, replaces the old
+          silent same-date no-op. */}
+      {importSummary && (
+        <div
+          style={{
+            padding: "8px 12px",
+            border: "1px solid #0b6e4f55",
+            background: "#0b6e4f0d",
+            color: "#0b6e4f",
+            borderRadius: 8,
+            fontSize: 12.5,
+          }}
+        >
+          {importSummary}
+        </div>
+      )}
 
+      {/* BUG-022 / BUG-045 — Add button alignment. Place the button in
+          its own row, right-aligned, instead of wrapping it in a
+          <Field label=" ">. The phantom-label was pushing the button
+          below the inputs and made the form look uneven. */}
       <form onSubmit={onAdd} style={formStyle}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr 1fr", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 10 }}>
           <Field label="Date">
             <DatePicker
               value={date}
@@ -369,16 +465,17 @@ function HolidaysTab() {
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
+              maxLength={120}
               style={inputStyle}
             />
           </Field>
-          <Field label=" ">
-            <button type="submit" disabled={create.isPending} style={btnPrimary}>
-              {create.isPending ? "Saving…" : "Add"}
-            </button>
-          </Field>
         </div>
         {error && <div style={errorBox}>{error}</div>}
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
+          <button type="submit" disabled={create.isPending} style={btnPrimary}>
+            {create.isPending ? "Saving…" : "+ Add holiday"}
+          </button>
+        </div>
       </form>
 
       <table style={tableStyle}>
@@ -564,6 +661,7 @@ function ApprovedLeavesTab() {
               type="text"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
+              maxLength={500}
               style={inputStyle}
             />
           </Field>

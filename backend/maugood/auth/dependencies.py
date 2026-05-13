@@ -259,9 +259,16 @@ def current_user(
         )
 
     with engine.begin() as conn:
-        touch_session(
+        new_expiry = touch_session(
             conn, session_row.id, idle_minutes=settings.session_idle_minutes
         )
+
+    # Stash the freshly-slid expiry on request.state so the auth router
+    # can return it on /api/auth/me (the frontend needs it for the
+    # session-expiry warning modal countdown). Side-effecting on
+    # request.state is consistent with how the tenant scope flows.
+    request.state.session_expires_at = new_expiry
+    request.state.session_idle_minutes = settings.session_idle_minutes
 
     # Refresh the cookie's Max-Age so the browser keeps the session alive
     # alongside the DB row. Same attributes as on login; Secure still off
