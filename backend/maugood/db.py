@@ -1722,6 +1722,14 @@ cameras = Table(
     Column(
         "detection_enabled", Boolean, nullable=False, server_default="true"
     ),
+    # Migration 0049 — per-camera clip-recording gate. When False the
+    # capture pipeline continues (RTSP read, detection, tracking,
+    # detection_events) but no video is written to disk and no
+    # person_clips row is inserted. Default true preserves existing
+    # behaviour for all pre-migration cameras.
+    Column(
+        "clip_recording_enabled", Boolean, nullable=False, server_default="true"
+    ),
     # P28.5b: per-camera capture knob bag. Defaults match the
     # prototype's tested constants. Schema is open by design — the
     # set of knobs evolves between phases without a migration. The
@@ -2144,6 +2152,12 @@ person_clips = Table(
         nullable=False,
         server_default="0",
     ),
+    # Pipeline metadata added in migration 0048
+    Column("encoding_start_at", DateTime(timezone=True), nullable=True),
+    Column("encoding_end_at", DateTime(timezone=True), nullable=True),
+    Column("fps_recorded", Float, nullable=True),
+    Column("resolution_w", Integer, nullable=True),
+    Column("resolution_h", Integer, nullable=True),
     Column(
         "created_at",
         DateTime(timezone=True),
@@ -2162,6 +2176,54 @@ person_clips = Table(
         "employee_id",
         "created_at",
     ),
+)
+
+
+# Per-use-case face-matching results for a person clip. One row per
+# (person_clip_id, use_case). UC1=yolo+face pipeline, UC2=insightface with
+# explicit crop storage, UC3=insightface direct matching.
+clip_processing_results = Table(
+    "clip_processing_results",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "person_clip_id",
+        Integer,
+        ForeignKey("person_clips.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column("use_case", Text, nullable=False),
+    Column("status", Text, nullable=False, server_default="pending"),
+    Column("started_at", DateTime(timezone=True), nullable=True),
+    Column("ended_at", DateTime(timezone=True), nullable=True),
+    Column("duration_ms", Integer, nullable=True),
+    Column("face_extract_duration_ms", Integer, nullable=True),
+    Column("match_duration_ms", Integer, nullable=True),
+    Column("face_crop_count", Integer, nullable=False, server_default="0"),
+    Column(
+        "matched_employees",
+        JSONB,
+        nullable=False,
+        server_default="[]",
+    ),
+    Column("unknown_count", Integer, nullable=False, server_default="0"),
+    Column("match_details", JSONB, nullable=True),
+    Column("error", Text, nullable=True),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    Index("ix_cpr_tenant_clip", "tenant_id", "person_clip_id"),
 )
 
 
@@ -2196,6 +2258,17 @@ face_crops = Table(
     Column("event_timestamp", Text, nullable=False),
     Column("face_index", Integer, nullable=False, server_default="1"),
     Column("file_path", Text, nullable=True),
+    # Migration 0050 — which UC pipeline created this crop (uc1 / uc2 / uc3).
+    # NULL for rows written before this column was added.
+    Column("use_case", Text, nullable=True),
+    # Migration 0051 — matched employee, NULL = unknown person.
+    # ON DELETE SET NULL so deleting an employee leaves crop rows intact.
+    Column(
+        "employee_id",
+        Integer,
+        ForeignKey("employees.id", ondelete="SET NULL"),
+        nullable=True,
+    ),
     Column("quality_score", Float, nullable=False, server_default="0"),
     Column("sharpness", Float, nullable=False, server_default="0"),
     Column("detection_score", Float, nullable=False, server_default="0"),
@@ -2209,6 +2282,7 @@ face_crops = Table(
     ),
     Index("ix_face_crops_tenant_camera_created", "tenant_id", "camera_id", "created_at"),
     Index("ix_face_crops_tenant_clip", "tenant_id", "person_clip_id"),
+    Index("ix_face_crops_employee_id", "tenant_id", "employee_id"),
 )
 
 

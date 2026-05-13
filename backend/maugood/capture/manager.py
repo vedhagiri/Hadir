@@ -235,6 +235,7 @@ class CaptureManager:
         tracker_config: Optional[dict[str, Any]] = None,
         detection_config: Optional[dict[str, Any]] = None,
         detection_enabled: bool = True,
+        clip_recording_enabled: bool = True,
         schema: Optional[str] = None,
     ) -> bool:
         """Start a worker for ``(tenant_id, camera_id)`` with the given
@@ -276,6 +277,7 @@ class CaptureManager:
                 tracker_config=tracker_config,
                 detection_config=detection_config,
                 detection_enabled=detection_enabled,
+                clip_recording_enabled=clip_recording_enabled,
             )
             worker.start()
         except Exception as exc:  # noqa: BLE001
@@ -493,6 +495,7 @@ class CaptureManager:
                             cameras_table.c.rtsp_url_encrypted,
                             cameras_table.c.worker_enabled,
                             cameras_table.c.detection_enabled,
+                            cameras_table.c.clip_recording_enabled,
                             cameras_table.c.capture_config,
                         ).where(
                             cameras_table.c.tenant_id == tenant_id,
@@ -541,6 +544,7 @@ class CaptureManager:
             tracker_config=tracker_cfg,
             detection_config=detection_cfg,
             detection_enabled=bool(cam_row.detection_enabled),
+            clip_recording_enabled=bool(cam_row.clip_recording_enabled),
             schema=schema,
         )
 
@@ -817,6 +821,9 @@ class CaptureManager:
                 tracker_config=tracker_config,
                 detection_config=detection_config,
                 detection_enabled=bool(getattr(row, "detection_enabled", True)),
+                clip_recording_enabled=bool(
+                    getattr(row, "clip_recording_enabled", True)
+                ),
                 schema=schema,
             )
             plain_url = ""  # noqa: F841
@@ -862,6 +869,7 @@ class CaptureManager:
             cameras_table.c.name,
             cameras_table.c.rtsp_url_encrypted,
             cameras_table.c.detection_enabled,
+            cameras_table.c.clip_recording_enabled,
             cameras_table.c.capture_config,
         ).where(
             cameras_table.c.tenant_id == tenant_id,
@@ -1069,12 +1077,14 @@ class CaptureManager:
 
         tenants = self._discover_tenants()
         # desired[(t, c)] = (name, plain_url, capture_config, tracker_config,
-        #                    detection_config, schema)
+        #                    detection_config, detection_enabled,
+        #                    clip_recording_enabled, schema)
         desired: dict[
             WorkerKey,
             tuple[
                 str, str, dict[str, Any],
-                dict[str, Any], dict[str, Any], Optional[str],
+                dict[str, Any], dict[str, Any],
+                bool, bool, Optional[str],
             ],
         ] = {}
         for tenant_id, schema in tenants:
@@ -1119,6 +1129,7 @@ class CaptureManager:
                     cam_name, plain_url, cam_config,
                     tenant_tracker, tenant_detection,
                     bool(getattr(row, "detection_enabled", True)),
+                    bool(getattr(row, "clip_recording_enabled", True)),
                     schema,
                 )
 
@@ -1150,6 +1161,7 @@ class CaptureManager:
                 tenant_tracker,
                 tenant_detection,
                 desired_detection_enabled,
+                desired_clip_recording_enabled,
                 schema,
             ) = desired[key]
             tid, cid = key
@@ -1168,6 +1180,7 @@ class CaptureManager:
                     tracker_config=tenant_tracker,
                     detection_config=tenant_detection,
                     detection_enabled=desired_detection_enabled,
+                    clip_recording_enabled=desired_clip_recording_enabled,
                     schema=schema,
                 ):
                     report["started"] += 1
@@ -1246,6 +1259,32 @@ class CaptureManager:
                             },
                             "after": {
                                 "detection_enabled": desired_detection_enabled
+                            },
+                        },
+                    )
+
+                # Migration 0049: clip_recording_enabled drift. Hot-swaps
+                # without restart so a UI flip takes effect on the next
+                # reader frame. When flipping from True to False while a
+                # clip is actively recording, the worker finalizes the
+                # current clip immediately.
+                current_clip_recording = existing.is_clip_recording_enabled()
+                if current_clip_recording != desired_clip_recording_enabled:
+                    existing.update_clip_recording_enabled(
+                        desired_clip_recording_enabled
+                    )
+                    report["config_updated"] += 1
+                    self._audit_worker_event(
+                        tenant_id=tid,
+                        schema=schema,
+                        action="capture.worker.clip_recording_enabled_updated",
+                        entity_id=str(cid),
+                        payload={
+                            "before": {
+                                "clip_recording_enabled": current_clip_recording
+                            },
+                            "after": {
+                                "clip_recording_enabled": desired_clip_recording_enabled
                             },
                         },
                     )

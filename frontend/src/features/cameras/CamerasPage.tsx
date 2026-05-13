@@ -64,6 +64,12 @@ export function CamerasPage() {
       patch: { detection_enabled: !cam.detection_enabled },
     });
   };
+  const toggleClipRecordingEnabled = (cam: Camera) => {
+    patch.mutate({
+      id: cam.id,
+      patch: { clip_recording_enabled: !cam.clip_recording_enabled },
+    });
+  };
 
   return (
     <>
@@ -105,13 +111,14 @@ export function CamerasPage() {
               <th>Worker</th>
               <th>Display</th>
               <th>Detection</th>
+              <th>Recording</th>
               <th style={{ textAlign: "right" }}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {list.isLoading && (
               <tr>
-                <td colSpan={11} className="text-sm text-dim" style={{ padding: 16 }}>
+                <td colSpan={12} className="text-sm text-dim" style={{ padding: 16 }}>
                   Loading…
                 </td>
               </tr>
@@ -119,7 +126,7 @@ export function CamerasPage() {
             {list.isError && (
               <tr>
                 <td
-                  colSpan={11}
+                  colSpan={12}
                   className="text-sm"
                   style={{ padding: 16, color: "var(--danger-text)" }}
                 >
@@ -199,6 +206,13 @@ export function CamerasPage() {
                     title="Click to toggle face detection on/off (worker keeps streaming)"
                   />
                 </td>
+                <td>
+                  <Switch
+                    checked={cam.clip_recording_enabled}
+                    onChange={() => toggleClipRecordingEnabled(cam)}
+                    title="Click to toggle person-clip recording on/off (detection keeps running)"
+                  />
+                </td>
                 <td style={{ textAlign: "right" }}>
                   <RowActionsMenu
                     onPreview={() => setPreviewTarget(cam)}
@@ -211,7 +225,7 @@ export function CamerasPage() {
             })}
             {list.data && list.data.items.length === 0 && !list.isLoading && (
               <tr>
-                <td colSpan={11} className="text-sm text-dim" style={{ padding: 16 }}>
+                <td colSpan={12} className="text-sm text-dim" style={{ padding: 16 }}>
                   No cameras yet. Add one to see its preview frame.
                 </td>
               </tr>

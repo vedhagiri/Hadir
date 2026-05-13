@@ -194,12 +194,15 @@ class Settings(BaseSettings):
         return [item.strip() for item in raw.split(",") if item.strip()]
 
     # --- Person clips -------------------------------------------------------
-    # Root directory for person clip videos. Each clip is stored under
-    # ``{root}/camera_{id}/{YYYY-MM-DD}_{HH-MM-SS}.mp4`` and Fernet-encrypted
-    # at rest using the same key as face crops. This path is NOT under /data
-    # (which maps to ./data/faces on the host) — the docker-compose mounts
-    # ./data/person_clips → /person_clips separately.
+    # Root directory for person clip videos.
+    # New format (0048+): ``{clip_storage_root}/{YYYYMMDD}/camera_{id}/{filename}.mp4``
+    # Filename: ``{YYYYMMDD}-{start_HHMMSS}-{end_HHMMSS}_{camera_id}.mp4``
+    # Legacy path kept for backward-compat with clips written before 0048.
     person_clips_storage_path: str = "/person_clips"
+    # New root used by ClipWorker for all clips written after migration 0048.
+    clip_storage_root: str = "/clips"
+    # Number of parallel workers for batch face-matching reprocess.
+    clip_processing_workers: int = 2
 
     # --- Face crops ---------------------------------------------------------
     # Root directory for face crop images extracted from person clips. Each

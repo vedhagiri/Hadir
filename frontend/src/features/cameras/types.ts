@@ -40,6 +40,10 @@ export interface Camera {
   // keeps reading frames + driving live preview but the analyzer
   // skips the expensive detect() call and writes no detection_events.
   detection_enabled: boolean;
+  // Migration 0049 — per-camera gate for person-clip video recording.
+  // When disabled, the reader keeps reading + detection keeps running,
+  // but no video files are written and no person_clips rows are created.
+  clip_recording_enabled: boolean;
   capture_config: CaptureConfig;
   created_at: string;
   last_seen_at: string | null;
@@ -70,6 +74,7 @@ export interface CameraCreateInput {
   worker_enabled: boolean;
   display_enabled: boolean;
   detection_enabled: boolean;
+  clip_recording_enabled: boolean;
   capture_config: CaptureConfig;
   brand?: string | null;
 }
@@ -83,6 +88,7 @@ export interface CameraPatchInput {
   worker_enabled?: boolean;
   display_enabled?: boolean;
   detection_enabled?: boolean;
+  clip_recording_enabled?: boolean;
   capture_config?: CaptureConfig;
   brand?: string | null;
 }

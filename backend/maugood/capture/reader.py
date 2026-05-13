@@ -97,7 +97,22 @@ VideoCaptureFactory = Callable[[str], FrameSource]
 def default_capture_factory(url: str) -> FrameSource:
     """Production: open an OpenCV VideoCapture with sensible timeouts."""
 
+    import os  # noqa: PLC0415
+
     import cv2  # noqa: PLC0415
+
+    # Force TCP transport for RTSP streams before opening the capture.
+    # OpenCV's default is UDP. A single dropped UDP packet corrupts every
+    # H.264 P-frame that references the affected macroblock until the next
+    # I-frame — visible as green/gray shifting blocks in the live preview.
+    # OPENCV_FFMPEG_CAPTURE_OPTIONS is read by the FFMPEG backend at
+    # VideoCapture construction time; setting it after open has no effect.
+    if url.lower().startswith(("rtsp://", "rtsps://")):
+        current = os.environ.get("OPENCV_FFMPEG_CAPTURE_OPTIONS", "")
+        if "rtsp_transport" not in current:
+            os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
+                current + (";rtsp_transport;tcp" if current else "rtsp_transport;tcp")
+            )
 
     cap = cv2.VideoCapture(url)
     if hasattr(cv2, "CAP_PROP_OPEN_TIMEOUT_MSEC"):
@@ -237,6 +252,7 @@ class CaptureWorker:
         tracker_config: Optional[dict] = None,
         detection_config: Optional[dict] = None,
         detection_enabled: bool = True,
+        clip_recording_enabled: bool = True,
     ) -> None:
         self._engine = engine
         self._scope = scope
@@ -262,6 +278,14 @@ class CaptureWorker:
         # worker.
         self._detection_enabled_lock = threading.Lock()
         self._detection_enabled = bool(detection_enabled)
+
+        # Migration 0049 — per-camera clip-recording gate. When False
+        # the reader keeps reading + detection keeps running, but
+        # _manage_clip_recording is a no-op (no frames written, no
+        # ClipWorker submission). Hot-swapped via
+        # ``update_clip_recording_enabled`` without a worker restart.
+        self._clip_recording_enabled_lock = threading.Lock()
+        self._clip_recording_enabled: bool = bool(clip_recording_enabled)
 
         # P28.5c: tenant-level tracker + detection config snapshots.
         # Kept under their own locks so the manager's reconcile tick
@@ -363,6 +387,12 @@ class CaptureWorker:
             self._config.consecutive_no_person_threshold
         )
 
+        # Active IoU track count — set by the analyzer thread after each
+        # tracker.update() call, read by the reader thread to determine
+        # whether the tracker still believes a person is present even
+        # when the current per-cycle detection missed them.
+        self._active_track_count: int = 0
+
         # Clip recording state. Frames are written to a temp directory on
         # disk immediately as they arrive (native FPS, no subsampling) so
         # memory use stays bounded. The temp dir is passed to ClipWorker
@@ -372,6 +402,7 @@ class CaptureWorker:
         self._clip_first_ts: float = 0.0    # wall-clock of first frame in clip
         self._clip_last_ts: float = 0.0     # wall-clock of most recent frame
         self._clip_recording: bool = False
+        self._clip_has_had_person: bool = False
         self._clip_start_ts: float = 0.0
         self._clip_max_person_count: int = 0
         # P37 — matched employee IDs accumulated during clip recording.
@@ -624,6 +655,48 @@ class CaptureWorker:
                 new,
             )
 
+    def is_clip_recording_enabled(self) -> bool:
+        """Read the live clip-recording toggle flag.
+
+        Migration 0049: when False, _check_and_record_clip is a no-op
+        (the reader keeps reading + detection keeps running, but no
+        video frames are written to disk and no person_clips rows are
+        created). Hot-swapped via ``update_clip_recording_enabled``
+        without a worker restart.
+        """
+
+        with self._clip_recording_enabled_lock:
+            return bool(self._clip_recording_enabled)
+
+    def update_clip_recording_enabled(self, enabled: bool) -> None:
+        """Hot-reload entry point for the per-camera clip-recording toggle.
+
+        The reconcile loop diffs ``cameras.clip_recording_enabled`` and
+        calls this when an operator flips the switch in the UI. No
+        worker restart, no dropped frames — the next reader frame
+        observes the new value via ``is_clip_recording_enabled``.
+
+        When flipping from enabled to disabled while a clip is actively
+        recording, the current clip is finalized immediately so no
+        partial clip is orphaned.
+        """
+
+        new = bool(enabled)
+        with self._clip_recording_enabled_lock:
+            old = self._clip_recording_enabled
+            self._clip_recording_enabled = new
+        if old != new:
+            if not new and self._clip_recording:
+                self._finalize_current_clip()
+            logger.info(
+                "capture worker clip_recording_enabled updated: tenant=%s "
+                "camera_id=%s old=%s new=%s",
+                self._scope.tenant_id,
+                self.camera_id,
+                old,
+                new,
+            )
+
     def update_detection_config(self, new_config: dict) -> None:
         """Hot-reload entry point for tenant-level detection_config
         changes. Forwards to the analyzer's ``update_config`` which
@@ -702,6 +775,13 @@ class CaptureWorker:
         when the reader moves on.
         """
 
+        # Migration 0049: per-camera clip-recording gate. When False
+        # the reader keeps reading + detection keeps running, but no
+        # video frames are written to disk and no person_clips rows
+        # are created. Hot-swapped via update_clip_recording_enabled.
+        if not self.is_clip_recording_enabled():
+            return
+
         from maugood.config import get_settings as _gs  # noqa: PLC0415
         settings = _gs()
         if not settings.clip_save_enabled:
@@ -710,12 +790,21 @@ class CaptureWorker:
         with self._person_present_lock:
             person_here = self._person_present
             face_count = self._face_count
+            active_tracks = self._active_track_count
 
         now = time.time()
 
-        if person_here:
+        # Combined presence signal: the per-cycle detection result
+        # OR the tracker's active track count. The tracker provides
+        # temporal continuity — a briefly occluded person keeps their
+        # track alive for idle_timeout_s (~2-3 s), preventing premature
+        # clip finalization when per-cycle detection misses them.
+        has_person = person_here or (active_tracks > 0)
+
+        if has_person:
             # Person detected — update last-seen timestamp.
             self._last_person_seen_ts = now
+            self._clip_has_had_person = True
 
             if not self._clip_recording:
                 # Start new clip: create a temp directory for frame files.
@@ -723,6 +812,7 @@ class CaptureWorker:
                     prefix="maugood_clip_"
                 )
                 self._clip_recording = True
+                self._clip_has_had_person = True
                 self._clip_start_ts = now
                 self._clip_first_ts = now
                 self._clip_last_ts = now
@@ -789,6 +879,8 @@ class CaptureWorker:
         """
 
         self._clip_recording = False
+        had_person = self._clip_has_had_person
+        self._clip_has_had_person = False
         tmpdir = self._clip_tmpdir
         self._clip_tmpdir = None
         frame_count = self._clip_frame_idx
@@ -796,9 +888,26 @@ class CaptureWorker:
         first_ts = self._clip_first_ts
         last_ts = self._clip_last_ts
 
+        if not had_person and tmpdir is not None:
+            # Clip recorded zero frames with a confirmed person —
+            # likely a false-positive detection trigger. Discard
+            # the temp dir without submitting to ClipWorker.
+            logger.debug(
+                "clip discarded (no person): camera=%s frames=%d",
+                self.camera_id,
+                frame_count,
+            )
+            try:
+                tmpdir.cleanup()
+            except Exception:  # noqa: BLE001
+                pass
+            return
+
         if frame_count >= 3 and tmpdir is not None:
             with self._metadata_lock:
                 camera_fps = self._detected_metadata.get("fps") or 25.0
+                resolution_w = self._detected_metadata.get("resolution_w")
+                resolution_h = self._detected_metadata.get("resolution_h")
             with self._clip_matched_ids_lock:
                 matched_ids = sorted(self._clip_matched_employee_ids)
                 self._clip_matched_employee_ids.clear()
@@ -811,6 +920,8 @@ class CaptureWorker:
                 "person_count": max(self._clip_max_person_count, 0),
                 "fps": float(camera_fps),
                 "matched_employees": matched_ids,
+                "resolution_w": resolution_w,
+                "resolution_h": resolution_h,
             }
             self._clip_worker.submit_clip(clip_data)
             logger.debug(
@@ -1084,6 +1195,14 @@ class CaptureWorker:
                 [d.bbox for d in detections], now
             )
 
+            # Publish the tracker's live track count for the clip-
+            # recording logic to read. The tracker provides temporal
+            # continuity — a briefly occluded person keeps their track
+            # alive even when per-cycle detection misses them, so the
+            # clip doesn't get prematurely finalized.
+            with self._person_present_lock:
+                self._active_track_count = self._tracker.active_tracks
+
             # Pre-match each detection against the matcher so (a) the
             # cached boxes get accurate labels and (b) emit() doesn't
             # have to re-run the matcher for new tracks.
@@ -1226,14 +1345,13 @@ class CaptureWorker:
             with self._cached_boxes_lock:
                 boxes = list(self._cached_boxes)
 
+            # Always copy: OpenCV's cap.read() reuses the same buffer on the
+            # next call, so if encode_jpeg is still running when cap.read()
+            # fires, the bottom of the frame gets overwritten and produces
+            # gray/corrupted pixels in the MJPEG stream.
+            preview = frame_bgr.copy()
             if boxes:
-                # ``annotate_frame`` mutates in place; we don't want
-                # to overwrite the frame the analyzer is about to read,
-                # so we copy first.
-                preview = frame_bgr.copy()
                 annotate_frame(preview, boxes)
-            else:
-                preview = frame_bgr
 
             jpeg = encode_jpeg(preview, quality=self._config.preview_jpeg_quality)
             if jpeg is None:

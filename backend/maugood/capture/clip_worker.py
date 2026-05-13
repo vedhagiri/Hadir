@@ -13,11 +13,20 @@ Why ffmpeg?
     unplayable in browsers. ffmpeg with ``libx264`` always produces
     proper H.264 MP4s with correct metadata.
 
-Storage structure::
+Storage structure (post-migration-0048)::
 
-    /person_clips/
-        camera_{id}/
-            {YYYY-MM-DD}_{HH-MM-SS}.mp4
+    /clips/
+        {YYYYMMDD}/
+            camera_{id}/
+                {YYYYMMDD}-{start_HHMMSS}-{end_HHMMSS}_{camera_id}.mp4
+
+Example::
+
+    /clips/20260512/camera_1/20260512-130200-130512_1.mp4
+
+Legacy clips written before migration 0048 remain at their original
+path (``person_clips_storage_path`` root) — they are still served
+correctly because ``file_path`` in the DB row is absolute.
 """
 
 from __future__ import annotations
@@ -42,6 +51,7 @@ logger = logging.getLogger(__name__)
 # Minimum frames required for a valid clip. Fewer than this and the
 # video would be too short to decode meaningfully in a browser.
 _MIN_CLIP_FRAMES = 3
+
 
 class ClipWorker:
     """Dedicated thread for finalizing person clips asynchronously.
@@ -96,6 +106,10 @@ class ClipWorker:
 
     def is_alive(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
+
+    def queue_size(self) -> int:
+        """Return the number of clips waiting in the queue."""
+        return self._queue.qsize()
 
     # ------------------------------------------------------------------
     # Public: submit a clip for finalization
@@ -167,6 +181,8 @@ class ClipWorker:
         camera_fps = float(clip_data.get("fps", 25.0))
         person_count = int(clip_data.get("person_count", 0))
         matched_employees: list[int] = clip_data.get("matched_employees", [])
+        resolution_w: Optional[int] = clip_data.get("resolution_w")
+        resolution_h: Optional[int] = clip_data.get("resolution_h")
 
         try:
             if tmpdir is None or frame_count < _MIN_CLIP_FRAMES:
@@ -176,36 +192,38 @@ class ClipWorker:
                 )
                 return
 
-            # Compute actual FPS from the real wall-clock timestamps so
+            # Compute actual FPS from real wall-clock timestamps so
             # playback duration exactly matches the recorded duration.
-            # Example: 7500 frames recorded over 300 s → fps = 25.0 →
-            # MP4 plays for 7500/25 = 300 s. Using camera-reported FPS
-            # here would be wrong when the delivery rate differed from
-            # the RTSP header value.
             duration = last_ts - first_ts
             if duration > 0.5 and frame_count >= 2:
                 actual_fps = frame_count / duration
-                actual_fps = max(0.5, min(actual_fps, 120.0))  # sane clamp
+                actual_fps = max(0.5, min(actual_fps, 120.0))
             else:
                 actual_fps = camera_fps
 
             clip_start_dt = datetime.fromtimestamp(first_ts, tz=timezone.utc)
             clip_end_dt = datetime.fromtimestamp(last_ts, tz=timezone.utc)
 
+            # --- New storage layout (post-0048) ----------------------------
+            # /clips/{YYYYMMDD}/camera_{id}/{YYYYMMDD}-{start_HHMMSS}-{end_HHMMSS}_{camera_id}.mp4
+            date_str = clip_start_dt.strftime("%Y%m%d")
+            start_hms = clip_start_dt.strftime("%H%M%S")
+            end_hms = clip_end_dt.strftime("%H%M%S")
+            filename = f"{date_str}-{start_hms}-{end_hms}_{self._camera_id}.mp4"
+
             clip_dir = (
-                Path(settings.person_clips_storage_path)
+                Path(settings.clip_storage_root)
+                / date_str
                 / f"camera_{self._camera_id}"
             )
-            start_dt = datetime.fromtimestamp(start_ts, tz=timezone.utc)
-            filename = f"{start_dt.strftime('%Y-%m-%d_%H-%M-%S')}.mp4"
             file_path = clip_dir / filename
             thumb_path = file_path.with_suffix(".thumb.jpg")
 
+            encoding_start_at = datetime.now(timezone.utc)
             filesize = 0
             try:
                 clip_dir.mkdir(parents=True, exist_ok=True)
 
-                # Frames are already in tmpdir — encode directly.
                 plain_bytes = self._encode_from_tmpdir(
                     tmpdir_path=tmpdir.name,
                     fps=actual_fps,
@@ -213,12 +231,12 @@ class ClipWorker:
                 if plain_bytes is None:
                     return
 
+                encoding_end_at = datetime.now(timezone.utc)
+
                 encrypted = encrypt_bytes(plain_bytes)
                 file_path.write_bytes(encrypted)
 
                 # Thumbnail: first frame already on disk.
-                # Use a glob so this works regardless of digit-width format
-                # (reader writes 8-digit, keep compatible with both).
                 thumb_srcs = sorted(Path(tmpdir.name).glob("frame_*.jpg"))
                 if thumb_srcs:
                     thumb_encrypted = encrypt_bytes(thumb_srcs[0].read_bytes())
@@ -259,6 +277,11 @@ class ClipWorker:
                             frame_count=frame_count,
                             person_count=person_count,
                             matched_employees=matched_employees,
+                            encoding_start_at=encoding_start_at,
+                            encoding_end_at=encoding_end_at,
+                            fps_recorded=round(actual_fps, 2),
+                            resolution_w=int(resolution_w) if resolution_w else None,
+                            resolution_h=int(resolution_h) if resolution_h else None,
                         )
                     )
                     clip_id = (  # type: ignore[arg-type]
@@ -305,13 +328,6 @@ class ClipWorker:
 
         tmp_output = Path(tmpdir_path) / "output.mp4"
 
-        # -framerate: actual FPS derived from real wall-clock timestamps.
-        #   This is the key to correct playback duration: if 7500 frames
-        #   were captured over 300 s, fps=25 → MP4 plays for 300 s.
-        # -pattern_type glob -i '*.jpg': reads frame_NNNNNN.jpg in order.
-        # -c:v libx264 / -pix_fmt yuv420p: maximum browser compatibility.
-        # -crf 18: visually lossless at reasonable file size.
-        # -movflags +faststart: moov atom at front for browser streaming.
         cmd = [
             "ffmpeg", "-y",
             "-framerate", f"{fps:.6f}",

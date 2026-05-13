@@ -3,11 +3,24 @@ import type { UseQueryResult } from "@tanstack/react-query";
 
 import { api } from "../../api/client";
 import type { Camera } from "../cameras/types";
-import type { PersonClipFilters, PersonClipListResponse, PersonClipStats, ReprocessFaceMatchResponse, ReprocessFaceMatchStatus } from "./types";
+import type {
+  ClipProcessingResultsResponse,
+  FaceCropListResponse,
+  PersonClipFilters,
+  PersonClipListResponse,
+  PersonClipStats,
+  ReprocessFaceMatchRequest,
+  ReprocessFaceMatchResponse,
+  ReprocessFaceMatchStatus,
+  SingleClipReprocessRequest,
+  SingleClipReprocessResponse,
+  SystemStatsResponse,
+} from "./types";
 
 const LIST_KEY = ["person-clips", "list"] as const;
 const STATS_KEY = ["person-clips", "stats"] as const;
 const REPROCESS_STATUS_KEY = ["person-clips", "reprocess-status"] as const;
+const SYSTEM_STATS_KEY = ["person-clips", "system-stats"] as const;
 
 export function usePersonClips(
   filters: PersonClipFilters,
@@ -34,6 +47,70 @@ export function usePersonClipStats(): UseQueryResult<PersonClipStats, Error> {
     queryKey: STATS_KEY,
     queryFn: () => api<PersonClipStats>("/api/person-clips/stats"),
     staleTime: 30 * 1000,
+  });
+}
+
+export function useClipProcessingResults(
+  clipId: number | null,
+  pollWhileProcessing = false,
+): UseQueryResult<ClipProcessingResultsResponse, Error> {
+  return useQuery({
+    queryKey: ["person-clips", "processing-results", clipId],
+    queryFn: () => api<ClipProcessingResultsResponse>(`/api/person-clips/${clipId}/processing-results`),
+    enabled: clipId !== null,
+    staleTime: 5 * 1000,
+    refetchInterval: pollWhileProcessing
+      ? (query) => {
+          const data = query.state.data;
+          if (!data) return 2000;
+          const hasInProgress = data.results.some(
+            (r) => r.status === "processing" || r.status === "pending",
+          );
+          return hasInProgress ? 2000 : false;
+        }
+      : false,
+    refetchIntervalInBackground: false,
+  });
+}
+
+export function useClipFaceCrops(
+  clipId: number | null,
+  useCase: string | null = null,
+): UseQueryResult<FaceCropListResponse, Error> {
+  const path = useCase
+    ? `/api/person-clips/${clipId}/face-crops?use_case=${useCase}`
+    : `/api/person-clips/${clipId}/face-crops`;
+  return useQuery({
+    queryKey: ["person-clips", "face-crops", clipId, useCase],
+    queryFn: () => api<FaceCropListResponse>(path),
+    enabled: clipId !== null,
+    staleTime: 10 * 1000,
+  });
+}
+
+export function useSingleClipReprocess(clipId: number | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (req: SingleClipReprocessRequest) => {
+      return api<SingleClipReprocessResponse>(`/api/person-clips/${clipId}/reprocess`, {
+        method: "POST",
+        body: req,
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["person-clips", "processing-results", clipId] });
+      qc.invalidateQueries({ queryKey: ["person-clips", "face-crops", clipId] });
+    },
+  });
+}
+
+export function useSystemStats(): UseQueryResult<SystemStatsResponse, Error> {
+  return useQuery({
+    queryKey: SYSTEM_STATS_KEY,
+    queryFn: () => api<SystemStatsResponse>("/api/person-clips/system-stats"),
+    refetchInterval: 5_000,
+    refetchIntervalInBackground: false,
+    staleTime: 4_000,
   });
 }
 
@@ -80,14 +157,15 @@ export function useCameraOptions(): UseQueryResult<{ items: Camera[] }, Error> {
 export function useReprocessFaceMatch() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (mode: "all" | "skip_existing") => {
+    mutationFn: async (req: ReprocessFaceMatchRequest) => {
       return api<ReprocessFaceMatchResponse>("/api/person-clips/reprocess-face-match", {
         method: "POST",
-        body: { mode },
+        body: req,
       });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: REPROCESS_STATUS_KEY });
+      qc.invalidateQueries({ queryKey: SYSTEM_STATS_KEY });
     },
   });
 }

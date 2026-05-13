@@ -53,6 +53,10 @@ class CameraOut(BaseModel):
     # written. Default True (current behaviour). See
     # docs/phases/cameras-detection-toggle.md.
     detection_enabled: bool
+    # Migration 0049 — when False the capture pipeline keeps running
+    # (detection, tracking, events) but no video clip is written to
+    # disk and no person_clips row is inserted.
+    clip_recording_enabled: bool = True
     capture_config: CaptureConfig
     created_at: datetime
     last_seen_at: Optional[datetime] = None
@@ -88,6 +92,7 @@ class CameraCreateIn(BaseModel):
     worker_enabled: bool = True
     display_enabled: bool = True
     detection_enabled: bool = True
+    clip_recording_enabled: bool = True
     capture_config: CaptureConfig = Field(default_factory=CaptureConfig)
     # Optional brand tag. The frontend offers a curated dropdown
     # (Samsung, Hikvision, Dahua, CP Plus, Axis, Panasonic, Others)
@@ -109,6 +114,7 @@ class CameraPatchIn(BaseModel):
     worker_enabled: Optional[bool] = None
     display_enabled: Optional[bool] = None
     detection_enabled: Optional[bool] = None
+    clip_recording_enabled: Optional[bool] = None
     # PATCH expects a complete CaptureConfig when present (UI sends
     # the whole bag). A future API version could accept partial
     # updates by switching to a dedicated CaptureConfigPatch model.
