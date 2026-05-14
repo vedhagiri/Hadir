@@ -85,7 +85,33 @@ def _resolve_employee_names(conn, scope: TenantScope, all_matched_ids: set[int])
     return {r.id: r.full_name for r in rows}
 
 
-def _row_to_out(row, name_map: dict[int, str] | None = None) -> PersonClipOut:
+def _derive_clip_name(row) -> str:
+    """Pick a friendly clip name. Falls back to a synthetic stamp
+    while the clip is still recording (file_path is None until the
+    ClipWorker finalizes the MP4).
+    """
+
+    fp = getattr(row, "file_path", None)
+    if fp:
+        try:
+            return Path(str(fp)).name
+        except Exception:  # noqa: BLE001
+            pass
+    start = getattr(row, "clip_start", None)
+    if start is not None:
+        try:
+            return f"recording-{start.strftime('%Y%m%dT%H%M%S')}"
+        except Exception:  # noqa: BLE001
+            pass
+    return f"clip-{row.id}"
+
+
+def _row_to_out(
+    row,
+    name_map: dict[int, str] | None = None,
+    processed_by_clip: dict[int, list[str]] | None = None,
+    matched_crop_by_clip: dict[int, int] | None = None,
+) -> PersonClipOut:
     matched: list[int] = []
     raw = getattr(row, "matched_employees", None)
     if raw is not None and isinstance(raw, list):
@@ -93,6 +119,9 @@ def _row_to_out(row, name_map: dict[int, str] | None = None) -> PersonClipOut:
     names: list[str] = []
     if name_map is not None:
         names = [name_map.get(eid, f"EMP {eid}") for eid in matched]
+    processed_ucs: list[str] = []
+    if processed_by_clip is not None:
+        processed_ucs = processed_by_clip.get(int(row.id), [])
     return PersonClipOut(
         id=row.id,
         camera_id=row.camera_id,
@@ -126,6 +155,13 @@ def _row_to_out(row, name_map: dict[int, str] | None = None) -> PersonClipOut:
         chunk_count=int(getattr(row, "chunk_count", 1) or 1),
         recording_status=str(
             getattr(row, "recording_status", "completed") or "completed"
+        ),
+        processed_use_cases=processed_ucs,
+        clip_name=_derive_clip_name(row),
+        matched_face_crop_id=(
+            matched_crop_by_clip.get(int(row.id))
+            if matched_crop_by_clip is not None
+            else None
         ),
         created_at=row.created_at,
     )
@@ -580,6 +616,15 @@ def list_person_clips(
     page_size: int = Query(default=50, ge=1, le=200),
     camera_id: Optional[int] = Query(default=None),
     employee_id: Optional[int] = Query(default=None),
+    matched_employee_id: Optional[int] = Query(
+        default=None,
+        description=(
+            "Return clips where this employee was matched. Unions the "
+            "legacy ``employee_id`` link with the ``matched_employees`` "
+            "JSONB array populated per-UC. Used by the Employee drawer's "
+            "Matched Clips tab."
+        ),
+    ),
     start: Optional[str] = Query(default=None, description="ISO datetime"),
     end: Optional[str] = Query(default=None, description="ISO datetime"),
     detection_source: Optional[str] = Query(
@@ -629,6 +674,7 @@ def list_person_clips(
         rows, total = list_clips(
             conn, scope, page=page, page_size=page_size,
             camera_id=camera_id, employee_id=employee_id,
+            matched_employee_id=matched_employee_id,
             start=start_dt, end=end_dt,
             detection_source=detection_source,
             recording_status=recording_status,
@@ -643,12 +689,78 @@ def list_person_clips(
                         all_ids.add(int(eid))
         name_map = _resolve_employee_names(conn, scope, all_ids)
 
+        # Batch-fetch processed use cases for every clip in this page.
+        # Single query joined by clip id — no N+1.
+        processed_by_clip: dict[int, list[str]] = {}
+        clip_ids = [int(r.id) for r in rows]
+        if clip_ids:
+            # NB: ``clip_processing_results.status`` is written by the
+            # reprocess worker as ``"completed"`` (see
+            # reprocess.py:1087 / :1372). The earlier filter used
+            # ``"processed"`` and silently returned zero rows, so the
+            # Clip Analytics column never updated after a successful
+            # Identify Event run.
+            cpr_rows = conn.execute(
+                select(
+                    clip_processing_results.c.person_clip_id,
+                    clip_processing_results.c.use_case,
+                ).where(
+                    clip_processing_results.c.tenant_id == scope.tenant_id,
+                    clip_processing_results.c.person_clip_id.in_(clip_ids),
+                    clip_processing_results.c.status == "completed",
+                )
+            ).all()
+            for cpr in cpr_rows:
+                cid = int(cpr.person_clip_id)
+                uc = str(cpr.use_case).lower()
+                bucket = processed_by_clip.setdefault(cid, [])
+                if uc not in bucket:
+                    bucket.append(uc)
+            for bucket in processed_by_clip.values():
+                bucket.sort()
+
+        # Per-clip best-quality face_crop for the requested employee.
+        # Only populated when the caller passed ``matched_employee_id``
+        # (Employee drawer's Matched Clips tab). Bulk query — one
+        # ``DISTINCT ON`` instead of N per-row lookups.
+        matched_crop_by_clip: dict[int, int] = {}
+        if matched_employee_id is not None and clip_ids:
+            crop_rows = conn.execute(
+                select(
+                    face_crops.c.person_clip_id,
+                    face_crops.c.id,
+                    face_crops.c.quality_score,
+                )
+                .where(
+                    face_crops.c.tenant_id == scope.tenant_id,
+                    face_crops.c.employee_id == matched_employee_id,
+                    face_crops.c.person_clip_id.in_(clip_ids),
+                )
+                .order_by(
+                    face_crops.c.person_clip_id,
+                    face_crops.c.quality_score.desc(),
+                    face_crops.c.id.asc(),
+                )
+            ).all()
+            for cr in crop_rows:
+                cid = int(cr.person_clip_id)
+                if cid not in matched_crop_by_clip:
+                    matched_crop_by_clip[cid] = int(cr.id)
+
     # Migration 0054 — overlay live person counts on the 🔴 LIVE
     # rows. The placeholder INSERT at clip start sets person_count=0;
     # without this overlay every recording card would show "0 person"
     # until the clip finalizes. Fetch the per-camera live counts from
     # the in-memory worker state in one batch.
-    items = [_row_to_out(r, name_map) for r in rows]
+    items = [
+        _row_to_out(
+            r,
+            name_map,
+            processed_by_clip,
+            matched_crop_by_clip if matched_employee_id is not None else None,
+        )
+        for r in rows
+    ]
     has_recording = any(c.recording_status == "recording" for c in items)
     if has_recording:
         try:

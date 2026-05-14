@@ -36,6 +36,18 @@ export interface PersonClipOut {
   // renders a 🔴 LIVE badge and offers MJPEG preview from the
   // camera's live stream (/api/cameras/{id}/live.mjpg).
   recording_status: RecordingStatus;
+  // Use-case codes (e.g. ['uc1','uc2']) the clip has been processed
+  // by. Empty list = "Not Processed" — drives the Clip Analytics
+  // table's "Processed Use Cases" column.
+  processed_use_cases: string[];
+  // Display-friendly clip name. MP4 basename when finalized, or a
+  // synthetic ``recording-YYYYMMDDTHHMMSS`` while still recording.
+  clip_name: string;
+  // Only set when ?matched_employee_id=N was passed. Points at the
+  // best-quality face_crops row whose employee matches the requested
+  // id, so the Employee drawer's Matched Clips card can render that
+  // person's face instead of the multi-person clip thumbnail.
+  matched_face_crop_id?: number | null;
   created_at: string;
 }
 

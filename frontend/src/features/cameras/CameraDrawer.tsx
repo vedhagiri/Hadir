@@ -52,17 +52,20 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
   const [location, setLocation] = useState(initial?.location ?? "");
   const [zone, setZone] = useState(initial?.zone ?? "");
   const [brand, setBrand] = useState(initial?.brand ?? "");
+  // New cameras default every pipeline switch to OFF. Operator
+  // explicitly turns on what they want after adding the row. Edit
+  // mode honours whatever the persisted row already carries.
   const [workerEnabled, setWorkerEnabled] = useState(
-    initial?.worker_enabled ?? true,
+    initial?.worker_enabled ?? false,
   );
   const [displayEnabled, setDisplayEnabled] = useState(
-    initial?.display_enabled ?? true,
+    initial?.display_enabled ?? false,
   );
   const [detectionEnabled, setDetectionEnabled] = useState(
-    initial?.detection_enabled ?? true,
+    initial?.detection_enabled ?? false,
   );
   const [clipRecordingEnabled, setClipRecordingEnabled] = useState(
-    initial?.clip_recording_enabled ?? true,
+    initial?.clip_recording_enabled ?? false,
   );
   // Migration 0053: default for new cameras is 'body' so seated /
   // back-to-camera employees still keep clips recording (YOLO finds
@@ -84,10 +87,10 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
     setLocation(initial?.location ?? "");
     setZone(initial?.zone ?? "");
     setBrand(initial?.brand ?? "");
-    setWorkerEnabled(initial?.worker_enabled ?? true);
-    setDisplayEnabled(initial?.display_enabled ?? true);
-    setDetectionEnabled(initial?.detection_enabled ?? true);
-    setClipRecordingEnabled(initial?.clip_recording_enabled ?? true);
+    setWorkerEnabled(initial?.worker_enabled ?? false);
+    setDisplayEnabled(initial?.display_enabled ?? false);
+    setDetectionEnabled(initial?.detection_enabled ?? false);
+    setClipRecordingEnabled(initial?.clip_recording_enabled ?? false);
     setClipDetectionSource(initial?.clip_detection_source ?? "body");
     setConfig(initial?.capture_config ?? DEFAULT_CAPTURE_CONFIG);
     setRtspUrl("");

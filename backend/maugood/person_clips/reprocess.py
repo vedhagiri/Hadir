@@ -1552,3 +1552,14 @@ def is_single_clip_running(tenant_id: int, clip_id: int) -> bool:
     """Return True while a per-clip reprocess thread is live."""
     with _single_clip_lock:
         return bool(_single_clip_running.get((tenant_id, clip_id)))
+
+
+def get_active_single_clip_runs(tenant_id: int) -> list[int]:
+    """List of clip_ids currently being processed by Identify Event
+    threads for the given tenant. Used by the Pipeline Monitor
+    dashboard's Identify-Event panel.
+    """
+    with _single_clip_lock:
+        return sorted(
+            cid for (t, cid), live in _single_clip_running.items() if t == tenant_id and live
+        )

@@ -14,9 +14,11 @@
 // drawer's footer) so the read-only / write-mode boundary is
 // explicit.
 
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { api } from "../../api/client";
 import { useMe } from "../../auth/AuthProvider";
 import { DatePicker, todayIso } from "../../components/DatePicker";
 import { DrawerShell } from "../../components/DrawerShell";
@@ -26,6 +28,11 @@ import { useDayDetail } from "../calendar/hooks";
 import type { DayDetail } from "../calendar/types";
 import { useDetectionEvents } from "../camera-logs/hooks";
 import type { DetectionEvent } from "../camera-logs/types";
+import { ClipDetailDrawer } from "../person-clips/PersonClipsPage";
+import type {
+  PersonClipListResponse,
+  PersonClipOut,
+} from "../person-clips/types";
 import {
   useEmployeeDetail,
   useEmployeePhotos,
@@ -33,7 +40,7 @@ import {
 } from "./hooks";
 import type { Employee, Photo } from "./types";
 
-type Tab = "details" | "events" | "attendance" | "team";
+type Tab = "details" | "events" | "attendance" | "team" | "clips";
 
 export function EmployeeViewDrawer({
   employeeId,
@@ -107,7 +114,7 @@ export function EmployeeViewDrawer({
             padding: "0 18px",
           }}
         >
-          {(["details", "attendance", "events", "team"] as Tab[]).map((key) => {
+          {(["details", "attendance", "events", "clips", "team"] as Tab[]).map((key) => {
             const active = tab === key;
             return (
               <button
@@ -159,6 +166,8 @@ export function EmployeeViewDrawer({
           )}
 
           {tab === "team" && <TeamMembersTab employeeId={employeeId} />}
+
+          {tab === "clips" && <MatchedClipsTab employeeId={employeeId} />}
         </div>
       </div>
     </DrawerShell>
@@ -776,6 +785,483 @@ function EventsTab({ employeeId }: { employeeId: number }) {
       )}
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Matched Clips tab
+//
+// Lists every person_clip where the employee is matched — either by the
+// legacy ``person_clips.employee_id`` link or by appearing in the
+// per-UC ``matched_employees`` JSONB array. Server filter:
+// ``?matched_employee_id=N`` (union semantics, see repository.py).
+//
+// Each card renders the clip thumbnail (``/api/person-clips/{id}/thumbnail``)
+// + camera name + duration + size + processed-UC chips. Click → opens the
+// same ``ClipDetailDrawer`` used by Person Clips + Clip Analytics.
+// ---------------------------------------------------------------------------
+
+const MATCHED_CLIPS_PAGE_SIZE = 24;
+
+function MatchedClipsTab({ employeeId }: { employeeId: number }) {
+  const { t } = useTranslation();
+  const [page, setPage] = useState(1);
+  // Same date pattern as EventsTab — defaults to today's local date;
+  // operator can flip to any past date or clear via "All dates".
+  const [date, setDate] = useState<string>(todayLocalIso());
+  const [allDates, setAllDates] = useState<boolean>(false);
+  const [openClip, setOpenClip] = useState<PersonClipOut | null>(null);
+
+  // Convert the local YYYY-MM-DD to a UTC ISO range covering the full
+  // local day. Same helper EventsTab uses.
+  const { start, end } = computeDayRange(allDates ? null : date);
+
+  // Reset paging when the date filter changes so the operator doesn't
+  // land on an empty page after narrowing.
+  useDateChangeReset(date, allDates, () => setPage(1));
+
+  const qs = (() => {
+    const p = new URLSearchParams();
+    p.set("matched_employee_id", String(employeeId));
+    p.set("page", String(page));
+    p.set("page_size", String(MATCHED_CLIPS_PAGE_SIZE));
+    if (start) p.set("start", start);
+    if (end) p.set("end", end);
+    return p.toString();
+  })();
+
+  const list = useQuery({
+    queryKey: ["matched-clips", employeeId, qs],
+    queryFn: () => api<PersonClipListResponse>(`/api/person-clips?${qs}`),
+    refetchInterval: 30_000,
+  });
+
+  const items = list.data?.items ?? [];
+  const total = list.data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / MATCHED_CLIPS_PAGE_SIZE));
+
+  return (
+    <>
+      {/* Date filter row — identical pattern to EventsTab so operators
+          get the same affordances across both tabs. */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          marginBottom: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <label className="text-xs text-dim" style={{ fontWeight: 500 }}>
+          {t("employees.events.dateLabel") as string}
+        </label>
+        <DatePicker
+          value={date}
+          disabled={allDates}
+          onChange={(next) => setDate(next || todayLocalIso())}
+          max={todayIso()}
+          ariaLabel={t("employees.events.dateLabel") as string}
+        />
+        <label
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 12,
+            color: "var(--text-secondary)",
+            cursor: "pointer",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={allDates}
+            onChange={(e) => setAllDates(e.target.checked)}
+          />
+          {t("employees.events.allDates") as string}
+        </label>
+        {!allDates && (
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => setDate(todayLocalIso())}
+            disabled={date === todayLocalIso()}
+            title={t("employees.events.resetToToday") as string}
+          >
+            {t("employees.events.today") as string}
+          </button>
+        )}
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 12,
+        }}
+      >
+        <div className="text-xs text-dim">
+          {list.isLoading
+            ? "Loading…"
+            : `${total} clip${total === 1 ? "" : "s"} where this person was matched`}
+        </div>
+        {totalPages > 1 && (
+          <div style={{ display: "flex", gap: 6 }}>
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={page <= 1 || list.isFetching}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              <Icon name="chevronLeft" size={11} />
+            </button>
+            <span
+              className="mono text-xs text-dim"
+              style={{ alignSelf: "center" }}
+            >
+              {page} / {totalPages}
+            </span>
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={page >= totalPages || list.isFetching}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              <Icon name="chevronRight" size={11} />
+            </button>
+          </div>
+        )}
+      </div>
+
+      {list.isLoading && (
+        <div className="text-sm text-dim" style={{ padding: 16 }}>
+          Loading clips…
+        </div>
+      )}
+      {list.isError && (
+        <div
+          className="text-sm"
+          style={{ padding: 16, color: "var(--danger-text)" }}
+        >
+          Could not load matched clips.
+        </div>
+      )}
+      {!list.isLoading && !list.isError && items.length === 0 && (
+        <div
+          className="text-sm text-dim"
+          style={{
+            padding: 24,
+            border: "1px dashed var(--border)",
+            borderRadius: "var(--radius-sm)",
+            textAlign: "center",
+          }}
+        >
+          No matched clips yet. When this person is identified in a clip
+          (via UC1 / UC2 / UC3 on the Clip Analytics page), it'll show
+          up here.
+        </div>
+      )}
+
+      {items.length > 0 && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+            gap: 12,
+          }}
+        >
+          {items.map((c) => (
+            <MatchedClipCard
+              key={c.id}
+              clip={c}
+              onOpen={() => {
+                // Only completed clips have a stable artifact — the
+                // detail drawer's video + face-crop panels would 404
+                // for an in-flight encode. Match the gating Clip
+                // Analytics already applies.
+                if (c.recording_status === "completed") setOpenClip(c);
+              }}
+            />
+          ))}
+        </div>
+      )}
+
+      {openClip && (
+        <ClipDetailDrawer
+          clip={openClip}
+          onClose={() => setOpenClip(null)}
+          focusEmployeeId={employeeId}
+        />
+      )}
+    </>
+  );
+}
+
+function MatchedClipCard({
+  clip,
+  onOpen,
+}: {
+  clip: PersonClipOut;
+  onOpen: () => void;
+}) {
+  const [thumbError, setThumbError] = useState(false);
+  const playable = clip.recording_status === "completed";
+  // The card always shows the actual video thumbnail (still frame
+  // from the clip), not the face crop — operators want a visual cue
+  // for the scene, not just the head. The drilldown drawer filters
+  // the per-UC face crops to this employee only (see
+  // ClipDetailDrawer's ``focusEmployeeId`` prop).
+  const imgSrc = `/api/person-clips/${clip.id}/thumbnail`;
+
+  return (
+    <button
+      type="button"
+      onClick={playable ? onOpen : undefined}
+      title={
+        playable
+          ? "Open clip details"
+          : `Details unavailable while clip is ${clip.recording_status}`
+      }
+      style={{
+        textAlign: "start",
+        padding: 0,
+        background: "var(--bg-elev)",
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius)",
+        overflow: "hidden",
+        cursor: playable ? "pointer" : "not-allowed",
+        display: "flex",
+        flexDirection: "column",
+        transition: "transform 120ms ease, box-shadow 120ms ease",
+      }}
+      onMouseEnter={(e) => {
+        if (!playable) return;
+        e.currentTarget.style.boxShadow = "0 6px 16px rgba(0,0,0,0.12)";
+        e.currentTarget.style.transform = "translateY(-1px)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.boxShadow = "";
+        e.currentTarget.style.transform = "";
+      }}
+    >
+      {/* Thumbnail */}
+      <div
+        style={{
+          position: "relative",
+          aspectRatio: "16 / 9",
+          background: "#111",
+          overflow: "hidden",
+        }}
+      >
+        {!thumbError && playable ? (
+          <img
+            src={imgSrc}
+            alt=""
+            onError={() => setThumbError(true)}
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              display: "block",
+            }}
+          />
+        ) : (
+          <div
+            style={{
+              width: "100%",
+              height: "100%",
+              display: "grid",
+              placeItems: "center",
+              color: "rgba(255,255,255,0.4)",
+            }}
+          >
+            <Icon name="videocam" size={28} />
+          </div>
+        )}
+
+        {/* Lifecycle pill (top-left). Recording / Encoding land as
+            colour-coded chips; Completed shows nothing — we don't
+            want every card carrying a green badge. */}
+        {clip.recording_status === "recording" && (
+          <LifecyclePill bg="rgba(239,68,68,0.92)">🔴 Recording</LifecyclePill>
+        )}
+        {clip.recording_status === "finalizing" && (
+          <LifecyclePill bg="rgba(245,158,11,0.92)">Encoding</LifecyclePill>
+        )}
+
+        {/* Duration (bottom-right). */}
+        <div
+          className="mono"
+          style={{
+            position: "absolute",
+            insetInlineEnd: 6,
+            insetBlockEnd: 6,
+            padding: "2px 6px",
+            background: "rgba(0,0,0,0.65)",
+            color: "#fff",
+            fontSize: 11,
+            borderRadius: 4,
+          }}
+        >
+          {fmtClipDuration(clip.duration_seconds)}
+        </div>
+      </div>
+
+      {/* Meta footer */}
+      <div
+        style={{
+          padding: "8px 10px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 4,
+          minWidth: 0,
+        }}
+      >
+        <div
+          style={{
+            fontSize: 12.5,
+            fontWeight: 600,
+            color: "var(--text)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+          title={clip.camera_name}
+        >
+          {clip.camera_name || "Unknown camera"}
+        </div>
+        <div
+          className="text-xs text-dim"
+          style={{
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+          title={clip.clip_name}
+        >
+          {fmtClipTime(clip.clip_start)} · {fmtClipSize(clip.filesize_bytes)}
+        </div>
+
+        {/* Processed-UC chips. Only show when at least one UC has run
+            — keeps the card quiet for raw Saved clips. */}
+        {clip.processed_use_cases.length > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 2 }}>
+            {clip.processed_use_cases.map((uc) => (
+              <span
+                key={uc}
+                className="mono"
+                style={{
+                  padding: "1px 6px",
+                  borderRadius: 999,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  background: ucAccentSoft(uc),
+                  color: ucAccentText(uc),
+                  border: `1px solid ${ucAccentBorder(uc)}`,
+                }}
+              >
+                {uc.toUpperCase()}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    </button>
+  );
+}
+
+function LifecyclePill({
+  bg,
+  children,
+}: {
+  bg: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <span
+      style={{
+        position: "absolute",
+        top: 6,
+        insetInlineStart: 6,
+        padding: "2px 8px",
+        background: bg,
+        color: "#fff",
+        fontSize: 10.5,
+        fontWeight: 700,
+        borderRadius: 999,
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
+function fmtClipDuration(sec: number): string {
+  if (!Number.isFinite(sec) || sec <= 0) return "—";
+  const total = Math.round(sec);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+function fmtClipSize(bytes: number): string {
+  if (!bytes || bytes <= 0) return "—";
+  const units = ["B", "KB", "MB", "GB"];
+  let n = bytes;
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) {
+    n /= 1024;
+    i += 1;
+  }
+  return `${n.toFixed(n >= 100 || i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+function fmtClipTime(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return `${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })} ${d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`;
+  } catch {
+    return iso;
+  }
+}
+
+function ucAccentSoft(uc: string): string {
+  switch (uc.toLowerCase()) {
+    case "uc1":
+      return "rgba(59,130,246,0.12)";
+    case "uc2":
+      return "rgba(139,92,246,0.12)";
+    case "uc3":
+      return "rgba(16,185,129,0.12)";
+    default:
+      return "var(--bg-sunken)";
+  }
+}
+
+function ucAccentText(uc: string): string {
+  switch (uc.toLowerCase()) {
+    case "uc1":
+      return "#1d4ed8";
+    case "uc2":
+      return "#6d28d9";
+    case "uc3":
+      return "#047857";
+    default:
+      return "var(--text-secondary)";
+  }
+}
+
+function ucAccentBorder(uc: string): string {
+  switch (uc.toLowerCase()) {
+    case "uc1":
+      return "rgba(59,130,246,0.25)";
+    case "uc2":
+      return "rgba(139,92,246,0.25)";
+    case "uc3":
+      return "rgba(16,185,129,0.25)";
+    default:
+      return "var(--border)";
+  }
 }
 
 /**

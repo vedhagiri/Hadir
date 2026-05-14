@@ -35,6 +35,7 @@ import { CameraLogsPage } from "./features/camera-logs/CameraLogsPage";
 import { CamerasPage } from "./features/cameras/CamerasPage";
 import { FaceCropsPage } from "./features/face-crops/FaceCropsPage";
 import { PersonClipsPage } from "./features/person-clips/PersonClipsPage";
+import { ClipAnalyticsPage } from "./features/clip-analytics/ClipAnalyticsPage";
 import { DashboardRouter } from "./features/dashboard/DashboardRouter";
 import { EmployeesPage } from "./features/employees/EmployeesPage";
 import { MyProfilePage } from "./features/employees/MyProfilePage";
@@ -48,6 +49,7 @@ import { ReportsPage } from "./features/reports/ReportsPage";
 import { SystemPage as SuperAdminSystemPage } from "./super-admin/SystemPage";
 import { SystemPage } from "./features/system/SystemPage";
 import { LiveCapturePage } from "./pages/LiveCapture/LiveCapture";
+import { PipelineMonitor } from "./pages/PipelineMonitor/PipelineMonitor";
 import { SystemSettingsPage } from "./pages/SystemSettings/SystemSettingsPage";
 import { LeaveCalendarPage } from "./leave-calendar/LeaveCalendarPage";
 import { ManagerAssignmentsPage } from "./manager-assignments/ManagerAssignmentsPage";
@@ -134,6 +136,7 @@ export function App() {
         <Route path="cameras" element={<CamerasPage />} />
         <Route path="camera-logs" element={<CameraLogsPage />} />
         <Route path="person-clips" element={<PersonClipsPage />} />
+        <Route path="clip-analytics" element={<ClipAnalyticsPage />} />
         <Route path="face-crops" element={<FaceCropsPage />} />
         <Route path="live" element={<LiveCapturePage />} />
         <Route path="system" element={<SystemPage />} />
@@ -148,6 +151,7 @@ export function App() {
         <Route path="former-employees" element={<FormerEmployeesSeenReport />} />
         <Route path="calendar" element={<CalendarPage />} />
         <Route path="operations/workers" element={<WorkersPage />} />
+        <Route path="pipeline-monitor" element={<AdminOnly><PipelineMonitor /></AdminOnly>} />
         <Route path="mgr-assign" element={<ManagerAssignmentsPage />} />
         <Route path="policies" element={<PoliciesPage />} />
         <Route path="leave-policy" element={<LeaveCalendarPage />} />
@@ -186,6 +190,7 @@ export function App() {
             id !== "cameras" &&
             id !== "camera-logs" &&
             id !== "person-clips" &&
+            id !== "clip-analytics" &&
             id !== "face-crops" &&
             id !== "live" &&
             id !== "system" &&
@@ -198,6 +203,7 @@ export function App() {
             id !== "calendar" &&
             id !== "former-employees" &&
             id !== "operations/workers" &&
+            id !== "pipeline-monitor" &&
             id !== "settings" &&
             id !== "mgr-assign" &&
             id !== "policies" &&

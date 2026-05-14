@@ -808,6 +808,48 @@ class CaptureWorker:
                 new,
             )
 
+    def get_recording_state(self) -> dict:
+        """Live snapshot of the per-camera clip recording state.
+
+        Read by the Pipeline Monitor dashboard. Returns a small dict
+        the operations router can serialise. Frames + chunks live on
+        the reader thread; we read them without locks because a stale
+        +/- 1 frame count is fine for a dashboard refresh.
+        """
+
+        current = self._current_chunk
+        frames_in_current_chunk = (
+            int(current.get("frame_count", 0)) if current is not None else 0
+        )
+        completed_chunk_frames = sum(
+            int(c.get("frame_count", 0)) for c in self._clip_chunks
+        )
+        elapsed_sec = 0.0
+        if self._clip_recording and self._clip_start_ts is not None:
+            import time as _time  # noqa: PLC0415
+
+            elapsed_sec = max(0.0, _time.time() - self._clip_start_ts)
+        return {
+            "recording_enabled": self.is_clip_recording_enabled(),
+            "recording_active": bool(self._clip_recording),
+            "current_clip_id": self._current_clip_id,
+            "elapsed_sec": round(elapsed_sec, 1),
+            "frames_in_current_chunk": frames_in_current_chunk,
+            "chunks_completed": len(self._clip_chunks),
+            "total_frames_written": completed_chunk_frames
+            + frames_in_current_chunk,
+            "clip_worker_alive": (
+                self._clip_worker.is_alive()
+                if self._clip_worker is not None
+                else False
+            ),
+            "clip_worker_queue_size": (
+                self._clip_worker.queue_size()
+                if self._clip_worker is not None
+                else 0
+            ),
+        }
+
     def is_clip_recording_enabled(self) -> bool:
         """Read the live clip-recording toggle flag.
 
@@ -1246,21 +1288,26 @@ class CaptureWorker:
         memory buffering. Disk I/O per frame is an 80-100 KB JPEG
         write (~1 ms on SSD), negligible compared to RTSP read latency.
 
-        Clip lifecycle (Phase B chunked):
+        Clip lifecycle (max-duration auto-split):
           * Person arrives           → open chunk 0, start writing frames
-          * Person present > N sec   → rotate to chunk 1, keep writing
-                                       (N = clip_encoding_config.chunk_duration_sec)
+          * Clip age ≥ N sec         → finalize THIS clip as its own MP4
+                                       + DB row; the very next frame
+                                       starts a fresh clip seamlessly
+                                       if the person is still present
+                                       (N = clip_encoding_config.chunk_duration_sec,
+                                       default 180 = 3 minutes).
           * Person leaves            → keep writing through grace period
-                                       (still in current chunk; no rotation
+                                       (still in current clip; no split
                                        on the way out)
-          * Grace expired            → submit ALL chunks to ClipWorker
-                                       in one batch; ClipWorker per-chunk
-                                       encodes then ffmpeg-concat-merges
-                                       into one final MP4.
+          * Grace expired            → finalize current clip; if the
+                                       person reappears later it gets
+                                       a fresh clip / DB row.
 
         Each chunk owns its own TemporaryDirectory; ClipWorker calls
-        .cleanup() on each after its encode finishes. The reader's
-        memory + disk footprint stays O(1) regardless of clip length.
+        .cleanup() on it after the encode finishes. The reader's
+        memory + disk footprint stays O(1) regardless of how long the
+        person stays in frame, because every N seconds the buffer is
+        handed off to the worker and reset.
         """
 
         # Migration 0049: per-camera clip-recording gate. When False
@@ -1324,21 +1371,40 @@ class CaptureWorker:
                     self._current_clip_id,
                 )
 
-            # Check if the active chunk has exceeded the rotation
-            # threshold from the snapshot. Rotation only fires while a
-            # person is still in frame — on the way out (grace period)
-            # we keep writing into the current chunk so the trailing
-            # frames stay together.
-            if self._current_chunk is not None:
-                chunk_age = now - self._current_chunk["chunk_start_ts"]
-                chunk_duration = float(
+            # Check if the active clip has hit its max duration. When
+            # a person stays in frame past the threshold we don't
+            # extend the clip — we finalize it (own MP4, own DB row)
+            # and the next frame opens a fresh clip via the
+            # ``if not self._clip_recording:`` branch above. This is
+            # the load-bearing "split every N min" red line.
+            #
+            # The trailing frame is written to the OUTGOING clip first
+            # so the segment boundary is at a frame edge, not in the
+            # middle of nothing. ``face_count`` is folded in for the
+            # same reason — the closing clip records the max it saw.
+            if self._current_chunk is not None and self._clip_start_ts is not None:
+                clip_age = now - self._clip_start_ts
+                max_clip_duration = float(
                     self._clip_encoding_snapshot.get(
                         "chunk_duration_sec",
                         self.DEFAULT_CLIP_ENCODING_CONFIG["chunk_duration_sec"],
                     )
                 )
-                if chunk_age >= chunk_duration:
-                    self._rotate_chunk(now)
+                if clip_age >= max_clip_duration:
+                    if face_count > self._clip_max_person_count:
+                        self._clip_max_person_count = face_count
+                    self._write_frame_to_current_chunk(frame_bgr, now)
+                    logger.debug(
+                        "clip split (max-duration reached): camera=%s "
+                        "clip_id=%s age=%.1fs threshold=%.1fs",
+                        self.camera_id,
+                        self._current_clip_id,
+                        clip_age,
+                        max_clip_duration,
+                    )
+                    self._finalize_current_clip()
+                    # Next frame will start a fresh clip seamlessly.
+                    return
 
             # Track max persons seen during this clip.
             if face_count > self._clip_max_person_count:
@@ -1815,28 +1881,17 @@ class CaptureWorker:
             with self._person_present_lock:
                 self._active_track_count = self._tracker.active_tracks
 
-            # Pre-match each detection against the matcher so (a) the
-            # cached boxes get accurate labels and (b) emit() doesn't
-            # have to re-run the matcher for new tracks.
-            per_detection_match: list[Optional[tuple[int, float]]] = []
-            for det in detections:
-                mm = (
-                    matcher_cache.match(self._scope, det.embedding)
-                    if det.embedding is not None
-                    else None
-                )
-                # P28.8: only ACTIVE matches drive the Matching stage.
-                # Inactive (former-employee) and future-joiners are
-                # surveillance signals, not pipeline-health signals —
-                # the operations panel cares whether attendance is
-                # actually flowing.
-                if mm and mm.classification == "active":
-                    self.record_successful_match()
-                    with self._clip_matched_ids_lock:
-                        self._clip_matched_employee_ids.add(mm.employee_id)
-                    per_detection_match.append((mm.employee_id, mm.score))
-                else:
-                    per_detection_match.append(None)
+            # Live workflow no longer runs face matching. The matcher
+            # cache, face-crop extraction, and detection_events
+            # emission are all deferred to the manual reprocess
+            # endpoints (UC1 / UC2 / UC3) — live capture is now
+            # purely: read RTSP → detect persons → save clip.
+            #
+            # We still hand a same-length list to the publisher /
+            # zipper so downstream signatures don't have to change.
+            per_detection_match: list[Optional[tuple[int, float]]] = [
+                None for _ in detections
+            ]
 
             # Build the annotation box list and publish it for the
             # reader to draw onto subsequent preview frames. We only
@@ -1856,52 +1911,12 @@ class CaptureWorker:
                     tracked_body_boxes_xyxy,
                 )
 
-            # One detection_events row per NEW track, never per frame.
-            # Snapshot the capture_config + detection_config under the
-            # locks so a mid-iteration update_config doesn't change
-            # values half-way through the inner loop. detection_config
-            # rides into emit so each row carries a per-event
-            # ``detection_metadata`` snapshot (model + version).
-            current_capture_config = self.get_capture_config()
-            current_detection_config = self.get_detection_config()
-            from maugood.detection import DetectorConfig as _DC  # noqa: PLC0415
-            current_detector_config = (
-                _DC.from_dict(current_detection_config)
-                if current_detection_config
-                else None
-            )
-            for det, match, pm in zip(
-                detections, matches, per_detection_match
-            ):
-                if not match.is_new:
-                    continue
-                try:
-                    new_id = events_io.emit_detection_event(
-                        self._engine,
-                        self._scope,
-                        camera_id=self.camera_id,
-                        frame_bgr=frame,
-                        bbox=match.bbox,
-                        det_score=det.det_score,
-                        track_id=match.track_id,
-                        embedding=det.embedding,
-                        pre_matched=pm,
-                        annotated_frame_bgr=frame,
-                        capture_config=current_capture_config,
-                        detector_config=current_detector_config,
-                    )
-                    if new_id is not None:
-                        # P28.8: a row + crop was actually written.
-                        self.record_face_saved()
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning(
-                        "camera %s: event emit failed: %s",
-                        self.camera_name,
-                        type(exc).__name__,
-                    )
-                    self._record_error(
-                        "emit", f"event write failed: {type(exc).__name__}"
-                    )
+            # Live workflow no longer emits detection_events rows or
+            # writes per-track face crops. Those are deferred to the
+            # manual reprocess pipelines (UC1 / UC2 / UC3) which run
+            # against the saved clip MP4 on operator demand. Keeps
+            # the live loop CPU- and IO-light: read RTSP → detect
+            # persons → save clip → done.
 
             runs_this_sec += 1
             now = time.time()

@@ -8,7 +8,7 @@ from typing import Optional
 from sqlalchemy import delete, func, insert, select
 from sqlalchemy.engine import Engine, Row
 
-from maugood.db import cameras, employees, person_clips
+from maugood.db import cameras, clip_processing_results, employees, person_clips
 from maugood.tenants.scope import TenantScope
 
 
@@ -20,6 +20,7 @@ def list_clips(
     page_size: int = 50,
     camera_id: Optional[int] = None,
     employee_id: Optional[int] = None,
+    matched_employee_id: Optional[int] = None,
     start: Optional[datetime] = None,
     end: Optional[datetime] = None,
     detection_source: Optional[str] = None,
@@ -55,6 +56,36 @@ def list_clips(
         base = base.where(person_clips.c.camera_id == camera_id)
     if employee_id is not None:
         base = base.where(person_clips.c.employee_id == employee_id)
+    if matched_employee_id is not None:
+        # Union semantics: a clip "belongs" to an employee when ANY of
+        # these is true:
+        #   1) legacy ``person_clips.employee_id`` link points at them
+        #   2) ``person_clips.matched_employees`` JSONB contains their
+        #      id (only UC3 writes this — load-bearing bug if we stop
+        #      here, because operators may only run UC1)
+        #   3) ANY ``clip_processing_results`` row for this clip has
+        #      a completed match for this employee
+        # (3) is the broad guarantee — UC1, UC2 or UC3 hitting on the
+        # employee surfaces the clip regardless of which UC ran.
+        from sqlalchemy import or_  # noqa: PLC0415
+
+        cpr_subq = (
+            select(clip_processing_results.c.person_clip_id)
+            .where(
+                clip_processing_results.c.tenant_id == scope.tenant_id,
+                clip_processing_results.c.status == "completed",
+                clip_processing_results.c.matched_employees.contains(
+                    [matched_employee_id]
+                ),
+            )
+        )
+        base = base.where(
+            or_(
+                person_clips.c.employee_id == matched_employee_id,
+                person_clips.c.matched_employees.contains([matched_employee_id]),
+                person_clips.c.id.in_(cpr_subq),
+            )
+        )
     if start is not None:
         base = base.where(person_clips.c.clip_start >= start)
     if end is not None:

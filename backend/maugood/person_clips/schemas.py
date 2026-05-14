@@ -46,6 +46,22 @@ class PersonClipOut(BaseModel):
     # the clip is in progress; the frontend renders a 🔴 LIVE badge
     # and offers MJPEG live preview. Completed clips play the MP4.
     recording_status: str = "completed"
+    # Use-case codes (e.g. ['uc1','uc2']) where ``clip_processing_results
+    # .status='processed'`` exists for this clip. Empty list = clip has
+    # not been processed by any of UC1/UC2/UC3. Drives the "Processed
+    # Use Cases" column on the Clip Analytics page.
+    processed_use_cases: list[str] = []
+    # Display-friendly clip name. Derived from the MP4 file basename
+    # when the clip has been encoded (``<start_HHMMSS>-<end_HHMMSS>.mp4``),
+    # or synthesised from the clip start time while still recording.
+    clip_name: str = ""
+    # Only set when the list endpoint was called with
+    # ``?matched_employee_id=N`` — the highest-quality ``face_crops`` row
+    # for this clip where the crop's employee matches the requested id.
+    # The Employee drawer's Matched Clips tab uses this to render the
+    # employee's own face on the card instead of the multi-person
+    # thumbnail.
+    matched_face_crop_id: Optional[int] = None
     created_at: datetime
 
 

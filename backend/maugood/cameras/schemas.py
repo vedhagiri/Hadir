@@ -93,10 +93,15 @@ class CameraCreateIn(BaseModel):
     camera_code: Optional[str] = Field(default=None, min_length=1, max_length=32)
     # Accepted schemes validated in rtsp.parse_rtsp_url.
     rtsp_url: str = Field(min_length=8, max_length=2048)
-    worker_enabled: bool = True
-    display_enabled: bool = True
-    detection_enabled: bool = True
-    clip_recording_enabled: bool = True
+    # Defaults flipped to False so a freshly-added camera does nothing
+    # until the operator explicitly turns on what they want. The DB
+    # column server_defaults stay True for backwards compat with any
+    # out-of-band INSERT — the API path is the only writer that
+    # honours these.
+    worker_enabled: bool = False
+    display_enabled: bool = False
+    detection_enabled: bool = False
+    clip_recording_enabled: bool = False
     # Migration 0052 / 0053 — 'face' | 'body' | 'both'. Default
     # bumped from 'face' to 'body' in migration 0053: a stationary
     # seated employee whose face is hidden (looking down at a desk,

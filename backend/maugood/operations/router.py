@@ -30,8 +30,14 @@ from maugood.db import (
     attendance_records,
     audit_log,
     cameras,
+    clip_processing_results,
     detection_events,
     get_engine,
+    person_clips,
+)
+from maugood.person_clips.reprocess import (
+    get_active_single_clip_runs,
+    get_reprocess_worker,
 )
 from maugood.tenants.scope import TenantScope
 
@@ -631,4 +637,334 @@ def patch_camera_metadata(
         brand=after_row.brand,
         model=after_row.model,
         mount_location=after_row.mount_location,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Pipeline monitor — aggregated 4-stage live snapshot.
+# ---------------------------------------------------------------------------
+#
+# GET /api/operations/pipeline rolls up the four worker stages into a
+# single payload so the Pipeline Monitor page can refresh on one poll:
+#
+#   1. RTSP feed         — CaptureWorker reader threads
+#   2. Clip recording    — per-camera _check_and_record_clip state
+#   3. Encoding          — per-camera ClipWorker queue (ffmpeg)
+#   4. Identify Event    — single-clip face-match reprocess threads
+#
+# Each stage's counts are derived from the in-process worker singletons
+# (CaptureManager, get_reprocess_worker) and three SQL aggregates over
+# ``person_clips`` + ``clip_processing_results``.
+
+
+class PipelineRtspWorkerOut(BaseModel):
+    camera_id: int
+    camera_name: str
+    status: Literal["starting", "running", "reconnecting", "stopped", "failed"]
+    uptime_sec: int = 0
+    fps_reader: float = 0.0
+    fps_analyzer: float = 0.0
+    errors_5min: int = 0
+
+
+class PipelineRtspOut(BaseModel):
+    running: int = 0
+    reconnecting: int = 0
+    stopped: int = 0
+    failed: int = 0
+    configured: int = 0
+    workers: list[PipelineRtspWorkerOut] = Field(default_factory=list)
+
+
+class PipelineRecordingCameraOut(BaseModel):
+    camera_id: int
+    camera_name: str
+    recording_enabled: bool
+    recording_active: bool
+    current_clip_id: Optional[int] = None
+    elapsed_sec: float = 0.0
+    total_frames_written: int = 0
+    chunks_completed: int = 0
+
+
+class PipelineRecordingOut(BaseModel):
+    active: int = 0
+    enabled_cameras: int = 0
+    cameras: list[PipelineRecordingCameraOut] = Field(default_factory=list)
+
+
+class PipelineEncodingWorkerOut(BaseModel):
+    camera_id: int
+    camera_name: str
+    alive: bool
+    queue_size: int = 0
+
+
+class PipelineEncodingOut(BaseModel):
+    queued: int = 0
+    processing: int = 0
+    completed_today: int = 0
+    failed_today: int = 0
+    alive_workers: int = 0
+    total_workers: int = 0
+    workers: list[PipelineEncodingWorkerOut] = Field(default_factory=list)
+
+
+class IdentifyUseCaseStatsOut(BaseModel):
+    use_case: str  # "uc1" | "uc2" | "uc3"
+    pending: int = 0
+    processing: int = 0
+    completed_today: int = 0
+    failed_today: int = 0
+    completed_total: int = 0
+
+
+class PipelineIdentifyOut(BaseModel):
+    running: int = 0
+    # Aggregate roll-ups (sum across UCs) — kept for the top-of-page
+    # summary chips that don't care about per-UC split.
+    pending: int = 0
+    processing: int = 0
+    completed_today: int = 0
+    failed_today: int = 0
+    active_clip_ids: list[int] = Field(default_factory=list)
+    batch_status: str = "idle"
+    # Per-UC breakdown — the Pipeline Monitor's Identify Event tab
+    # renders one card per UC with its own pending / processing /
+    # completed / failed counts.
+    use_cases: list[IdentifyUseCaseStatsOut] = Field(default_factory=list)
+
+
+class PipelineMonitorOut(BaseModel):
+    rtsp: PipelineRtspOut
+    recording: PipelineRecordingOut
+    encoding: PipelineEncodingOut
+    identify: PipelineIdentifyOut
+    generated_at: str
+
+
+@router.get("/operations/pipeline", response_model=PipelineMonitorOut)
+def get_pipeline_monitor(
+    user: Annotated[CurrentUser, ADMIN],
+) -> PipelineMonitorOut:
+    """Live snapshot of all 4 worker stages for the Pipeline Monitor.
+
+    Read-only, no audit row — operators poll this every few seconds
+    and audit noise would drown the legitimate signal.
+    """
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    engine = get_engine()
+
+    # ---- Stage 1: RTSP feed workers (CaptureManager) ----------------------
+    # The per-tenant snapshot returns one entry per running worker; we
+    # cross-reference ``cameras.worker_enabled`` for "configured" count.
+    rtsp = PipelineRtspOut()
+    worker_keys = [
+        (t, c) for (t, c) in capture_manager.workers_snapshot() if t == scope.tenant_id
+    ]
+    for tenant_id, camera_id in worker_keys:
+        stats = capture_manager.get_full_worker_stats(tenant_id, camera_id)
+        if stats is None:
+            continue
+        status_value: str = str(stats.get("status", "stopped"))
+        if status_value == "running":
+            rtsp.running += 1
+        elif status_value == "reconnecting":
+            rtsp.reconnecting += 1
+        elif status_value == "failed":
+            rtsp.failed += 1
+        else:
+            rtsp.stopped += 1
+        rtsp.workers.append(
+            PipelineRtspWorkerOut(
+                camera_id=int(camera_id),
+                camera_name=str(stats.get("camera_name") or f"Camera {camera_id}"),
+                status=status_value,  # type: ignore[arg-type]
+                uptime_sec=int(stats.get("uptime_sec") or 0),
+                fps_reader=float(stats.get("fps_reader") or 0.0),
+                fps_analyzer=float(stats.get("fps_analyzer") or 0.0),
+                errors_5min=int(stats.get("errors_5min") or 0),
+            )
+        )
+
+    # ---- Stage 2: Clip recording (per-camera state machines) --------------
+    recording = PipelineRecordingOut()
+    with engine.begin() as conn:
+        cam_rows = conn.execute(
+            select(
+                cameras.c.id,
+                cameras.c.name,
+                cameras.c.clip_recording_enabled,
+            ).where(cameras.c.tenant_id == scope.tenant_id)
+        ).all()
+    enabled_camera_ids = {int(r.id) for r in cam_rows if r.clip_recording_enabled}
+    recording.enabled_cameras = len(enabled_camera_ids)
+    camera_names = {int(r.id): str(r.name) for r in cam_rows}
+
+    for tenant_id, camera_id in worker_keys:
+        # We only inspect cameras whose worker is alive — a stopped
+        # worker by definition has no live recording state.
+        worker = capture_manager.get_worker(tenant_id, camera_id)
+        if worker is None:
+            continue
+        try:
+            rec = worker.get_recording_state()
+        except Exception:  # noqa: BLE001
+            continue
+        if rec.get("recording_active"):
+            recording.active += 1
+        recording.cameras.append(
+            PipelineRecordingCameraOut(
+                camera_id=int(camera_id),
+                camera_name=camera_names.get(int(camera_id), f"Camera {camera_id}"),
+                recording_enabled=bool(rec.get("recording_enabled")),
+                recording_active=bool(rec.get("recording_active")),
+                current_clip_id=rec.get("current_clip_id"),
+                elapsed_sec=float(rec.get("elapsed_sec") or 0.0),
+                total_frames_written=int(rec.get("total_frames_written") or 0),
+                chunks_completed=int(rec.get("chunks_completed") or 0),
+            )
+        )
+
+    # ---- Stage 3: Encoding (ClipWorker queues + DB aggregates) ------------
+    encoding = PipelineEncodingOut()
+    today_utc_start = datetime.now(tz=timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    with engine.begin() as conn:
+        enc_rows = conn.execute(
+            select(
+                person_clips.c.recording_status,
+                func.count().label("cnt"),
+            )
+            .where(person_clips.c.tenant_id == scope.tenant_id)
+            .group_by(person_clips.c.recording_status)
+        ).all()
+        enc_today = conn.execute(
+            select(
+                person_clips.c.recording_status,
+                func.count().label("cnt"),
+            )
+            .where(
+                person_clips.c.tenant_id == scope.tenant_id,
+                person_clips.c.encoding_end_at >= today_utc_start,
+            )
+            .group_by(person_clips.c.recording_status)
+        ).all()
+    enc_counts = {str(r.recording_status): int(r.cnt) for r in enc_rows}
+    enc_today_counts = {str(r.recording_status): int(r.cnt) for r in enc_today}
+    # "Pending in encoding queue" maps to the recording lifecycle:
+    # ``recording`` rows are still being written by the reader, and
+    # ``finalizing`` rows are in the ClipWorker queue / mid-encode.
+    encoding.queued = enc_counts.get("recording", 0)
+    encoding.processing = enc_counts.get("finalizing", 0)
+    encoding.completed_today = enc_today_counts.get("completed", 0)
+    encoding.failed_today = enc_today_counts.get("failed", 0) + enc_today_counts.get(
+        "abandoned", 0
+    )
+
+    for tenant_id, camera_id in worker_keys:
+        worker = capture_manager.get_worker(tenant_id, camera_id)
+        if worker is None:
+            continue
+        try:
+            rec = worker.get_recording_state()
+        except Exception:  # noqa: BLE001
+            continue
+        encoding.workers.append(
+            PipelineEncodingWorkerOut(
+                camera_id=int(camera_id),
+                camera_name=camera_names.get(int(camera_id), f"Camera {camera_id}"),
+                alive=bool(rec.get("clip_worker_alive")),
+                queue_size=int(rec.get("clip_worker_queue_size") or 0),
+            )
+        )
+    encoding.total_workers = len(encoding.workers)
+    encoding.alive_workers = sum(1 for w in encoding.workers if w.alive)
+
+    # ---- Stage 4: Identify Event (face-match jobs) ------------------------
+    identify = PipelineIdentifyOut()
+    active_clip_ids = get_active_single_clip_runs(scope.tenant_id)
+    identify.active_clip_ids = active_clip_ids
+    identify.running = len(active_clip_ids)
+    # Group by ``(status, use_case)`` so the panel can break the numbers
+    # down per UC1 / UC2 / UC3. ``ended_at`` filters the "today" bucket
+    # for completed + failed; the running buckets (pending, processing)
+    # don't have an end_at yet so we count them lifetime.
+    with engine.begin() as conn:
+        cpr_rows = conn.execute(
+            select(
+                clip_processing_results.c.status,
+                clip_processing_results.c.use_case,
+                func.count().label("cnt"),
+            )
+            .where(clip_processing_results.c.tenant_id == scope.tenant_id)
+            .group_by(
+                clip_processing_results.c.status,
+                clip_processing_results.c.use_case,
+            )
+        ).all()
+        cpr_today = conn.execute(
+            select(
+                clip_processing_results.c.status,
+                clip_processing_results.c.use_case,
+                func.count().label("cnt"),
+            )
+            .where(
+                clip_processing_results.c.tenant_id == scope.tenant_id,
+                clip_processing_results.c.ended_at >= today_utc_start,
+            )
+            .group_by(
+                clip_processing_results.c.status,
+                clip_processing_results.c.use_case,
+            )
+        ).all()
+
+    # Roll into a per-UC dict — UC keys lower-cased + restricted to the
+    # known three so a typo in the DB doesn't pollute the panel.
+    KNOWN_UCS = ("uc1", "uc2", "uc3")
+    per_uc: dict[str, dict[str, int]] = {
+        uc: {"pending": 0, "processing": 0, "completed_today": 0, "failed_today": 0, "completed_total": 0}
+        for uc in KNOWN_UCS
+    }
+    for r in cpr_rows:
+        uc = str(r.use_case or "").lower()
+        if uc not in per_uc:
+            continue
+        status_str = str(r.status)
+        cnt = int(r.cnt)
+        if status_str == "pending":
+            per_uc[uc]["pending"] += cnt
+        elif status_str == "processing":
+            per_uc[uc]["processing"] += cnt
+        elif status_str == "completed":
+            per_uc[uc]["completed_total"] += cnt
+    for r in cpr_today:
+        uc = str(r.use_case or "").lower()
+        if uc not in per_uc:
+            continue
+        status_str = str(r.status)
+        cnt = int(r.cnt)
+        if status_str == "completed":
+            per_uc[uc]["completed_today"] += cnt
+        elif status_str == "failed":
+            per_uc[uc]["failed_today"] += cnt
+
+    identify.use_cases = [
+        IdentifyUseCaseStatsOut(use_case=uc, **per_uc[uc]) for uc in KNOWN_UCS
+    ]
+    # Roll-ups for the top-of-page summary chip — sum across UCs.
+    identify.pending = sum(s["pending"] for s in per_uc.values())
+    identify.processing = sum(s["processing"] for s in per_uc.values())
+    identify.completed_today = sum(s["completed_today"] for s in per_uc.values())
+    identify.failed_today = sum(s["failed_today"] for s in per_uc.values())
+    identify.batch_status = str(get_reprocess_worker().get_status().get("status", "idle"))
+
+    return PipelineMonitorOut(
+        rtsp=rtsp,
+        recording=recording,
+        encoding=encoding,
+        identify=identify,
+        generated_at=datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),
     )

@@ -6490,12 +6490,17 @@ function UseCaseResultSection({
   cropsData,
   loading,
   clipId,
+  focusEmployeeId,
 }: {
   useCase: "uc1" | "uc2" | "uc3";
   result: ClipProcessingResult | null;
   cropsData: FaceCropListResponse | undefined;
   loading: boolean;
   clipId: number;
+  // When set, filter face crops down to only this employee — used by
+  // the Employee drawer's Matched Clips tab so unrelated faces +
+  // unknowns don't show up in the drilldown.
+  focusEmployeeId?: number | null;
 }) {
   const meta = UC_META[useCase];
   if (!meta) return null;
@@ -6516,7 +6521,14 @@ function UseCaseResultSection({
     }
   }
 
-  const crops = cropsData?.items ?? [];
+  // Narrow to the focused employee when the caller asked for it.
+  // Filter at the very start so every downstream calc — ordering,
+  // lightbox, matched/unknown counts — operates on the narrowed set.
+  const rawCrops = cropsData?.items ?? [];
+  const crops =
+    focusEmployeeId != null
+      ? rawCrops.filter((c) => c.employee_id === focusEmployeeId)
+      : rawCrops;
   // Stable order: matched first (by employee name), then unknown,
   // each group ordered by quality desc.
   const ordered = [...crops].sort((a, b) => {
@@ -6657,7 +6669,17 @@ function UseCaseResultSection({
             borderBottom: ordered.length > 0 ? "1px solid var(--border)" : "none",
           }}
         >
-          <Kpi label="Faces saved" value={String(result.face_crop_count)} />
+          <Kpi
+            label="Faces saved"
+            // When the drawer is focused on a single employee, this
+            // KPI reflects only their saved crops — clip-wide totals
+            // would be misleading next to the filtered grid below.
+            value={String(
+              focusEmployeeId != null
+                ? ordered.length
+                : result.face_crop_count,
+            )}
+          />
           <Kpi label="Matched" value={String(matchedCount)} accent="#15803d" />
           <Kpi label="Unknown" value={String(unknownCount)} />
           <Kpi
@@ -6817,7 +6839,24 @@ function Kpi({
 
 // ── ClipDetailDrawer ──────────────────────────────────────────────────────────
 
-function ClipDetailDrawer({ clip, onClose }: { clip: PersonClipOut; onClose: () => void }) {
+// Exported so the Clip Analytics page can reuse the same View Details
+// drawer (thumbnail + metadata + UC1/UC2/UC3 sections + face crops +
+// reprocess form). Single source of truth keeps the two pages visually
+// consistent.
+//
+// ``focusEmployeeId`` (optional) — when set, every UC section filters
+// its face crops to only that employee's matches. Used by the
+// Employee drawer's Matched Clips tab so the operator sees just the
+// person they clicked on, not every face in the frame.
+export function ClipDetailDrawer({
+  clip,
+  onClose,
+  focusEmployeeId,
+}: {
+  clip: PersonClipOut;
+  onClose: () => void;
+  focusEmployeeId?: number | null | undefined;
+}) {
   const [showReprocessForm, setShowReprocessForm] = useState(false);
   // Empty by default; seeded from the actual processing-results when
   // the form opens (see ``openReprocessForm`` below).
@@ -7072,6 +7111,7 @@ function ClipDetailDrawer({ clip, onClose }: { clip: PersonClipOut; onClose: () 
               cropsData={uc1Crops.data}
               loading={uc1Crops.isLoading}
               clipId={clip.id}
+              focusEmployeeId={focusEmployeeId ?? null}
             />
             <UseCaseResultSection
               useCase="uc2"
@@ -7079,6 +7119,7 @@ function ClipDetailDrawer({ clip, onClose }: { clip: PersonClipOut; onClose: () 
               cropsData={uc2Crops.data}
               loading={uc2Crops.isLoading}
               clipId={clip.id}
+              focusEmployeeId={focusEmployeeId ?? null}
             />
             <UseCaseResultSection
               useCase="uc3"
@@ -7086,6 +7127,7 @@ function ClipDetailDrawer({ clip, onClose }: { clip: PersonClipOut; onClose: () 
               cropsData={uc3Crops.data}
               loading={uc3Crops.isLoading}
               clipId={clip.id}
+              focusEmployeeId={focusEmployeeId ?? null}
             />
           </div>
         </div>
