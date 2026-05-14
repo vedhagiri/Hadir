@@ -43,7 +43,6 @@ import {
   useEmployeePhotoUpload,
   useEmployeePhotos,
   useUpdateEmployee,
-  useAdminOverrideDeleteRequest,
 } from "./hooks";
 import type { Employee, EmployeeWritePayload, PhotoAngle } from "./types";
 
@@ -143,7 +142,6 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
   const create = useCreateEmployee();
   const update = useUpdateEmployee();
   const decide = useDecideDeleteRequest();
-  const adminOverride = useAdminOverrideDeleteRequest();
   const upload = useEmployeePhotoUpload();
   const deletePhoto = useDeletePhoto();
 
@@ -171,8 +169,6 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
   const [photoAngle, setPhotoAngle] = useState<PhotoAngle>("front");
   const [serverError, setServerError] = useState<string | null>(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [overrideOpen, setOverrideOpen] = useState(false);
-  const [overrideComment, setOverrideComment] = useState("");
 
   // "Platform access" — Add mode defaults this on so every imported
   // or hand-added employee gets a login by default (operator can opt
@@ -455,37 +451,6 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
     }
   };
 
-  const onOverrideSubmit = async () => {
-    if (!pendingDelete.data || !employeeId) return;
-    if (overrideComment.trim().length < 10) {
-      setServerError(t("employees.errors.overrideCommentMin") as string);
-      return;
-    }
-    try {
-      await adminOverride.mutateAsync({
-        employeeId,
-        requestId: pendingDelete.data.id,
-        decision: "approve",
-        comment: overrideComment.trim(),
-      });
-      setOverrideOpen(false);
-      onClose();
-    } catch (e) {
-      if (e instanceof ApiError) {
-        const detail = (e.body as { detail?: string })?.detail;
-        setServerError(typeof detail === "string" ? detail : `Error ${e.status}`);
-      }
-    }
-  };
-
-  const isDifferentAdminFromRequester = useMemo(() => {
-    if (!pendingDelete.data || !me.data) return false;
-    return pendingDelete.data.requested_by !== me.data.id;
-  }, [pendingDelete.data, me.data]);
-
-  const showOverrideButton =
-    isAdmin && !!pendingDelete.data && isDifferentAdminFromRequester;
-
   return (
     <DrawerShell onClose={onClose}>
       <div className="drawer">
@@ -563,56 +528,6 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
                   >
                     {t("employees.delete.reject") as string}
                   </button>
-                </div>
-              )}
-              {showOverrideButton && !overrideOpen && (
-                <button
-                  type="button"
-                  className="btn btn-sm"
-                  style={{ marginTop: 8 }}
-                  onClick={() => setOverrideOpen(true)}
-                >
-                  {t("employees.delete.overrideAndApprove") as string}
-                </button>
-              )}
-              {overrideOpen && (
-                <div style={{ marginTop: 8 }}>
-                  <textarea
-                    placeholder={
-                      t("employees.delete.overridePromptComment") as string
-                    }
-                    value={overrideComment}
-                    onChange={(e) => setOverrideComment(e.target.value)}
-                    rows={3}
-                    style={{
-                      width: "100%",
-                      padding: 8,
-                      fontSize: 12.5,
-                      border: "1px solid var(--border)",
-                      borderRadius: "var(--radius-sm)",
-                      background: "var(--bg-elev)",
-                    }}
-                  />
-                  <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-primary"
-                      onClick={() => void onOverrideSubmit()}
-                      disabled={adminOverride.isPending}
-                    >
-                      {t("employees.delete.confirmOverride") as string}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-sm"
-                      onClick={() => {
-                        setOverrideOpen(false);
-                        setOverrideComment("");
-                      }}
-                    >
-                      {t("common.cancel") as string}
-                    </button>
-                  </div>
                 </div>
               )}
             </div>

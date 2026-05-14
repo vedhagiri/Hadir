@@ -1,0 +1,19 @@
+{
+  "version": "1.1.15",
+  "previous_version": null,
+  "commit_id": "n/a",
+  "previous_commit_id": null,
+  "all_new_install": true,
+  "new_migrations": [],
+  "services_changed": {
+    "backend": true,
+    "frontend": true,
+    "nginx": true,
+    "postgres": false
+  },
+  "compose_changed": true,
+  "https_compose_changed": true,
+  "env_keys_added": [],
+  "env_keys_removed": [],
+  "upgrade_scripts": []
+}

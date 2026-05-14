@@ -344,30 +344,6 @@ export function useDecideDeleteRequest() {
   });
 }
 
-export function useAdminOverrideDeleteRequest() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (args: {
-      employeeId: number;
-      requestId: number;
-      decision: "approve" | "reject";
-      comment: string;
-    }): Promise<DeleteRequest> => {
-      return api<DeleteRequest>(
-        `/api/employees/${args.employeeId}/delete-request/${args.requestId}/admin-override`,
-        {
-          method: "POST",
-          body: { decision: args.decision, comment: args.comment },
-        },
-      );
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["delete-requests"] });
-      qc.invalidateQueries({ queryKey: ["employees"] });
-    },
-  });
-}
-
 export interface BulkDeleteRequest {
   scope: "selected" | "all";
   mode: "soft" | "hard";

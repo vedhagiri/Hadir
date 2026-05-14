@@ -77,9 +77,12 @@ router = APIRouter(tags=["employees", "delete-requests"])
 # the listing doesn't get shadowed by the employees router's
 # ``/{employee_id}`` dynamic segment.
 
-ADMIN = Depends(require_role("Admin"))
 HR_ONLY = Depends(require_role("HR"))
 ADMIN_OR_HR = Depends(require_any_role("Admin", "HR"))
+# Permanent-delete submission is open to Admin / HR / Manager. Manager
+# submissions are additionally scope-checked against the visible-employee
+# set so a manager can't request deletion of someone outside their team.
+ADMIN_HR_MANAGER = Depends(require_any_role("Admin", "HR", "Manager"))
 
 
 # ---------------------------------------------------------------------------
@@ -97,11 +100,6 @@ class DeleteRequestSubmitIn(BaseModel):
 class DeleteRequestDecideIn(BaseModel):
     decision: Literal["approve", "reject"]
     comment: Optional[str] = Field(default=None, max_length=500)
-
-
-class DeleteRequestOverrideIn(BaseModel):
-    decision: Literal["approve", "reject"]
-    comment: str = Field(min_length=10, max_length=500)
 
 
 class DeleteRequestOut(BaseModel):
@@ -368,23 +366,41 @@ def _execute_hard_delete(
 def submit_delete_request(
     employee_id: int,
     payload: DeleteRequestSubmitIn,
-    user: Annotated[CurrentUser, ADMIN_OR_HR],
+    user: Annotated[CurrentUser, ADMIN_HR_MANAGER],
 ) -> DeleteRequestOut:
-    """Admin or HR submits a delete request.
+    """Admin, HR, or Manager submits a delete request.
 
     HR self-submit auto-approves on insert and triggers the hard-delete
-    immediately. Admin submit creates a pending row and notifies HR.
+    immediately. Admin/Manager submit creates a pending row for HR to
+    decide on. Manager submissions are scope-checked against the
+    manager's visible-employee set.
     """
 
     scope = TenantScope(tenant_id=user.tenant_id)
     engine = get_engine()
     is_hr = "HR" in user.roles
+    is_admin_or_hr = "Admin" in user.roles or is_hr
 
     with engine.begin() as conn:
         # Cross-tenant 404 — same red line as the rest of the API.
         emp = repo.get_employee(conn, scope, employee_id)
         if emp is None:
             raise HTTPException(status_code=404, detail="employee not found")
+
+        # Manager scope: 404 (not 403) so existence isn't leaked to a
+        # Manager who doesn't manage the target employee.
+        if not is_admin_or_hr:
+            from maugood.attendance.repository import (  # noqa: PLC0415
+                get_manager_visible_employee_ids,
+            )
+
+            visible = get_manager_visible_employee_ids(
+                conn, scope, manager_user_id=user.id
+            )
+            if employee_id not in visible:
+                raise HTTPException(
+                    status_code=404, detail="employee not found"
+                )
 
         # 409 if a pending row already exists. The DB partial unique
         # index would also reject this; the explicit check gives a
@@ -504,16 +520,33 @@ def submit_delete_request(
 )
 def get_pending_delete_request(
     employee_id: int,
-    user: Annotated[CurrentUser, ADMIN_OR_HR],
+    user: Annotated[CurrentUser, ADMIN_HR_MANAGER],
 ) -> Optional[DeleteRequestOut]:
     """Return the open (pending) delete request for the employee, or
-    null if none. Used by the Edit drawer to show the yellow banner."""
+    null if none. Used by the Edit drawer to show the yellow banner.
+
+    Manager is scope-checked against the visible-employee set so a
+    manager can't probe pending state for someone outside their team.
+    """
 
     scope = TenantScope(tenant_id=user.tenant_id)
+    is_admin_or_hr = "Admin" in user.roles or "HR" in user.roles
     with get_engine().begin() as conn:
         emp = repo.get_employee(conn, scope, employee_id)
         if emp is None:
             raise HTTPException(status_code=404, detail="employee not found")
+        if not is_admin_or_hr:
+            from maugood.attendance.repository import (  # noqa: PLC0415
+                get_manager_visible_employee_ids,
+            )
+
+            visible = get_manager_visible_employee_ids(
+                conn, scope, manager_user_id=user.id
+            )
+            if employee_id not in visible:
+                raise HTTPException(
+                    status_code=404, detail="employee not found"
+                )
         row = conn.execute(
             select(t_delete_requests.c.id).where(
                 t_delete_requests.c.tenant_id == scope.tenant_id,
@@ -671,113 +704,8 @@ def hr_decide_delete_request(
     return out
 
 
-@router.post(
-    "/api/employees/{employee_id}/delete-request/{req_id}/admin-override",
-    response_model=DeleteRequestOut,
-)
-def admin_override_delete_request(
-    employee_id: int,
-    req_id: int,
-    payload: DeleteRequestOverrideIn,
-    user: Annotated[CurrentUser, ADMIN],
-) -> DeleteRequestOut:
-    """Another Admin (not the original requester) overrides + decides.
-
-    Mandatory 10-char comment enforced server-side. Self-override is
-    rejected — the override exists for cases where one Admin needs to
-    act on another's pending request, not for self-approval.
-    """
-
-    scope = TenantScope(tenant_id=user.tenant_id)
-    engine = get_engine()
-    now = datetime.now(tz=timezone.utc)
-
-    with engine.begin() as conn:
-        row = conn.execute(
-            select(
-                t_delete_requests.c.id,
-                t_delete_requests.c.status,
-                t_delete_requests.c.requested_by,
-                t_delete_requests.c.reason,
-                t_delete_requests.c.employee_id,
-            ).where(
-                t_delete_requests.c.tenant_id == scope.tenant_id,
-                t_delete_requests.c.id == req_id,
-                t_delete_requests.c.employee_id == employee_id,
-            )
-        ).first()
-        if row is None:
-            raise HTTPException(status_code=404, detail="delete request not found")
-        if row.status != "pending":
-            raise HTTPException(
-                status_code=409,
-                detail=f"delete request is in status '{row.status}', cannot override",
-            )
-        if row.requested_by is not None and int(row.requested_by) == user.id:
-            raise HTTPException(
-                status_code=403,
-                detail="cannot override your own delete request",
-            )
-
-        conn.execute(
-            update(t_delete_requests)
-            .where(t_delete_requests.c.id == req_id)
-            .values(
-                status="admin_override",
-                admin_override_by=user.id,
-                admin_override_at=now,
-                admin_override_comment=payload.comment,
-            )
-        )
-        write_audit(
-            conn,
-            tenant_id=scope.tenant_id,
-            actor_user_id=user.id,
-            action=(
-                "delete_request.admin_override_approve"
-                if payload.decision == "approve"
-                else "delete_request.admin_override_reject"
-            ),
-            entity_type="delete_request",
-            entity_id=str(req_id),
-            after={
-                "employee_id": employee_id,
-                "previous_requester": int(row.requested_by) if row.requested_by else None,
-                "comment": payload.comment,
-                "decision": payload.decision,
-            },
-        )
-
-    if payload.decision == "approve":
-        _execute_hard_delete(
-            engine=engine,
-            scope=scope,
-            employee_id=employee_id,
-            actor_user_id=user.id,
-            reason=str(row.reason) if row.reason is not None else None,
-            requester_user_id=int(row.requested_by) if row.requested_by else None,
-            via="admin_override",
-            delete_request_id=req_id,
-        )
-        return DeleteRequestOut(
-            id=req_id,
-            employee_id=employee_id,
-            employee_code="",
-            employee_full_name="",
-            requested_by=int(row.requested_by) if row.requested_by else None,
-            requested_by_full_name=None,
-            reason=str(row.reason) if row.reason is not None else None,
-            status="admin_override",
-            hr_decided_by=None,
-            hr_decided_at=None,
-            hr_comment=None,
-            admin_override_by=user.id,
-            admin_override_at=now,
-            admin_override_comment=payload.comment,
-            created_at=now,
-        )
-
-    with engine.begin() as conn:
-        out = _hydrate_request(conn, scope, req_id)
-    assert out is not None
-    return out
+# NOTE: the admin-override endpoint was removed by operator request —
+# only HR can decide on pending delete requests now. Existing historical
+# rows with ``status='admin_override'`` remain in the audit trail; the
+# state value stays in the CHECK constraint for compatibility, but no
+# code path creates new override rows.

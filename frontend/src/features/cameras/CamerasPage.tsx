@@ -111,7 +111,7 @@ export function CamerasPage() {
               <th>Worker</th>
               <th>Display</th>
               <th>Detection</th>
-              <th>Recording</th>
+              <th>Clip Saving</th>
               <th style={{ textAlign: "right" }}>Actions</th>
             </tr>
           </thead>

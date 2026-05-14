@@ -270,6 +270,20 @@ def _apply_grants(conn: Connection, *, schema_name: str) -> None:
         text(f'GRANT SELECT, INSERT ON "{schema_name}"."audit_log" TO maugood_app')
     )
 
+    # delete_requests is append-only at the grant level — SELECT + INSERT
+    # + UPDATE only. Hard-delete cascades the row away via the
+    # employees FK, which Postgres fires on maugood_app's behalf as part
+    # of the parent DELETE — no direct DELETE grant needed.
+    conn.execute(
+        text(f'ALTER TABLE "{schema_name}"."delete_requests" OWNER TO maugood_admin')
+    )
+    conn.execute(
+        text(
+            f'GRANT SELECT, INSERT, UPDATE ON "{schema_name}"."delete_requests" '
+            "TO maugood_app"
+        )
+    )
+
     conn.execute(
         text(f'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA "{schema_name}" TO maugood_app')
     )

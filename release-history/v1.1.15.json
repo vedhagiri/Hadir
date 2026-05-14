@@ -1,0 +1,18 @@
+{
+  "version": "1.1.15",
+  "label": "v1.1.15",
+  "git_url": "n/a",
+  "branch": "n/a",
+  "commit_id": "n/a",
+  "commit_short": "n/a",
+  "built_at_utc": "2026-05-13T21:34:48Z",
+  "built_at_local": "2026-05-14 03:04:48 IST",
+  "machine": {
+    "hostname": "inaisys-02",
+    "os": "Linux",
+    "kernel": "Linux 6.17.0-23-generic x86_64",
+    "user": "hari-inaisys",
+    "python_version": "3.12.3",
+    "node_version": "24.15.0"
+  }
+}
