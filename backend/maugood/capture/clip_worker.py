@@ -120,6 +120,14 @@ class ClipWorker:
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
+        # Pipeline Monitor observability — read by the unified workers
+        # aggregator. Mutated by ``_run`` under no lock because Python
+        # ints are atomic and the dashboard tolerates a stale read.
+        self._lifetime_processed = 0
+        self._lifetime_failed = 0
+        self._currently_processing = False
+        self._current_clip_id: Optional[int] = None
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -147,6 +155,25 @@ class ClipWorker:
     def queue_size(self) -> int:
         """Return the number of clips waiting in the queue."""
         return self._queue.qsize()
+
+    def is_processing(self) -> bool:
+        """True while ``_finalize_clip`` is running on a clip. Surfaced
+        on the Pipeline Monitor Clip Saving row so the dashboard shows
+        non-zero ``processing`` whenever the encoder is busy."""
+
+        return bool(self._currently_processing)
+
+    @property
+    def lifetime_processed(self) -> int:
+        return int(self._lifetime_processed)
+
+    @property
+    def lifetime_failed(self) -> int:
+        return int(self._lifetime_failed)
+
+    @property
+    def current_clip_id(self) -> Optional[int]:
+        return self._current_clip_id
 
     # ------------------------------------------------------------------
     # Public: submit a clip for finalization
@@ -183,14 +210,27 @@ class ClipWorker:
                     clip_data = self._queue.get(timeout=1.0)
                 except queue.Empty:
                     continue
+                self._currently_processing = True
                 try:
-                    self._finalize_clip(clip_data)
+                    # Option B — when the reader submits a stream-copy
+                    # job (mode='stream_copy', segmenter populated) we
+                    # take the zero-encode concat path. Otherwise fall
+                    # back to the legacy encode-from-JPEGs flow.
+                    if clip_data.get("mode") == "stream_copy":
+                        self._finalize_stream_copy(clip_data)
+                    else:
+                        self._finalize_clip(clip_data)
+                    self._lifetime_processed += 1
                 except Exception as exc:  # noqa: BLE001
+                    self._lifetime_failed += 1
                     logger.error(
                         "clip finalization failed: camera=%s reason=%s",
                         self._camera_id,
                         type(exc).__name__,
                     )
+                finally:
+                    self._currently_processing = False
+                    self._current_clip_id = None
 
     # ------------------------------------------------------------------
     # Encoding defaults (Phase B). Used when the reader's snapshot is
@@ -611,6 +651,36 @@ class ClipWorker:
             # ``detection_source`` is still persisted on the row
             # (used by the UI to surface which detector triggered
             # the clip).
+            #
+            # Queue-based auto-submit (new, queue-pipeline arch): when
+            # a clip lands in the DB with ``recording_status=completed``
+            # and a real ``file_path``, we push (clip, uc1/uc2/uc3)
+            # jobs onto the always-on clip_pipeline. ``skip_existing``
+            # means a future re-finalize never double-processes. The
+            # pipeline's queue cap silently drops jobs when overloaded
+            # (logged at WARNING by the StageQueue), so a flood of
+            # clips can't OOM the matcher.
+            if clip_id is not None:
+                try:
+                    from maugood.clip_pipeline import (  # noqa: PLC0415
+                        clip_pipeline,
+                    )
+                    clip_pipeline.submit_batch(
+                        scope=self._scope,
+                        clip_ids=[int(clip_id)],
+                        use_cases=["uc1", "uc2", "uc3"],
+                        skip_existing=True,
+                        submitted_by_user_id=None,
+                        submitted_by_email="clip_worker@auto-submit",
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    # Auto-submit is best-effort — never let a pipeline
+                    # hiccup poison the clip-save path. The operator
+                    # can still trigger reprocess manually.
+                    logger.warning(
+                        "auto-submit to clip_pipeline failed: clip=%s reason=%s",
+                        clip_id, type(exc).__name__,
+                    )
 
         finally:
             # Always free temp disk space, regardless of success/failure.
@@ -625,6 +695,217 @@ class ClipWorker:
                         tmpdir_obj.cleanup()
                     except Exception:  # noqa: BLE001
                         pass
+
+    def _finalize_stream_copy(self, clip_data: dict) -> None:
+        """Option B finalize — concat-copy segments from RtspSegmenter,
+        Fernet-encrypt, INSERT person_clips, auto-submit to clip_pipeline.
+
+        ``clip_data`` shape (set by the reader when mode=stream_copy):
+            {
+                "mode": "stream_copy",
+                "t_start": float (unix epoch seconds),
+                "t_end":   float,
+                "person_count": int,
+                "detection_source": str,
+                "existing_clip_id": Optional[int],  # placeholder row id
+                "segmenter_ref": RtspSegmenter,
+            }
+
+        No re-encoding. The whole flow is:
+          1. ``segmenter.get_segments_in_range(t_start, t_end)``
+          2. ``ffmpeg -f concat -c copy`` → single MP4 in a temp dir
+          3. Fernet-encrypt → /data/clips/{tenant}/{camera}/{ts}.mp4
+          4. INSERT person_clips row with recording_status=completed
+          5. Auto-submit (clip, uc1/uc2/uc3) to clip_pipeline
+        """
+
+        import shutil  # noqa: PLC0415
+        import sqlalchemy as sa  # noqa: PLC0415
+        from maugood.config import get_settings as _gs  # noqa: PLC0415
+        from maugood.db import person_clips as _pc  # noqa: PLC0415
+        from maugood.employees.photos import encrypt_bytes  # noqa: PLC0415
+
+        t_start = float(clip_data["t_start"])
+        t_end = float(clip_data["t_end"])
+        person_count = int(clip_data.get("person_count", 1))
+        detection_source = str(clip_data.get("detection_source", "body"))
+        existing_clip_id: Optional[int] = clip_data.get("existing_clip_id")
+        segmenter = clip_data.get("segmenter_ref")
+        if segmenter is None:
+            logger.warning(
+                "stream-copy finalize without segmenter ref: camera=%s",
+                self._camera_id,
+            )
+            self._mark_recording_failed(existing_clip_id)
+            return
+
+        segments = segmenter.get_segments_in_range(t_start, t_end)
+        if not segments:
+            logger.warning(
+                "stream-copy finalize: no segments cover [%.1f, %.1f] "
+                "for camera=%s — segmenter may be warming up",
+                t_start, t_end, self._camera_id,
+            )
+            self._mark_recording_failed(existing_clip_id)
+            return
+
+        # 1. concat-copy.
+        work_dir = Path(tempfile.mkdtemp(prefix="maugood-streamcopy-"))
+        try:
+            list_file = work_dir / "concat.txt"
+            with list_file.open("w") as fh:
+                for seg in segments:
+                    # ffmpeg concat demuxer requires single-quoted
+                    # POSIX paths with no embedded single quotes —
+                    # tmp paths we control so this is safe.
+                    fh.write(f"file '{seg.path}'\n")
+            merged = work_dir / "clip.mp4"
+            t_encode_start = datetime.now(timezone.utc)
+            rc = subprocess.run(  # noqa: S603
+                [
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-loglevel", "error",
+                    "-y",
+                    "-f", "concat",
+                    "-safe", "0",
+                    "-i", str(list_file),
+                    "-c", "copy",
+                    "-movflags", "+faststart",
+                    str(merged),
+                ],
+                capture_output=True,
+                timeout=120,
+            )
+            t_encode_end = datetime.now(timezone.utc)
+            if rc.returncode != 0:
+                stderr = rc.stderr.decode("utf-8", errors="replace")[-400:]
+                logger.warning(
+                    "stream-copy concat failed: camera=%s rc=%d stderr=%r",
+                    self._camera_id, rc.returncode, stderr,
+                )
+                self._mark_recording_failed(existing_clip_id)
+                return
+            if not merged.exists() or merged.stat().st_size == 0:
+                logger.warning(
+                    "stream-copy concat produced empty file: camera=%s",
+                    self._camera_id,
+                )
+                self._mark_recording_failed(existing_clip_id)
+                return
+
+            # 2. Fernet-encrypt + place at the final path. Same layout
+            # the encode path uses (clip_storage_root/DD-MM-YYYY/cam-slug/)
+            # so the existing UI / file-server endpoints find the
+            # clip without any change.
+            settings = _gs()
+            clip_start_dt = datetime.fromtimestamp(t_start, tz=timezone.utc)
+            clip_end_dt = datetime.fromtimestamp(t_end, tz=timezone.utc)
+            date_str = clip_start_dt.strftime("%d-%m-%Y")
+            start_hms = clip_start_dt.strftime("%H%M%S")
+            end_hms = clip_end_dt.strftime("%H%M%S")
+            camera_slug = slugify_camera_name(
+                self._camera_name, self._camera_id
+            )
+            tenant_root = (
+                Path(settings.clip_storage_root) / date_str / camera_slug
+            )
+            tenant_root.mkdir(parents=True, exist_ok=True)
+            final_path = tenant_root / f"{start_hms}-{end_hms}.mp4"
+            try:
+                final_path.write_bytes(encrypt_bytes(merged.read_bytes()))
+            except OSError as exc:
+                logger.warning(
+                    "stream-copy write failed: camera=%s reason=%s",
+                    self._camera_id, type(exc).__name__,
+                )
+                self._mark_recording_failed(existing_clip_id)
+                return
+            filesize = final_path.stat().st_size
+            duration = max(0.0, t_end - t_start)
+
+            # 3. INSERT or UPDATE person_clips.
+            clip_id: Optional[int] = None
+            final_values = dict(
+                clip_start=clip_start_dt,
+                clip_end=clip_end_dt,
+                duration_seconds=duration,
+                file_path=str(final_path),
+                filesize_bytes=filesize,
+                # Stream-copy doesn't decode frames at finalize time —
+                # the operator-visible frame count is approximated from
+                # ffmpeg's segmenter timing.
+                frame_count=int(duration * 25),  # camera typical 25 fps
+                person_count=person_count,
+                matched_employees=[],
+                encoding_start_at=t_encode_start,
+                encoding_end_at=t_encode_end,
+                fps_recorded=None,
+                resolution_w=None,
+                resolution_h=None,
+                detection_source=detection_source,
+                chunk_count=len(segments),
+                recording_status="completed",
+            )
+            with self._engine.begin() as conn:
+                if existing_clip_id is not None:
+                    upd = conn.execute(
+                        sa.update(_pc)
+                        .where(
+                            _pc.c.id == existing_clip_id,
+                            _pc.c.tenant_id == self._scope.tenant_id,
+                            _pc.c.recording_status.in_(("recording", "finalizing")),
+                        )
+                        .values(**final_values)
+                    )
+                    if upd.rowcount == 0:
+                        existing_clip_id = None
+                    else:
+                        clip_id = existing_clip_id
+                if existing_clip_id is None:
+                    result = conn.execute(
+                        sa.insert(_pc).values(
+                            tenant_id=self._scope.tenant_id,
+                            camera_id=self._camera_id,
+                            employee_id=None,
+                            track_id=None,
+                            detection_event_id=None,
+                            **final_values,
+                        )
+                    )
+                    clip_id = (
+                        result.inserted_primary_key[0]
+                        if result.inserted_primary_key
+                        else None
+                    )
+            self._current_clip_id = clip_id
+
+            # 4. Auto-submit to the clip_pipeline. Same hook as the
+            # encode path — the per-UC cropping queues pick up the
+            # new clip within seconds.
+            if clip_id is not None:
+                try:
+                    from maugood.clip_pipeline import (  # noqa: PLC0415
+                        clip_pipeline,
+                    )
+                    clip_pipeline.submit_batch(
+                        scope=self._scope,
+                        clip_ids=[int(clip_id)],
+                        use_cases=["uc1", "uc2", "uc3"],
+                        skip_existing=True,
+                        submitted_by_user_id=None,
+                        submitted_by_email="clip_worker@auto-submit",
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "auto-submit (stream_copy) failed: clip=%s reason=%s",
+                        clip_id, type(exc).__name__,
+                    )
+        finally:
+            try:
+                shutil.rmtree(work_dir, ignore_errors=True)
+            except Exception:  # noqa: BLE001
+                pass
 
     def _mark_recording_failed(self, clip_id: Optional[int]) -> None:
         """Flip a placeholder ``recording`` row to ``failed`` (migration

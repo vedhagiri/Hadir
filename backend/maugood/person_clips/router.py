@@ -111,6 +111,7 @@ def _row_to_out(
     name_map: dict[int, str] | None = None,
     processed_by_clip: dict[int, list[str]] | None = None,
     matched_crop_by_clip: dict[int, int] | None = None,
+    processing_by_clip: dict[int, list[str]] | None = None,
 ) -> PersonClipOut:
     matched: list[int] = []
     raw = getattr(row, "matched_employees", None)
@@ -122,6 +123,9 @@ def _row_to_out(
     processed_ucs: list[str] = []
     if processed_by_clip is not None:
         processed_ucs = processed_by_clip.get(int(row.id), [])
+    processing_ucs: list[str] = []
+    if processing_by_clip is not None:
+        processing_ucs = processing_by_clip.get(int(row.id), [])
     return PersonClipOut(
         id=row.id,
         camera_id=row.camera_id,
@@ -157,6 +161,7 @@ def _row_to_out(
             getattr(row, "recording_status", "completed") or "completed"
         ),
         processed_use_cases=processed_ucs,
+        processing_use_cases=processing_ucs,
         clip_name=_derive_clip_name(row),
         matched_face_crop_id=(
             matched_crop_by_clip.get(int(row.id))
@@ -689,34 +694,49 @@ def list_person_clips(
                         all_ids.add(int(eid))
         name_map = _resolve_employee_names(conn, scope, all_ids)
 
-        # Batch-fetch processed use cases for every clip in this page.
-        # Single query joined by clip id — no N+1.
+        # Batch-fetch processed + in-flight use cases for every clip in
+        # this page. One query covers both buckets so a row that is
+        # currently being processed shows the right Processing Status
+        # pill instead of "Saved".
         processed_by_clip: dict[int, list[str]] = {}
+        processing_by_clip: dict[int, list[str]] = {}
         clip_ids = [int(r.id) for r in rows]
         if clip_ids:
-            # NB: ``clip_processing_results.status`` is written by the
-            # reprocess worker as ``"completed"`` (see
-            # reprocess.py:1087 / :1372). The earlier filter used
-            # ``"processed"`` and silently returned zero rows, so the
-            # Clip Analytics column never updated after a successful
-            # Identify Event run.
+            # NB: ``clip_processing_results.status`` values:
+            #   * "completed" — finished, drives the "Processed" label
+            #   * "processing" / "pending" — in flight; the operator
+            #     should see "Processing" not "Saved" while these exist
+            #   * "failed" — terminal failure; we surface as Saved + the
+            #     Failed/skipped counter so the Identify Event UI can
+            #     retry.
             cpr_rows = conn.execute(
                 select(
                     clip_processing_results.c.person_clip_id,
                     clip_processing_results.c.use_case,
+                    clip_processing_results.c.status,
                 ).where(
                     clip_processing_results.c.tenant_id == scope.tenant_id,
                     clip_processing_results.c.person_clip_id.in_(clip_ids),
-                    clip_processing_results.c.status == "completed",
+                    clip_processing_results.c.status.in_(
+                        ("completed", "processing", "pending")
+                    ),
                 )
             ).all()
             for cpr in cpr_rows:
                 cid = int(cpr.person_clip_id)
                 uc = str(cpr.use_case).lower()
-                bucket = processed_by_clip.setdefault(cid, [])
+                status = str(cpr.status).lower()
+                target = (
+                    processed_by_clip
+                    if status == "completed"
+                    else processing_by_clip
+                )
+                bucket = target.setdefault(cid, [])
                 if uc not in bucket:
                     bucket.append(uc)
             for bucket in processed_by_clip.values():
+                bucket.sort()
+            for bucket in processing_by_clip.values():
                 bucket.sort()
 
         # Per-clip best-quality face_crop for the requested employee.
@@ -758,6 +778,7 @@ def list_person_clips(
             name_map,
             processed_by_clip,
             matched_crop_by_clip if matched_employee_id is not None else None,
+            processing_by_clip,
         )
         for r in rows
     ]

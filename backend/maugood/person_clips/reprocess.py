@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
-from sqlalchemy import select as sa_select, update as sa_update, insert as sa_insert
+from sqlalchemy import func as sa_func, or_ as sa_or, select as sa_select, update as sa_update, insert as sa_insert
 
 from maugood.auth.audit import write_audit
 from maugood.config import get_settings
@@ -1345,7 +1345,20 @@ class ReprocessFaceMatchWorker:
             ).where(person_clips.c.tenant_id == scope.tenant_id)
 
             if mode == "skip_existing":
-                query = query.where(person_clips.c.matched_employees == "[]")
+                # ``matched_employees`` is JSONB — comparing it to the
+                # Python string "[]" raises ``operator does not exist:
+                # jsonb = character varying`` at the driver. Use the
+                # JSONB-native ``jsonb_array_length`` and treat NULL
+                # (clips that pre-date the column / never went through
+                # matching) as "no matches yet" too.
+                query = query.where(
+                    sa_or(
+                        person_clips.c.matched_employees.is_(None),
+                        sa_func.jsonb_array_length(
+                            person_clips.c.matched_employees
+                        ) == 0,
+                    )
+                )
 
             rows = conn.execute(query).all()
 

@@ -55,6 +55,8 @@ from maugood.notifications import (
 from maugood.operations import router as operations_router
 from maugood.face_crops import router as face_crops_router
 from maugood.person_clips import router as person_clips_router
+from maugood.clip_pipeline.router import router as clip_pipeline_router
+from maugood.pipeline_monitor import router as pipeline_monitor_router
 from maugood.retention import retention_scheduler
 from maugood.scheduled_reports import (
     report_runner,
@@ -124,6 +126,11 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     notification_worker.start()
     retention_scheduler.start()
     lifecycle_scheduler.start()
+    # Queue-based clip-processing pipeline (cropping + matching
+    # workers). Side-by-side with the legacy ReprocessFaceMatchWorker
+    # path — operators submit batches via /api/clip-pipeline/submit.
+    from maugood.clip_pipeline import clip_pipeline  # noqa: PLC0415
+    clip_pipeline.start()
     try:
         yield
     finally:
@@ -135,6 +142,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         notification_worker.stop()
         retention_scheduler.stop()
         lifecycle_scheduler.stop()
+        clip_pipeline.stop()
         limiter.stop()
 
 
@@ -281,6 +289,8 @@ def create_app() -> FastAPI:
     app.include_router(live_capture_router)
     app.include_router(operations_router)
     app.include_router(person_clips_router)
+    app.include_router(clip_pipeline_router)
+    app.include_router(pipeline_monitor_router)
     app.include_router(face_crops_router)
 
     # Dev-only test endpoints — used by the Playwright smoke test in

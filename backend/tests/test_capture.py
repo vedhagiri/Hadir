@@ -1410,7 +1410,7 @@ def test_detection_enabled_short_circuits_detect_call(
 
 
 def test_emit_writes_detection_metadata_when_detector_config_passed(
-    admin_engine, monkeypatch, tmp_path
+    admin_engine, monkeypatch, tmp_path, clean_cameras
 ) -> None:
     """Migration 0032 + the metadata helper: when ``emit_detection_event``
     is called with ``detector_config=DetectorConfig(...)``, the row's
@@ -1477,6 +1477,7 @@ def test_emit_writes_detection_metadata_when_detector_config_passed(
 
 def test_orphan_cleanup_script_reclassifies_missing_files(
     admin_engine,
+    clean_cameras,
 ) -> None:
     """The cleanup script sets face_crop_path = NULL + orphaned_at when
     the file is missing on disk; healthy rows are untouched. Audit row

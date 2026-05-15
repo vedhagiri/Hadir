@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import collections
 import logging
+import os
 import tempfile
 import threading
 import time
@@ -60,6 +61,7 @@ from maugood.capture import events as events_io
 from maugood.capture.analyzer import Analyzer
 from maugood.capture.annotate import AnnotationBox, annotate_frame, encode_jpeg
 from maugood.capture.clip_worker import ClipWorker
+from maugood.capture.segmenter import RtspSegmenter
 from maugood.capture.directory import employee_directory
 from maugood.capture.tracker import Bbox, IoUTracker, TrackMatch
 from maugood.config import get_settings
@@ -579,6 +581,30 @@ class CaptureWorker:
             camera_name=self.camera_name,
         )
 
+        # Option B — RTSP stream-copy segmenter. Constructed only when
+        # the operator opts into ``MAUGOOD_CLIP_SAVING_MODE=stream_copy``.
+        # When enabled, a parallel ffmpeg subprocess writes 10-second
+        # rolling H.264 segments to a per-camera tmp dir; on clip
+        # finalize the ClipWorker concat-copies the relevant segments
+        # rather than re-encoding from decoded frames.
+        self._clip_saving_mode = (
+            get_settings().clip_saving_mode or "encode"
+        ).strip().lower()
+        self._segmenter: Optional[RtspSegmenter] = None
+        if self._clip_saving_mode == "stream_copy":
+            seg_root = Path(
+                os.environ.get(
+                    "MAUGOOD_RTSP_SEGMENTS_ROOT",
+                    "/tmp/maugood-rtsp-segments",
+                )
+            )
+            self._segmenter = RtspSegmenter(
+                tenant_id=self._scope.tenant_id,
+                camera_id=self.camera_id,
+                rtsp_url_plain=self._rtsp_url_plain,
+                segments_dir=seg_root / str(self._scope.tenant_id) / str(self.camera_id),
+            )
+
         # P28.8 — pipeline stage tracking. Timestamps default to None
         # (= "never"); the get_stats() consumer treats an unset
         # timestamp as max age.
@@ -637,6 +663,11 @@ class CaptureWorker:
             return
         self._stop.clear()
         self._clip_worker.start()
+        # Option B segmenter starts in tandem with the worker so the
+        # rolling segment buffer is warm before the analyzer's first
+        # person-present event fires.
+        if self._segmenter is not None:
+            self._segmenter.start()
         self._reader_thread = threading.Thread(
             target=self._run_reader,
             name=f"capread-{self.camera_id}",
@@ -653,6 +684,8 @@ class CaptureWorker:
     def stop(self, timeout: float = 5.0) -> None:
         self._stop.set()
         self._clip_worker.stop(timeout=timeout)
+        if self._segmenter is not None:
+            self._segmenter.stop(timeout_s=timeout)
         for t in (self._reader_thread, self._analyzer_thread):
             if t is not None and t.is_alive():
                 t.join(timeout=timeout)
@@ -1573,12 +1606,48 @@ class CaptureWorker:
             )
             # Hand off the recording-row claim before resetting so a
             # back-to-back start doesn't try to UPDATE the same row.
+            existing_clip_id = self._current_clip_id
             self._current_clip_id = None
-            self._clip_worker.submit_clip(clip_data)
-            logger.debug(
-                "clip submitted: camera=%s frames=%d chunks=%d",
-                self.camera_id, total_frames, len(chunks),
-            )
+
+            if (
+                self._clip_saving_mode == "stream_copy"
+                and self._segmenter is not None
+            ):
+                # Option B: don't ship per-chunk JPEG frames; ship the
+                # time range + a reference to the segmenter. The
+                # ClipWorker pulls the relevant H.264 segments off disk
+                # and concat-copies them — no re-encode.
+                stream_copy_data = {
+                    "mode": "stream_copy",
+                    "t_start": float(first_ts),
+                    "t_end": float(last_ts),
+                    "person_count": max(self._clip_max_person_count, 0),
+                    "detection_source": self.get_clip_detection_source(),
+                    "existing_clip_id": existing_clip_id,
+                    "segmenter_ref": self._segmenter,
+                }
+                # Per-chunk JPEG tmpdirs are unused in this mode — but
+                # the reader still created them. Clean up now so disk
+                # doesn't bloat between modes.
+                for c in chunks:
+                    tmpdir = c.get("tmpdir")
+                    if tmpdir is not None:
+                        try:
+                            tmpdir.cleanup()
+                        except Exception:  # noqa: BLE001
+                            pass
+                self._clip_worker.submit_clip(stream_copy_data)
+                logger.debug(
+                    "clip submitted (stream_copy): camera=%s range=%.1f→%.1f",
+                    self.camera_id, float(first_ts), float(last_ts),
+                )
+            else:
+                # Encode path (legacy default).
+                self._clip_worker.submit_clip(clip_data)
+                logger.debug(
+                    "clip submitted (encode): camera=%s frames=%d chunks=%d",
+                    self.camera_id, total_frames, len(chunks),
+                )
         else:
             # Too short — clean up every chunk tmpdir immediately.
             for c in chunks:

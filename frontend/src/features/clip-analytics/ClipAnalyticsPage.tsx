@@ -38,6 +38,7 @@ type ProcessingFilter =
   | "all"
   | "recording"
   | "encoding"
+  | "processing"
   | "saved"
   | "processed";
 
@@ -78,13 +79,15 @@ function fmtBytes(bytes: number): string {
 }
 
 // Processing Status reflects the full per-clip lifecycle:
-//   recording_status='recording'              → "Recording"
-//   recording_status='finalizing'              → "Encoding"
-//   recording_status='completed' + no UC runs  → "Saved"
-//   recording_status='completed' + ≥1 UC run   → "Processed"
+//   recording_status='recording'                       → "Recording"
+//   recording_status='finalizing'                      → "Encoding"
+//   recording_status='completed' + processing UC(s)    → "Processing"
+//   recording_status='completed' + no UC + no flight   → "Saved"
+//   recording_status='completed' + ≥1 completed UC     → "Processed"
 //
-// "Processed" is the only label that depends on processed_use_cases —
-// the rest are pure recording-lifecycle states.
+// "Processing" wins over "Processed" when at least one UC is still in
+// flight (e.g. UC1 completed, UC2 still cropping) so the operator sees
+// the live state, not the partial result.
 function processingStatusLabel(c: PersonClipOut): string {
   switch (c.recording_status) {
     case "recording":
@@ -97,6 +100,7 @@ function processingStatusLabel(c: PersonClipOut): string {
       return "Abandoned";
     case "completed":
     default:
+      if ((c.processing_use_cases ?? []).length > 0) return "Processing";
       return c.processed_use_cases.length > 0 ? "Processed" : "Saved";
   }
 }
@@ -158,9 +162,14 @@ export function ClipAnalyticsPage() {
       p.set("recording_status", "recording");
     } else if (processingFilter === "encoding") {
       p.set("recording_status", "finalizing");
-    } else if (processingFilter === "saved" || processingFilter === "processed") {
-      // Both Saved and Processed share recording_status='completed' —
-      // the client-side filter below splits them on processed_use_cases.
+    } else if (
+      processingFilter === "saved"
+      || processingFilter === "processed"
+      || processingFilter === "processing"
+    ) {
+      // All three share recording_status='completed' — the client-side
+      // filter below splits them on processing_use_cases /
+      // processed_use_cases.
       p.set("recording_status", "completed");
     }
     if (startDate) p.set("start", `${startDate}T00:00:00`);
@@ -184,10 +193,19 @@ export function ClipAnalyticsPage() {
   //  * Processed-UC dropdown
   const items = useMemo(() => {
     let rows = list.data?.items ?? [];
-    if (processingFilter === "saved") {
+    if (processingFilter === "processing") {
       rows = rows.filter(
         (c) =>
           c.recording_status === "completed" &&
+          (c.processing_use_cases ?? []).length > 0,
+      );
+    } else if (processingFilter === "saved") {
+      // Saved = completed recording, nothing in flight, nothing
+      // finished — i.e. just sitting waiting for the operator.
+      rows = rows.filter(
+        (c) =>
+          c.recording_status === "completed" &&
+          (c.processing_use_cases ?? []).length === 0 &&
           c.processed_use_cases.length === 0,
       );
     } else if (processingFilter === "processed") {
@@ -429,6 +447,7 @@ export function ClipAnalyticsPage() {
                   <option value="all">All</option>
                   <option value="recording">Recording</option>
                   <option value="encoding">Encoding</option>
+                  <option value="processing">Processing</option>
                   <option value="saved">Saved</option>
                   <option value="processed">Processed</option>
                 </select>
@@ -3361,6 +3380,14 @@ function StatusPill({
         return {
           bg: "rgba(59,130,246,0.12)",
           fg: "#1d4ed8",
+        };
+      case "Processing":
+        // Live pipeline state — purple tone so it visually
+        // distinguishes itself from both the terminal Processed
+        // (blue) and the static Saved (green).
+        return {
+          bg: "rgba(139,92,246,0.14)",
+          fg: "#6d28d9",
         };
       case "Saved":
         return { bg: "var(--success-soft)", fg: "var(--success-text)" };

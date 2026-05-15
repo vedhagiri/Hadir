@@ -84,6 +84,18 @@ class Settings(BaseSettings):
     # hard, not advisory (pilot-plan red line).
     match_threshold: float = 0.45
 
+    # --- Clip saving mode (Option B — stream-copy) -----------------------
+    # ``encode``       — legacy default. Reader stores JPEG frames; the
+    #                    ClipWorker runs ffmpeg to re-encode them into an
+    #                    H.264 MP4. Heavy on CPU.
+    # ``stream_copy`` — RtspSegmenter runs a parallel ffmpeg subprocess
+    #                    that segment-writes the camera's H.264 stream
+    #                    directly to disk with ``-c copy``. On finalize
+    #                    the ClipWorker concat-copies the relevant
+    #                    segments into the final MP4 — zero encode CPU.
+    #                    Costs one extra RTSP connection per camera.
+    clip_saving_mode: str = "encode"
+
     # --- Attendance (P10) --------------------------------------------------
     # IANA timezone used to convert detection timestamps to wall-clock
     # local time for comparison against a shift policy's ``start``/``end``

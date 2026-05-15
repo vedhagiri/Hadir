@@ -51,6 +51,11 @@ class PersonClipOut(BaseModel):
     # not been processed by any of UC1/UC2/UC3. Drives the "Processed
     # Use Cases" column on the Clip Analytics page.
     processed_use_cases: list[str] = []
+    # UCs with ``clip_processing_results.status`` in ('processing',
+    # 'pending'). Non-empty means a pipeline worker is mid-flight on
+    # this clip — the Clip Analytics page renders "Processing" instead
+    # of "Saved" while this list is non-empty.
+    processing_use_cases: list[str] = []
     # Display-friendly clip name. Derived from the MP4 file basename
     # when the clip has been encoded (``<start_HHMMSS>-<end_HHMMSS>.mp4``),
     # or synthesised from the clip start time while still recording.
