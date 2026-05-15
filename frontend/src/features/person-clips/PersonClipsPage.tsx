@@ -58,13 +58,42 @@ function fmtMs(ms: number | null | undefined): string {
 }
 
 function fmtTimestamp(iso: string): string {
-  const d = new Date(iso);
+  const d = parseFlexibleTimestamp(iso);
+  if (!d) return "—";
   return d.toLocaleString(undefined, {
     month: "short",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+// ``face_crops.event_timestamp`` is stored as a compact
+// ``YYYYMMDD_HHMMSS`` string (used as a filename component in
+// ``maugood/face_crops/extractor.py``) rather than ISO 8601. Naive
+// ``new Date(...)`` returns ``Invalid Date`` on that shape, which
+// then renders as ``Invalid Date`` / ``Invalid Time`` in the
+// FaceCropLightbox metadata cells. This helper accepts either shape
+// and returns ``null`` for unparseable inputs so the caller can show
+// a clean ``—`` instead.
+export function parseFlexibleTimestamp(raw: string | null | undefined): Date | null {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  // Try ISO 8601 (and any other format the browser recognises).
+  const iso = new Date(s);
+  if (!Number.isNaN(iso.getTime())) return iso;
+  // Compact ``YYYYMMDD_HHMMSS`` (face-crop filename-style).
+  const m = /^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})$/.exec(s);
+  if (m) {
+    const [, y, mo, d, h, mi, se] = m;
+    const t = new Date(
+      Number(y), Number(mo) - 1, Number(d),
+      Number(h), Number(mi), Number(se),
+    );
+    if (!Number.isNaN(t.getTime())) return t;
+  }
+  return null;
 }
 
 function personCountColor(count: number): string {
@@ -5956,7 +5985,12 @@ function FaceCropLightbox({
 
   if (!crop) return null;
 
-  const ts = new Date(crop.event_timestamp);
+  // ``crop.event_timestamp`` is the compact ``YYYYMMDD_HHMMSS`` string
+  // that the extractor uses to build the crop filename — naive
+  // ``new Date(...)`` chokes on it. ``parseFlexibleTimestamp`` accepts
+  // both ISO 8601 and the compact form so the Time/Date metadata cells
+  // stop rendering as ``Invalid Date``/``Invalid Time``.
+  const ts = parseFlexibleTimestamp(crop.event_timestamp);
   const isMatched = crop.employee_id !== null;
   const conf = crop.match_confidence;
 
@@ -6238,19 +6272,27 @@ function FaceCropLightbox({
             />
             <MetaCell
               label="Time"
-              value={ts.toLocaleTimeString(undefined, {
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit",
-              })}
+              value={
+                ts
+                  ? ts.toLocaleTimeString(undefined, {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      second: "2-digit",
+                    })
+                  : "—"
+              }
             />
             <MetaCell
               label="Date"
-              value={ts.toLocaleDateString(undefined, {
-                day: "2-digit",
-                month: "short",
-                year: "numeric",
-              })}
+              value={
+                ts
+                  ? ts.toLocaleDateString(undefined, {
+                      day: "2-digit",
+                      month: "short",
+                      year: "numeric",
+                    })
+                  : "—"
+              }
             />
             <MetaCell label="Crop ID" value={`#${crop.id}`} />
           </div>
