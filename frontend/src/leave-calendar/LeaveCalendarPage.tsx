@@ -10,10 +10,13 @@
 // weekend_days + timezone — the load-bearing inputs the engine
 // reads at recompute time.
 
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { ApiError } from "../api/client";
+import type { Employee } from "../features/employees/types";
 import { DatePicker } from "../components/DatePicker";
+import { useEmployeeList } from "../features/employees/hooks";
 import {
   useApprovedLeaves,
   useCreateApprovedLeave,
@@ -556,6 +559,13 @@ function HolidayRow({
 function ApprovedLeavesTab() {
   const leaves = useApprovedLeaves();
   const types = useLeaveTypes();
+  const employees = useEmployeeList({
+    q: "",
+    department_id: null,
+    include_inactive: false,
+    page: 1,
+    page_size: 200,
+  });
   const create = useCreateApprovedLeave();
   const del = useDeleteApprovedLeave();
   const [showForm, setShowForm] = useState(false);
@@ -567,13 +577,20 @@ function ApprovedLeavesTab() {
   const [endDate, setEndDate] = useState("");
   const [notes, setNotes] = useState("");
 
-  if (leaves.isLoading || types.isLoading) return <p>Loading leaves…</p>;
+  if (leaves.isLoading || types.isLoading || employees.isLoading)
+    return <p>Loading leaves…</p>;
   if (leaves.error)
     return (
       <p style={{ color: "var(--danger-text)" }}>Couldn’t load leaves.</p>
     );
   const rows = leaves.data ?? [];
   const typeOptions = (types.data ?? []).filter((t) => t.active);
+  const employeeOptions = (employees.data?.items ?? []).slice().sort((a, b) =>
+    a.employee_code.localeCompare(b.employee_code),
+  );
+  const employeeLookup = new Map(
+    employeeOptions.map((e) => [e.id, e] as const),
+  );
 
   const onCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -617,14 +634,12 @@ function ApprovedLeavesTab() {
               gap: 10,
             }}
           >
-            <Field label="Employee id">
-              <input
-                type="number"
-                min={1}
+            <Field label="Employee">
+              <EmployeeSearchSelect
+                options={employeeOptions}
                 value={employeeId}
-                onChange={(e) => setEmployeeId(e.target.value)}
-                required
-                style={inputStyle}
+                onChange={setEmployeeId}
+                placeholder="Search by code or name…"
               />
             </Field>
             <Field label="Leave type">
@@ -689,13 +704,21 @@ function ApprovedLeavesTab() {
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
-            <ApprovedLeaveRow
-              key={r.id}
-              row={r}
-              onDelete={() => void del.mutateAsync(r.id)}
-            />
-          ))}
+          {rows.map((r) => {
+            const emp = employeeLookup.get(r.employee_id);
+            return (
+              <ApprovedLeaveRow
+                key={r.id}
+                row={r}
+                employeeLabel={
+                  emp
+                    ? `${emp.employee_code} — ${emp.full_name}`
+                    : `#${r.employee_id}`
+                }
+                onDelete={() => void del.mutateAsync(r.id)}
+              />
+            );
+          })}
           {rows.length === 0 && (
             <tr>
               <td
@@ -715,14 +738,16 @@ function ApprovedLeavesTab() {
 
 function ApprovedLeaveRow({
   row,
+  employeeLabel,
   onDelete,
 }: {
   row: ApprovedLeave;
+  employeeLabel: string;
   onDelete: () => void;
 }) {
   return (
     <tr style={{ borderTop: "1px solid var(--border)" }}>
-      <td style={td}>{row.employee_id}</td>
+      <td style={td}>{employeeLabel}</td>
       <td style={td}>{row.leave_type_name}</td>
       <td style={td}>{row.start_date}</td>
       <td style={td}>{row.end_date}</td>
@@ -760,6 +785,213 @@ function Field({
       <span style={labelStyle}>{label}</span>
       {children}
     </label>
+  );
+}
+
+
+function EmployeeSearchSelect({
+  options,
+  value,
+  onChange,
+  placeholder,
+}: {
+  options: Employee[];
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const [pos, setPos] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    flipUp: boolean;
+  } | null>(null);
+
+  const selected = useMemo(() => {
+    const id = Number.parseInt(value, 10);
+    if (!Number.isFinite(id)) return null;
+    return options.find((e) => e.id === id) ?? null;
+  }, [value, options]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return options.slice(0, 50);
+    return options
+      .filter((e) => {
+        const code = e.employee_code.toLowerCase();
+        const name = e.full_name.toLowerCase();
+        return code.includes(q) || name.includes(q);
+      })
+      .slice(0, 50);
+  }, [query, options]);
+
+  useEffect(() => {
+    if (!open) return;
+    const compute = () => {
+      const el = inputRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const POPOVER_H = 260;
+      const spaceBelow = window.innerHeight - r.bottom;
+      const flipUp = spaceBelow < POPOVER_H && r.top > spaceBelow;
+      setPos({
+        top: flipUp ? r.top - 4 : r.bottom + 4,
+        left: r.left,
+        width: r.width,
+        flipUp,
+      });
+    };
+    compute();
+    window.addEventListener("scroll", compute, true);
+    window.addEventListener("resize", compute);
+    return () => {
+      window.removeEventListener("scroll", compute, true);
+      window.removeEventListener("resize", compute);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (wrapRef.current?.contains(target)) return;
+      if (popoverRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  const triggerLabel = selected
+    ? `${selected.employee_code} — ${selected.full_name}`
+    : "";
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative" }}>
+      <input
+        ref={inputRef}
+        type="text"
+        value={open ? query : triggerLabel}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          if (!open) setOpen(true);
+        }}
+        onFocus={() => {
+          setOpen(true);
+          setQuery("");
+        }}
+        placeholder={placeholder ?? "Search…"}
+        autoComplete="off"
+        style={inputStyle}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      />
+      {selected && !open && (
+        <button
+          type="button"
+          onClick={() => {
+            onChange("");
+            setQuery("");
+            setOpen(true);
+          }}
+          aria-label="Clear selection"
+          style={{
+            position: "absolute",
+            insetInlineEnd: 6,
+            top: "50%",
+            transform: "translateY(-50%)",
+            border: "none",
+            background: "transparent",
+            color: "var(--text-tertiary)",
+            cursor: "pointer",
+            fontSize: 14,
+            lineHeight: 1,
+            padding: "2px 6px",
+          }}
+        >
+          ×
+        </button>
+      )}
+      {open &&
+        pos &&
+        createPortal(
+          <div
+            ref={popoverRef}
+            role="listbox"
+            style={{
+              position: "fixed",
+              top: pos.flipUp ? undefined : pos.top,
+              bottom: pos.flipUp
+                ? window.innerHeight - pos.top
+                : undefined,
+              left: pos.left,
+              width: pos.width,
+              zIndex: 1000,
+              background: "var(--surface)",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius-sm)",
+              boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+              maxHeight: 260,
+              overflowY: "auto",
+            }}
+          >
+            {filtered.length === 0 ? (
+              <div
+                style={{
+                  padding: "8px 10px",
+                  color: "var(--text-tertiary)",
+                  fontSize: 12.5,
+                }}
+              >
+                No matches.
+              </div>
+            ) : (
+              filtered.map((e) => {
+                const isSel = selected?.id === e.id;
+                return (
+                  <button
+                    key={e.id}
+                    type="button"
+                    role="option"
+                    aria-selected={isSel}
+                    onMouseDown={(ev) => ev.preventDefault()}
+                    onClick={() => {
+                      onChange(String(e.id));
+                      setOpen(false);
+                      setQuery("");
+                    }}
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      textAlign: "start",
+                      padding: "6px 10px",
+                      border: "none",
+                      background: isSel ? "var(--bg)" : "transparent",
+                      color: "var(--text)",
+                      cursor: "pointer",
+                      fontSize: 13,
+                    }}
+                  >
+                    <span style={{ fontWeight: 600 }}>
+                      {e.employee_code}
+                    </span>
+                    <span style={{ color: "var(--text-secondary)" }}>
+                      {" "}
+                      — {e.full_name}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>,
+          document.body,
+        )}
+    </div>
   );
 }
 

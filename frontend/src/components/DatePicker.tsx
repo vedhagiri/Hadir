@@ -5,6 +5,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
+import { createPortal } from "react-dom";
 
 import { Icon } from "../shell/Icon";
 
@@ -84,8 +85,21 @@ export function DatePicker({
     return { year: d.getFullYear(), month: d.getMonth() };
   });
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const popoverId = useId();
+
+  // Popover coordinates in viewport space. Switching from
+  // ``position: absolute`` (which got clipped when the wrapper sat
+  // inside a modal / drawer with ``overflow: auto``) to ``position:
+  // fixed`` driven by ``getBoundingClientRect`` lets the popup escape
+  // every ancestor's overflow + flip above when there isn't room
+  // below (e.g. near the bottom of a tall page).
+  const [popoverPos, setPopoverPos] = useState<{
+    top: number;
+    left: number;
+    flipUp: boolean;
+  } | null>(null);
 
   // Keep the visible month aligned with ``value`` when it changes from
   // the outside (preset chips, paired picker snap).
@@ -95,12 +109,51 @@ export function DatePicker({
     setView({ year: d.getFullYear(), month: d.getMonth() });
   }, [value]);
 
-  // Click-outside + Esc to close.
+  // Compute the popup's viewport coordinates whenever it opens, and
+  // re-compute on scroll / resize so it tracks the trigger.
+  useEffect(() => {
+    if (!open) {
+      setPopoverPos(null);
+      return;
+    }
+    const recompute = () => {
+      const btn = triggerRef.current;
+      if (!btn) return;
+      const rect = btn.getBoundingClientRect();
+      const POPOVER_H = 420; // approx — the grid is 6×7 + header + footer
+      const POPOVER_W = 340;
+      const vh = window.innerHeight;
+      const vw = window.innerWidth;
+      const spaceBelow = vh - rect.bottom;
+      const flipUp = spaceBelow < POPOVER_H + 12 && rect.top > POPOVER_H + 12;
+      const top = flipUp ? rect.top - POPOVER_H - 6 : rect.bottom + 6;
+      // Keep the popover within the viewport horizontally — push left
+      // by the overflow amount when the trigger is too close to the
+      // right edge.
+      let left = rect.left;
+      if (left + POPOVER_W > vw - 8) {
+        left = Math.max(8, vw - POPOVER_W - 8);
+      }
+      setPopoverPos({ top, left, flipUp });
+    };
+    recompute();
+    window.addEventListener("scroll", recompute, true);
+    window.addEventListener("resize", recompute);
+    return () => {
+      window.removeEventListener("scroll", recompute, true);
+      window.removeEventListener("resize", recompute);
+    };
+  }, [open]);
+
+  // Click-outside + Esc to close. With the popover in a portal we now
+  // need to allow clicks landing on the popover itself.
   useEffect(() => {
     if (!open) return;
     function onDocPointer(e: MouseEvent) {
-      if (!wrapRef.current) return;
-      if (!wrapRef.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (wrapRef.current?.contains(target)) return;
+      if (popoverRef.current?.contains(target)) return;
+      setOpen(false);
     }
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
@@ -195,16 +248,17 @@ export function DatePicker({
         </span>
       </button>
 
-      {open && (
+      {open && popoverPos && createPortal(
         <div
+          ref={popoverRef}
           id={popoverId}
           role="dialog"
           aria-label={ariaLabel ?? "Date picker"}
           style={{
-            position: "absolute",
-            top: "calc(100% + 6px)",
-            insetInlineStart: 0,
-            zIndex: 60,
+            position: "fixed",
+            top: popoverPos.top,
+            left: popoverPos.left,
+            zIndex: 1000,
             width: 340,
             padding: 14,
             background: "var(--bg-elev)",
@@ -380,7 +434,8 @@ export function DatePicker({
               Close
             </button>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

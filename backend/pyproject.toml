@@ -32,6 +32,12 @@ dependencies = [
     "numpy==1.26.4",
     "insightface==0.7.3",
     "onnxruntime==1.19.2",
+    # P28.5c — YOLO body detection (ultralytics YOLOv8n). Used by both
+    # detector modes for person-presence bbox extraction. Without this
+    # the analyzer's body-only path (default since live_matching_enabled
+    # flipped to False in migration 0060) degrades to empty bbox lists
+    # and floods the log with ``No module named 'ultralytics'``.
+    "ultralytics==8.3.40",
     # P6: Entra ID OIDC. authlib gives us JOSE/JWT validation against
     # the discovery endpoint's JWKS; httpx is needed at runtime (was
     # dev-only) for the discovery + token-exchange HTTP calls.

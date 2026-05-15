@@ -496,6 +496,7 @@ class ClipPipeline:
     def _handle_match(self, job: MatchJob) -> None:
         from maugood.person_clips.reprocess import (  # noqa: PLC0415
             _backfill_crop_matches,
+            _emit_attendance_detection_events,
             _match_detections,
             _resolve_employee_names,
             _save_face_crops_to_db,
@@ -523,9 +524,10 @@ class ClipPipeline:
                 face_crop_count = job.initial_face_crop_count
                 if job.use_case == "uc1" and job.frame_results:
                     # Crops already exist with employee_id=NULL; backfill
-                    # the matched ones now.
+                    # the matched ones now (employee_id + match_confidence).
                     _backfill_crop_matches(
-                        engine, scope, job.crop_match_index, det_employee_map
+                        engine, scope, job.crop_match_index, det_employee_map,
+                        frame_results=job.frame_results,
                     )
                 elif job.use_case == "uc2" and job.frame_results:
                     face_crop_count = _save_face_crops_uc2_best_per_track(
@@ -595,6 +597,28 @@ class ClipPipeline:
                                 face_matching_duration_ms=total_ms,
                             )
                         )
+
+                # Attendance fan-out — emit one detection_events row per
+                # matched (clip, employee) at the best-confidence crop's
+                # frame timestamp. This is what reconnects clip-pipeline
+                # matches to the attendance engine since live capture no
+                # longer writes detection_events.
+                try:
+                    n = _emit_attendance_detection_events(
+                        engine, scope, job.clip_id, clip_meta["camera_id"],
+                    )
+                    if n > 0:
+                        logger.info(
+                            "clip_pipeline attendance fan-out: "
+                            "clip=%s uc=%s emitted %d detection_events row(s)",
+                            job.clip_id, job.use_case, n,
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "clip_pipeline attendance fan-out failed: "
+                        "clip=%s uc=%s reason=%s",
+                        job.clip_id, job.use_case, type(exc).__name__,
+                    )
             self._tracker.mark_completed(job.batch_id, job.use_case)
         except Exception as exc:  # noqa: BLE001
             logger.exception(

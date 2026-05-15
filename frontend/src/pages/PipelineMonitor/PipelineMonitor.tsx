@@ -1088,6 +1088,14 @@ if (typeof document !== "undefined") {
     s.textContent = `@keyframes pipeline-pulse {
       0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.5); }
       50% { box-shadow: 0 0 0 6px rgba(239,68,68,0); }
+    }
+    @keyframes pipeline-spin {
+      from { transform: rotate(0deg); }
+      to   { transform: rotate(360deg); }
+    }
+    .icon-spin {
+      animation: pipeline-spin 0.9s linear infinite;
+      transform-origin: 50% 50%;
     }`;
     document.head.appendChild(s);
   }
@@ -1880,6 +1888,34 @@ function WorkersTablePanel() {
           Updated {new Date(d.generated_at).toLocaleTimeString()} ·{" "}
           {d.took_ms.toFixed(0)} ms
         </span>
+        <button
+          type="button"
+          onClick={() => void q.refetch()}
+          disabled={q.isFetching}
+          title="Force an immediate refresh — bypasses the 1.5 s polling interval."
+          aria-label="Sync workers now"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "4px 10px",
+            border: "1px solid var(--border)",
+            borderRadius: 6,
+            background: "var(--bg)",
+            color: "var(--text)",
+            cursor: q.isFetching ? "wait" : "pointer",
+            fontSize: 11.5,
+            fontWeight: 600,
+            opacity: q.isFetching ? 0.6 : 1,
+          }}
+        >
+          <Icon
+            name="refresh"
+            size={12}
+            {...(q.isFetching ? { className: "icon-spin" } : {})}
+          />
+          {q.isFetching ? "Syncing…" : "Sync now"}
+        </button>
       </div>
 
       {/* Grouped table */}

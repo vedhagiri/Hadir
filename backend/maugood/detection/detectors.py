@@ -126,6 +126,14 @@ _face_app_det_size: Optional[int] = None
 _yolo_model: Any = None
 _yolo_model_dir: Path = Path("/data/models")
 
+# Once-per-process rate-limit for the ``detect_person_boxes`` fallback
+# warning. With the analyzer running at ~6 fps × N cameras, an
+# uninstalled ultralytics would otherwise flood the log with the same
+# message hundreds of times per minute. We log on first encounter
+# (operator sees the install hint) and then mute until the process
+# restarts.
+_yolo_unavailable_warned = False
+
 
 # Default detector input size. 320×320 is ~2-3× faster than 640×640
 # on CPU and still detects faces down to ~30px on a 1080p frame.
@@ -529,20 +537,28 @@ def detect_person_boxes(  # type: ignore[no-untyped-def]
     the cycle rate (~6×/sec).
     """
 
+    global _yolo_unavailable_warned
     try:
         return _detect_person_boxes_yolo(frame_bgr, config)
     except ModuleNotFoundError as exc:
-        logger.warning(
-            "detect_person_boxes: %s — install ultralytics (`pip install "
-            "ultralytics`) to enable body detection; returning empty bbox list",
-            exc,
-        )
+        if not _yolo_unavailable_warned:
+            logger.warning(
+                "detect_person_boxes: %s — install ultralytics "
+                "(`pip install ultralytics`) to enable body detection. "
+                "Returning empty bbox list; further occurrences muted "
+                "until process restart.",
+                exc,
+            )
+            _yolo_unavailable_warned = True
         return []
     except Exception as exc:  # noqa: BLE001 — YOLO loader can raise OSError + others
-        logger.warning(
-            "detect_person_boxes: %s: %s — returning empty bbox list",
-            type(exc).__name__, exc,
-        )
+        if not _yolo_unavailable_warned:
+            logger.warning(
+                "detect_person_boxes: %s: %s — returning empty bbox list. "
+                "Further occurrences muted until process restart.",
+                type(exc).__name__, exc,
+            )
+            _yolo_unavailable_warned = True
         return []
 
 

@@ -83,14 +83,21 @@ export function parseFlexibleTimestamp(raw: string | null | undefined): Date | n
   // Try ISO 8601 (and any other format the browser recognises).
   const iso = new Date(s);
   if (!Number.isNaN(iso.getTime())) return iso;
-  // Compact ``YYYYMMDD_HHMMSS`` (face-crop filename-style).
+  // Compact ``YYYYMMDD_HHMMSS`` (face-crop filename-style). The
+  // backend writes this string from a UTC datetime (clip_start is
+  // TIMESTAMPTZ → UTC; the extractor uses ``strftime("%Y%m%d_%H%M%S")``
+  // without a timezone marker). The naive ``new Date(y, m, d, h, m, s)``
+  // ctor interprets the components as LOCAL time, which silently
+  // off-by-N-hours every render. ``Date.UTC`` makes the source
+  // timezone explicit; ``toLocaleString`` downstream then converts
+  // to the operator's wall-clock correctly.
   const m = /^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})$/.exec(s);
   if (m) {
     const [, y, mo, d, h, mi, se] = m;
-    const t = new Date(
+    const t = new Date(Date.UTC(
       Number(y), Number(mo) - 1, Number(d),
       Number(h), Number(mi), Number(se),
-    );
+    ));
     if (!Number.isNaN(t.getTime())) return t;
   }
   return null;
@@ -4746,6 +4753,10 @@ function ClipCard({
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(
     null,
   );
+  // Holds the UCs pending overwrite confirmation when the operator
+  // picks a UC that has already been processed on this clip. Null
+  // when nothing is pending.
+  const [overwriteUcs, setOverwriteUcs] = useState<string[] | null>(null);
   const reprocess = useSingleClipReprocess(clip.id);
   // Migration 0055 — only fetch the thumbnail once the clip has been
   // encoded. While 'recording' / 'finalizing' the endpoint correctly
@@ -5429,8 +5440,29 @@ function ClipCard({
             // exactly one. Per-UC results land in
             // ``clip_processing_results`` and surface in the detail
             // drawer's Pipeline section.
+            //
+            // If the pick is already in ``processed_use_cases``, defer
+            // to the overwrite confirmation modal instead of firing
+            // the mutation directly.
+            if (clip.processed_use_cases.includes(useCase)) {
+              setOverwriteUcs([useCase]);
+              return;
+            }
             reprocess.mutate({ use_cases: [useCase] });
           }}
+        />
+      )}
+      {overwriteUcs && (
+        <OverwriteReprocessModal
+          clipId={clip.id}
+          ucs={overwriteUcs}
+          busy={reprocess.isPending}
+          onConfirm={() => {
+            const ucs = overwriteUcs;
+            setOverwriteUcs(null);
+            reprocess.mutate({ use_cases: ucs });
+          }}
+          onCancel={() => setOverwriteUcs(null)}
         />
       )}
     </div>
@@ -5910,11 +5942,17 @@ interface LightboxCrop {
   employee_name: string | null;
   quality_score: number;
   detection_score: number;
+  // ``event_timestamp`` is the in-video detection moment —
+  // ``clip_start + (frame_index / fps)`` written by the matcher when
+  // it saves the crop. Always rendered as Detection time / Detection
+  // date in the lightbox. Processing / DB-created / worker-execution
+  // timestamps are deliberately NOT surfaced because they don't
+  // correspond to anything the operator cares about for attendance.
   event_timestamp: string;
   use_case: string | null;
-  // Per-employee best confidence resolved from the UC's match_details
-  // (the per-crop confidence isn't persisted today — this is the best
-  // we have without rerunning).
+  // Per-crop match confidence (migration 0061) — persisted on the
+  // face_crops row by the matching worker. The actual score for THIS
+  // frame's match, not a per-employee aggregate.
   match_confidence: number | null;
 }
 
@@ -6261,17 +6299,13 @@ function FaceCropLightbox({
               fontSize: 12,
             }}
           >
-            <MetaCell label="Quality" value={crop.quality_score.toFixed(3)} />
+            {/* The detection moment — clip_start + frame_offset.
+                This is the in-video timeline timestamp the user
+                expects on Attendance, Detection events, and the
+                Employee activity timeline. NOT processing time, NOT
+                DB created time, NOT match-worker execution time. */}
             <MetaCell
-              label="Detection score"
-              value={crop.detection_score.toFixed(3)}
-            />
-            <MetaCell
-              label="Dimensions"
-              value={`${crop.width}×${crop.height}px`}
-            />
-            <MetaCell
-              label="Time"
+              label="Detection time"
               value={
                 ts
                   ? ts.toLocaleTimeString(undefined, {
@@ -6281,9 +6315,10 @@ function FaceCropLightbox({
                     })
                   : "—"
               }
+              hint="When the face appeared in the video (clip_start + frame offset). Used by attendance."
             />
             <MetaCell
-              label="Date"
+              label="Detection date"
               value={
                 ts
                   ? ts.toLocaleDateString(undefined, {
@@ -6293,6 +6328,32 @@ function FaceCropLightbox({
                     })
                   : "—"
               }
+              hint="Calendar date of the detection moment, not the processing date"
+            />
+            <MetaCell
+              label="Use case"
+              value={
+                crop.use_case ? crop.use_case.toUpperCase() : "—"
+              }
+              hint="Which pipeline produced this crop"
+            />
+            <MetaCell
+              label="Match confidence"
+              value={
+                crop.match_confidence != null
+                  ? `${(crop.match_confidence * 100).toFixed(1)}%`
+                  : "—"
+              }
+              hint="Cosine similarity to the matched employee's enrolled embedding"
+            />
+            <MetaCell label="Quality" value={crop.quality_score.toFixed(3)} />
+            <MetaCell
+              label="Detection score"
+              value={crop.detection_score.toFixed(3)}
+            />
+            <MetaCell
+              label="Dimensions"
+              value={`${crop.width}×${crop.height}px`}
             />
             <MetaCell label="Crop ID" value={`#${crop.id}`} />
           </div>
@@ -6317,9 +6378,18 @@ function FaceCropLightbox({
   );
 }
 
-function MetaCell({ label, value }: { label: string; value: string }) {
+function MetaCell({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+}) {
   return (
     <div
+      title={hint}
       style={{
         background: "var(--bg-elev)",
         border: "1px solid var(--border)",
@@ -6594,8 +6664,15 @@ function UseCaseResultSection({
     detection_score: c.detection_score,
     event_timestamp: c.event_timestamp,
     use_case: c.use_case,
+    // Prefer the persisted per-crop confidence (migration 0061);
+    // fall back to the per-employee aggregate for legacy rows whose
+    // ``match_confidence`` column is still NULL.
     match_confidence:
-      c.employee_id !== null ? confByEmployee.get(c.employee_id) ?? null : null,
+      c.match_confidence != null
+        ? c.match_confidence
+        : c.employee_id !== null
+          ? confByEmployee.get(c.employee_id) ?? null
+          : null,
   }));
 
   const matchedCount = ordered.filter((c) => c.employee_id !== null).length;
@@ -6949,10 +7026,40 @@ export function ClipDetailDrawer({
     });
   };
 
+  // UCs the user picked that are ALREADY in
+  // ``clip.processed_use_cases``. Re-running a UC overwrites the prior
+  // ``clip_processing_results`` row (and its face crops); the operator
+  // must explicitly opt in via the confirmation modal before we
+  // overwrite finished evidence.
+  const [overwriteUcs, setOverwriteUcs] = useState<string[] | null>(null);
+
   const handleRunReprocess = () => {
     if (selectedUcs.size === 0) return;
+    const picked = Array.from(selectedUcs);
+    const already = picked.filter((uc) =>
+      clip.processed_use_cases.includes(uc),
+    );
+    if (already.length > 0) {
+      setOverwriteUcs(already);
+      return;
+    }
     reprocess.mutate(
-      { use_cases: Array.from(selectedUcs) },
+      { use_cases: picked },
+      {
+        onSuccess: () => setShowReprocessForm(false),
+      },
+    );
+  };
+
+  // Confirmed overwrite → run the same mutation against the full
+  // selected set (which includes both already-processed UCs and any
+  // fresh ones).
+  const handleConfirmOverwrite = () => {
+    const picked = Array.from(selectedUcs);
+    setOverwriteUcs(null);
+    if (picked.length === 0) return;
+    reprocess.mutate(
+      { use_cases: picked },
       {
         onSuccess: () => setShowReprocessForm(false),
       },
@@ -7191,9 +7298,154 @@ export function ClipDetailDrawer({
           )}
         </div>
       </div>
+      {overwriteUcs && (
+        <OverwriteReprocessModal
+          clipId={clip.id}
+          ucs={overwriteUcs}
+          busy={reprocess.isPending}
+          onConfirm={handleConfirmOverwrite}
+          onCancel={() => setOverwriteUcs(null)}
+        />
+      )}
     </DrawerShell>
   );
 }
+
+
+// ── OverwriteReprocessModal ─────────────────────────────────────────────────
+//
+// Shown when the operator picks one or more UCs that have already been
+// processed on this clip. Re-running an already-processed UC overwrites
+// the prior ``clip_processing_results`` row AND the face crops saved on
+// that run, so we make the operator explicitly opt in before the
+// existing evidence is replaced.
+
+function OverwriteReprocessModal({
+  clipId,
+  ucs,
+  busy,
+  onConfirm,
+  onCancel,
+}: {
+  clipId: number;
+  ucs: string[];
+  busy: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  // Esc closes the dialog. Click-outside is intentionally NOT wired:
+  // an accidental backdrop click should not silently abandon the
+  // operator's reprocess intent OR confirm an overwrite.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !busy) onCancel();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [busy, onCancel]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Confirm overwrite"
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 300,
+        background: "rgba(2, 6, 23, 0.55)",
+        display: "grid",
+        placeItems: "center",
+      }}
+    >
+      <div
+        style={{
+          width: "min(440px, 92vw)",
+          background: "var(--bg)",
+          border: "1px solid var(--border)",
+          borderRadius: 12,
+          boxShadow: "0 24px 48px rgba(2,6,23,0.32)",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            padding: "14px 18px",
+            borderBottom: "1px solid var(--border)",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            background: "var(--warning-soft, rgba(245,158,11,0.08))",
+          }}
+        >
+          <span
+            aria-hidden
+            style={{
+              width: 28, height: 28, borderRadius: "50%",
+              display: "grid", placeItems: "center",
+              background: "rgba(245,158,11,0.20)",
+              color: "var(--warning-text, #b45309)",
+            }}
+          >
+            !
+          </span>
+          <div style={{ fontWeight: 700, fontSize: 14 }}>
+            Overwrite existing results?
+          </div>
+        </div>
+        <div style={{ padding: "16px 18px", fontSize: 13, lineHeight: 1.55 }}>
+          <p style={{ margin: "0 0 10px 0" }}>
+            Clip <strong>#{clipId}</strong> has already been processed by:
+          </p>
+          <ul style={{ margin: "0 0 12px 22px", padding: 0 }}>
+            {ucs.map((u) => (
+              <li key={u} style={{ fontWeight: 600 }}>
+                {u.toUpperCase()}
+              </li>
+            ))}
+          </ul>
+          <p style={{ margin: 0, color: "var(--text-secondary)" }}>
+            Running again will <strong>overwrite</strong> the prior
+            face crops, match results, and timings for {ucs.length === 1 ? "this use case" : "these use cases"}.
+            This cannot be undone.
+          </p>
+        </div>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: 8,
+            padding: "12px 18px",
+            borderTop: "1px solid var(--border)",
+            background: "var(--bg-elev)",
+          }}
+        >
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={onCancel}
+            disabled={busy}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm btn-primary"
+            onClick={onConfirm}
+            disabled={busy}
+            style={{
+              background: "var(--warning-text, #b45309)",
+              borderColor: "var(--warning-text, #b45309)",
+            }}
+          >
+            {busy ? "Reprocessing…" : "Overwrite & reprocess"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 // ── PhaseBar — shared by UseCaseResultSection for in-flight progress ─────────
 

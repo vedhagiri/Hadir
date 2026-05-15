@@ -43,7 +43,7 @@ from sqlalchemy import func as sa_func, or_ as sa_or, select as sa_select, updat
 
 from maugood.auth.audit import write_audit
 from maugood.config import get_settings
-from maugood.db import employees, get_engine, person_clips, clip_processing_results, face_crops
+from maugood.db import detection_events, employees, get_engine, person_clips, clip_processing_results, face_crops
 from maugood.employees.photos import decrypt_bytes, encrypt_bytes
 from maugood.identification.matcher import matcher_cache
 from maugood.tenants.scope import TenantScope
@@ -199,6 +199,12 @@ def _match_detections(
     (frame_idx, det_idx) → employee_id (None = unknown) so callers can
     attribute each face crop to the right person.
 
+    The per-detection confidence is also attached to each ``det`` dict
+    in-place at key ``"match_confidence"`` (None when unmatched). This
+    lets ``_save_face_crops_*`` persist the confidence to face_crops
+    without changing the helper signatures — they already iterate
+    ``frame_results``.
+
     Returns:
         det_employee_map  — {(frame_idx, det_idx): employee_id | None}
         matched_ids       — set of employee IDs that were recognised
@@ -217,19 +223,22 @@ def _match_detections(
             emb = det.get("embedding")
             if emb is None:
                 det_employee_map[(frame_idx, det_idx)] = None
+                det["match_confidence"] = None
                 unknown_count += 1
                 continue
             probe = np.asarray(emb, dtype=np.float32)
             mm = matcher_cache.match(scope, probe)
             if mm is not None and mm.classification == "active":
                 eid = mm.employee_id
-                det_employee_map[(frame_idx, det_idx)] = eid
-                matched_ids.add(eid)
                 conf = float(getattr(mm, "confidence", 0.0))
+                det_employee_map[(frame_idx, det_idx)] = eid
+                det["match_confidence"] = conf
+                matched_ids.add(eid)
                 if eid not in seen_employees or conf > seen_employees[eid]:
                     seen_employees[eid] = conf
             else:
                 det_employee_map[(frame_idx, det_idx)] = None
+                det["match_confidence"] = None
                 unknown_count += 1
 
     match_details: list[dict] = [
@@ -635,6 +644,10 @@ def _save_face_crops_uc2_best_per_track(
                         height=_UC2_CROP_SIZE,
                         use_case="uc2",
                         employee_id=emp_id,
+                        # Migration 0061 — persist the per-detection match
+                        # confidence so the face crop preview can render
+                        # the actual score for this frame's match.
+                        match_confidence=det.get("match_confidence"),
                     )
                 )
         except Exception:  # noqa: BLE001
@@ -820,6 +833,17 @@ def _save_face_crops_to_db(
                             height=h,
                             use_case=use_case,
                             employee_id=emp_id,
+                            # Migration 0061 — per-detection match score
+                            # populated by ``_match_detections``. UC1
+                            # passes ``det_employee_map=None`` (saves
+                            # before match), so this is NULL for UC1
+                            # crops at INSERT time and gets backfilled
+                            # by ``_backfill_crop_matches`` below.
+                            match_confidence=(
+                                det.get("match_confidence")
+                                if det_employee_map is not None
+                                else None
+                            ),
                         ).returning(face_crops.c.id)
                     )
                     inserted_id = int(result.scalar_one())
@@ -840,34 +864,188 @@ def _backfill_crop_matches(
     scope: TenantScope,
     save_index: dict[tuple[int, int], int],
     det_employee_map: dict[tuple[int, int], Optional[int]],
+    frame_results: Optional[list[tuple[int, list[dict]]]] = None,
 ) -> None:
-    """UPDATE ``face_crops.employee_id`` for the rows saved before the
-    match step ran. UC1's save-first ordering means every crop landed
-    with ``employee_id=NULL``; the matcher then produced
-    ``det_employee_map``, and this helper threads the match back onto
-    the persisted rows. Rows without a match (employee_id=None) are
-    left alone — they already carry NULL.
+    """UPDATE ``face_crops.employee_id`` + ``match_confidence`` for the
+    rows saved before the match step ran. UC1's save-first ordering
+    means every crop landed with ``employee_id=NULL``; the matcher then
+    produced ``det_employee_map`` (employee ids) and tagged each ``det``
+    dict with ``match_confidence``. This helper threads both back onto
+    the persisted rows. Rows without a match are left alone.
+
+    ``frame_results`` is optional for backward compatibility — when
+    provided we backfill match_confidence too; when omitted we only
+    set employee_id (legacy callers).
     """
-    updates: list[tuple[int, int]] = []
+    # Build (frame_idx, det_idx) → match_confidence lookup once.
+    conf_map: dict[tuple[int, int], Optional[float]] = {}
+    if frame_results is not None:
+        for fi, dets in frame_results:
+            for di, det in enumerate(dets):
+                v = det.get("match_confidence")
+                conf_map[(fi, di)] = (
+                    float(v) if isinstance(v, (int, float)) else None
+                )
+
+    updates: list[tuple[int, int, Optional[float]]] = []
     for key, crop_id in save_index.items():
         emp_id = det_employee_map.get(key)
         if emp_id is None:
             continue
-        updates.append((crop_id, emp_id))
+        updates.append((crop_id, emp_id, conf_map.get(key)))
 
     if not updates:
         return
 
     with engine.begin() as conn:
-        for crop_id, emp_id in updates:
+        for crop_id, emp_id, conf in updates:
+            values: dict = {"employee_id": emp_id}
+            if conf is not None:
+                values["match_confidence"] = conf
             conn.execute(
                 sa_update(face_crops)
                 .where(
                     face_crops.c.id == crop_id,
                     face_crops.c.tenant_id == scope.tenant_id,
                 )
-                .values(employee_id=emp_id)
+                .values(**values)
             )
+
+
+def _emit_attendance_detection_events(
+    engine,
+    scope: TenantScope,
+    clip_id: int,
+    camera_id: int,
+) -> int:
+    """Fan out matched face_crops into detection_events rows so the
+    attendance engine picks them up.
+
+    For each matched employee on this clip we emit TWO detection_events
+    rows: one anchored at the EARLIEST matched frame (drives ``in_time``)
+    and one at the LATEST (drives ``out_time``). When the earliest and
+    latest are the same crop — i.e. the employee was matched on exactly
+    one frame in this clip — we emit a single row.
+
+    Anchoring is the **actual frame** the face was captured in
+    (``face_crops.event_timestamp = clip_start + frame_offset``), not
+    the clip's start time, not the matcher worker's wall-clock, not
+    the DB write time. This is the load-bearing requirement.
+
+    Idempotent on (clip, employee): both inserts use stable track_ids
+    (``clip-{id}-emp-{eid}-in`` / ``-out``), so re-running the matcher
+    deletes the prior pair before re-inserting.
+
+    Returns the number of rows inserted.
+    """
+
+    with engine.begin() as conn:
+        rows = conn.execute(
+            sa_select(
+                face_crops.c.id.label("crop_id"),
+                face_crops.c.employee_id,
+                face_crops.c.event_timestamp,
+                face_crops.c.match_confidence,
+                face_crops.c.width,
+                face_crops.c.height,
+                face_crops.c.file_path,
+            ).where(
+                face_crops.c.tenant_id == scope.tenant_id,
+                face_crops.c.person_clip_id == clip_id,
+                face_crops.c.employee_id.isnot(None),
+            )
+        ).all()
+
+    # Group by employee. For each employee compute:
+    #   * earliest crop  → in_time anchor
+    #   * latest crop    → out_time anchor
+    # ``event_timestamp`` is the load-bearing field — it's the in-video
+    # frame moment, stable across reruns of the matcher.
+    by_emp: dict[int, list] = {}
+    for r in rows:
+        eid = int(r.employee_id)
+        by_emp.setdefault(eid, []).append(r)
+
+    if not by_emp:
+        return 0
+
+    import re as _re  # noqa: PLC0415
+
+    _ts_re = _re.compile(r"^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})$")
+
+    def _parse(ts: str):  # type: ignore[no-untyped-def]
+        m = _ts_re.match(ts or "")
+        if not m:
+            return None
+        yy, mo, dd, hh, mi, se = (int(x) for x in m.groups())
+        return datetime(yy, mo, dd, hh, mi, se, tzinfo=timezone.utc)
+
+    inserted = 0
+    with engine.begin() as conn:
+        for eid, crops in by_emp.items():
+            # Sort by parsed UTC timestamp ascending; drop anything
+            # unparseable so we don't anchor on bad data.
+            parsed: list[tuple[datetime, object]] = []
+            for c in crops:
+                t = _parse(str(c.event_timestamp or ""))
+                if t is not None:
+                    parsed.append((t, c))
+            if not parsed:
+                logger.warning(
+                    "attendance fan-out: no parseable timestamps for "
+                    "clip=%s emp=%s — skipping",
+                    clip_id, eid,
+                )
+                continue
+            parsed.sort(key=lambda x: x[0])
+            first_t, first_c = parsed[0]
+            last_t, last_c = parsed[-1]
+
+            # Clear any prior fan-out rows for this (clip, employee).
+            conn.execute(
+                detection_events.delete().where(
+                    detection_events.c.tenant_id == scope.tenant_id,
+                    detection_events.c.track_id.in_(
+                        [
+                            f"clip-{clip_id}-emp-{eid}",        # legacy single-row id
+                            f"clip-{clip_id}-emp-{eid}-in",
+                            f"clip-{clip_id}-emp-{eid}-out",
+                        ]
+                    ),
+                )
+            )
+
+            def _emit(track_suffix: str, t: datetime, c) -> None:  # type: ignore[no-untyped-def]
+                conn.execute(
+                    sa_insert(detection_events).values(
+                        tenant_id=scope.tenant_id,
+                        camera_id=camera_id,
+                        captured_at=t,
+                        bbox={
+                            "x": 0, "y": 0,
+                            "w": int(c.width or 0),
+                            "h": int(c.height or 0),
+                        },
+                        face_crop_path=c.file_path,
+                        employee_id=eid,
+                        confidence=(
+                            float(c.match_confidence)
+                            if c.match_confidence is not None
+                            else None
+                        ),
+                        track_id=f"clip-{clip_id}-emp-{eid}-{track_suffix}",
+                    )
+                )
+
+            _emit("in", first_t, first_c)
+            inserted += 1
+            # Only emit a separate "out" row when the latest matched
+            # frame is genuinely different — same crop on a single-
+            # frame match would just duplicate the in_time.
+            if last_c.crop_id != first_c.crop_id:
+                _emit("out", last_t, last_c)
+                inserted += 1
+    return inserted
 
 
 def _upsert_processing_result(
@@ -1047,7 +1225,10 @@ def _process_clip_for_use_case(
 
         if use_case == "uc1" and match_index is not None and frame_results:
             # Backfill the just-saved crop rows with their match result.
-            _backfill_crop_matches(engine, scope, match_index, det_employee_map)
+            _backfill_crop_matches(
+                engine, scope, match_index, det_employee_map,
+                frame_results=frame_results,
+            )
         elif use_case == "uc2" and frame_results:
             # UC2 = reference-parity pipeline: composite quality
             # scoring + IoU track association + one best frame per
@@ -1112,6 +1293,27 @@ def _process_clip_for_use_case(
                         face_matching_duration_ms=total_ms,
                     )
                 )
+
+        # Fan out matched crops into detection_events so the attendance
+        # engine sees frame-accurate in/out times for each matched
+        # employee. One row per (clip, employee) anchored at the
+        # best-confidence crop's event_timestamp. Idempotent — re-runs
+        # delete + re-insert.
+        try:
+            n = _emit_attendance_detection_events(
+                engine, scope, clip_id, camera_id,
+            )
+            if n > 0:
+                logger.info(
+                    "attendance fan-out: clip=%s uc=%s emitted %d "
+                    "detection_events row(s)",
+                    clip_id, use_case, n,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "attendance fan-out failed: clip=%s uc=%s reason=%s",
+                clip_id, use_case, type(exc).__name__,
+            )
 
         return {
             "status": "completed",

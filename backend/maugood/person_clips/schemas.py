@@ -321,6 +321,11 @@ class FaceCropOut(BaseModel):
     detection_score: float
     width: int
     height: int
+    # Migration 0061 — per-crop match confidence (0.0–1.0). NULL when
+    # the face wasn't matched or for crops written before this column
+    # existed. Surfaced in the face crop preview alongside the
+    # employee name.
+    match_confidence: Optional[float] = None
     created_at: datetime
 
 

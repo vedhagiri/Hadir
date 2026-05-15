@@ -85,16 +85,20 @@ class Settings(BaseSettings):
     match_threshold: float = 0.45
 
     # --- Clip saving mode (Option B — stream-copy) -----------------------
-    # ``encode``       — legacy default. Reader stores JPEG frames; the
-    #                    ClipWorker runs ffmpeg to re-encode them into an
-    #                    H.264 MP4. Heavy on CPU.
-    # ``stream_copy`` — RtspSegmenter runs a parallel ffmpeg subprocess
+    # ``stream_copy`` (default since the encoding-elimination rollout) —
+    #                    RtspSegmenter runs a parallel ffmpeg subprocess
     #                    that segment-writes the camera's H.264 stream
     #                    directly to disk with ``-c copy``. On finalize
     #                    the ClipWorker concat-copies the relevant
     #                    segments into the final MP4 — zero encode CPU.
     #                    Costs one extra RTSP connection per camera.
-    clip_saving_mode: str = "encode"
+    # ``encode``       — legacy fallback. Reader stores JPEG frames; the
+    #                    ClipWorker runs ffmpeg to re-encode them into an
+    #                    H.264 MP4. Heavy on CPU. Set
+    #                    ``MAUGOOD_CLIP_SAVING_MODE=encode`` to roll back
+    #                    on a host where the extra RTSP connection isn't
+    #                    viable.
+    clip_saving_mode: str = "stream_copy"
 
     # --- Attendance (P10) --------------------------------------------------
     # IANA timezone used to convert detection timestamps to wall-clock

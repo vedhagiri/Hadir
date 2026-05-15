@@ -1183,6 +1183,83 @@ def reprocess_face_match_status(
     )
 
 
+@router.get("/processed-counts")
+def processed_counts(
+    user: Annotated[CurrentUser, HR_OR_ADMIN],
+    use_cases: str = "uc1,uc2,uc3",
+) -> dict:
+    """How many clips already have a ``completed`` row in
+    ``clip_processing_results`` for each requested use case.
+
+    Powers the Identify Event overwrite-confirmation panel — the
+    operator sees the actual blast radius of an overwrite before
+    pressing the confirm button. The ``any_uc`` count is the distinct
+    clip set across all selected UCs (i.e. "if I overwrite, this many
+    clips lose at least one prior result").
+    """
+
+    requested = [
+        u.strip().lower()
+        for u in (use_cases or "").split(",")
+        if u.strip()
+    ]
+    if not requested:
+        return {
+            "use_cases": [],
+            "per_uc": {},
+            "any_uc": 0,
+            "total_completed_clips": 0,
+        }
+    scope = TenantScope(tenant_id=user.tenant_id)
+    engine = get_engine()
+    with engine.begin() as conn:
+        # Per-UC distinct clip count where status='completed'.
+        rows = conn.execute(
+            select(
+                clip_processing_results.c.use_case,
+                func.count(
+                    func.distinct(clip_processing_results.c.person_clip_id)
+                ).label("cnt"),
+            )
+            .where(
+                clip_processing_results.c.tenant_id == scope.tenant_id,
+                clip_processing_results.c.use_case.in_(requested),
+                clip_processing_results.c.status == "completed",
+            )
+            .group_by(clip_processing_results.c.use_case)
+        ).all()
+        per_uc: dict[str, int] = {uc: 0 for uc in requested}
+        for r in rows:
+            per_uc[str(r.use_case).lower()] = int(r.cnt or 0)
+        # Distinct clip set across the requested UCs — overwrite mode
+        # touches the union, not the sum.
+        any_uc = conn.execute(
+            select(
+                func.count(
+                    func.distinct(clip_processing_results.c.person_clip_id)
+                )
+            ).where(
+                clip_processing_results.c.tenant_id == scope.tenant_id,
+                clip_processing_results.c.use_case.in_(requested),
+                clip_processing_results.c.status == "completed",
+            )
+        ).scalar_one()
+        # How many clips exist in total — gives the operator the
+        # "of N total clips" denominator on the dashboard.
+        total_clips = conn.execute(
+            select(func.count(person_clips.c.id)).where(
+                person_clips.c.tenant_id == scope.tenant_id,
+                person_clips.c.recording_status == "completed",
+            )
+        ).scalar_one()
+    return {
+        "use_cases": requested,
+        "per_uc": per_uc,
+        "any_uc": int(any_uc or 0),
+        "total_completed_clips": int(total_clips or 0),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Per-clip processing results
 # ---------------------------------------------------------------------------
@@ -1360,6 +1437,11 @@ def list_clip_face_crops(
             detection_score=float(r.detection_score),
             width=int(r.width),
             height=int(r.height),
+            match_confidence=(
+                float(r.match_confidence)
+                if r.match_confidence is not None
+                else None
+            ),
             created_at=r.created_at,
         )
         for r in crop_rows

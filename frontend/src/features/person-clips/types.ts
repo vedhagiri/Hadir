@@ -327,6 +327,9 @@ export interface FaceCropOut {
   detection_score: number;
   width: number;
   height: number;
+  // Migration 0061 — per-crop match confidence (0.0–1.0). NULL when
+  // unmatched or for legacy rows pre-dating this column.
+  match_confidence: number | null;
   created_at: string;
 }
 

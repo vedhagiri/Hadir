@@ -2402,6 +2402,10 @@ face_crops = Table(
     Column("detection_score", Float, nullable=False, server_default="0"),
     Column("width", Integer, nullable=False, server_default="0"),
     Column("height", Integer, nullable=False, server_default="0"),
+    # Migration 0061 — per-crop match score, 0.0–1.0. NULL when the
+    # crop wasn't matched to any employee (employee_id is NULL) or for
+    # legacy rows that pre-date this column.
+    Column("match_confidence", Float, nullable=True),
     Column(
         "created_at",
         DateTime(timezone=True),

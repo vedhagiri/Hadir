@@ -54,13 +54,13 @@ services:
       MAUGOOD_ADMIN_DB_PASSWORD: ${MAUGOOD_ADMIN_DB_PASSWORD:-maugood_admin}
       MAUGOOD_TENANT_MODE: ${MAUGOOD_TENANT_MODE:-single}
       MAUGOOD_ENV: ${MAUGOOD_ENV:-dev}
-      # Option B — clip saving mode. ``encode`` (default) re-encodes
-      # from JPEG frames via the existing ClipWorker. ``stream_copy``
-      # spawns a parallel ffmpeg subprocess per camera that segments
-      # the H.264 stream directly to disk (no encode CPU); on clip
-      # finalize the ClipWorker concat-copies segments. Doubles RTSP
-      # bandwidth per camera; eliminates ~95% of clip-save CPU.
-      MAUGOOD_CLIP_SAVING_MODE: ${MAUGOOD_CLIP_SAVING_MODE:-encode}
+      # Option B — clip saving mode. Default ``stream_copy`` spawns a
+      # parallel ffmpeg subprocess per camera that segments the H.264
+      # stream directly to disk (zero encode CPU); on clip finalize
+      # the ClipWorker concat-copies segments. Costs one extra RTSP
+      # connection per camera. Set ``MAUGOOD_CLIP_SAVING_MODE=encode``
+      # in .env to roll back to the legacy JPEG-re-encode path.
+      MAUGOOD_CLIP_SAVING_MODE: ${MAUGOOD_CLIP_SAVING_MODE:-stream_copy}
     volumes:
       - ./backend:/app
       # P28-followup: the pre_omran_reset_seed script needs to read the

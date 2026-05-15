@@ -26,6 +26,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.responses import StreamingResponse
 from openpyxl import load_workbook
 from pydantic import BaseModel
 from sqlalchemy import and_, delete, func, insert, select, update
@@ -341,18 +342,45 @@ class PolicyImportResponse(BaseModel):
     skipped_count: int = 0
 
 
-@router.post("/api/policies/import", response_model=PolicyImportResponse)
-async def import_policies_xlsx(
-    user: Annotated[CurrentUser, ADMIN_OR_HR],
-    file: UploadFile = File(...),
-) -> PolicyImportResponse:
-    """Bulk-create Fixed/Flex/Ramadan/Custom policies from an .xlsx
-    file. Rows whose ``name`` already exists for the tenant are
-    skipped (not failed); every other parse error returns 400 so the
-    operator can fix the file and re-import."""
+class PolicyImportPreviewRow(BaseModel):
+    """One importable row, validated. Surfaced in the preview UI."""
 
-    scope = TenantScope(tenant_id=user.tenant_id)
-    raw = await file.read()
+    row: int
+    name: str
+    type: str
+    start: Optional[str] = None
+    end: Optional[str] = None
+    grace_minutes: Optional[int] = None
+    required_hours: int
+    active_from: str
+    will_skip: bool = False
+    skip_reason: Optional[str] = None
+
+
+class PolicyImportPreviewError(BaseModel):
+    row: int
+    message: str
+
+
+class PolicyImportPreviewResult(BaseModel):
+    rows: list[PolicyImportPreviewRow] = []
+    errors: list[PolicyImportPreviewError] = []
+
+
+def _parse_policy_xlsx(
+    raw: bytes,
+) -> tuple[list[tuple[int, "PolicyCreateRequest"]], list[PolicyImportPreviewError]]:
+    """Parse a Shift Policies XLSX into validated PolicyCreateRequest
+    objects + per-row errors.
+
+    The preview endpoint uses both arrays. The import endpoint uses the
+    rows for INSERTs and surfaces errors in its response too. Shared
+    so the two paths can't drift in behaviour.
+    """
+
+    parsed: list[tuple[int, "PolicyCreateRequest"]] = []
+    errors: list[PolicyImportPreviewError] = []
+
     try:
         wb = load_workbook(BytesIO(raw), read_only=True, data_only=True)
     except Exception as exc:  # noqa: BLE001
@@ -364,7 +392,6 @@ async def import_policies_xlsx(
         ws = wb.active
         if ws is None:
             raise HTTPException(status_code=400, detail="empty workbook")
-
         rows_iter = ws.iter_rows(values_only=True)
         try:
             header = next(rows_iter)
@@ -404,19 +431,21 @@ async def import_policies_xlsx(
 
         from maugood.policies.schemas import PolicyConfig  # noqa: PLC0415
 
-        parsed: list[tuple[int, PolicyCreateRequest]] = []
         for row_number, raw_row in enumerate(rows_iter, start=2):
             if not raw_row:
                 continue
             name = _cell(raw_row, i_name)
             if not name:
+                # Blank ``name`` cell skips silently — typical when
+                # operators leave trailing empty rows in the workbook.
                 continue
             ptype_str = (_cell(raw_row, i_type) or "Fixed").capitalize()
             if ptype_str not in ("Fixed", "Flex", "Ramadan", "Custom"):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"row {row_number}: unsupported type {ptype_str!r}",
-                )
+                errors.append(PolicyImportPreviewError(
+                    row=row_number,
+                    message=f"unsupported type {ptype_str!r} (valid: Fixed/Flex/Ramadan/Custom)",
+                ))
+                continue
             start = _cell(raw_row, i_start)
             end = _cell(raw_row, i_end)
             grace = _cell(raw_row, i_grace)
@@ -425,23 +454,26 @@ async def import_policies_xlsx(
             try:
                 af = _date_type.fromisoformat(af_raw) if af_raw else _date_type.today()
             except ValueError:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"row {row_number}: active_from {af_raw!r} not ISO-parseable",
-                )
+                errors.append(PolicyImportPreviewError(
+                    row=row_number,
+                    message=f"active_from {af_raw!r} not ISO-parseable (YYYY-MM-DD)",
+                ))
+                continue
 
             cfg_kwargs: dict = {
                 "required_hours": int(hours) if hours else 8,
             }
             if ptype_str in ("Fixed", "Ramadan"):
                 if not (start and end):
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"row {row_number}: Fixed/Ramadan requires start and end",
-                    )
+                    errors.append(PolicyImportPreviewError(
+                        row=row_number,
+                        message=f"{ptype_str} requires start + end time (HH:MM)",
+                    ))
+                    continue
                 cfg_kwargs["start"] = start
                 cfg_kwargs["end"] = end
                 cfg_kwargs["grace_minutes"] = int(grace) if grace else 15
+
             try:
                 cfg = PolicyConfig(**cfg_kwargs)
                 req = PolicyCreateRequest(
@@ -451,16 +483,184 @@ async def import_policies_xlsx(
                     active_from=af,
                 )
             except Exception as exc:  # noqa: BLE001
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"row {row_number}: {exc}",
-                )
+                errors.append(PolicyImportPreviewError(
+                    row=row_number, message=str(exc),
+                ))
+                continue
             parsed.append((row_number, req))
     finally:
         wb.close()
 
+    return parsed, errors
+
+
+@router.get("/api/policies/import-template")
+def policies_import_template(
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
+) -> StreamingResponse:
+    """Stream a sample shift-policies workbook with one example row
+    per type (Fixed / Flex / Ramadan / Custom) + a Field guide sheet.
+    Operator clicks Download in the import modal, edits the file,
+    uploads it back through the preview/import flow."""
+
+    from openpyxl import Workbook  # noqa: PLC0415
+
+    wb = Workbook()
+    # Data sheet
+    ws = wb.active
+    ws.title = "Policies"
+    headers = [
+        "name", "type", "start", "end",
+        "grace_minutes", "required_hours", "active_from",
+    ]
+    ws.append(headers)
+    ws.append(["Standard Shift",   "Fixed",   "07:30", "15:30", 15, 8, "2026-01-01"])
+    ws.append(["Flex Office",      "Flex",    "",      "",      "", 8, "2026-01-01"])
+    ws.append(["Ramadan 2026",     "Ramadan", "09:00", "14:30", 10, 6, "2026-03-01"])
+    ws.append(["Eid Custom",       "Custom",  "",      "",      "", 8, "2026-04-10"])
+
+    # Field guide sheet — same UX as the employee import template.
+    guide = wb.create_sheet("Field guide")
+    guide.append(["Column", "Required?", "Notes"])
+    guide.append([
+        "name",
+        "yes",
+        "Unique within the tenant. Re-importing a row with an existing name is skipped (not failed).",
+    ])
+    guide.append([
+        "type",
+        "yes",
+        "One of Fixed / Flex / Ramadan / Custom. Defaults to Fixed when blank.",
+    ])
+    guide.append([
+        "start",
+        "Fixed / Ramadan only",
+        "Wall-clock start time HH:MM, 24-hour.",
+    ])
+    guide.append([
+        "end",
+        "Fixed / Ramadan only",
+        "Wall-clock end time HH:MM, 24-hour.",
+    ])
+    guide.append([
+        "grace_minutes",
+        "optional",
+        "Minutes of grace before late / after-end early-out. 0–180. Defaults to 15 for Fixed/Ramadan.",
+    ])
+    guide.append([
+        "required_hours",
+        "optional",
+        "Daily required work hours. 1–24. Defaults to 8.",
+    ])
+    guide.append([
+        "active_from",
+        "optional",
+        "ISO date YYYY-MM-DD. Defaults to today if blank.",
+    ])
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        headers={
+            "Content-Disposition": (
+                'attachment; filename="shift-policies-import-template.xlsx"'
+            )
+        },
+    )
+
+
+@router.post(
+    "/api/policies/import-preview",
+    response_model=PolicyImportPreviewResult,
+)
+async def import_policies_preview(
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
+    file: UploadFile = File(...),
+) -> PolicyImportPreviewResult:
+    """Dry-run a shift-policies import: parse the workbook, validate
+    each row, and report which rows would be skipped because their
+    name already exists. **No DB writes.**
+
+    The frontend posts the same file twice — once here for the
+    preview, then to ``POST /api/policies/import`` after the
+    operator confirms. Mirrors the employees import flow.
+    """
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    raw = await file.read()
+    parsed, errors = _parse_policy_xlsx(raw)
+
+    # Snapshot existing names so the preview can flag "will be skipped".
+    existing_names: set[str] = set()
+    if parsed:
+        engine = get_engine()
+        with engine.begin() as conn:
+            existing_names = {
+                r.name.strip().lower()
+                for r in conn.execute(
+                    select(shift_policies.c.name).where(
+                        shift_policies.c.tenant_id == scope.tenant_id,
+                    )
+                ).all()
+            }
+
+    rows: list[PolicyImportPreviewRow] = []
+    for row_number, req in parsed:
+        will_skip = req.name.strip().lower() in existing_names
+        cfg = req.config
+        rows.append(PolicyImportPreviewRow(
+            row=row_number,
+            name=req.name,
+            type=req.type,
+            start=cfg.start,
+            end=cfg.end,
+            grace_minutes=cfg.grace_minutes,
+            required_hours=cfg.required_hours,
+            active_from=req.active_from.isoformat(),
+            will_skip=will_skip,
+            skip_reason=(
+                "A policy with this name already exists."
+                if will_skip else None
+            ),
+        ))
+    return PolicyImportPreviewResult(rows=rows, errors=errors)
+
+
+@router.post("/api/policies/import", response_model=PolicyImportResponse)
+async def import_policies_xlsx(
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
+    file: UploadFile = File(...),
+) -> PolicyImportResponse:
+    """Bulk-create Fixed/Flex/Ramadan/Custom policies from an .xlsx
+    file. Rows whose ``name`` already exists for the tenant are
+    skipped (not failed); every parse error is collected so the
+    operator can see exactly which rows didn't import (the modal
+    surfaces them in the result panel)."""
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    raw = await file.read()
+    parsed, parse_errors = _parse_policy_xlsx(raw)
+
+    # Translate parse errors into skipped rows so the response shape
+    # stays uniform — the operator sees one list, not two.
+    skipped: list[PolicyImportSkipped] = [
+        PolicyImportSkipped(
+            row_number=e.row,
+            submitted_name="(parse error)",
+            reason=e.message,
+        )
+        for e in parse_errors
+    ]
+
     if not parsed:
-        return PolicyImportResponse()
+        return PolicyImportResponse(
+            skipped=skipped, skipped_count=len(skipped),
+        )
 
     engine = get_engine()
     imported: list[PolicyResponse] = []

@@ -221,3 +221,126 @@ export function useReprocessStatus(): UseQueryResult<ReprocessFaceMatchStatus, E
     staleTime: 1000,
   });
 }
+
+
+// Per-UC count of already-processed clips for the requested UCs. Powers
+// the Identify Event overwrite-confirmation panel — the operator sees
+// the actual blast radius before confirming.
+export interface ProcessedClipCounts {
+  use_cases: string[];
+  per_uc: Record<string, number>;
+  any_uc: number;
+  total_completed_clips: number;
+}
+
+export function useProcessedClipCounts(
+  useCases: string[],
+  enabled: boolean,
+): UseQueryResult<ProcessedClipCounts, Error> {
+  const csv = [...useCases].sort().join(",");
+  return useQuery({
+    queryKey: ["person-clips", "processed-counts", csv],
+    queryFn: () =>
+      api<ProcessedClipCounts>(
+        `/api/person-clips/processed-counts?use_cases=${encodeURIComponent(csv)}`,
+      ),
+    enabled: enabled && csv.length > 0,
+    staleTime: 5_000,
+  });
+}
+
+
+// ── New clip_pipeline batch path ────────────────────────────────────────────
+// Replaces the legacy /api/person-clips/reprocess-face-match flow. The
+// pipeline tracks per-(clip, uc) state so the modal can show what's
+// queued / cropping / matching / completed / skipped / failed in real
+// time as the worker drains the queue one job at a time.
+
+export interface ClipPipelineSubmitAllRequest {
+  use_cases: string[];
+  skip_existing: boolean;
+}
+
+export interface ClipPipelineSubmitAllResponse {
+  batch_id: string;
+  total_clips: number;
+  total_jobs: number;
+  queued_jobs: number;
+  skipped_jobs: number;
+  deleted_prior: number;
+}
+
+export function useClipPipelineSubmitAll() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ClipPipelineSubmitAllRequest) =>
+      api<ClipPipelineSubmitAllResponse>(
+        "/api/clip-pipeline/submit-all",
+        { method: "POST", body },
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["clip-analytics", "list"] });
+      qc.invalidateQueries({ queryKey: ["clip-pipeline", "status"] });
+    },
+  });
+}
+
+
+// Status of one batch — the modal polls this aggressively while the
+// batch is in flight so the operator sees jobs move from queued →
+// cropping → matching → completed in real time.
+
+export interface ClipPipelineBatchPerUc {
+  total: number;
+  queued: number;
+  cropping: number;
+  matching: number;
+  completed: number;
+  skipped: number;
+  failed: number;
+}
+
+export interface ClipPipelineBatch {
+  batch_id: string;
+  submitted_at: string;
+  total_jobs: number;
+  queued_jobs: number;
+  cropping_now: number;
+  matching_now: number;
+  completed_jobs: number;
+  skipped_jobs: number;
+  failed_jobs: number;
+  remaining_jobs: number;
+  use_cases: string[];
+  skip_existing: boolean;
+  per_uc: Record<string, ClipPipelineBatchPerUc>;
+  completed_at: string | null;
+}
+
+export interface ClipPipelineStatusResponse {
+  running: boolean;
+  batches: ClipPipelineBatch[];
+}
+
+export function useClipPipelineBatch(
+  batchId: string | null,
+): UseQueryResult<ClipPipelineBatch | null, Error> {
+  return useQuery<ClipPipelineBatch | null>({
+    queryKey: ["clip-pipeline", "batch", batchId ?? ""],
+    queryFn: async () => {
+      if (!batchId) return null;
+      const res = await api<ClipPipelineStatusResponse>(
+        `/api/clip-pipeline/status?batch_id=${encodeURIComponent(batchId)}`,
+      );
+      return res.batches[0] ?? null;
+    },
+    enabled: batchId !== null,
+    // Keep polling while in flight — completed_at non-null means done.
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (!data) return 1500;
+      return data.completed_at ? false : 1500;
+    },
+    staleTime: 500,
+  });
+}

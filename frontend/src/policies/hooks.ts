@@ -100,6 +100,45 @@ export function useImportPoliciesXlsx() {
   });
 }
 
+
+// ── Two-call import preview (matches employees flow) ────────────────────────
+
+export interface PolicyImportPreviewRow {
+  row: number;
+  name: string;
+  type: string;
+  start: string | null;
+  end: string | null;
+  grace_minutes: number | null;
+  required_hours: number;
+  active_from: string;
+  will_skip: boolean;
+  skip_reason: string | null;
+}
+
+export interface PolicyImportPreviewError {
+  row: number;
+  message: string;
+}
+
+export interface PolicyImportPreviewResult {
+  rows: PolicyImportPreviewRow[];
+  errors: PolicyImportPreviewError[];
+}
+
+export function usePreviewPoliciesImport() {
+  return useMutation({
+    mutationFn: async (file: File): Promise<PolicyImportPreviewResult> => {
+      const fd = new FormData();
+      fd.append("file", file);
+      return api<PolicyImportPreviewResult>(
+        "/api/policies/import-preview",
+        { method: "POST", body: fd },
+      );
+    },
+  });
+}
+
 export function useCreateAssignment() {
   const qc = useQueryClient();
   return useMutation({

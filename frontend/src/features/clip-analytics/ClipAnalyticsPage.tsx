@@ -19,7 +19,9 @@ import {
   useClipFaceCrops,
   useClipProcessingResults,
   useDeletePersonClip,
-  useReprocessFaceMatch,
+  useClipPipelineBatch,
+  useClipPipelineSubmitAll,
+  useProcessedClipCounts,
   useReprocessStatus,
   useSingleClipReprocess,
 } from "../person-clips/hooks";
@@ -292,22 +294,26 @@ export function ClipAnalyticsPage() {
             <Icon name="sparkles" size={12} />
             {batchRunning ? "Identify Event running…" : "Identify Event"}
           </button>
-          {/* Single bulk-delete button. Disabled until the operator
-              picks at least one row — selection is a safety gate
-              that confirms they've reviewed the table before firing
-              the destructive action against the active filter. */}
+          {/* Bulk-delete button. Always scoped to the operator's
+              ticked rows — never the full filter set. Picking one
+              checkbox deletes one clip; picking all visible rows
+              deletes only those. The button label adapts so the
+              operator can see exactly how many will be deleted before
+              they click. */}
           <button
             className={selected.size > 0 ? "btn btn-danger" : "btn"}
-            onClick={() => setBulkDeleteScope("all")}
+            onClick={() => setBulkDeleteScope("selected")}
             disabled={selected.size === 0 || total === 0}
             title={
               selected.size === 0
-                ? "Select at least one clip to enable bulk delete"
-                : "Delete every clip that matches the active filter (capped at 200 per request)"
+                ? "Tick at least one row to enable delete"
+                : `Delete the ${selected.size} ticked clip${selected.size === 1 ? "" : "s"}`
             }
           >
             <Icon name="trash" size={12} />
-            Delete all matching filter
+            {selected.size === 0
+              ? "Delete selected"
+              : `Delete ${selected.size} selected`}
           </button>
         </div>
       </div>
@@ -1155,8 +1161,10 @@ const UC_TILES: readonly UseCaseTile[] = [
 type BatchMode = "skip_existing" | "all";
 
 function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
-  const reprocess = useReprocessFaceMatch();
-  const status = useReprocessStatus();
+  // New pipeline path — submit-all resolves clips server-side, applies
+  // overwrite cleanup (when not skip_existing), and returns a batch_id
+  // we poll for live per-UC progress.
+  const submitAll = useClipPipelineSubmitAll();
   const qc = useQueryClient();
 
   const [selected, setSelected] = useState<Set<UseCaseCode>>(
@@ -1164,38 +1172,82 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
   );
   const [mode, setMode] = useState<BatchMode>("skip_existing");
   const [error, setError] = useState<string | null>(null);
+  // Holds the batch id returned by submit-all. When non-null, the modal
+  // switches from the picker to the live-progress panel.
+  const [batchId, setBatchId] = useState<string | null>(null);
+  const batchStatus = useClipPipelineBatch(batchId);
+  // When the operator picks ``all`` (overwrite) mode and clicks Start
+  // we flip this to true and render a confirmation step inside the
+  // same modal. Only an explicit second click on the confirm button
+  // actually fires the reprocess. The flag clears on Cancel, on UC
+  // change, or on Mode change.
+  const [awaitingOverwriteConfirm, setAwaitingOverwriteConfirm] = useState(false);
 
-  const toggle = (uc: UseCaseCode) =>
+  // Backend count of clips already done for the currently-selected
+  // UCs. Fetched lazily — only when we actually enter the confirm
+  // step, so the picker doesn't waste a request on every UC tick.
+  const selectedList = Array.from(selected);
+  const processedCounts = useProcessedClipCounts(
+    selectedList,
+    awaitingOverwriteConfirm && mode === "all",
+  );
+
+  const toggle = (uc: UseCaseCode) => {
+    setAwaitingOverwriteConfirm(false);
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(uc)) next.delete(uc);
       else next.add(uc);
       return next;
     });
+  };
+  const pickMode = (m: BatchMode) => {
+    setAwaitingOverwriteConfirm(false);
+    setMode(m);
+  };
 
-  const running =
-    status.data?.status === "running" || status.data?.status === "starting";
+  // Inflight = a batch is mid-process. The Start button stays disabled
+  // while polling shows queued/in-flight jobs to prevent the operator
+  // from accidentally launching a second batch on top of the first.
+  const inflight =
+    batchStatus.data !== null
+    && batchStatus.data !== undefined
+    && batchStatus.data.completed_at === null;
+
+  const fireReprocess = async () => {
+    setError(null);
+    try {
+      const res = await submitAll.mutateAsync({
+        use_cases: Array.from(selected),
+        skip_existing: mode === "skip_existing",
+      });
+      // Flip into live-progress mode rather than closing — the
+      // operator sees jobs flow queued → cropping → matching →
+      // completed live. They can close the modal at any time; the
+      // pipeline keeps running in the background.
+      setBatchId(res.batch_id);
+      qc.invalidateQueries({ queryKey: ["clip-analytics", "list"] });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not start.");
+    }
+  };
 
   const onStart = async () => {
     if (selected.size === 0) {
       setError("Pick at least one use case.");
       return;
     }
-    setError(null);
-    try {
-      const res = await reprocess.mutateAsync({
-        mode,
-        use_cases: Array.from(selected),
-      });
-      if (!res.started) {
-        setError(res.message || "Could not start.");
-        return;
-      }
-      qc.invalidateQueries({ queryKey: ["clip-analytics", "list"] });
-      onClose();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not start.");
+    // Overwrite mode requires an explicit second confirm — re-running
+    // any UC that already has a clip_processing_results row destroys
+    // the prior face crops + match details for that (clip, uc). The
+    // confirm step renders inline so the operator stays in the same
+    // popup flow.
+    if (mode === "all" && !awaitingOverwriteConfirm) {
+      setAwaitingOverwriteConfirm(true);
+      setError(null);
+      return;
     }
+    await fireReprocess();
   };
 
   return (
@@ -1337,35 +1389,162 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
               <ModeRow
                 value="skip_existing"
                 active={mode === "skip_existing"}
-                onPick={() => setMode("skip_existing")}
+                onPick={() => pickMode("skip_existing")}
                 title="Skip already processed"
                 subtitle="Only run clips that don't yet have a result for the chosen use cases. Safe default — won't redo work."
               />
               <ModeRow
                 value="all"
                 active={mode === "all"}
-                onPick={() => setMode("all")}
+                onPick={() => pickMode("all")}
                 title="Reprocess everything (overwrite)"
                 subtitle="Run every clip in this tenant. Existing results for the chosen use cases will be overwritten."
                 tone="warn"
               />
             </div>
-            {running && (
+            {awaitingOverwriteConfirm && mode === "all" && (
               <div
+                role="alertdialog"
+                aria-label="Confirm overwrite"
                 style={{
                   marginTop: 12,
-                  padding: "8px 10px",
-                  borderRadius: 8,
-                  background: "var(--warning-soft)",
-                  color: "var(--warning-text)",
+                  padding: "12px 14px",
+                  borderRadius: 10,
+                  background: "var(--danger-soft, rgba(239,68,68,0.10))",
+                  border: "1px solid rgba(239,68,68,0.35)",
                   fontSize: 12.5,
-                  border: "1px solid rgba(245,158,11,0.25)",
+                  lineHeight: 1.55,
                 }}
               >
-                A batch is already running ({status.data?.processed_clips ?? 0} /{" "}
-                {status.data?.total_clips ?? 0}). Wait for it to finish before
-                starting another.
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    marginBottom: 6,
+                  }}
+                >
+                  <span
+                    aria-hidden
+                    style={{
+                      width: 20, height: 20, borderRadius: "50%",
+                      display: "grid", placeItems: "center",
+                      background: "rgba(239,68,68,0.20)",
+                      color: "var(--danger-text)",
+                      fontWeight: 700,
+                    }}
+                  >
+                    !
+                  </span>
+                  <strong style={{ color: "var(--danger-text)" }}>
+                    Overwrite confirmation required
+                  </strong>
+                </div>
+                <p style={{ margin: "0 0 8px 0" }}>
+                  Every clip in this tenant that already has a result
+                  for{" "}
+                  <strong>
+                    {Array.from(selected)
+                      .map((u) => u.toUpperCase())
+                      .join(" / ")}
+                  </strong>{" "}
+                  will be reprocessed. Existing face crops + match
+                  details will be replaced.
+                </p>
+
+                {/* Already-processed counts so the operator sees the
+                    real blast radius before confirming. */}
+                {processedCounts.isLoading && (
+                  <div
+                    style={{
+                      margin: "0 0 8px 0",
+                      fontSize: 12,
+                      color: "var(--text-secondary)",
+                      fontStyle: "italic",
+                    }}
+                  >
+                    Counting already-processed clips…
+                  </div>
+                )}
+                {processedCounts.data && (
+                  <div
+                    style={{
+                      margin: "0 0 8px 0",
+                      padding: "8px 10px",
+                      borderRadius: 6,
+                      background: "rgba(255,255,255,0.55)",
+                      border: "1px solid rgba(239,68,68,0.20)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.05em",
+                        color: "var(--danger-text)",
+                        marginBottom: 6,
+                      }}
+                    >
+                      Already processed · will be overwritten
+                    </div>
+                    <ul
+                      style={{
+                        margin: 0,
+                        paddingInlineStart: 18,
+                        fontVariantNumeric: "tabular-nums",
+                      }}
+                    >
+                      {Array.from(selected).map((uc) => {
+                        const n = processedCounts.data!.per_uc[uc] ?? 0;
+                        return (
+                          <li key={uc} style={{ fontSize: 12.5 }}>
+                            <strong>{uc.toUpperCase()}</strong>:{" "}
+                            <span
+                              style={{
+                                color:
+                                  n > 0
+                                    ? "var(--danger-text)"
+                                    : "var(--text-secondary)",
+                                fontWeight: 600,
+                              }}
+                            >
+                              {n.toLocaleString()} clip{n === 1 ? "" : "s"}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    <div
+                      style={{
+                        marginTop: 8,
+                        fontSize: 12,
+                        color: "var(--text-secondary)",
+                      }}
+                    >
+                      <strong>
+                        {processedCounts.data.any_uc.toLocaleString()}
+                      </strong>{" "}
+                      distinct clip
+                      {processedCounts.data.any_uc === 1 ? "" : "s"} touched
+                      out of{" "}
+                      <strong>
+                        {processedCounts.data.total_completed_clips.toLocaleString()}
+                      </strong>{" "}
+                      total clips in this tenant.
+                    </div>
+                  </div>
+                )}
+
+                <p style={{ margin: 0, color: "var(--text-secondary)" }}>
+                  Click <strong>Confirm overwrite</strong> below to proceed,
+                  or pick <strong>Skip already processed</strong> mode to
+                  avoid touching finished work.
+                </p>
               </div>
+            )}
+            {batchStatus.data && (
+              <BatchLiveProgressPanel batch={batchStatus.data} />
             )}
             {error && (
               <div
@@ -1398,17 +1577,26 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
             <button
               type="button"
               className="btn"
-              onClick={onClose}
-              disabled={reprocess.isPending}
+              onClick={() => {
+                if (awaitingOverwriteConfirm) {
+                  // Back out of the confirm step without leaving the
+                  // modal so the operator can change UC selection or
+                  // switch to skip_existing without losing context.
+                  setAwaitingOverwriteConfirm(false);
+                  return;
+                }
+                onClose();
+              }}
+              disabled={submitAll.isPending}
             >
-              Cancel
+              {awaitingOverwriteConfirm ? "Back" : batchId ? "Close" : "Cancel"}
             </button>
             <button
               type="button"
               className="btn btn-primary"
               onClick={() => void onStart()}
               disabled={
-                reprocess.isPending || selected.size === 0 || running
+                submitAll.isPending || selected.size === 0 || inflight
               }
               style={
                 mode === "all"
@@ -1416,11 +1604,15 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
                   : undefined
               }
             >
-              {reprocess.isPending
-                ? "Starting…"
-                : mode === "all"
-                  ? "Reprocess everything"
-                  : "Start processing"}
+              {submitAll.isPending
+                ? "Submitting…"
+                : inflight
+                  ? "Running — see progress above"
+                  : mode === "all"
+                    ? awaitingOverwriteConfirm
+                      ? "Confirm overwrite"
+                      : "Reprocess everything"
+                    : "Start processing"}
             </button>
           </ModalFooter>
         </div>
@@ -1428,6 +1620,358 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
     </ModalShell>
   );
 }
+
+
+// ── BatchLiveProgressPanel ────────────────────────────────────────────────
+//
+// Renders inside the Identify Event modal once the batch has been
+// submitted to ``clip_pipeline``. Polls every 1.5 s via
+// ``useClipPipelineBatch``. Shows:
+//   * Scorecard — Selected / Completed / Skipped / Failed / Remaining
+//   * Per-UC strip — for each requested UC: queued / cropping / matching
+//     / completed / skipped / failed
+//   * Progress bar — overall completion percentage
+//
+// Counts come straight from the ``BatchTracker`` on the backend, so
+// what the operator sees matches the pipeline's real queue state.
+
+function BatchLiveProgressPanel({
+  batch,
+}: {
+  batch: import("../person-clips/hooks").ClipPipelineBatch;
+}) {
+  const done = batch.completed_at !== null;
+  const finished =
+    batch.completed_jobs + batch.skipped_jobs + batch.failed_jobs;
+  const pct =
+    batch.total_jobs > 0
+      ? Math.round((finished / batch.total_jobs) * 100)
+      : 0;
+  return (
+    <div
+      role="region"
+      aria-label="Batch progress"
+      style={{
+        marginTop: 12,
+        padding: "12px 14px",
+        borderRadius: 10,
+        border: "1px solid var(--border)",
+        background: "var(--bg-sunken)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            fontSize: 12,
+            fontWeight: 700,
+            color: "var(--text)",
+          }}
+        >
+          <span
+            aria-hidden
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: "50%",
+              background: done
+                ? "var(--success-text)"
+                : "var(--accent, #6366f1)",
+              animation: done ? undefined : "pipeline-pulse 1.6s infinite",
+            }}
+          />
+          {done ? "Batch complete" : "Batch running"}
+          <span
+            className="text-xs"
+            style={{
+              fontWeight: 500,
+              color: "var(--text-secondary)",
+              marginInlineStart: 4,
+            }}
+          >
+            · #{batch.batch_id}
+          </span>
+        </div>
+        <span
+          className="mono"
+          style={{ fontSize: 11, color: "var(--text-secondary)" }}
+        >
+          {pct}%
+        </span>
+      </div>
+
+      {/* Progress bar */}
+      <div
+        style={{
+          height: 6,
+          borderRadius: 3,
+          background: "var(--bg)",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            height: "100%",
+            width: `${pct}%`,
+            background: done
+              ? "var(--success-text)"
+              : "var(--accent, #6366f1)",
+            transition: "width 0.4s ease",
+          }}
+        />
+      </div>
+
+      {/* Scorecard — Selected / Completed / Skipped / Failed / Remaining */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(5, 1fr)",
+          gap: 6,
+        }}
+      >
+        <BatchStat label="Selected" value={batch.total_jobs} />
+        <BatchStat
+          label="Completed"
+          value={batch.completed_jobs}
+          color="var(--success-text)"
+        />
+        <BatchStat
+          label="Skipped"
+          value={batch.skipped_jobs}
+          color="var(--text-secondary)"
+        />
+        <BatchStat
+          label="Failed"
+          value={batch.failed_jobs}
+          color={
+            batch.failed_jobs > 0 ? "var(--danger-text)" : undefined
+          }
+        />
+        <BatchStat
+          label="Remaining"
+          value={batch.remaining_jobs}
+          color="var(--accent, #6366f1)"
+        />
+      </div>
+
+      {/* In-flight detail */}
+      {!done && (
+        <div
+          style={{
+            display: "flex",
+            gap: 12,
+            fontSize: 11,
+            color: "var(--text-secondary)",
+            flexWrap: "wrap",
+          }}
+        >
+          <span>
+            <strong style={{ color: "var(--text)" }}>
+              {batch.queued_jobs}
+            </strong>{" "}
+            in queue
+          </span>
+          <span>·</span>
+          <span>
+            <strong style={{ color: "var(--text)" }}>
+              {batch.cropping_now}
+            </strong>{" "}
+            cropping
+          </span>
+          <span>·</span>
+          <span>
+            <strong style={{ color: "var(--text)" }}>
+              {batch.matching_now}
+            </strong>{" "}
+            matching
+          </span>
+        </div>
+      )}
+
+      {/* Per-UC strip */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: `repeat(${batch.use_cases.length}, 1fr)`,
+          gap: 8,
+        }}
+      >
+        {batch.use_cases.map((uc) => {
+          const s = batch.per_uc[uc];
+          if (!s) return null;
+          const ucFinished = s.completed + s.skipped + s.failed;
+          const ucPct =
+            s.total > 0 ? Math.round((ucFinished / s.total) * 100) : 0;
+          return (
+            <div
+              key={uc}
+              style={{
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                padding: "8px 10px",
+                background: "var(--bg)",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "baseline",
+                  marginBottom: 4,
+                }}
+              >
+                <strong style={{ fontSize: 11, letterSpacing: "0.04em" }}>
+                  {uc.toUpperCase()}
+                </strong>
+                <span
+                  className="mono"
+                  style={{ fontSize: 11, color: "var(--text-secondary)" }}
+                >
+                  {ucFinished} / {s.total}
+                </span>
+              </div>
+              <div
+                style={{
+                  height: 4,
+                  background: "var(--bg-sunken)",
+                  borderRadius: 2,
+                  overflow: "hidden",
+                  marginBottom: 5,
+                }}
+              >
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${ucPct}%`,
+                    background: "var(--accent, #6366f1)",
+                    transition: "width 0.4s ease",
+                  }}
+                />
+              </div>
+              <div
+                style={{
+                  fontSize: 10,
+                  color: "var(--text-secondary)",
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 6,
+                }}
+              >
+                <span>Q {s.queued}</span>
+                <span>· C {s.cropping}</span>
+                <span>· M {s.matching}</span>
+                <span style={{ color: "var(--success-text)" }}>
+                  · ✓ {s.completed}
+                </span>
+                {s.skipped > 0 && (
+                  <span style={{ color: "var(--text-secondary)" }}>
+                    · skip {s.skipped}
+                  </span>
+                )}
+                {s.failed > 0 && (
+                  <span style={{ color: "var(--danger-text)" }}>
+                    · fail {s.failed}
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {done && (
+        <div
+          style={{
+            fontSize: 11.5,
+            color: "var(--success-text)",
+            fontWeight: 600,
+          }}
+        >
+          Done · {batch.completed_jobs} completed
+          {batch.skipped_jobs > 0
+            ? ` · ${batch.skipped_jobs} skipped`
+            : ""}
+          {batch.failed_jobs > 0
+            ? ` · ${batch.failed_jobs} failed`
+            : ""}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function BatchStat({
+  label,
+  value,
+  color,
+}: {
+  label: string;
+  value: number;
+  color?: string | undefined;
+}) {
+  return (
+    <div
+      style={{
+        background: "var(--bg)",
+        border: "1px solid var(--border)",
+        borderRadius: 6,
+        padding: "6px 8px",
+      }}
+    >
+      <div
+        style={{
+          fontSize: 9.5,
+          fontWeight: 700,
+          letterSpacing: "0.04em",
+          textTransform: "uppercase",
+          color: "var(--text-secondary)",
+        }}
+      >
+        {label}
+      </div>
+      <div
+        className="mono"
+        style={{
+          marginTop: 1,
+          fontSize: 14,
+          fontWeight: 700,
+          color: color ?? "var(--text)",
+        }}
+      >
+        {value.toLocaleString()}
+      </div>
+    </div>
+  );
+}
+
+
+// Add keyframe for the pulsing in-progress dot if not already present.
+if (typeof document !== "undefined") {
+  const id = "clip-analytics-batch-pulse";
+  if (!document.getElementById(id)) {
+    const s = document.createElement("style");
+    s.id = id;
+    s.textContent = `@keyframes pipeline-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(99,102,241,0.5); }
+      50% { box-shadow: 0 0 0 6px rgba(99,102,241,0); }
+    }`;
+    document.head.appendChild(s);
+  }
+}
+
 
 function ModeRow({
   value,

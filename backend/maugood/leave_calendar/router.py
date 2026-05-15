@@ -23,7 +23,7 @@ from fastapi import (
     status,
 )
 from openpyxl import load_workbook
-from sqlalchemy import and_, delete, insert, select, update
+from sqlalchemy import and_, delete, func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 
 from maugood.auth.audit import write_audit
@@ -110,24 +110,52 @@ def create_leave_type(
 ) -> LeaveTypeResponse:
     scope = TenantScope(tenant_id=user.tenant_id)
     engine = get_engine()
+    code = payload.code.strip()
+    name = payload.name.strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="Code is required.")
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required.")
     with engine.begin() as conn:
+        existing = conn.execute(
+            select(leave_types.c.code, leave_types.c.name).where(
+                leave_types.c.tenant_id == scope.tenant_id,
+                (func.lower(leave_types.c.code) == code.lower())
+                | (func.lower(leave_types.c.name) == name.lower()),
+            )
+        ).first()
+        if existing is not None:
+            if str(existing.code).strip().lower() == code.lower():
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"A leave type with code '{code}' already exists."
+                    ),
+                )
+            raise HTTPException(
+                status_code=409,
+                detail=f"A leave type named '{name}' already exists.",
+            )
         try:
             new_id = int(
                 conn.execute(
                     insert(leave_types)
                     .values(
                         tenant_id=scope.tenant_id,
-                        code=payload.code,
-                        name=payload.name,
+                        code=code,
+                        name=name,
                         is_paid=payload.is_paid,
                     )
                     .returning(leave_types.c.id)
                 ).scalar_one()
             )
-        except Exception as exc:  # noqa: BLE001
+        except IntegrityError:
+            # Race condition: a concurrent insert beat the pre-check.
             raise HTTPException(
-                status_code=400,
-                detail=f"could not create leave_type: {type(exc).__name__}",
+                status_code=409,
+                detail=(
+                    f"A leave type with code '{code}' already exists."
+                ),
             )
         write_audit(
             conn,
@@ -137,8 +165,8 @@ def create_leave_type(
             entity_type="leave_type",
             entity_id=str(new_id),
             after={
-                "code": payload.code,
-                "name": payload.name,
+                "code": code,
+                "name": name,
                 "is_paid": payload.is_paid,
             },
         )
@@ -184,7 +212,27 @@ def patch_leave_type(
             raise HTTPException(status_code=404, detail="leave_type not found")
         values: dict[str, Any] = {}
         if payload.name is not None:
-            values["name"] = payload.name
+            new_name = payload.name.strip()
+            if not new_name:
+                raise HTTPException(
+                    status_code=400, detail="Name is required."
+                )
+            if new_name.lower() != str(before.name).strip().lower():
+                clash = conn.execute(
+                    select(leave_types.c.id).where(
+                        leave_types.c.tenant_id == scope.tenant_id,
+                        leave_types.c.id != leave_type_id,
+                        func.lower(leave_types.c.name) == new_name.lower(),
+                    )
+                ).first()
+                if clash is not None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"A leave type named '{new_name}' already exists."
+                        ),
+                    )
+            values["name"] = new_name
         if payload.is_paid is not None:
             values["is_paid"] = payload.is_paid
         if payload.active is not None:

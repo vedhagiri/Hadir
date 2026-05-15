@@ -15,18 +15,18 @@
 // from this page in a follow-up — for now it surfaces the count.
 
 import { useEffect, useMemo, useState } from "react";
-import type { ChangeEvent } from "react";
 
 import { ApiError } from "../api/client";
 import { DatePicker } from "../components/DatePicker";
-import { DrawerShell } from "../components/DrawerShell";
+import { ModalShell } from "../components/DrawerShell";
 import { Icon } from "../shell/Icon";
 import { toast } from "../shell/Toaster";
+import { PolicyImportModal } from "./PolicyImportModal";
 import {
   useAssignments,
   useCreatePolicy,
   useDeletePolicy,
-  useImportPoliciesXlsx,
+  usePatchPolicy,
   usePolicies,
 } from "./hooks";
 import type {
@@ -45,40 +45,16 @@ export function PoliciesPage() {
   const assignments = useAssignments();
   const create = useCreatePolicy();
   const del = useDeletePolicy();
-  const importer = useImportPoliciesXlsx();
-  const [importSummary, setImportSummary] = useState<string | null>(null);
-  const [importError, setImportError] = useState<string | null>(null);
-
-  // BUG-040 — XLSX import handler. Mirrors the holiday-import flow:
-  // surfaces imported / skipped counts plus the first few skipped
-  // names so the operator can fix the spreadsheet and re-run.
-  const onImportPolicies = async (e: ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    e.target.value = "";
-    if (!f) return;
-    setImportSummary(null);
-    setImportError(null);
-    try {
-      const res = await importer.mutateAsync(f);
-      const parts: string[] = [`${res.imported_count} policies imported`];
-      if (res.skipped_count > 0) {
-        const names = res.skipped
-          .slice(0, 3)
-          .map((s) => `"${s.submitted_name}"`)
-          .join(", ");
-        const more =
-          res.skipped_count > 3 ? `, +${res.skipped_count - 3} more` : "";
-        parts.push(`${res.skipped_count} skipped (${names}${more})`);
-      }
-      setImportSummary(parts.join(" · "));
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Import failed";
-      setImportError(msg);
-    }
-  };
+  // Three-step import modal (drag-and-drop + preview + confirm) —
+  // matches the employees import flow. Replaces the prior inline
+  // hidden-file-input that imported in one shot with no preview.
+  const [importOpen, setImportOpen] = useState(false);
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // Edit drawer — opens with a specific policy preloaded into the form.
+  // ``null`` keeps it closed; ``PolicyResponse`` opens it pre-filled.
+  const [editing, setEditing] = useState<PolicyResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const policyList = policies.data ?? [];
@@ -173,29 +149,17 @@ export function PoliciesPage() {
           </p>
         </div>
         <div className="page-actions">
-          {/* BUG-040 — XLSX import for shift policies. The label
-              wraps a hidden file input so the same .btn styling can
-              double as a file picker without extra UI. */}
-          <label
+          {/* Three-step import — opens a modal with drag-and-drop,
+              template download, preview table, per-row error list,
+              and a Confirm step. Same UX as the employee import. */}
+          <button
             className="btn"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              cursor: importer.isPending ? "wait" : "pointer",
-            }}
+            onClick={() => setImportOpen(true)}
             title="Import shift policies from an .xlsx file"
           >
             <Icon name="upload" size={12} />
-            {importer.isPending ? "Importing…" : "Import"}
-            <input
-              type="file"
-              accept=".xlsx"
-              hidden
-              onChange={onImportPolicies}
-              disabled={importer.isPending}
-            />
-          </label>
+            Import
+          </button>
           <button
             className="btn btn-primary"
             onClick={() => setDrawerOpen(true)}
@@ -205,38 +169,6 @@ export function PoliciesPage() {
           </button>
         </div>
       </div>
-      {/* BUG-040 — import summary banner so a same-name re-import
-          shows what was actually written. */}
-      {importSummary && (
-        <div
-          style={{
-            padding: "8px 12px",
-            margin: "0 0 12px 0",
-            border: "1px solid #0b6e4f55",
-            background: "#0b6e4f0d",
-            color: "#0b6e4f",
-            borderRadius: 8,
-            fontSize: 12.5,
-          }}
-        >
-          {importSummary}
-        </div>
-      )}
-      {importError && (
-        <div
-          style={{
-            padding: "8px 12px",
-            margin: "0 0 12px 0",
-            border: "1px solid var(--danger-text)",
-            background: "var(--danger-bg, rgba(220,38,38,0.06))",
-            color: "var(--danger-text)",
-            borderRadius: 8,
-            fontSize: 12.5,
-          }}
-        >
-          {importError}
-        </div>
-      )}
 
       {policies.isLoading && (
         <p className="text-sm text-dim">Loading shift policies…</p>
@@ -363,6 +295,7 @@ export function PoliciesPage() {
                 policy={selected}
                 assignments={assignmentsByPolicy[selected.id] ?? []}
                 onDelete={() => onDelete(selected)}
+                onEdit={() => setEditing(selected)}
               />
             )}
           </div>
@@ -370,48 +303,204 @@ export function PoliciesPage() {
       )}
 
       {drawerOpen && (
-        <DrawerShell onClose={() => setDrawerOpen(false)}>
-          <div className="drawer">
-            <div className="drawer-head">
-              <div>
-                <div className="mono text-xs text-dim">Shift policy</div>
-                <div
-                  style={{ fontSize: 16, fontWeight: 600, marginTop: 2 }}
-                >
-                  New policy
+        <ModalShell onClose={() => setDrawerOpen(false)}>
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 60,
+              display: "grid",
+              placeItems: "center",
+              padding: 16,
+            }}
+          >
+            <div
+              className="card"
+              role="dialog"
+              aria-modal="true"
+              aria-label="New shift policy"
+              style={{
+                width: "min(620px, 96vw)",
+                maxHeight: "86vh",
+                overflow: "auto",
+              }}
+            >
+              <div className="card-head">
+                <div>
+                  <div className="mono text-xs text-dim">Shift policy</div>
+                  <h3 className="card-title" style={{ marginTop: 2 }}>
+                    New policy
+                  </h3>
                 </div>
+                <button
+                  className="icon-btn"
+                  onClick={() => setDrawerOpen(false)}
+                  aria-label="Close"
+                  title="Close"
+                  disabled={create.isPending}
+                >
+                  <Icon name="x" size={14} />
+                </button>
               </div>
-              <button
-                className="icon-btn"
-                onClick={() => setDrawerOpen(false)}
-                aria-label="Close"
-              >
-                <Icon name="x" size={14} />
-              </button>
-            </div>
-            <div className="drawer-body">
-              {error && (
-                <div
-                  role="alert"
-                  style={{
-                    background: "var(--danger-soft)",
-                    color: "var(--danger-text)",
-                    border: "1px solid var(--border)",
-                    padding: "8px 10px",
-                    borderRadius: "var(--radius-sm)",
-                    fontSize: 12.5,
-                    marginBottom: 12,
-                  }}
-                >
-                  {error}
-                </div>
-              )}
-              <PolicyForm onSubmit={onCreate} busy={create.isPending} />
+              <div className="card-body">
+                {error && (
+                  <div
+                    role="alert"
+                    style={{
+                      background: "var(--danger-soft)",
+                      color: "var(--danger-text)",
+                      border: "1px solid var(--border)",
+                      padding: "8px 10px",
+                      borderRadius: "var(--radius-sm)",
+                      fontSize: 12.5,
+                      marginBottom: 12,
+                    }}
+                  >
+                    {error}
+                  </div>
+                )}
+                <PolicyForm onSubmit={onCreate} busy={create.isPending} />
+              </div>
             </div>
           </div>
-        </DrawerShell>
+        </ModalShell>
+      )}
+      {editing && (
+        <PolicyEditDrawer
+          policy={editing}
+          onClose={() => setEditing(null)}
+        />
+      )}
+      {importOpen && (
+        <PolicyImportModal onClose={() => setImportOpen(false)} />
       )}
     </>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Edit modal — centered popup (not a side drawer per operator request).
+// Same form as create, seeded with the current policy's values + a
+// ``usePatchPolicy`` save handler. The ``type`` field is locked because
+// the server's PolicyPatchInput does not accept a type change (delete
+// + recreate is the right path if the operator actually wants to
+// switch types).
+// ---------------------------------------------------------------------------
+
+function PolicyEditDrawer({
+  policy,
+  onClose,
+}: {
+  policy: PolicyResponse;
+  onClose: () => void;
+}) {
+  const patch = usePatchPolicy(policy.id);
+  const [error, setError] = useState<string | null>(null);
+
+  const onSave = async (input: {
+    name: string;
+    type: PolicyType;
+    config: PolicyConfig;
+    active_from: string;
+  }) => {
+    setError(null);
+    try {
+      // PolicyPatchInput accepts name + config + active_from + active_until.
+      // ``type`` is ignored on the server but the form still carries it;
+      // we drop it explicitly here to keep the request shape honest.
+      const updated = await patch.mutateAsync({
+        name: input.name,
+        config: input.config,
+        active_from: input.active_from,
+      });
+      toast.success(`"${updated.name}" updated.`);
+      onClose();
+    } catch (err) {
+      if (err instanceof ApiError) {
+        const body = err.body as { detail?: unknown } | null;
+        const msg =
+          typeof body?.detail === "string"
+            ? body.detail
+            : `Save failed (${err.status}).`;
+        setError(msg);
+        toast.error(msg);
+      } else {
+        setError("Save failed.");
+        toast.error("Save failed.");
+      }
+    }
+  };
+
+  return (
+    <ModalShell onClose={onClose}>
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 60,
+          display: "grid",
+          placeItems: "center",
+          padding: 16,
+        }}
+      >
+        <div
+          className="card"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Edit shift policy ${policy.name}`}
+          style={{
+            width: "min(620px, 96vw)",
+            maxHeight: "86vh",
+            overflow: "auto",
+          }}
+        >
+          <div className="card-head">
+            <div>
+              <div className="mono text-xs text-dim">Shift policy</div>
+              <h3
+                className="card-title"
+                style={{ marginTop: 2 }}
+              >
+                Edit · {policy.name}
+              </h3>
+            </div>
+            <button
+              className="icon-btn"
+              onClick={onClose}
+              aria-label="Close"
+              title="Close"
+              disabled={patch.isPending}
+            >
+              <Icon name="x" size={14} />
+            </button>
+          </div>
+          <div className="card-body">
+            {error && (
+              <div
+                role="alert"
+                style={{
+                  background: "var(--danger-soft)",
+                  color: "var(--danger-text)",
+                  border: "1px solid var(--border)",
+                  padding: "8px 10px",
+                  borderRadius: "var(--radius-sm)",
+                  fontSize: 12.5,
+                  marginBottom: 12,
+                }}
+              >
+                {error}
+              </div>
+            )}
+            <PolicyForm
+              onSubmit={onSave}
+              busy={patch.isPending}
+              initial={policy}
+            />
+          </div>
+        </div>
+      </div>
+    </ModalShell>
   );
 }
 
@@ -423,10 +512,12 @@ function PolicyDetail({
   policy,
   assignments,
   onDelete,
+  onEdit,
 }: {
   policy: PolicyResponse;
   assignments: AssignmentResponse[];
   onDelete: () => void;
+  onEdit: () => void;
 }) {
   const cfg = policy.config;
   const requiredHours = cfg.required_hours ?? 8;
@@ -466,8 +557,8 @@ function PolicyDetail({
         </div>
         <button
           className="btn btn-sm"
-          disabled
-          title="Edit drawer arrives next"
+          onClick={onEdit}
+          title="Edit this shift policy"
         >
           <Icon name="edit" size={11} /> Edit
         </button>
@@ -931,6 +1022,8 @@ function DetailField({
 function PolicyForm({
   onSubmit,
   busy,
+  initial,
+  submitLabel,
 }: {
   onSubmit: (input: {
     name: string;
@@ -939,28 +1032,41 @@ function PolicyForm({
     active_from: string;
   }) => Promise<void>;
   busy: boolean;
+  // When set the form opens in edit mode: every field seeded from the
+  // existing policy, type field locked (the server's PolicyPatchInput
+  // does not allow type changes), and the submit button label is
+  // ``submitLabel`` (defaults to "Save changes" when ``initial`` is
+  // present, "Create policy" otherwise).
+  initial?: PolicyResponse | null | undefined;
+  submitLabel?: string | undefined;
 }) {
-  const [name, setName] = useState("");
-  const [type, setType] = useState<PolicyType>("Fixed");
+  const isEdit = !!initial;
+  const cfg0 = initial?.config ?? {};
+  const [name, setName] = useState(initial?.name ?? "");
+  const [type, setType] = useState<PolicyType>(initial?.type ?? "Fixed");
   const [activeFrom, setActiveFrom] = useState(
-    new Date().toISOString().slice(0, 10),
+    initial?.active_from ?? new Date().toISOString().slice(0, 10),
   );
   // Fixed (also used by Ramadan + Custom-Fixed)
-  const [start, setStart] = useState("07:30");
-  const [end, setEnd] = useState("15:30");
-  const [grace, setGrace] = useState(15);
+  const [start, setStart] = useState(cfg0.start ?? "07:30");
+  const [end, setEnd] = useState(cfg0.end ?? "15:30");
+  const [grace, setGrace] = useState(cfg0.grace_minutes ?? 15);
   // Flex (also used by Custom-Flex)
-  const [inStart, setInStart] = useState("07:30");
-  const [inEnd, setInEnd] = useState("08:30");
-  const [outStart, setOutStart] = useState("15:30");
-  const [outEnd, setOutEnd] = useState("16:30");
+  const [inStart, setInStart] = useState(cfg0.in_window_start ?? "07:30");
+  const [inEnd, setInEnd] = useState(cfg0.in_window_end ?? "08:30");
+  const [outStart, setOutStart] = useState(cfg0.out_window_start ?? "15:30");
+  const [outEnd, setOutEnd] = useState(cfg0.out_window_end ?? "16:30");
   // Common
-  const [requiredHours, setRequiredHours] = useState(8);
+  const [requiredHours, setRequiredHours] = useState(
+    cfg0.required_hours ?? 8,
+  );
   // Ramadan / Custom — calendar range
-  const [rangeStart, setRangeStart] = useState("");
-  const [rangeEnd, setRangeEnd] = useState("");
+  const [rangeStart, setRangeStart] = useState(cfg0.start_date ?? "");
+  const [rangeEnd, setRangeEnd] = useState(cfg0.end_date ?? "");
   // Custom — Fixed or Flex inner
-  const [innerType, setInnerType] = useState<"Fixed" | "Flex">("Fixed");
+  const [innerType, setInnerType] = useState<"Fixed" | "Flex">(
+    cfg0.inner_type ?? "Fixed",
+  );
 
   const onTypeChange = (next: PolicyType) => {
     setType(next);
@@ -1060,7 +1166,17 @@ function PolicyForm({
           <select
             value={type}
             onChange={(e) => onTypeChange(e.target.value as PolicyType)}
-            style={inputStyle}
+            disabled={isEdit}
+            title={
+              isEdit
+                ? "Policy type cannot be changed after creation — delete and re-create to switch types."
+                : undefined
+            }
+            style={{
+              ...inputStyle,
+              cursor: isEdit ? "not-allowed" : "pointer",
+              opacity: isEdit ? 0.7 : 1,
+            }}
           >
             <option value="Fixed">Fixed</option>
             <option value="Flex">Flex</option>
@@ -1239,7 +1355,9 @@ function PolicyForm({
           disabled={busy}
           className="btn btn-primary"
         >
-          {busy ? "Saving…" : "Create policy"}
+          {busy
+            ? "Saving…"
+            : (submitLabel ?? (isEdit ? "Save changes" : "Create policy"))}
         </button>
       </div>
     </form>
