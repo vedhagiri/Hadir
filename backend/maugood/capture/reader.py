@@ -1894,13 +1894,19 @@ class CaptureWorker:
                         detections = []
                     last_detect_ts = now
                 except Exception as exc:  # noqa: BLE001
+                    # Carry the message + class name. The previous log
+                    # showed only the class (e.g. ``ModuleNotFoundError``)
+                    # which gives the operator zero idea which module is
+                    # missing; with the message they can pip-install it.
                     logger.warning(
-                        "camera %s: analyzer error: %s",
+                        "camera %s: analyzer error: %s: %s",
                         self.camera_name,
                         type(exc).__name__,
+                        exc,
                     )
                     self._record_error(
-                        "analyzer", f"detect failed: {type(exc).__name__}"
+                        "analyzer",
+                        f"detect failed: {type(exc).__name__}: {exc}",
                     )
                     detections = []
                     person_count = 0

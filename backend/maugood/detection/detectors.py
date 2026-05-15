@@ -520,9 +520,30 @@ def detect_person_boxes(  # type: ignore[no-untyped-def]
     presence, not face matching, so the face boxes don't belong
     there. Works in both ``insightface`` and ``yolo+face`` detection
     modes (YOLO body detection runs in both).
+
+    Falls back to ``[]`` when ``ultralytics`` is not installed — the
+    body-only analyzer path (default since migration 0060's
+    ``live_matching_enabled=False``) MUST keep running even on
+    environments that haven't pip-installed the YOLO dep. Without
+    this guard the analyzer thread spams ``ModuleNotFoundError`` at
+    the cycle rate (~6×/sec).
     """
 
-    return _detect_person_boxes_yolo(frame_bgr, config)
+    try:
+        return _detect_person_boxes_yolo(frame_bgr, config)
+    except ModuleNotFoundError as exc:
+        logger.warning(
+            "detect_person_boxes: %s — install ultralytics (`pip install "
+            "ultralytics`) to enable body detection; returning empty bbox list",
+            exc,
+        )
+        return []
+    except Exception as exc:  # noqa: BLE001 — YOLO loader can raise OSError + others
+        logger.warning(
+            "detect_person_boxes: %s: %s — returning empty bbox list",
+            type(exc).__name__, exc,
+        )
+        return []
 
 
 def detect_persons(frame_bgr, config: DetectorConfig) -> int:  # type: ignore[no-untyped-def]
