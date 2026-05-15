@@ -846,3 +846,79 @@ def put_clip_encoding_config(
             after=new_config,
         )
     return ClipEncodingConfigOut.model_validate(new_config)
+
+
+# ---------------------------------------------------------------------------
+# Migration 0059 — Live identification (face-matching) toggle.
+# ---------------------------------------------------------------------------
+
+
+class LiveMatchingConfigOut(BaseModel):
+    """Outbound shape for the live-identification toggle."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    enabled: bool
+
+
+class LiveMatchingConfigIn(BaseModel):
+    """Inbound shape — single boolean."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool
+
+
+def _load_live_matching_row(scope: TenantScope) -> bool:
+    engine = get_engine()
+    with engine.begin() as conn:
+        row = conn.execute(
+            select(tenant_settings.c.live_matching_enabled).where(
+                tenant_settings.c.tenant_id == scope.tenant_id
+            )
+        ).first()
+    if row is None:
+        # Person-only is the lean default. Operators opt in to live
+        # face matching via System Settings → Live identification.
+        return False
+    return bool(row.live_matching_enabled)
+
+
+@router.get("/live-matching", response_model=LiveMatchingConfigOut)
+def get_live_matching_config(
+    user: Annotated[CurrentUser, ADMIN],
+) -> LiveMatchingConfigOut:
+    scope = TenantScope(tenant_id=user.tenant_id)
+    return LiveMatchingConfigOut(enabled=_load_live_matching_row(scope))
+
+
+@router.put("/live-matching", response_model=LiveMatchingConfigOut)
+def put_live_matching_config(
+    payload: dict,
+    user: Annotated[CurrentUser, ADMIN],
+) -> LiveMatchingConfigOut:
+    parsed = _validation_to_400(LiveMatchingConfigIn, payload)
+    scope = TenantScope(tenant_id=user.tenant_id)
+    before = _load_live_matching_row(scope)
+    engine = get_engine()
+    with engine.begin() as conn:
+        _ensure_tenant_settings_row(conn, scope.tenant_id)
+        conn.execute(
+            sql_update(tenant_settings)
+            .where(tenant_settings.c.tenant_id == scope.tenant_id)
+            .values(
+                live_matching_enabled=parsed.enabled,
+                updated_at=datetime.now(tz=timezone.utc),
+            )
+        )
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="system.live_matching.updated",
+            entity_type="tenant_settings",
+            entity_id=str(scope.tenant_id),
+            before={"enabled": before},
+            after={"enabled": parsed.enabled},
+        )
+    return LiveMatchingConfigOut(enabled=parsed.enabled)

@@ -875,6 +875,9 @@ def _to_tenant_settings_response(row) -> TenantSettingsResponse:  # type: ignore
         tenant_id=int(row.tenant_id),
         weekend_days=list(row.weekend_days or []),
         timezone=str(row.timezone),
+        live_matching_enabled=bool(
+            getattr(row, "live_matching_enabled", False)
+        ),
         updated_at=row.updated_at.isoformat(),
     )
 
@@ -893,6 +896,7 @@ def get_tenant_settings(
                 tenant_settings.c.tenant_id,
                 tenant_settings.c.weekend_days,
                 tenant_settings.c.timezone,
+                tenant_settings.c.live_matching_enabled,
                 tenant_settings.c.updated_at,
             ).where(tenant_settings.c.tenant_id == scope.tenant_id)
         ).first()
@@ -906,6 +910,7 @@ def get_tenant_settings(
                     tenant_settings.c.tenant_id,
                     tenant_settings.c.weekend_days,
                     tenant_settings.c.timezone,
+                    tenant_settings.c.live_matching_enabled,
                     tenant_settings.c.updated_at,
                 ).where(tenant_settings.c.tenant_id == scope.tenant_id)
             ).first()
@@ -927,6 +932,7 @@ def patch_tenant_settings(
             select(
                 tenant_settings.c.weekend_days,
                 tenant_settings.c.timezone,
+                tenant_settings.c.live_matching_enabled,
             ).where(tenant_settings.c.tenant_id == scope.tenant_id)
         ).first()
         values: dict[str, Any] = {"updated_at": datetime.now(tz=timezone.utc)}
@@ -934,6 +940,8 @@ def patch_tenant_settings(
             values["weekend_days"] = payload.weekend_days
         if payload.timezone is not None:
             values["timezone"] = payload.timezone
+        if payload.live_matching_enabled is not None:
+            values["live_matching_enabled"] = payload.live_matching_enabled
         if before is None:
             # Create with defaults + payload overrides.
             conn.execute(
@@ -958,6 +966,9 @@ def patch_tenant_settings(
                 {
                     "weekend_days": list(before.weekend_days or []),
                     "timezone": str(before.timezone),
+                    "live_matching_enabled": bool(
+                        getattr(before, "live_matching_enabled", True)
+                    ),
                 }
                 if before is not None
                 else None
@@ -972,6 +983,7 @@ def patch_tenant_settings(
                 tenant_settings.c.tenant_id,
                 tenant_settings.c.weekend_days,
                 tenant_settings.c.timezone,
+                tenant_settings.c.live_matching_enabled,
                 tenant_settings.c.updated_at,
             ).where(tenant_settings.c.tenant_id == scope.tenant_id)
         ).first()

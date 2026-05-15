@@ -60,6 +60,7 @@ from sqlalchemy import (
     create_engine,
     event,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import CITEXT, JSONB
 
@@ -551,6 +552,19 @@ tenant_settings = Table(
             '"resolution_max_height": null, '
             '"keep_chunks_after_merge": false}'
         ),
+    ),
+    # Migration 0059 — Admin toggle that disables every live face-
+    # matching surface (detection_events emission, embedding extraction,
+    # matcher_cache lookup, live attendance recompute trigger). When
+    # FALSE (the default since migration 0060) the analyzer runs YOLO
+    # body detection only — person bboxes drive the preview and clip-
+    # recording trigger; face matching happens later via the manual
+    # UC1/UC2/UC3 reprocessors on saved clips.
+    Column(
+        "live_matching_enabled",
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
     ),
     Column(
         "updated_at",

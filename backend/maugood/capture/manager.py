@@ -250,6 +250,7 @@ class CaptureManager:
         clip_recording_enabled: bool = True,
         clip_detection_source: str = "body",
         clip_encoding_config: Optional[dict[str, Any]] = None,
+        live_matching_enabled: bool = False,
         schema: Optional[str] = None,
     ) -> bool:
         """Start a worker for ``(tenant_id, camera_id)`` with the given
@@ -294,6 +295,7 @@ class CaptureManager:
                 clip_recording_enabled=clip_recording_enabled,
                 clip_detection_source=clip_detection_source,
                 clip_encoding_config=clip_encoding_config,
+                live_matching_enabled=live_matching_enabled,
             )
             worker.start()
         except Exception as exc:  # noqa: BLE001
@@ -572,7 +574,12 @@ class CaptureManager:
         # Reuse the existing tenant_settings detection / tracker
         # / clip-encoding config so a restart doesn't drop the
         # tenant's choices.
-        tracker_cfg, detection_cfg, encoding_cfg = self._read_tenant_configs(
+        (
+            tracker_cfg,
+            detection_cfg,
+            encoding_cfg,
+            live_matching_enabled,
+        ) = self._read_tenant_configs(
             tenant_id=tenant_id, schema=schema
         )
 
@@ -590,6 +597,7 @@ class CaptureManager:
                 getattr(cam_row, "clip_detection_source", "body") or "body"
             ),
             clip_encoding_config=encoding_cfg,
+            live_matching_enabled=live_matching_enabled,
             schema=schema,
         )
 
@@ -689,11 +697,12 @@ class CaptureManager:
 
     def _read_tenant_configs(
         self, *, tenant_id: int, schema: str
-    ) -> tuple[Optional[dict], Optional[dict], Optional[dict]]:
+    ) -> tuple[Optional[dict], Optional[dict], Optional[dict], bool]:
         """Read the tenant's ``tracker_config``, ``detection_config``,
-        and ``clip_encoding_config`` for a fresh worker spawn. Returns
-        ``(None, None, None)`` on failure so the worker uses its
-        built-in defaults."""
+        ``clip_encoding_config``, and ``live_matching_enabled``
+        (migration 0059) for a fresh worker spawn. Returns conservative
+        defaults on failure (``None`` configs + live matching ON) so
+        the worker uses its built-in defaults."""
 
         try:
             from maugood.db import tenant_context  # noqa: PLC0415
@@ -706,10 +715,11 @@ class CaptureManager:
                             ts_table.c.tracker_config,
                             ts_table.c.detection_config,
                             ts_table.c.clip_encoding_config,
+                            ts_table.c.live_matching_enabled,
                         ).where(ts_table.c.tenant_id == tenant_id)
                     ).first()
             if row is None:
-                return None, None, None
+                return None, None, None, False
             return (
                 dict(row.tracker_config) if row.tracker_config else None,
                 dict(row.detection_config) if row.detection_config else None,
@@ -718,9 +728,12 @@ class CaptureManager:
                     if row.clip_encoding_config
                     else None
                 ),
+                bool(
+                    getattr(row, "live_matching_enabled", False)
+                ),
             )
         except Exception:  # noqa: BLE001
-            return None, None, None
+            return None, None, None, False
 
     def get_live_person_counts(
         self, *, tenant_id: int
@@ -921,11 +934,15 @@ class CaptureManager:
 
         # P28.5c: tenant-level detection + tracker settings shared
         # across this tenant's workers. Migration 0052 adds the clip
-        # encoding config to the same loader.
-        detection_config, tracker_config, encoding_config = (
-            self._load_tenant_capture_settings(
-                engine, tenant_id=tenant_id, schema=schema
-            )
+        # encoding config to the same loader; migration 0059 adds the
+        # live-matching toggle.
+        (
+            detection_config,
+            tracker_config,
+            encoding_config,
+            live_matching_enabled,
+        ) = self._load_tenant_capture_settings(
+            engine, tenant_id=tenant_id, schema=schema
         )
 
         spawned = 0
@@ -974,6 +991,7 @@ class CaptureManager:
                     getattr(row, "clip_detection_source", "body") or "body"
                 ),
                 clip_encoding_config=encoding_config,
+                live_matching_enabled=live_matching_enabled,
                 schema=schema,
             )
             plain_url = ""  # noqa: F841
@@ -1230,13 +1248,14 @@ class CaptureManager:
         # desired[(t, c)] = (name, plain_url, capture_config, tracker_config,
         #                    detection_config, detection_enabled,
         #                    clip_recording_enabled, clip_detection_source,
-        #                    clip_encoding_config, schema)
+        #                    clip_encoding_config, live_matching_enabled,
+        #                    schema)
         desired: dict[
             WorkerKey,
             tuple[
                 str, str, dict[str, Any],
                 dict[str, Any], dict[str, Any],
-                bool, bool, str, dict[str, Any], Optional[str],
+                bool, bool, str, dict[str, Any], bool, Optional[str],
             ],
         ] = {}
         for tenant_id, schema in tenants:
@@ -1255,11 +1274,15 @@ class CaptureManager:
                 continue
 
             # P28.5c: tenant-level detection + tracker settings.
-            # Migration 0052 adds the clip encoding config to the load.
-            tenant_detection, tenant_tracker, tenant_encoding = (
-                self._load_tenant_capture_settings(
-                    get_engine(), tenant_id=tenant_id, schema=schema
-                )
+            # Migration 0052 adds the clip encoding config to the load;
+            # migration 0059 adds the live-matching toggle.
+            (
+                tenant_detection,
+                tenant_tracker,
+                tenant_encoding,
+                tenant_live_matching_enabled,
+            ) = self._load_tenant_capture_settings(
+                get_engine(), tenant_id=tenant_id, schema=schema
             )
 
             for row in rows:
@@ -1287,6 +1310,7 @@ class CaptureManager:
                         getattr(row, "clip_detection_source", "body") or "body"
                     ),
                     tenant_encoding,
+                    tenant_live_matching_enabled,
                     schema,
                 )
 
@@ -1321,6 +1345,7 @@ class CaptureManager:
                 desired_clip_recording_enabled,
                 desired_clip_detection_source,
                 desired_clip_encoding,
+                desired_live_matching_enabled,
                 schema,
             ) = desired[key]
             tid, cid = key
@@ -1342,6 +1367,7 @@ class CaptureManager:
                     clip_recording_enabled=desired_clip_recording_enabled,
                     clip_detection_source=desired_clip_detection_source,
                     clip_encoding_config=desired_clip_encoding,
+                    live_matching_enabled=desired_live_matching_enabled,
                     schema=schema,
                 ):
                     report["started"] += 1
@@ -1420,6 +1446,31 @@ class CaptureManager:
                             },
                             "after": {
                                 "detection_enabled": desired_detection_enabled
+                            },
+                        },
+                    )
+
+                # Migration 0059: live_matching_enabled drift. When the
+                # tenant Admin flips the toggle the change takes effect
+                # on the next analyzer cycle — the analyzer thread
+                # branches on this flag every cycle. No worker restart.
+                current_live_matching = existing.is_live_matching_enabled()
+                if current_live_matching != desired_live_matching_enabled:
+                    existing.update_live_matching_enabled(
+                        desired_live_matching_enabled
+                    )
+                    report["config_updated"] += 1
+                    self._audit_worker_event(
+                        tenant_id=tid,
+                        schema=schema,
+                        action="capture.worker.live_matching_enabled_updated",
+                        entity_id=str(cid),
+                        payload={
+                            "before": {
+                                "live_matching_enabled": current_live_matching
+                            },
+                            "after": {
+                                "live_matching_enabled": desired_live_matching_enabled
                             },
                         },
                     )
@@ -1545,14 +1596,15 @@ class CaptureManager:
         *,
         tenant_id: int,
         schema: Optional[str],
-    ) -> tuple[dict, dict, dict]:
-        """Return ``(detection_config, tracker_config, clip_encoding_config)``
-        for one tenant.
+    ) -> tuple[dict, dict, dict, bool]:
+        """Return ``(detection_config, tracker_config,
+        clip_encoding_config, live_matching_enabled)`` for one tenant.
 
-        All three fall back to module-level defaults when the row is
-        missing or a key is absent — defence in depth on top of the
-        migration's server_default. The reconcile tick calls this
-        every pass; cheap raw SELECT, no model state involved.
+        All four fall back to module-level defaults (and ``True`` for
+        the live-matching toggle) when the row is missing or a key is
+        absent — defence in depth on top of the migration's
+        server_default. The reconcile tick calls this every pass;
+        cheap raw SELECT, no model state involved.
         """
 
         from sqlalchemy import select  # noqa: PLC0415
@@ -1563,6 +1615,7 @@ class CaptureManager:
             tenant_settings.c.detection_config,
             tenant_settings.c.tracker_config,
             tenant_settings.c.clip_encoding_config,
+            tenant_settings.c.live_matching_enabled,
         ).where(tenant_settings.c.tenant_id == tenant_id)
 
         try:
@@ -1586,11 +1639,13 @@ class CaptureManager:
                 dict(self._DEFAULT_DETECTION_CONFIG),
                 dict(self._DEFAULT_TRACKER_CONFIG),
                 dict(self._DEFAULT_CLIP_ENCODING_CONFIG),
+                False,
             )
 
         detection = dict(self._DEFAULT_DETECTION_CONFIG)
         tracker = dict(self._DEFAULT_TRACKER_CONFIG)
         encoding = dict(self._DEFAULT_CLIP_ENCODING_CONFIG)
+        live_matching = False
         if row is not None:
             if isinstance(row.detection_config, dict):
                 detection.update(row.detection_config)
@@ -1600,7 +1655,10 @@ class CaptureManager:
                 getattr(row, "clip_encoding_config", None), dict
             ):
                 encoding.update(row.clip_encoding_config)
-        return detection, tracker, encoding
+            live_matching = bool(
+                getattr(row, "live_matching_enabled", False)
+            )
+        return detection, tracker, encoding, live_matching
 
     # ------------------------------------------------------------------
 

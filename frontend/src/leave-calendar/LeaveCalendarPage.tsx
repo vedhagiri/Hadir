@@ -348,6 +348,13 @@ function HolidaysTab() {
 
   const [date, setDate] = useState("");
   const [name, setName] = useState("");
+  // BUG-025 — surface the imported / skipped counts so the operator
+  // sees whether a same-date file actually inserted anything. Must be
+  // declared BEFORE the early-return guards below — otherwise the
+  // hook count differs between first paint (still loading) and the
+  // post-load render, which breaks the Rules of Hooks and blanks the
+  // whole page.
+  const [importSummary, setImportSummary] = useState<string | null>(null);
 
   if (list.isLoading) return <p>Loading holidays…</p>;
   if (list.error)
@@ -368,9 +375,6 @@ function HolidaysTab() {
     }
   };
 
-  // BUG-025 — surface the imported / skipped counts so the operator
-  // sees whether a same-date file actually inserted anything.
-  const [importSummary, setImportSummary] = useState<string | null>(null);
   const onImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     e.target.value = "";

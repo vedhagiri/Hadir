@@ -111,7 +111,7 @@ export function CamerasPage() {
               <th>Worker</th>
               <th>Display</th>
               <th>Detection</th>
-              <th>Recording</th>
+              <th>Clip Saving</th>
               <th style={{ textAlign: "right" }}>Actions</th>
             </tr>
           </thead>
@@ -210,7 +210,7 @@ export function CamerasPage() {
                   <Switch
                     checked={cam.clip_recording_enabled}
                     onChange={() => toggleClipRecordingEnabled(cam)}
-                    title="Click to toggle person-clip recording on/off (detection keeps running)"
+                    title="Click to toggle clip saving on/off (detection keeps running)"
                   />
                 </td>
                 <td style={{ textAlign: "right" }}>

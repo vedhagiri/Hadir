@@ -371,7 +371,7 @@
       "workerEnabled": "Capture worker",
       "displayEnabled": "Live preview",
       "detectionEnabled": "Face detection",
-      "clipRecordingEnabled": "Save person clips",
+      "clipRecordingEnabled": "Clip Saving",
       "clipDetectionSource": "Clip detection source",
       "captureSettings": "Capture settings",
       "maxFacesPerEvent": "Max faces per event",
@@ -433,6 +433,19 @@
     "resetButton": "Reset to defaults",
     "resetConfirm": {
       "title": "Reset to defaults?"
+    },
+    "liveMatching": {
+      "title": "Live identification",
+      "subtitle": "Master switch for real-time face matching from the RTSP stream. When off, the live pipeline runs person detection only — identification happens later via the manual UC1/UC2/UC3 reprocessors on saved clips.",
+      "bullet1": "Live RTSP stream + person bounding boxes remain on.",
+      "bullet2": "No embedding extraction, no matcher cache lookup, no detection_events insert.",
+      "bullet3": "No live attendance updates from the analyzer — only clip reprocess paths.",
+      "bullet4": "Clip recording continues; faces can be identified later on demand.",
+      "toggleLabel": "Live identification",
+      "statusOn": "On",
+      "statusOff": "Off",
+      "toastOn": "Live identification enabled — applying within 2 seconds.",
+      "toastOff": "Live identification disabled — applying within 2 seconds."
     },
     "detection": {
       "title": "Detection",

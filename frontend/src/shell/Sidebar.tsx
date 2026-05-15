@@ -24,6 +24,7 @@ import {
 } from "../sidebar";
 import type { Role } from "../types";
 import { Icon } from "./Icon";
+import { HIDE_PERSON_CLIPS } from "../config";
 import { NAV } from "./nav";
 
 
@@ -54,7 +55,15 @@ interface Props {
 
 export function Sidebar({ role }: Props) {
   const { t } = useTranslation();
-  const items = NAV[role];
+  // Apply env-driven hides before the role's nav reaches the renderer.
+  // ``HIDE_PERSON_CLIPS`` from ``VITE_HIDE_PERSON_CLIPS`` strips the
+  // Person Clips entry without touching the route or the design's NAV
+  // source-of-truth.
+  const items = NAV[role].filter((it) => {
+    if ("section" in it) return true;
+    if (HIDE_PERSON_CLIPS && it.id === "person-clips") return false;
+    return true;
+  });
   const sidebarState = useSidebarState();
   const collapsed = sidebarState === "collapsed";
   // Brand row reads ``tenant_name`` from /api/auth/me — the value the

@@ -2840,77 +2840,117 @@ function StageTrack({
   const reachedIndex = stages.findIndex((s) => s.key === stage);
   const isFailed = stage === "failed";
 
+  const successColor = "var(--success-text)";
+  const accentColor = "var(--accent, #6366f1)";
+  const mutedColor = "var(--text-secondary)";
+  const lineMuted = "var(--border)";
   return (
     <div
       style={{
-        display: "grid",
-        gridTemplateColumns: `repeat(${stages.length}, 1fr)`,
-        gap: 0,
         background: "var(--bg-sunken)",
         border: "1px solid var(--border)",
         borderRadius: 12,
-        overflow: "hidden",
+        padding: "18px 16px 14px",
       }}
     >
-      {stages.map((s, i) => {
-        const active = i === reachedIndex && !isFailed;
-        const past = !isFailed && i < reachedIndex;
-        const fg = active
-          ? "var(--accent, #6366f1)"
-          : past
-            ? "var(--success-text)"
-            : "var(--text-secondary)";
-        return (
-          <div
-            key={s.key}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "10px 12px",
-              borderInlineEnd:
-                i < stages.length - 1 ? "1px solid var(--border)" : "none",
-              background: active ? "rgba(99,102,241,0.08)" : "transparent",
-              position: "relative",
-            }}
-          >
-            <span
-              aria-hidden
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: `repeat(${stages.length}, 1fr)`,
+          gap: 0,
+          position: "relative",
+        }}
+      >
+        {stages.map((s, i) => {
+          const active = i === reachedIndex && !isFailed;
+          const past = !isFailed && i < reachedIndex;
+          const segmentDone = !isFailed && i < reachedIndex; // connector to next
+          const ringColor = past ? successColor : active ? accentColor : lineMuted;
+          const fillColor = past ? successColor : active ? accentColor : "transparent";
+          const iconColor = past || active ? "#fff" : mutedColor;
+          const labelColor = active ? accentColor : past ? successColor : mutedColor;
+          return (
+            <div
+              key={s.key}
               style={{
-                width: 22,
-                height: 22,
-                borderRadius: "50%",
-                border: `2px solid ${fg}`,
-                // Icon inherits ``currentColor``; when active the
-                // circle is solid so flip the foreground to white.
-                color: active ? "#fff" : fg,
-                display: "grid",
-                placeItems: "center",
-                background: active ? fg : "transparent",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 8,
+                position: "relative",
               }}
             >
-              <Icon name={past ? "check" : s.icon} size={11} />
-            </span>
-            <div style={{ display: "flex", flexDirection: "column" }}>
+              {/* Connector line — drawn from this circle's right to the
+                  next circle's left. Green when this stage is completed. */}
+              {i < stages.length - 1 && (
+                <span
+                  aria-hidden
+                  style={{
+                    position: "absolute",
+                    top: 10, // ~ vertical center of 22px circle
+                    left: "calc(50% + 14px)",
+                    right: "calc(-50% + 14px)",
+                    height: 3,
+                    background: segmentDone ? successColor : lineMuted,
+                    zIndex: 0,
+                    transition: "background 200ms ease",
+                  }}
+                />
+              )}
+              {/* Circle: green-filled w/ white tick when past, accent-filled
+                  when active, neutral outline when future. */}
               <span
+                aria-hidden
                 style={{
-                  fontSize: 11.5,
-                  fontWeight: 600,
-                  color: fg,
-                  letterSpacing: "0.02em",
+                  width: 22,
+                  height: 22,
+                  borderRadius: "50%",
+                  border: `2px solid ${ringColor}`,
+                  color: iconColor,
+                  display: "grid",
+                  placeItems: "center",
+                  background: fillColor,
+                  position: "relative",
+                  zIndex: 1,
+                  boxShadow: active
+                    ? `0 0 0 4px rgba(99,102,241,0.15)`
+                    : past
+                      ? `0 0 0 3px rgba(34,197,94,0.12)`
+                      : "none",
+                  transition: "background 200ms ease, border-color 200ms ease",
                 }}
               >
-                {s.label}
+                <Icon name={past ? "check" : s.icon} size={11} />
               </span>
-              {active && stage === "matching" && (
-                <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                  {live.face_matching_progress ?? 0}%
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: 2,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    color: labelColor,
+                    letterSpacing: "0.02em",
+                    textAlign: "center",
+                  }}
+                >
+                  {s.label}
                 </span>
-              )}
+                {active && stage === "matching" && (
+                  <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                    {live.face_matching_progress ?? 0}%
+                  </span>
+                )}
+              </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }

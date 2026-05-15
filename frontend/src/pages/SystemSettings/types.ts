@@ -69,3 +69,14 @@ export const X264_PRESETS: readonly X264Preset[] = [
 export const RESOLUTION_OPTIONS: readonly (number | null)[] = [
   null, 480, 720, 1080,
 ] as const;
+
+// Migration 0059 — live identification toggle. Sent / received on
+// /api/system/live-matching as a single ``{enabled: bool}`` payload.
+// Default is FALSE since migration 0060 — operators explicitly opt in.
+export interface LiveMatchingConfig {
+  enabled: boolean;
+}
+
+export const LIVE_MATCHING_DEFAULT: LiveMatchingConfig = {
+  enabled: false,
+};

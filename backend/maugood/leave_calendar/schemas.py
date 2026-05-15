@@ -119,12 +119,20 @@ class TenantSettingsResponse(BaseModel):
     tenant_id: int
     weekend_days: list[str]
     timezone: str
+    # Migration 0059 — when False the capture analyzer skips face
+    # detection / recognition / matcher_cache / detection_events
+    # emission entirely. Person bounding boxes still drive the live
+    # preview + clip-recording trigger; identification only happens
+    # later via the manual UC1/UC2/UC3 reprocessors. Default is False
+    # since migration 0060 — operators opt in from System Settings.
+    live_matching_enabled: bool = False
     updated_at: str
 
 
 class TenantSettingsPatchRequest(BaseModel):
     weekend_days: Optional[list[str]] = None
     timezone: Optional[str] = Field(default=None, max_length=64)
+    live_matching_enabled: Optional[bool] = None
 
     @model_validator(mode="after")
     def _check(self) -> "TenantSettingsPatchRequest":

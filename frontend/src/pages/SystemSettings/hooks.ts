@@ -7,15 +7,18 @@ import { api } from "../../api/client";
 import {
   CLIP_ENCODING_DEFAULTS,
   DETECTION_DEFAULTS,
+  LIVE_MATCHING_DEFAULT,
   TRACKER_DEFAULTS,
   type ClipEncodingConfig,
   type DetectionConfig,
+  type LiveMatchingConfig,
   type TrackerConfig,
 } from "./types";
 
 const DETECTION_KEY = ["system", "detection-config"] as const;
 const TRACKER_KEY = ["system", "tracker-config"] as const;
 const CLIP_ENCODING_KEY = ["system", "clip-encoding-config"] as const;
+const LIVE_MATCHING_KEY = ["system", "live-matching"] as const;
 
 export function useDetectionConfig() {
   return useQuery<DetectionConfig>({
@@ -83,6 +86,29 @@ export function usePutClipEncodingConfig() {
       }),
     onSuccess: (data) => {
       qc.setQueryData(CLIP_ENCODING_KEY, data);
+    },
+  });
+}
+
+export function useLiveMatchingConfig() {
+  return useQuery<LiveMatchingConfig>({
+    queryKey: LIVE_MATCHING_KEY,
+    queryFn: () => api<LiveMatchingConfig>("/api/system/live-matching"),
+    initialData: LIVE_MATCHING_DEFAULT,
+    staleTime: 5_000,
+  });
+}
+
+export function usePutLiveMatchingConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: LiveMatchingConfig) =>
+      api<LiveMatchingConfig>("/api/system/live-matching", {
+        method: "PUT",
+        body,
+      }),
+    onSuccess: (data) => {
+      qc.setQueryData(LIVE_MATCHING_KEY, data);
     },
   });
 }

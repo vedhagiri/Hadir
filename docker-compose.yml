@@ -98,6 +98,11 @@ services:
     environment:
       # Inside the compose network the backend is reachable by service name.
       VITE_BACKEND_URL: http://backend:8000
+      # Hide the "Person Clips" sidebar entry. Set to 1 (or true/yes/on)
+      # to enable. Interpolation honours an .env at repo root, so
+      # MAUGOOD_HIDE_PERSON_CLIPS=1 there flips it without editing
+      # compose.
+      VITE_HIDE_PERSON_CLIPS: "${MAUGOOD_HIDE_PERSON_CLIPS:-1}"
     volumes:
       - ./frontend:/app
       # Named volume keeps the Linux-built node_modules separate from the

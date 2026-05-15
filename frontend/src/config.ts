@@ -19,3 +19,18 @@ function truncate(v: string): string {
 
 export const APP_VERSION_FULL = RAW;
 export const APP_VERSION_SHORT = truncate(RAW);
+
+// ── Feature flags (env-driven) ──────────────────────────────────────────────
+
+function envFlag(name: string): boolean {
+  const raw = (import.meta.env as Record<string, string | undefined>)[name];
+  if (raw === undefined || raw === null) return false;
+  const v = String(raw).trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
+// Hides the "Person Clips" sidebar nav item across every role when set.
+// Set ``VITE_HIDE_PERSON_CLIPS=1`` in ``frontend/.env`` to enable.
+// The route itself is still served — only the sidebar entry + breadcrumb
+// are suppressed — so a bookmarked URL keeps working.
+export const HIDE_PERSON_CLIPS = envFlag("VITE_HIDE_PERSON_CLIPS");

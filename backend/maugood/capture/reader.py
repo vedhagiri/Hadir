@@ -266,6 +266,7 @@ class CaptureWorker:
         clip_recording_enabled: bool = True,
         clip_detection_source: str = "body",
         clip_encoding_config: Optional[dict] = None,
+        live_matching_enabled: bool = False,
     ) -> None:
         self._engine = engine
         self._scope = scope
@@ -291,6 +292,17 @@ class CaptureWorker:
         # worker.
         self._detection_enabled_lock = threading.Lock()
         self._detection_enabled = bool(detection_enabled)
+
+        # Migration 0059 — tenant-wide live matching toggle. When
+        # False the analyzer runs YOLO body detection only (no face
+        # detection, no recognition, no embeddings, no matcher cache,
+        # no detection_events row). Person bboxes still drive the
+        # preview + clip-recording trigger so the live stream and the
+        # MP4 archive both keep working — identification just happens
+        # later via UC1/UC2/UC3 reprocess. Reconcile loop hot-swaps
+        # via ``update_live_matching_enabled``.
+        self._live_matching_enabled_lock = threading.Lock()
+        self._live_matching_enabled = bool(live_matching_enabled)
 
         # Migration 0049 — per-camera clip-recording gate. When False
         # the reader keeps reading + detection keeps running, but
@@ -802,6 +814,41 @@ class CaptureWorker:
             logger.info(
                 "capture worker detection_enabled updated: tenant=%s "
                 "camera_id=%s old=%s new=%s",
+                self._scope.tenant_id,
+                self.camera_id,
+                old,
+                new,
+            )
+
+    def is_live_matching_enabled(self) -> bool:
+        """Migration 0059 — tenant-wide live-matching toggle.
+
+        Read by the analyzer thread once per cycle. When False the
+        analyzer drops every face-matching surface (face detection,
+        embedding, matcher cache, detection_events insert, live
+        attendance recompute trigger) and runs YOLO body detection
+        only for the preview overlay + clip trigger.
+        """
+
+        with self._live_matching_enabled_lock:
+            return bool(self._live_matching_enabled)
+
+    def update_live_matching_enabled(self, enabled: bool) -> None:
+        """Hot-reload entry point for the live-matching toggle.
+
+        Called by the manager's reconcile tick when an Admin flips
+        the System Settings switch. Takes effect on the next analyzer
+        cycle — no worker restart, no dropped frames.
+        """
+
+        new = bool(enabled)
+        with self._live_matching_enabled_lock:
+            old = self._live_matching_enabled
+            self._live_matching_enabled = new
+        if old != new:
+            logger.info(
+                "capture worker live_matching_enabled updated: "
+                "tenant=%s camera_id=%s old=%s new=%s",
                 self._scope.tenant_id,
                 self.camera_id,
                 old,
@@ -1733,22 +1780,49 @@ class CaptureWorker:
             moved, prev_motion_gray = _check_motion(frame, prev_motion_gray)
             force = (now - last_detect_ts) >= self._config.force_detect_every_s
             detection_enabled = self.is_detection_enabled()
+            # Migration 0059 — when live matching is off, the analyzer
+            # runs YOLO body detection only. We still feed an empty
+            # ``detections`` list through the tracker below so any
+            # leftover face tracks expire on schedule.
+            live_matching_enabled = self.is_live_matching_enabled()
+            # Clip Saving must work independently of the Detection
+            # toggle — when an operator turns Detection off but leaves
+            # Clip Saving on, YOLO body detection still has to run in
+            # the background to drive the clip trigger. The Detection
+            # toggle only gates the *preview overlay* (boxes drawn on
+            # the live stream), not whether detection executes at all.
+            clip_recording_enabled = self.is_clip_recording_enabled()
+            needs_detection = detection_enabled or clip_recording_enabled
 
             detections: list = []
             person_boxes_xyxy: list = []
-            if (moved or force) and detection_enabled:
+            person_count = 0
+            if (moved or force) and needs_detection:
                 try:
-                    # detect_and_count runs YOLO person-body detection
-                    # alongside face detection in a single pass — YOLO
-                    # never runs twice even in yolo+face mode.
-                    # person_count + person_boxes come from YOLO body
-                    # boxes, so a seated employee with their back to the
-                    # camera still produces person_count > 0, keeping
-                    # the clip alive. ``person_boxes_xyxy`` feeds the
-                    # persons-only live overlay (Watch-Live modal).
-                    detections, person_count, person_boxes_xyxy = (
-                        self._analyzer.detect_and_count(frame)
-                    )
+                    if detection_enabled and live_matching_enabled:
+                        # Full pass — face detection + YOLO body
+                        # detection + recognition in a single
+                        # ``detect_and_count`` call. Used when the
+                        # operator has explicitly enabled live face
+                        # matching (rare since migration 0060).
+                        detections, person_count, person_boxes_xyxy = (
+                            self._analyzer.detect_and_count(frame)
+                        )
+                    else:
+                        # Body-only path. Covers three cases:
+                        #   * Detection ON, live matching OFF (default
+                        #     since 0060) → preview overlay + clip
+                        #     trigger.
+                        #   * Detection OFF, Clip Saving ON → background
+                        #     driver for the clip trigger; the preview
+                        #     overlay is suppressed below.
+                        #   * Detection ON, Clip Saving ON, live matching
+                        #     OFF → same as the first case.
+                        person_boxes_xyxy = (
+                            self._analyzer.detect_person_boxes(frame)
+                        )
+                        person_count = len(person_boxes_xyxy)
+                        detections = []
                     last_detect_ts = now
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(
@@ -1797,13 +1871,13 @@ class CaptureWorker:
                     # here as a safety net for the unlikely path
                     # where the body tracker update fails.
                     self._yolo_person_count = int(person_count)
-            elif (moved or force) and not detection_enabled:
-                # Migration 0033: detection_enabled=False short-circuits
-                # the expensive ``detect`` call. Bump ``last_detect_ts``
-                # so the force-detect-every-Ns timer doesn't keep
-                # firing on every cycle while detection is paused —
-                # we'll resume cleanly when re-enabled. The tracker is
-                # still driven below with an empty detections list so
+            elif (moved or force) and not needs_detection:
+                # Both the Detection toggle and Clip Saving are OFF —
+                # short-circuit every expensive call. Bump
+                # ``last_detect_ts`` so the force-detect-every-Ns timer
+                # doesn't keep firing every cycle while detection is
+                # paused; we'll resume cleanly when re-enabled. The
+                # trackers are still driven below with empty inputs so
                 # any leftover tracks idle-expire on schedule.
                 last_detect_ts = now
                 # P37: detection disabled → ramp up consecutive counter
@@ -1906,10 +1980,21 @@ class CaptureWorker:
             # overlay doesn't flicker when YOLO occasionally misses
             # a frame.
             if moved or force:
-                self._publish_cached_boxes(
-                    detections, matches, per_detection_match,
-                    tracked_body_boxes_xyxy,
-                )
+                # The Detection toggle gates the *preview overlay* only.
+                # When Detection is OFF we still ran YOLO (because Clip
+                # Saving is ON), but we suppress the boxes so the live
+                # stream stays clean — clips keep recording in the
+                # background.
+                if detection_enabled:
+                    self._publish_cached_boxes(
+                        detections, matches, per_detection_match,
+                        tracked_body_boxes_xyxy,
+                        person_only=not live_matching_enabled,
+                    )
+                else:
+                    with self._cached_boxes_lock:
+                        self._cached_boxes = []
+                        self._cached_person_boxes = []
 
             # Live workflow no longer emits detection_events rows or
             # writes per-track face crops. Those are deferred to the
@@ -1945,7 +2030,27 @@ class CaptureWorker:
     def _publish_cached_boxes(
         self, detections, matches, per_detection_match,
         person_boxes_xyxy: "list[tuple[int, int, int, int]]" = (),
+        person_only: bool = False,
     ) -> None:
+        # Migration 0059 — when live matching is disabled, mirror the
+        # YOLO person bboxes into the face-preview cache too so any
+        # consumer of ``live.mjpg`` sees person boxes instead of an
+        # un-annotated stream. The persons-only preview slot keeps
+        # the same content as today.
+        if person_only:
+            person_anno: list[AnnotationBox] = []
+            for x1, y1, x2, y2 in person_boxes_xyxy:
+                person_anno.append(
+                    AnnotationBox(
+                        x=int(x1), y=int(y1),
+                        w=int(x2 - x1), h=int(y2 - y1),
+                        label="Person", known=False,
+                    )
+                )
+            with self._cached_boxes_lock:
+                self._cached_boxes = list(person_anno)
+                self._cached_person_boxes = person_anno
+            return
         boxes: list[AnnotationBox] = []
         for det, match, pm in zip(detections, matches, per_detection_match):
             bbox: Bbox = match.bbox

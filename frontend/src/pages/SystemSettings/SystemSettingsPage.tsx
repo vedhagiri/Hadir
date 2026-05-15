@@ -17,8 +17,10 @@ import { Icon } from "../../shell/Icon";
 import {
   useClipEncodingConfig,
   useDetectionConfig,
+  useLiveMatchingConfig,
   usePutClipEncodingConfig,
   usePutDetectionConfig,
+  usePutLiveMatchingConfig,
   useTrackerConfig,
   usePutTrackerConfig,
 } from "./hooks";
@@ -46,12 +48,177 @@ export function SystemSettingsPage() {
         </div>
       </div>
 
+      <LiveMatchingCard />
+      <div style={{ height: 16 }} />
       <DetectionCard />
       <div style={{ height: 16 }} />
       <TrackerCard />
       <div style={{ height: 16 }} />
       <ClipEncodingCard />
     </>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Live identification card (migration 0059)
+//
+// Master switch for the live face-matching pipeline. When OFF, the
+// analyzer thread skips face detection / recognition / embedding /
+// matcher_cache / detection_events emission. Person bounding boxes
+// still drive the live preview overlay and the clip-recording trigger;
+// identification only happens later via the manual UC1/UC2/UC3
+// reprocessors on saved clips.
+
+function LiveMatchingCard() {
+  const { t } = useTranslation();
+  const remote = useLiveMatchingConfig();
+  const put = usePutLiveMatchingConfig();
+  const enabled = remote.data?.enabled ?? true;
+  const [toast, setToast] = useState<string | null>(null);
+
+  const onToggle = async (next: boolean) => {
+    setToast(null);
+    try {
+      await put.mutateAsync({ enabled: next });
+      setToast(
+        next
+          ? (t("systemSettings.liveMatching.toastOn") as string)
+          : (t("systemSettings.liveMatching.toastOff") as string),
+      );
+      setTimeout(() => setToast(null), 4000);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setToast(formatApiError(err, t));
+      } else {
+        setToast(t("common.errorGeneric") as string);
+      }
+    }
+  };
+
+  return (
+    <div className="card">
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          gap: 16,
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h2 className="card-title" style={{ marginBottom: 4 }}>
+            {t("systemSettings.liveMatching.title")}
+          </h2>
+          <p
+            className="card-sub"
+            style={{ margin: 0, color: "var(--text-secondary)" }}
+          >
+            {t("systemSettings.liveMatching.subtitle")}
+          </p>
+          <ul
+            style={{
+              marginTop: 12,
+              marginBottom: 0,
+              paddingInlineStart: 18,
+              color: "var(--text-secondary)",
+              fontSize: 12.5,
+              lineHeight: 1.7,
+            }}
+          >
+            <li>{t("systemSettings.liveMatching.bullet1")}</li>
+            <li>{t("systemSettings.liveMatching.bullet2")}</li>
+            <li>{t("systemSettings.liveMatching.bullet3")}</li>
+            <li>{t("systemSettings.liveMatching.bullet4")}</li>
+          </ul>
+        </div>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-end",
+            gap: 8,
+            minWidth: 200,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 11,
+              letterSpacing: "0.04em",
+              textTransform: "uppercase",
+              color: enabled ? "var(--success-text)" : "var(--warning-text)",
+              fontWeight: 700,
+            }}
+          >
+            {enabled
+              ? t("systemSettings.liveMatching.statusOn")
+              : t("systemSettings.liveMatching.statusOff")}
+          </span>
+          <label
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              cursor: put.isPending ? "wait" : "pointer",
+            }}
+          >
+            <span style={{ fontSize: 13, color: "var(--text)" }}>
+              {t("systemSettings.liveMatching.toggleLabel")}
+            </span>
+            <span
+              aria-hidden
+              style={{
+                position: "relative",
+                width: 42,
+                height: 24,
+                borderRadius: 999,
+                background: enabled
+                  ? "var(--success-text)"
+                  : "var(--border)",
+                transition: "background 160ms ease",
+                opacity: put.isPending ? 0.6 : 1,
+              }}
+            >
+              <span
+                style={{
+                  position: "absolute",
+                  top: 2,
+                  insetInlineStart: enabled ? 20 : 2,
+                  width: 20,
+                  height: 20,
+                  borderRadius: "50%",
+                  background: "#fff",
+                  boxShadow: "0 1px 3px rgba(0,0,0,0.25)",
+                  transition: "inset-inline-start 160ms ease",
+                }}
+              />
+            </span>
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => void onToggle(e.target.checked)}
+              disabled={put.isPending}
+              aria-label={
+                t("systemSettings.liveMatching.toggleLabel") as string
+              }
+              style={{ position: "absolute", opacity: 0, pointerEvents: "none" }}
+            />
+          </label>
+          {toast && (
+            <span
+              style={{
+                fontSize: 12,
+                color: "var(--text-secondary)",
+                textAlign: "end",
+                maxWidth: 220,
+              }}
+            >
+              {toast}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
