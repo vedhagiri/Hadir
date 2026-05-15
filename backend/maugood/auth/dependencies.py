@@ -269,6 +269,10 @@ def current_user(
     # request.state is consistent with how the tenant scope flows.
     request.state.session_expires_at = new_expiry
     request.state.session_idle_minutes = settings.session_idle_minutes
+    # P3+: surface the session's created_at so /me + /refresh can return
+    # it. Lets the frontend show "logged in at HH:MM" alongside the
+    # countdown without an extra query.
+    request.state.session_started_at = session_row.created_at
 
     # Refresh the cookie's Max-Age so the browser keeps the session alive
     # alongside the DB row. Same attributes as on login; Secure still off

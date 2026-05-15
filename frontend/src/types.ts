@@ -45,6 +45,15 @@ export interface MeResponse {
   // reads it to schedule the "about to expire" warning modal.
   session_expires_at?: string | null;
   session_idle_minutes?: number;
+  // Immutable creation time of the session row — surfaced so the UI
+  // can show "Signed in at HH:MM" alongside the countdown.
+  session_started_at?: string | null;
+  // Server's view of "now" at the moment the response was built.
+  // The auth provider computes a clock-skew offset against the local
+  // clock so the SessionCountdown / SessionExpiryWatcher render the
+  // remaining time exactly as the backend sees it (no drift on
+  // throttled/backgrounded tabs).
+  server_time?: string | null;
 }
 
 // Used by the shell to decide which NAV to render when a user holds more

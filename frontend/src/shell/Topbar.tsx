@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate, NavLink } from "react-router-dom";
 
 import { useLogout, useSwitchRole } from "../auth/AuthProvider";
+import { SessionCountdown } from "../auth/SessionCountdown";
 import { NotificationBell } from "../notifications/NotificationBell";
 import type { MeResponse, Role } from "../types";
 import { Icon } from "./Icon";
@@ -75,6 +76,7 @@ export function Topbar({ pageId, role, me }: Props) {
           gap: 10,
         }}
       >
+        <SessionCountdown />
         <NotificationBell />
         <LanguageSwitcher />
         <UserMenu

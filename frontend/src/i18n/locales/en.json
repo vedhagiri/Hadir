@@ -293,6 +293,11 @@
     "Manager": "Manager",
     "Employee": "Employee"
   },
+  "session": {
+    "expiresIn": "Session expires in",
+    "extend": "Extend session",
+    "refreshing": "Refreshing…"
+  },
   "display": {
     "button": "Display settings",
     "pageSub": "Adjust how Maugood looks for you. Changes save automatically and follow your account across browsers.",

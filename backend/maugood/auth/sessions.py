@@ -43,6 +43,7 @@ class SessionRow:
     user_id: int
     expires_at: datetime
     data: dict[str, Any] = field(default_factory=dict)
+    created_at: datetime | None = None
 
 
 def _now() -> datetime:
@@ -96,6 +97,7 @@ def create_session(
         user_id=user_id,
         expires_at=expires,
         data=data,
+        created_at=now,
     )
 
 
@@ -109,6 +111,7 @@ def load_session(conn: Connection, session_id: str) -> Optional[SessionRow]:
             user_sessions.c.user_id,
             user_sessions.c.expires_at,
             user_sessions.c.data,
+            user_sessions.c.created_at,
         ).where(user_sessions.c.id == session_id)
     ).first()
     if row is None:
@@ -119,6 +122,7 @@ def load_session(conn: Connection, session_id: str) -> Optional[SessionRow]:
         user_id=int(row.user_id),
         expires_at=row.expires_at,
         data=dict(row.data or {}),
+        created_at=row.created_at,
     )
 
 

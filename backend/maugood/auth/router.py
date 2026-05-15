@@ -155,6 +155,15 @@ class MeResponse(BaseModel):
     # "Stay signed in" button POSTs ``/api/auth/refresh`` to extend it.
     session_expires_at: datetime | None = None
     session_idle_minutes: int = 0
+    # Session creation time (immutable; not slid). Lets the UI show
+    # "Signed in at HH:MM" alongside the countdown.
+    session_started_at: datetime | None = None
+    # Server's view of "now" at the moment this response was built.
+    # The frontend computes a clock-skew offset (server_time - client_now)
+    # and applies it to the countdown so the displayed remaining time
+    # matches what the backend sees regardless of local clock drift or
+    # tab-throttling.
+    server_time: datetime | None = None
 
 
 class RefreshSessionResponse(BaseModel):
@@ -167,6 +176,8 @@ class RefreshSessionResponse(BaseModel):
 
     session_expires_at: datetime
     session_idle_minutes: int
+    session_started_at: datetime | None = None
+    server_time: datetime
 
 
 class PreferredLanguageRequest(BaseModel):
@@ -549,6 +560,10 @@ def login(
         tenant_name=_resolve_tenant_name(target_tenant_id),
         has_brand_logo=has_logo,
         brand_logo_version=version,
+        session_expires_at=session.expires_at,
+        session_idle_minutes=settings.session_idle_minutes,
+        session_started_at=session.created_at,
+        server_time=datetime.now(tz=timezone.utc),
     )
 
 
@@ -632,6 +647,8 @@ def refresh_session(
     return RefreshSessionResponse(
         session_expires_at=session_exp,
         session_idle_minutes=settings.session_idle_minutes,
+        session_started_at=getattr(request.state, "session_started_at", None),
+        server_time=datetime.now(tz=timezone.utc),
     )
 
 
@@ -696,6 +713,9 @@ def _to_me_response(
     session_exp: datetime | None = (
         getattr(request.state, "session_expires_at", None) if request else None
     )
+    session_start: datetime | None = (
+        getattr(request.state, "session_started_at", None) if request else None
+    )
     return MeResponse(
         id=user.id,
         email=user.email,
@@ -714,6 +734,8 @@ def _to_me_response(
         brand_logo_version=version,
         session_expires_at=session_exp,
         session_idle_minutes=settings.session_idle_minutes,
+        session_started_at=session_start,
+        server_time=datetime.now(tz=timezone.utc),
     )
 
 

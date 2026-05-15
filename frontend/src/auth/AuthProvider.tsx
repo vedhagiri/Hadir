@@ -14,9 +14,33 @@ import type { MeResponse } from "../types";
 
 const ME_KEY = ["auth", "me"] as const;
 
+// Live clock-skew offset (server_time − client_now), in milliseconds.
+// Re-synced on every /me, /login, /refresh response. Adding this to
+// ``Date.now()`` gives the frontend the same view of "now" as the
+// backend has — used by the session countdown so a throttled tab or
+// a skewed local clock can't produce a wrong remaining time.
+let serverTimeOffsetMs = 0;
+
+export function serverNow(): number {
+  return Date.now() + serverTimeOffsetMs;
+}
+
+export function getServerTimeOffsetMs(): number {
+  return serverTimeOffsetMs;
+}
+
+function applyServerTimeSync(serverTimeIso: string | null | undefined): void {
+  if (!serverTimeIso) return;
+  const t = new Date(serverTimeIso).getTime();
+  if (!Number.isFinite(t)) return;
+  serverTimeOffsetMs = t - Date.now();
+}
+
 async function fetchMe(): Promise<MeResponse | null> {
   try {
-    return await api<MeResponse>("/api/auth/me");
+    const me = await api<MeResponse>("/api/auth/me");
+    applyServerTimeSync(me.server_time);
+    return me;
   } catch (err) {
     // Treat 401 as "not logged in" — the caller decides whether to
     // redirect. Anything else is a real error and should bubble.
@@ -71,6 +95,7 @@ export function useLogin() {
     mutationFn: async (input: LoginInput): Promise<MeResponse> =>
       api<MeResponse>("/api/auth/login", { method: "POST", body: input }),
     onSuccess: (me) => {
+      applyServerTimeSync(me.server_time);
       qc.setQueryData(ME_KEY, me);
     },
   });
@@ -97,20 +122,31 @@ export function useRefreshSession() {
     mutationFn: async (): Promise<{
       session_expires_at: string;
       session_idle_minutes: number;
+      session_started_at?: string | null;
+      server_time: string;
     }> =>
       api<{
         session_expires_at: string;
         session_idle_minutes: number;
+        session_started_at?: string | null;
+        server_time: string;
       }>("/api/auth/refresh", { method: "POST" }),
     onSuccess: (res) => {
+      // Re-sync the server-time offset so the countdown stays anchored
+      // to the backend's clock regardless of local drift.
+      applyServerTimeSync(res.server_time);
       // Patch the cached me with the new expiry so the watcher's
       // useEffect reschedules the warning timer.
       const cur = qc.getQueryData<MeResponse | null>(ME_KEY);
       if (cur) {
+        const nextStartedAt =
+          res.session_started_at ?? cur.session_started_at ?? null;
         qc.setQueryData<MeResponse>(ME_KEY, {
           ...cur,
           session_expires_at: res.session_expires_at,
           session_idle_minutes: res.session_idle_minutes,
+          session_started_at: nextStartedAt,
+          server_time: res.server_time,
         });
       }
     },

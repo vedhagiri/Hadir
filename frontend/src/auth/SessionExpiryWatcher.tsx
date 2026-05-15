@@ -9,7 +9,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { useLogout, useMe, useRefreshSession } from "./AuthProvider";
+import { serverNow, useLogout, useMe, useRefreshSession } from "./AuthProvider";
 
 // Show the modal when the session has this many seconds (or fewer)
 // remaining. 120 s gives the operator a comfortable window to click.
@@ -25,7 +25,10 @@ function diffSeconds(targetIso: string | null | undefined): number {
   if (!targetIso) return Number.POSITIVE_INFINITY;
   const t = new Date(targetIso).getTime();
   if (!Number.isFinite(t)) return Number.POSITIVE_INFINITY;
-  return Math.floor((t - Date.now()) / 1000);
+  // Anchor to server time so a backgrounded / throttled tab doesn't
+  // miscompute the remaining seconds. ``serverNow()`` is the local
+  // clock plus the skew offset re-synced on every backend response.
+  return Math.floor((t - serverNow()) / 1000);
 }
 
 function formatCountdown(seconds: number): string {
@@ -207,7 +210,7 @@ export function SessionExpiryWatcher() {
                 {isExpired
                   ? "Sign in again to continue."
                   : isWarning
-                    ? "Stay signed in to keep working without interruption."
+                    ? "Do you want to stay logged in, or log out?"
                     : ""}
               </div>
             </div>
