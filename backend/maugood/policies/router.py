@@ -1,12 +1,13 @@
 """FastAPI router for ``/api/policies`` + ``/api/policy-assignments``.
 
-Admin + HR can manage policies and assignments. Soft-delete by
-setting ``active_until = today - 1`` (preserves history; the
-attendance-records FK on ``shift_policies`` rejects a hard DELETE
-anyway).
+Admin + HR can manage policies and assignments. Delete defaults to
+**soft delete** (``active_until = today - 1`` so history is
+preserved); ``?hard=true`` opts into permanent delete, which
+pre-checks the ``attendance_records`` reference count and returns
+409 when any historical rows still tie back.
 
 Audit:
-* ``shift_policy.{created,updated,soft_deleted}``
+* ``shift_policy.{created,updated,soft_deleted,hard_deleted}``
 * ``policy_assignment.{created,deleted}``
 """
 
@@ -34,6 +35,7 @@ from sqlalchemy import and_, delete, func, insert, select, update
 from maugood.auth.audit import write_audit
 from maugood.auth.dependencies import CurrentUser, require_any_role
 from maugood.db import (
+    attendance_records,
     departments,
     employees,
     get_engine,
@@ -257,15 +259,25 @@ def patch_policy(
 @router.delete(
     "/api/policies/{policy_id}", status_code=status.HTTP_204_NO_CONTENT
 )
-def soft_delete_policy(
+def delete_policy(
     policy_id: int,
     user: Annotated[CurrentUser, ADMIN_OR_HR],
+    hard: bool = False,
 ) -> Response:
-    """Soft-delete: sets ``active_until = today - 1`` so resolution skips it.
+    """Delete a shift policy.
 
-    Hard delete is refused — ``attendance_records.policy_id`` has a
-    RESTRICT FK to ``shift_policies`` so historical rows always tie
-    back to their original policy. Operators rely on that for audits.
+    Default behaviour (``hard=false``) — **soft delete**: sets
+    ``active_until = today - 1`` so the resolver skips the row from
+    now on. Historical ``attendance_records`` keep their original
+    policy reference, audit-friendly.
+
+    Opt-in ``hard=true`` — **permanent delete**: drops the row from
+    the DB outright. ``policy_assignments`` rows cascade-delete via
+    their FK; ``attendance_records.policy_id`` has a RESTRICT FK so
+    we pre-check the reference count and return **409** if any rows
+    still point at this policy. The pre-check protects against the
+    bare DB error and lets the UI explain *why* the delete was
+    refused.
     """
 
     scope = TenantScope(tenant_id=user.tenant_id)
@@ -276,6 +288,7 @@ def soft_delete_policy(
             select(
                 shift_policies.c.active_until,
                 shift_policies.c.name,
+                shift_policies.c.type,
             ).where(
                 shift_policies.c.id == policy_id,
                 shift_policies.c.tenant_id == scope.tenant_id,
@@ -283,6 +296,57 @@ def soft_delete_policy(
         ).first()
         if before is None:
             raise HTTPException(status_code=404, detail="policy not found")
+
+        if hard:
+            ref_count = conn.execute(
+                select(func.count())
+                .select_from(attendance_records)
+                .where(
+                    attendance_records.c.policy_id == policy_id,
+                    attendance_records.c.tenant_id == scope.tenant_id,
+                )
+            ).scalar_one()
+            if ref_count > 0:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "reason": "in_use",
+                        "attendance_records": int(ref_count),
+                        "message": (
+                            f"Cannot permanently delete: {int(ref_count)} attendance "
+                            f"record(s) still reference this policy. Use soft delete "
+                            f"to archive it instead."
+                        ),
+                    },
+                )
+            # ``policy_assignments`` cascade-deletes via its FK; no
+            # explicit cleanup needed.
+            conn.execute(
+                delete(shift_policies).where(
+                    shift_policies.c.id == policy_id,
+                    shift_policies.c.tenant_id == scope.tenant_id,
+                )
+            )
+            write_audit(
+                conn,
+                tenant_id=scope.tenant_id,
+                actor_user_id=user.id,
+                action="shift_policy.hard_deleted",
+                entity_type="shift_policy",
+                entity_id=str(policy_id),
+                before={
+                    "name": str(before.name),
+                    "type": str(before.type),
+                    "active_until": (
+                        before.active_until.isoformat()
+                        if before.active_until is not None
+                        else None
+                    ),
+                },
+                after=None,
+            )
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+
         conn.execute(
             update(shift_policies)
             .where(

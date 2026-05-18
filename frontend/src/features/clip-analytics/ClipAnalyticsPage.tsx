@@ -20,11 +20,13 @@ import {
   useClipProcessingResults,
   useDeletePersonClip,
   useClipPipelineBatch,
+  useClipPipelineStatus,
   useClipPipelineSubmitAll,
   useProcessedClipCounts,
   useReprocessStatus,
   useSingleClipReprocess,
 } from "../person-clips/hooks";
+import type { ClipPipelineBatch } from "../person-clips/hooks";
 import { ClipDetailDrawer } from "../person-clips/PersonClipsPage";
 import type {
   ClipProcessingResult,
@@ -49,12 +51,116 @@ type ProcessedUcFilter = "any" | "uc1" | "uc2" | "uc3" | "not_processed";
 const ALL_USE_CASES = ["uc1", "uc2", "uc3"] as const;
 type UseCaseCode = (typeof ALL_USE_CASES)[number];
 
-function fmtDateTime(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString();
-  } catch {
-    return iso;
+// Two-line "time over date" cell renderer for the Start / End columns.
+// Replaces the dense locale string that mashed date + time together —
+// HH:MM:SS is the scanning anchor (operators reason about clips in
+// "minutes-ago" terms first), with a calendar context line below
+// (``Today`` / ``Yesterday`` / ``Mon, May 15`` / ``May 15, 2025``).
+//
+// Locale-aware via Intl + the tenant's i18n language; the seconds row
+// is monospaced so the column visually aligns down the table even when
+// individual times differ.
+function CellDateTime({
+  iso,
+  emphasize,
+}: {
+  iso: string | null | undefined;
+  // ``emphasize`` lets the End-Time cell dim slightly so the eye
+  // anchors on Start first and reads End as the secondary boundary —
+  // tested as more scannable than two equally-weighted columns.
+  emphasize?: boolean;
+}) {
+  if (!iso) {
+    return <span style={{ color: "var(--text-tertiary)" }}>—</span>;
   }
+  let d: Date;
+  try {
+    d = new Date(iso);
+  } catch {
+    return <span className="mono text-sm">{iso}</span>;
+  }
+  if (!Number.isFinite(d.getTime())) {
+    return <span className="mono text-sm">{iso}</span>;
+  }
+
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const isYesterday =
+    d.getFullYear() === yesterday.getFullYear() &&
+    d.getMonth() === yesterday.getMonth() &&
+    d.getDate() === yesterday.getDate();
+  const withinWeek =
+    Math.abs(now.getTime() - d.getTime()) <= 7 * 24 * 3600 * 1000;
+
+  const timeStr = d.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+
+  let dateStr: string;
+  if (sameDay) {
+    dateStr = "Today";
+  } else if (isYesterday) {
+    dateStr = "Yesterday";
+  } else if (withinWeek) {
+    dateStr = d.toLocaleDateString(undefined, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    });
+  } else if (d.getFullYear() === now.getFullYear()) {
+    dateStr = d.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+    });
+  } else {
+    dateStr = d.toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  }
+
+  return (
+    <div
+      title={d.toLocaleString()}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        lineHeight: 1.25,
+        opacity: emphasize === false ? 0.85 : 1,
+      }}
+    >
+      <span
+        className="mono"
+        style={{
+          fontSize: 13,
+          fontWeight: 600,
+          color: "var(--text)",
+          fontVariantNumeric: "tabular-nums",
+          letterSpacing: "-0.01em",
+        }}
+      >
+        {timeStr}
+      </span>
+      <span
+        style={{
+          fontSize: 11,
+          color: "var(--text-secondary)",
+          fontWeight: sameDay ? 600 : 400,
+        }}
+      >
+        {dateStr}
+      </span>
+    </div>
+  );
 }
 
 function fmtDuration(sec: number): string {
@@ -82,10 +188,17 @@ function fmtBytes(bytes: number): string {
 
 // Processing Status reflects the full per-clip lifecycle:
 //   recording_status='recording'                       → "Recording"
-//   recording_status='finalizing'                      → "Encoding"
+//   recording_status='finalizing'                      → "Finalizing"
 //   recording_status='completed' + processing UC(s)    → "Processing"
 //   recording_status='completed' + no UC + no flight   → "Saved"
 //   recording_status='completed' + ≥1 completed UC     → "Processed"
+//
+// Label is "Finalizing" (not "Encoding") because the clip-saving
+// pipeline runs in ``stream_copy`` mode by default — the worker
+// concat-copies pre-segmented H.264 chunks and Fernet-encrypts the
+// result; no re-encode happens. The state name in the DB stays
+// ``finalizing`` so the backend lifecycle + sweep paths are
+// unchanged; this is a UI-only rename.
 //
 // "Processing" wins over "Processed" when at least one UC is still in
 // flight (e.g. UC1 completed, UC2 still cropping) so the operator sees
@@ -95,7 +208,7 @@ function processingStatusLabel(c: PersonClipOut): string {
     case "recording":
       return "Recording";
     case "finalizing":
-      return "Encoding";
+      return "Finalizing";
     case "failed":
       return "Failed";
     case "abandoned":
@@ -107,10 +220,331 @@ function processingStatusLabel(c: PersonClipOut): string {
   }
 }
 
-function processedUseCasesLabel(c: PersonClipOut): string {
-  if (c.recording_status !== "completed") return "—";
-  if (c.processed_use_cases.length === 0) return "Not Processed";
-  return c.processed_use_cases.map((u) => u.toUpperCase()).join(", ");
+// Per-UC status pill for the Processed UCs column. Each clip carries
+// ``processed_use_cases`` (completed) and ``processing_use_cases``
+// (in-flight) — the cell renders one pill per known UC so an operator
+// can see at a glance which of UC1 / UC2 / UC3 has run, which is still
+// running, and which hasn't started. A summary line under the pills
+// surfaces the count + match outcome (matched vs unmatched) so the
+// column conveys both pipeline progress and search result.
+
+type UcCellState = "processed" | "processing" | "pending";
+
+function ucState(code: string, c: PersonClipOut): UcCellState {
+  if (c.processed_use_cases.includes(code)) return "processed";
+  if ((c.processing_use_cases ?? []).includes(code)) return "processing";
+  return "pending";
+}
+
+function UcPill({ code, state }: { code: string; state: UcCellState }) {
+  const palette: Record<UcCellState, {
+    bg: string;
+    fg: string;
+    border: string;
+    glyph: string;
+    title: string;
+  }> = {
+    processed: {
+      bg: "rgba(16,185,129,0.12)",
+      fg: "#047857",
+      border: "rgba(16,185,129,0.35)",
+      glyph: "✓",
+      title: "Matched / processed",
+    },
+    processing: {
+      bg: "rgba(245,158,11,0.14)",
+      fg: "#b45309",
+      border: "rgba(245,158,11,0.4)",
+      glyph: "⟳",
+      title: "Processing in progress",
+    },
+    pending: {
+      bg: "var(--bg-sunken)",
+      fg: "var(--text-tertiary)",
+      border: "var(--border)",
+      glyph: "—",
+      title: "Not processed yet",
+    },
+  };
+  const p = palette[state];
+  return (
+    <span
+      title={`${code.toUpperCase()} — ${p.title}`}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 3,
+        padding: "1px 6px",
+        borderRadius: 999,
+        background: p.bg,
+        color: p.fg,
+        border: `1px solid ${p.border}`,
+        fontSize: 10.5,
+        fontWeight: 600,
+        lineHeight: 1.4,
+        fontVariantNumeric: "tabular-nums",
+        whiteSpace: "nowrap",
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          display: "inline-block",
+          minWidth: 9,
+          textAlign: "center",
+          fontSize: state === "processing" ? 11 : 9,
+        }}
+      >
+        {p.glyph}
+      </span>
+      {code.toUpperCase()}
+    </span>
+  );
+}
+
+function ProcessedUcCell({ clip }: { clip: PersonClipOut }) {
+  if (clip.recording_status !== "completed") {
+    return (
+      <span style={{ color: "var(--text-tertiary)", fontSize: 12 }}>—</span>
+    );
+  }
+
+  const processedCount = clip.processed_use_cases.length;
+  const total = ALL_USE_CASES.length;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+        minWidth: 0,
+      }}
+    >
+      <div
+        style={{ display: "flex", gap: 4, flexWrap: "wrap" }}
+        aria-label="Use-case processing status"
+      >
+        {ALL_USE_CASES.map((uc) => (
+          <UcPill key={uc} code={uc} state={ucState(uc, clip)} />
+        ))}
+      </div>
+      <div
+        style={{
+          fontSize: 11,
+          color: "var(--text-secondary)",
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        <strong style={{ color: "var(--text)" }}>{processedCount}</strong>
+        {" / "}
+        {total} processed
+      </div>
+    </div>
+  );
+}
+
+// Match Result column — separate from Processed UCs so the operator
+// can read pipeline progress (left) and match outcome (right) without
+// either signal hiding the other.
+//
+// Data shape note: ``matched_employees`` is aggregated across every UC
+// that has run for this clip — the backend doesn't currently expose a
+// per-UC breakdown. So:
+//   * If at least one employee matched → every UC in
+//     ``processed_use_cases`` is rendered as a green "matched" pill.
+//   * If no employee matched → every UC in ``processed_use_cases`` is
+//     rendered as a red "unmatched" pill.
+//   * UCs that haven't run yet show as neutral "pending" pills so the
+//     cell always lists the full UC roster.
+//
+// The summary line under the pills carries the head-count (when
+// matched) or a plain "No matches found" note (when unmatched).
+function MatchResultCell({ clip }: { clip: PersonClipOut }) {
+  if (clip.recording_status !== "completed") {
+    return (
+      <span style={{ color: "var(--text-tertiary)", fontSize: 12 }}>—</span>
+    );
+  }
+  const processed = clip.processed_use_cases;
+  const processing = clip.processing_use_cases ?? [];
+  const matchedCount = clip.matched_employees.length;
+
+  // Nothing has run and nothing is in flight — surface a neutral
+  // "Pending" so the cell stays readable instead of empty.
+  if (processed.length === 0 && processing.length === 0) {
+    return (
+      <span
+        style={{
+          fontSize: 12,
+          color: "var(--text-tertiary)",
+          fontStyle: "italic",
+        }}
+      >
+        Pending — UCs not run yet
+      </span>
+    );
+  }
+
+  // Same overall verdict applies to every UC that has run, given the
+  // aggregated ``matched_employees`` shape.
+  const hasMatch = matchedCount > 0;
+  const matchedUcs = hasMatch ? processed : [];
+  const unmatchedUcs = hasMatch ? [] : processed;
+  const pendingUcs = ALL_USE_CASES.filter(
+    (uc) => !processed.includes(uc) && !processing.includes(uc),
+  );
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        minWidth: 0,
+      }}
+    >
+      {matchedUcs.length > 0 && (
+        <MatchRow
+          label="Matched"
+          ucs={matchedUcs}
+          tone="success"
+          glyph="✓"
+        />
+      )}
+      {unmatchedUcs.length > 0 && (
+        <MatchRow
+          label="Unmatched"
+          ucs={unmatchedUcs}
+          tone="danger"
+          glyph="✗"
+        />
+      )}
+      {processing.length > 0 && (
+        <MatchRow
+          label="Processing"
+          ucs={processing}
+          tone="warning"
+          glyph="⟳"
+        />
+      )}
+      {pendingUcs.length > 0 && (
+        <MatchRow
+          label="Pending"
+          ucs={pendingUcs}
+          tone="neutral"
+          glyph="—"
+        />
+      )}
+      {processed.length > 0 && (
+        <div
+          style={{
+            fontSize: 11,
+            color: hasMatch ? "#047857" : "#b91c1c",
+            fontWeight: 600,
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {hasMatch
+            ? `${matchedCount} employee${matchedCount === 1 ? "" : "s"} matched`
+            : "No employees matched"}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MatchRow({
+  label,
+  ucs,
+  tone,
+  glyph,
+}: {
+  label: string;
+  ucs: readonly string[];
+  tone: "success" | "danger" | "warning" | "neutral";
+  glyph: string;
+}) {
+  const palette: Record<
+    typeof tone,
+    { bg: string; fg: string; border: string }
+  > = {
+    success: {
+      bg: "rgba(16,185,129,0.12)",
+      fg: "#047857",
+      border: "rgba(16,185,129,0.35)",
+    },
+    danger: {
+      bg: "rgba(220,38,38,0.10)",
+      fg: "#b91c1c",
+      border: "rgba(220,38,38,0.35)",
+    },
+    warning: {
+      bg: "rgba(245,158,11,0.14)",
+      fg: "#b45309",
+      border: "rgba(245,158,11,0.4)",
+    },
+    neutral: {
+      bg: "var(--bg-sunken)",
+      fg: "var(--text-tertiary)",
+      border: "var(--border)",
+    },
+  };
+  const p = palette[tone];
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        flexWrap: "wrap",
+      }}
+    >
+      <span
+        style={{
+          fontSize: 10.5,
+          fontWeight: 700,
+          textTransform: "uppercase",
+          letterSpacing: "0.04em",
+          color: p.fg,
+          minWidth: 78,
+        }}
+      >
+        {label}
+      </span>
+      <span style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+        {ucs.map((uc) => (
+          <span
+            key={uc}
+            title={`${uc.toUpperCase()} — ${label}`}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 3,
+              padding: "1px 6px",
+              borderRadius: 999,
+              background: p.bg,
+              color: p.fg,
+              border: `1px solid ${p.border}`,
+              fontSize: 10.5,
+              fontWeight: 600,
+              lineHeight: 1.4,
+              fontVariantNumeric: "tabular-nums",
+              whiteSpace: "nowrap",
+            }}
+          >
+            <span
+              aria-hidden
+              style={{ minWidth: 9, textAlign: "center", fontSize: 9 }}
+            >
+              {glyph}
+            </span>
+            {uc.toUpperCase()}
+          </span>
+        ))}
+      </span>
+    </div>
+  );
 }
 
 export function ClipAnalyticsPage() {
@@ -139,10 +573,81 @@ export function ClipAnalyticsPage() {
   const [detailTarget, setDetailTarget] = useState<PersonClipOut | null>(null);
   const [liveTarget, setLiveTarget] = useState<PersonClipOut | null>(null);
   const [batchOpen, setBatchOpen] = useState(false);
+  // ``Batch Process Status`` modal — surfaces the live progress of
+  // any in-flight ``clip_pipeline`` batches (queue depth, completed
+  // / skipped / failed counters, currently-processing clip/UC).
+  // Distinct from ``batchOpen`` (the submit modal) — operators can
+  // close the submit modal and still inspect progress via this one.
+  const [statusOpen, setStatusOpen] = useState(false);
   const batchStatus = useReprocessStatus();
-  const batchRunning =
+  const legacyBatchRunning =
     batchStatus.data?.status === "running" ||
     batchStatus.data?.status === "starting";
+  // New queue-pipeline status — used both for the page-level "Batch
+  // Process Status" button visibility and to know when to block a
+  // fresh submit from the Identify Event button.
+  const pipelineStatus = useClipPipelineStatus();
+  const activeBatches = useMemo(
+    () =>
+      (pipelineStatus.data?.batches ?? []).filter(
+        (b) => b.completed_at === null,
+      ),
+    [pipelineStatus.data],
+  );
+  const pipelineBatchRunning = activeBatches.length > 0;
+  const batchRunning = legacyBatchRunning || pipelineBatchRunning;
+  // The inline "Identify Event running…" banner under the page header
+  // shows aggregate progress for every active pipeline batch the
+  // operator has *not* dismissed. Dismissed ids live here so the
+  // close button on the banner has somewhere to record its choice.
+  // When no batch is active any more, the set resets so a fresh batch
+  // brings the banner back without manual intervention.
+  const [dismissedBatchIds, setDismissedBatchIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  useEffect(() => {
+    if (activeBatches.length === 0 && dismissedBatchIds.size > 0) {
+      setDismissedBatchIds(new Set());
+    }
+  }, [activeBatches.length, dismissedBatchIds.size]);
+  const visibleActiveBatches = useMemo(
+    () => activeBatches.filter((b) => !dismissedBatchIds.has(b.batch_id)),
+    [activeBatches, dismissedBatchIds],
+  );
+
+  // Match Result column visibility. Hidden by default — operators
+  // toggle it on/off via ``Ctrl + M``. The keystroke is ignored when
+  // the focused element is editable (input / textarea / select /
+  // contenteditable) so filter typing isn't hijacked.
+  const [showMatchResult, setShowMatchResult] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tgt = e.target as HTMLElement | null;
+      if (tgt) {
+        const tag = tgt.tagName;
+        if (
+          tag === "INPUT" ||
+          tag === "TEXTAREA" ||
+          tag === "SELECT" ||
+          tgt.isContentEditable
+        ) {
+          return;
+        }
+      }
+      if (
+        e.ctrlKey &&
+        !e.shiftKey &&
+        !e.altKey &&
+        !e.metaKey &&
+        (e.key === "m" || e.key === "M")
+      ) {
+        e.preventDefault();
+        setShowMatchResult((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // Reset to page 1 whenever any filter changes so the operator
   // doesn't land on an empty page 4.
@@ -294,6 +799,55 @@ export function ClipAnalyticsPage() {
             <Icon name="sparkles" size={12} />
             {batchRunning ? "Identify Event running…" : "Identify Event"}
           </button>
+          {/* Batch Process Status — only renders while a queue
+              pipeline batch is in flight. Clicking opens a modal with
+              the live queue depth, per-batch progress, and the
+              currently-processing clip + use case so operators know
+              the worker isn't stuck. */}
+          {pipelineBatchRunning && (
+            <button
+              className="btn"
+              onClick={() => setStatusOpen(true)}
+              title="View live progress of the running batch"
+              aria-label="Open Batch Process Status modal"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                background: "var(--accent-soft, rgba(99,102,241,0.10))",
+                border: "1px solid rgba(99,102,241,0.35)",
+                color: "var(--accent-text, #4f46e5)",
+              }}
+            >
+              <span
+                aria-hidden
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  background: "var(--accent, #6366f1)",
+                  animation: "pipeline-pulse 1.6s infinite",
+                }}
+              />
+              <Icon name="activity" size={12} />
+              Batch Process Status
+              {activeBatches.length > 1 && (
+                <span
+                  className="mono"
+                  style={{
+                    fontSize: 10.5,
+                    background: "var(--accent, #6366f1)",
+                    color: "white",
+                    borderRadius: 999,
+                    padding: "0 6px",
+                    marginInlineStart: 2,
+                  }}
+                >
+                  {activeBatches.length}
+                </span>
+              )}
+            </button>
+          )}
           {/* Bulk-delete button. Always scoped to the operator's
               ticked rows — never the full filter set. Picking one
               checkbox deletes one clip; picking all visible rows
@@ -301,13 +855,34 @@ export function ClipAnalyticsPage() {
               operator can see exactly how many will be deleted before
               they click. */}
           <button
-            className={selected.size > 0 ? "btn btn-danger" : "btn"}
+            // Always carry ``btn-danger`` so the matching
+            // ``.btn-danger:disabled { opacity: 0.5; cursor:
+            // not-allowed }`` rule in styles-enhancements3.css kicks
+            // in. With just ``btn`` (the previous behaviour when no
+            // rows were ticked) the design CSS has no `:disabled`
+            // styling at all — operators saw a functionally-disabled
+            // button that visually still looked clickable.
+            className="btn btn-danger"
             onClick={() => setBulkDeleteScope("selected")}
             disabled={selected.size === 0 || total === 0}
+            aria-disabled={selected.size === 0 || total === 0}
             title={
               selected.size === 0
                 ? "Tick at least one row to enable delete"
                 : `Delete the ${selected.size} ticked clip${selected.size === 1 ? "" : "s"}`
+            }
+            style={
+              selected.size === 0 || total === 0
+                ? {
+                    // Defence in depth on top of the CSS rule — if a
+                    // future theme override drops the `.btn-danger:disabled`
+                    // styling, these inline values still make the
+                    // disabled state visually obvious.
+                    opacity: 0.5,
+                    cursor: "not-allowed",
+                    pointerEvents: "none",
+                  }
+                : undefined
             }
           >
             <Icon name="trash" size={12} />
@@ -318,12 +893,21 @@ export function ClipAnalyticsPage() {
         </div>
       </div>
 
-      {/* Live batch-progress banner. Only renders while the overall
-          Identify Event worker is in flight; auto-disappears when the
-          status flips back to idle / completed. Polls every 2 s via
-          ``useReprocessStatus``. */}
-      {batchStatus.data && batchRunning && (
-        <BatchProgressBanner status={batchStatus.data} />
+      {/* Live batch-progress banner. Pulls from ``useClipPipelineStatus``
+          so counters tick in real time as the queue drains. Operator
+          can dismiss it via the X — the banner re-shows when a new
+          batch starts. Detailed progress (per-UC, currently-processing
+          clip) lives in the Batch Process Status modal. */}
+      {visibleActiveBatches.length > 0 && (
+        <PipelineBatchBanner
+          batches={visibleActiveBatches}
+          onOpen={() => setStatusOpen(true)}
+          onDismiss={() =>
+            setDismissedBatchIds(
+              new Set(activeBatches.map((b) => b.batch_id)),
+            )
+          }
+        />
       )}
 
       <div className="card">
@@ -378,6 +962,14 @@ export function ClipAnalyticsPage() {
               <th style={{ width: 150, background: "var(--bg)" }}>
                 Processed UCs
               </th>
+              {showMatchResult && (
+                <th
+                  style={{ width: 200, background: "var(--bg)" }}
+                  title="Toggle with Ctrl + M"
+                >
+                  Match Result
+                </th>
+              )}
               <th
                 style={{
                   width: 60,
@@ -452,7 +1044,7 @@ export function ClipAnalyticsPage() {
                 >
                   <option value="all">All</option>
                   <option value="recording">Recording</option>
-                  <option value="encoding">Encoding</option>
+                  <option value="encoding">Finalizing</option>
                   <option value="processing">Processing</option>
                   <option value="saved">Saved</option>
                   <option value="processed">Processed</option>
@@ -474,6 +1066,9 @@ export function ClipAnalyticsPage() {
                   <option value="not_processed">Not Processed</option>
                 </select>
               </th>
+              {showMatchResult && (
+                <th style={{ background: "var(--bg)" }} />
+              )}
               <th style={{ background: "var(--bg)" }} />
             </tr>
           </thead>
@@ -481,7 +1076,7 @@ export function ClipAnalyticsPage() {
             {list.isLoading && (
               <tr>
                 <td
-                  colSpan={11}
+                  colSpan={showMatchResult ? 12 : 11}
                   className="text-sm text-dim"
                   style={{ padding: 16 }}
                 >
@@ -492,7 +1087,7 @@ export function ClipAnalyticsPage() {
             {list.isError && (
               <tr>
                 <td
-                  colSpan={11}
+                  colSpan={showMatchResult ? 12 : 11}
                   className="text-sm"
                   style={{ padding: 16, color: "var(--danger-text)" }}
                 >
@@ -503,7 +1098,7 @@ export function ClipAnalyticsPage() {
             {!list.isLoading && !list.isError && items.length === 0 && (
               <tr>
                 <td
-                  colSpan={11}
+                  colSpan={showMatchResult ? 12 : 11}
                   className="text-sm text-dim"
                   style={{ padding: 16 }}
                 >
@@ -576,8 +1171,12 @@ export function ClipAnalyticsPage() {
                     </div>
                   </td>
                   <td className="mono text-sm">{c.clip_name || "—"}</td>
-                  <td className="text-sm">{fmtDateTime(c.clip_start)}</td>
-                  <td className="text-sm">{fmtDateTime(c.clip_end)}</td>
+                  <td className="text-sm">
+                    <CellDateTime iso={c.clip_start} />
+                  </td>
+                  <td className="text-sm">
+                    <CellDateTime iso={c.clip_end} emphasize={false} />
+                  </td>
                   <td className="mono text-sm">
                     {fmtDuration(c.duration_seconds)}
                   </td>
@@ -590,7 +1189,14 @@ export function ClipAnalyticsPage() {
                       onClick={() => setLiveTarget(c)}
                     />
                   </td>
-                  <td className="text-sm">{processedUseCasesLabel(c)}</td>
+                  <td className="text-sm">
+                    <ProcessedUcCell clip={c} />
+                  </td>
+                  {showMatchResult && (
+                    <td className="text-sm">
+                      <MatchResultCell clip={c} />
+                    </td>
+                  )}
                   <td
                     onClick={(e) => e.stopPropagation()}
                     style={{ textAlign: "end" }}
@@ -688,6 +1294,16 @@ export function ClipAnalyticsPage() {
       )}
       {batchOpen && (
         <BatchIdentifyEventModal onClose={() => setBatchOpen(false)} />
+      )}
+      {statusOpen && (
+        <BatchProcessStatusModal
+          batches={activeBatches.concat(
+            (pipelineStatus.data?.batches ?? []).filter(
+              (b) => b.completed_at !== null,
+            ),
+          )}
+          onClose={() => setStatusOpen(false)}
+        />
       )}
       {liveTarget && (
         <LiveProcessingModal
@@ -1172,6 +1788,19 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
   );
   const [mode, setMode] = useState<BatchMode>("skip_existing");
   const [error, setError] = useState<string | null>(null);
+  // Optional date/time filter — all four fields are independent. The
+  // server applies them to ``person_clips.clip_start`` in the tenant's
+  // local timezone. Empty string = no bound on that side. When
+  // ``filterOpen`` is false the section collapses to a one-line
+  // summary so operators with no filter need don't see the inputs.
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [timeFrom, setTimeFrom] = useState("");
+  const [timeTo, setTimeTo] = useState("");
+  const hasFilter = !!(dateFrom || dateTo || timeFrom || timeTo);
+  const overnight =
+    !!timeFrom && !!timeTo && timeFrom > timeTo;
   // Holds the batch id returned by submit-all. When non-null, the modal
   // switches from the picker to the live-progress panel.
   const [batchId, setBatchId] = useState<string | null>(null);
@@ -1216,10 +1845,18 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
 
   const fireReprocess = async () => {
     setError(null);
+    if (dateFrom && dateTo && dateFrom > dateTo) {
+      setError("Date range is inverted — From must be on or before To.");
+      return;
+    }
     try {
       const res = await submitAll.mutateAsync({
         use_cases: Array.from(selected),
         skip_existing: mode === "skip_existing",
+        date_from: dateFrom || null,
+        date_to: dateTo || null,
+        time_from: timeFrom || null,
+        time_to: timeTo || null,
       });
       // Flip into live-progress mode rather than closing — the
       // operator sees jobs flow queued → cropping → matching →
@@ -1227,6 +1864,7 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
       // pipeline keeps running in the background.
       setBatchId(res.batch_id);
       qc.invalidateQueries({ queryKey: ["clip-analytics", "list"] });
+      qc.invalidateQueries({ queryKey: ["clip-pipeline", "status"] });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not start.");
     }
@@ -1276,6 +1914,16 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
             boxShadow: "0 24px 64px rgba(10,12,20,0.35)",
             width: 720,
             maxWidth: "calc(100vw - 48px)",
+            // Cap to the viewport and lay out as flex column so the
+            // header + footer stay pinned while the middle body
+            // scrolls. Without the maxHeight the modal grew past the
+            // viewport on shorter screens with the date/time filter +
+            // live progress panel both expanded; the title + close
+            // button would fall off the top edge with no way to
+            // reach them.
+            maxHeight: "calc(100vh - 48px)",
+            display: "flex",
+            flexDirection: "column",
             overflow: "hidden",
           }}
         >
@@ -1321,6 +1969,38 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
                   Identify Event — overall process
                 </div>
               </div>
+              {/* Header close button — always enabled. Closing does
+                  NOT cancel a running batch; the pipeline keeps
+                  draining on the backend and the operator can reopen
+                  the progress view from "Batch Process Status". */}
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close"
+                title="Close (processing continues in the background)"
+                style={{
+                  appearance: "none",
+                  width: 32,
+                  height: 32,
+                  borderRadius: 8,
+                  border: "1px solid rgba(255,255,255,0.35)",
+                  background: "rgba(255,255,255,0.15)",
+                  color: "white",
+                  display: "grid",
+                  placeItems: "center",
+                  cursor: "pointer",
+                  flexShrink: 0,
+                  transition: "background 120ms ease-out",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "rgba(255,255,255,0.28)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "rgba(255,255,255,0.15)";
+                }}
+              >
+                <Icon name="x" size={14} />
+              </button>
             </div>
             <div
               style={{
@@ -1330,12 +2010,34 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
                 opacity: 0.92,
               }}
             >
-              Run the chosen use cases across <strong>every saved clip</strong> in
-              this tenant. Pick what to do with clips that have already
-              been processed.
+              {batchId ? (
+                <>
+                  Processing continues in the background after you close.
+                  Reopen progress any time from{" "}
+                  <strong>Batch Process Status</strong> near the page header.
+                </>
+              ) : (
+                <>
+                  Run the chosen use cases across{" "}
+                  <strong>every saved clip</strong> in this tenant. Pick what
+                  to do with clips that have already been processed.
+                </>
+              )}
             </div>
           </div>
 
+          {/* Scrollable body — wraps the UC selection, date/time
+              filter, mode picker, overwrite confirm, and live-progress
+              panel so the header stays pinned at the top and the
+              footer stays pinned at the bottom while the operator
+              scrolls through everything in between. */}
+          <div
+            style={{
+              flex: 1,
+              minHeight: 0,
+              overflowY: "auto",
+            }}
+          >
           {/* UC selection — reuses the per-row tile catalogue. */}
           <div style={{ padding: "18px 22px 6px" }}>
             <div
@@ -1369,6 +2071,137 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
                 />
               ))}
             </div>
+          </div>
+
+          {/* Date / time filter — optional, collapsed by default.
+              Empty fields mean "no bound on that side"; ``time_from
+              > time_to`` is the overnight window the backend handles
+              with an OR clause across midnight. */}
+          <div style={{ padding: "16px 22px 4px" }}>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setFilterOpen((v) => !v)}
+              aria-expanded={filterOpen}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                fontSize: 12,
+                fontWeight: 600,
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                color: "var(--text-secondary)",
+                padding: 0,
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+              }}
+            >
+              <Icon
+                name={filterOpen ? "chevronDown" : "chevronRight"}
+                size={12}
+              />
+              Date / Time filter
+              {hasFilter && (
+                <span
+                  className="mono"
+                  style={{
+                    background: "var(--accent-soft, rgba(99,102,241,0.10))",
+                    color: "var(--accent-text, #4f46e5)",
+                    border: "1px solid rgba(99,102,241,0.35)",
+                    borderRadius: 999,
+                    padding: "1px 8px",
+                    fontSize: 10.5,
+                  }}
+                >
+                  active
+                </span>
+              )}
+            </button>
+            {filterOpen && (
+              <div
+                style={{
+                  marginTop: 10,
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 12,
+                  padding: "10px 12px",
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                  background: "var(--bg-sunken)",
+                }}
+              >
+                <FilterField
+                  label="Date from"
+                  inputType="date"
+                  value={dateFrom}
+                  onChange={setDateFrom}
+                />
+                <FilterField
+                  label="Date to"
+                  inputType="date"
+                  value={dateTo}
+                  onChange={setDateTo}
+                  min={dateFrom || undefined}
+                />
+                <FilterField
+                  label="Time from"
+                  inputType="time"
+                  value={timeFrom}
+                  onChange={setTimeFrom}
+                />
+                <FilterField
+                  label="Time to"
+                  inputType="time"
+                  value={timeTo}
+                  onChange={setTimeTo}
+                />
+                <div
+                  className="text-xs text-dim"
+                  style={{
+                    gridColumn: "1 / -1",
+                    lineHeight: 1.55,
+                    margin: 0,
+                  }}
+                >
+                  Filters apply to each clip's start time in the tenant's
+                  local timezone. Leave any field blank to skip that
+                  bound.
+                  {overnight && (
+                    <>
+                      {" "}
+                      <strong>Overnight window:</strong> Time from {timeFrom}
+                      {" → "}Time to {timeTo} accepts clips that start after{" "}
+                      {timeFrom} <em>or</em> before {timeTo} on each day in
+                      the range.
+                    </>
+                  )}
+                </div>
+                {hasFilter && (
+                  <div
+                    style={{
+                      gridColumn: "1 / -1",
+                      display: "flex",
+                      justifyContent: "flex-end",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      onClick={() => {
+                        setDateFrom("");
+                        setDateTo("");
+                        setTimeFrom("");
+                        setTimeTo("");
+                      }}
+                    >
+                      Clear filter
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Mode picker — the load-bearing piece for "overall process". */}
@@ -1562,6 +2395,7 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
               </div>
             )}
           </div>
+          </div>
 
           <ModalFooter
             leftSlot={
@@ -1570,7 +2404,7 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
                   ? "No use cases selected"
                   : `${selected.size} use case${selected.size === 1 ? "" : "s"} · ${
                       mode === "skip_existing" ? "skip existing" : "overwrite"
-                    }`}
+                    }${hasFilter ? " · filtered" : ""}`}
               </div>
             }
           >
@@ -1973,6 +2807,331 @@ if (typeof document !== "undefined") {
 }
 
 
+// ── FilterField ───────────────────────────────────────────────────────────
+// Labeled <input type="date"|"time"> used in the Date/Time filter
+// section of the batch modal. Kept tiny on purpose — no validation
+// hooks, no toggles. The server validates the strings on submit and
+// returns a 400 with a precise message if anything is malformed.
+
+function FilterField({
+  label,
+  inputType,
+  value,
+  onChange,
+  min,
+}: {
+  label: string;
+  inputType: "date" | "time";
+  value: string;
+  onChange: (next: string) => void;
+  min?: string | undefined;
+}) {
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <span
+        style={{
+          fontSize: 11,
+          textTransform: "uppercase",
+          letterSpacing: "0.04em",
+          color: "var(--text-secondary)",
+        }}
+      >
+        {label}
+      </span>
+      <input
+        type={inputType}
+        value={value}
+        min={min}
+        onChange={(e) => onChange(e.target.value)}
+        style={{
+          padding: "6px 8px",
+          border: "1px solid var(--border)",
+          borderRadius: "var(--radius-sm)",
+          fontSize: 13,
+          background: "var(--bg)",
+          color: "var(--text)",
+          fontFamily: "var(--font-sans)",
+        }}
+      />
+    </label>
+  );
+}
+
+
+// ── BatchProcessStatusModal ───────────────────────────────────────────────
+// Page-level "live progress" surface for the queue pipeline. Renders
+// one BatchLiveProgressPanel per batch, sorted active-first. Listens
+// to ``useClipPipelineStatus`` so counters tick without the operator
+// needing to keep the submit modal open. Closing the modal does NOT
+// cancel anything — the pipeline keeps running in the background.
+
+function BatchProcessStatusModal({
+  batches,
+  onClose,
+}: {
+  batches: ClipPipelineBatch[];
+  onClose: () => void;
+}) {
+  const active = batches.filter((b) => b.completed_at === null);
+  const done = batches.filter((b) => b.completed_at !== null);
+  const totals = batches.reduce(
+    (acc, b) => {
+      acc.total += b.total_jobs;
+      acc.completed += b.completed_jobs;
+      acc.skipped += b.skipped_jobs;
+      acc.failed += b.failed_jobs;
+      acc.remaining += b.remaining_jobs;
+      acc.cropping_now += b.cropping_now;
+      acc.matching_now += b.matching_now;
+      return acc;
+    },
+    {
+      total: 0,
+      completed: 0,
+      skipped: 0,
+      failed: 0,
+      remaining: 0,
+      cropping_now: 0,
+      matching_now: 0,
+    },
+  );
+
+  return (
+    <ModalShell onClose={onClose}>
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 60,
+          background:
+            "linear-gradient(180deg, rgba(10,12,20,0.55), rgba(10,12,20,0.72))",
+          backdropFilter: "blur(2px)",
+          display: "grid",
+          placeItems: "center",
+          padding: 24,
+        }}
+      >
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Batch Process Status"
+          style={{
+            background: "var(--bg-elev)",
+            border: "1px solid var(--border)",
+            borderRadius: 16,
+            boxShadow: "0 24px 64px rgba(10,12,20,0.35)",
+            width: 760,
+            maxWidth: "calc(100vw - 48px)",
+            maxHeight: "calc(100vh - 48px)",
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              padding: "18px 22px",
+              borderBottom: "1px solid var(--border)",
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+            }}
+          >
+            <div
+              aria-hidden
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: 10,
+                background: "var(--accent-soft, rgba(99,102,241,0.10))",
+                color: "var(--accent-text, #4f46e5)",
+                display: "grid",
+                placeItems: "center",
+              }}
+            >
+              <Icon name="activity" size={18} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                  color: "var(--text-secondary)",
+                }}
+              >
+                Clip Analytics · Pipeline
+              </div>
+              <div style={{ fontSize: 17, fontWeight: 700, marginTop: 2 }}>
+                Batch Process Status
+              </div>
+            </div>
+            <button
+              type="button"
+              className="btn"
+              onClick={onClose}
+              aria-label="Close"
+            >
+              <Icon name="x" size={12} />
+            </button>
+          </div>
+
+          <div
+            style={{
+              padding: "14px 22px",
+              borderBottom: "1px solid var(--border)",
+              display: "grid",
+              gridTemplateColumns: "repeat(5, 1fr)",
+              gap: 8,
+            }}
+          >
+            <BatchStat label="Selected" value={totals.total} />
+            <BatchStat
+              label="Completed"
+              value={totals.completed}
+              color="var(--success-text)"
+            />
+            <BatchStat
+              label="Skipped"
+              value={totals.skipped}
+              color="var(--text-secondary)"
+            />
+            <BatchStat
+              label="Failed"
+              value={totals.failed}
+              color={
+                totals.failed > 0 ? "var(--danger-text)" : undefined
+              }
+            />
+            <BatchStat
+              label="Remaining"
+              value={totals.remaining}
+              color="var(--accent, #6366f1)"
+            />
+          </div>
+
+          {active.length > 0 && (
+            <div
+              style={{
+                padding: "8px 22px",
+                fontSize: 12,
+                color: "var(--text-secondary)",
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 14,
+                background: "var(--bg-sunken)",
+              }}
+            >
+              <span>
+                <strong style={{ color: "var(--text)" }}>
+                  {active.length}
+                </strong>{" "}
+                active batch{active.length === 1 ? "" : "es"}
+              </span>
+              <span>·</span>
+              <span>
+                <strong style={{ color: "var(--text)" }}>
+                  {totals.cropping_now}
+                </strong>{" "}
+                cropping now
+              </span>
+              <span>·</span>
+              <span>
+                <strong style={{ color: "var(--text)" }}>
+                  {totals.matching_now}
+                </strong>{" "}
+                matching now
+              </span>
+            </div>
+          )}
+
+          <div
+            style={{
+              padding: 22,
+              overflow: "auto",
+              display: "flex",
+              flexDirection: "column",
+              gap: 16,
+            }}
+          >
+            {batches.length === 0 ? (
+              <div
+                className="text-sm text-dim"
+                style={{ textAlign: "center", padding: 24 }}
+              >
+                No batches in flight.
+              </div>
+            ) : (
+              <>
+                {active.map((b) => (
+                  <div key={b.batch_id}>
+                    <BatchHeading batch={b} />
+                    <BatchLiveProgressPanel batch={b} />
+                  </div>
+                ))}
+                {done.length > 0 && (
+                  <div
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      letterSpacing: "0.06em",
+                      textTransform: "uppercase",
+                      color: "var(--text-secondary)",
+                      marginTop: active.length > 0 ? 6 : 0,
+                    }}
+                  >
+                    Recently completed
+                  </div>
+                )}
+                {done.map((b) => (
+                  <div key={b.batch_id}>
+                    <BatchHeading batch={b} />
+                    <BatchLiveProgressPanel batch={b} />
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </ModalShell>
+  );
+}
+
+
+function BatchHeading({ batch }: { batch: ClipPipelineBatch }) {
+  const submittedAt = new Date(batch.submitted_at);
+  const submittedLabel = isNaN(submittedAt.getTime())
+    ? batch.submitted_at
+    : submittedAt.toLocaleString();
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "baseline",
+        gap: 10,
+        flexWrap: "wrap",
+        marginBottom: 6,
+      }}
+    >
+      <strong style={{ fontSize: 13 }}>Batch #{batch.batch_id}</strong>
+      <span
+        className="text-xs text-dim"
+        style={{ fontFamily: "var(--font-mono)" }}
+      >
+        {submittedLabel}
+      </span>
+      <span className="text-xs text-dim">
+        {batch.use_cases.map((u) => u.toUpperCase()).join(" · ")}
+        {" · "}
+        {batch.skip_existing ? "skip existing" : "overwrite"}
+      </span>
+    </div>
+  );
+}
+
+
 function ModeRow({
   value,
   active,
@@ -2056,26 +3215,60 @@ function ModeRow({
   );
 }
 
-// Live progress banner — only shown while the batch worker is in
-// flight. Auto-disappears when status flips back to idle.
-function BatchProgressBanner({
-  status,
+// ── PipelineBatchBanner ───────────────────────────────────────────────────
+// Inline page-header banner that mirrors the live queue state of every
+// active ``clip_pipeline`` batch. Replaces the legacy
+// ``BatchProgressBanner`` (which read from ``useReprocessStatus`` — a
+// dead code path now that submissions go through clip_pipeline).
+//
+// Counters come from ``useClipPipelineStatus``; this component just
+// renders the aggregate. The X dismisses for the *current* set of
+// batches; a freshly-submitted batch unhides automatically (see the
+// dismiss bookkeeping in ``ClipAnalyticsPage``).
+
+function PipelineBatchBanner({
+  batches,
+  onOpen,
+  onDismiss,
 }: {
-  status: {
-    status: string;
-    mode: string;
-    use_cases: string[];
-    total_clips: number;
-    processed_clips: number;
-    matched_total: number;
-    failed_count: number;
-  };
+  batches: ClipPipelineBatch[];
+  onOpen: () => void;
+  onDismiss: () => void;
 }) {
+  // Aggregate counters across every visible active batch.
+  const agg = batches.reduce(
+    (acc, b) => {
+      acc.total += b.total_jobs;
+      acc.completed += b.completed_jobs;
+      acc.skipped += b.skipped_jobs;
+      acc.failed += b.failed_jobs;
+      acc.cropping += b.cropping_now;
+      acc.matching += b.matching_now;
+      return acc;
+    },
+    {
+      total: 0,
+      completed: 0,
+      skipped: 0,
+      failed: 0,
+      cropping: 0,
+      matching: 0,
+    },
+  );
+  const finished = agg.completed + agg.skipped + agg.failed;
   const pct =
-    status.total_clips > 0
-      ? Math.min(100, (status.processed_clips / status.total_clips) * 100)
-      : 0;
-  const ucs = status.use_cases.map((u) => u.toUpperCase()).join(" · ");
+    agg.total > 0 ? Math.min(100, (finished / agg.total) * 100) : 0;
+
+  // Union of every visible batch's UC + mode summary. With one batch
+  // (the common case) this matches the modal exactly; with multiple
+  // we collapse to "N batches".
+  const headline =
+    batches.length === 1 && batches[0]
+      ? `${batches[0].use_cases.map((u) => u.toUpperCase()).join(" · ")} · ${
+          batches[0].skip_existing ? "skip existing" : "overwrite"
+        }`
+      : `${batches.length} active batches`;
+
   return (
     <div
       role="status"
@@ -2106,12 +3299,45 @@ function BatchProgressBanner({
           className="mono"
           style={{ color: "var(--text-secondary)", fontSize: 12 }}
         >
-          {status.processed_clips} / {status.total_clips} clips
+          {finished} / {agg.total} jobs
         </span>
         <span style={{ flex: 1 }} />
-        <span className="text-xs text-dim">
-          {ucs} · {status.mode === "skip_existing" ? "skip existing" : "overwrite"}
-        </span>
+        <span className="text-xs text-dim">{headline}</span>
+        <button
+          type="button"
+          className="btn btn-sm"
+          onClick={onOpen}
+          title="Open Batch Process Status for full per-UC progress"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
+          }}
+        >
+          <Icon name="activity" size={11} />
+          Details
+        </button>
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label="Dismiss progress banner"
+          title="Dismiss — processing continues in the background"
+          style={{
+            appearance: "none",
+            width: 26,
+            height: 26,
+            borderRadius: 6,
+            border: "1px solid var(--border)",
+            background: "transparent",
+            color: "var(--text-secondary)",
+            display: "grid",
+            placeItems: "center",
+            cursor: "pointer",
+            marginInlineStart: 2,
+          }}
+        >
+          <Icon name="x" size={12} />
+        </button>
       </div>
       <div
         style={{
@@ -2133,17 +3359,31 @@ function BatchProgressBanner({
       </div>
       <div className="text-xs text-dim" style={{ display: "flex", gap: 12 }}>
         <span>
-          Matched so far: <strong>{status.matched_total}</strong>
+          Completed: <strong>{agg.completed}</strong>
         </span>
-        {status.failed_count > 0 && (
-          <span style={{ color: "var(--danger-text)" }}>
-            Failed: {status.failed_count}
-          </span>
+        <span>·</span>
+        <span>
+          Skipped: <strong>{agg.skipped}</strong>
+        </span>
+        {agg.failed > 0 && (
+          <>
+            <span>·</span>
+            <span style={{ color: "var(--danger-text)" }}>
+              Failed: <strong>{agg.failed}</strong>
+            </span>
+          </>
         )}
+        <span>·</span>
+        <span>
+          <strong>{agg.cropping}</strong> cropping ·{" "}
+          <strong>{agg.matching}</strong> matching
+        </span>
       </div>
     </div>
   );
 }
+
+
 
 function IdentifyEventModal({
   clip,
@@ -2915,8 +4155,8 @@ function DeleteClipModal({
                 marginTop: 10,
               }}
             >
-              The clip is still {clip.recording_status}. Wait for encoding to
-              finish before deleting.
+              The clip is still {clip.recording_status}. Wait for finalizing
+              to finish before deleting.
             </div>
           )}
           {error && (
@@ -3024,7 +4264,7 @@ function LiveProcessingModal({
     return () => document.removeEventListener("keydown", onEsc);
   }, [onClose]);
 
-  // Compute the current overall stage. Order: Recording → Encoding →
+  // Compute the current overall stage. Order: Recording → Finalizing →
   // Face Extraction → Face Matching → Completed. Failed wins over all.
   const overallStage = computeOverallStage(live, ucResults);
   const totalElapsed = computeTotalElapsedMs(live, ucResults);
@@ -3283,7 +4523,10 @@ function computeOverallStage(
     return { state: "recording", label: "Recording from camera" };
   }
   if (clip.recording_status === "finalizing") {
-    return { state: "encoding", label: "Encoding MP4 — finalizing chunks" };
+    return {
+      state: "encoding",
+      label: "Finalizing MP4 — concat-copying segments",
+    };
   }
   // Recording is completed. Inspect the UC pipeline.
   const anyProcessing = ucs.some((r) => r.status === "processing");
@@ -3318,7 +4561,7 @@ function computeTotalElapsedMs(
     const ts = Date.parse(clip.clip_start);
     return Number.isFinite(ts) ? Math.max(0, Date.now() - ts) : null;
   }
-  // While encoding: elapsed = now - encoding_start_at (fall back to clip_end).
+  // While finalizing: elapsed = now - encoding_start_at (fall back to clip_end).
   if (clip.recording_status === "finalizing") {
     const anchor = clip.encoding_start_at ?? clip.clip_end;
     const ts = Date.parse(anchor);
@@ -3395,7 +4638,7 @@ function StageTrack({
   // after recording is complete.
   const stages: { key: OverallStageState; label: string; icon: IconName }[] = [
     { key: "recording", label: "Recording", icon: "videocam" },
-    { key: "encoding", label: "Encoding", icon: "activity" },
+    { key: "encoding", label: "Finalizing", icon: "activity" },
     { key: "extracting", label: "Face extraction", icon: "user" },
     { key: "matching", label: "Face matching", icon: "shield" },
     { key: "completed", label: "Completed", icon: "check" },
@@ -3937,7 +5180,7 @@ function StatusPill({
         return { bg: "var(--success-soft)", fg: "var(--success-text)" };
       case "Recording":
         return { bg: "var(--danger-soft)", fg: "var(--danger-text)" };
-      case "Encoding":
+      case "Finalizing":
         return { bg: "var(--warning-soft)", fg: "var(--warning-text)" };
       case "Failed":
       case "Abandoned":

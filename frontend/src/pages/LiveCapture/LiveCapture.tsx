@@ -407,33 +407,43 @@ export function LiveCapturePage() {
                   : t("liveCapture.statusOffline")}
               </span>
             </div>
+            {/* Live person count — replaces the "Last 10m · Known ·
+                Unknown" rollup. Sourced from the worker's most recent
+                analyzer cycle (``max(face_count, yolo_person_count,
+                active_tracks)``), so it reflects what's in frame
+                right now, not aggregated history. */}
             <div className="flex items-center gap-2">
+              <span
+                aria-hidden
+                style={{
+                  display: "inline-block",
+                  width: 8,
+                  height: 8,
+                  borderRadius: 999,
+                  background:
+                    (stats.data?.live_person_count ?? 0) > 0
+                      ? "var(--success, #10b981)"
+                      : "var(--text-tertiary)",
+                  boxShadow:
+                    (stats.data?.live_person_count ?? 0) > 0
+                      ? "0 0 0 3px rgba(16,185,129,0.18)"
+                      : "none",
+                }}
+              />
               <span className="text-xs text-dim">
-                {t("liveCapture.detectionsLast10m")}
+                {t("liveCapture.livePersons", {
+                  defaultValue: "Live persons",
+                })}
                 {": "}
                 <span
                   className="mono"
-                  style={{ color: "var(--text)" }}
+                  style={{
+                    color: "var(--text)",
+                    fontWeight: 600,
+                    fontVariantNumeric: "tabular-nums",
+                  }}
                 >
-                  <RollingNumber value={stats.data?.detections_last_10m ?? 0} />
-                </span>
-              </span>
-              <span className="text-xs text-dim">
-                {" · "}
-                {t("liveCapture.known")}{" "}
-                <span
-                  className="mono"
-                  style={{ color: "var(--success-text)" }}
-                >
-                  <RollingNumber value={stats.data?.known_count ?? 0} />
-                </span>
-                {" · "}
-                {t("liveCapture.unknown")}{" "}
-                <span
-                  className="mono"
-                  style={{ color: "var(--warning-text)" }}
-                >
-                  <RollingNumber value={stats.data?.unknown_count ?? 0} />
+                  <RollingNumber value={stats.data?.live_person_count ?? 0} />
                 </span>
               </span>
             </div>

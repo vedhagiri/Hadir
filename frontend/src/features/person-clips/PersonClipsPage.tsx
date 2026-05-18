@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "../../api/client";
 import { DrawerShell, ModalShell } from "../../components/DrawerShell";
@@ -6982,6 +6982,7 @@ export function ClipDetailDrawer({
   const [selectedUcs, setSelectedUcs] = useState<Set<string>>(new Set());
   const [thumbError, setThumbError] = useState(false);
 
+  const qc = useQueryClient();
   const processingResults = useClipProcessingResults(clip.id, true);
   const results = processingResults.data?.results ?? [];
 
@@ -7003,9 +7004,68 @@ export function ClipDetailDrawer({
     setShowReprocessForm(true);
   };
 
-  const uc1Crops = useClipFaceCrops(uc1Result ? clip.id : null, "uc1");
-  const uc2Crops = useClipFaceCrops(uc2Result ? clip.id : null, "uc2");
-  const uc3Crops = useClipFaceCrops(uc3Result ? clip.id : null, "uc3");
+  // Per-UC pending flag. While a UC is pending/processing the
+  // corresponding ``useClipFaceCrops`` hook polls every 2 s so newly
+  // written crops surface as soon as the pipeline emits them. Once the
+  // UC settles to completed/failed the polling stops.
+  const uc1Pending =
+    uc1Result?.status === "processing" || uc1Result?.status === "pending";
+  const uc2Pending =
+    uc2Result?.status === "processing" || uc2Result?.status === "pending";
+  const uc3Pending =
+    uc3Result?.status === "processing" || uc3Result?.status === "pending";
+
+  const uc1Crops = useClipFaceCrops(
+    uc1Result ? clip.id : null,
+    "uc1",
+    uc1Pending,
+  );
+  const uc2Crops = useClipFaceCrops(
+    uc2Result ? clip.id : null,
+    "uc2",
+    uc2Pending,
+  );
+  const uc3Crops = useClipFaceCrops(
+    uc3Result ? clip.id : null,
+    "uc3",
+    uc3Pending,
+  );
+
+  // Transition watcher — defence in depth on top of the polling above.
+  // When a UC's status flips from a non-completed value to
+  // ``completed`` we explicitly invalidate that UC's face-crops query
+  // so the cached pre-completion empty list is dropped immediately.
+  // Covers the race where ``useClipProcessingResults`` learns about
+  // completion in the same tick that ``useClipFaceCrops``'s
+  // ``pollWhilePending`` flips false — without this, the empty list
+  // would stay cached for the full ``staleTime``.
+  const lastUcStatusRef = useRef<Record<string, string | null>>({
+    uc1: null,
+    uc2: null,
+    uc3: null,
+  });
+  useEffect(() => {
+    const cur: Record<string, string | null> = {
+      uc1: uc1Result?.status ?? null,
+      uc2: uc2Result?.status ?? null,
+      uc3: uc3Result?.status ?? null,
+    };
+    for (const uc of ["uc1", "uc2", "uc3"] as const) {
+      const prev = lastUcStatusRef.current[uc];
+      if (prev !== "completed" && cur[uc] === "completed") {
+        qc.invalidateQueries({
+          queryKey: ["person-clips", "face-crops", clip.id, uc],
+        });
+      }
+    }
+    lastUcStatusRef.current = cur;
+  }, [
+    qc,
+    clip.id,
+    uc1Result?.status,
+    uc2Result?.status,
+    uc3Result?.status,
+  ]);
 
   const reprocess = useSingleClipReprocess(clip.id);
 

@@ -55,6 +55,9 @@ export function PoliciesPage() {
   // Edit drawer — opens with a specific policy preloaded into the form.
   // ``null`` keeps it closed; ``PolicyResponse`` opens it pre-filled.
   const [editing, setEditing] = useState<PolicyResponse | null>(null);
+  // Delete-confirmation modal. ``null`` keeps it closed; setting it
+  // to a policy opens the modal with Soft / Permanent options.
+  const [deleting, setDeleting] = useState<PolicyResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const policyList = policies.data ?? [];
@@ -119,22 +122,45 @@ export function PoliciesPage() {
     }
   };
 
-  const onDelete = async (p: PolicyResponse) => {
-    if (
-      !confirm(
-        `Soft-delete "${p.name}"? Existing attendance rows keep their original policy reference; resolution will skip this row from now on.`,
-      )
-    )
-      return;
+  // Soft delete: flips ``active_until`` to yesterday on the server.
+  // History is preserved; the resolver skips the row going forward.
+  // Hard delete: drops the row outright. Server pre-checks for
+  // attendance_records references and 409s with a count if any
+  // remain — we surface that count to the operator.
+  const onDelete = async (
+    p: PolicyResponse,
+    hard: boolean,
+  ): Promise<{ ok: true } | { ok: false; reason: string }> => {
     try {
-      await del.mutateAsync(p.id);
-      toast.success(`"${p.name}" deleted.`);
+      await del.mutateAsync({ policyId: p.id, hard });
+      toast.success(
+        hard
+          ? `"${p.name}" permanently deleted.`
+          : `"${p.name}" archived.`,
+      );
+      setDeleting(null);
+      return { ok: true };
     } catch (err) {
       if (err instanceof ApiError) {
-        toast.error(`Delete failed (${err.status}).`);
-      } else {
-        toast.error("Delete failed.");
+        const body = err.body as { detail?: unknown } | null;
+        let reason = `Delete failed (${err.status}).`;
+        if (err.status === 409 && body?.detail && typeof body.detail === "object") {
+          const detail = body.detail as {
+            message?: string;
+            attendance_records?: number;
+          };
+          if (typeof detail.message === "string") {
+            reason = detail.message;
+          }
+        } else if (typeof body?.detail === "string") {
+          reason = body.detail;
+        }
+        toast.error(reason);
+        return { ok: false, reason };
       }
+      const fallback = "Delete failed.";
+      toast.error(fallback);
+      return { ok: false, reason: fallback };
     }
   };
 
@@ -294,7 +320,7 @@ export function PoliciesPage() {
               <PolicyDetail
                 policy={selected}
                 assignments={assignmentsByPolicy[selected.id] ?? []}
-                onDelete={() => onDelete(selected)}
+                onDelete={() => setDeleting(selected)}
                 onEdit={() => setEditing(selected)}
               />
             )}
@@ -374,7 +400,195 @@ export function PoliciesPage() {
       {importOpen && (
         <PolicyImportModal onClose={() => setImportOpen(false)} />
       )}
+      {deleting && (
+        <DeletePolicyModal
+          policy={deleting}
+          busy={del.isPending}
+          onClose={() => setDeleting(null)}
+          onConfirm={(hard) => onDelete(deleting, hard)}
+        />
+      )}
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DeletePolicyModal — two-option confirm. Soft delete is the default
+// and presented as the safe choice; permanent delete is the danger
+// path with the server's reference-count error surfaced inline when
+// the request comes back 409.
+// ---------------------------------------------------------------------------
+
+function DeletePolicyModal({
+  policy,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  policy: PolicyResponse;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: (
+    hard: boolean,
+  ) => Promise<{ ok: true } | { ok: false; reason: string }>;
+}) {
+  const [hardError, setHardError] = useState<string | null>(null);
+  const [pending, setPending] = useState<"soft" | "hard" | null>(null);
+
+  const run = async (hard: boolean) => {
+    setHardError(null);
+    setPending(hard ? "hard" : "soft");
+    const result = await onConfirm(hard);
+    setPending(null);
+    if (!result.ok && hard) {
+      setHardError(result.reason);
+    }
+  };
+
+  return (
+    <ModalShell onClose={busy ? () => {} : onClose}>
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 60,
+          display: "grid",
+          placeItems: "center",
+          padding: 16,
+        }}
+      >
+        <div
+          className="card"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Delete shift policy ${policy.name}`}
+          style={{
+            width: "min(540px, 96vw)",
+            maxHeight: "86vh",
+            overflow: "auto",
+          }}
+        >
+          <div className="card-head">
+            <div>
+              <div className="mono text-xs text-dim">Shift policy</div>
+              <h3 className="card-title" style={{ marginTop: 2 }}>
+                Delete · {policy.name}
+              </h3>
+            </div>
+            <button
+              className="icon-btn"
+              onClick={onClose}
+              aria-label="Close"
+              title="Close"
+              disabled={busy}
+            >
+              <Icon name="x" size={14} />
+            </button>
+          </div>
+          <div className="card-body" style={{ display: "grid", gap: 12 }}>
+            <p
+              className="text-sm text-dim"
+              style={{ margin: 0, lineHeight: 1.5 }}
+            >
+              Choose how to remove this policy. Soft delete is reversible
+              by clearing <span className="mono">active_until</span> back
+              to <span className="mono">NULL</span>; permanent delete is
+              not.
+            </p>
+
+            <DeleteOption
+              title="Soft delete (archive)"
+              description="Hide the policy from new attendance computation. Existing attendance rows keep their original policy reference, audit trail stays intact."
+              actionLabel="Soft delete"
+              actionClass="btn"
+              busy={pending === "soft"}
+              disabled={busy}
+              onClick={() => run(false)}
+            />
+
+            <DeleteOption
+              title="Permanent delete"
+              description="Drop the row entirely. Policy assignments are cascade-deleted automatically. Refused if any attendance record still references this policy — soft delete instead."
+              actionLabel="Permanent delete"
+              actionClass="btn btn-danger"
+              busy={pending === "hard"}
+              disabled={busy}
+              danger
+              onClick={() => run(true)}
+              error={hardError}
+            />
+          </div>
+        </div>
+      </div>
+    </ModalShell>
+  );
+}
+
+function DeleteOption({
+  title,
+  description,
+  actionLabel,
+  actionClass,
+  busy,
+  disabled,
+  danger = false,
+  onClick,
+  error,
+}: {
+  title: string;
+  description: string;
+  actionLabel: string;
+  actionClass: string;
+  busy: boolean;
+  disabled: boolean;
+  danger?: boolean;
+  onClick: () => void;
+  error?: string | null;
+}) {
+  return (
+    <div
+      style={{
+        border: `1px solid ${danger ? "var(--danger)" : "var(--border)"}`,
+        borderRadius: "var(--radius-sm)",
+        padding: 12,
+        background: danger ? "var(--danger-soft)" : "var(--bg)",
+        display: "grid",
+        gap: 8,
+      }}
+    >
+      <div style={{ fontWeight: 600, fontSize: 13.5 }}>{title}</div>
+      <div
+        className="text-xs text-dim"
+        style={{ lineHeight: 1.5, margin: 0 }}
+      >
+        {description}
+      </div>
+      {error && (
+        <div
+          role="alert"
+          style={{
+            background: "var(--bg)",
+            border: "1px solid var(--danger)",
+            color: "var(--danger-text)",
+            padding: "6px 8px",
+            borderRadius: "var(--radius-sm)",
+            fontSize: 12,
+          }}
+        >
+          {error}
+        </div>
+      )}
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <button
+          type="button"
+          className={actionClass}
+          onClick={onClick}
+          disabled={disabled || busy}
+        >
+          {busy ? "Working…" : actionLabel}
+        </button>
+      </div>
+    </div>
   );
 }
 

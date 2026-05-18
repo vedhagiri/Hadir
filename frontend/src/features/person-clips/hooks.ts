@@ -101,6 +101,14 @@ export function useClipProcessingResults(
 export function useClipFaceCrops(
   clipId: number | null,
   useCase: string | null = null,
+  // When the caller knows the UC is still mid-pipeline (status
+  // ``processing``/``pending`` per ``useClipProcessingResults``), set
+  // this true so the hook polls every 2 s until the UC settles. Default
+  // false keeps the existing call-once behaviour for surfaces that only
+  // ever render finished clips. Without this, the View Details drawer
+  // would cache the empty pre-completion list for the full 10 s
+  // ``staleTime`` and faces only appeared after a manual refresh.
+  pollWhilePending: boolean = false,
 ): UseQueryResult<FaceCropListResponse, Error> {
   const path = useCase
     ? `/api/person-clips/${clipId}/face-crops?use_case=${useCase}`
@@ -110,6 +118,8 @@ export function useClipFaceCrops(
     queryFn: () => api<FaceCropListResponse>(path),
     enabled: clipId !== null,
     staleTime: 10 * 1000,
+    refetchInterval: pollWhilePending ? 2000 : false,
+    refetchIntervalInBackground: false,
   });
 }
 
@@ -259,6 +269,15 @@ export function useProcessedClipCounts(
 export interface ClipPipelineSubmitAllRequest {
   use_cases: string[];
   skip_existing: boolean;
+  // Optional date/time filters — all four are independent. The
+  // server applies them to ``person_clips.clip_start`` in the
+  // tenant's local timezone. ``time_from > time_to`` denotes an
+  // overnight window. Empty string / undefined / null all mean "no
+  // bound on this side".
+  date_from?: string | null;
+  date_to?: string | null;
+  time_from?: string | null;
+  time_to?: string | null;
 }
 
 export interface ClipPipelineSubmitAllResponse {
@@ -320,6 +339,31 @@ export interface ClipPipelineBatch {
 export interface ClipPipelineStatusResponse {
   running: boolean;
   batches: ClipPipelineBatch[];
+}
+
+// Full status snapshot — used by the page-level "Batch Process
+// Status" button + modal. Polls every 1.5 s while any batch is in
+// flight, otherwise drops to a slower idle tick so the topbar
+// indicator stays current without thrashing the API. The hook
+// always returns the latest snapshot; consumers decide whether
+// any of its ``batches`` are still running.
+export function useClipPipelineStatus(): UseQueryResult<
+  ClipPipelineStatusResponse,
+  Error
+> {
+  return useQuery<ClipPipelineStatusResponse>({
+    queryKey: ["clip-pipeline", "status"],
+    queryFn: () =>
+      api<ClipPipelineStatusResponse>("/api/clip-pipeline/status"),
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (!data) return 5_000;
+      const anyRunning = data.batches.some((b) => b.completed_at === null);
+      return anyRunning ? 1_500 : 10_000;
+    },
+    refetchIntervalInBackground: false,
+    staleTime: 500,
+  });
 }
 
 export function useClipPipelineBatch(

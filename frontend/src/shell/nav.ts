@@ -69,7 +69,6 @@ export const NAV: Record<Role, NavItem[]> = {
     { id: "camera-logs", label: "Camera Logs", icon: "camera" },
     { id: "person-clips", label: "Person Clips", icon: "videocam" },
     { id: "clip-analytics", label: "Clip Analytics", icon: "fileText" },
-    { id: "face-crops", label: "Face Crops", icon: "user" },
     { id: "mgr-assign", label: "Manager assignments", icon: "users" },
     { section: "System" },
     { id: "settings", label: "Settings", icon: "settings" },

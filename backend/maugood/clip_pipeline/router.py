@@ -16,10 +16,12 @@ existing Identify Event UI.
 from __future__ import annotations
 
 import logging
+import re
+from datetime import date as date_type
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from maugood.auth.audit import write_audit
 from maugood.auth.dependencies import CurrentUser, require_any_role
@@ -156,13 +158,51 @@ def status(
 # ---- batch Identify Event (replaces the legacy reprocess-face-match path) ---
 
 
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
 class SubmitAllRequest(BaseModel):
     """``Identify Event — overall process`` body. The server resolves
     the eligible clip set itself so the operator doesn't have to ship
-    every id over the wire."""
+    every id over the wire.
+
+    Date and time filters are optional and **independent** — pass any
+    subset to narrow the eligible clip set. They apply to
+    ``person_clips.clip_start`` rendered in the tenant's local
+    timezone. ``time_from > time_to`` is the overnight window: the
+    filter accepts everything *after* ``time_from`` or *before*
+    ``time_to`` each day in the range.
+    """
 
     use_cases: list[str] = Field(min_length=1, max_length=3)
     skip_existing: bool = True
+    date_from: Optional[str] = None  # YYYY-MM-DD inclusive
+    date_to: Optional[str] = None  # YYYY-MM-DD inclusive
+    time_from: Optional[str] = None  # HH:MM (24h) inclusive
+    time_to: Optional[str] = None  # HH:MM (24h) inclusive
+
+    @field_validator("date_from", "date_to")
+    @classmethod
+    def _check_date(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or v == "":
+            return None
+        if not _DATE_RE.match(v):
+            raise ValueError("expected YYYY-MM-DD")
+        try:
+            date_type.fromisoformat(v)
+        except ValueError as exc:  # pragma: no cover - belt + braces
+            raise ValueError("invalid calendar date") from exc
+        return v
+
+    @field_validator("time_from", "time_to")
+    @classmethod
+    def _check_time(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or v == "":
+            return None
+        if not _TIME_RE.match(v):
+            raise ValueError("expected HH:MM (24-hour)")
+        return v
 
 
 class SubmitAllResponse(BaseModel):
@@ -222,8 +262,11 @@ def submit_all(
     schema = resolve_tenant_schema_via_engine(engine, user.tenant_id)
     scope = TenantScope(tenant_id=user.tenant_id, tenant_schema=schema)
 
-    from sqlalchemy import select, delete  # noqa: PLC0415
+    from sqlalchemy import select, delete, text  # noqa: PLC0415
 
+    from maugood.attendance.repository import (  # noqa: PLC0415
+        load_tenant_settings,
+    )
     from maugood.db import (  # noqa: PLC0415
         clip_processing_results,
         detection_events,
@@ -232,19 +275,82 @@ def submit_all(
         tenant_context,
     )
 
+    # Build the date/time filter once and reuse it for both the
+    # eligible-clip resolution and the overwrite-cleanup delete.
+    # Filter is evaluated against ``person_clips.clip_start`` rendered
+    # in the tenant's local timezone — operators pick local dates and
+    # local clock times in the UI.
+    filter_clauses: list = []
+    filter_params: dict = {}
+    if (
+        body.date_from
+        or body.date_to
+        or body.time_from
+        or body.time_to
+    ):
+        with tenant_context(scope.tenant_schema):
+            with engine.begin() as conn:
+                settings = load_tenant_settings(conn, scope)
+        tz_name = settings.timezone
+        filter_params["clip_tz"] = tz_name
+        if body.date_from:
+            filter_clauses.append(
+                text(
+                    "(clip_start AT TIME ZONE :clip_tz)::date >= :clip_date_from"
+                )
+            )
+            filter_params["clip_date_from"] = body.date_from
+        if body.date_to:
+            filter_clauses.append(
+                text(
+                    "(clip_start AT TIME ZONE :clip_tz)::date <= :clip_date_to"
+                )
+            )
+            filter_params["clip_date_to"] = body.date_to
+        if body.time_from or body.time_to:
+            # Default open ends to 00:00 / 23:59 so passing only one
+            # bound still narrows correctly.
+            t_from = body.time_from or "00:00"
+            t_to = body.time_to or "23:59"
+            h_from, m_from = (int(p) for p in t_from.split(":"))
+            h_to, m_to = (int(p) for p in t_to.split(":"))
+            from_m = h_from * 60 + m_from
+            to_m = h_to * 60 + m_to
+            filter_params["clip_time_from_m"] = from_m
+            filter_params["clip_time_to_m"] = to_m
+            mod_expr = (
+                "(EXTRACT(HOUR FROM clip_start AT TIME ZONE :clip_tz)::int "
+                "* 60 + EXTRACT(MINUTE FROM clip_start AT TIME ZONE :clip_tz)::int)"
+            )
+            if from_m <= to_m:
+                filter_clauses.append(
+                    text(
+                        f"{mod_expr} BETWEEN :clip_time_from_m AND :clip_time_to_m"
+                    )
+                )
+            else:
+                # Overnight window — accept everything after time_from
+                # OR before time_to each day.
+                filter_clauses.append(
+                    text(
+                        f"({mod_expr} >= :clip_time_from_m "
+                        f"OR {mod_expr} <= :clip_time_to_m)"
+                    )
+                )
+
     deleted_prior = 0
     with tenant_context(scope.tenant_schema):
         with engine.begin() as conn:
             # Resolve every clip eligible for processing — completed
             # recordings only. Anything still recording/finalizing/
             # failed/abandoned is intentionally excluded.
-            clip_rows = conn.execute(
-                select(person_clips.c.id).where(
-                    person_clips.c.tenant_id == scope.tenant_id,
-                    person_clips.c.recording_status == "completed",
-                    person_clips.c.file_path.is_not(None),
-                )
-            ).all()
+            base_where = [
+                person_clips.c.tenant_id == scope.tenant_id,
+                person_clips.c.recording_status == "completed",
+                person_clips.c.file_path.is_not(None),
+            ]
+            stmt = select(person_clips.c.id).where(*base_where, *filter_clauses)
+            clip_rows = conn.execute(stmt, filter_params).all()
             clip_ids = [int(r.id) for r in clip_rows]
 
             if clip_ids and not body.skip_existing:
@@ -327,6 +433,10 @@ def submit_all(
                     "queued_jobs": batch.queued_jobs,
                     "skipped_jobs": batch.skipped_jobs,
                     "deleted_prior_rows": deleted_prior,
+                    "date_from": body.date_from,
+                    "date_to": body.date_to,
+                    "time_from": body.time_from,
+                    "time_to": body.time_to,
                 },
             )
 

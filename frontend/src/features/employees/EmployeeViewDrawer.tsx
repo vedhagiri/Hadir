@@ -358,6 +358,22 @@ function DetailsTab({
   const { t } = useTranslation();
   const [zoomPhotoId, setZoomPhotoId] = useState<number | null>(null);
   const role = primaryRoleFromCodes(employee.role_codes ?? []);
+
+  // Esc closes the photo lightbox specifically. Scoped to when the
+  // lightbox is open + capture phase so it dismisses cleanly without
+  // bubbling into the drawer's focus-trap handler.
+  useEffect(() => {
+    if (zoomPhotoId === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        setZoomPhotoId(null);
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [zoomPhotoId]);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <Section label={t("employees.section.identity") as string}>
@@ -504,56 +520,68 @@ function DetailsTab({
         </div>
       )}
 
-      {/* Lightbox — click thumbnail to open; X button only closes
-          (matches the operator-policy red line). */}
+      {/* Lightbox — clicking a thumbnail opens this; X button or Esc
+          dismisses. z-index has to clear the design CSS's sticky
+          topbar (10000) and toast container (99999), and the close
+          button is anchored to the fixed overlay itself (not the
+          inner image wrapper) so it always renders at the top-right
+          of the viewport regardless of image dimensions. */}
       {zoomPhotoId !== null && (
         <div
           role="dialog"
           aria-modal="true"
+          aria-label="Photo preview"
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(0,0,0,0.7)",
+            background: "rgba(0,0,0,0.85)",
             display: "grid",
             placeItems: "center",
-            zIndex: 9999,
+            zIndex: 100000,
             padding: 32,
           }}
         >
-          <div
+          <button
+            type="button"
+            onClick={() => setZoomPhotoId(null)}
+            aria-label={t("common.close") as string}
+            title={(t("common.close") as string) + " (Esc)"}
+            autoFocus
             style={{
-              position: "relative",
-              maxWidth: "90vw",
-              maxHeight: "90vh",
+              position: "fixed",
+              top: 24,
+              insetInlineEnd: 24,
+              zIndex: 100001,
+              width: 44,
+              height: 44,
+              borderRadius: 999,
+              border: "2px solid rgba(255,255,255,0.85)",
+              background: "rgba(0,0,0,0.85)",
+              color: "white",
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              pointerEvents: "auto",
+              padding: 0,
+              fontFamily: "inherit",
+              boxShadow: "0 4px 16px rgba(0,0,0,0.6)",
             }}
           >
-            <img
-              src={`/api/employees/${employee.id}/photos/${zoomPhotoId}/image`}
-              alt="Reference photo"
-              style={{
-                maxWidth: "90vw",
-                maxHeight: "90vh",
-                objectFit: "contain",
-                borderRadius: 8,
-                boxShadow: "0 12px 48px rgba(0,0,0,0.5)",
-              }}
-            />
-            <button
-              type="button"
-              className="icon-btn"
-              onClick={() => setZoomPhotoId(null)}
-              aria-label={t("common.close") as string}
-              style={{
-                position: "absolute",
-                top: 8,
-                insetInlineEnd: 8,
-                background: "rgba(0,0,0,0.6)",
-                color: "white",
-              }}
-            >
-              <Icon name="x" size={14} />
-            </button>
-          </div>
+            <Icon name="x" size={20} />
+          </button>
+          <img
+            src={`/api/employees/${employee.id}/photos/${zoomPhotoId}/image`}
+            alt="Reference photo"
+            style={{
+              maxWidth: "90vw",
+              maxHeight: "90vh",
+              objectFit: "contain",
+              borderRadius: 8,
+              boxShadow: "0 12px 48px rgba(0,0,0,0.5)",
+              pointerEvents: "none",
+            }}
+          />
         </div>
       )}
 

@@ -56,11 +56,21 @@ export function usePatchPolicy(policyId: number) {
   });
 }
 
+export interface DeletePolicyInput {
+  policyId: number;
+  // ``false`` (default) → soft delete: server flips ``active_until``
+  // to yesterday so the resolver skips the row. ``true`` → hard
+  // delete: row is dropped; assignments cascade away; server 409s
+  // if any ``attendance_records`` still reference the policy.
+  hard: boolean;
+}
+
 export function useDeletePolicy() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (policyId: number): Promise<void> => {
-      await api<null>(`/api/policies/${policyId}`, { method: "DELETE" });
+    mutationFn: async ({ policyId, hard }: DeletePolicyInput): Promise<void> => {
+      const qs = hard ? "?hard=true" : "";
+      await api<null>(`/api/policies/${policyId}${qs}`, { method: "DELETE" });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: POLICIES_KEY });

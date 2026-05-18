@@ -129,6 +129,7 @@ export const BRAND_OPTIONS = [
   "Hikvision",
   "Dahua",
   "CP Plus",
+  "Imou",
   "Axis",
   "Panasonic",
   "Others",

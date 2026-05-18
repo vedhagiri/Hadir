@@ -520,7 +520,7 @@ def list_employees_endpoint(
     # employees (department membership ∪ explicit assignments).
     restrict_ids: Optional[frozenset[int]] = None
     if "Manager" in user.roles and "Admin" not in user.roles and "HR" not in user.roles:
-        from maugood.attendance.repository import (  # noqa: PLC0415
+        from maugood.manager_assignments.repository import (  # noqa: PLC0415
             get_manager_visible_employee_ids,
         )
 
@@ -2146,7 +2146,7 @@ def soft_delete_employee_endpoint(
         # Manager-scope check: 404 (not 403) so existence isn't leaked
         # to a Manager who doesn't manage the target employee.
         if not is_admin_or_hr:
-            from maugood.attendance.repository import (  # noqa: PLC0415
+            from maugood.manager_assignments.repository import (  # noqa: PLC0415
                 get_manager_visible_employee_ids,
             )
 
