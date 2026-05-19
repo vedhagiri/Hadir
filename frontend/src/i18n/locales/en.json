@@ -6,6 +6,7 @@
     "saved": "Saved.",
     "cancel": "Cancel",
     "close": "Close",
+    "dismiss": "Dismiss",
     "delete": "Delete",
     "edit": "Edit",
     "add": "Add",
@@ -1100,9 +1101,12 @@
       "singleTitle": "Restart worker for {{name}}?",
       "singleBody": "Briefly interrupts face capture for this camera (about 5 seconds).",
       "allTitle": "Restart all {{count}} workers?",
-      "allWarning": "This will pause face capture for the entire tenant for approximately 10 seconds while workers reconnect. Anyone walking past a camera during this window will not be recorded for attendance.",
+      "allWarning": "Restarts capture workers AND the clip-processing pipeline AND the reprocess worker for the entire tenant. Pauses face capture for ~10 seconds while workers reconnect. After restart, any stuck processing jobs will be inspected and either resumed (match-only) or re-queued from scratch based on the artifacts found on disk.",
       "typePhrase": "Type {{phrase}} to confirm",
-      "allConfirm": "Restart all anyway"
+      "allConfirm": "Restart all and recover",
+      "resultTitle": "Restart complete",
+      "resultCapture": "Capture workers: {{restarted}}/{{total}} restarted",
+      "resultRecovery": "Recovery: {{scanned}} scanned · {{a}} status-only · {{b}} match-only resume · {{c}} full restart"
     },
     "errors": {
       "title": "Recent errors",

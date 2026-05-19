@@ -1823,6 +1823,12 @@ cameras = Table(
     Column("model", Text, nullable=True),
     Column("mount_location", Text, nullable=True),
     UniqueConstraint("tenant_id", "name", name="uq_cameras_tenant_name"),
+    # Migration 0052 — per-camera trigger detector for clip recording.
+    # CHECK guards against UI/API drift writing unknown values.
+    CheckConstraint(
+        "clip_detection_source IN ('face', 'body', 'both')",
+        name="ck_cameras_clip_detection_source",
+    ),
 )
 
 
@@ -2201,6 +2207,9 @@ person_clips = Table(
         nullable=False,
         server_default="0",
     ),
+    # Migration 0046 — per-clip face matching timestamps.
+    Column("face_matching_start", DateTime(timezone=True), nullable=True),
+    Column("face_matching_end", DateTime(timezone=True), nullable=True),
     # Pipeline metadata added in migration 0048
     Column("encoding_start_at", DateTime(timezone=True), nullable=True),
     Column("encoding_end_at", DateTime(timezone=True), nullable=True),
@@ -2253,6 +2262,21 @@ person_clips = Table(
         "tenant_id",
         "employee_id",
         "created_at",
+    ),
+    # Migration 0041 — face crop extraction lifecycle.
+    CheckConstraint(
+        "face_crops_status IN ('pending','processing','processed','failed')",
+        name="ck_person_clips_face_crops_status",
+    ),
+    # Migration 0052 — which detector triggered the clip.
+    CheckConstraint(
+        "detection_source IN ('face', 'body', 'both')",
+        name="ck_person_clips_detection_source",
+    ),
+    # Migration 0054 + 0055 — recording lifecycle status.
+    CheckConstraint(
+        "recording_status IN ('recording', 'finalizing', 'completed', 'failed', 'abandoned')",
+        name="ck_person_clips_recording_status",
     ),
 )
 
@@ -2345,6 +2369,15 @@ clip_processing_results = Table(
     Column("unknown_count", Integer, nullable=False, server_default="0"),
     Column("match_details", JSONB, nullable=True),
     Column("error", Text, nullable=True),
+    # Migration 0062 — boot-time recovery counter. Incremented on every
+    # successful atomic claim by the recovery flow; capped to prevent
+    # poison-job loops.
+    Column(
+        "recovery_attempts",
+        Integer,
+        nullable=False,
+        server_default="0",
+    ),
     Column(
         "created_at",
         DateTime(timezone=True),
@@ -2352,6 +2385,12 @@ clip_processing_results = Table(
         server_default=func.now(),
     ),
     Index("ix_cpr_tenant_clip", "tenant_id", "person_clip_id"),
+    # Migration 0048 — one result row per (clip, use_case). The clip
+    # pipeline uses ``ON CONFLICT ON CONSTRAINT uq_cpr_clip_usecase``
+    # to upsert progress, so the named constraint is load-bearing.
+    UniqueConstraint(
+        "person_clip_id", "use_case", name="uq_cpr_clip_usecase"
+    ),
 )
 
 

@@ -42,7 +42,6 @@ import { MyProfilePage } from "./features/employees/MyProfilePage";
 import { MyTeamPage } from "./features/employees/MyTeamPage";
 import { PhotoApprovalsPage } from "./features/employees/PhotoApprovalsPage";
 import { CalendarPage } from "./features/calendar/CalendarPage";
-import { WorkersPage } from "./features/operations/WorkersPage";
 import { EmployeeReportPage } from "./features/reports/EmployeeReportPage";
 import { FormerEmployeesSeenReport } from "./features/reports/FormerEmployeesSeenReport";
 import { ReportsPage } from "./features/reports/ReportsPage";
@@ -150,7 +149,13 @@ export function App() {
         <Route path="employee-report" element={<EmployeeReportPage />} />
         <Route path="former-employees" element={<FormerEmployeesSeenReport />} />
         <Route path="calendar" element={<CalendarPage />} />
-        <Route path="operations/workers" element={<WorkersPage />} />
+        {/* operations/workers retired — Pipeline Monitor's Cameras tab
+            absorbed the per-camera worker view. Bounce stale bookmarks
+            to the new home. */}
+        <Route
+          path="operations/workers"
+          element={<Navigate to="/pipeline-monitor" replace />}
+        />
         <Route path="pipeline-monitor" element={<AdminOnly><PipelineMonitor /></AdminOnly>} />
         <Route path="mgr-assign" element={<ManagerAssignmentsPage />} />
         <Route path="policies" element={<PoliciesPage />} />
@@ -202,7 +207,6 @@ export function App() {
             id !== "employee-report" &&
             id !== "calendar" &&
             id !== "former-employees" &&
-            id !== "operations/workers" &&
             id !== "pipeline-monitor" &&
             id !== "settings" &&
             id !== "mgr-assign" &&

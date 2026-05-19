@@ -65,6 +65,12 @@ class MatchJob:
     crop_match_index: dict[tuple[int, int], int] = field(default_factory=dict)
     initial_face_crop_count: int = 0
     started_at: Optional[float] = None
+    # Boot-time recovery flag (P29). When True the cropping stage was
+    # skipped — ``frame_results`` is empty and ``clip_meta`` carries
+    # only the camera_id needed for attendance fan-out. The matching
+    # worker takes the resume path: load face_crops from DB, decrypt,
+    # run recognition, backfill matched_employee_id. UC1 only.
+    resume_from_db: bool = False
 
 
 # A submission is one operator click; expands to N (clip × use_case)

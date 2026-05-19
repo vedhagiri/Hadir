@@ -127,6 +127,30 @@ class RestartAllOut(BaseModel):
     total: int
 
 
+class RecoverySummaryOut(BaseModel):
+    scanned: int = 0
+    class_a: int = 0
+    class_b: int = 0
+    class_c: int = 0
+    failed_cap: int = 0
+    skipped: int = 0
+
+
+class RestartAllAndRecoverOut(BaseModel):
+    # Capture worker layer
+    capture_restarted: int
+    capture_failed: int
+    capture_total: int
+    # Clip pipeline layer (queue-based cropping/matching workers)
+    clip_pipeline_restarted: bool
+    # Legacy ReprocessFaceMatchWorker layer
+    reprocess_cancelled: bool
+    # Recovery sweep — synchronous so the operator sees the result.
+    recovery_triggered: bool
+    recovery_reason: Optional[str] = None
+    recovery: RecoverySummaryOut
+
+
 class CameraErrorsOut(BaseModel):
     recent_errors: list[str]
     audit_log_errors: list[dict[str, Any]]
@@ -468,6 +492,132 @@ def restart_all_workers(user: Annotated[CurrentUser, ADMIN]) -> RestartAllOut:
 
 
 @router.post(
+    "/operations/workers/restart-all-and-recover",
+    response_model=RestartAllAndRecoverOut,
+)
+def restart_all_and_recover(
+    user: Annotated[CurrentUser, ADMIN],
+) -> RestartAllAndRecoverOut:
+    """Comprehensive restart for the Pipeline Monitor "Restart All
+    Workers" button.
+
+    Steps (each best-effort; one layer's failure doesn't block the
+    next):
+
+    1. Restart every capture worker for this tenant.
+    2. Cancel any active legacy ``ReprocessFaceMatchWorker`` run so
+       the recovery pass below sees a clean ``_active_single_clip_runs``.
+    3. Trigger an immediate, **synchronous** clip-pipeline recovery
+       sweep so the response carries the actual class A/B/C counts.
+    4. Trigger an immediate legacy reprocess recovery (async, drip-fed
+       — kept off the response thread because it sleeps between
+       per-clip triggers).
+
+    Per-camera restart endpoint (``.../restart``) deliberately
+    **does not** call this — narrow actions stay narrow. Only
+    Restart-All triggers recovery.
+    """
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+
+    # ---- 1. capture workers ------------------------------------------
+    cap_result = capture_manager.restart_all_for_tenant(scope.tenant_id)
+
+    # ---- 2. cancel legacy reprocess (if running) ---------------------
+    reprocess_worker = get_reprocess_worker()
+    reprocess_cancelled = False
+    try:
+        if reprocess_worker.is_running():
+            reprocess_cancelled = reprocess_worker.cancel()
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "restart-all-and-recover: reprocess cancel failed", exc_info=True
+        )
+
+    # ---- 3. clip pipeline recovery (synchronous) ---------------------
+    from maugood.clip_pipeline import clip_pipeline as _clip_pipeline  # noqa: PLC0415
+
+    recovery_payload: dict = {"triggered": False, "reason": "not run"}
+    try:
+        recovery_payload = _clip_pipeline.recover_now(blocking=True) or {}
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "restart-all-and-recover: clip pipeline recovery failed"
+        )
+        recovery_payload = {
+            "triggered": False,
+            "reason": f"sweep failed: {type(exc).__name__}",
+        }
+
+    # ---- 4. legacy reprocess recovery (async, drip-fed) --------------
+    try:
+        from maugood.person_clips.reprocess import (  # noqa: PLC0415
+            recover_legacy_reprocess_at_boot,
+        )
+
+        recover_legacy_reprocess_at_boot(delay_s=0)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "restart-all-and-recover: legacy reprocess recovery failed to spawn",
+            exc_info=True,
+        )
+
+    # ---- audit -------------------------------------------------------
+    audit_after = {
+        "capture": cap_result,
+        "reprocess_cancelled": reprocess_cancelled,
+        "recovery": {
+            k: v
+            for k, v in recovery_payload.items()
+            if k
+            in (
+                "triggered",
+                "reason",
+                "scanned",
+                "class_a",
+                "class_b",
+                "class_c",
+                "failed_cap",
+                "skipped",
+            )
+        },
+    }
+    try:
+        with get_engine().begin() as conn:
+            write_audit(
+                conn,
+                tenant_id=scope.tenant_id,
+                actor_user_id=user.id,
+                action="pipeline.restart_all_and_recover",
+                entity_type="capture_manager",
+                entity_id=None,
+                after=audit_after,
+            )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "restart-all-and-recover: audit write failed", exc_info=True
+        )
+
+    return RestartAllAndRecoverOut(
+        capture_restarted=int(cap_result.get("restarted", 0)),
+        capture_failed=int(cap_result.get("failed", 0)),
+        capture_total=int(cap_result.get("total", 0)),
+        clip_pipeline_restarted=True,  # sweep ran (or attempted)
+        reprocess_cancelled=reprocess_cancelled,
+        recovery_triggered=bool(recovery_payload.get("triggered", False)),
+        recovery_reason=recovery_payload.get("reason"),
+        recovery=RecoverySummaryOut(
+            scanned=int(recovery_payload.get("scanned", 0)),
+            class_a=int(recovery_payload.get("class_a", 0)),
+            class_b=int(recovery_payload.get("class_b", 0)),
+            class_c=int(recovery_payload.get("class_c", 0)),
+            failed_cap=int(recovery_payload.get("failed_cap", 0)),
+            skipped=int(recovery_payload.get("skipped", 0)),
+        ),
+    )
+
+
+@router.post(
     "/operations/workers/{camera_id}/restart",
     response_model=RestartResultOut,
 )
@@ -751,6 +901,11 @@ def get_pipeline_monitor(
 
     Read-only, no audit row — operators poll this every few seconds
     and audit noise would drown the legitimate signal.
+
+    On a fresh tenant (no cameras, no clips, no workers) every stage
+    is intentionally empty rather than 500. Each stage's gather step
+    is wrapped so a single unexpected error in one stage doesn't
+    take down the whole response.
     """
 
     scope = TenantScope(tenant_id=user.tenant_id)
@@ -760,9 +915,17 @@ def get_pipeline_monitor(
     # The per-tenant snapshot returns one entry per running worker; we
     # cross-reference ``cameras.worker_enabled`` for "configured" count.
     rtsp = PipelineRtspOut()
-    worker_keys = [
-        (t, c) for (t, c) in capture_manager.workers_snapshot() if t == scope.tenant_id
-    ]
+    try:
+        worker_keys = [
+            (t, c) for (t, c) in capture_manager.workers_snapshot() if t == scope.tenant_id
+        ]
+    except Exception:
+        logger.exception(
+            "pipeline-monitor: capture_manager.workers_snapshot() failed; "
+            "treating worker list as empty for tenant_id=%s",
+            scope.tenant_id,
+        )
+        worker_keys = []
     for tenant_id, camera_id in worker_keys:
         stats = capture_manager.get_full_worker_stats(tenant_id, camera_id)
         if stats is None:
@@ -790,14 +953,24 @@ def get_pipeline_monitor(
 
     # ---- Stage 2: Clip recording (per-camera state machines) --------------
     recording = PipelineRecordingOut()
-    with engine.begin() as conn:
-        cam_rows = conn.execute(
-            select(
-                cameras.c.id,
-                cameras.c.name,
-                cameras.c.clip_recording_enabled,
-            ).where(cameras.c.tenant_id == scope.tenant_id)
-        ).all()
+    cam_rows: list[Any] = []
+    try:
+        with engine.begin() as conn:
+            cam_rows = list(
+                conn.execute(
+                    select(
+                        cameras.c.id,
+                        cameras.c.name,
+                        cameras.c.clip_recording_enabled,
+                    ).where(cameras.c.tenant_id == scope.tenant_id)
+                ).all()
+            )
+    except Exception:
+        logger.exception(
+            "pipeline-monitor: cameras lookup failed; treating as empty "
+            "for tenant_id=%s",
+            scope.tenant_id,
+        )
     enabled_camera_ids = {int(r.id) for r in cam_rows if r.clip_recording_enabled}
     recording.enabled_cameras = len(enabled_camera_ids)
     camera_names = {int(r.id): str(r.name) for r in cam_rows}
@@ -832,26 +1005,39 @@ def get_pipeline_monitor(
     today_utc_start = datetime.now(tz=timezone.utc).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
-    with engine.begin() as conn:
-        enc_rows = conn.execute(
-            select(
-                person_clips.c.recording_status,
-                func.count().label("cnt"),
+    enc_rows: list[Any] = []
+    enc_today: list[Any] = []
+    try:
+        with engine.begin() as conn:
+            enc_rows = list(
+                conn.execute(
+                    select(
+                        person_clips.c.recording_status,
+                        func.count().label("cnt"),
+                    )
+                    .where(person_clips.c.tenant_id == scope.tenant_id)
+                    .group_by(person_clips.c.recording_status)
+                ).all()
             )
-            .where(person_clips.c.tenant_id == scope.tenant_id)
-            .group_by(person_clips.c.recording_status)
-        ).all()
-        enc_today = conn.execute(
-            select(
-                person_clips.c.recording_status,
-                func.count().label("cnt"),
+            enc_today = list(
+                conn.execute(
+                    select(
+                        person_clips.c.recording_status,
+                        func.count().label("cnt"),
+                    )
+                    .where(
+                        person_clips.c.tenant_id == scope.tenant_id,
+                        person_clips.c.encoding_end_at >= today_utc_start,
+                    )
+                    .group_by(person_clips.c.recording_status)
+                ).all()
             )
-            .where(
-                person_clips.c.tenant_id == scope.tenant_id,
-                person_clips.c.encoding_end_at >= today_utc_start,
-            )
-            .group_by(person_clips.c.recording_status)
-        ).all()
+    except Exception:
+        logger.exception(
+            "pipeline-monitor: person_clips aggregate failed; treating "
+            "as empty for tenant_id=%s",
+            scope.tenant_id,
+        )
     enc_counts = {str(r.recording_status): int(r.cnt) for r in enc_rows}
     enc_today_counts = {str(r.recording_status): int(r.cnt) for r in enc_today}
     # "Pending in encoding queue" maps to the recording lifecycle:
@@ -885,41 +1071,62 @@ def get_pipeline_monitor(
 
     # ---- Stage 4: Identify Event (face-match jobs) ------------------------
     identify = PipelineIdentifyOut()
-    active_clip_ids = get_active_single_clip_runs(scope.tenant_id)
+    try:
+        active_clip_ids = get_active_single_clip_runs(scope.tenant_id)
+    except Exception:
+        logger.exception(
+            "pipeline-monitor: get_active_single_clip_runs failed; "
+            "treating as empty for tenant_id=%s",
+            scope.tenant_id,
+        )
+        active_clip_ids = []
     identify.active_clip_ids = active_clip_ids
     identify.running = len(active_clip_ids)
     # Group by ``(status, use_case)`` so the panel can break the numbers
     # down per UC1 / UC2 / UC3. ``ended_at`` filters the "today" bucket
     # for completed + failed; the running buckets (pending, processing)
     # don't have an end_at yet so we count them lifetime.
-    with engine.begin() as conn:
-        cpr_rows = conn.execute(
-            select(
-                clip_processing_results.c.status,
-                clip_processing_results.c.use_case,
-                func.count().label("cnt"),
+    cpr_rows: list[Any] = []
+    cpr_today: list[Any] = []
+    try:
+        with engine.begin() as conn:
+            cpr_rows = list(
+                conn.execute(
+                    select(
+                        clip_processing_results.c.status,
+                        clip_processing_results.c.use_case,
+                        func.count().label("cnt"),
+                    )
+                    .where(clip_processing_results.c.tenant_id == scope.tenant_id)
+                    .group_by(
+                        clip_processing_results.c.status,
+                        clip_processing_results.c.use_case,
+                    )
+                ).all()
             )
-            .where(clip_processing_results.c.tenant_id == scope.tenant_id)
-            .group_by(
-                clip_processing_results.c.status,
-                clip_processing_results.c.use_case,
+            cpr_today = list(
+                conn.execute(
+                    select(
+                        clip_processing_results.c.status,
+                        clip_processing_results.c.use_case,
+                        func.count().label("cnt"),
+                    )
+                    .where(
+                        clip_processing_results.c.tenant_id == scope.tenant_id,
+                        clip_processing_results.c.ended_at >= today_utc_start,
+                    )
+                    .group_by(
+                        clip_processing_results.c.status,
+                        clip_processing_results.c.use_case,
+                    )
+                ).all()
             )
-        ).all()
-        cpr_today = conn.execute(
-            select(
-                clip_processing_results.c.status,
-                clip_processing_results.c.use_case,
-                func.count().label("cnt"),
-            )
-            .where(
-                clip_processing_results.c.tenant_id == scope.tenant_id,
-                clip_processing_results.c.ended_at >= today_utc_start,
-            )
-            .group_by(
-                clip_processing_results.c.status,
-                clip_processing_results.c.use_case,
-            )
-        ).all()
+    except Exception:
+        logger.exception(
+            "pipeline-monitor: clip_processing_results aggregate failed; "
+            "treating as empty for tenant_id=%s",
+            scope.tenant_id,
+        )
 
     # Roll into a per-UC dict — UC keys lower-cased + restricted to the
     # known three so a typo in the DB doesn't pollute the panel.
@@ -959,7 +1166,17 @@ def get_pipeline_monitor(
     identify.processing = sum(s["processing"] for s in per_uc.values())
     identify.completed_today = sum(s["completed_today"] for s in per_uc.values())
     identify.failed_today = sum(s["failed_today"] for s in per_uc.values())
-    identify.batch_status = str(get_reprocess_worker().get_status().get("status", "idle"))
+    try:
+        identify.batch_status = str(
+            get_reprocess_worker().get_status().get("status", "idle")
+        )
+    except Exception:
+        logger.exception(
+            "pipeline-monitor: reprocess worker status unavailable; "
+            "defaulting batch_status='idle' for tenant_id=%s",
+            scope.tenant_id,
+        )
+        identify.batch_status = "idle"
 
     return PipelineMonitorOut(
         rtsp=rtsp,

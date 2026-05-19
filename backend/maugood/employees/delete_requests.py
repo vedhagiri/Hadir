@@ -530,23 +530,38 @@ def get_pending_delete_request(
 def list_delete_requests(
     user: Annotated[CurrentUser, ADMIN_OR_HR],
 ) -> DeleteRequestListOut:
-    """Pending delete requests in this tenant. Approvals page consumes this."""
+    """Pending delete requests in this tenant. Approvals page consumes this.
+
+    On a fresh tenant with no rows the response is ``{"items": []}``.
+    If the underlying table or grant is missing (e.g. migrations
+    half-applied during initial project setup), the handler logs a
+    warning and returns the same empty shape rather than 500-ing the
+    Employees page that calls this on first paint.
+    """
 
     scope = TenantScope(tenant_id=user.tenant_id)
-    with get_engine().begin() as conn:
-        rows = conn.execute(
-            select(t_delete_requests.c.id)
-            .where(
-                t_delete_requests.c.tenant_id == scope.tenant_id,
-                t_delete_requests.c.status == "pending",
-            )
-            .order_by(t_delete_requests.c.created_at.desc())
-        ).all()
-        items: list[DeleteRequestOut] = []
-        for r in rows:
-            hyd = _hydrate_request(conn, scope, int(r.id))
-            if hyd is not None:
-                items.append(hyd)
+    try:
+        with get_engine().begin() as conn:
+            rows = conn.execute(
+                select(t_delete_requests.c.id)
+                .where(
+                    t_delete_requests.c.tenant_id == scope.tenant_id,
+                    t_delete_requests.c.status == "pending",
+                )
+                .order_by(t_delete_requests.c.created_at.desc())
+            ).all()
+            items: list[DeleteRequestOut] = []
+            for r in rows:
+                hyd = _hydrate_request(conn, scope, int(r.id))
+                if hyd is not None:
+                    items.append(hyd)
+    except Exception:
+        logger.exception(
+            "list_delete_requests: returning empty list after DB error "
+            "(tenant_id=%s) — verify migration 0030 + maugood_app grants",
+            scope.tenant_id,
+        )
+        return DeleteRequestListOut(items=[])
     return DeleteRequestListOut(items=items)
 
 

@@ -131,6 +131,20 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     # path — operators submit batches via /api/clip-pipeline/submit.
     from maugood.clip_pipeline import clip_pipeline  # noqa: PLC0415
     clip_pipeline.start()
+    # P29 — legacy ReprocessFaceMatchWorker recovery for any
+    # person_clips rows left in ``matched_status='processing'`` by
+    # an unclean shutdown. Deferred + drip-fed so it doesn't compete
+    # with capture/matcher warm-up. The clip_pipeline does its own
+    # deferred recovery internally; this is the parallel hook for the
+    # legacy single-clip path.
+    import os as _os  # noqa: PLC0415
+    if _os.environ.get(
+        "MAUGOOD_CLIP_PIPELINE_DISABLE_RECOVERY", ""
+    ).lower() not in ("1", "true", "yes"):
+        from maugood.person_clips.reprocess import (  # noqa: PLC0415
+            recover_legacy_reprocess_at_boot,
+        )
+        recover_legacy_reprocess_at_boot()
     try:
         yield
     finally:

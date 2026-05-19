@@ -659,113 +659,172 @@ def list_person_clips(
         pattern=r"^(pending|processing|processed|failed)$",
     ),
 ) -> PersonClipListResponse:
-    """List person clips, with optional filters."""
+    """List person clips, with optional filters.
+
+    On a fresh project with no cameras / no clips this returns
+    ``{items: [], total: 0, page, page_size}``. Any unexpected
+    database-side failure (e.g. a partially-applied migration during
+    initial project setup) is logged at ``exception`` level and
+    surfaced as the same empty response — the Employee drawer's
+    Matched Clips tab then renders its "No matched clips yet"
+    empty-state instead of a generic 500.
+    """
 
     scope = TenantScope(tenant_id=user.tenant_id)
+
+    # Light validation on matched_employee_id. Negative / zero is
+    # always meaningless (employee primary keys are positive); we
+    # short-circuit to an empty list rather than letting the SQL
+    # engine work on a guaranteed-empty filter.
+    if matched_employee_id is not None and matched_employee_id <= 0:
+        return PersonClipListResponse(
+            items=[], total=0, page=page, page_size=page_size,
+        )
+
     start_dt: Optional[datetime] = None
     end_dt: Optional[datetime] = None
+    # ISO parser accepts both ``Z`` and ``+HH:MM`` suffixes on
+    # Python 3.11+. We tolerate a trailing ``Z`` defensively so
+    # clients running against an older interpreter still validate.
+    def _parse_iso(value: str) -> datetime:
+        v = value.strip()
+        if v.endswith("Z"):
+            v = v[:-1] + "+00:00"
+        return datetime.fromisoformat(v)
+
     if start:
         try:
-            start_dt = datetime.fromisoformat(start)
+            start_dt = _parse_iso(start)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="invalid start date") from exc
     if end:
         try:
-            end_dt = datetime.fromisoformat(end)
+            end_dt = _parse_iso(end)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="invalid end date") from exc
 
-    with get_engine().begin() as conn:
-        rows, total = list_clips(
-            conn, scope, page=page, page_size=page_size,
-            camera_id=camera_id, employee_id=employee_id,
-            matched_employee_id=matched_employee_id,
-            start=start_dt, end=end_dt,
-            detection_source=detection_source,
-            recording_status=recording_status,
-            matched_status=matched_status,
+    try:
+        with get_engine().begin() as conn:
+            rows, total = list_clips(
+                conn, scope, page=page, page_size=page_size,
+                camera_id=camera_id, employee_id=employee_id,
+                matched_employee_id=matched_employee_id,
+                start=start_dt, end=end_dt,
+                detection_source=detection_source,
+                recording_status=recording_status,
+                matched_status=matched_status,
+            )
+    except Exception:
+        logger.exception(
+            "list_person_clips: returning empty list after DB error "
+            "(tenant_id=%s, matched_employee_id=%s) — verify person_clips "
+            "/ clip_processing_results / face_crops migrations + grants",
+            scope.tenant_id,
+            matched_employee_id,
         )
-        all_ids: set[int] = set()
-        for r in rows:
-            raw = getattr(r, "matched_employees", None)
-            if raw is not None and isinstance(raw, list):
-                for eid in raw:
-                    if isinstance(eid, (int, float)):
-                        all_ids.add(int(eid))
-        name_map = _resolve_employee_names(conn, scope, all_ids)
+        return PersonClipListResponse(
+            items=[], total=0, page=page, page_size=page_size,
+        )
 
-        # Batch-fetch processed + in-flight use cases for every clip in
-        # this page. One query covers both buckets so a row that is
-        # currently being processed shows the right Processing Status
-        # pill instead of "Saved".
-        processed_by_clip: dict[int, list[str]] = {}
-        processing_by_clip: dict[int, list[str]] = {}
-        clip_ids = [int(r.id) for r in rows]
-        if clip_ids:
-            # NB: ``clip_processing_results.status`` values:
-            #   * "completed" — finished, drives the "Processed" label
-            #   * "processing" / "pending" — in flight; the operator
-            #     should see "Processing" not "Saved" while these exist
-            #   * "failed" — terminal failure; we surface as Saved + the
-            #     Failed/skipped counter so the Identify Event UI can
-            #     retry.
-            cpr_rows = conn.execute(
-                select(
-                    clip_processing_results.c.person_clip_id,
-                    clip_processing_results.c.use_case,
-                    clip_processing_results.c.status,
-                ).where(
-                    clip_processing_results.c.tenant_id == scope.tenant_id,
-                    clip_processing_results.c.person_clip_id.in_(clip_ids),
-                    clip_processing_results.c.status.in_(
-                        ("completed", "processing", "pending")
-                    ),
-                )
-            ).all()
-            for cpr in cpr_rows:
-                cid = int(cpr.person_clip_id)
-                uc = str(cpr.use_case).lower()
-                status = str(cpr.status).lower()
-                target = (
-                    processed_by_clip
-                    if status == "completed"
-                    else processing_by_clip
-                )
-                bucket = target.setdefault(cid, [])
-                if uc not in bucket:
-                    bucket.append(uc)
-            for bucket in processed_by_clip.values():
-                bucket.sort()
-            for bucket in processing_by_clip.values():
-                bucket.sort()
+    all_ids: set[int] = set()
+    for r in rows:
+        raw = getattr(r, "matched_employees", None)
+        if raw is not None and isinstance(raw, list):
+            for eid in raw:
+                if isinstance(eid, (int, float)):
+                    all_ids.add(int(eid))
 
-        # Per-clip best-quality face_crop for the requested employee.
-        # Only populated when the caller passed ``matched_employee_id``
-        # (Employee drawer's Matched Clips tab). Bulk query — one
-        # ``DISTINCT ON`` instead of N per-row lookups.
-        matched_crop_by_clip: dict[int, int] = {}
-        if matched_employee_id is not None and clip_ids:
-            crop_rows = conn.execute(
-                select(
-                    face_crops.c.person_clip_id,
-                    face_crops.c.id,
-                    face_crops.c.quality_score,
-                )
-                .where(
-                    face_crops.c.tenant_id == scope.tenant_id,
-                    face_crops.c.employee_id == matched_employee_id,
-                    face_crops.c.person_clip_id.in_(clip_ids),
-                )
-                .order_by(
-                    face_crops.c.person_clip_id,
-                    face_crops.c.quality_score.desc(),
-                    face_crops.c.id.asc(),
-                )
-            ).all()
-            for cr in crop_rows:
-                cid = int(cr.person_clip_id)
-                if cid not in matched_crop_by_clip:
-                    matched_crop_by_clip[cid] = int(cr.id)
+    name_map: dict[int, str] = {}
+    processed_by_clip: dict[int, list[str]] = {}
+    processing_by_clip: dict[int, list[str]] = {}
+    matched_crop_by_clip: dict[int, int] = {}
+    clip_ids = [int(r.id) for r in rows]
+
+    # Auxiliary lookups — names, per-UC processing status, best-quality
+    # face_crop. On a fresh tenant these all return empty, so the cost
+    # is one round-trip with no rows. Failures here degrade the cards
+    # (no thumbnails, no processed-UC chips) but don't 500 the list.
+    try:
+        with get_engine().begin() as conn:
+            name_map = _resolve_employee_names(conn, scope, all_ids)
+
+            # Batch-fetch processed + in-flight use cases for every clip
+            # in this page. One query covers both buckets so a row that
+            # is currently being processed shows the right Processing
+            # Status pill instead of "Saved".
+            if clip_ids:
+                # NB: ``clip_processing_results.status`` values:
+                #   * "completed" — finished, drives the "Processed" label
+                #   * "processing" / "pending" — in flight; the operator
+                #     should see "Processing" not "Saved" while these
+                #     exist
+                #   * "failed" — terminal failure; we surface as Saved +
+                #     the Failed/skipped counter so the Identify Event
+                #     UI can retry.
+                cpr_rows = conn.execute(
+                    select(
+                        clip_processing_results.c.person_clip_id,
+                        clip_processing_results.c.use_case,
+                        clip_processing_results.c.status,
+                    ).where(
+                        clip_processing_results.c.tenant_id == scope.tenant_id,
+                        clip_processing_results.c.person_clip_id.in_(clip_ids),
+                        clip_processing_results.c.status.in_(
+                            ("completed", "processing", "pending")
+                        ),
+                    )
+                ).all()
+                for cpr in cpr_rows:
+                    cid = int(cpr.person_clip_id)
+                    uc = str(cpr.use_case).lower()
+                    status = str(cpr.status).lower()
+                    target = (
+                        processed_by_clip
+                        if status == "completed"
+                        else processing_by_clip
+                    )
+                    bucket = target.setdefault(cid, [])
+                    if uc not in bucket:
+                        bucket.append(uc)
+                for bucket in processed_by_clip.values():
+                    bucket.sort()
+                for bucket in processing_by_clip.values():
+                    bucket.sort()
+
+            # Per-clip best-quality face_crop for the requested
+            # employee. Only populated when the caller passed
+            # ``matched_employee_id`` (Employee drawer's Matched Clips
+            # tab). Bulk query — one ``DISTINCT ON`` instead of N
+            # per-row lookups.
+            if matched_employee_id is not None and clip_ids:
+                crop_rows = conn.execute(
+                    select(
+                        face_crops.c.person_clip_id,
+                        face_crops.c.id,
+                        face_crops.c.quality_score,
+                    )
+                    .where(
+                        face_crops.c.tenant_id == scope.tenant_id,
+                        face_crops.c.employee_id == matched_employee_id,
+                        face_crops.c.person_clip_id.in_(clip_ids),
+                    )
+                    .order_by(
+                        face_crops.c.person_clip_id,
+                        face_crops.c.quality_score.desc(),
+                        face_crops.c.id.asc(),
+                    )
+                ).all()
+                for cr in crop_rows:
+                    cid = int(cr.person_clip_id)
+                    if cid not in matched_crop_by_clip:
+                        matched_crop_by_clip[cid] = int(cr.id)
+    except Exception:
+        logger.exception(
+            "list_person_clips: auxiliary lookups (names / per-UC / "
+            "face_crops) failed; rendering rows with empty annotations "
+            "for tenant_id=%s",
+            scope.tenant_id,
+        )
 
     # Migration 0054 — overlay live person counts on the 🔴 LIVE
     # rows. The placeholder INSERT at clip start sets person_count=0;

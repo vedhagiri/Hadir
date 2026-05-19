@@ -48,8 +48,8 @@ export function ApprovalsPage() {
   const pending = useInboxPending();
   const decided = useInboxDecided();
   const all = useRequests();
-  const deleteRequests = useDeleteRequestList();
   const showDeleteTab = role === "HR" || role === "Admin";
+  const deleteRequests = useDeleteRequestList({ enabled: showDeleteTab });
 
   const [tab, setTab] = useState<Tab>("pending");
   const [openId, setOpenId] = useState<number | null>(null);

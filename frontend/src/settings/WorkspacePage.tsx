@@ -5,14 +5,18 @@
 // makes — shift boundaries, "today" rollover, scheduler firings,
 // report dates. This page is where Admin / HR sets it.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../api/client";
+import { DatePicker, todayIso } from "../components/DatePicker";
+import { ModalShell } from "../components/DrawerShell";
 import { Icon } from "../shell/Icon";
 import {
+  useRegenerateAttendanceRange,
   usePatchTenantSettings,
   useTenantSettings,
+  type RegenerateRangeResponse,
 } from "../leave-calendar/hooks";
 import { SettingsTabs } from "./SettingsTabs";
 
@@ -58,10 +62,22 @@ export function WorkspacePage() {
   const [customMode, setCustomMode] = useState(false);
   const [customValue, setCustomValue] = useState("");
 
+  // Surfaces the regenerate-historical CTA after a real timezone
+  // change. `lastChangedTz` remembers the previous value so we can
+  // compute whether the most-recent save was actually a tz flip
+  // (vs. weekend-day toggle, which doesn't need regen).
+  const [tzJustChanged, setTzJustChanged] = useState(false);
+  const [previousTz, setPreviousTz] = useState<string | null>(null);
+  const [regenOpen, setRegenOpen] = useState(false);
+  const initialTzRef = useRef<string | null>(null);
+
   // Initial sync: if the saved timezone isn't in the curated list,
   // jump straight to Custom mode so the operator can see/edit it.
   useEffect(() => {
     if (!settings.data) return;
+    if (initialTzRef.current === null) {
+      initialTzRef.current = settings.data.timezone;
+    }
     const inList = COMMON_TIMEZONES.some(
       (z) => z.value === settings.data!.timezone,
     );
@@ -74,9 +90,14 @@ export function WorkspacePage() {
   const onSelectTimezone = async (tz: string) => {
     setError(null);
     setSavedToast(null);
+    const oldTz = settings.data?.timezone ?? null;
     try {
       await patch.mutateAsync({ timezone: tz });
       setSavedToast(`Timezone set to ${tz}`);
+      if (oldTz && oldTz !== tz) {
+        setPreviousTz(oldTz);
+        setTzJustChanged(true);
+      }
     } catch (err) {
       setError(extractError(err));
     }
@@ -132,6 +153,25 @@ export function WorkspacePage() {
             maxWidth: 720,
           }}
         >
+          {tzJustChanged && (
+            <TimezoneChangedBanner
+              previousTz={previousTz ?? "the previous timezone"}
+              currentTz={settings.data.timezone}
+              onRegenerate={() => setRegenOpen(true)}
+              onDismiss={() => setTzJustChanged(false)}
+            />
+          )}
+
+          {regenOpen && (
+            <RegenerateHistoricalModal
+              currentTz={settings.data.timezone}
+              onClose={(completed) => {
+                setRegenOpen(false);
+                if (completed) setTzJustChanged(false);
+              }}
+            />
+          )}
+
           {/* --- Timezone card --- */}
           <section
             className="card"
@@ -288,6 +328,259 @@ export function WorkspacePage() {
         </div>
       )}
     </>
+  );
+}
+
+function TimezoneChangedBanner({
+  previousTz,
+  currentTz,
+  onRegenerate,
+  onDismiss,
+}: {
+  previousTz: string;
+  currentTz: string;
+  onRegenerate: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div
+      role="alert"
+      style={{
+        background: "var(--warning-soft)",
+        color: "var(--warning-text)",
+        border: "1px solid var(--warning-border)",
+        borderRadius: "var(--radius)",
+        padding: "12px 14px",
+        display: "flex",
+        gap: 12,
+        alignItems: "flex-start",
+      }}
+    >
+      <Icon name="info" size={14} />
+      <div style={{ flex: 1, fontSize: 13, lineHeight: 1.5 }}>
+        <strong style={{ display: "block", marginBottom: 4 }}>
+          Timezone changed — historical attendance may be stale.
+        </strong>
+        <div>
+          Today's attendance was automatically recomputed in{" "}
+          <code>{currentTz}</code>. Past dates were computed in{" "}
+          <code>{previousTz}</code>; in / out / total / late /
+          overtime numbers near midnight may be off by the time
+          difference. Regenerate a date range to refresh them.
+        </div>
+        <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            className="btn btn-sm btn-primary"
+            onClick={onRegenerate}
+          >
+            Regenerate historical attendance…
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={onDismiss}
+          >
+            Dismiss
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RegenerateHistoricalModal({
+  currentTz,
+  onClose,
+}: {
+  currentTz: string;
+  onClose: (completed: boolean) => void;
+}) {
+  const regenerate = useRegenerateAttendanceRange();
+  const [start, setStart] = useState<string>(() => {
+    // Default: 7 days back (covers the past week — common request).
+    const d = new Date();
+    d.setDate(d.getDate() - 7);
+    return d.toISOString().slice(0, 10);
+  });
+  const [end, setEnd] = useState<string>(() => todayIso());
+  const [result, setResult] = useState<RegenerateRangeResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const rangeDays = (() => {
+    try {
+      const s = new Date(start).getTime();
+      const e = new Date(end).getTime();
+      if (Number.isNaN(s) || Number.isNaN(e) || e < s) return null;
+      return Math.round((e - s) / 86400000) + 1;
+    } catch {
+      return null;
+    }
+  })();
+
+  const onRun = async () => {
+    setError(null);
+    setResult(null);
+    if (!start || !end) {
+      setError("Both start and end dates are required.");
+      return;
+    }
+    if (rangeDays === null) {
+      setError("Invalid date range.");
+      return;
+    }
+    if (rangeDays > 92) {
+      setError(
+        `Range is ${rangeDays} days; maximum is 92. Split into smaller ranges.`,
+      );
+      return;
+    }
+    try {
+      const resp = await regenerate.mutateAsync({ start, end });
+      setResult(resp);
+    } catch (err) {
+      setError(extractError(err));
+    }
+  };
+
+  return (
+    <ModalShell open onClose={() => onClose(result !== null)}>
+      <div
+        role="dialog"
+        aria-labelledby="regen-historical-title"
+        style={{
+          // ModalShell renders only the scrim — the panel has to carry
+          // its own fixed-position centering. Mirrors the pattern in
+          // requests/OverrideModal.tsx so it sits in the middle of the
+          // viewport instead of dropping into the page's document flow
+          // (where it would render bottom-left after the long Settings
+          // page content).
+          position: "fixed",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -50%)",
+          width: 520,
+          maxWidth: "90vw",
+          maxHeight: "90vh",
+          overflowY: "auto",
+          background: "var(--bg)",
+          border: "1px solid var(--border-strong)",
+          borderRadius: "var(--radius)",
+          padding: 20,
+          zIndex: 60,
+          boxShadow: "var(--shadow-lg)",
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+        }}
+      >
+        <header>
+          <h2
+            id="regen-historical-title"
+            style={{ margin: 0, fontSize: 16, fontWeight: 600 }}
+          >
+            Regenerate historical attendance
+          </h2>
+          <p
+            style={{
+              margin: "4px 0 0",
+              fontSize: 12.5,
+              color: "var(--text-secondary)",
+              lineHeight: 1.5,
+            }}
+          >
+            Recomputes attendance for every active employee on each
+            date in the range. Uses the current timezone{" "}
+            <code>{currentTz}</code>. Maximum 92 days per call.
+          </p>
+        </header>
+
+        <div style={{ display: "flex", gap: 10 }}>
+          <label style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
+            <span style={labelStyle}>Start (inclusive)</span>
+            <DatePicker
+              value={start}
+              onChange={setStart}
+              max={end || todayIso()}
+              ariaLabel="Start date"
+            />
+          </label>
+          <label style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
+            <span style={labelStyle}>End (inclusive)</span>
+            <DatePicker
+              value={end}
+              onChange={setEnd}
+              max={todayIso()}
+              ariaLabel="End date"
+            />
+          </label>
+        </div>
+
+        {rangeDays !== null && (
+          <div className="text-xs text-dim">
+            {rangeDays} day{rangeDays === 1 ? "" : "s"} in range
+          </div>
+        )}
+
+        {error && (
+          <div
+            role="alert"
+            style={{
+              background: "var(--danger-soft)",
+              color: "var(--danger-text)",
+              padding: "8px 12px",
+              borderRadius: "var(--radius-sm)",
+              fontSize: 12.5,
+            }}
+          >
+            {error}
+          </div>
+        )}
+
+        {result && (
+          <div
+            role="status"
+            style={{
+              background: "var(--success-soft)",
+              color: "var(--success-text)",
+              padding: "10px 12px",
+              borderRadius: "var(--radius-sm)",
+              fontSize: 12.5,
+              lineHeight: 1.5,
+            }}
+          >
+            Recomputed <strong>{result.total_rows_upserted}</strong>{" "}
+            attendance row{result.total_rows_upserted === 1 ? "" : "s"}{" "}
+            across <strong>{result.days_processed}</strong> day
+            {result.days_processed === 1 ? "" : "s"} ({result.start} →{" "}
+            {result.end}).
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => onClose(result !== null)}
+            disabled={regenerate.isPending}
+          >
+            {result ? "Close" : "Cancel"}
+          </button>
+          {!result && (
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              onClick={onRun}
+              disabled={regenerate.isPending || !rangeDays || rangeDays > 92}
+            >
+              {regenerate.isPending
+                ? "Regenerating…"
+                : "Run regenerate"}
+            </button>
+          )}
+        </div>
+      </div>
+    </ModalShell>
   );
 }
 

@@ -370,13 +370,22 @@ def _branding_for_tenant(conn: Connection, *, tenant_id: int) -> dict:
     }
 
 
+class TenantNotFoundError(Exception):
+    """Raised when ``_tenant_summary`` can't resolve the tenant row.
+
+    The router maps this to HTTP 404; an unhandled assert here would
+    return 500 instead, which is bad UX on a stale/deleted tenant.
+    """
+
+
 def _tenant_summary(conn: Connection, *, tenant_id: int) -> dict:
     row = conn.execute(
         select(
             tenants.c.id, tenants.c.name, tenants.c.slug, tenants.c.schema_name
         ).where(tenants.c.id == tenant_id)
     ).first()
-    assert row is not None, f"tenant id {tenant_id} not found"
+    if row is None:
+        raise TenantNotFoundError(f"tenant id {tenant_id} not found")
     return {
         "id": int(row.id),
         "name": str(row.name),

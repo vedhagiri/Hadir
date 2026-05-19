@@ -28,6 +28,7 @@ import {
   useDeletePolicy,
   usePatchPolicy,
   usePolicies,
+  useSetPolicyAsDefault,
 } from "./hooks";
 import type {
   AssignmentResponse,
@@ -45,6 +46,7 @@ export function PoliciesPage() {
   const assignments = useAssignments();
   const create = useCreatePolicy();
   const del = useDeletePolicy();
+  const setDefault = useSetPolicyAsDefault();
   // Three-step import modal (drag-and-drop + preview + confirm) —
   // matches the employees import flow. Replaces the prior inline
   // hidden-file-input that imported in one shot with no preview.
@@ -91,6 +93,38 @@ export function PoliciesPage() {
     }
     return map;
   }, [assignmentList]);
+
+  // The tenant-default policy id is the policy_id of the
+  // ``scope_type='tenant'`` assignment row. The resolver picks it as
+  // tier-5 fallback (after Custom / Ramadan / employee / department).
+  // At most one row is expected; if multiple exist, we treat the first
+  // as authoritative — the backend Set-as-default endpoint dedupes
+  // on every write.
+  const defaultPolicyId = useMemo(() => {
+    const row = assignmentList.find(
+      (a) => a.scope_type === "tenant" && a.scope_id === null,
+    );
+    return row ? row.policy_id : null;
+  }, [assignmentList]);
+
+  const onSetDefault = async (policyId: number) => {
+    setError(null);
+    try {
+      await setDefault.mutateAsync(policyId);
+      const name =
+        policyList.find((p) => p.id === policyId)?.name ?? "policy";
+      toast.success(`"${name}" is now the default shift policy.`);
+    } catch (err) {
+      const msg =
+        err instanceof ApiError
+          ? typeof (err.body as { detail?: unknown })?.detail === "string"
+            ? String((err.body as { detail?: unknown }).detail)
+            : `Could not set default (${err.status}).`
+          : "Could not set default.";
+      setError(msg);
+      toast.error(msg);
+    }
+  };
 
   const selected = policyList.find((p) => p.id === selectedId) ?? null;
 
@@ -232,6 +266,7 @@ export function PoliciesPage() {
               {policyList.map((p) => {
                 const isSelected = p.id === selectedId;
                 const isActive = p.active_until === null;
+                const isDefault = p.id === defaultPolicyId;
                 const rowAssignments = assignmentsByPolicy[p.id] ?? [];
                 const subtitle = renderSubtitle(p, rowAssignments);
                 return (
@@ -264,9 +299,28 @@ export function PoliciesPage() {
                         style={{
                           fontWeight: isSelected ? 600 : 500,
                           fontSize: 13.5,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          flexWrap: "wrap",
                         }}
                       >
-                        {p.name}
+                        <span>{p.name}</span>
+                        {isDefault && (
+                          <span
+                            className="pill pill-accent"
+                            title="Tenant-wide default policy"
+                            style={{
+                              fontSize: 9.5,
+                              padding: "1px 6px",
+                              letterSpacing: "0.02em",
+                              textTransform: "uppercase",
+                              fontWeight: 700,
+                            }}
+                          >
+                            Default
+                          </span>
+                        )}
                       </div>
                       <div
                         className="mono text-xs text-dim"
@@ -320,6 +374,9 @@ export function PoliciesPage() {
               <PolicyDetail
                 policy={selected}
                 assignments={assignmentsByPolicy[selected.id] ?? []}
+                isDefault={selected.id === defaultPolicyId}
+                onSetDefault={() => onSetDefault(selected.id)}
+                settingDefault={setDefault.isPending}
                 onDelete={() => setDeleting(selected)}
                 onEdit={() => setEditing(selected)}
               />
@@ -725,11 +782,17 @@ function PolicyEditDrawer({
 function PolicyDetail({
   policy,
   assignments,
+  isDefault,
+  onSetDefault,
+  settingDefault,
   onDelete,
   onEdit,
 }: {
   policy: PolicyResponse;
   assignments: AssignmentResponse[];
+  isDefault: boolean;
+  onSetDefault: () => void;
+  settingDefault: boolean;
   onDelete: () => void;
   onEdit: () => void;
 }) {
@@ -766,9 +829,35 @@ function PolicyDetail({
               {policy.name}
             </h2>
             <span className="pill pill-accent">{policy.type}</span>
+            {isDefault && (
+              <span
+                className="pill pill-accent"
+                title="Tenant-wide default policy — applies when no department / employee override matches."
+                style={{
+                  fontSize: 10.5,
+                  padding: "2px 8px",
+                  letterSpacing: "0.02em",
+                  textTransform: "uppercase",
+                  fontWeight: 700,
+                }}
+              >
+                Default
+              </span>
+            )}
             {!isActive && <span className="pill pill-neutral">Off</span>}
           </div>
         </div>
+        {!isDefault && isActive && (
+          <button
+            className="btn btn-sm"
+            onClick={onSetDefault}
+            disabled={settingDefault}
+            title="Make this policy the tenant-wide default. Replaces any existing default."
+          >
+            <Icon name="check" size={11} />{" "}
+            {settingDefault ? "Setting…" : "Set as default"}
+          </button>
+        )}
         <button
           className="btn btn-sm"
           onClick={onEdit}

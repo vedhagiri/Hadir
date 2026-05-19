@@ -99,7 +99,10 @@ function DayCell({
   const clickable = day.status !== "future";
 
   // Cell background — match the screenshot's flat white cells,
-  // tinted only for special statuses.
+  // tinted only for special statuses. ``waiting`` is the today-only
+  // state for employees who can still arrive within the open shift
+  // window — distinct from absent (danger) so the operator isn't
+  // misled about staff who simply haven't checked in yet.
   const bg =
     day.status === "weekend"
       ? "var(--info-soft)"
@@ -109,7 +112,9 @@ function DayCell({
           ? "var(--warning-soft)"
           : day.status === "absent"
             ? "var(--danger-soft)"
-            : "var(--bg-elev)";
+            : day.status === "waiting"
+              ? "var(--accent-soft)"
+              : "var(--bg-elev)";
 
   const totalHours =
     day.total_minutes != null && day.total_minutes > 0
@@ -283,6 +288,11 @@ function labelFor(
   }
   if (day.holiday_name) return day.holiday_name;
   if (day.leave_name) return day.leave_name;
+  if (day.status === "waiting") {
+    return t("calendar.waitingShort", {
+      defaultValue: "Waiting",
+    }) as string;
+  }
   if (day.status === "absent") {
     return t("calendar.absentShort", {
       defaultValue: "Absent",
@@ -308,6 +318,8 @@ function pillBg(status: CalendarStatus): string {
       return "var(--danger-soft)";
     case "late":
       return "var(--warning-soft)";
+    case "waiting":
+      return "var(--accent-soft)";
     default:
       return "var(--bg-sunken)";
   }

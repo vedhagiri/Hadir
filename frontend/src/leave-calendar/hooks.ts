@@ -166,6 +166,57 @@ export function usePatchTenantSettings() {
         method: "PATCH",
         body: input,
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: SETTINGS_KEY }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: SETTINGS_KEY });
+      // A timezone or weekend-days change shifts every downstream
+      // attendance read. Wipe the related caches so the UI doesn't
+      // serve stale old-tz responses after the operator saves. Prefix
+      // invalidation matches any query whose key starts with these
+      // tokens — covers daily attendance, my-attendance, employee
+      // ranges, dashboards, system-health "today's events", and every
+      // calendar view (company / person / day-detail).
+      qc.invalidateQueries({ queryKey: ["attendance"] });
+      qc.invalidateQueries({ queryKey: ["calendar"] });
+      qc.invalidateQueries({ queryKey: ["system"] });
+    },
+  });
+}
+
+// Bulk historical regenerate after a tz change. Walks every date in
+// [start, end] server-side and recomputes attendance for every active
+// employee. Backend caps the range at 92 days.
+export interface RegenerateRangePerDate {
+  date: string; // YYYY-MM-DD
+  rows_upserted: number;
+}
+
+export interface RegenerateRangeResponse {
+  start: string;
+  end: string;
+  days_processed: number;
+  total_rows_upserted: number;
+  per_date: RegenerateRangePerDate[];
+}
+
+export function useRegenerateAttendanceRange() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { start: string; end: string }) => {
+      const qs = new URLSearchParams({
+        start: input.start,
+        end: input.end,
+      }).toString();
+      return api<RegenerateRangeResponse>(
+        `/api/attendance/regenerate-range?${qs}`,
+        { method: "POST" },
+      );
+    },
+    onSuccess: () => {
+      // The regenerate rewrites attendance_records — wipe every cache
+      // that reads from it.
+      qc.invalidateQueries({ queryKey: ["attendance"] });
+      qc.invalidateQueries({ queryKey: ["calendar"] });
+      qc.invalidateQueries({ queryKey: ["system"] });
+    },
   });
 }

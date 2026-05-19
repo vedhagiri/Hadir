@@ -96,49 +96,6 @@ _DEFAULT_POLICY = {
     },
 }
 
-# Tables that ``maugood_app`` operates on with full CRUD inside the new
-# tenant schema. ``audit_log`` is excluded — its grants are narrower.
-_APP_CRUD_TABLES = (
-    "users",
-    "roles",
-    "user_roles",
-    "departments",
-    "user_departments",
-    "user_sessions",
-    "employees",
-    "employee_photos",
-    "cameras",
-    "detection_events",
-    "camera_health_snapshots",
-    "shift_policies",
-    "attendance_records",
-    "tenant_branding",
-    "tenant_oidc_config",
-    "manager_assignments",
-    # P29 (#3) — three-tier hierarchy. Mirrors departments +
-    # user_departments granted above.
-    "divisions",
-    "sections",
-    "user_divisions",
-    "user_sections",
-    "policy_assignments",
-    "leave_types",
-    "holidays",
-    "approved_leaves",
-    "tenant_settings",
-    "custom_fields",
-    "custom_field_values",
-    "requests",
-    "request_attachments",
-    "request_reason_categories",
-    "notifications",
-    "notification_preferences",
-    "email_config",
-    "report_schedules",
-    "report_runs",
-    "erp_export_config",
-)
-
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -251,34 +208,19 @@ def _create_per_tenant_tables(conn: Connection, *, schema_name: str) -> None:
 
 
 def _apply_grants(conn: Connection, *, schema_name: str) -> None:
-    """Mirror the grants that 0001-0006 applied to ``main`` for the new schema."""
+    """Apply ownership + grants via the shared grants reconciler.
 
-    conn.execute(text(f'ALTER SCHEMA "{schema_name}" OWNER TO maugood_admin'))
-    conn.execute(text(f'GRANT USAGE ON SCHEMA "{schema_name}" TO maugood_app'))
+    Single source of truth lives in ``scripts._grants.sync_schema_grants``
+    so the provisioning step and the post-migration hook in
+    ``scripts.migrate`` can never drift on the contract. The helper
+    discovers tables from ``information_schema`` rather than a static
+    allowlist — any table ``metadata.create_all`` materialised in the
+    new schema is automatically covered.
+    """
 
-    for tbl in _APP_CRUD_TABLES:
-        conn.execute(text(f'ALTER TABLE "{schema_name}"."{tbl}" OWNER TO maugood_admin'))
-        conn.execute(
-            text(
-                f'GRANT SELECT, INSERT, UPDATE, DELETE ON "{schema_name}"."{tbl}" TO maugood_app'
-            )
-        )
+    from scripts._grants import sync_schema_grants  # noqa: PLC0415
 
-    # audit_log is append-only at the grant level — INSERT + SELECT only.
-    conn.execute(text(f'ALTER TABLE "{schema_name}"."audit_log" OWNER TO maugood_admin'))
-    conn.execute(
-        text(f'GRANT SELECT, INSERT ON "{schema_name}"."audit_log" TO maugood_app')
-    )
-
-    conn.execute(
-        text(f'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA "{schema_name}" TO maugood_app')
-    )
-    conn.execute(
-        text(
-            f'ALTER DEFAULT PRIVILEGES IN SCHEMA "{schema_name}" '
-            "GRANT USAGE, SELECT ON SEQUENCES TO maugood_app"
-        )
-    )
+    sync_schema_grants(conn, schema_name)
 
 
 def _seed_defaults(
@@ -576,6 +518,18 @@ def provision(
                 conn.execute(text(f'SET search_path TO "{schema_name}", public'))
 
                 _create_per_tenant_tables(conn, schema_name=schema_name)
+                # Defence in depth: if metadata + DB drifted in either
+                # direction (a column in metadata but skipped by
+                # create_all on this connection, or vice versa), the
+                # structure reconciler heals the schema before grants
+                # land on top of it. No-op on a freshly create_all'd
+                # schema — the work happens when db.py lags behind a
+                # forward ALTER migration.
+                from scripts._schema_sync import (  # noqa: PLC0415
+                    sync_schema_structure,
+                )
+
+                sync_schema_structure(conn, schema_name)
                 _apply_grants(conn, schema_name=schema_name)
 
                 user_id = _seed_defaults(

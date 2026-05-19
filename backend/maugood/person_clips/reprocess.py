@@ -248,6 +248,141 @@ def _match_detections(
     return det_employee_map, matched_ids, unknown_count, match_details, time.time() - t0
 
 
+def match_only_from_saved_crops(
+    engine,
+    scope: TenantScope,
+    *,
+    clip_id: int,
+    use_case: str,
+) -> tuple[set[int], int, list[dict], int, float, int]:
+    """Boot-time recovery (Class B) entry point: run matching on
+    already-saved UC1 face_crops without re-decoding the clip.
+
+    Loads every face_crops row for ``(clip_id, use_case)`` whose
+    ``employee_id IS NULL`` (i.e. still un-matched), decrypts the
+    stored crop bytes, runs the InsightFace recognition embed on each,
+    feeds the embedding to the matcher cache, and UPDATEs
+    ``face_crops.employee_id`` + ``match_confidence`` on a hit.
+    Rows whose decryption or recognition fails are left as NULL
+    (treated as unknown) — they don't block the rest of the resume.
+
+    Returns:
+        matched_ids        — set of employee IDs newly matched
+        unknown_count      — crops with no match (or decode/recog fail)
+        match_details      — [{employee_id, confidence}]
+        face_crop_count    — total crops considered (matched + unknown)
+        match_duration_s   — wall time
+        crops_processed    — number of crops where embedding succeeded
+    """
+
+    from maugood.capture.analyzer import get_analyzer  # noqa: PLC0415
+
+    import cv2  # noqa: PLC0415
+
+    t0 = time.time()
+    analyzer = get_analyzer()
+
+    with engine.begin() as conn:
+        rows = conn.execute(
+            sa_select(
+                face_crops.c.id,
+                face_crops.c.file_path,
+            )
+            .where(
+                face_crops.c.tenant_id == scope.tenant_id,
+                face_crops.c.person_clip_id == clip_id,
+                face_crops.c.use_case == use_case,
+                face_crops.c.employee_id.is_(None),
+                face_crops.c.file_path.isnot(None),
+            )
+            .order_by(face_crops.c.id.asc())
+        ).all()
+
+    # Also count any already-matched rows so the final face_crop_count
+    # reflects the total crops persisted (matching the contract that
+    # the regular pipeline writes).
+    with engine.begin() as conn:
+        total_existing = int(
+            conn.execute(
+                sa_select(sa_func.count()).where(
+                    face_crops.c.tenant_id == scope.tenant_id,
+                    face_crops.c.person_clip_id == clip_id,
+                    face_crops.c.use_case == use_case,
+                )
+            ).scalar()
+            or 0
+        )
+
+    matched_ids: set[int] = set()
+    seen_employees: dict[int, float] = {}
+    unknown_count = 0
+    crops_processed = 0
+
+    updates: list[tuple[int, Optional[int], Optional[float]]] = []
+    for r in rows:
+        crop_id = int(r.id)
+        try:
+            cipher = Path(str(r.file_path)).read_bytes()
+        except OSError:
+            unknown_count += 1
+            continue
+        try:
+            plain = decrypt_bytes(cipher)
+        except Exception:  # noqa: BLE001
+            unknown_count += 1
+            continue
+        try:
+            arr = np.frombuffer(plain, dtype=np.uint8)
+            crop_bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if crop_bgr is None or crop_bgr.size == 0:
+                unknown_count += 1
+                continue
+        except Exception:  # noqa: BLE001
+            unknown_count += 1
+            continue
+        emb = analyzer.embed_crop(crop_bgr)
+        if emb is None:
+            unknown_count += 1
+            continue
+        crops_processed += 1
+        probe = np.asarray(emb, dtype=np.float32)
+        mm = matcher_cache.match(scope, probe)
+        if mm is None or mm.classification != "active":
+            unknown_count += 1
+            continue
+        eid = int(mm.employee_id)
+        conf = float(getattr(mm, "confidence", 0.0))
+        matched_ids.add(eid)
+        if eid not in seen_employees or conf > seen_employees[eid]:
+            seen_employees[eid] = conf
+        updates.append((crop_id, eid, conf))
+
+    if updates:
+        with engine.begin() as conn:
+            for crop_id, emp_id, conf in updates:
+                conn.execute(
+                    sa_update(face_crops)
+                    .where(
+                        face_crops.c.id == crop_id,
+                        face_crops.c.tenant_id == scope.tenant_id,
+                    )
+                    .values(employee_id=emp_id, match_confidence=conf)
+                )
+
+    match_details = [
+        {"employee_id": eid, "confidence": round(conf, 4)}
+        for eid, conf in seen_employees.items()
+    ]
+    return (
+        matched_ids,
+        unknown_count,
+        match_details,
+        max(total_existing, len(rows)),
+        time.time() - t0,
+        crops_processed,
+    )
+
+
 # ---------------------------------------------------------------------------
 # UC2 — reference-parity quality scorer + best-per-track save
 # ---------------------------------------------------------------------------
@@ -1778,3 +1913,183 @@ def get_active_single_clip_runs(tenant_id: int) -> list[int]:
         return sorted(
             cid for (t, cid), live in _single_clip_running.items() if t == tenant_id and live
         )
+
+
+# ---------------------------------------------------------------------------
+# Boot-time recovery for ReprocessFaceMatchWorker (P29)
+# ---------------------------------------------------------------------------
+
+
+def recover_legacy_reprocess_at_boot(
+    *, delay_s: Optional[int] = None
+) -> threading.Thread:
+    """Spawn a daemon thread that sweeps ``person_clips`` rows left at
+    ``matched_status='processing'`` by an unclean shutdown.
+
+    Per-clip decision mirrors the clip_pipeline classifier:
+
+    * ``matched_employees`` populated → Class A: flip ``matched_status``
+      to ``'processed'`` (no reprocessing).
+    * ``face_crops`` rows missing or disk artifacts absent → Class C:
+      flip back to ``'pending'`` and re-trigger via
+      ``trigger_single_clip_reprocess``.
+    * Otherwise (crops valid) → Class C-equivalent still — the legacy
+      pipeline has no stage boundary so we re-trigger the per-clip
+      flow; the trigger reuses existing crops to the extent the
+      ``_process_clip_for_use_case`` path supports it.
+
+    Audit row per recovery: ``person_clip.recovered_at_boot``.
+    """
+
+    from maugood.clip_pipeline import recovery as _recovery  # noqa: PLC0415
+    from maugood.db import tenant_context  # noqa: PLC0415
+
+    actual_delay = (
+        _recovery.RECOVERY_DELAY_SECONDS if delay_s is None else delay_s
+    )
+
+    def _entry() -> None:
+        if actual_delay > 0:
+            time.sleep(actual_delay)
+        logger.info(
+            "reprocess recovery: starting (delay_s=%d)", actual_delay
+        )
+
+        tenants = _recovery.discover_active_tenants()
+        if not tenants:
+            return
+
+        engine = get_engine()
+        recovered_a = recovered_c = skipped = 0
+        for tenant_id, schema in tenants:
+            scope = TenantScope(
+                tenant_id=tenant_id, tenant_schema=schema
+            )
+            try:
+                with tenant_context(schema):
+                    with engine.begin() as conn:
+                        rows = conn.execute(
+                            sa_select(
+                                person_clips.c.id,
+                                person_clips.c.matched_employees,
+                            ).where(
+                                person_clips.c.tenant_id == tenant_id,
+                                person_clips.c.matched_status == "processing",
+                            )
+                        ).all()
+                    if not rows:
+                        continue
+                    logger.info(
+                        "reprocess recovery: tenant=%s schema=%s scanned=%d",
+                        tenant_id, schema, len(rows),
+                    )
+
+                    for r in rows:
+                        clip_id = int(r.id)
+                        matched_list = r.matched_employees or []
+
+                        # Class A: matched_employees populated but
+                        # status not flipped — likely the legacy worker
+                        # died right before its final UPDATE.
+                        if matched_list:
+                            with engine.begin() as conn:
+                                result = conn.execute(
+                                    sa_update(person_clips)
+                                    .where(
+                                        person_clips.c.id == clip_id,
+                                        person_clips.c.tenant_id == tenant_id,
+                                        person_clips.c.matched_status
+                                        == "processing",
+                                    )
+                                    .values(matched_status="processed")
+                                )
+                                applied = bool(result.rowcount or 0)
+                                if applied:
+                                    write_audit(
+                                        conn,
+                                        tenant_id=tenant_id,
+                                        actor_user_id=None,
+                                        action=(
+                                            "person_clip.recovered_at_boot"
+                                        ),
+                                        entity_type="person_clip",
+                                        entity_id=str(clip_id),
+                                        after={
+                                            "class": "A",
+                                            "label": "completed_mislabelled",
+                                            "matched_count": len(matched_list),
+                                        },
+                                    )
+                            if applied:
+                                recovered_a += 1
+                            else:
+                                skipped += 1
+                            continue
+
+                        # Class C: no match yet. Atomic flip to pending
+                        # so a concurrent recovery pass can't double-
+                        # re-trigger.
+                        with engine.begin() as conn:
+                            result = conn.execute(
+                                sa_update(person_clips)
+                                .where(
+                                    person_clips.c.id == clip_id,
+                                    person_clips.c.tenant_id == tenant_id,
+                                    person_clips.c.matched_status
+                                    == "processing",
+                                )
+                                .values(
+                                    matched_status="pending",
+                                    face_matching_progress=0,
+                                )
+                            )
+                            if (result.rowcount or 0) == 0:
+                                skipped += 1
+                                continue
+                            write_audit(
+                                conn,
+                                tenant_id=tenant_id,
+                                actor_user_id=None,
+                                action="person_clip.recovered_at_boot",
+                                entity_type="person_clip",
+                                entity_id=str(clip_id),
+                                after={
+                                    "class": "C",
+                                    "label": "full_restart",
+                                },
+                            )
+
+                        # Re-trigger the existing async per-clip flow
+                        # (which already handles its own ``_single_clip_running``
+                        # de-duplication). Heavy drip-feed cadence so
+                        # we don't slam the detector lock.
+                        triggered = trigger_single_clip_reprocess(
+                            clip_id, scope
+                        )
+                        if triggered:
+                            recovered_c += 1
+                        else:
+                            skipped += 1
+                        per = (
+                            _recovery.RECOVERY_HEAVY_INTERVAL_S
+                            / max(1, _recovery.RECOVERY_HEAVY_BURST)
+                        )
+                        if per > 0:
+                            time.sleep(per)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "reprocess recovery: tenant=%s failed (%s)",
+                    tenant_id, type(exc).__name__,
+                )
+                continue
+
+        logger.info(
+            "reprocess recovery complete: A=%d C=%d skipped=%d",
+            recovered_a, recovered_c, skipped,
+        )
+
+    t = threading.Thread(
+        target=_entry, name="reprocess-recovery", daemon=True
+    )
+    t.start()
+    return t

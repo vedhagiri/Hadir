@@ -375,6 +375,141 @@ def delete_policy(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.post(
+    "/api/policies/{policy_id}/set-as-default",
+    response_model=AssignmentResponse,
+)
+def set_policy_as_default(
+    policy_id: int,
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
+) -> AssignmentResponse:
+    """Make ``policy_id`` the tenant-wide default policy.
+
+    Atomically replaces any existing ``scope_type='tenant'``
+    ``policy_assignments`` row for this tenant with one pointing at
+    ``policy_id``. The resolver's tier 5 (tenant-scoped assignment)
+    then picks up the new policy for every employee that has no
+    employee- or department-scoped override and no active Custom /
+    Ramadan window covering the date.
+
+    Refuses to set a soft-deleted policy (``active_until`` in the
+    past) as default — the resolver would skip it and silently fall
+    through to legacy fallback, which is confusing UX.
+    """
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    engine = get_engine()
+    today = date_type.today()
+
+    with engine.begin() as conn:
+        # Target policy must exist in this tenant + be active.
+        target = conn.execute(
+            select(
+                shift_policies.c.id,
+                shift_policies.c.name,
+                shift_policies.c.active_from,
+                shift_policies.c.active_until,
+            ).where(
+                shift_policies.c.id == policy_id,
+                shift_policies.c.tenant_id == scope.tenant_id,
+            )
+        ).first()
+        if target is None:
+            raise HTTPException(status_code=404, detail="policy not found")
+        if target.active_until is not None and target.active_until < today:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "policy is archived (active_until is in the past); "
+                    "restore it before setting as default"
+                ),
+            )
+
+        # Capture the current tenant-default for the audit row + the
+        # subsequent delete. There should be at most one row, but a
+        # legacy DB may carry duplicates — drop them all.
+        before_rows = conn.execute(
+            select(
+                policy_assignments.c.id,
+                policy_assignments.c.policy_id,
+            ).where(
+                policy_assignments.c.tenant_id == scope.tenant_id,
+                policy_assignments.c.scope_type == "tenant",
+            )
+        ).all()
+        previous_policy_id = (
+            int(before_rows[0].policy_id) if before_rows else None
+        )
+
+        # Idempotent: if the requested policy is already the (sole)
+        # default, return the existing row unchanged.
+        if (
+            len(before_rows) == 1
+            and previous_policy_id == policy_id
+        ):
+            row = conn.execute(
+                select(
+                    policy_assignments.c.id,
+                    policy_assignments.c.tenant_id,
+                    policy_assignments.c.policy_id,
+                    policy_assignments.c.scope_type,
+                    policy_assignments.c.scope_id,
+                    policy_assignments.c.active_from,
+                    policy_assignments.c.active_until,
+                ).where(policy_assignments.c.id == int(before_rows[0].id))
+            ).first()
+            return _assignment_to_response(row)
+
+        # Wipe every existing tenant-scoped assignment (typically 1).
+        if before_rows:
+            conn.execute(
+                delete(policy_assignments).where(
+                    policy_assignments.c.tenant_id == scope.tenant_id,
+                    policy_assignments.c.scope_type == "tenant",
+                )
+            )
+
+        new_id = int(
+            conn.execute(
+                insert(policy_assignments)
+                .values(
+                    tenant_id=scope.tenant_id,
+                    policy_id=policy_id,
+                    scope_type="tenant",
+                    scope_id=None,
+                    active_from=today,
+                    active_until=None,
+                )
+                .returning(policy_assignments.c.id)
+            ).scalar_one()
+        )
+
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="shift_policy.default_set",
+            entity_type="shift_policy",
+            entity_id=str(policy_id),
+            before={"previous_default_policy_id": previous_policy_id},
+            after={"default_policy_id": policy_id, "name": str(target.name)},
+        )
+
+        row = conn.execute(
+            select(
+                policy_assignments.c.id,
+                policy_assignments.c.tenant_id,
+                policy_assignments.c.policy_id,
+                policy_assignments.c.scope_type,
+                policy_assignments.c.scope_id,
+                policy_assignments.c.active_from,
+                policy_assignments.c.active_until,
+            ).where(policy_assignments.c.id == new_id)
+        ).first()
+
+    return _assignment_to_response(row)
+
+
 # ---------------------------------------------------------------------------
 # BUG-040 — Shift policy XLSX import
 # ---------------------------------------------------------------------------

@@ -7,6 +7,7 @@ import { api } from "../../api/client";
 import type {
   CameraErrorsResponse,
   CameraMetadataPatch,
+  RestartAllAndRecoverResult,
   RestartAllResult,
   RestartResult,
   WorkersListResponse,
@@ -49,6 +50,32 @@ export function useRestartAllWorkers() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["operations", "workers"] });
+    },
+  });
+}
+
+// Broader "Restart All Workers" — restarts capture workers + clip
+// pipeline + reprocess worker AND triggers an immediate recovery
+// sweep. Returns the recovery class A/B/C counts so the UI can
+// surface what was reclaimed.
+export function useRestartAllAndRecover() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (): Promise<RestartAllAndRecoverResult> => {
+      return api<RestartAllAndRecoverResult>(
+        "/api/operations/workers/restart-all-and-recover",
+        { method: "POST" },
+      );
+    },
+    onSuccess: () => {
+      // Invalidate every surface the operator might compare against
+      // after a recovery sweep: worker dashboard, Pipeline Monitor,
+      // person-clips list (recording_status flips), clip-pipeline
+      // batches table.
+      qc.invalidateQueries({ queryKey: ["operations", "workers"] });
+      qc.invalidateQueries({ queryKey: ["pipeline-monitor"] });
+      qc.invalidateQueries({ queryKey: ["person-clips"] });
+      qc.invalidateQueries({ queryKey: ["clip-pipeline"] });
     },
   });
 }

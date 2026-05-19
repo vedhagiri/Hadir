@@ -114,6 +114,14 @@ function DayCell({
       color: "var(--danger-text, var(--danger))",
     },
     {
+      key: "waiting",
+      value: day.waiting_count,
+      label: t("calendar.statusShort.waiting", {
+        defaultValue: "Waiting",
+      }) as string,
+      color: "var(--accent-text, var(--accent))",
+    },
+    {
       key: "leave",
       value: day.leave_count,
       label: t("calendar.statusShort.leave", {

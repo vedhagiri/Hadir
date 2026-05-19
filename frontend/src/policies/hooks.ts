@@ -165,6 +165,23 @@ export function useCreateAssignment() {
   });
 }
 
+export function useSetPolicyAsDefault() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (policyId: number): Promise<AssignmentResponse> =>
+      api<AssignmentResponse>(`/api/policies/${policyId}/set-as-default`, {
+        method: "POST",
+      }),
+    onSuccess: () => {
+      // Both queries change — the policy list itself doesn't change
+      // (policies aren't mutated), but invalidating both keeps the
+      // "Default" badge in sync without any extra plumbing.
+      qc.invalidateQueries({ queryKey: POLICIES_KEY });
+      qc.invalidateQueries({ queryKey: ASSIGNMENTS_KEY });
+    },
+  });
+}
+
 export function useDeleteAssignment() {
   const qc = useQueryClient();
   return useMutation({

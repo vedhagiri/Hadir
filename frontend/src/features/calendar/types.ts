@@ -5,6 +5,7 @@ export type CalendarStatus =
   | "present"
   | "late"
   | "absent"
+  | "waiting"
   | "leave"
   | "weekend"
   | "holiday"
@@ -16,6 +17,10 @@ export interface CompanyDay {
   present_count: number;
   late_count: number;
   absent_count: number;
+  // Today-only count: employees marked absent who can still arrive
+  // within the open shift window. Backend defaults to 0 on past +
+  // future dates.
+  waiting_count: number;
   leave_count: number;
   active_employees: number;
   is_weekend: boolean;

@@ -56,7 +56,11 @@ class CompanyDayOut(BaseModel):
     present_count: int
     late_count: int
     absent_count: int
-    leave_count: int
+    # Today-only counter: employees marked absent who can still arrive
+    # within the open shift window. Zero on past + future dates. The
+    # frontend renders these distinctly from authoritative absences.
+    waiting_count: int = 0
+    leave_count: int = 0
     active_employees: int
     is_weekend: bool
     is_holiday: bool

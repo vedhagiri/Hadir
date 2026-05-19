@@ -73,6 +73,82 @@ def local_tz() -> ZoneInfo:
     return ZoneInfo(get_settings().local_timezone)
 
 
+def policy_shift_end_times(
+    conn: Connection,
+    scope: TenantScope,
+    policy_ids: list[int],
+) -> dict[int, Optional[time]]:
+    """Return the configured shift-end ``time`` per policy_id.
+
+    The shift end is what a "waiting / pending" check compares against:
+    while ``now_local < shift_end`` an employee with no detection events
+    is still expected to arrive (Flex window open / Fixed end-of-day not
+    yet reached). After it, treat them as absent.
+
+    Per-type extraction:
+
+    * Fixed     → ``config.end``
+    * Flex      → ``config.out_window_end``
+    * Ramadan   → ``config.end`` (Ramadan inherits the Fixed shape)
+    * Custom    → ``config.inner.end`` (Fixed inner) or
+                  ``config.inner.out_window_end`` (Flex inner); when
+                  the legacy flat keys are used (no ``inner`` wrapper),
+                  pick whichever of ``end`` / ``out_window_end`` is set.
+
+    Returns ``{policy_id: time | None}`` — None when the config is
+    missing the relevant key. Callers should treat ``None`` as
+    "shift over / unknown — don't mark waiting".
+    """
+
+    if not policy_ids:
+        return {}
+
+    rows = conn.execute(
+        select(shift_policies.c.id, shift_policies.c.config).where(
+            shift_policies.c.tenant_id == scope.tenant_id,
+            shift_policies.c.id.in_(policy_ids),
+        )
+    ).all()
+
+    result: dict[int, Optional[time]] = {}
+    for r in rows:
+        cfg = r.config or {}
+        # Custom policies may carry an ``inner`` nested config; fall
+        # back to the flat keys for legacy / non-Custom shapes.
+        inner = cfg.get("inner") if isinstance(cfg.get("inner"), dict) else {}
+        end_str = (
+            cfg.get("end")
+            or cfg.get("out_window_end")
+            or inner.get("end")
+            or inner.get("out_window_end")
+        )
+        result[int(r.id)] = _parse_hhmm(end_str)
+    # Cover policies referenced by the caller but missing from the
+    # tenant scope (deleted / cross-tenant) so callers don't KeyError.
+    for pid in policy_ids:
+        result.setdefault(int(pid), None)
+    return result
+
+
+def _parse_hhmm(value: object) -> Optional[time]:
+    """Parse a 'HH:MM' string into a naive ``time``. Returns None on
+    any parse failure — the caller treats that as 'shift over'."""
+
+    if not isinstance(value, str):
+        return None
+    parts = value.split(":")
+    if len(parts) < 2:
+        return None
+    try:
+        hh = int(parts[0])
+        mm = int(parts[1])
+    except ValueError:
+        return None
+    if not (0 <= hh <= 23 and 0 <= mm <= 59):
+        return None
+    return time(hh, mm)
+
+
 # --- P11: tenant settings + leaves + holidays ------------------------------
 
 
@@ -500,10 +576,9 @@ def resolve_policies_for_employees(
 # --- Event lookup -----------------------------------------------------------
 
 
-def _local_day_bounds(the_date: date) -> tuple[datetime, datetime]:
-    """Return (start_utc, end_utc) for the local-timezone day boundaries."""
+def _local_day_bounds(the_date: date, tz: ZoneInfo) -> tuple[datetime, datetime]:
+    """Return (start_utc, end_utc) for the given local-timezone day."""
 
-    tz = local_tz()
     local_start = datetime.combine(the_date, time(0, 0), tzinfo=tz)
     local_end = datetime.combine(the_date, time(23, 59, 59, 999999), tzinfo=tz)
     return local_start, local_end
@@ -516,9 +591,19 @@ def events_for(
     employee_id: int,
     the_date: date,
 ) -> list[datetime]:
-    """Return identified detection timestamps for the employee on the local date."""
+    """Return identified detection timestamps for the employee on the local date.
 
-    start_utc, end_utc = _local_day_bounds(the_date)
+    **Tenant-timezone aware** — loads the per-tenant ``tenant_settings``
+    row and converts the UTC-stored ``captured_at`` against the
+    tenant's own timezone (P11 red line). Pre-P11 callers used the
+    server-scoped ``local_tz()``; that fallback only fires when the
+    tenant has no ``tenant_settings`` row (load_tenant_settings
+    returns env defaults in that case).
+    """
+
+    settings = load_tenant_settings(conn, scope)
+    tz = local_tz_for(settings)
+    start_utc, end_utc = _local_day_bounds(the_date, tz)
     rows = conn.execute(
         select(detection_events.c.captured_at)
         .where(
@@ -529,7 +614,6 @@ def events_for(
         )
         .order_by(detection_events.c.captured_at.asc())
     ).all()
-    tz = local_tz()
     # Return naive local-time datetimes so the engine compares wall clocks
     # directly against policy ``start`` / ``end`` (also naive ``time``).
     return [r.captured_at.astimezone(tz).replace(tzinfo=None) for r in rows]

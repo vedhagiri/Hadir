@@ -109,13 +109,10 @@ def _compute_pending_employee_ids(
     end is still in the future and who haven't checked in yet (i.e.
     the row is "absent" with no in_time and no leave).
 
-    Reads each unique policy's config once and pulls the
-    end-of-shift time. Fixed → ``end``; Flex / Custom-Flex →
-    ``out_window_end``. Anything we can't parse is treated as
-    "shift over" so we don't mask actual absentees.
-
-    ``tenant_tz`` is the tenant's wall clock — used so the comparison
-    uses the right "now" for tenants outside the server timezone.
+    Delegates the per-policy shift-end lookup to
+    ``repository.policy_shift_end_times`` so the calendar view can
+    apply the same "waiting" logic without duplicating the config
+    parsing.
     """
 
     pending: set[int] = set()
@@ -130,45 +127,21 @@ def _compute_pending_employee_ids(
     if not candidate_rows:
         return pending
 
-    from sqlalchemy import select  # noqa: PLC0415
+    from maugood.attendance.repository import (  # noqa: PLC0415
+        policy_shift_end_times,
+    )
 
-    from maugood.db import shift_policies  # noqa: PLC0415
-
-    policy_ids = sorted({r.policy_id for r in candidate_rows})
+    policy_ids = sorted({int(r.policy_id) for r in candidate_rows})
     with get_engine().begin() as conn:
-        config_rows = conn.execute(
-            select(shift_policies.c.id, shift_policies.c.config).where(
-                shift_policies.c.tenant_id == scope.tenant_id,
-                shift_policies.c.id.in_(policy_ids),
-            )
-        ).all()
-
-    # policy_id -> end-of-shift "HH:MM" string (or None on parse failure)
-    shift_end_by_policy: dict[int, Optional[str]] = {}
-    for cr in config_rows:
-        cfg = cr.config or {}
-        end_str = (
-            cfg.get("end")
-            or cfg.get("out_window_end")
-            or cfg.get("inner", {}).get("end")
-            or cfg.get("inner", {}).get("out_window_end")
-        )
-        shift_end_by_policy[int(cr.id)] = (
-            str(end_str) if isinstance(end_str, str) else None
+        shift_end_by_policy = policy_shift_end_times(
+            conn, scope, policy_ids
         )
 
     now_local = datetime.now(timezone.utc).astimezone(tenant_tz).time()
 
     for r in candidate_rows:
-        end_str = shift_end_by_policy.get(int(r.policy_id))
-        if not end_str:
-            continue
-        try:
-            hh, mm = end_str.split(":")[:2]
-            from datetime import time as _time  # noqa: PLC0415
-
-            shift_end = _time(int(hh), int(mm))
-        except Exception:  # noqa: BLE001
+        shift_end = shift_end_by_policy.get(int(r.policy_id))
+        if shift_end is None:
             continue
         if now_local < shift_end:
             pending.add(int(r.employee_id))
@@ -382,9 +355,16 @@ def my_recent_attendance(
     """
 
     scope = TenantScope(tenant_id=user.tenant_id)
-    from maugood.attendance.repository import local_tz  # noqa: PLC0415
+    from maugood.attendance.repository import (  # noqa: PLC0415
+        load_tenant_settings,
+        local_tz_for,
+    )
 
-    today = datetime.now(timezone.utc).astimezone(local_tz()).date()
+    # P11: per-tenant timezone is the canonical clock for "today".
+    with get_engine().begin() as conn:
+        _settings = load_tenant_settings(conn, scope)
+    tenant_tz = local_tz_for(_settings)
+    today = datetime.now(timezone.utc).astimezone(tenant_tz).date()
     start = today - timedelta(days=days - 1)
 
     employee_id = _employee_row_id_for(user)
@@ -504,14 +484,20 @@ def regenerate_attendance(
 
     scope = TenantScope(tenant_id=user.tenant_id)
     from maugood.attendance import scheduler as attendance_scheduler  # noqa: PLC0415
-    from maugood.attendance.repository import local_tz  # noqa: PLC0415
-
-    the_date = (
-        target_date
-        or datetime.now(timezone.utc).astimezone(local_tz()).date()
+    from maugood.attendance.repository import (  # noqa: PLC0415
+        load_tenant_settings,
+        local_tz_for,
     )
 
-    if the_date == datetime.now(timezone.utc).astimezone(local_tz()).date():
+    # P11: tenant's own timezone drives "today" + the same-day branch.
+    with get_engine().begin() as conn:
+        _settings = load_tenant_settings(conn, scope)
+    tenant_tz = local_tz_for(_settings)
+    today_local = datetime.now(timezone.utc).astimezone(tenant_tz).date()
+
+    the_date = target_date or today_local
+
+    if the_date == today_local:
         # Today — use the bulk helper that walks every active employee.
         rows = attendance_scheduler.recompute_today(scope)
     else:
@@ -539,3 +525,121 @@ def regenerate_attendance(
         rows,
     )
     return RegenerateOut(date=the_date, rows_upserted=rows)
+
+
+class RegenerateRangePerDate(BaseModel):
+    date: date_type
+    rows_upserted: int
+
+
+class RegenerateRangeOut(BaseModel):
+    start: date_type
+    end: date_type
+    days_processed: int
+    total_rows_upserted: int
+    per_date: list[RegenerateRangePerDate]
+
+
+# Cap the range so a careless operator can't issue a multi-year request
+# that walls the request thread. 92 days ≈ a fiscal quarter — covers
+# the common "regenerate the last few months after a tz change" case.
+_REGENERATE_RANGE_MAX_DAYS = 92
+
+
+@router.post("/regenerate-range", response_model=RegenerateRangeOut)
+def regenerate_attendance_range(
+    user: Annotated[CurrentUser, Depends(current_user)],
+    start: Annotated[date_type, Query(description="Inclusive start date.")],
+    end: Annotated[date_type, Query(description="Inclusive end date.")],
+) -> RegenerateRangeOut:
+    """Recompute attendance for every date in ``[start, end]``.
+
+    Designed for the post-timezone-change recovery flow: detection
+    events stored in UTC bucket into the **new** tenant timezone,
+    fixing historical in/out/total/late/short-hours/overtime values
+    that were computed against the **old** day boundaries.
+
+    Admin/HR only. Synchronous — capped at 92 days to keep request
+    threads bounded. For longer ranges, split the call.
+    """
+
+    if "Admin" not in user.roles and "HR" not in user.roles:
+        raise HTTPException(status_code=403, detail="forbidden")
+    if start > end:
+        raise HTTPException(status_code=400, detail="start must be <= end")
+    span_days = (end - start).days + 1
+    if span_days > _REGENERATE_RANGE_MAX_DAYS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"range too large ({span_days} days); maximum is "
+                f"{_REGENERATE_RANGE_MAX_DAYS}. Split into smaller "
+                f"ranges and call this endpoint multiple times."
+            ),
+        )
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    from maugood.attendance import repository as attendance_repo  # noqa: PLC0415
+    from maugood.attendance import scheduler as attendance_scheduler  # noqa: PLC0415
+    from maugood.attendance.repository import (  # noqa: PLC0415
+        load_tenant_settings,
+        local_tz_for,
+    )
+    from maugood.db import tenant_context  # noqa: PLC0415
+
+    with get_engine().begin() as conn:
+        _settings = load_tenant_settings(conn, scope)
+    tenant_tz = local_tz_for(_settings)
+    today_local = datetime.now(timezone.utc).astimezone(tenant_tz).date()
+
+    per_date: list[RegenerateRangePerDate] = []
+    total = 0
+    with tenant_context(scope.tenant_schema):
+        current = start
+        while current <= end:
+            if current == today_local:
+                day_rows = attendance_scheduler.recompute_today(scope)
+            else:
+                day_rows = 0
+                with get_engine().begin() as conn:
+                    emp_ids = attendance_repo.active_employee_ids(
+                        conn, scope, on_date=current
+                    )
+                for eid in emp_ids:
+                    try:
+                        if attendance_scheduler.recompute_for(
+                            scope, employee_id=eid, the_date=current
+                        ):
+                            day_rows += 1
+                    except Exception:
+                        logger.exception(
+                            "regenerate-range: recompute_for failed "
+                            "(tenant_id=%s, employee_id=%s, date=%s) — "
+                            "continuing with the rest of the range",
+                            scope.tenant_id,
+                            eid,
+                            current,
+                        )
+            per_date.append(
+                RegenerateRangePerDate(
+                    date=current, rows_upserted=day_rows
+                )
+            )
+            total += day_rows
+            current = current + timedelta(days=1)
+
+    logger.info(
+        "attendance regenerate-range by user %s: %s → %s (%d days, %d rows)",
+        user.id,
+        start,
+        end,
+        span_days,
+        total,
+    )
+    return RegenerateRangeOut(
+        start=start,
+        end=end,
+        days_processed=span_days,
+        total_rows_upserted=total,
+        per_date=per_date,
+    )

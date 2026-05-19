@@ -119,7 +119,9 @@ export function EmployeesPage() {
 
   const list = useEmployeeList(filters);
   const departmentsQuery = useDepartments();
-  const pendingDeletes = useDeleteRequestList();
+  // Backend gates this at ADMIN_OR_HR — skip the request for any
+  // other role to avoid a 403 + noisy network tab on initial setup.
+  const pendingDeletes = useDeleteRequestList({ enabled: isAdmin || isHr });
   const pendingByEmployee = useMemo(() => {
     const m = new Map<number, number>();
     for (const r of pendingDeletes.data?.items ?? []) {

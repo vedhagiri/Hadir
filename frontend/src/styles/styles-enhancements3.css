@@ -668,3 +668,14 @@ input[type="radio"]:focus-visible {
   60%  { left: 100%; width: 40%; }
   100% { left: 100%; width: 40%; }
 }
+
+/* Calendar "waiting" status — today-only state for employees whose
+   shift window hasn't closed yet. Distinct from absent (danger) and
+   from leave (info) — uses the accent palette to read as
+   "expected, not yet arrived". Mirrors the existing ``.cal-day
+   .status-*`` rules in styles.css L604–609 so the cell still
+   participates in the grid's flat-white surface. */
+.cal-day.status-waiting {
+  background: var(--accent-soft);
+  border-color: transparent;
+}

@@ -23,7 +23,7 @@ from maugood.notifications.producer import notify_report_ready
 from maugood.auth.dependencies import CurrentUser, current_user
 from maugood.db import departments, get_engine, tenants
 from maugood.reporting.attendance import build_xlsx
-from maugood.reporting.pdf import build_pdf, filename_for
+from maugood.reporting.pdf import TenantNotFoundError, build_pdf, filename_for
 from maugood.tenants.scope import TenantScope
 from sqlalchemy import select as sa_select
 
@@ -224,17 +224,20 @@ def generate_attendance_pdf(
             if row is not None:
                 department_label = f"{row.code} · {row.name}"
 
-        data, rows = build_pdf(
-            conn,
-            scope,
-            start_date=payload.start,
-            end_date=payload.end,
-            department_ids=department_ids,
-            employee_id=payload.employee_id,
-            generated_by_email=user.email,
-            department_label=department_label,
-            include_employee_photos=payload.include_employee_photos,
-        )
+        try:
+            data, rows = build_pdf(
+                conn,
+                scope,
+                start_date=payload.start,
+                end_date=payload.end,
+                department_ids=department_ids,
+                employee_id=payload.employee_id,
+                generated_by_email=user.email,
+                department_label=department_label,
+                include_employee_photos=payload.include_employee_photos,
+            )
+        except TenantNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
         # Friendly slug fuels the spec'd filename
         # (``maugood-attendance-{slug}-…``). Fall back to the tenant

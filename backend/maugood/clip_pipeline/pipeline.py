@@ -74,6 +74,48 @@ MATCHING_WORKERS = _env_int("MAUGOOD_CLIP_PIPELINE_MATCHING_WORKERS", 1)
 QUEUE_MAX_DEPTH = _env_int("MAUGOOD_CLIP_PIPELINE_QUEUE_MAX_DEPTH", 4096)
 
 
+def _recovery_drip_sleep_light() -> None:
+    """Drip-feed for Class B (recognition-only) re-enqueues. Uses the
+    interval / burst constants from ``recovery`` so a single env var
+    tunes both sides.
+    """
+
+    from maugood.clip_pipeline import recovery  # noqa: PLC0415
+
+    # Convert (burst, interval) to per-submission sleep so the sweep is
+    # straight-line. Burst=10 over 2s → 200ms per submission.
+    per = recovery.RECOVERY_LIGHT_INTERVAL_S / max(
+        1, recovery.RECOVERY_LIGHT_BURST
+    )
+    if per > 0:
+        time.sleep(per)
+
+
+def _recovery_drip_sleep_heavy() -> None:
+    """Drip-feed for Class C (full-restart) re-enqueues."""
+
+    from maugood.clip_pipeline import recovery  # noqa: PLC0415
+
+    per = recovery.RECOVERY_HEAVY_INTERVAL_S / max(
+        1, recovery.RECOVERY_HEAVY_BURST
+    )
+    if per > 0:
+        time.sleep(per)
+
+
+def _summary_to_dict(summary) -> dict:
+    """Plain-dict view of a RecoverySummary for API responses."""
+
+    return {
+        "scanned": int(getattr(summary, "scanned", 0)),
+        "class_a": int(getattr(summary, "class_a", 0)),
+        "class_b": int(getattr(summary, "class_b", 0)),
+        "class_c": int(getattr(summary, "class_c", 0)),
+        "failed_cap": int(getattr(summary, "failed_cap", 0)),
+        "skipped": int(getattr(summary, "skipped", 0)),
+    }
+
+
 class ClipPipeline:
     """Process-wide singleton — see module docstring."""
 
@@ -93,6 +135,13 @@ class ClipPipeline:
         # ``self`` without circular reference at module import time.
         self._cropping_by_uc: dict[str, StageQueue[CropJob]] = {}
         self._matching: Optional[StageQueue[MatchJob]] = None
+        # P29 — guard so a manual ``recover_now`` triggered while the
+        # boot-time deferred recovery thread is still running (or another
+        # manual trigger is mid-sweep) doesn't double-fire. The atomic
+        # claim UPDATE in ``recovery.py`` would catch the race anyway,
+        # but the in-flight guard avoids spawning two threads doing the
+        # same DB walk.
+        self._recovery_in_flight = False
 
     # ---- lifecycle ---------------------------------------------------
 
@@ -127,6 +176,15 @@ class ClipPipeline:
                 MATCHING_WORKERS,
                 QUEUE_MAX_DEPTH,
             )
+
+        # P29 — deferred boot-time recovery for stuck processing rows.
+        # Spawned outside the lock because the recovery thread itself
+        # acquires it via the enqueue callbacks. A test or operator can
+        # disable via MAUGOOD_CLIP_PIPELINE_DISABLE_RECOVERY=1.
+        if os.environ.get(
+            "MAUGOOD_CLIP_PIPELINE_DISABLE_RECOVERY", ""
+        ).lower() not in ("1", "true", "yes"):
+            self._schedule_recovery()
 
     def stop(self) -> None:
         with self._lock:
@@ -298,6 +356,338 @@ class ClipPipeline:
                 "ucs": list(self.UCS),
             },
         }
+
+    # ---- boot-time + on-demand recovery -----------------------------
+
+    def recover_now(self, *, blocking: bool = False) -> Optional[dict]:
+        """Manually trigger an immediate recovery sweep — no startup
+        delay, no drip-feed cadence change. Used by the Pipeline
+        Monitor's "Restart All Workers" action.
+
+        Idempotent on concurrent calls: if a sweep is already in
+        flight, returns ``None`` immediately rather than starting a
+        second walk of the same DB rows. The atomic claim UPDATE in
+        ``recovery.claim_for_recovery`` is the load-bearing safety —
+        this guard is just a courtesy to avoid two threads doing the
+        same DB scan in parallel.
+
+        ``blocking=True`` runs synchronously on the caller's thread
+        and returns the ``RecoverySummary`` as a dict. Default
+        (False) spawns the same daemon thread shape as the boot-time
+        path, returns a small dict announcing the trigger.
+        """
+
+        with self._lock:
+            if not self._started:
+                return {"triggered": False, "reason": "pipeline not started"}
+            if self._recovery_in_flight:
+                return {"triggered": False, "reason": "recovery already in flight"}
+            self._recovery_in_flight = True
+
+        if blocking:
+            try:
+                summary = self._do_recovery_sweep()
+                return {
+                    "triggered": True,
+                    "blocking": True,
+                    **_summary_to_dict(summary),
+                }
+            finally:
+                with self._lock:
+                    self._recovery_in_flight = False
+        else:
+            self._spawn_recovery_thread(delay_s=0)
+            return {"triggered": True, "blocking": False}
+
+    def _schedule_recovery(self) -> None:
+        """Deferred boot-time recovery. Spawns a daemon thread that
+        sleeps ``RECOVERY_DELAY_SECONDS`` before sweeping — see
+        ``recovery.start_deferred_recovery`` for the timing rationale.
+        """
+
+        with self._lock:
+            if self._recovery_in_flight:
+                return
+            self._recovery_in_flight = True
+
+        self._spawn_recovery_thread(delay_s=None)
+
+    def _spawn_recovery_thread(self, *, delay_s: Optional[int]) -> None:
+        """Shared boot-time + recover_now machinery. Builds the
+        per-tenant synthetic batch + enqueue callbacks, then hands
+        off to ``recovery.start_deferred_recovery``.
+        """
+
+        def _on_complete(_summary) -> None:
+            with self._lock:
+                self._recovery_in_flight = False
+
+        from maugood.clip_pipeline import recovery  # noqa: PLC0415
+
+        # Per-tenant synthetic batches, created lazily on first Class B
+        # or C decision for that tenant so empty-recovery tenants don't
+        # appear in the Pipeline Monitor list.
+        recovery_batches: dict[int, BatchSubmission] = {}
+        rebatches_lock = threading.Lock()
+
+        def _ensure_batch(tenant_id: int) -> BatchSubmission:
+            with rebatches_lock:
+                b = recovery_batches.get(tenant_id)
+                if b is not None:
+                    return b
+                b = self._tracker.create(
+                    tenant_id=tenant_id,
+                    clip_ids=[],
+                    use_cases=list(self.UCS),
+                    skip_existing=False,
+                    submitted_by_user_id=None,
+                    submitted_by_email="system:recovery@boot",
+                )
+                recovery_batches[tenant_id] = b
+                return b
+
+        def _enqueue_class_b(decision: "recovery.RecoveryDecision") -> None:
+            """Class B: matching-only resume — push a synthetic MatchJob
+            straight onto the matching queue (skip cropping). Light
+            drip-feed cadence (10 / 2 s)."""
+
+            # Resolve camera_id once so the attendance fan-out has it.
+            camera_id = self._fetch_camera_id_for_clip(
+                scope=TenantScope(
+                    tenant_id=decision.tenant_id,
+                    tenant_schema=decision.tenant_schema,
+                ),
+                clip_id=decision.clip_id,
+            )
+            batch = _ensure_batch(decision.tenant_id)
+            scope = TenantScope(
+                tenant_id=decision.tenant_id,
+                tenant_schema=decision.tenant_schema,
+            )
+            match_job = MatchJob(
+                job_id=uuid.uuid4().hex[:12],
+                batch_id=batch.batch_id,
+                clip_id=decision.clip_id,
+                use_case=decision.use_case,
+                scope=scope,
+                submitted_at=time.time(),
+                cropping_started_at=time.time(),
+                cropping_ended_at=time.time(),
+                frame_results=[],
+                frames_meta={},
+                extract_seconds=0.0,
+                clip_meta={"camera_id": camera_id},
+                crop_match_index={},
+                initial_face_crop_count=0,
+                resume_from_db=True,
+            )
+            # Bookkeeping: in the tracker we count this job as both
+            # submitted + already past cropping so the Pipeline Monitor
+            # row shows it in 'matching' rather than 'queued'.
+            self._tracker.mark_submitted(batch.batch_id, decision.use_case)
+            self._tracker.mark_cropping_started(
+                batch.batch_id, decision.use_case
+            )
+            self._tracker.mark_cropping_finished_enqueue_match(
+                batch.batch_id, decision.use_case
+            )
+            if self._matching is None or not self._matching.submit(match_job):
+                logger.warning(
+                    "clip_pipeline recovery: Class B enqueue rejected "
+                    "(matching queue full or stopped) tenant=%s clip=%s uc=%s",
+                    decision.tenant_id, decision.clip_id, decision.use_case,
+                )
+                self._tracker.mark_failed(
+                    batch.batch_id, decision.use_case, stage="matching"
+                )
+
+            # Light drip cadence — share a small sleep across the
+            # whole sweep so we don't slam the queue + matcher.
+            _recovery_drip_sleep_light()
+
+        def _enqueue_class_c(decision: "recovery.RecoveryDecision") -> None:
+            """Class C: full restart — push a normal CropJob. Heavy
+            drip-feed cadence (3 / 5 s) because each one re-runs
+            detection."""
+
+            batch = _ensure_batch(decision.tenant_id)
+            scope = TenantScope(
+                tenant_id=decision.tenant_id,
+                tenant_schema=decision.tenant_schema,
+            )
+            crop_job = CropJob(
+                job_id=uuid.uuid4().hex[:12],
+                batch_id=batch.batch_id,
+                clip_id=decision.clip_id,
+                use_case=decision.use_case,
+                scope=scope,
+            )
+            stage = self._cropping_by_uc.get(decision.use_case)
+            if stage is None:
+                logger.warning(
+                    "clip_pipeline recovery: Class C — unknown use_case "
+                    "tenant=%s clip=%s uc=%s",
+                    decision.tenant_id, decision.clip_id, decision.use_case,
+                )
+                self._tracker.mark_failed(
+                    batch.batch_id, decision.use_case, stage="cropping"
+                )
+                return
+            self._tracker.mark_submitted(batch.batch_id, decision.use_case)
+            if not stage.submit(crop_job):
+                logger.warning(
+                    "clip_pipeline recovery: Class C enqueue rejected "
+                    "(cropping queue full) tenant=%s clip=%s uc=%s",
+                    decision.tenant_id, decision.clip_id, decision.use_case,
+                )
+                self._tracker.mark_failed(
+                    batch.batch_id, decision.use_case, stage="cropping"
+                )
+            _recovery_drip_sleep_heavy()
+
+        # Stash the callbacks on ``self`` so blocking ``recover_now``
+        # can call ``run_recovery`` synchronously with the same
+        # enqueue + batch shape, no thread spawn.
+        self._last_enqueue_class_b = _enqueue_class_b
+        self._last_enqueue_class_c = _enqueue_class_c
+
+        recovery.start_deferred_recovery(
+            enqueue_class_b=_enqueue_class_b,
+            enqueue_class_c=_enqueue_class_c,
+            on_complete=_on_complete,
+            delay_s=delay_s,
+        )
+
+    def _do_recovery_sweep(self):
+        """Synchronous sweep used by ``recover_now(blocking=True)``.
+
+        Builds the same enqueue callbacks as the threaded path so the
+        per-tenant synthetic batches + drip-feed land identically.
+        Returns the ``RecoverySummary`` for direct API consumption.
+        """
+
+        from maugood.clip_pipeline import recovery  # noqa: PLC0415
+
+        # We need the same callbacks the deferred path builds — so we
+        # call _spawn_recovery_thread machinery in "synchronous mode":
+        # invoke run_recovery directly. The simplest way is to take
+        # the deferred path's same builder closure. Inline the trio
+        # here so we don't double-spawn a thread.
+        per_tenant_batches: dict[int, BatchSubmission] = {}
+        bl = threading.Lock()
+
+        def _ensure_batch(tenant_id: int) -> BatchSubmission:
+            with bl:
+                b = per_tenant_batches.get(tenant_id)
+                if b is not None:
+                    return b
+                b = self._tracker.create(
+                    tenant_id=tenant_id,
+                    clip_ids=[],
+                    use_cases=list(self.UCS),
+                    skip_existing=False,
+                    submitted_by_user_id=None,
+                    submitted_by_email="system:recovery@manual",
+                )
+                per_tenant_batches[tenant_id] = b
+                return b
+
+        def _enqueue_b(decision):
+            camera_id = self._fetch_camera_id_for_clip(
+                scope=TenantScope(
+                    tenant_id=decision.tenant_id,
+                    tenant_schema=decision.tenant_schema,
+                ),
+                clip_id=decision.clip_id,
+            )
+            batch = _ensure_batch(decision.tenant_id)
+            scope = TenantScope(
+                tenant_id=decision.tenant_id,
+                tenant_schema=decision.tenant_schema,
+            )
+            match_job = MatchJob(
+                job_id=uuid.uuid4().hex[:12],
+                batch_id=batch.batch_id,
+                clip_id=decision.clip_id,
+                use_case=decision.use_case,
+                scope=scope,
+                submitted_at=time.time(),
+                cropping_started_at=time.time(),
+                cropping_ended_at=time.time(),
+                frame_results=[],
+                frames_meta={},
+                extract_seconds=0.0,
+                clip_meta={"camera_id": camera_id},
+                crop_match_index={},
+                initial_face_crop_count=0,
+                resume_from_db=True,
+            )
+            self._tracker.mark_submitted(batch.batch_id, decision.use_case)
+            self._tracker.mark_cropping_started(
+                batch.batch_id, decision.use_case
+            )
+            self._tracker.mark_cropping_finished_enqueue_match(
+                batch.batch_id, decision.use_case
+            )
+            if self._matching is None or not self._matching.submit(match_job):
+                self._tracker.mark_failed(
+                    batch.batch_id, decision.use_case, stage="matching"
+                )
+
+        def _enqueue_c(decision):
+            batch = _ensure_batch(decision.tenant_id)
+            scope = TenantScope(
+                tenant_id=decision.tenant_id,
+                tenant_schema=decision.tenant_schema,
+            )
+            crop_job = CropJob(
+                job_id=uuid.uuid4().hex[:12],
+                batch_id=batch.batch_id,
+                clip_id=decision.clip_id,
+                use_case=decision.use_case,
+                scope=scope,
+            )
+            stage = self._cropping_by_uc.get(decision.use_case)
+            if stage is None:
+                self._tracker.mark_failed(
+                    batch.batch_id, decision.use_case, stage="cropping"
+                )
+                return
+            self._tracker.mark_submitted(batch.batch_id, decision.use_case)
+            if not stage.submit(crop_job):
+                self._tracker.mark_failed(
+                    batch.batch_id, decision.use_case, stage="cropping"
+                )
+
+        return recovery.run_recovery(
+            enqueue_class_b=_enqueue_b,
+            enqueue_class_c=_enqueue_c,
+        )
+
+    def _fetch_camera_id_for_clip(
+        self, *, scope: TenantScope, clip_id: int
+    ) -> Optional[int]:
+        """Tiny helper to resolve camera_id under a tenant context for
+        the Class B resume path. Returns None on any lookup error;
+        attendance fan-out is best-effort so a missing camera_id only
+        suppresses the fan-out without failing the resume itself.
+        """
+
+        engine = get_engine()
+        try:
+            with tenant_context(scope.tenant_schema):
+                with engine.begin() as conn:
+                    row = conn.execute(
+                        sa_select(person_clips.c.camera_id).where(
+                            person_clips.c.id == clip_id,
+                            person_clips.c.tenant_id == scope.tenant_id,
+                        )
+                    ).first()
+            if row is None:
+                return None
+            return int(row.camera_id) if row.camera_id is not None else None
+        except Exception:  # noqa: BLE001
+            return None
 
     # ---- stage 1: cropping ------------------------------------------
 
@@ -502,12 +892,106 @@ class ClipPipeline:
             _save_face_crops_to_db,
             _save_face_crops_uc2_best_per_track,
             _upsert_processing_result,
+            match_only_from_saved_crops,
         )
 
         self._tracker.mark_matching_started(job.batch_id, job.use_case)
         job.started_at = time.time()
         scope = job.scope
         engine = get_engine()
+
+        # Recovery resume branch (P29). Cropping was skipped — saved
+        # crops are reused directly. ``frame_results`` is empty here so
+        # the regular ``_match_detections`` path can't run.
+        if job.resume_from_db:
+            try:
+                with tenant_context(scope.tenant_schema):
+                    (
+                        matched_ids,
+                        unknown_count,
+                        match_details,
+                        face_crop_count,
+                        match_s,
+                        _crops_done,
+                    ) = match_only_from_saved_crops(
+                        engine,
+                        scope,
+                        clip_id=job.clip_id,
+                        use_case=job.use_case,
+                    )
+
+                    name_map = _resolve_employee_names(
+                        engine, scope, matched_ids
+                    )
+                    for md in match_details:
+                        eid = md.get("employee_id")
+                        if eid and eid in name_map:
+                            md["name"] = name_map[eid]
+
+                    total_ms = int((time.time() - job.cropping_started_at) * 1000)
+                    matched_list = sorted(matched_ids)
+                    ended_at = datetime.now(timezone.utc)
+
+                    _upsert_processing_result(
+                        engine, scope, job.clip_id, job.use_case,
+                        status="completed",
+                        ended_at=ended_at,
+                        duration_ms=total_ms,
+                        match_duration_ms=int(match_s * 1000),
+                        face_crop_count=face_crop_count,
+                        matched_employees=matched_list,
+                        unknown_count=unknown_count,
+                        match_details=match_details if match_details else None,
+                    )
+
+                    # Attendance fan-out — same as the regular path. The
+                    # dedup-on-(camera, employee, captured_at) inside
+                    # _emit_attendance_detection_events keeps duplicates
+                    # from a previous half-run from being created again.
+                    try:
+                        camera_id = job.clip_meta.get("camera_id")
+                        if camera_id is not None:
+                            n = _emit_attendance_detection_events(
+                                engine, scope, job.clip_id, int(camera_id),
+                            )
+                            if n > 0:
+                                logger.info(
+                                    "clip_pipeline recovery: attendance "
+                                    "fan-out emitted %d detection_events "
+                                    "row(s) clip=%s uc=%s",
+                                    n, job.clip_id, job.use_case,
+                                )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "clip_pipeline recovery: attendance fan-out "
+                            "failed clip=%s uc=%s reason=%s",
+                            job.clip_id, job.use_case, type(exc).__name__,
+                        )
+
+                self._tracker.mark_completed(job.batch_id, job.use_case)
+                return
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "clip_pipeline recovery (resume): match handler "
+                    "failed clip=%s uc=%s: %s",
+                    job.clip_id, job.use_case, type(exc).__name__,
+                )
+                try:
+                    with tenant_context(scope.tenant_schema):
+                        _upsert_processing_result(
+                            engine, scope, job.clip_id, job.use_case,
+                            status="failed",
+                            error=(
+                                "recovery match-only resume failed: "
+                                f"{type(exc).__name__}"
+                            ),
+                        )
+                except Exception:  # noqa: BLE001
+                    pass
+                self._tracker.mark_failed(
+                    job.batch_id, job.use_case, stage="matching"
+                )
+                return
 
         try:
             with tenant_context(scope.tenant_schema):

@@ -24,7 +24,7 @@ from sqlalchemy import and_, desc, func, select, text
 from zoneinfo import ZoneInfo
 
 from maugood.attendance import attendance_scheduler
-from maugood.attendance.repository import local_tz
+from maugood.attendance.repository import load_tenant_settings, local_tz_for
 from maugood.auth.dependencies import CurrentUser, require_role
 from maugood.auth.ratelimit import get_rate_limiter
 from maugood.capture import capture_manager
@@ -147,13 +147,11 @@ class CamerasHealthOut(BaseModel):
     items: list[CameraHealthOut]
 
 
-def _local_today() -> datetime.date:  # type: ignore[name-defined]
-    tz = local_tz()
+def _local_today(tz) -> datetime.date:  # type: ignore[name-defined,no-untyped-def]
     return datetime.now(timezone.utc).astimezone(tz).date()
 
 
-def _local_day_bounds_utc(d) -> tuple[datetime, datetime]:  # type: ignore[no-untyped-def]
-    tz = local_tz()
+def _local_day_bounds_utc(d, tz) -> tuple[datetime, datetime]:  # type: ignore[no-untyped-def]
     start_local = datetime.combine(d, time(0, 0), tzinfo=tz)
     end_local = datetime.combine(d, time(23, 59, 59, 999999), tzinfo=tz)
     return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
@@ -164,8 +162,13 @@ def get_health(user: Annotated[CurrentUser, ADMIN]) -> HealthOut:
     scope = TenantScope(tenant_id=user.tenant_id)
     engine = get_engine()
 
-    today = _local_today()
-    day_start_utc, day_end_utc = _local_day_bounds_utc(today)
+    # P11: tenant-scoped timezone for "today" rollover. Falls back to
+    # MAUGOOD_LOCAL_TIMEZONE only when no tenant_settings row exists.
+    with engine.begin() as conn:
+        _settings_snapshot = load_tenant_settings(conn, scope)
+    tenant_tz = local_tz_for(_settings_snapshot)
+    today = _local_today(tenant_tz)
+    day_start_utc, day_end_utc = _local_day_bounds_utc(today, tenant_tz)
 
     with engine.begin() as conn:
         # Postgres `pg_stat_activity` works for the connected database

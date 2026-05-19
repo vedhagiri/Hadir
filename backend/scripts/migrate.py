@@ -40,6 +40,8 @@ from pathlib import Path
 from sqlalchemy import text
 
 from maugood.db import make_admin_engine, set_tenant_schema, reset_tenant_schema
+from scripts._grants import sync_schema_grants
+from scripts._schema_sync import sync_schema_structure
 
 logger = logging.getLogger("maugood.migrate")
 logging.basicConfig(level=logging.INFO, format="[migrate] %(message)s")
@@ -77,6 +79,54 @@ def _run_alembic_upgrade(schema: str) -> None:
             f"alembic upgrade failed for schema={schema} "
             f"(exit={completed.returncode})"
         )
+
+
+def _sync_grants_for(schema: str) -> None:
+    """Re-apply the ownership + grant contract after a migration.
+
+    Forward migrations create new tables as whoever
+    ``MAUGOOD_ADMIN_DATABASE_URL`` connects as (the bootstrap superuser).
+    That leaves the tables owned by ``maugood`` with no grants for
+    ``maugood_app`` — the request path then 500s with "permission denied".
+    Running the grants sync after every upgrade closes the loop: any new
+    table the migration created is automatically owned by
+    ``maugood_admin`` and granted to ``maugood_app`` per the same
+    contract ``provision_tenant`` applies.
+    """
+
+    token = set_tenant_schema(schema)
+    try:
+        engine = make_admin_engine()
+        try:
+            with engine.begin() as conn:
+                sync_schema_grants(conn, schema)
+        finally:
+            engine.dispose()
+    finally:
+        reset_tenant_schema(token)
+
+
+def _sync_structure_for(schema: str) -> None:
+    """Reconcile schema structure against ``maugood.db.metadata``.
+
+    Defence-in-depth pass after every ``alembic upgrade``. Adds any
+    column / CHECK / UNIQUE constraint / index that's declared in
+    ``metadata`` but missing on disk — primarily the case for tenants
+    provisioned via ``metadata.create_all`` + ``alembic stamp head``
+    before a later forward ALTER migration shipped. Idempotent; safe
+    to run on an already-aligned schema.
+    """
+
+    token = set_tenant_schema(schema)
+    try:
+        engine = make_admin_engine()
+        try:
+            with engine.begin() as conn:
+                sync_schema_structure(conn, schema)
+        finally:
+            engine.dispose()
+    finally:
+        reset_tenant_schema(token)
 
 
 def _iter_tenant_schemas() -> list[str]:
@@ -127,15 +177,22 @@ def _iter_tenant_schemas() -> list[str]:
 def main() -> int:
     # 1. Bring main forward (legacy pilot history + 0008 boundary).
     _run_alembic_upgrade("main")
+    _sync_structure_for("main")
+    _sync_grants_for("main")
 
-    # 2. Iterate every other tenant and bring it to head. New tenants
-    #    provisioned via scripts.provision_tenant arrive here already
-    #    stamped at head, so this is usually a no-op for them — until
-    #    a future schema-agnostic migration ships.
+    # 2. Iterate every other tenant and bring it to head, then reconcile
+    #    structure + grants for any tables the migration created. New
+    #    tenants provisioned via scripts.provision_tenant arrive here
+    #    already stamped at head, so the upgrade step is usually a
+    #    no-op for them — but the structure + grants syncs still run
+    #    (idempotent) so any drift from older builds gets healed on
+    #    the next container boot.
     for schema in _iter_tenant_schemas():
         _run_alembic_upgrade(schema)
+        _sync_structure_for(schema)
+        _sync_grants_for(schema)
 
-    logger.info("all schemas at head")
+    logger.info("all schemas at head; structure + grants reconciled")
     return 0
 
 

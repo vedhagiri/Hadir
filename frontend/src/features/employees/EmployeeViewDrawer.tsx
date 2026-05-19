@@ -18,7 +18,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { api } from "../../api/client";
+import { ApiError, api } from "../../api/client";
 import { useMe } from "../../auth/AuthProvider";
 import { DatePicker, todayIso } from "../../components/DatePicker";
 import { DrawerShell } from "../../components/DrawerShell";
@@ -861,7 +861,38 @@ function MatchedClipsTab({ employeeId }: { employeeId: number }) {
     queryKey: ["matched-clips", employeeId, qs],
     queryFn: () => api<PersonClipListResponse>(`/api/person-clips?${qs}`),
     refetchInterval: 30_000,
+    // Don't burn the 30 s polling budget retrying permission /
+    // not-found failures — those won't change between polls.
+    retry: (failureCount, error) => {
+      if (error instanceof ApiError) {
+        if (error.status === 401 || error.status === 403 || error.status === 404) {
+          return false;
+        }
+      }
+      return failureCount < 2;
+    },
   });
+
+  const errorMessage = (() => {
+    if (!list.isError) return null;
+    const err = list.error;
+    if (err instanceof ApiError) {
+      if (err.status === 401) {
+        return "Your session expired. Sign in again to view matched clips.";
+      }
+      if (err.status === 403) {
+        return "Matched clips are available to Admin and HR roles.";
+      }
+      if (err.status === 400) {
+        return "Invalid date range. Try clearing the filter.";
+      }
+      if (err.status >= 500) {
+        return "Could not load matched clips — the server is still warming up. The page will retry automatically.";
+      }
+      return `Could not load matched clips (HTTP ${err.status}).`;
+    }
+    return "Could not load matched clips. Check your connection and try again.";
+  })();
 
   const items = list.data?.items ?? [];
   const total = list.data?.total ?? 0;
@@ -966,12 +997,12 @@ function MatchedClipsTab({ employeeId }: { employeeId: number }) {
           Loading clips…
         </div>
       )}
-      {list.isError && (
+      {errorMessage && (
         <div
           className="text-sm"
           style={{ padding: 16, color: "var(--danger-text)" }}
         >
-          Could not load matched clips.
+          {errorMessage}
         </div>
       )}
       {!list.isLoading && !list.isError && items.length === 0 && (

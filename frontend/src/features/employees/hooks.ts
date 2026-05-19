@@ -289,13 +289,16 @@ export function useEmployeePendingDeleteRequest(
   });
 }
 
-export function useDeleteRequestList(): UseQueryResult<
-  DeleteRequestListResponse,
-  Error
-> {
+export function useDeleteRequestList(
+  options: { enabled?: boolean } = {},
+): UseQueryResult<DeleteRequestListResponse, Error> {
+  // Backend gate is ADMIN_OR_HR — callers should pass `enabled` based
+  // on the viewer's role to avoid a 403 (and reduce request noise on
+  // initial setup before any rows exist).
   return useQuery({
     queryKey: ["delete-requests", "list"],
     queryFn: () => api<DeleteRequestListResponse>("/api/delete-requests"),
+    enabled: options.enabled ?? true,
     refetchInterval: 30 * 1000,
   });
 }

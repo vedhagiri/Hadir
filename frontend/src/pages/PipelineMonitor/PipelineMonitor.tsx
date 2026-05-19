@@ -10,13 +10,24 @@ import { useQuery } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import type { CSSProperties } from "react";
 
-import { api } from "../../api/client";
+import { ApiError, api } from "../../api/client";
+import { useMe } from "../../auth/AuthProvider";
+import { RestartAllModal } from "../../features/operations/RestartAllModal";
+import { useRestartAllAndRecover } from "../../features/operations/hooks";
+import type { RestartAllAndRecoverResult } from "../../features/operations/types";
 import { Icon } from "../../shell/Icon";
 import type { IconName } from "../../shell/Icon";
 
 const POLL_INTERVAL_MS = 3000;
 
-type StageKey = "workers" | "rtsp" | "recording" | "encoding" | "identify" | "queues";
+type StageKey =
+  | "cameras"
+  | "workers"
+  | "rtsp"
+  | "recording"
+  | "encoding"
+  | "identify"
+  | "queues";
 
 interface RtspWorker {
   camera_id: number;
@@ -92,6 +103,11 @@ interface PipelineMonitorOut {
 }
 
 const TABS: { key: StageKey; label: string; icon: IconName }[] = [
+  // "Cameras" rolls up RTSP + recording + encoding per camera so an
+  // operator gets the per-device picture without switching tabs. It's
+  // the default landing tab — replaces the standalone Worker Monitoring
+  // page that used to live at /operations/workers.
+  { key: "cameras", label: "Cameras", icon: "camera" },
   { key: "workers", label: "Workers", icon: "activity" },
   { key: "rtsp", label: "RTSP Feed", icon: "camera" },
   { key: "recording", label: "Clip Recording", icon: "videocam" },
@@ -111,16 +127,49 @@ function fmtUptime(sec: number): string {
 }
 
 export function PipelineMonitor() {
-  const [tab, setTab] = useState<StageKey>("workers");
+  const [tab, setTab] = useState<StageKey>("cameras");
+  const me = useMe();
+  // Don't even fire the request until /api/auth/me has resolved and
+  // confirms the viewer is Admin. AdminOnly already redirects
+  // non-Admins, but during the brief loading window the page can
+  // mount with stale cache and pre-empt the redirect — the
+  // ``enabled`` guard keeps us from issuing a doomed call.
+  const isAdmin = me.data?.active_role === "Admin";
 
   const query = useQuery({
     queryKey: ["operations", "pipeline"],
     queryFn: () => api<PipelineMonitorOut>("/api/operations/pipeline"),
+    enabled: isAdmin,
     refetchInterval: POLL_INTERVAL_MS,
     refetchIntervalInBackground: false,
+    retry: (failureCount, error) => {
+      // Don't burn the polling budget retrying obvious permission
+      // failures — those won't change between polls.
+      if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+        return false;
+      }
+      return failureCount < 2;
+    },
   });
 
   const data = query.data;
+  const errorMessage = (() => {
+    if (!query.isError) return null;
+    const err = query.error;
+    if (err instanceof ApiError) {
+      if (err.status === 401) {
+        return "Your session expired. Sign in again to view Pipeline Monitor.";
+      }
+      if (err.status === 403) {
+        return "Pipeline Monitor is Admin-only. Switch to your Admin role to view it.";
+      }
+      if (err.status >= 500) {
+        return `Pipeline Monitor temporarily unavailable (HTTP ${err.status}). Retrying…`;
+      }
+      return `Could not load pipeline (HTTP ${err.status}).`;
+    }
+    return "Could not load pipeline. Check your connection and try again.";
+  })();
 
   return (
     <>
@@ -140,6 +189,11 @@ export function PipelineMonitor() {
             )}
           </p>
         </div>
+        {isAdmin && (
+          <div className="page-actions">
+            <RestartAllWorkersAction />
+          </div>
+        )}
       </div>
 
       {/* Top summary chips — same numbers in all tabs so the operator
@@ -252,19 +306,27 @@ export function PipelineMonitor() {
         </div>
 
         <div style={{ padding: 16 }}>
-          {query.isLoading && (
+          {(query.isLoading || (!isAdmin && me.isLoading)) && (
             <div className="text-sm text-dim" style={{ padding: 16 }}>
               Loading pipeline state…
             </div>
           )}
-          {query.isError && (
+          {!me.isLoading && !isAdmin && (
+            <div className="text-sm text-dim" style={{ padding: 16 }}>
+              Pipeline Monitor is available to Admin users. Your current
+              role can't view this page — switch roles from the topbar
+              if you have an Admin role available.
+            </div>
+          )}
+          {errorMessage && (
             <div
               className="text-sm"
               style={{ padding: 16, color: "var(--danger-text)" }}
             >
-              Could not load pipeline. The endpoint requires Admin role.
+              {errorMessage}
             </div>
           )}
+          {data && tab === "cameras" && <CamerasPanel data={data} />}
           {data && tab === "rtsp" && <RtspPanel data={data.rtsp} />}
           {data && tab === "recording" && (
             <RecordingPanel data={data.recording} />
@@ -343,6 +405,244 @@ function SummaryCard({
         </div>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tab "Cameras" — per-camera roll-up across every stage.
+// One row per active camera, columns: Worker status / RTSP / Clip Saving /
+// Processing. Absorbs the standalone Worker Monitoring page into a single
+// operational view. Source: same /api/operations/pipeline payload that
+// drives every other tab (no extra request).
+// ---------------------------------------------------------------------------
+
+interface CameraRow {
+  camera_id: number;
+  camera_name: string;
+  rtsp: RtspWorker | null;
+  recording: RecordingCamera | null;
+  encoding: EncodingWorker | null;
+}
+
+function buildCameraRows(data: PipelineMonitorOut): CameraRow[] {
+  // Union the camera ids surfaced across the three per-camera lists so
+  // a camera whose worker is reconnecting (no recording row yet) still
+  // appears. recording.cameras + encoding.workers carry the human-
+  // readable camera_name when rtsp.workers doesn't.
+  const byId = new Map<number, CameraRow>();
+  const ensure = (id: number, name: string): CameraRow => {
+    const existing = byId.get(id);
+    if (existing) {
+      if (!existing.camera_name && name) existing.camera_name = name;
+      return existing;
+    }
+    const row: CameraRow = {
+      camera_id: id,
+      camera_name: name,
+      rtsp: null,
+      recording: null,
+      encoding: null,
+    };
+    byId.set(id, row);
+    return row;
+  };
+
+  for (const w of data.rtsp.workers) {
+    const r = ensure(w.camera_id, w.camera_name);
+    r.rtsp = w;
+  }
+  for (const c of data.recording.cameras) {
+    const r = ensure(c.camera_id, c.camera_name);
+    r.recording = c;
+  }
+  for (const e of data.encoding.workers) {
+    const r = ensure(e.camera_id, e.camera_name);
+    r.encoding = e;
+  }
+  return [...byId.values()].sort((a, b) => {
+    // Failed first, then reconnecting, then by name. Operators see what
+    // needs attention without scrolling.
+    const rank = (row: CameraRow): number => {
+      const s = row.rtsp?.status;
+      if (s === "failed") return 0;
+      if (s === "reconnecting") return 1;
+      if (s === "starting") return 2;
+      if (s === "running") return 3;
+      return 4;
+    };
+    const r = rank(a) - rank(b);
+    if (r !== 0) return r;
+    return a.camera_name.localeCompare(b.camera_name);
+  });
+}
+
+function CamerasPanel({ data }: { data: PipelineMonitorOut }) {
+  const rows = buildCameraRows(data);
+
+  const recordingActive = data.recording.active;
+  const recordingEnabled = data.recording.enabled_cameras;
+
+  return (
+    <>
+      <CountStrip
+        items={[
+          {
+            label: "Active cameras",
+            value: rows.length,
+            tone: rows.length > 0 ? "ok" : "neutral",
+          },
+          {
+            label: "RTSP running",
+            value: data.rtsp.running,
+            tone:
+              data.rtsp.failed > 0
+                ? "danger"
+                : data.rtsp.reconnecting > 0
+                  ? "warn"
+                  : "ok",
+          },
+          {
+            label: "Clip saving",
+            value: `${recordingActive} / ${recordingEnabled}`,
+            tone: recordingActive > 0 ? "ok" : "neutral",
+          },
+          {
+            label: "Encoding alive",
+            value: `${data.encoding.alive_workers} / ${data.encoding.total_workers}`,
+            tone:
+              data.encoding.alive_workers === data.encoding.total_workers
+                ? "ok"
+                : "warn",
+          },
+        ]}
+      />
+
+      {rows.length === 0 ? (
+        <div
+          className="card"
+          style={{
+            marginTop: 12,
+            padding: 24,
+            textAlign: "center",
+          }}
+        >
+          <div className="text-sm text-dim" style={{ marginBottom: 8 }}>
+            No active camera workers. Add a camera under{" "}
+            <a
+              href="/cameras"
+              style={{ color: "var(--accent)", textDecoration: "underline" }}
+            >
+              Cameras
+            </a>{" "}
+            and enable its worker to populate this view.
+          </div>
+        </div>
+      ) : (
+        <div
+          style={{
+            marginTop: 12,
+            overflowX: "auto",
+            border: "1px solid var(--border)",
+            borderRadius: 10,
+          }}
+        >
+          <table
+            style={{
+              width: "100%",
+              borderCollapse: "collapse",
+              fontSize: 12.5,
+              minWidth: 880,
+            }}
+          >
+            <thead style={{ background: "var(--bg-sunken)" }}>
+              <tr>
+                <th style={thStyle}>Camera</th>
+                <th style={thStyle}>Workers</th>
+                <th style={thStyle}>Worker status</th>
+                <th style={thStyle}>RTSP</th>
+                <th style={thStyle}>Clip saving</th>
+                <th style={thStyle}>Processing</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <CameraRowView key={row.camera_id} row={row} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
+
+function CameraRowView({ row }: { row: CameraRow }) {
+  // "Workers per camera": each running CaptureWorker bundles a reader
+  // + analyzer thread and (optionally) a ClipWorker for encoding. We
+  // report a single integer — the count of live sub-workers per
+  // camera so the column matches operator intuition.
+  const workersRunning = (() => {
+    let n = 0;
+    if (row.rtsp && row.rtsp.status !== "stopped" && row.rtsp.status !== "failed") {
+      n += 1; // reader + analyzer counted as one capture worker
+    }
+    if (row.encoding?.alive) n += 1;
+    return n;
+  })();
+
+  const rtspBlurb = (() => {
+    if (!row.rtsp) return "—";
+    return `${row.rtsp.fps_reader.toFixed(1)} / ${row.rtsp.fps_analyzer.toFixed(1)} fps · err ${row.rtsp.errors_5min}`;
+  })();
+
+  const clipBlurb = (() => {
+    if (!row.recording) return "—";
+    if (!row.recording.recording_enabled) return "Disabled";
+    if (row.recording.recording_active) {
+      return `Recording (${Math.round(row.recording.elapsed_sec)}s)`;
+    }
+    return "Idle";
+  })();
+
+  const processingBlurb = (() => {
+    if (!row.encoding) return "—";
+    if (!row.encoding.alive) return "Worker down";
+    return `queue: ${row.encoding.queue_size}`;
+  })();
+
+  return (
+    <tr>
+      <td style={{ ...tdStyle, fontWeight: 600, color: "var(--text)" }}>
+        <div>{row.camera_name}</div>
+        <div className="text-xs text-dim mono">#{row.camera_id}</div>
+      </td>
+      <td style={tdStyle}>
+        <span
+          style={{
+            fontWeight: 600,
+            color: workersRunning === 0 ? "var(--danger-text)" : "var(--text)",
+          }}
+        >
+          {workersRunning}
+        </span>
+      </td>
+      <td style={tdStyle}>
+        {row.rtsp ? <StatusBadge status={row.rtsp.status} /> : <em className="text-dim">none</em>}
+      </td>
+      <td style={tdStyle} className="mono text-sm">
+        {rtspBlurb}
+      </td>
+      <td style={tdStyle} className="text-sm">
+        <Pill tone={row.recording?.recording_active ? "ok" : row.recording?.recording_enabled ? "neutral" : "neutral"}>
+          {clipBlurb}
+        </Pill>
+      </td>
+      <td style={tdStyle} className="text-sm">
+        <Pill tone={row.encoding?.alive === false ? "danger" : "neutral"}>
+          {processingBlurb}
+        </Pill>
+      </td>
+    </tr>
   );
 }
 
@@ -915,7 +1215,7 @@ type Tone = "ok" | "warn" | "danger" | "neutral";
 function CountStrip({
   items,
 }: {
-  items: { label: string; value: number; tone: Tone }[];
+  items: { label: string; value: number | string; tone: Tone }[];
 }) {
   return (
     <div
@@ -2149,4 +2449,96 @@ function paletteForHealth(health: string): { bg: string; fg: string } {
     default:
       return { bg: "var(--bg-sunken)", fg: "var(--text-secondary)" };
   }
+}
+
+
+// Pipeline Monitor's Restart All Workers action. Single Admin-only
+// button + type-to-confirm modal. Calls
+// ``POST /api/operations/workers/restart-all-and-recover`` which
+// restarts capture workers, the clip pipeline, and the legacy
+// reprocess worker AND triggers an immediate recovery sweep for
+// any rows stuck in ``processing``. Per-camera restart actions on
+// individual rows do NOT trigger recovery (by design — they're
+// narrow operator actions).
+function RestartAllWorkersAction() {
+  const [open, setOpen] = useState(false);
+  const [lastResult, setLastResult] =
+    useState<RestartAllAndRecoverResult | null>(null);
+  const restartAll = useRestartAllAndRecover();
+
+  return (
+    <>
+      <button
+        type="button"
+        className="btn"
+        style={{ background: "var(--danger)", color: "white" }}
+        onClick={() => setOpen(true)}
+        disabled={restartAll.isPending}
+      >
+        <Icon name="refresh" size={12} />
+        Restart all workers
+      </button>
+      {open && (
+        <RestartAllModal
+          workerCount={0}
+          onCancel={() => setOpen(false)}
+          onConfirm={() => {
+            restartAll.mutate(undefined, {
+              onSuccess: (r) => setLastResult(r),
+              onSettled: () => setOpen(false),
+            });
+          }}
+          pending={restartAll.isPending}
+        />
+      )}
+      {lastResult && (
+        <div
+          role="status"
+          style={{
+            position: "fixed",
+            bottom: 16,
+            insetInlineEnd: 16,
+            zIndex: 70,
+            background: "var(--bg-elev)",
+            border: "1px solid var(--success-text)",
+            borderInlineStart: "4px solid var(--success)",
+            borderRadius: "var(--radius)",
+            boxShadow: "var(--shadow-lg)",
+            padding: "10px 14px",
+            maxWidth: 420,
+            fontSize: 12.5,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 8,
+              alignItems: "flex-start",
+            }}
+          >
+            <strong>Restart complete</strong>
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label="Dismiss"
+              onClick={() => setLastResult(null)}
+            >
+              <Icon name="x" size={12} />
+            </button>
+          </div>
+          <div style={{ marginTop: 4, color: "var(--text-secondary)" }}>
+            Capture workers: {lastResult.capture_restarted}/
+            {lastResult.capture_total} restarted
+          </div>
+          <div style={{ color: "var(--text-secondary)" }}>
+            Recovery: {lastResult.recovery.scanned} scanned ·{" "}
+            {lastResult.recovery.class_a} status-only ·{" "}
+            {lastResult.recovery.class_b} match-only ·{" "}
+            {lastResult.recovery.class_c} full restart
+          </div>
+        </div>
+      )}
+    </>
+  );
 }

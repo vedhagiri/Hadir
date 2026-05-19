@@ -10,6 +10,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 
 import { useCameras } from "../../features/cameras/hooks";
 import type { Camera } from "../../features/cameras/types";
@@ -160,6 +161,27 @@ export function LiveCapturePage() {
       // — silently ignore; the operator can press F11 instead.
     }
   };
+
+  // Empty-state short-circuit: when the tenant has zero cameras
+  // configured the viewer + sidebar are both meaningless. Render a
+  // centered call-to-action that points the operator at the Cameras
+  // page (Admin-only, same nav section, so the link always resolves
+  // for any role that can reach Live Capture).
+  const noCamerasConfigured =
+    !camerasQuery.isLoading && allCameras.length === 0;
+  if (noCamerasConfigured) {
+    return (
+      <>
+        <div className="page-header">
+          <div>
+            <h1 className="page-title">{t("liveCapture.title")}</h1>
+            <p className="page-sub">{t("liveCapture.subtitle")}</p>
+          </div>
+        </div>
+        <LiveCaptureEmptyState />
+      </>
+    );
+  }
 
   return (
     <>
@@ -617,5 +639,62 @@ function CameraRow({
         </span>
       )}
     </button>
+  );
+}
+
+function LiveCaptureEmptyState() {
+  const { t } = useTranslation();
+  return (
+    <div
+      className="card"
+      style={{
+        padding: "48px 24px",
+        textAlign: "center",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 16,
+      }}
+    >
+      <div
+        aria-hidden
+        style={{
+          width: 56,
+          height: 56,
+          borderRadius: "50%",
+          background: "var(--bg-sunken)",
+          border: "1px solid var(--border)",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "var(--text-secondary)",
+        }}
+      >
+        <Icon name="camera" size={24} />
+      </div>
+      <div>
+        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>
+          {t("liveCapture.emptyState.title", "No cameras configured")}
+        </h2>
+        <p
+          style={{
+            margin: "6px 0 0",
+            color: "var(--text-secondary)",
+            fontSize: 13.5,
+            lineHeight: 1.55,
+            maxWidth: 420,
+          }}
+        >
+          {t(
+            "liveCapture.emptyState.description",
+            "Add a camera to start streaming live feeds. RTSP credentials are encrypted at rest and the worker picks them up automatically.",
+          )}
+        </p>
+      </div>
+      <Link to="/cameras" className="btn btn-primary">
+        <Icon name="plus" size={12} />
+        {t("liveCapture.emptyState.cta", "Add camera")}
+      </Link>
+    </div>
   );
 }

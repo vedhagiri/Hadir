@@ -721,6 +721,10 @@ function StatusPill({ status }: { status: CalendarStatus }) {
     present: { tone: "success", label: "Present" },
     late: { tone: "warning", label: "Late" },
     absent: { tone: "danger", label: "Absent" },
+    // Today-only: shift window still open + no in_time yet. Distinct
+    // from absent so the operator doesn't flag staff who can still
+    // arrive on time.
+    waiting: { tone: "accent", label: "Waiting" },
     leave: { tone: "info", label: "Leave" },
     holiday: { tone: "neutral", label: "Holiday" },
     weekend: { tone: "neutral", label: "Weekend" },

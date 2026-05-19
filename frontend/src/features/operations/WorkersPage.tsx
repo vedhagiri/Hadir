@@ -12,17 +12,20 @@ import { Icon } from "../../shell/Icon";
 import { RestartAllModal } from "./RestartAllModal";
 import { WorkerCard } from "./WorkerCard";
 import {
-  useRestartAllWorkers,
+  useRestartAllAndRecover,
   useRestartWorker,
   useWorkers,
 } from "./hooks";
+import type { RestartAllAndRecoverResult } from "./types";
 
 export function WorkersPage() {
   const { t } = useTranslation();
   const list = useWorkers();
   const restartOne = useRestartWorker();
-  const restartAll = useRestartAllWorkers();
+  const restartAll = useRestartAllAndRecover();
   const [restartAllOpen, setRestartAllOpen] = useState(false);
+  const [lastResult, setLastResult] =
+    useState<RestartAllAndRecoverResult | null>(null);
 
   const onRestart = (cameraId: number) => {
     restartOne.mutate(cameraId);
@@ -30,6 +33,9 @@ export function WorkersPage() {
 
   const onRestartAll = () => {
     restartAll.mutate(undefined, {
+      onSuccess: (result) => {
+        setLastResult(result);
+      },
       onSettled: () => setRestartAllOpen(false),
     });
   };
@@ -67,6 +73,55 @@ export function WorkersPage() {
           </button>
         </div>
       </div>
+
+      {/* Recovery result banner — shown after a successful Restart
+          All Workers. Auto-dismisses if the user navigates away;
+          the X button is just for explicit dismissal. */}
+      {lastResult && (
+        <div
+          className="card"
+          role="status"
+          style={{
+            padding: "10px 14px",
+            marginBottom: 12,
+            borderInlineStart: "3px solid var(--success)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+          }}
+        >
+          <div style={{ fontSize: 13, color: "var(--text)" }}>
+            <strong>
+              {t("operations.restart.resultTitle") as string}
+            </strong>
+            {" — "}
+            <span className="text-dim">
+              {t("operations.restart.resultCapture", {
+                restarted: lastResult.capture_restarted,
+                total: lastResult.capture_total,
+              }) as string}
+            </span>
+            {" · "}
+            <span className="text-dim">
+              {t("operations.restart.resultRecovery", {
+                scanned: lastResult.recovery.scanned,
+                a: lastResult.recovery.class_a,
+                b: lastResult.recovery.class_b,
+                c: lastResult.recovery.class_c,
+              }) as string}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label={t("common.dismiss") as string}
+            onClick={() => setLastResult(null)}
+          >
+            <Icon name="x" size={12} />
+          </button>
+        </div>
+      )}
 
       {/* Summary strip */}
       <div

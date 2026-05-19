@@ -35,6 +35,7 @@ from maugood.attendance.repository import (
     holidays_on,
     load_tenant_settings,
     local_tz_for,
+    policy_shift_end_times,
 )
 from maugood.db import (
     approved_leaves,
@@ -59,6 +60,7 @@ _WEEKDAY_NAMES = (
 
 
 # Status enum surfaced to the frontend for cell rendering.
+STATUS_WAITING = "waiting"
 STATUS_PRESENT = "present"
 STATUS_LATE = "late"
 STATUS_ABSENT = "absent"
@@ -110,6 +112,7 @@ class CompanyDay:
     present_count: int
     late_count: int
     absent_count: int
+    waiting_count: int  # today only: shift window still open + no in_time
     leave_count: int
     active_employees: int
     is_weekend: bool
@@ -218,6 +221,41 @@ def company_view(
     ).all()
     holiday_by_date = {r.date: str(r.name) for r in hol_rows}
 
+    # Today's "waiting" count — employees marked absent who can still
+    # arrive within their shift window. Only today qualifies; past
+    # dates' absent counts are authoritative. The lookup runs once
+    # per call (today's date is at most one day in the range).
+    tenant_tz = local_tz_for(settings)
+    today_local = datetime.now(timezone.utc).astimezone(tenant_tz).date()
+    waiting_today = 0
+    if month_start <= today_local <= month_end:
+        pending_filter = list(agg_filter) + [
+            attendance_records.c.date == today_local,
+            attendance_records.c.absent.is_(True),
+            attendance_records.c.in_time.is_(None),
+            attendance_records.c.leave_type_id.is_(None),
+        ]
+        pending_rows = conn.execute(
+            select(
+                attendance_records.c.employee_id,
+                attendance_records.c.policy_id,
+            ).where(*pending_filter)
+        ).all()
+        if pending_rows:
+            policy_ids = sorted({int(r.policy_id) for r in pending_rows})
+            shift_end_by_policy = policy_shift_end_times(
+                conn, scope, policy_ids
+            )
+            now_local_time = datetime.now(timezone.utc).astimezone(
+                tenant_tz
+            ).time()
+            for r in pending_rows:
+                shift_end = shift_end_by_policy.get(int(r.policy_id))
+                if shift_end is None:
+                    continue
+                if now_local_time < shift_end:
+                    waiting_today += 1
+
     out: list[CompanyDay] = []
     for d in iter_days(month_start, month_end):
         agg = agg_rows.get(d)
@@ -236,6 +274,11 @@ def company_view(
         # (engine sets absent=true + leave_type_id when on leave).
         # Subtract leave to get true no-show absences.
         absent = max(0, absent_raw - leave)
+        # Today only: peel "waiting" out of the absent total so the
+        # operator sees them as still-pending rather than already-
+        # absent. The waiting bucket auto-empties as shift ends pass.
+        waiting = waiting_today if d == today_local else 0
+        absent = max(0, absent - waiting)
         weekend = is_weekend(d, weekend_days)
         hol_name = holiday_by_date.get(d)
         active = active_count
@@ -251,6 +294,7 @@ def company_view(
                 present_count=present,
                 late_count=late,
                 absent_count=absent,
+                waiting_count=waiting,
                 leave_count=leave,
                 active_employees=active,
                 is_weekend=weekend,
@@ -390,6 +434,26 @@ def person_view(
     ).all()
     holiday_by_date = {r.date: str(r.name) for r in hol_rows}
 
+    # Per-policy shift-end map + tenant "now" for the today/waiting
+    # check below. The map is empty if no attendance rows exist —
+    # which short-circuits the waiting branch correctly.
+    policy_ids_for_today = [
+        int(r.policy_id)
+        for r in rows
+        if r.date == today_local
+        and bool(r.absent)
+        and r.in_time is None
+        and r.leave_type_id is None
+    ]
+    shift_end_by_policy = (
+        policy_shift_end_times(conn, scope, policy_ids_for_today)
+        if policy_ids_for_today
+        else {}
+    )
+    now_local_time = (
+        datetime.now(timezone.utc).astimezone(local_tz_for(settings)).time()
+    )
+
     out: list[PersonDay] = []
     for d in iter_days(month_start, month_end):
         weekend = is_weekend(d, weekend_days)
@@ -405,8 +469,13 @@ def person_view(
         #    holiday — the operator wants to see it)
         # 3. weekend (no work expected)
         # 4. leave (approved_leaves covers the date)
-        # 5. attendance flags: absent, late, present
-        # 6. no_record (workday with neither attendance nor leave)
+        # 5. waiting — today only, when the row is "absent" but the
+        #    employee's shift window hasn't closed yet (flex / late
+        #    arrival window still open). Treats them as pending, not
+        #    absent. Falls through to absent automatically once the
+        #    shift end passes.
+        # 6. attendance flags: absent, late, present
+        # 7. no_record (workday with neither attendance nor leave)
         if in_future:
             status = STATUS_FUTURE
         elif hol_name is not None:
@@ -417,6 +486,18 @@ def person_view(
             status = STATUS_LEAVE
         elif leave_name is not None and ar is None:
             status = STATUS_LEAVE
+        elif (
+            ar is not None
+            and bool(ar.absent)
+            and ar.in_time is None
+            and d == today_local
+            and (
+                (shift_end := shift_end_by_policy.get(int(ar.policy_id)))
+                is not None
+            )
+            and now_local_time < shift_end
+        ):
+            status = STATUS_WAITING
         elif ar is not None and bool(ar.absent):
             status = STATUS_ABSENT
         elif ar is not None and bool(ar.late):

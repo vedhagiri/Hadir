@@ -675,13 +675,17 @@ async def import_holidays_xlsx(
 
 
 def _to_approved_leave(row) -> ApprovedLeaveResponse:  # type: ignore[no-untyped-def]
+    # leave_type_code / leave_type_name come from an outer-join with
+    # leave_types. The FK is normally CASCADE so orphans can't exist,
+    # but defence in depth — a None from the join produces "" instead
+    # of the literal string "None" the UI would otherwise render.
     return ApprovedLeaveResponse(
         id=int(row.id),
         tenant_id=int(row.tenant_id),
         employee_id=int(row.employee_id),
         leave_type_id=int(row.leave_type_id),
-        leave_type_code=str(row.leave_type_code),
-        leave_type_name=str(row.leave_type_name),
+        leave_type_code=str(row.leave_type_code) if row.leave_type_code is not None else "",
+        leave_type_name=str(row.leave_type_name) if row.leave_type_name is not None else "",
         start_date=row.start_date,
         end_date=row.end_date,
         notes=row.notes,
@@ -975,6 +979,7 @@ def patch_tenant_settings(
 ) -> TenantSettingsResponse:
     scope = TenantScope(tenant_id=user.tenant_id)
     engine = get_engine()
+    timezone_changed = False
     with engine.begin() as conn:
         before = conn.execute(
             select(
@@ -990,6 +995,19 @@ def patch_tenant_settings(
             values["timezone"] = payload.timezone
         if payload.live_matching_enabled is not None:
             values["live_matching_enabled"] = payload.live_matching_enabled
+
+        # Detect a real timezone change. Triggers the post-commit
+        # recompute_today() below so the operator gets correct
+        # numbers for *today* immediately — historical days still
+        # need an explicit regenerate-range pass (the UI surfaces
+        # this via a banner).
+        if payload.timezone is not None:
+            previous_tz = (
+                str(before.timezone) if before is not None else None
+            )
+            if previous_tz != payload.timezone:
+                timezone_changed = True
+
         if before is None:
             # Create with defaults + payload overrides.
             conn.execute(
@@ -1036,4 +1054,27 @@ def patch_tenant_settings(
             ).where(tenant_settings.c.tenant_id == scope.tenant_id)
         ).first()
     assert row is not None
+
+    # Post-commit recompute. Outside the transaction so a failing
+    # recompute (e.g. capture worker hiccup) can't roll back the
+    # legitimate settings change. Best-effort: log and continue.
+    if timezone_changed:
+        try:
+            from maugood.attendance import scheduler as attendance_scheduler  # noqa: PLC0415
+
+            rows = attendance_scheduler.recompute_today(scope)
+            logger.info(
+                "tenant_settings: timezone changed for tenant_id=%s; "
+                "recomputed %d attendance row(s) for today in the new tz",
+                scope.tenant_id,
+                rows,
+            )
+        except Exception:
+            logger.exception(
+                "tenant_settings: timezone changed for tenant_id=%s but "
+                "recompute_today() failed; today's attendance will "
+                "refresh on the next 15-minute scheduler tick",
+                scope.tenant_id,
+            )
+
     return _to_tenant_settings_response(row)

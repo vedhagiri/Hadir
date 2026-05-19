@@ -360,9 +360,11 @@ function StatusPill({ status }: { status: string }) {
         ? "warning"
         : status === "absent"
           ? "danger"
-          : status === "leave" || status === "holiday"
-            ? "info"
-            : "neutral";
+          : status === "waiting"
+            ? "accent"
+            : status === "leave" || status === "holiday"
+              ? "info"
+              : "neutral";
   return (
     <span className={`pill pill-${tone}`}>
       {t(`calendar.status.${status}`) as string}

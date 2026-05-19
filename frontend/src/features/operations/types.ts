@@ -80,6 +80,29 @@ export interface RestartAllResult {
   total: number;
 }
 
+// Broader "Restart All Workers" result — capture workers + clip
+// pipeline + reprocess worker + recovery sweep. Backend:
+// ``POST /api/operations/workers/restart-all-and-recover``.
+export interface RecoverySummary {
+  scanned: number;
+  class_a: number;
+  class_b: number;
+  class_c: number;
+  failed_cap: number;
+  skipped: number;
+}
+
+export interface RestartAllAndRecoverResult {
+  capture_restarted: number;
+  capture_failed: number;
+  capture_total: number;
+  clip_pipeline_restarted: boolean;
+  reprocess_cancelled: boolean;
+  recovery_triggered: boolean;
+  recovery_reason: string | null;
+  recovery: RecoverySummary;
+}
+
 export interface CameraErrorsResponse {
   recent_errors: string[];
   audit_log_errors: Array<{
