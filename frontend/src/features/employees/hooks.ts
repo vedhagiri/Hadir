@@ -42,6 +42,7 @@ export interface EmployeeListFilters {
 
 export function useEmployeeList(
   filters: EmployeeListFilters,
+  options: { enabled?: boolean } = {},
 ): UseQueryResult<EmployeeListResponse, Error> {
   const params = new URLSearchParams();
   if (filters.q.trim()) params.set("q", filters.q.trim());
@@ -61,6 +62,33 @@ export function useEmployeeList(
   return useQuery({
     queryKey: ["employees", "list", filters],
     queryFn: () => api<EmployeeListResponse>(path),
+    staleTime: 30 * 1000,
+    enabled: options.enabled ?? true,
+  });
+}
+
+// Manager-scoped employee list, backed by ``GET /api/employees/my-team``.
+// Use this when the calling page needs the Manager's actual team (the
+// same set the attendance backend auto-narrows to) — e.g. populating
+// the Individual picker on Daily Attendance for a Manager. Admin/HR
+// callers should keep using ``useEmployeeList``; ``/my-team`` is gated
+// to the Manager role on the server.
+export function useMyTeamList(
+  enabled: boolean,
+  filters: { page?: number; page_size?: number } = {},
+): UseQueryResult<EmployeeListResponse, Error> {
+  const page = filters.page ?? 1;
+  const pageSize = filters.page_size ?? 200;
+  const params = new URLSearchParams();
+  params.set("page", String(page));
+  params.set("page_size", String(pageSize));
+  params.set("sort_by", "full_name");
+  params.set("sort_dir", "asc");
+  const path = `/api/employees/my-team?${params.toString()}`;
+  return useQuery({
+    queryKey: ["employees", "my-team", { page, pageSize }],
+    queryFn: () => api<EmployeeListResponse>(path),
+    enabled,
     staleTime: 30 * 1000,
   });
 }

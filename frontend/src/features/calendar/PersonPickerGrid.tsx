@@ -7,9 +7,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { useMe } from "../../auth/AuthProvider";
 import { Icon } from "../../shell/Icon";
+import { primaryRole } from "../../types";
 import { useDepartments } from "../departments/hooks";
-import { useEmployeeList } from "../employees/hooks";
+import { useEmployeeList, useMyTeamList } from "../employees/hooks";
 import type { Employee } from "../employees/types";
 
 const PAGE_SIZE = 24;
@@ -35,6 +37,9 @@ export function PersonPickerGrid({
   onClearRestriction?: () => void;
 }) {
   const { t } = useTranslation();
+  const me = useMe();
+  const role = me.data ? primaryRole(me.data.roles) : "Employee";
+  const isManager = role === "Manager";
   const [q, setQ] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
   const [departmentId, setDepartmentId] = useState<number | null>(null);
@@ -78,20 +83,85 @@ export function PersonPickerGrid({
         : filters,
     [filters, restrictedSet],
   );
-  const employees = useEmployeeList(effectiveFilters);
+
+  // Admin/HR use the full employee list with server-side search +
+  // pagination. Manager pulls from /api/employees/my-team — the same
+  // team-rule set the calendar backend (manager_team_employee_ids)
+  // narrows to. The team API doesn't paginate or text-search server-
+  // side (the list is small by definition), so we filter + paginate
+  // the manager's team in-memory below.
+  const adminEmployees = useEmployeeList(effectiveFilters, {
+    enabled: !isManager,
+  });
+  const teamEmployees = useMyTeamList(isManager, { page_size: 200 });
+  const employees = isManager ? teamEmployees : adminEmployees;
   const departments = useDepartments();
 
   const allItems = employees.data?.items ?? [];
+
+  // Manager path: apply search + department + pagination locally
+  // against the team set. Admin/HR path: trust the server slice.
   const items = useMemo(() => {
-    if (!restrictedSet) return allItems;
-    return allItems.filter((e) => restrictedSet.has(e.id));
-  }, [allItems, restrictedSet]);
+    let rows = allItems;
+    if (restrictedSet) {
+      rows = rows.filter((e) => restrictedSet.has(e.id));
+      return rows;
+    }
+    if (isManager) {
+      if (departmentId !== null) {
+        rows = rows.filter((e) => e.department.id === departmentId);
+      }
+      if (debouncedQ.length >= SEARCH_MIN_CHARS) {
+        const needle = debouncedQ.toLowerCase();
+        rows = rows.filter((e) => {
+          return (
+            e.full_name.toLowerCase().includes(needle) ||
+            e.employee_code.toLowerCase().includes(needle) ||
+            (e.email ?? "").toLowerCase().includes(needle)
+          );
+        });
+      }
+      const start = (page - 1) * PAGE_SIZE;
+      return rows.slice(start, start + PAGE_SIZE);
+    }
+    return rows;
+  }, [
+    allItems,
+    restrictedSet,
+    isManager,
+    departmentId,
+    debouncedQ,
+    page,
+  ]);
+
+  // Pre-pagination + pre-restriction filtered set for Manager — used
+  // to compute totalPages and the "n / total" counter.
+  const managerFilteredCount = useMemo(() => {
+    if (!isManager || restrictedSet) return 0;
+    let rows = allItems;
+    if (departmentId !== null) {
+      rows = rows.filter((e) => e.department.id === departmentId);
+    }
+    if (debouncedQ.length >= SEARCH_MIN_CHARS) {
+      const needle = debouncedQ.toLowerCase();
+      rows = rows.filter(
+        (e) =>
+          e.full_name.toLowerCase().includes(needle) ||
+          e.employee_code.toLowerCase().includes(needle) ||
+          (e.email ?? "").toLowerCase().includes(needle),
+      );
+    }
+    return rows.length;
+  }, [isManager, restrictedSet, allItems, departmentId, debouncedQ]);
 
   const totalPages = useMemo(() => {
     if (restrictedSet) return 1;
+    if (isManager) {
+      return Math.max(1, Math.ceil(managerFilteredCount / PAGE_SIZE));
+    }
     if (!employees.data) return 1;
     return Math.max(1, Math.ceil(employees.data.total / employees.data.page_size));
-  }, [employees.data, restrictedSet]);
+  }, [employees.data, restrictedSet, isManager, managerFilteredCount]);
 
   return (
     <div className="card" style={{ padding: 14 }}>
@@ -189,7 +259,9 @@ export function PersonPickerGrid({
         >
           {restrictedSet
             ? `${items.length} / ${restrictedSet.size}`
-            : `${items.length} / ${employees.data?.total ?? 0}`}
+            : isManager
+              ? `${items.length} / ${managerFilteredCount}`
+              : `${items.length} / ${employees.data?.total ?? 0}`}
         </span>
       </div>
 

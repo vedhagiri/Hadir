@@ -16,7 +16,7 @@ import { PdfOptionsModal } from "../../components/PdfOptionsModal";
 import { useConfidentialDownload } from "../../components/useConfidentialDownload";
 import { primaryRole } from "../../types";
 import { useDepartments } from "../departments/hooks";
-import { useEmployeeList } from "../employees/hooks";
+import { useEmployeeList, useMyTeamList } from "../employees/hooks";
 import { AttendanceDrawer } from "./AttendanceDrawer";
 import { useAttendance, useRegenerateAttendance } from "./hooks";
 import type { AttendanceItem } from "./types";
@@ -27,9 +27,15 @@ export function DailyAttendancePage() {
   const me = useMe();
   const role = me.data ? primaryRole(me.data.roles) : "Employee";
   const isAdminLike = role === "Admin" || role === "HR";
+  const isManager = role === "Manager";
 
   const [date, setDate] = useState<string>(todayIso());
-  const [scopeMode, setScopeMode] = useState<ScopeMode>("company");
+  // Manager default lands on "team" — that's their natural scope (the
+  // backend auto-narrows /api/attendance to their team-rule set when
+  // no department/employee filter is supplied).
+  const [scopeMode, setScopeMode] = useState<ScopeMode>(
+    isManager ? "team" : "company",
+  );
   const [departmentId, setDepartmentId] = useState<number | null>(null);
   const [employeeId, setEmployeeId] = useState<number | null>(null);
   const [drawerItem, setDrawerItem] = useState<AttendanceItem | null>(null);
@@ -55,22 +61,31 @@ export function DailyAttendancePage() {
       action: () => setPdfModalOpen(true),
     });
 
-  // Wire the active scope to backend filters. "Team" is a manager-team
-  // filter that we don't have a dedicated endpoint for yet — it falls
-  // back to "company" so the page still shows data; the UI surfaces a
-  // hint instead of pretending it filters.
+  // Wire the active scope to backend filters. For Manager + "Team",
+  // we pass nothing — the backend's /api/attendance handler already
+  // auto-narrows to the Manager's team via ``manager_team_employee_ids``
+  // when no department/employee filter is supplied.
   const filterDeptId = scopeMode === "department" ? departmentId : null;
   const filterEmpId = scopeMode === "individual" ? employeeId : null;
 
   const list = useAttendance(date, filterDeptId, filterEmpId);
   const departmentsQuery = useDepartments();
-  const employeesQuery = useEmployeeList({
-    q: "",
-    department_id: null,
-    include_inactive: false,
-    page: 1,
-    page_size: 200,
-  });
+  // Admin/HR get the full tenant; Manager pulls from /my-team so the
+  // Individual picker matches the same set the attendance backend
+  // auto-narrows to. The two hooks are mutually exclusive — enable
+  // only the one that matches the caller's role.
+  const adminEmployeesQuery = useEmployeeList(
+    {
+      q: "",
+      department_id: null,
+      include_inactive: false,
+      page: 1,
+      page_size: 200,
+    },
+    { enabled: !isManager },
+  );
+  const teamEmployeesQuery = useMyTeamList(isManager, { page_size: 200 });
+  const employeesQuery = isManager ? teamEmployeesQuery : adminEmployeesQuery;
   const regenerate = useRegenerateAttendance();
 
   const stats = useMemo(() => {
@@ -326,13 +341,21 @@ export function DailyAttendancePage() {
           </select>
         )}
 
-        {scopeMode === "team" && (
+        {scopeMode === "team" && isManager && (
+          <span
+            className="text-xs text-dim"
+            title="Showing every employee on your team (auto-narrowed by the server)."
+          >
+            Showing your team members
+          </span>
+        )}
+        {scopeMode === "team" && !isManager && (
           <span
             className="text-xs text-dim"
             style={{ fontStyle: "italic" }}
-            title="Manager-team filter — currently shows the same as Company; manager picker arrives later."
+            title="Team scope is only meaningful when viewing as a Manager."
           >
-            Manager-team filter coming soon
+            Team scope applies to Manager accounts only
           </span>
         )}
 

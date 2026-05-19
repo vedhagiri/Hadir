@@ -362,6 +362,7 @@ def person_view(
             attendance_records.c.late,
             attendance_records.c.absent,
             attendance_records.c.leave_type_id,
+            attendance_records.c.policy_id,
             shift_policies.c.name.label("policy_name"),
             leave_types.c.name.label("leave_name"),
         )

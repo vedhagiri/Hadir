@@ -567,6 +567,85 @@ def test_person_view_manager_404_outside_dept(
         _restore_admin(admin_engine, user_id=admin_user["id"])
 
 
+def test_person_view_today_absent_no_leave_resolves_policy_id(
+    client: TestClient,
+    admin_user: dict,
+    admin_engine: Engine,
+    seeded_calendar: dict,
+) -> None:
+    """Regression for the ``policy_id`` SELECT omission.
+
+    ``person_view`` reads ``r.policy_id`` from each row when computing
+    ``policy_ids_for_today`` for any attendance row matching
+    ``date == today AND absent AND in_time IS NULL AND leave_type_id
+    IS NULL`` (the today-and-still-pending branch that picks a shift
+    end to decide ``waiting`` vs. ``absent`` for today). The SELECT
+    clause must therefore include ``attendance_records.c.policy_id``
+    — without it the row attribute access raises
+    ``NoSuchColumnError`` and the endpoint 500s.
+
+    The other ``test_person_view_*`` tests don't trigger this code
+    path because their seeded attendance rows live in the first five
+    weekdays of the month, which may or may not include today. This
+    test deliberately writes a row on today's date with the exact
+    bug-triggering shape and asserts the endpoint returns 200.
+    """
+
+    from maugood.db import attendance_records as _ar
+
+    today = date.today()
+    eng1 = seeded_calendar["eng1"]
+    policy_id = seeded_calendar.get("policy_id")
+    # Use the same policy the fixture seeded for ENG-001.
+    if policy_id is None:
+        with admin_engine.begin() as conn:
+            policy_id = conn.execute(
+                select(shift_policies.c.id)
+                .where(shift_policies.c.tenant_id == TENANT_ID)
+                .order_by(shift_policies.c.id.asc())
+                .limit(1)
+            ).scalar_one()
+
+    # Ensure today's row matches the bug predicate exactly: absent,
+    # no in_time, no leave_type. Idempotent — delete any pre-existing
+    # row for the same (tenant, employee, date) tuple first.
+    with admin_engine.begin() as conn:
+        conn.execute(
+            delete(_ar).where(
+                _ar.c.tenant_id == TENANT_ID,
+                _ar.c.employee_id == eng1,
+                _ar.c.date == today,
+            )
+        )
+        conn.execute(
+            insert(_ar).values(
+                tenant_id=TENANT_ID,
+                employee_id=eng1,
+                date=today,
+                in_time=None,
+                out_time=None,
+                total_minutes=None,
+                policy_id=policy_id,
+                late=False,
+                early_out=False,
+                short_hours=False,
+                absent=True,
+                overtime_minutes=0,
+                leave_type_id=None,
+            )
+        )
+
+    _login(client, admin_user)
+    month = _month_str(today.replace(day=1))
+    resp = client.get(
+        f"/api/attendance/calendar/person/{eng1}?month={month}"
+    )
+    # Pre-fix: 500 Internal Server Error. Post-fix: 200 OK.
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["employee_id"] == eng1
+
+
 def test_person_view_employee_404_for_others(
     client: TestClient,
     employee_user: dict,

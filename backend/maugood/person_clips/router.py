@@ -71,6 +71,92 @@ router = APIRouter(prefix="/api/person-clips", tags=["person-clips"])
 
 ADMIN = Depends(require_role("Admin"))
 HR_OR_ADMIN = Depends(require_any_role("Admin", "HR"))
+# Manager joins the read-only gates so they can view matched clips for
+# their team. Per-call team-scope is enforced via
+# ``_assert_clip_visible_to_manager`` — Manager without a matched
+# team-mate on the clip gets 404 (never 403, never leaks existence).
+HR_ADMIN_OR_MANAGER = Depends(require_any_role("Admin", "HR", "Manager"))
+
+
+def _is_admin_or_hr(user: CurrentUser) -> bool:
+    return "Admin" in user.roles or "HR" in user.roles
+
+
+def _manager_team_ids(conn, scope: TenantScope, user: CurrentUser) -> frozenset[int]:
+    """Resolve the Manager's team set via the team-rule helper.
+
+    Returns the same set the calendar, picker, and attendance router
+    use. Admin/HR callers must short-circuit before this — they don't
+    need narrowing.
+    """
+
+    from maugood.employees.repository import (  # noqa: PLC0415
+        manager_team_employee_ids,
+    )
+
+    return manager_team_employee_ids(
+        conn, scope, user_email=user.email, user_id=user.id
+    )
+
+
+def _clip_matched_employee_ids(conn, scope: TenantScope, clip_id: int) -> tuple[bool, set[int]]:
+    """Return ``(exists_in_tenant, matched_employee_ids)`` for a clip.
+
+    Resolves which employees are linked to a clip by unioning two
+    sources, identical to the list query:
+      1. ``person_clips.employee_id`` — legacy single-employee link.
+      2. Distinct ``face_crops.employee_id`` rows whose
+         ``person_clip_id`` matches and ``employee_id IS NOT NULL``
+         (every UC's matched employees land here).
+
+    The boolean signals whether the clip row exists in this tenant at
+    all — so the router can return 404 for cross-tenant probes
+    without distinguishing "wrong tenant" from "no match in team".
+    """
+
+    clip_row = conn.execute(
+        select(person_clips.c.employee_id).where(
+            person_clips.c.tenant_id == scope.tenant_id,
+            person_clips.c.id == clip_id,
+        )
+    ).first()
+    if clip_row is None:
+        return (False, set())
+    matched: set[int] = set()
+    if clip_row.employee_id is not None:
+        matched.add(int(clip_row.employee_id))
+    crop_rows = conn.execute(
+        select(face_crops.c.employee_id)
+        .where(
+            face_crops.c.tenant_id == scope.tenant_id,
+            face_crops.c.person_clip_id == clip_id,
+            face_crops.c.employee_id.isnot(None),
+        )
+        .distinct()
+    ).all()
+    matched.update(int(r.employee_id) for r in crop_rows if r.employee_id is not None)
+    return (True, matched)
+
+
+def _assert_clip_visible_to_manager(
+    conn,
+    scope: TenantScope,
+    user: CurrentUser,
+    clip_id: int,
+) -> None:
+    """For Manager callers, require that the clip carries a match for
+    at least one employee in the Manager's team. Otherwise 404 (never
+    403, never leaks existence). Admin/HR short-circuit.
+    """
+
+    if _is_admin_or_hr(user):
+        return
+    exists, matched = _clip_matched_employee_ids(conn, scope, clip_id)
+    if not exists:
+        raise HTTPException(status_code=404, detail="clip not found")
+    team = _manager_team_ids(conn, scope, user)
+    if not matched or matched.isdisjoint(team):
+        raise HTTPException(status_code=404, detail="clip not found")
 
 
 def _resolve_employee_names(conn, scope: TenantScope, all_matched_ids: set[int]) -> dict[int, str]:
@@ -616,7 +702,7 @@ def get_system_stats(
 
 @router.get("", response_model=PersonClipListResponse)
 def list_person_clips(
-    user: Annotated[CurrentUser, HR_OR_ADMIN],
+    user: Annotated[CurrentUser, HR_ADMIN_OR_MANAGER],
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
     camera_id: Optional[int] = Query(default=None),
@@ -680,6 +766,20 @@ def list_person_clips(
         return PersonClipListResponse(
             items=[], total=0, page=page, page_size=page_size,
         )
+
+    # Manager scope: never allow a Manager to enumerate every clip in
+    # the tenant. They must pin to a ``matched_employee_id`` (or
+    # ``employee_id``) that's in their team; otherwise 404 so we
+    # don't leak the existence of other employees' clips. Admin/HR
+    # skip this branch.
+    if not _is_admin_or_hr(user):
+        with get_engine().begin() as conn:
+            team = _manager_team_ids(conn, scope, user)
+        pin = matched_employee_id if matched_employee_id is not None else employee_id
+        if pin is None:
+            raise HTTPException(status_code=404, detail="not found")
+        if pin not in team:
+            raise HTTPException(status_code=404, detail="not found")
 
     start_dt: Optional[datetime] = None
     end_dt: Optional[datetime] = None
@@ -1326,7 +1426,7 @@ def processed_counts(
 @router.get("/{clip_id}/processing-results", response_model=ClipProcessingResultsResponse)
 def get_clip_processing_results(
     clip_id: int,
-    user: Annotated[CurrentUser, HR_OR_ADMIN],
+    user: Annotated[CurrentUser, HR_ADMIN_OR_MANAGER],
 ) -> ClipProcessingResultsResponse:
     """Return per-use-case processing results for a clip."""
 
@@ -1337,6 +1437,7 @@ def get_clip_processing_results(
         row = get_clip(conn, scope, clip_id)
         if row is None:
             raise HTTPException(status_code=404, detail="person clip not found")
+        _assert_clip_visible_to_manager(conn, scope, user, clip_id)
 
         cpr_rows = conn.execute(
             select(clip_processing_results)
@@ -1448,7 +1549,7 @@ def reprocess_single_clip(
 @router.get("/{clip_id}/face-crops", response_model=FaceCropListResponse)
 def list_clip_face_crops(
     clip_id: int,
-    user: Annotated[CurrentUser, HR_OR_ADMIN],
+    user: Annotated[CurrentUser, HR_ADMIN_OR_MANAGER],
     use_case: Optional[str] = Query(default=None, description="Filter by use case: uc1, uc2"),
 ) -> FaceCropListResponse:
     """List face crops stored for a clip, optionally filtered by use case."""
@@ -1460,6 +1561,7 @@ def list_clip_face_crops(
         clip_row = get_clip(conn, scope, clip_id)
         if clip_row is None:
             raise HTTPException(status_code=404, detail="person clip not found")
+        _assert_clip_visible_to_manager(conn, scope, user, clip_id)
 
         q = (
             select(
@@ -1517,12 +1619,14 @@ def list_clip_face_crops(
 def get_face_crop_image(
     clip_id: int,
     crop_id: int,
-    user: Annotated[CurrentUser, HR_OR_ADMIN],
+    user: Annotated[CurrentUser, HR_ADMIN_OR_MANAGER],
 ) -> Response:
     """Decrypt and serve a face crop JPEG.
 
     Cross-tenant requests return 404 — the WHERE clause on ``tenant_id``
-    enforces this before any file I/O.
+    enforces this before any file I/O. Manager callers additionally
+    pass the team-scope guard so they can only see crops attached to
+    clips with at least one team-mate matched.
     """
     scope = TenantScope(tenant_id=user.tenant_id)
     engine = get_engine()
@@ -1535,9 +1639,10 @@ def get_face_crop_image(
                 face_crops.c.tenant_id == scope.tenant_id,
             )
         ).first()
+        if crop_row is None:
+            raise HTTPException(status_code=404, detail="face crop not found")
+        _assert_clip_visible_to_manager(conn, scope, user, clip_id)
 
-    if crop_row is None:
-        raise HTTPException(status_code=404, detail="face crop not found")
     if not crop_row.file_path:
         raise HTTPException(status_code=410, detail="face crop file missing")
 
@@ -1565,7 +1670,7 @@ def get_face_crop_image(
 @router.get("/{clip_id}/thumbnail")
 def person_clip_thumbnail(
     clip_id: int,
-    user: Annotated[CurrentUser, HR_OR_ADMIN],
+    user: Annotated[CurrentUser, HR_ADMIN_OR_MANAGER],
 ) -> Response:
     """Serve the thumbnail (first frame) for a person clip."""
 
@@ -1574,9 +1679,10 @@ def person_clip_thumbnail(
 
     with engine.begin() as conn:
         row = get_clip(conn, scope, clip_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="person clip not found")
+        _assert_clip_visible_to_manager(conn, scope, user, clip_id)
 
-    if row is None:
-        raise HTTPException(status_code=404, detail="person clip not found")
     if not row.file_path:
         raise HTTPException(status_code=410, detail="clip file missing")
 
@@ -1597,7 +1703,7 @@ def person_clip_thumbnail(
 @router.get("/{clip_id}/stream")
 def stream_person_clip(
     clip_id: int,
-    user: Annotated[CurrentUser, HR_OR_ADMIN],
+    user: Annotated[CurrentUser, HR_ADMIN_OR_MANAGER],
     response: Response,
 ) -> Response:
     """Stream a person clip video file. Decrypts on the fly."""
@@ -1607,9 +1713,10 @@ def stream_person_clip(
 
     with engine.begin() as conn:
         row = get_clip(conn, scope, clip_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="person clip not found")
+        _assert_clip_visible_to_manager(conn, scope, user, clip_id)
 
-    if row is None:
-        raise HTTPException(status_code=404, detail="person clip not found")
     if not row.file_path:
         raise HTTPException(status_code=410, detail="clip file missing")
 

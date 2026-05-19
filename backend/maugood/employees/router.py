@@ -1947,8 +1947,8 @@ def list_team_members_endpoint(
         employees as _employees,
         sections as _sections,
     )
-    from maugood.manager_assignments.repository import (  # noqa: PLC0415
-        get_manager_visible_employee_ids,
+    from maugood.employees.repository import (  # noqa: PLC0415
+        manager_team_employee_ids,
     )
 
     scope = TenantScope(tenant_id=user.tenant_id)
@@ -1992,9 +1992,29 @@ def list_team_members_endpoint(
             raise HTTPException(status_code=404, detail="employee not found")
 
         if not is_admin_or_hr:
-            visible = get_manager_visible_employee_ids(
-                conn, scope, manager_user_id=user.id
+            # Use the team-rule resolver (My Team / Daily Attendance /
+            # Calendar all share this). Falls back to the legacy P8
+            # visible-set when the Manager has no matching employees
+            # row — so existing tenants relying on department-only
+            # scoping still see the same set.
+            visible = set(
+                manager_team_employee_ids(
+                    conn, scope, user_email=user.email, user_id=user.id
+                )
             )
+            # ``manager_team_employee_ids`` deliberately excludes the
+            # manager's own employee row; for the team-members
+            # endpoint a Manager can legitimately view their own
+            # profile's team-mates, so add self back into the allow
+            # set when an email bridge exists.
+            from maugood.requests.repository import (  # noqa: PLC0415
+                employee_for_user_email,
+            )
+            my_emp_id = employee_for_user_email(
+                conn, scope, email=user.email
+            )
+            if my_emp_id is not None:
+                visible.add(int(my_emp_id))
             if employee_id not in visible:
                 # 404 not 403 — never leak existence to a Manager who
                 # can't see the row.
