@@ -12,6 +12,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DrawerShell } from "../../components/DrawerShell";
+import { extractApiError } from "../../api/client";
 
 import { Icon } from "../../shell/Icon";
 import { BrandLogo } from "./BrandLogo";
@@ -55,17 +56,21 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
   // New cameras default every pipeline switch to OFF. Operator
   // explicitly turns on what they want after adding the row. Edit
   // mode honours whatever the persisted row already carries.
+  // Defaults for a brand-new camera: every operational toggle is ON
+  // so the camera is immediately useful after Add. Edit mode keeps
+  // the row's persisted value — the ``??`` fallback only fires when
+  // ``initial`` is undefined (the Add path).
   const [workerEnabled, setWorkerEnabled] = useState(
-    initial?.worker_enabled ?? false,
+    initial?.worker_enabled ?? true,
   );
   const [displayEnabled, setDisplayEnabled] = useState(
-    initial?.display_enabled ?? false,
+    initial?.display_enabled ?? true,
   );
   const [detectionEnabled, setDetectionEnabled] = useState(
-    initial?.detection_enabled ?? false,
+    initial?.detection_enabled ?? true,
   );
   const [clipRecordingEnabled, setClipRecordingEnabled] = useState(
-    initial?.clip_recording_enabled ?? false,
+    initial?.clip_recording_enabled ?? true,
   );
   // Migration 0053: default for new cameras is 'body' so seated /
   // back-to-camera employees still keep clips recording (YOLO finds
@@ -87,10 +92,10 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
     setLocation(initial?.location ?? "");
     setZone(initial?.zone ?? "");
     setBrand(initial?.brand ?? "");
-    setWorkerEnabled(initial?.worker_enabled ?? false);
-    setDisplayEnabled(initial?.display_enabled ?? false);
-    setDetectionEnabled(initial?.detection_enabled ?? false);
-    setClipRecordingEnabled(initial?.clip_recording_enabled ?? false);
+    setWorkerEnabled(initial?.worker_enabled ?? true);
+    setDisplayEnabled(initial?.display_enabled ?? true);
+    setDetectionEnabled(initial?.detection_enabled ?? true);
+    setClipRecordingEnabled(initial?.clip_recording_enabled ?? true);
     setClipDetectionSource(initial?.clip_detection_source ?? "body");
     setConfig(initial?.capture_config ?? DEFAULT_CAPTURE_CONFIG);
     setRtspUrl("");
@@ -165,8 +170,12 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
         await patch.mutateAsync({ id: initial.id, patch: patchBody });
       }
       onClose();
-    } catch {
-      setError(t("cameras.errors.saveFailed"));
+    } catch (err) {
+      // Surface the backend's actual message (e.g. duplicate RTSP URL
+      // 409 with {field, message}) instead of a generic "save failed".
+      // ``extractApiError`` knows about both the plain-string and the
+      // structured {field, message} shapes used across Maugood.
+      setError(extractApiError(err, t("cameras.errors.saveFailed")));
     }
   };
 

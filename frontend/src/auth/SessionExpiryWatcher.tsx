@@ -7,13 +7,14 @@
 // give the user one last chance via the modal in "expired" mode rather
 // than auto-redirecting to /login.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { serverNow, useLogout, useMe, useRefreshSession } from "./AuthProvider";
 
 // Show the modal when the session has this many seconds (or fewer)
-// remaining. 120 s gives the operator a comfortable window to click.
-const WARN_BEFORE_EXPIRY_S = 120;
+// remaining. Last 30 s of the session window — explicit "Stay Signed
+// In" click is the only thing that extends it.
+const WARN_BEFORE_EXPIRY_S = 30;
 
 // Hard upper bound on countdown polling — re-evaluates remaining time
 // once per second so the displayed "1:58" actually ticks down.
@@ -31,6 +32,22 @@ function diffSeconds(targetIso: string | null | undefined): number {
   return Math.floor((t - serverNow()) / 1000);
 }
 
+// Popup countdown target = session_started_at + idle_minutes.
+// See SessionCountdown.tsx for the rationale: decouples popup timing
+// from the per-request sliding ``expires_at``, so polling on other
+// queries doesn't push the warning modal forward indefinitely. The
+// backend bumps session_started_at when "Stay signed in" is clicked
+// so the refresh button still visibly extends the window.
+function computePopupTargetIso(
+  startedAt: string | null | undefined,
+  idleMinutes: number | null | undefined,
+): string | null {
+  if (!startedAt || !idleMinutes) return null;
+  const startMs = new Date(startedAt).getTime();
+  if (!Number.isFinite(startMs)) return null;
+  return new Date(startMs + idleMinutes * 60_000).toISOString();
+}
+
 function formatCountdown(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
   const m = Math.floor(seconds / 60);
@@ -45,24 +62,23 @@ export function SessionExpiryWatcher() {
 
   const [phase, setPhase] = useState<Phase>("idle");
   const [remaining, setRemaining] = useState<number>(0);
-  // Track the last expiry we observed so refetches don't spam
-  // re-renders if the value is identical.
-  const lastExpiryRef = useRef<string | null>(null);
 
-  const expiresAt = me?.session_expires_at ?? null;
+  const expiresAt = computePopupTargetIso(
+    me?.session_started_at,
+    me?.session_idle_minutes,
+  );
 
-  // Schedule / re-schedule when the cached expiry changes.
+  // Drive the countdown off a single interval keyed only on the target.
+  // ``phase`` is intentionally NOT a dependency: each tick re-derives
+  // phase from the remaining-time math, so including it in the deps
+  // would tear down the interval mid-countdown the moment phase first
+  // transitions (idle → warning), and the early-return guard from the
+  // old implementation prevented the interval from being re-created.
   useEffect(() => {
     if (!expiresAt) {
-      // No session — drop back to idle.
       setPhase("idle");
       return;
     }
-    if (lastExpiryRef.current === expiresAt && phase !== "expired") {
-      // Same expiry we already saw — nothing to reschedule.
-      return;
-    }
-    lastExpiryRef.current = expiresAt;
 
     const tick = () => {
       const left = diffSeconds(expiresAt);
@@ -72,14 +88,14 @@ export function SessionExpiryWatcher() {
       } else if (left <= WARN_BEFORE_EXPIRY_S) {
         setPhase((p) => (p === "expired" ? p : "warning"));
       } else {
-        setPhase("idle");
+        setPhase((p) => (p === "expired" ? p : "idle"));
       }
     };
 
     tick();
     const id = window.setInterval(tick, COUNTDOWN_INTERVAL_MS);
     return () => window.clearInterval(id);
-  }, [expiresAt, phase]);
+  }, [expiresAt]);
 
   // If a refresh succeeds, ``me`` updates with a fresh
   // ``session_expires_at`` and the effect above resets the timer.

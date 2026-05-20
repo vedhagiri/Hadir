@@ -90,10 +90,13 @@ def _check_duplicate_url(
                 status_code=409,
                 detail={
                     "field": "rtsp_url",
+                    "code": "duplicate_rtsp_url",
+                    "existing_camera_id": row.id,
+                    "existing_camera_name": row.name,
                     "message": (
-                        f"Camera '{row.name}' already uses this RTSP stream "
-                        f"({rtsp_io.rtsp_host(existing_plain)}). Edit that "
-                        f"entry instead of creating a duplicate."
+                        f"This camera/RTSP URL is already added "
+                        f"(as '{row.name}'). Delete the existing camera "
+                        f"first to add it again."
                     ),
                 },
             )

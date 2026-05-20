@@ -172,6 +172,35 @@ def update_active_role(
     )
 
 
+def bump_refresh_anchor(conn: Connection, session_id: str) -> datetime:
+    """Set ``data.refresh_anchor_at`` to ``now()`` on the session row.
+
+    Used by ``POST /api/auth/refresh`` so the frontend's popup countdown
+    target (computed as ``refresh_anchor_at + idle_minutes``) resets when
+    the user clicks "Stay signed in". Backend sliding of ``expires_at``
+    on every authenticated request stays untouched.
+
+    Read-modify-write rather than ``jsonb_set`` so we tolerate a missing
+    or malformed ``data`` field — same pattern as ``update_active_role``.
+    Returns the timestamp that was written.
+    """
+
+    now = _now()
+    row = conn.execute(
+        select(user_sessions.c.data).where(user_sessions.c.id == session_id)
+    ).first()
+    if row is None:
+        return now
+    data: dict[str, Any] = dict(row.data or {})
+    data["refresh_anchor_at"] = now.isoformat()
+    conn.execute(
+        update(user_sessions)
+        .where(user_sessions.c.id == session_id)
+        .values(data=data)
+    )
+    return now
+
+
 def delete_session(conn: Connection, session_id: str) -> None:
     """Remove a session row. Used by logout and expiry handling."""
 

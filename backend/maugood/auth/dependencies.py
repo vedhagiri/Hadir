@@ -10,6 +10,7 @@ parameter rather than juggling user + guard.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Callable, Iterable
 
 from fastapi import Cookie, Depends, HTTPException, Request, Response, status
@@ -272,7 +273,20 @@ def current_user(
     # P3+: surface the session's created_at so /me + /refresh can return
     # it. Lets the frontend show "logged in at HH:MM" alongside the
     # countdown without an extra query.
-    request.state.session_started_at = session_row.created_at
+    #
+    # If the user has explicitly clicked "Stay signed in" since login,
+    # ``data.refresh_anchor_at`` holds the most recent anchor — return
+    # that so the frontend's popup countdown (target =
+    # session_started_at + idle_minutes) resets after refresh while
+    # staying decoupled from per-request sliding.
+    anchor_iso = (session_row.data or {}).get("refresh_anchor_at") if session_row.data else None
+    if anchor_iso:
+        try:
+            request.state.session_started_at = datetime.fromisoformat(anchor_iso)
+        except (TypeError, ValueError):
+            request.state.session_started_at = session_row.created_at
+    else:
+        request.state.session_started_at = session_row.created_at
 
     # Refresh the cookie's Max-Age so the browser keeps the session alive
     # alongside the DB row. Same attributes as on login; Secure still off

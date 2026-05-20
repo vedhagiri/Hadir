@@ -32,6 +32,7 @@ from maugood.auth.dependencies import (
 from maugood.auth.passwords import verify_password
 from maugood.auth.ratelimit import LoginRateLimiter, get_rate_limiter
 from maugood.auth.sessions import (
+    bump_refresh_anchor,
     create_session,
     delete_session,
     update_active_role,
@@ -631,10 +632,16 @@ def refresh_session(
         session_exp = datetime.now(tz=timezone.utc) + timedelta(
             minutes=settings.session_idle_minutes
         )
-    # Silent audit. Useful when an operator wants to inspect "did the
-    # user actually click 'Stay signed in' or was their browser idle?"
+    # Reset the frontend popup's countdown anchor. The popup target is
+    # ``session_started_at + idle_minutes``; bumping the anchor here is
+    # what makes "Stay signed in" visibly reset the countdown without
+    # touching the per-request sliding ``expires_at`` (which is what
+    # actually keeps the server-side session alive). Silent audit useful
+    # when an operator wants to inspect "did the user actually click
+    # 'Stay signed in' or was their browser idle?"
     engine = get_engine()
     with engine.begin() as conn:
+        new_anchor = bump_refresh_anchor(conn, user.session_id)
         write_audit(
             conn,
             tenant_id=user.tenant_id,
@@ -647,7 +654,7 @@ def refresh_session(
     return RefreshSessionResponse(
         session_expires_at=session_exp,
         session_idle_minutes=settings.session_idle_minutes,
-        session_started_at=getattr(request.state, "session_started_at", None),
+        session_started_at=new_anchor,
         server_time=datetime.now(tz=timezone.utc),
     )
 
