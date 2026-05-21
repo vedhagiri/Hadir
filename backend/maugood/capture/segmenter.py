@@ -29,6 +29,7 @@ import logging
 import os
 import re
 import subprocess
+import collections
 import threading
 import time
 from dataclasses import dataclass
@@ -118,6 +119,13 @@ class RtspSegmenter:
         self._first_segment_at: Optional[float] = None
         self._last_segment_at: Optional[float] = None
         self._restart_count = 0
+        # TEMP-DIAGNOSTIC-2026-05-20 — track restart timestamps so we
+        # can emit ``segmenter_thrashing`` when N restarts happen in a
+        # short window. Bounded; only the most-recent 60 timestamps
+        # are kept.
+        self._restart_ts_window: "collections.deque[float]" = collections.deque(
+            maxlen=60
+        )
 
     # ---- lifecycle --------------------------------------------------
 
@@ -275,6 +283,43 @@ class RtspSegmenter:
                         self._camera_id, rc, stderr_tail,
                     )
                     self._restart_count += 1
+                    # TEMP-DIAGNOSTIC-2026-05-20 — anomaly emit.
+                    try:
+                        from maugood.diagnostics import (  # noqa: PLC0415
+                            record_ffmpeg_restart,
+                            record_segmenter_thrashing,
+                        )
+                        # Trim stderr to the first non-empty line — the
+                        # signal is "No route to host" / "Connection
+                        # timed out" / "EOF", not the full traceback.
+                        short_reason = next(
+                            (ln.strip() for ln in stderr_tail.splitlines()
+                             if ln.strip()),
+                            f"exit rc={rc}",
+                        )[:160]
+                        record_ffmpeg_restart(
+                            tenant_id=self._tenant_id,
+                            camera_id=self._camera_id,
+                            camera_name=None,
+                            exit_code=rc,
+                            short_reason=short_reason,
+                        )
+                        # Thrashing detector: > 5 restarts in last 30 s.
+                        now_ts = time.time()
+                        self._restart_ts_window.append(now_ts)
+                        restarts_30s = sum(
+                            1 for t in self._restart_ts_window
+                            if (now_ts - t) <= 30.0
+                        )
+                        if restarts_30s >= 5:
+                            record_segmenter_thrashing(
+                                tenant_id=self._tenant_id,
+                                camera_id=self._camera_id,
+                                camera_name=None,
+                                restarts_30s=restarts_30s,
+                            )
+                    except Exception:  # noqa: BLE001
+                        pass
                     break
                 time.sleep(0.5)
             # Make sure the subprocess is dead before respawning.

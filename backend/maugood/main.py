@@ -53,6 +53,8 @@ from maugood.notifications import (
     router as notifications_router,
 )
 from maugood.operations import router as operations_router
+# TEMP-DIAGNOSTIC-2026-05-20 — Frame Diagnostics tab.
+from maugood.diagnostics.router import router as diagnostics_router
 from maugood.face_crops import router as face_crops_router
 from maugood.person_clips import router as person_clips_router
 from maugood.clip_pipeline.router import router as clip_pipeline_router
@@ -302,6 +304,8 @@ def create_app() -> FastAPI:
     app.include_router(notifications_router)
     app.include_router(live_capture_router)
     app.include_router(operations_router)
+    # TEMP-DIAGNOSTIC-2026-05-20 — Frame Diagnostics tab.
+    app.include_router(diagnostics_router)
     app.include_router(person_clips_router)
     app.include_router(clip_pipeline_router)
     app.include_router(pipeline_monitor_router)

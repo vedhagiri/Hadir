@@ -1688,6 +1688,20 @@ class CaptureWorker:
                 if not cap.isOpened():
                     self._set_status("reconnecting", error="could not open stream")
                     self._record_unreachable("could not open stream")
+                    # TEMP-DIAGNOSTIC-2026-05-20
+                    try:
+                        from maugood.diagnostics import (  # noqa: PLC0415
+                            record_rtsp_reconnect,
+                        )
+                        record_rtsp_reconnect(
+                            tenant_id=self._scope.tenant_id,
+                            camera_id=self.camera_id,
+                            camera_name=self.camera_name,
+                            reason="could not open stream",
+                            backoff_s=backoff,
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
                     self._sleep_interruptible(backoff)
                     backoff = self._bump_backoff(backoff)
                     continue
@@ -1702,7 +1716,13 @@ class CaptureWorker:
                 first_frame_seen = False
 
                 while not self._stop.is_set():
+                    # TEMP-DIAGNOSTIC-2026-05-20 — per-frame timing.
+                    # Four monotonic() calls cost ~1 µs total at 25 fps
+                    # = 25 µs/s of CPU. The branch on is_enabled()
+                    # short-circuits when diagnostics is off.
+                    _t0 = time.monotonic()
                     ok, frame = cap.read()
+                    _t_after_read = time.monotonic()
                     if not ok or frame is None:
                         logger.info(
                             "camera %s: read returned empty — reconnecting",
@@ -1712,6 +1732,18 @@ class CaptureWorker:
                         self._record_error(
                             "rtsp", "read failed — reconnecting"
                         )
+                        # TEMP-DIAGNOSTIC-2026-05-20
+                        try:
+                            from maugood.diagnostics import (  # noqa: PLC0415
+                                record_reader_read_failed,
+                            )
+                            record_reader_read_failed(
+                                tenant_id=self._scope.tenant_id,
+                                camera_id=self.camera_id,
+                                camera_name=self.camera_name,
+                            )
+                        except Exception:  # noqa: BLE001
+                            pass
                         break
 
                     # P28.8: on first successful read, probe + persist
@@ -1749,11 +1781,40 @@ class CaptureWorker:
                     # thread so preview pace tracks read pace, not detect
                     # pace.
                     self._update_preview(frame)
+                    _t_after_preview = time.monotonic()
 
                     # P37: check person presence and record clip frames.
                     # Starts immediately when a person is detected,
                     # stops immediately when they leave — no buffers.
                     self._check_and_record_clip(frame)
+                    _t_after_clip = time.monotonic()
+
+                    # TEMP-DIAGNOSTIC-2026-05-20 — emit only when the
+                    # frame's hot-path budget is blown. Cheap arithmetic
+                    # + one branch when diagnostics is off.
+                    _t_total_ms = (_t_after_clip - _t0) * 1000.0
+                    if _t_total_ms > 50.0:
+                        try:
+                            from maugood.diagnostics import (  # noqa: PLC0415
+                                is_enabled as _diag_enabled,
+                                record_frame_slow,
+                            )
+                            if _diag_enabled():
+                                record_frame_slow(
+                                    tenant_id=self._scope.tenant_id,
+                                    camera_id=self.camera_id,
+                                    camera_name=self.camera_name,
+                                    t_read_ms=(_t_after_read - _t0) * 1000.0,
+                                    t_preview_ms=(_t_after_preview - _t_after_read) * 1000.0,
+                                    t_clip_ms=(_t_after_clip - _t_after_preview) * 1000.0,
+                                    t_total_ms=_t_total_ms,
+                                    fps_reader=float(self._stats.get("fps_reader", 0.0) or 0.0),
+                                    native_fps=getattr(
+                                        self, "_detected_fps", None
+                                    ),
+                                )
+                        except Exception:  # noqa: BLE001
+                            pass
 
                     now = time.time()
                     if now - last_fps_ts >= 1.0:

@@ -47,6 +47,8 @@ export const NAV: Record<Role, NavItem[]> = {
     { id: "system-settings", label: "Detection & Tracker", icon: "settings" },
     { id: "audit", label: "Audit Log", icon: "shield" },
     { id: "settings", label: "Settings", icon: "settings" },
+    // TEMP-DIAGNOSTIC-2026-05-20 — Frame Diagnostics tab.
+    { id: "frame-diagnostics", label: "Frame Diagnostics", icon: "activity" },
     { section: "Help" },
     { id: "pipeline", label: "How it works", icon: "sparkles" },
     { id: "api-docs", label: "API Reference", icon: "fileText" },
@@ -125,6 +127,8 @@ export const CRUMBS: Record<string, string[]> = {
   system: ["Maugood", "System", "Infrastructure"],
   "system-settings": ["Maugood", "System", "Detection & Tracker"],
   "api-docs": ["Maugood", "Developers", "API Reference"],
+  // TEMP-DIAGNOSTIC-2026-05-20
+  "frame-diagnostics": ["Maugood", "System", "Frame Diagnostics"],
 };
 
 // The union of every route id across all roles — used by App.tsx so each
