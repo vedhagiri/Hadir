@@ -7,7 +7,7 @@
 // give the user one last chance via the modal in "expired" mode rather
 // than auto-redirecting to /login.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { serverNow, useLogout, useMe, useRefreshSession } from "./AuthProvider";
 
@@ -63,6 +63,12 @@ export function SessionExpiryWatcher() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [remaining, setRemaining] = useState<number>(0);
 
+  // Keep a ref so the interval tick always reads the current pending state
+  // rather than a stale closure value. Set synchronously during render so
+  // it is accurate before the next tick fires.
+  const refreshPendingRef = useRef(false);
+  refreshPendingRef.current = refresh.isPending;
+
   const expiresAt = computePopupTargetIso(
     me?.session_started_at,
     me?.session_idle_minutes,
@@ -84,11 +90,20 @@ export function SessionExpiryWatcher() {
       const left = diffSeconds(expiresAt);
       setRemaining(left);
       if (left <= 0) {
-        setPhase("expired");
+        // Don't flip to "expired" while a refresh request is already
+        // in-flight (user clicked "Stay signed in" with seconds left).
+        // The onSuccess handler will reset phase to "idle" once done.
+        if (!refreshPendingRef.current) {
+          setPhase("expired");
+        }
       } else if (left <= WARN_BEFORE_EXPIRY_S) {
-        setPhase((p) => (p === "expired" ? p : "warning"));
+        // Use direct set (not functional guard) so that if the phase was
+        // erroneously stuck at "expired" from a race condition, a new
+        // popup target with time remaining can recover the UI to "warning".
+        setPhase("warning");
       } else {
-        setPhase((p) => (p === "expired" ? p : "idle"));
+        // Same rationale: always reflect the true countdown state.
+        setPhase("idle");
       }
     };
 
@@ -118,18 +133,55 @@ export function SessionExpiryWatcher() {
   const handleSignOut = () => {
     logout.mutate(undefined, {
       onSuccess: () => {
-        setPhase("idle");
-        // The next useMe refetch will return null and ProtectedRoute
-        // will redirect to /login.
+        window.location.href = "/login";
+      },
+      onError: () => {
+        // Session already invalid server-side — navigate anyway.
+        window.location.href = "/login";
       },
     });
   };
 
-  if (phase === "idle") return null;
-  if (!me && phase !== "expired") return null;
+  // Hard-navigate to /login only AFTER the server session has been
+  // invalidated.  Without the logout call, the server session can still
+  // be alive (the 30-second poll slides it), LoginPage sees me != null
+  // and immediately returns <Navigate to="/" />, bouncing the user back
+  // to the app with the same stale session_started_at — the "expired"
+  // popup fires again on remount, creating an infinite loop.
+  const handleRelogin = () => {
+    logout.mutate(undefined, {
+      onSuccess: () => {
+        window.location.href = "/login";
+      },
+      onError: () => {
+        // Session already gone server-side — safe to navigate anyway.
+        window.location.href = "/login";
+      },
+    });
+  };
 
-  const isWarning = phase === "warning";
-  const isExpired = phase === "expired";
+  // When the server session genuinely expires — GET /api/auth/me returns
+  // 401 so fetchMe returns null and TanStack sets me to null — transition
+  // to "expired" immediately so the "Sign in again" modal is shown.
+  // Without this, the render guard below would hide the component while
+  // phase is still "warning", leaving the user on a blank authenticated
+  // shell (the "automatic logout" symptom).
+  useEffect(() => {
+    if (me === null && phase !== "expired") {
+      setPhase("expired");
+    }
+  }, [me, phase]);
+
+  // When me is null (server session gone), force the expired state
+  // immediately on this render rather than waiting for the useEffect.
+  // This prevents a one-frame blank when the component remounts after
+  // Layout's "if (!me) return <SessionExpiryWatcher />" swap.
+  const effectivePhase: Phase = me === null ? "expired" : phase;
+
+  if (effectivePhase === "idle") return null;
+
+  const isWarning = effectivePhase === "warning";
+  const isExpired = effectivePhase === "expired";
   const busy = refresh.isPending || logout.isPending;
 
   return (
@@ -333,7 +385,7 @@ export function SessionExpiryWatcher() {
                     color: "var(--text)",
                   }}
                 >
-                  Sign out now
+                  {logout.isPending ? "Signing out…" : "Sign out now"}
                 </button>
                 <button
                   type="button"
@@ -354,19 +406,15 @@ export function SessionExpiryWatcher() {
               <button
                 type="button"
                 className="btn btn-sm btn-primary"
-                onClick={() => {
-                  // Force a hard redirect to /login. The server-side
-                  // session row is already gone; once the user re-logs
-                  // ProtectedRoute lets them back.
-                  window.location.href = "/login";
-                }}
+                onClick={handleRelogin}
+                disabled={busy}
                 style={{
                   background: "var(--text)",
                   color: "var(--bg)",
                   fontWeight: 600,
                 }}
               >
-                Sign in again
+                {logout.isPending ? "Signing out…" : "Sign in again"}
               </button>
             )}
           </div>

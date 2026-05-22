@@ -10,6 +10,8 @@
 
 import { useMemo, useState } from "react";
 
+import { AnomalyInfoBanner } from "../../components/AnomalyNote";
+
 import { useMe } from "../../auth/AuthProvider";
 import { DatePicker, todayIso } from "../../components/DatePicker";
 import { PdfOptionsModal } from "../../components/PdfOptionsModal";
@@ -419,6 +421,8 @@ export function DailyAttendancePage() {
             </button>
           </div>
         </div>
+        <AnomalyInfoBanner message="If the camera misses certain events due to camera positioning, capture limitations, lighting, or brightness conditions, those cases should be treated as possible anomalies." />
+
         <table className="table">
           <thead>
             <tr>

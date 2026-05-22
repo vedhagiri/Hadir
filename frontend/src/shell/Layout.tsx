@@ -17,9 +17,16 @@ export function Layout() {
   const { data: me } = useMe();
   const location = useLocation();
 
-  // ProtectedRoute guarantees ``me`` exists before we get here; this
-  // narrowing keeps the rest of the component honest against TS strict.
-  if (!me) return null;
+  // ProtectedRoute guarantees ``me`` is non-null on first render.  But
+  // if the session expires mid-session (GET /api/auth/me returns 401 →
+  // fetchMe returns null → TanStack sets me = null), ProtectedRoute
+  // keeps rendering children (wasLoggedInRef guards the redirect) and
+  // Layout is re-rendered with me = null.  We must NOT return null here
+  // unconditionally — that would unmount SessionExpiryWatcher, losing
+  // the "expired" modal and leaving the user on a blank white screen.
+  // Instead, render *only* the watcher so its me=null→expired effect
+  // fires and the "Sign in again" modal is shown.
+  if (!me) return <SessionExpiryWatcher />;
 
   // P7: navigation is driven by the user's *active* role — the one
   // they picked via the topbar switcher. Falls back to the first

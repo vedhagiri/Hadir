@@ -201,39 +201,66 @@ export function LiveCapturePage() {
           </p>
         </div>
         <div className="page-actions">
-          <button
-            className="btn"
-            onClick={onTogglePause}
-            disabled={activeCamId == null}
-            aria-pressed={paused}
-          >
-            <Icon name={paused ? "play" : "pause"} size={12} />
-            {paused ? t("liveCapture.resume") : t("liveCapture.pause")}
-          </button>
-          <button
-            className="btn"
-            onClick={onToggleFullscreen}
-            disabled={activeCamId == null}
-            aria-pressed={isFullscreen}
-            title={
+          {/* Pause + Fullscreen are inert until the operator selects a
+              camera. The design system's base ``.btn`` rule does not
+              paint a disabled state, so we apply the standard greyed
+              opacity + ``not-allowed`` cursor inline. Title carries the
+              "Select a camera first" hint so a pointer user sees the
+              gating reason on hover; ``aria-disabled`` mirrors it for
+              screen-readers redundantly with the native ``disabled``. */}
+          {(() => {
+            const camNotSelected = activeCamId == null;
+            const disabledStyle = camNotSelected
+              ? ({ opacity: 0.55, cursor: "not-allowed" } as const)
+              : undefined;
+            const selectFirst = t("liveCapture.selectCameraFirst", {
+              defaultValue: "Select a camera first",
+            }) as string;
+            const fsLabel = (
               isFullscreen
-                ? (t("liveCapture.exitFullscreen", {
+                ? t("liveCapture.exitFullscreen", {
                     defaultValue: "Exit fullscreen",
-                  }) as string)
-                : (t("liveCapture.fullscreen", {
-                    defaultValue: "Fullscreen",
-                  }) as string)
-            }
-          >
-            <Icon name={isFullscreen ? "minimize" : "maximize"} size={12} />
-            {isFullscreen
-              ? (t("liveCapture.exitFullscreen", {
-                  defaultValue: "Exit fullscreen",
-                }) as string)
-              : (t("liveCapture.fullscreen", {
-                  defaultValue: "Fullscreen",
-                }) as string)}
-          </button>
+                  })
+                : t("liveCapture.fullscreen", { defaultValue: "Fullscreen" })
+            ) as string;
+            return (
+              <>
+                <button
+                  className="btn"
+                  onClick={onTogglePause}
+                  disabled={camNotSelected}
+                  aria-disabled={camNotSelected}
+                  aria-pressed={paused}
+                  title={
+                    camNotSelected
+                      ? selectFirst
+                      : paused
+                        ? (t("liveCapture.resume") as string)
+                        : (t("liveCapture.pause") as string)
+                  }
+                  style={disabledStyle}
+                >
+                  <Icon name={paused ? "play" : "pause"} size={12} />
+                  {paused ? t("liveCapture.resume") : t("liveCapture.pause")}
+                </button>
+                <button
+                  className="btn"
+                  onClick={onToggleFullscreen}
+                  disabled={camNotSelected}
+                  aria-disabled={camNotSelected}
+                  aria-pressed={isFullscreen}
+                  title={camNotSelected ? selectFirst : fsLabel}
+                  style={disabledStyle}
+                >
+                  <Icon
+                    name={isFullscreen ? "minimize" : "maximize"}
+                    size={12}
+                  />
+                  {fsLabel}
+                </button>
+              </>
+            );
+          })()}
         </div>
       </div>
 

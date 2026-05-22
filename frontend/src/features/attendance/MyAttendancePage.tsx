@@ -719,6 +719,7 @@ function StatusPill({ status }: { status: CalendarStatus }) {
     { tone: string; label: string }
   > = {
     present: { tone: "success", label: "Present" },
+    escalation_present: { tone: "accent", label: "Present via Escalation" },
     late: { tone: "warning", label: "Late" },
     absent: { tone: "danger", label: "Absent" },
     // Today-only: shift window still open + no in_time yet. Distinct

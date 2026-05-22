@@ -5,6 +5,7 @@
 
 import { Fragment, useEffect, useMemo, useState } from "react";
 
+import { AnomalyInfoBanner } from "../../components/AnomalyNote";
 import {
   RelativeTime,
   formatExact,
@@ -127,7 +128,6 @@ export function CameraLogsPage() {
 
   const cameras = useCameraOptions();
   const events = useDetectionEvents(filters, { formerOnly });
-
   const groupedEvents = useMemo(
     () => groupEvents(events.data?.items ?? []),
     [events.data],
@@ -238,6 +238,8 @@ export function CameraLogsPage() {
             />
           </div>
         </div>
+
+        <AnomalyInfoBanner message="If the camera misses certain events due to camera positioning, capture limitations, lighting, or brightness conditions, those cases should be treated as possible anomalies." />
 
         <table className="table">
           <thead>

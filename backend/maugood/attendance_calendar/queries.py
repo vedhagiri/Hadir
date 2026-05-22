@@ -40,13 +40,16 @@ from maugood.attendance.repository import (
 from maugood.db import (
     approved_leaves,
     attendance_records,
+    camera_health_snapshots,
     cameras,
     departments,
     detection_events,
     employees,
     holidays,
     leave_types,
+    requests as requests_table,
     shift_policies,
+    users,
 )
 from maugood.tenants.scope import TenantScope
 
@@ -62,6 +65,7 @@ _WEEKDAY_NAMES = (
 # Status enum surfaced to the frontend for cell rendering.
 STATUS_WAITING = "waiting"
 STATUS_PRESENT = "present"
+STATUS_ESCALATION_PRESENT = "escalation_present"
 STATUS_LATE = "late"
 STATUS_ABSENT = "absent"
 STATUS_LEAVE = "leave"
@@ -332,6 +336,13 @@ class PersonDay:
     is_holiday: bool
     holiday_name: Optional[str]
     leave_name: Optional[str]
+    # Late-breakdown fields — populated for Fixed/Ramadan/Custom-Fixed
+    # policies so the calendar cell and drawer can render
+    # "Expected / Arrived / Late By" without a separate query.
+    # Both None for Flex policies (window-based lateness, no single
+    # expected start time).
+    policy_shift_start: Optional[str]
+    policy_grace_minutes: Optional[int]
 
 
 def person_view(
@@ -361,9 +372,11 @@ def person_view(
             attendance_records.c.overtime_minutes,
             attendance_records.c.late,
             attendance_records.c.absent,
+            attendance_records.c.locked,
             attendance_records.c.leave_type_id,
             attendance_records.c.policy_id,
             shift_policies.c.name.label("policy_name"),
+            shift_policies.c.config.label("policy_config"),
             leave_types.c.name.label("leave_name"),
         )
         .select_from(
@@ -501,12 +514,35 @@ def person_view(
             status = STATUS_WAITING
         elif ar is not None and bool(ar.absent):
             status = STATUS_ABSENT
+        elif ar is not None and bool(getattr(ar, "locked", None)):
+            # Attendance confirmed via escalation approval — distinct from
+            # regular present so the calendar clearly shows the override.
+            status = STATUS_ESCALATION_PRESENT
         elif ar is not None and bool(ar.late):
             status = STATUS_LATE
         elif ar is not None:
             status = STATUS_PRESENT
         else:
             status = STATUS_NO_RECORD
+
+        # Extract shift_start + grace_minutes from the policy JSONB for
+        # Fixed / Ramadan / Custom-Fixed policies so the calendar cell
+        # can render a "Late by Xh Ym" row without a second query.
+        # Flex policies carry in_window_start/end instead of a single
+        # shift_start — leave both as None for that case.
+        _policy_shift_start: Optional[str] = None
+        _policy_grace_minutes: Optional[int] = None
+        if ar is not None and ar.policy_config:
+            _cfg = ar.policy_config
+            if isinstance(_cfg, dict):
+                _s = _cfg.get("start")
+                if isinstance(_s, str) and _s:
+                    _policy_shift_start = _s
+                _g = _cfg.get("grace_minutes")
+                try:
+                    _policy_grace_minutes = int(_g) if _g is not None else None
+                except (TypeError, ValueError):
+                    pass
 
         out.append(
             PersonDay(
@@ -529,6 +565,8 @@ def person_view(
                 leave_name=str(ar.leave_name)
                 if ar and ar.leave_name is not None
                 else leave_name,
+                policy_shift_start=_policy_shift_start,
+                policy_grace_minutes=_policy_grace_minutes,
             )
         )
     return out
@@ -566,15 +604,99 @@ class DayDetail:
     out_time: Optional[str]
     total_minutes: Optional[int]
     overtime_minutes: int
+    policy_id: Optional[int]
     policy_name: Optional[str]
     policy_description: Optional[str]
     policy_scope: str
+    # P28.9 — structured policy facts so the frontend's "Policy
+    # applied" card can render type-specific copy without doing
+    # JSONB introspection client-side. All times are ``HH:MM`` local
+    # strings; dates are ``YYYY-MM-DD``. None on every field where
+    # the policy type doesn't carry that knob.
+    policy_type: Optional[str]
+    policy_required_hours: Optional[int]
+    policy_grace_minutes: Optional[int]
+    policy_shift_start: Optional[str]
+    policy_shift_end: Optional[str]
+    policy_in_window_start: Optional[str]
+    policy_in_window_end: Optional[str]
+    policy_out_window_start: Optional[str]
+    policy_out_window_end: Optional[str]
+    policy_range_start: Optional[str]
+    policy_range_end: Optional[str]
+    policy_custom_inner_type: Optional[str]
     timeline: list[TimelineInterval]
     evidence: list[EvidenceCrop]
     is_weekend: bool
+    weekend_days: list[str]
     is_holiday: bool
     holiday_name: Optional[str]
     leave_name: Optional[str]
+    # Escalation-confirmed fields (0063).
+    # ``escalation_confirmed`` is True when the attendance record has
+    # been locked after a Manager+HR-approved escalation.
+    escalation_confirmed: bool
+    escalation_note: Optional[str]
+    # Snapshot of the approved escalation request so the drawer can
+    # render the approval chain without a second round-trip.
+    escalation_request: Optional["EscalationRequestSnapshot"]
+    # Absent sub-state helpers (only populated when status == absent).
+    camera_gaps: list["CameraGap"]
+    pending_request: Optional["PendingRequestSnapshot"]
+    approved_request: Optional["ApprovedRequestSnapshot"]
+
+
+@dataclass(frozen=True, slots=True)
+class EscalationRequestSnapshot:
+    """Subset of the approved escalation request shown in the drawer."""
+    request_id: int
+    submitted_at: str          # ISO datetime
+    reason_category: str
+    reason_text: Optional[str]
+    manager_name: Optional[str]
+    manager_decision_at: Optional[str]
+    manager_comment: Optional[str]
+    hr_name: Optional[str]
+    hr_decision_at: Optional[str]
+    hr_comment: Optional[str]
+
+
+@dataclass(frozen=True, slots=True)
+class CameraGap:
+    """One offline period for a single camera during the employee's shift."""
+    camera_id: int
+    camera_name: str
+    offline_from: str   # ISO datetime with tz
+    offline_to: str     # ISO datetime with tz
+    offline_minutes: int
+
+
+@dataclass(frozen=True, slots=True)
+class PendingRequestSnapshot:
+    """An open (not-yet-decided) exception or escalation request for this day."""
+    request_id: int
+    request_type: str          # 'exception' | 'escalation'
+    status: str                # e.g. 'submitted', 'manager_approved'
+    submitted_at: str          # ISO datetime
+    reason_category: str
+    reason_text: Optional[str]
+    manager_name: Optional[str]  # assigned manager (from requests.manager_user_id)
+
+
+@dataclass(frozen=True, slots=True)
+class ApprovedRequestSnapshot:
+    """An approved exception/leave request (non-escalation) for this day."""
+    request_id: int
+    request_type: str
+    submitted_at: str
+    reason_category: str
+    reason_text: Optional[str]
+    manager_name: Optional[str]
+    manager_decision_at: Optional[str]
+    manager_comment: Optional[str]
+    hr_name: Optional[str]
+    hr_decision_at: Optional[str]
+    hr_comment: Optional[str]
 
 
 # Two detection events more than this many minutes apart on the same
@@ -748,6 +870,65 @@ def _shift(t: time, minutes: int) -> Optional[time]:
     return base.time()
 
 
+_MIN_GAP_MINUTES = 5  # ignore brief blips shorter than this
+
+
+def _build_camera_gaps(
+    offline_rows: list,
+    *,
+    min_gap_minutes: int = _MIN_GAP_MINUTES,
+) -> list[CameraGap]:
+    """Merge consecutive offline health-snapshot rows per camera into CameraGap
+    intervals. Snapshot cadence is ~60 s; rows within 90 s of each other belong
+    to the same outage. Outages shorter than ``min_gap_minutes`` are noise and
+    are dropped."""
+    if not offline_rows:
+        return []
+
+    by_camera: dict[int, list] = {}
+    for r in offline_rows:
+        by_camera.setdefault(int(r.camera_id), []).append(r)
+
+    gaps: list[CameraGap] = []
+    for cam_id, rows in by_camera.items():
+        cam_name = str(rows[0].camera_name or f"CAM-{cam_id}")
+        cur_start = rows[0].captured_at
+        cur_end = rows[0].captured_at
+
+        for row in rows[1:]:
+            diff_s = (row.captured_at - cur_end).total_seconds()
+            if diff_s <= 90:
+                cur_end = row.captured_at
+            else:
+                mins = max(1, int((cur_end - cur_start).total_seconds() / 60) + 1)
+                if mins >= min_gap_minutes:
+                    gaps.append(
+                        CameraGap(
+                            camera_id=cam_id,
+                            camera_name=cam_name,
+                            offline_from=cur_start.isoformat(),
+                            offline_to=cur_end.isoformat(),
+                            offline_minutes=mins,
+                        )
+                    )
+                cur_start = row.captured_at
+                cur_end = row.captured_at
+
+        mins = max(1, int((cur_end - cur_start).total_seconds() / 60) + 1)
+        if mins >= min_gap_minutes:
+            gaps.append(
+                CameraGap(
+                    camera_id=cam_id,
+                    camera_name=cam_name,
+                    offline_from=cur_start.isoformat(),
+                    offline_to=cur_end.isoformat(),
+                    offline_minutes=mins,
+                )
+            )
+
+    return gaps
+
+
 def fetch_day_detail(
     conn: Connection,
     scope: TenantScope,
@@ -796,8 +977,11 @@ def fetch_day_detail(
             attendance_records.c.late,
             attendance_records.c.absent,
             attendance_records.c.leave_type_id,
+            attendance_records.c.locked,
+            attendance_records.c.escalation_note,
             shift_policies.c.id.label("policy_id"),
             shift_policies.c.name.label("policy_name"),
+            shift_policies.c.type.label("policy_type"),
             shift_policies.c.config.label("policy_config"),
             leave_types.c.name.label("leave_name"),
         )
@@ -829,12 +1013,15 @@ def fetch_day_detail(
     hol_name = hol[0].name if hol else None
     weekend = is_weekend(the_date, weekend_days)
 
-    today_local = datetime.now(timezone.utc).astimezone(
-        local_tz_for(settings)
-    ).date()
+    local_tz = local_tz_for(settings)
+    now_local = datetime.now(timezone.utc).astimezone(local_tz)
+    today_local = now_local.date()
+    now_local_time = now_local.time()
     in_future = the_date > today_local
 
-    # Status — same priority as person_view.
+    # Status — mirrors person_view priority exactly, including the
+    # "waiting" branch that was previously missing here (causing the
+    # drawer to show "absent" when the Per-Person cell showed "waiting").
     if in_future:
         status = STATUS_FUTURE
     elif hol_name is not None:
@@ -843,8 +1030,27 @@ def fetch_day_detail(
         status = STATUS_WEEKEND
     elif ar is not None and ar.leave_type_id is not None:
         status = STATUS_LEAVE
+    elif (
+        ar is not None
+        and bool(ar.absent)
+        and ar.in_time is None
+        and the_date == today_local
+    ):
+        # Waiting — today-only: shift window still open. Resolve the
+        # policy's shift-end for this single attendance row so we can
+        # compare against the local clock.
+        shift_end_map = policy_shift_end_times(
+            conn, scope, [int(ar.policy_id)]
+        )
+        shift_end = shift_end_map.get(int(ar.policy_id))
+        if shift_end is not None and now_local_time < shift_end:
+            status = STATUS_WAITING
+        else:
+            status = STATUS_ABSENT
     elif ar is not None and bool(ar.absent):
         status = STATUS_ABSENT
+    elif ar is not None and bool(ar.locked):
+        status = STATUS_ESCALATION_PRESENT
     elif ar is not None and bool(ar.late):
         status = STATUS_LATE
     elif ar is not None:
@@ -856,6 +1062,22 @@ def fetch_day_detail(
     # present. Defensive — older policies may not have it.
     policy_description: Optional[str] = None
     policy_scope = "tenant-default"
+    # P28.9 — structured policy facts the frontend renders directly.
+    # Sourced from the ``config`` JSONB; the exact key set varies per
+    # ``policy.type`` (see ``maugood/attendance/engine.py::policy_from_row``
+    # for the authoritative read of each shape).
+    policy_type_out: Optional[str] = None
+    policy_required_hours: Optional[int] = None
+    policy_grace_minutes: Optional[int] = None
+    policy_shift_start: Optional[str] = None
+    policy_shift_end: Optional[str] = None
+    policy_in_window_start: Optional[str] = None
+    policy_in_window_end: Optional[str] = None
+    policy_out_window_start: Optional[str] = None
+    policy_out_window_end: Optional[str] = None
+    policy_range_start: Optional[str] = None
+    policy_range_end: Optional[str] = None
+    policy_custom_inner_type: Optional[str] = None
     if ar is not None:
         cfg = ar.policy_config or {}
         if isinstance(cfg, dict):
@@ -865,13 +1087,38 @@ def fetch_day_detail(
             scope_val = cfg.get("scope")
             if isinstance(scope_val, str) and scope_val:
                 policy_scope = scope_val
+            policy_type_out = str(ar.policy_type)
+            try:
+                policy_required_hours = int(cfg.get("required_hours", 8))
+            except (TypeError, ValueError):
+                policy_required_hours = 8
+            # Pluck the HH:MM and YYYY-MM-DD strings if present.
+            def _str_or_none(v: object) -> Optional[str]:
+                return v if isinstance(v, str) and v else None
+
+            policy_shift_start = _str_or_none(cfg.get("start"))
+            policy_shift_end = _str_or_none(cfg.get("end"))
+            policy_in_window_start = _str_or_none(cfg.get("in_window_start"))
+            policy_in_window_end = _str_or_none(cfg.get("in_window_end"))
+            policy_out_window_start = _str_or_none(cfg.get("out_window_start"))
+            policy_out_window_end = _str_or_none(cfg.get("out_window_end"))
+            policy_range_start = _str_or_none(cfg.get("start_date"))
+            policy_range_end = _str_or_none(cfg.get("end_date"))
+            inner = cfg.get("inner_type")
+            if isinstance(inner, str) and inner in ("Fixed", "Flex"):
+                policy_custom_inner_type = inner
+            if policy_shift_end or policy_shift_start:
+                try:
+                    policy_grace_minutes = int(cfg.get("grace_minutes", 15))
+                except (TypeError, ValueError):
+                    policy_grace_minutes = 15
 
     # Detection events for that local day → timeline + evidence.
     day_start = datetime.combine(
-        the_date, time(0, 0), tzinfo=local_tz_for(settings)
+        the_date, time(0, 0), tzinfo=local_tz
     ).astimezone(timezone.utc)
     day_end = datetime.combine(
-        the_date, time(23, 59, 59), tzinfo=local_tz_for(settings)
+        the_date, time(23, 59, 59), tzinfo=local_tz
     ).astimezone(timezone.utc)
     ev_rows = conn.execute(
         select(
@@ -899,12 +1146,11 @@ def fetch_day_detail(
         .order_by(detection_events.c.captured_at.asc())
     ).all()
 
-    local_zone = local_tz_for(settings)
     captured_times: list[time] = []
     event_dicts: list[dict] = []
     for r in ev_rows:
         # Convert UTC captured_at → local time for the timeline.
-        local_dt = r.captured_at.astimezone(local_zone)
+        local_dt = r.captured_at.astimezone(local_tz)
         captured_times.append(local_dt.time())
         event_dicts.append(
             {
@@ -928,6 +1174,237 @@ def fetch_day_detail(
         out_time=ar.out_time if ar is not None else None,
     )
 
+    # Escalation confirmation — check if the attendance record is
+    # locked and load the approved escalation request for the drawer.
+    escalation_confirmed = bool(ar is not None and ar.locked)
+    escalation_note_val: Optional[str] = (
+        str(ar.escalation_note)
+        if ar is not None and ar.escalation_note is not None
+        else None
+    )
+    esc_snapshot: Optional[EscalationRequestSnapshot] = None
+    if escalation_confirmed:
+        mgr_users = users.alias("mgr_users")
+        hr_users = users.alias("hr_users")
+        esc_row = conn.execute(
+            select(
+                requests_table.c.id,
+                requests_table.c.submitted_at,
+                requests_table.c.reason_category,
+                requests_table.c.reason_text,
+                mgr_users.c.full_name.label("manager_name"),
+                requests_table.c.manager_decision_at,
+                requests_table.c.manager_comment,
+                hr_users.c.full_name.label("hr_name"),
+                requests_table.c.hr_decision_at,
+                requests_table.c.hr_comment,
+            )
+            .select_from(
+                requests_table
+                .outerjoin(
+                    mgr_users,
+                    requests_table.c.manager_user_id == mgr_users.c.id,
+                )
+                .outerjoin(
+                    hr_users,
+                    requests_table.c.hr_user_id == hr_users.c.id,
+                )
+            )
+            .where(
+                requests_table.c.tenant_id == scope.tenant_id,
+                requests_table.c.employee_id == int(emp_row.id),
+                requests_table.c.type == "escalation",
+                requests_table.c.target_date_start == the_date,
+                requests_table.c.status.in_(
+                    ("hr_approved", "admin_approved")
+                ),
+            )
+            .order_by(requests_table.c.id.desc())
+            .limit(1)
+        ).first()
+        if esc_row is not None:
+            esc_snapshot = EscalationRequestSnapshot(
+                request_id=int(esc_row.id),
+                submitted_at=esc_row.submitted_at.isoformat(),
+                reason_category=str(esc_row.reason_category),
+                reason_text=str(esc_row.reason_text)
+                if esc_row.reason_text
+                else None,
+                manager_name=str(esc_row.manager_name)
+                if esc_row.manager_name
+                else None,
+                manager_decision_at=esc_row.manager_decision_at.isoformat()
+                if esc_row.manager_decision_at
+                else None,
+                manager_comment=str(esc_row.manager_comment)
+                if esc_row.manager_comment
+                else None,
+                hr_name=str(esc_row.hr_name) if esc_row.hr_name else None,
+                hr_decision_at=esc_row.hr_decision_at.isoformat()
+                if esc_row.hr_decision_at
+                else None,
+                hr_comment=str(esc_row.hr_comment)
+                if esc_row.hr_comment
+                else None,
+            )
+
+    # --- Absent sub-state helpers ----------------------------------------
+    # Only queried when the day is genuinely absent — skip for present,
+    # late, leave, holiday, etc. to keep the hot path cheap.
+    _camera_gaps: list[CameraGap] = []
+    _pending_request: Optional[PendingRequestSnapshot] = None
+    _approved_request: Optional[ApprovedRequestSnapshot] = None
+
+    if status == STATUS_ABSENT:
+        # 1. Camera gaps — offline periods during the employee's shift window.
+        # Build the UTC shift window from the extracted policy times.
+        from datetime import time as _time_type  # noqa: PLC0415
+        try:
+            if policy_shift_start:
+                _sh, _sm = (int(x) for x in policy_shift_start.split(":")[:2])
+                _win_start_utc = datetime.combine(
+                    the_date, _time_type(_sh, _sm), tzinfo=local_tz
+                ).astimezone(timezone.utc)
+            else:
+                _win_start_utc = day_start  # already computed above
+
+            if policy_shift_end:
+                _eh, _em = (int(x) for x in policy_shift_end.split(":")[:2])
+                _win_end_utc = datetime.combine(
+                    the_date, _time_type(_eh, _em), tzinfo=local_tz
+                ).astimezone(timezone.utc)
+            else:
+                _win_end_utc = day_end  # already computed above
+        except (ValueError, TypeError):
+            _win_start_utc = day_start
+            _win_end_utc = day_end
+
+        offline_rows = conn.execute(
+            select(
+                camera_health_snapshots.c.camera_id,
+                camera_health_snapshots.c.captured_at,
+                cameras.c.name.label("camera_name"),
+            )
+            .select_from(
+                camera_health_snapshots.join(
+                    cameras,
+                    and_(
+                        cameras.c.id == camera_health_snapshots.c.camera_id,
+                        cameras.c.tenant_id == camera_health_snapshots.c.tenant_id,
+                    ),
+                )
+            )
+            .where(
+                camera_health_snapshots.c.tenant_id == scope.tenant_id,
+                camera_health_snapshots.c.reachable.is_(False),
+                camera_health_snapshots.c.captured_at >= _win_start_utc,
+                camera_health_snapshots.c.captured_at <= _win_end_utc,
+            )
+            .order_by(
+                camera_health_snapshots.c.camera_id,
+                camera_health_snapshots.c.captured_at,
+            )
+        ).all()
+        _camera_gaps = _build_camera_gaps(list(offline_rows))
+
+        # 2. Pending request — any open (non-terminal) request for this day.
+        _TERMINAL_STATUSES = (
+            "hr_approved", "admin_approved",
+            "manager_rejected", "hr_rejected", "admin_rejected", "cancelled",
+        )
+        mgr_alias = users.alias("mgr_alias")
+        pend_row = conn.execute(
+            select(
+                requests_table.c.id,
+                requests_table.c.type,
+                requests_table.c.status,
+                requests_table.c.submitted_at,
+                requests_table.c.reason_category,
+                requests_table.c.reason_text,
+                mgr_alias.c.full_name.label("manager_name"),
+            )
+            .select_from(
+                requests_table.outerjoin(
+                    mgr_alias,
+                    requests_table.c.manager_user_id == mgr_alias.c.id,
+                )
+            )
+            .where(
+                requests_table.c.tenant_id == scope.tenant_id,
+                requests_table.c.employee_id == int(emp_row.id),
+                requests_table.c.target_date_start == the_date,
+                requests_table.c.status.notin_(_TERMINAL_STATUSES),
+            )
+            .order_by(requests_table.c.id.desc())
+            .limit(1)
+        ).first()
+        if pend_row is not None:
+            _pending_request = PendingRequestSnapshot(
+                request_id=int(pend_row.id),
+                request_type=str(pend_row.type),
+                status=str(pend_row.status),
+                submitted_at=pend_row.submitted_at.isoformat(),
+                reason_category=str(pend_row.reason_category),
+                reason_text=str(pend_row.reason_text) if pend_row.reason_text else None,
+                manager_name=str(pend_row.manager_name) if pend_row.manager_name else None,
+            )
+
+        # 3. Approved non-escalation request (exception / leave approved but
+        # the absence is still on record). Escalation-confirmed days are
+        # already handled by the escalation_confirmed flag above (locked=True).
+        if _pending_request is None:
+            mgr_users2 = users.alias("mgr_users2")
+            hr_users2 = users.alias("hr_users2")
+            appr_row = conn.execute(
+                select(
+                    requests_table.c.id,
+                    requests_table.c.type,
+                    requests_table.c.submitted_at,
+                    requests_table.c.reason_category,
+                    requests_table.c.reason_text,
+                    mgr_users2.c.full_name.label("manager_name"),
+                    requests_table.c.manager_decision_at,
+                    requests_table.c.manager_comment,
+                    hr_users2.c.full_name.label("hr_name"),
+                    requests_table.c.hr_decision_at,
+                    requests_table.c.hr_comment,
+                )
+                .select_from(
+                    requests_table
+                    .outerjoin(
+                        mgr_users2,
+                        requests_table.c.manager_user_id == mgr_users2.c.id,
+                    )
+                    .outerjoin(
+                        hr_users2,
+                        requests_table.c.hr_user_id == hr_users2.c.id,
+                    )
+                )
+                .where(
+                    requests_table.c.tenant_id == scope.tenant_id,
+                    requests_table.c.employee_id == int(emp_row.id),
+                    requests_table.c.target_date_start == the_date,
+                    requests_table.c.type != "escalation",
+                    requests_table.c.status.in_(("hr_approved", "admin_approved")),
+                )
+                .order_by(requests_table.c.id.desc())
+                .limit(1)
+            ).first()
+            if appr_row is not None:
+                _approved_request = ApprovedRequestSnapshot(
+                    request_id=int(appr_row.id),
+                    request_type=str(appr_row.type),
+                    submitted_at=appr_row.submitted_at.isoformat(),
+                    reason_category=str(appr_row.reason_category),
+                    reason_text=str(appr_row.reason_text) if appr_row.reason_text else None,
+                    manager_name=str(appr_row.manager_name) if appr_row.manager_name else None,
+                    manager_decision_at=appr_row.manager_decision_at.isoformat() if appr_row.manager_decision_at else None,
+                    manager_comment=str(appr_row.manager_comment) if appr_row.manager_comment else None,
+                    hr_name=str(appr_row.hr_name) if appr_row.hr_name else None,
+                    hr_decision_at=appr_row.hr_decision_at.isoformat() if appr_row.hr_decision_at else None,
+                    hr_comment=str(appr_row.hr_comment) if appr_row.hr_comment else None,
+                )
+
     return DayDetail(
         employee_id=int(emp_row.id),
         employee_code=str(emp_row.employee_code),
@@ -945,15 +1422,35 @@ def fetch_day_detail(
         if ar and ar.total_minutes is not None
         else None,
         overtime_minutes=int(ar.overtime_minutes) if ar else 0,
+        policy_id=int(ar.policy_id) if ar else None,
         policy_name=str(ar.policy_name) if ar else None,
         policy_description=policy_description,
         policy_scope=policy_scope,
+        policy_type=policy_type_out,
+        policy_required_hours=policy_required_hours,
+        policy_grace_minutes=policy_grace_minutes,
+        policy_shift_start=policy_shift_start,
+        policy_shift_end=policy_shift_end,
+        policy_in_window_start=policy_in_window_start,
+        policy_in_window_end=policy_in_window_end,
+        policy_out_window_start=policy_out_window_start,
+        policy_out_window_end=policy_out_window_end,
+        policy_range_start=policy_range_start,
+        policy_range_end=policy_range_end,
+        policy_custom_inner_type=policy_custom_inner_type,
         timeline=timeline,
         evidence=evidence,
         is_weekend=weekend,
+        weekend_days=list(weekend_days),
         is_holiday=hol_name is not None,
         holiday_name=hol_name,
         leave_name=str(ar.leave_name)
         if ar and ar.leave_name is not None
         else None,
+        escalation_confirmed=escalation_confirmed,
+        escalation_note=escalation_note_val,
+        escalation_request=esc_snapshot,
+        camera_gaps=_camera_gaps,
+        pending_request=_pending_request,
+        approved_request=_approved_request,
     )

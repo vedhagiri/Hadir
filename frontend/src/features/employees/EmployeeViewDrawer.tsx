@@ -16,16 +16,17 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
 import { ApiError, api } from "../../api/client";
+import { AnomalyInfoBanner } from "../../components/AnomalyNote";
 import { useMe } from "../../auth/AuthProvider";
 import { DatePicker, todayIso } from "../../components/DatePicker";
 import { DrawerShell } from "../../components/DrawerShell";
 import { RelativeTime } from "../../components/RelativeTime";
 import { Icon } from "../../shell/Icon";
-import { useDayDetail } from "../calendar/hooks";
-import type { DayDetail } from "../calendar/types";
+import { DayDetailContent } from "../calendar/DayDetailDrawer";
 import { useDetectionEvents } from "../camera-logs/hooks";
 import type { DetectionEvent } from "../camera-logs/types";
 import { ClipDetailDrawer } from "../person-clips/PersonClipsPage";
@@ -607,6 +608,7 @@ function EventsTab({ employeeId }: { employeeId: number }) {
   // to any past date or clear the filter (use "All dates" toggle).
   const [date, setDate] = useState<string>(todayLocalIso());
   const [allDates, setAllDates] = useState<boolean>(false);
+  const [lightboxEventId, setLightboxEventId] = useState<number | null>(null);
   const PAGE_SIZE = 25;
 
   // Day-bounded range — captured_at is stored in UTC so we convert
@@ -720,6 +722,8 @@ function EventsTab({ employeeId }: { employeeId: number }) {
           count: events.data?.total ?? 0,
         }) as string}
       </div>
+      <AnomalyInfoBanner message="If the camera misses certain events due to camera positioning, capture limitations, lighting, or brightness conditions, those cases should be treated as possible anomalies." />
+
       <table className="table">
         <thead>
           <tr>
@@ -734,19 +738,44 @@ function EventsTab({ employeeId }: { employeeId: number }) {
             <tr key={ev.id}>
               <td>
                 {ev.has_crop ? (
-                  <img
-                    src={`/api/detection-events/${ev.id}/crop`}
-                    alt={`event ${ev.id}`}
-                    loading="lazy"
+                  <button
+                    type="button"
+                    onClick={() => setLightboxEventId(ev.id)}
+                    aria-label={`Preview face crop for event ${ev.id}`}
                     style={{
                       display: "block",
                       width: 44,
                       height: 44,
-                      objectFit: "cover",
-                      borderRadius: "var(--radius-sm)",
+                      padding: 0,
                       border: "1px solid var(--border)",
+                      borderRadius: "var(--radius-sm)",
+                      overflow: "hidden",
+                      cursor: "pointer",
+                      background: "var(--bg-sunken)",
+                      transition: "transform 120ms ease, box-shadow 120ms ease",
                     }}
-                  />
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.transform = "scale(1.08)";
+                      e.currentTarget.style.boxShadow = "0 3px 10px rgba(0,0,0,0.25)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.transform = "scale(1)";
+                      e.currentTarget.style.boxShadow = "none";
+                    }}
+                  >
+                    <img
+                      src={`/api/detection-events/${ev.id}/crop`}
+                      alt={`event ${ev.id}`}
+                      loading="lazy"
+                      style={{
+                        display: "block",
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "cover",
+                        pointerEvents: "none",
+                      }}
+                    />
+                  </button>
                 ) : (
                   <div
                     style={{
@@ -811,6 +840,21 @@ function EventsTab({ employeeId }: { employeeId: number }) {
       </div>
         </>
       )}
+
+      {/* Face crop lightbox — opens when a thumbnail is clicked */}
+      {lightboxEventId !== null && (() => {
+        const allEvents = events.data?.items ?? [];
+        const croppedEvents = allEvents.filter((e) => e.has_crop);
+        const idx = croppedEvents.findIndex((e) => e.id === lightboxEventId);
+        if (idx === -1) return null;
+        return (
+          <DetectionEventLightbox
+            events={croppedEvents}
+            initialIndex={idx}
+            onClose={() => setLightboxEventId(null)}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -1022,13 +1066,15 @@ function MatchedClipsTab({ employeeId }: { employeeId: number }) {
       )}
 
       {items.length > 0 && (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-            gap: 12,
-          }}
-        >
+        <>
+          <AnomalyInfoBanner message="If the camera misses certain events due to camera positioning, capture limitations, lighting, or brightness conditions, those cases should be treated as possible anomalies." />
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+              gap: 12,
+            }}
+          >
           {items.map((c) => (
             <MatchedClipCard
               key={c.id}
@@ -1043,6 +1089,7 @@ function MatchedClipsTab({ employeeId }: { employeeId: number }) {
             />
           ))}
         </div>
+        </>
       )}
 
       {openClip && (
@@ -1065,12 +1112,22 @@ function MatchedClipCard({
 }) {
   const [thumbError, setThumbError] = useState(false);
   const playable = clip.recording_status === "completed";
-  // The card always shows the actual video thumbnail (still frame
-  // from the clip), not the face crop — operators want a visual cue
-  // for the scene, not just the head. The drilldown drawer filters
-  // the per-UC face crops to this employee only (see
-  // ClipDetailDrawer's ``focusEmployeeId`` prop).
-  const imgSrc = `/api/person-clips/${clip.id}/thumbnail`;
+  // Prefer the matched employee's face crop when the API returned one
+  // (populated by the list endpoint when called with ?matched_employee_id=N).
+  // Fall back to the full clip thumbnail for completed clips.
+  const imgSrc =
+    clip.matched_face_crop_id != null
+      ? `/api/person-clips/${clip.id}/face-crops/${clip.matched_face_crop_id}/image`
+      : playable
+        ? `/api/person-clips/${clip.id}/thumbnail`
+        : null;
+
+  // Reset sticky error state whenever the image source changes so a
+  // 404 caught while the clip was still encoding doesn't prevent the
+  // thumbnail from appearing once encoding completes.
+  useEffect(() => {
+    setThumbError(false);
+  }, [imgSrc]);
 
   return (
     <button
@@ -1112,7 +1169,7 @@ function MatchedClipCard({
           overflow: "hidden",
         }}
       >
-        {!thumbError && playable ? (
+        {!thumbError && imgSrc ? (
           <img
             src={imgSrc}
             alt=""
@@ -1324,35 +1381,19 @@ function ucAccentBorder(uc: string): string {
 }
 
 /**
- * Attendance tab. Mirrors docs/scripts/issues-screenshots/03-Attendance_Record_model_screen_ref.png:
- *
- *   * Profile strip with policy + status pills.
- *   * 4-cell stat row: in_time / out_time / total / overtime (large mono).
- *   * Day timeline ribbon (06:00–18:00 with shaded work intervals).
- *   * Evidence strip — up to 5 face crops with timestamps + cam codes.
- *   * Policy applied card.
- *
- * Defaults to today; date picker re-fetches via useDayDetail.
+ * Attendance tab — renders the exact same DayDetailContent used by the
+ * Attendance Calendar → Per Person → Day Detail view. Date picker on top
+ * lets the user navigate days; the body is 100 % identical to the calendar.
  */
 function AttendanceTab({ employeeId }: { employeeId: number }) {
   const { t } = useTranslation();
   const [date, setDate] = useState<string>(todayLocalIso());
-  const day = useDayDetail(employeeId, date);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      {/* Date picker row — same shape as the Events tab. */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-        }}
-      >
-        <label
-          className="text-xs text-dim"
-          style={{ fontWeight: 500 }}
-        >
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Date picker */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <label className="text-xs text-dim" style={{ fontWeight: 500 }}>
           {t("employees.events.dateLabel") as string}
         </label>
         <DatePicker
@@ -1371,400 +1412,10 @@ function AttendanceTab({ employeeId }: { employeeId: number }) {
         </button>
       </div>
 
-      {day.isLoading && (
-        <div className="text-sm text-dim">
-          {t("common.loading") as string}…
-        </div>
-      )}
-      {day.isError && (
-        <div className="text-sm" style={{ color: "var(--danger-text)" }}>
-          {t("employees.attendance.loadFailed") as string}
-        </div>
-      )}
-      {day.data && <AttendanceDayCard day={day.data} />}
+      {/* Exact same content as Calendar → Day Detail — shared component */}
+      <DayDetailContent employeeId={employeeId} isoDate={date} />
     </div>
   );
-}
-
-function AttendanceDayCard({ day }: { day: DayDetail }) {
-  const { t } = useTranslation();
-
-  const inTime = day.in_time ? formatHms(day.in_time) : "—";
-  const outTime = day.out_time ? formatHms(day.out_time) : "—";
-  const totalHms =
-    day.total_minutes != null ? minutesToHms(day.total_minutes) : "—";
-  const overtimeH =
-    day.overtime_minutes > 0
-      ? `+${(day.overtime_minutes / 60).toFixed(1)}h`
-      : "—";
-
-  return (
-    <>
-      {/* Status pills */}
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        {day.policy_name && (
-          <span className="pill pill-neutral">{day.policy_name}</span>
-        )}
-        <span className={`pill ${statusPillClass(day.status)}`}>
-          {t(`employees.attendance.status.${day.status}`, {
-            defaultValue: day.status,
-          }) as string}
-        </span>
-      </div>
-
-      {/* Stat grid */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr 1fr 1fr",
-          gap: 8,
-        }}
-      >
-        <StatCell
-          label={t("employees.attendance.inTime") as string}
-          value={inTime}
-        />
-        <StatCell
-          label={t("employees.attendance.outTime") as string}
-          value={outTime}
-        />
-        <StatCell
-          label={t("employees.attendance.total") as string}
-          value={totalHms}
-        />
-        <StatCell
-          label={t("employees.attendance.overtime") as string}
-          value={overtimeH}
-          highlight={day.overtime_minutes > 0}
-        />
-      </div>
-
-      {/* Day timeline ribbon */}
-      <div>
-        <SectionLabel>
-          {t("employees.attendance.dayTimeline") as string}
-        </SectionLabel>
-        <DayTimeline timeline={day.timeline} />
-      </div>
-
-      {/* Evidence */}
-      {day.evidence.length > 0 && (
-        <div>
-          <SectionLabel>
-            {t("employees.attendance.evidence", {
-              count: day.evidence.length,
-            }) as string}
-          </SectionLabel>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))",
-              gap: 8,
-            }}
-          >
-            {day.evidence.slice(0, 8).map((c) => (
-              <div
-                key={c.detection_event_id}
-                style={{
-                  border: "1px solid var(--border)",
-                  borderRadius: 8,
-                  overflow: "hidden",
-                  background: "var(--bg-sunken)",
-                }}
-              >
-                <div
-                  style={{
-                    position: "relative",
-                    aspectRatio: "1 / 1",
-                  }}
-                >
-                  <img
-                    src={c.crop_url}
-                    alt={c.camera_code}
-                    loading="lazy"
-                    style={{
-                      width: "100%",
-                      height: "100%",
-                      objectFit: "cover",
-                      display: "block",
-                    }}
-                  />
-                  {c.confidence != null && (
-                    <span
-                      className="mono text-xs"
-                      style={{
-                        position: "absolute",
-                        top: 4,
-                        insetInlineStart: 4,
-                        background: "rgba(0,0,0,0.6)",
-                        color: "white",
-                        padding: "1px 5px",
-                        borderRadius: 4,
-                        fontSize: 10,
-                      }}
-                    >
-                      {Math.round(c.confidence * 100)}%
-                    </span>
-                  )}
-                </div>
-                <div
-                  className="mono text-xs text-dim"
-                  style={{ padding: "4px 6px", lineHeight: 1.3 }}
-                >
-                  <div style={{ color: "var(--text)", fontSize: 11 }}>
-                    {formatHms(c.captured_at).slice(0, 5)}
-                  </div>
-                  <div>{c.camera_code}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Policy applied */}
-      {day.policy_name && (
-        <div>
-          <SectionLabel>
-            {t("employees.attendance.policyApplied") as string}
-          </SectionLabel>
-          <div
-            style={{
-              border: "1px solid var(--border)",
-              borderRadius: 8,
-              padding: 10,
-              background: "var(--bg-sunken)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 10,
-            }}
-          >
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontWeight: 500, fontSize: 13 }}>
-                {day.policy_name}
-              </div>
-              {day.policy_description && (
-                <div className="text-xs text-dim" style={{ marginTop: 2 }}>
-                  {day.policy_description}
-                </div>
-              )}
-            </div>
-            <span className="mono text-xs text-dim">
-              {t("employees.attendance.policyScope", {
-                scope: day.policy_scope,
-                defaultValue: day.policy_scope,
-              }) as string}
-            </span>
-          </div>
-        </div>
-      )}
-
-      {/* Empty / non-working day callouts */}
-      {day.is_weekend && (
-        <div className="pill pill-neutral">
-          {t("employees.attendance.weekend") as string}
-        </div>
-      )}
-      {day.is_holiday && day.holiday_name && (
-        <div className="pill pill-accent">
-          {t("employees.attendance.holiday", {
-            name: day.holiday_name,
-          }) as string}
-        </div>
-      )}
-      {day.leave_name && (
-        <div className="pill pill-warning">
-          {t("employees.attendance.leave", {
-            name: day.leave_name,
-          }) as string}
-        </div>
-      )}
-    </>
-  );
-}
-
-function StatCell({
-  label,
-  value,
-  highlight,
-}: {
-  label: string;
-  value: string;
-  highlight?: boolean;
-}) {
-  return (
-    <div
-      style={{
-        border: "1px solid var(--border)",
-        borderRadius: 8,
-        padding: "10px 12px",
-        background: "var(--bg-sunken)",
-      }}
-    >
-      <div
-        className="text-xs"
-        style={{
-          fontWeight: 500,
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-          color: "var(--text-tertiary)",
-          marginBottom: 4,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        className="mono"
-        style={{
-          fontSize: 18,
-          fontWeight: 600,
-          color: highlight ? "var(--accent-text)" : "var(--text)",
-        }}
-      >
-        {value}
-      </div>
-    </div>
-  );
-}
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      className="text-xs"
-      style={{
-        fontWeight: 600,
-        textTransform: "uppercase",
-        letterSpacing: "0.05em",
-        color: "var(--text-tertiary)",
-        marginBottom: 8,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function DayTimeline({
-  timeline,
-}: {
-  timeline: { start: string; end: string }[];
-}) {
-  // 06:00–18:00 ribbon, scaled 0..100% across the band. Intervals
-  // outside the band clamp to the edges so the operator still sees
-  // them visually.
-  const TICKS = [6, 9, 12, 15, 18];
-  const startMin = 6 * 60;
-  const endMin = 18 * 60;
-  const total = endMin - startMin;
-  const pct = (iso: string) => {
-    const m = isoToLocalMin(iso);
-    if (m == null) return null;
-    return Math.max(0, Math.min(100, ((m - startMin) / total) * 100));
-  };
-  return (
-    <div>
-      <div
-        style={{
-          position: "relative",
-          height: 18,
-          background: "var(--bg-sunken)",
-          borderRadius: 4,
-          border: "1px solid var(--border)",
-          overflow: "hidden",
-        }}
-      >
-        {timeline.map((iv, i) => {
-          const a = pct(iv.start);
-          const b = pct(iv.end);
-          if (a == null || b == null) return null;
-          return (
-            <div
-              key={i}
-              style={{
-                position: "absolute",
-                top: 0,
-                bottom: 0,
-                insetInlineStart: `${a}%`,
-                width: `${Math.max(0.5, b - a)}%`,
-                background: "var(--accent)",
-                opacity: 0.85,
-              }}
-            />
-          );
-        })}
-      </div>
-      <div
-        className="mono text-xs text-dim"
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          marginTop: 4,
-        }}
-      >
-        {TICKS.map((h) => (
-          <span key={h}>{String(h).padStart(2, "0")}</span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function statusPillClass(status: string): string {
-  switch (status) {
-    case "present":
-      return "pill-success";
-    case "late":
-      return "pill-warning";
-    case "absent":
-      return "pill-danger";
-    case "leave":
-      return "pill-accent";
-    case "weekend":
-    case "holiday":
-      return "pill-neutral";
-    default:
-      return "pill-neutral";
-  }
-}
-
-// The day-detail endpoint returns time-only fields ("HH:MM:SS")
-// for ``in_time``, ``out_time``, ``timeline[].start/end``, and
-// ``evidence[].captured_at`` — they're already in tenant-local
-// time, no date component. ``new Date("00:19:53")`` returns
-// Invalid Date so we parse the string ourselves.
-function formatHms(value: string): string {
-  if (!value) return "—";
-  // Accept "HH:MM:SS" / "HH:MM" / full ISO datetime defensively.
-  const isoMatch = /^(\d{4})-\d{2}-\d{2}T(\d{2}):(\d{2})(?::(\d{2}))?/.exec(
-    value,
-  );
-  if (isoMatch) {
-    const [, , hh, mm, ss] = isoMatch;
-    return `${hh}:${mm}:${ss ?? "00"}`;
-  }
-  const hms = /^(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(value);
-  if (!hms) return value;
-  const [, h, m, s] = hms;
-  return `${h!.padStart(2, "0")}:${m}:${(s ?? "00").padStart(2, "0")}`;
-}
-
-function minutesToHms(m: number): string {
-  const h = Math.floor(m / 60);
-  const r = Math.floor(m % 60);
-  const s = Math.floor((m * 60) % 60);
-  return `${String(h).padStart(2, "0")}:${String(r).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-}
-
-function isoToLocalMin(value: string): number | null {
-  if (!value) return null;
-  const isoMatch = /^\d{4}-\d{2}-\d{2}T(\d{2}):(\d{2})/.exec(value);
-  if (isoMatch) {
-    return parseInt(isoMatch[1]!, 10) * 60 + parseInt(isoMatch[2]!, 10);
-  }
-  const hms = /^(\d{1,2}):(\d{2})/.exec(value);
-  if (!hms) return null;
-  return parseInt(hms[1]!, 10) * 60 + parseInt(hms[2]!, 10);
 }
 
 function Section({
@@ -1881,4 +1532,217 @@ function useDateChangeReset(
     reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date, allDates]);
+}
+
+// ---------------------------------------------------------------------------
+// Detection Event lightbox — split panel (image left, metadata right).
+// Same visual design as the Clip Analytics FaceCropLightbox.
+// ---------------------------------------------------------------------------
+
+function DetectionEventLightbox({
+  events,
+  initialIndex,
+  onClose,
+}: {
+  events: DetectionEvent[];
+  initialIndex: number;
+  onClose: () => void;
+}) {
+  const [index, setIndex] = useState(initialIndex);
+  const total = events.length;
+  const ev = events[index]!;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      if (e.key === "ArrowLeft") setIndex((i) => (i - 1 + total) % total);
+      if (e.key === "ArrowRight") setIndex((i) => (i + 1) % total);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, total]);
+
+  const detTime = (() => {
+    try {
+      return new Date(ev.captured_at).toLocaleTimeString(undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
+    } catch {
+      return ev.captured_at;
+    }
+  })();
+
+  const detDate = (() => {
+    try {
+      return new Date(ev.captured_at).toLocaleDateString(undefined, {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      });
+    } catch {
+      return "";
+    }
+  })();
+
+  const confidencePct =
+    ev.confidence != null
+      ? `${(ev.confidence * 100).toFixed(1)}%`
+      : "—";
+
+  const detectorMode =
+    ev.detection_metadata?.detector_mode ?? "—";
+
+  // Portal out of `.drawer` (which has position:fixed and therefore acts
+  // as a containing block for fixed-position children).  Without the
+  // portal `inset:0` resolves to the 540 px drawer, not the viewport.
+  const portalTarget =
+    typeof document !== "undefined"
+      ? (document.getElementById("drawer-root") ?? document.body)
+      : null;
+
+  const modal = (
+    /* Translucent overlay — clicking outside closes */
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Face crop preview"
+      style={{
+        position: "fixed", inset: 0, zIndex: 100000,
+        background: "rgba(0,0,0,0.72)",
+        display: "grid", placeItems: "center",
+        padding: 24,
+      }}
+      onClick={onClose}
+    >
+      {/* Centred popup card */}
+      <div
+        style={{
+          display: "flex",
+          width: "min(820px, 95vw)",
+          maxHeight: "88vh",
+          borderRadius: 16,
+          overflow: "hidden",
+          boxShadow: "0 32px 80px rgba(0,0,0,0.55)",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Left: dark image pane */}
+        <div
+          style={{
+            flex: 1, minWidth: 0, background: "#0d0d0d",
+            display: "flex", flexDirection: "column",
+            alignItems: "center", justifyContent: "center",
+            position: "relative", padding: "40px 36px",
+          }}
+        >
+          <img
+            key={ev.id}
+            src={`/api/detection-events/${ev.id}/crop`}
+            alt={ev.employee_name ?? `Event ${ev.id}`}
+            style={{
+              maxWidth: "100%", maxHeight: "46vh",
+              width: "auto", height: "auto",
+              objectFit: "contain", borderRadius: 10,
+              boxShadow: "0 8px 32px rgba(0,0,0,0.6)", display: "block",
+            }}
+          />
+          {total > 1 && (
+            <>
+              <button type="button" onClick={() => setIndex((i) => (i - 1 + total) % total)} aria-label="Previous"
+                style={{ position: "absolute", insetInlineStart: 12, top: "50%", transform: "translateY(-50%)", width: 36, height: 36, borderRadius: "50%", border: "1.5px solid rgba(255,255,255,0.25)", background: "rgba(0,0,0,0.5)", color: "#fff", cursor: "pointer", display: "grid", placeItems: "center", fontSize: 16 }}>‹</button>
+              <button type="button" onClick={() => setIndex((i) => (i + 1) % total)} aria-label="Next"
+                style={{ position: "absolute", insetInlineEnd: 12, top: "50%", transform: "translateY(-50%)", width: 36, height: 36, borderRadius: "50%", border: "1.5px solid rgba(255,255,255,0.25)", background: "rgba(0,0,0,0.5)", color: "#fff", cursor: "pointer", display: "grid", placeItems: "center", fontSize: 16 }}>›</button>
+            </>
+          )}
+          <div className="mono" style={{ position: "absolute", bottom: 14, left: "50%", transform: "translateX(-50%)", background: "rgba(0,0,0,0.5)", color: "rgba(255,255,255,0.8)", padding: "3px 12px", borderRadius: 999, fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}>
+            {index + 1} / {total}
+          </div>
+        </div>
+
+        {/* Right: metadata pane */}
+        <div style={{ width: 300, flexShrink: 0, background: "var(--bg)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          {/* Header */}
+          <div style={{ padding: "12px 14px 10px", display: "flex", alignItems: "center", gap: 6, borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+            <span className="pill pill-neutral" style={{ fontSize: 10.5, fontWeight: 700 }}>{ev.camera_name}</span>
+            <div style={{ flex: 1 }} />
+            <button type="button" onClick={onClose} aria-label="Close preview" style={{ width: 26, height: 26, borderRadius: "50%", border: "1px solid var(--border)", background: "transparent", cursor: "pointer", display: "grid", placeItems: "center", color: "var(--text)" }}>
+              <Icon name="x" size={12} />
+            </button>
+          </div>
+
+          {/* Identity + confidence */}
+          <div style={{ padding: "12px 14px 0", flexShrink: 0 }}>
+            <div style={{ fontSize: 17, fontWeight: 700, color: "var(--text)", lineHeight: 1.2, marginBottom: 3 }}>
+              {ev.employee_name ?? ev.former_match_employee_name ?? "Unknown"}
+            </div>
+            <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: ev.confidence != null ? 12 : 4, color: ev.employee_id ? "var(--success-text)" : ev.former_employee_match ? "var(--warning-text)" : "var(--text-secondary)" }}>
+              {ev.employee_id ? "● Matched" : ev.former_employee_match ? "⚠ Former employee" : "○ Unmatched"}
+            </div>
+            {ev.confidence != null && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text-tertiary)", marginBottom: 4 }}>
+                  <span>Match confidence</span>
+                  <span className="mono" style={{ fontWeight: 600 }}>{confidencePct}</span>
+                </div>
+                <div style={{ height: 4, borderRadius: 2, background: "var(--border)", overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${Math.min(100, ev.confidence * 100)}%`, background: "var(--accent)", borderRadius: 2 }} />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Metadata grid */}
+          <div style={{ padding: "0 14px 14px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7, overflowY: "auto", flex: 1 }}>
+            <DetEventMetaCard label="DETECTION TIME" value={detTime} />
+            <DetEventMetaCard label="DETECTION DATE" value={detDate} />
+            <DetEventMetaCard label="CAMERA" value={ev.camera_name} />
+            <DetEventMetaCard label="MATCH CONFIDENCE" value={confidencePct} />
+            <DetEventMetaCard label="DETECTOR" value={detectorMode} />
+            <DetEventMetaCard label="EVENT ID" value={`#${ev.id}`} />
+          </div>
+
+          {/* Navigation hint */}
+          <div style={{ padding: "8px 14px", borderTop: "1px solid var(--border)", fontSize: 11, color: "var(--text-tertiary)", flexShrink: 0 }}>
+            ← → to navigate · Esc to close
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  return portalTarget ? createPortal(modal, portalTarget) : modal;
+}
+
+function DetEventMetaCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div
+      style={{
+        border: "1px solid var(--border)",
+        borderRadius: 8,
+        padding: "8px 10px",
+        background: "var(--bg-elev)",
+      }}
+    >
+      <div
+        style={{
+          fontSize: 9,
+          fontWeight: 700,
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+          color: "var(--text-tertiary)",
+          marginBottom: 4,
+        }}
+      >
+        {label}
+      </div>
+      <div
+        className="mono"
+        style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)" }}
+      >
+        {value}
+      </div>
+    </div>
+  );
 }

@@ -85,6 +85,9 @@ class PersonDayOut(BaseModel):
     is_holiday: bool
     holiday_name: Optional[str] = None
     leave_name: Optional[str] = None
+    # Late-breakdown helpers for Fixed-type policies.
+    policy_shift_start: Optional[str] = None
+    policy_grace_minutes: Optional[int] = None
 
 
 class PersonMonthOut(BaseModel):
@@ -119,15 +122,82 @@ class DayDetailOut(BaseModel):
     out_time: Optional[str] = None
     total_minutes: Optional[int] = None
     overtime_minutes: int
+    policy_id: Optional[int] = None
     policy_name: Optional[str] = None
     policy_description: Optional[str] = None
     policy_scope: str
+    # P28.9 — structured policy facts; type-specific, see queries.py.
+    policy_type: Optional[str] = None
+    policy_required_hours: Optional[int] = None
+    policy_grace_minutes: Optional[int] = None
+    policy_shift_start: Optional[str] = None
+    policy_shift_end: Optional[str] = None
+    policy_in_window_start: Optional[str] = None
+    policy_in_window_end: Optional[str] = None
+    policy_out_window_start: Optional[str] = None
+    policy_out_window_end: Optional[str] = None
+    policy_range_start: Optional[str] = None
+    policy_range_end: Optional[str] = None
+    policy_custom_inner_type: Optional[str] = None
     timeline: list[TimelineIntervalOut]
     evidence: list[EvidenceOut]
     is_weekend: bool
+    weekend_days: list[str] = []
     is_holiday: bool
     holiday_name: Optional[str] = None
     leave_name: Optional[str] = None
+    # Escalation confirmation (0063).
+    escalation_confirmed: bool = False
+    escalation_note: Optional[str] = None
+    escalation_request: Optional["EscalationRequestSnapshotOut"] = None
+    camera_gaps: list[CameraGapOut] = []
+    pending_request: Optional[PendingRequestSnapshotOut] = None
+    approved_request: Optional[ApprovedRequestSnapshotOut] = None
+
+
+class EscalationRequestSnapshotOut(BaseModel):
+    request_id: int
+    submitted_at: str
+    reason_category: str
+    reason_text: Optional[str] = None
+    manager_name: Optional[str] = None
+    manager_decision_at: Optional[str] = None
+    manager_comment: Optional[str] = None
+    hr_name: Optional[str] = None
+    hr_decision_at: Optional[str] = None
+    hr_comment: Optional[str] = None
+
+
+class CameraGapOut(BaseModel):
+    camera_id: int
+    camera_name: str
+    offline_from: str
+    offline_to: str
+    offline_minutes: int
+
+
+class PendingRequestSnapshotOut(BaseModel):
+    request_id: int
+    request_type: str
+    status: str
+    submitted_at: str
+    reason_category: str
+    reason_text: Optional[str] = None
+    manager_name: Optional[str] = None
+
+
+class ApprovedRequestSnapshotOut(BaseModel):
+    request_id: int
+    request_type: str
+    submitted_at: str
+    reason_category: str
+    reason_text: Optional[str] = None
+    manager_name: Optional[str] = None
+    manager_decision_at: Optional[str] = None
+    manager_comment: Optional[str] = None
+    hr_name: Optional[str] = None
+    hr_decision_at: Optional[str] = None
+    hr_comment: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -354,15 +424,78 @@ def get_day_detail(
         out_time=detail.out_time,
         total_minutes=detail.total_minutes,
         overtime_minutes=detail.overtime_minutes,
+        policy_id=detail.policy_id,
         policy_name=detail.policy_name,
         policy_description=detail.policy_description,
         policy_scope=detail.policy_scope,
+        policy_type=detail.policy_type,
+        policy_required_hours=detail.policy_required_hours,
+        policy_grace_minutes=detail.policy_grace_minutes,
+        policy_shift_start=detail.policy_shift_start,
+        policy_shift_end=detail.policy_shift_end,
+        policy_in_window_start=detail.policy_in_window_start,
+        policy_in_window_end=detail.policy_in_window_end,
+        policy_out_window_start=detail.policy_out_window_start,
+        policy_out_window_end=detail.policy_out_window_end,
+        policy_range_start=detail.policy_range_start,
+        policy_range_end=detail.policy_range_end,
+        policy_custom_inner_type=detail.policy_custom_inner_type,
         timeline=[TimelineIntervalOut(**asdict(t)) for t in detail.timeline],
         evidence=[EvidenceOut(**asdict(e)) for e in detail.evidence],
         is_weekend=detail.is_weekend,
+        weekend_days=detail.weekend_days,
         is_holiday=detail.is_holiday,
         holiday_name=detail.holiday_name,
         leave_name=detail.leave_name,
+        escalation_confirmed=detail.escalation_confirmed,
+        escalation_note=detail.escalation_note,
+        escalation_request=(
+            EscalationRequestSnapshotOut(
+                request_id=detail.escalation_request.request_id,
+                submitted_at=detail.escalation_request.submitted_at,
+                reason_category=detail.escalation_request.reason_category,
+                reason_text=detail.escalation_request.reason_text,
+                manager_name=detail.escalation_request.manager_name,
+                manager_decision_at=detail.escalation_request.manager_decision_at,
+                manager_comment=detail.escalation_request.manager_comment,
+                hr_name=detail.escalation_request.hr_name,
+                hr_decision_at=detail.escalation_request.hr_decision_at,
+                hr_comment=detail.escalation_request.hr_comment,
+            )
+            if detail.escalation_request is not None
+            else None
+        ),
+        camera_gaps=[CameraGapOut(**asdict(g)) for g in detail.camera_gaps],
+        pending_request=(
+            PendingRequestSnapshotOut(
+                request_id=detail.pending_request.request_id,
+                request_type=detail.pending_request.request_type,
+                status=detail.pending_request.status,
+                submitted_at=detail.pending_request.submitted_at,
+                reason_category=detail.pending_request.reason_category,
+                reason_text=detail.pending_request.reason_text,
+                manager_name=detail.pending_request.manager_name,
+            )
+            if detail.pending_request is not None
+            else None
+        ),
+        approved_request=(
+            ApprovedRequestSnapshotOut(
+                request_id=detail.approved_request.request_id,
+                request_type=detail.approved_request.request_type,
+                submitted_at=detail.approved_request.submitted_at,
+                reason_category=detail.approved_request.reason_category,
+                reason_text=detail.approved_request.reason_text,
+                manager_name=detail.approved_request.manager_name,
+                manager_decision_at=detail.approved_request.manager_decision_at,
+                manager_comment=detail.approved_request.manager_comment,
+                hr_name=detail.approved_request.hr_name,
+                hr_decision_at=detail.approved_request.hr_decision_at,
+                hr_comment=detail.approved_request.hr_comment,
+            )
+            if detail.approved_request is not None
+            else None
+        ),
     )
 
 

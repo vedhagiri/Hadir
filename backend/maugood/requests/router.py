@@ -39,6 +39,7 @@ from maugood.auth.dependencies import CurrentUser, current_user, require_role
 from maugood.config import get_settings
 from maugood.db import (
     approved_leaves,
+    attendance_records,
     employees,
     get_engine,
     leave_types,
@@ -366,6 +367,71 @@ def _apply_post_approval_side_effects(
     if row.status not in ("hr_approved", "admin_approved"):
         return
 
+    if row.type == "escalation":
+        # Escalation approval: lock the attendance record for the
+        # target date so the scheduler never reverts it, and force
+        # absent=False so the status becomes "present (confirmed)".
+        # The escalation_note stores the reason for the audit trail
+        # displayed in the Day Detail drawer.
+        note = " / ".join(
+            part for part in (row.reason_category, row.reason_text) if part
+        )
+        with get_engine().begin() as conn:
+            existing_ar = conn.execute(
+                select(attendance_records.c.id).where(
+                    attendance_records.c.tenant_id == scope.tenant_id,
+                    attendance_records.c.employee_id == row.employee_id,
+                    attendance_records.c.date == row.target_date_start,
+                )
+            ).first()
+            if existing_ar is not None:
+                from sqlalchemy import update as sa_update
+                conn.execute(
+                    sa_update(attendance_records)
+                    .where(
+                        attendance_records.c.tenant_id == scope.tenant_id,
+                        attendance_records.c.employee_id == row.employee_id,
+                        attendance_records.c.date == row.target_date_start,
+                    )
+                    .values(
+                        absent=False,
+                        late=False,
+                        locked=True,
+                        escalation_note=note or None,
+                    )
+                )
+            else:
+                # No attendance row yet (day not yet computed). Recompute
+                # first so the row exists, then lock it.
+                try:
+                    attendance_scheduler_mod.recompute_for(
+                        scope,
+                        employee_id=row.employee_id,
+                        the_date=row.target_date_start,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "escalation %s pre-lock recompute failed: %s",
+                        row.id,
+                        exc,
+                    )
+                from sqlalchemy import update as sa_update
+                conn.execute(
+                    sa_update(attendance_records)
+                    .where(
+                        attendance_records.c.tenant_id == scope.tenant_id,
+                        attendance_records.c.employee_id == row.employee_id,
+                        attendance_records.c.date == row.target_date_start,
+                    )
+                    .values(
+                        absent=False,
+                        late=False,
+                        locked=True,
+                        escalation_note=note or None,
+                    )
+                )
+        return  # no further recompute pass — row is now locked
+
     if row.type == "leave":
         if row.leave_type_id is None:
             logger.warning(
@@ -375,8 +441,6 @@ def _apply_post_approval_side_effects(
             return
         end_date = row.target_date_end or row.target_date_start
         with get_engine().begin() as conn:
-            # Idempotency: don't create a duplicate ledger row if a
-            # previous approval already wrote one.
             existing = conn.execute(
                 select(approved_leaves.c.id).where(
                     approved_leaves.c.tenant_id == scope.tenant_id,
@@ -399,9 +463,7 @@ def _apply_post_approval_side_effects(
                     )
                 )
 
-    # Recompute attendance for every covered date so reports reflect
-    # the new leave / exception immediately. Past dates are explicitly
-    # in scope here — that's the whole point of the request workflow.
+    # Recompute attendance for every covered date.
     end_date = row.target_date_end or row.target_date_start
     current = row.target_date_start
     while current <= end_date:
@@ -417,7 +479,6 @@ def _apply_post_approval_side_effects(
                 current,
                 type(exc).__name__,
             )
-        # Advance one day.
         current = date_type.fromordinal(current.toordinal() + 1)
 
 
@@ -1378,10 +1439,14 @@ def list_reason_categories(
     request_type: Optional[str] = None,
     include_inactive: bool = False,
 ) -> list[ReasonCategoryResponse]:
-    if request_type is not None and request_type not in ("exception", "leave"):
+    if request_type is not None and request_type not in (
+        "exception",
+        "leave",
+        "escalation",
+    ):
         raise HTTPException(
             status_code=400,
-            detail="request_type must be 'exception' or 'leave'",
+            detail="request_type must be 'exception', 'leave', or 'escalation'",
         )
     scope = TenantScope(tenant_id=user.tenant_id)
     with get_engine().begin() as conn:

@@ -1,0 +1,1755 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Maugood — Absent Status & Exception Workflow (Design Proposal)</title>
+  <!--
+    DESIGN PROPOSAL — HTML mockup for stakeholder review.
+    This is a static prototype. No backend calls; nothing here is live.
+    Approval gates the implementation work (MAU-008..011, MAU-021..024).
+  -->
+  <style>
+    :root {
+      /* Accent + semantics — pulled from the Maugood design system,
+         hex-equivalents of the OKLCH tokens for a standalone file. */
+      --accent: #2563EB;
+      --accent-soft: #DBEAFE;
+      --accent-text: #1D4ED8;
+      --accent-on: #FFFFFF;
+
+      --success: #16A34A;
+      --success-soft: #DCFCE7;
+      --success-text: #15803D;
+
+      --warning: #F59E0B;
+      --warning-soft: #FEF3C7;
+      --warning-text: #B45309;
+
+      --danger: #DC2626;
+      --danger-soft: #FEE2E2;
+      --danger-text: #B91C1C;
+
+      --info: #0EA5E9;
+      --info-soft: #E0F2FE;
+      --info-text: #0369A1;
+
+      --neutral: #6B7280;
+      --neutral-soft: #F3F4F6;
+
+      /* Camera-miss tone — distinct from the "Late" warning and the
+         "Absent" danger. A teal so the operator can disambiguate at
+         a glance. */
+      --miss: #0891B2;
+      --miss-soft: #CFFAFE;
+      --miss-text: #155E75;
+
+      --bg: #F8FAFC;
+      --bg-elev: #FFFFFF;
+      --bg-sunken: #F1F5F9;
+      --bg-hover: #E2E8F0;
+      --border: #E2E8F0;
+      --border-strong: #CBD5E1;
+      --text: #0F172A;
+      --text-secondary: #334155;
+      --text-tertiary: #64748B;
+      --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+      --shadow-md: 0 4px 14px rgba(15, 23, 42, 0.08);
+      --shadow-lg: 0 12px 40px rgba(15, 23, 42, 0.18);
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+    }
+
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Inter",
+                   "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+    code, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+    /* ─────────────────────────── Page chrome ──────────────────────────── */
+    .doc-header {
+      background: linear-gradient(135deg, #0F172A 0%, #1E293B 60%, #334155 100%);
+      color: #fff;
+      padding: 28px 36px 24px;
+    }
+    .doc-eyebrow {
+      font-size: 11px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.65);
+      margin-bottom: 6px;
+    }
+    .doc-title {
+      font-size: 26px;
+      font-weight: 600;
+      margin: 0 0 10px;
+      letter-spacing: -0.01em;
+    }
+    .doc-meta {
+      display: flex;
+      gap: 18px;
+      flex-wrap: wrap;
+      font-size: 12px;
+      color: rgba(255,255,255,0.85);
+    }
+    .doc-meta b { color: #fff; }
+    .doc-status-chip {
+      display: inline-block;
+      padding: 3px 10px;
+      background: rgba(245, 158, 11, 0.22);
+      border: 1px solid rgba(245, 158, 11, 0.55);
+      color: #FCD34D;
+      border-radius: 999px;
+      font-weight: 600;
+      font-size: 11px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .doc-toc {
+      background: var(--bg-elev);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 36px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 16px;
+      font-size: 12px;
+    }
+    .doc-toc a {
+      color: var(--text-secondary);
+      text-decoration: none;
+      padding: 3px 8px;
+      border-radius: 4px;
+      transition: background 80ms ease;
+    }
+    .doc-toc a:hover { background: var(--bg-sunken); color: var(--text); }
+
+    .doc-section {
+      padding: 28px 36px;
+      border-bottom: 1px solid var(--border);
+    }
+    .doc-section + .doc-section { background: var(--bg); }
+    .section-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 26px; height: 26px;
+      background: var(--accent);
+      color: #fff;
+      border-radius: 50%;
+      font-size: 12px;
+      font-weight: 700;
+      margin-inline-end: 10px;
+      vertical-align: middle;
+    }
+    .section-title {
+      font-size: 18px;
+      font-weight: 600;
+      margin: 0 0 4px;
+      color: var(--text);
+    }
+    .section-sub {
+      font-size: 13px;
+      color: var(--text-tertiary);
+      margin: 0 0 18px;
+      max-width: 720px;
+    }
+    .section-annotate {
+      font-size: 11.5px;
+      color: var(--text-tertiary);
+      background: var(--bg-sunken);
+      border-inline-start: 3px solid var(--accent);
+      padding: 8px 12px;
+      border-radius: 4px;
+      max-width: 780px;
+      margin-top: 16px;
+    }
+    .section-annotate b { color: var(--text); }
+
+    /* ─────────────────────────── Drawer mock ──────────────────────────── */
+    .drawer-mock {
+      width: 100%;
+      max-width: 460px;
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-md);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .drawer-mock-row {
+      display: flex;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+    .drawer-head {
+      padding: 14px 18px 12px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-elev);
+    }
+    .drawer-eyebrow {
+      font-size: 10.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-tertiary);
+      margin-bottom: 2px;
+    }
+    .drawer-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .drawer-sub {
+      font-size: 12.5px;
+      color: var(--text-tertiary);
+      margin-top: 2px;
+    }
+    .drawer-body {
+      padding: 16px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      background: var(--bg);
+    }
+    .drawer-section-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-tertiary);
+      margin-bottom: 6px;
+    }
+
+    /* Status banner — the big "what is this day" badge. */
+    .status-banner {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 14px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border);
+      background: var(--bg-elev);
+    }
+    .status-banner .ico {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      display: grid; place-items: center;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+    .status-banner-title {
+      font-size: 14.5px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 2px;
+    }
+    .status-banner-sub {
+      font-size: 12px;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+
+    /* Per-status tint */
+    .status--real-absence .status-banner       { border-color: var(--danger);  background: var(--danger-soft); }
+    .status--real-absence .status-banner .ico  { background: var(--danger);    color: #fff; }
+    .status--camera-miss  .status-banner       { border-color: var(--miss);    background: var(--miss-soft); }
+    .status--camera-miss  .status-banner .ico  { background: var(--miss);      color: #fff; }
+    .status--exception    .status-banner       { border-color: var(--success); background: var(--success-soft); }
+    .status--exception    .status-banner .ico  { background: var(--success);   color: #fff; }
+    .status--late         .status-banner       { border-color: var(--warning); background: var(--warning-soft); }
+    .status--late         .status-banner .ico  { background: var(--warning);   color: #fff; }
+
+    /* Summary tile row */
+    .tile-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+    .tile {
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 10px 12px;
+    }
+    .tile-label {
+      font-size: 10.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-tertiary);
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .tile-value {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+    .tile-value.muted { color: var(--text-tertiary); }
+
+    /* Approval chain */
+    .chain {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      border-radius: var(--radius-md);
+      padding: 12px;
+      border: 1px solid var(--border);
+      background: var(--bg-elev);
+    }
+    .chain-step {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: 12.5px;
+    }
+    .chain-step .dot {
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      background: var(--success);
+      color: #fff;
+      font-size: 11px;
+      display: grid; place-items: center;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+    .chain-step.pending .dot { background: var(--warning); }
+    .chain-step.empty   .dot { background: var(--neutral-soft); color: var(--text-tertiary); border: 1px dashed var(--border-strong); }
+    .chain-actor {
+      font-weight: 600;
+      color: var(--text);
+    }
+    .chain-meta {
+      font-size: 11px;
+      color: var(--text-tertiary);
+      margin-top: 1px;
+    }
+
+    /* Camera event note row */
+    .event-note-list {
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .event-note {
+      display: flex; align-items: flex-start; gap: 10px;
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 10px 12px;
+    }
+    .event-note .thumb {
+      width: 40px; height: 50px;
+      border-radius: 6px;
+      background: linear-gradient(135deg, #94A3B8 0%, #475569 100%);
+      flex-shrink: 0;
+      position: relative;
+      overflow: hidden;
+    }
+    .event-note .thumb::after {
+      content: "";
+      position: absolute; inset: 0;
+      background: radial-gradient(circle at 50% 40%, rgba(255,255,255,0.25) 0%, transparent 60%);
+    }
+    .event-note-body { flex: 1; min-width: 0; font-size: 12px; }
+    .event-note-row {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      font-size: 11.5px;
+      color: var(--text-tertiary);
+    }
+    .event-note-row .mono { color: var(--text); font-weight: 600; }
+    .note-chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 1px 7px;
+      border-radius: 999px;
+      font-size: 10.5px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    .note-chip--unclear { background: var(--warning-soft); color: var(--warning-text); }
+    .note-chip--missed  { background: var(--miss-soft);    color: var(--miss-text);    border: 1px solid var(--miss); }
+    .note-chip--ok      { background: var(--success-soft); color: var(--success-text); }
+    .note-chip--pose    { background: var(--info-soft);    color: var(--info-text);    }
+
+    /* Gallery grid mock */
+    .gallery-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+      gap: 8px;
+    }
+    .gallery-card {
+      position: relative;
+      aspect-ratio: 4/5;
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      background: linear-gradient(135deg, #94A3B8 0%, #475569 100%);
+      border: 1px solid var(--border);
+    }
+    .gallery-card::after {
+      content: "";
+      position: absolute; inset: 0;
+      background: radial-gradient(circle at 50% 35%, rgba(255,255,255,0.25) 0%, transparent 60%);
+    }
+    .gallery-card .cap {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      padding: 6px 8px 6px;
+      background: linear-gradient(to top, rgba(0,0,0,0.55), transparent);
+      color: #fff;
+      font-size: 10.5px;
+    }
+    .gallery-card .cap .t {
+      font-weight: 700; font-size: 11.5px;
+    }
+    .gallery-card .conf {
+      position: absolute; top: 6px; right: 6px;
+      background: rgba(0,0,0,0.55);
+      color: #fff;
+      font-size: 9.5px;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 4px;
+    }
+    .gallery-card .annot {
+      position: absolute; top: 6px; left: 6px;
+      background: rgba(0,0,0,0.55);
+      color: #fff;
+      font-size: 9.5px;
+      padding: 1px 6px;
+      border-radius: 4px;
+    }
+    .gallery-card.note-unclear { outline: 2px solid var(--warning); outline-offset: -2px; }
+    .gallery-card.note-missed  { outline: 2px solid var(--miss);    outline-offset: -2px; }
+
+    /* Empty state */
+    .empty-state {
+      display: flex; gap: 12px; padding: 14px;
+      border: 1px dashed var(--border-strong);
+      border-radius: var(--radius-md);
+      background: var(--bg-sunken);
+    }
+    .empty-state .ico {
+      width: 36px; height: 36px;
+      background: var(--bg-elev);
+      border-radius: 50%;
+      display: grid; place-items: center;
+      flex-shrink: 0;
+      box-shadow: var(--shadow-sm);
+    }
+    .empty-state-title {
+      font-weight: 600; font-size: 13px; color: var(--text);
+    }
+    .empty-state-sub {
+      font-size: 12px; color: var(--text-tertiary); line-height: 1.45;
+    }
+
+    /* Timeline ribbon */
+    .timeline-ribbon {
+      position: relative;
+      height: 64px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: var(--bg-elev);
+      padding: 8px 0 14px;
+      overflow: hidden;
+    }
+    .timeline-ribbon .hour {
+      position: absolute; bottom: 0;
+      transform: translateX(-50%);
+      font-size: 9.5px; color: var(--text-tertiary);
+      font-family: ui-monospace, monospace;
+    }
+    .timeline-ribbon .bar {
+      position: absolute;
+      top: 18px; height: 14px;
+      background: var(--accent);
+      border-radius: 3px;
+    }
+    .timeline-ribbon .gap {
+      position: absolute; top: 25px;
+      border-top: 1.5px dashed var(--text-tertiary);
+      opacity: 0.55;
+    }
+    .timeline-ribbon .marker {
+      position: absolute;
+      top: 8px;
+      width: 12px; height: 32px;
+      transform: translateX(-50%);
+    }
+    .timeline-ribbon .marker .mhead {
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      box-shadow: 0 0 0 2px #fff;
+    }
+    .timeline-ribbon .marker .mline {
+      position: absolute; top: 0; left: 4px;
+      width: 4px; bottom: 0;
+      border-radius: 2px;
+      box-shadow: 0 0 0 2px #fff;
+    }
+    .timeline-ribbon .marker.first .mhead,
+    .timeline-ribbon .marker.first .mline { background: var(--success); }
+    .timeline-ribbon .marker.last  .mhead,
+    .timeline-ribbon .marker.last  .mline { background: var(--danger); }
+    .timeline-ribbon .dot {
+      position: absolute; top: 5px;
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      background: #fff;
+      border: 2px solid var(--accent);
+      transform: translateX(-50%);
+    }
+    .timeline-ribbon .miss-dot {
+      border-color: var(--miss);
+    }
+
+    /* Status comparison table */
+    .compare-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+    @media (max-width: 1024px) {
+      .compare-grid { grid-template-columns: 1fr; }
+    }
+    .compare-cell {
+      background: var(--bg-elev);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-sm);
+      padding: 16px;
+      border-top: 4px solid;
+    }
+    .compare-cell.real     { border-top-color: var(--danger); }
+    .compare-cell.miss     { border-top-color: var(--miss); }
+    .compare-cell.approved { border-top-color: var(--success); }
+    .compare-cell h4 {
+      margin: 0 0 4px;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .compare-cell .descr {
+      font-size: 12px;
+      color: var(--text-tertiary);
+      margin-bottom: 12px;
+    }
+    .compare-cell ul {
+      padding: 0; margin: 0;
+      list-style: none;
+      display: flex; flex-direction: column; gap: 6px;
+      font-size: 12.5px;
+    }
+    .compare-cell li {
+      display: flex; align-items: flex-start; gap: 8px;
+      color: var(--text-secondary);
+    }
+    .compare-cell li::before {
+      content: "";
+      width: 6px; height: 6px;
+      border-radius: 50%; margin-top: 7px;
+      flex-shrink: 0;
+    }
+    .compare-cell.real li::before     { background: var(--danger); }
+    .compare-cell.miss li::before     { background: var(--miss); }
+    .compare-cell.approved li::before { background: var(--success); }
+
+    /* Escalation modal */
+    .escalation-modal {
+      max-width: 520px;
+      background: var(--bg-elev);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-lg);
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .escalation-modal-head {
+      padding: 16px 20px;
+      background: linear-gradient(135deg, var(--warning) 0%, var(--danger) 100%);
+      color: #fff;
+    }
+    .escalation-modal-head h4 {
+      margin: 0; font-size: 16px; font-weight: 700;
+    }
+    .escalation-modal-head p {
+      margin: 4px 0 0;
+      font-size: 12px; opacity: 0.92;
+    }
+    .escalation-modal-body {
+      padding: 18px 20px;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .form-row { display: flex; flex-direction: column; gap: 4px; }
+    .form-row label {
+      font-size: 11px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.04em;
+      color: var(--text-tertiary);
+    }
+    .form-row input, .form-row select, .form-row textarea {
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font: inherit;
+      background: var(--bg);
+      color: var(--text);
+      outline: none;
+    }
+    .form-row textarea { min-height: 80px; resize: vertical; }
+    .form-help { font-size: 11px; color: var(--text-tertiary); }
+
+    .modal-foot {
+      padding: 14px 20px;
+      background: var(--bg-sunken);
+      border-top: 1px solid var(--border);
+      display: flex; justify-content: flex-end; gap: 8px;
+    }
+    .btn {
+      padding: 7px 14px;
+      border-radius: 7px;
+      font: inherit; font-weight: 600; font-size: 12.5px;
+      cursor: pointer; border: 1px solid var(--border);
+      background: var(--bg-elev); color: var(--text);
+    }
+    .btn-primary { background: var(--text); color: #fff; border-color: var(--text); }
+    .btn-danger  { background: var(--danger); color: #fff; border-color: var(--danger); }
+
+    /* Escalation history */
+    .escalation-log {
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 4px 0;
+    }
+    .escalation-entry {
+      display: flex; gap: 12px;
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+    }
+    .escalation-entry:first-child { border-top: none; }
+    .escalation-entry .stamp {
+      flex-shrink: 0;
+      font-size: 11.5px;
+      color: var(--text-tertiary);
+      font-family: ui-monospace, monospace;
+      min-width: 110px;
+    }
+    .escalation-entry .body {
+      font-size: 12.5px;
+      color: var(--text-secondary);
+    }
+    .escalation-entry .body .who {
+      color: var(--text);
+      font-weight: 600;
+    }
+    .escalation-entry .body .verb {
+      color: var(--text);
+      font-weight: 500;
+    }
+    .escalation-entry .body .reason {
+      margin-top: 4px;
+      padding: 6px 10px;
+      background: var(--bg-sunken);
+      border-radius: 6px;
+      font-size: 12px;
+    }
+
+    /* Role visibility matrix */
+    .role-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12.5px;
+    }
+    .role-table th, .role-table td {
+      padding: 8px 12px;
+      text-align: start;
+      border-bottom: 1px solid var(--border);
+    }
+    .role-table th {
+      background: var(--bg-sunken);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-tertiary);
+    }
+    .role-table tbody tr:hover { background: var(--bg-sunken); }
+    .role-table .yes { color: var(--success-text); font-weight: 600; }
+    .role-table .no  { color: var(--text-tertiary); }
+    .role-table .scoped { color: var(--info-text); }
+
+    /* Status legend / differentiator key */
+    .legend-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 12px;
+    }
+    .legend-card {
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 12px;
+      display: flex; gap: 10px;
+    }
+    .legend-swatch {
+      width: 30px; height: 30px;
+      border-radius: 8px;
+      flex-shrink: 0;
+    }
+    .legend-title {
+      font-size: 13px; font-weight: 700; margin-bottom: 2px;
+    }
+    .legend-sub {
+      font-size: 11.5px; color: var(--text-tertiary); line-height: 1.45;
+    }
+
+    /* Footer sign-off */
+    .approval-block {
+      padding: 24px 36px;
+      background: linear-gradient(135deg, var(--accent-soft) 0%, transparent 100%);
+      border-top: 1px solid var(--border);
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .approval-block h3 { margin: 0 0 4px; font-size: 16px; }
+    .approval-row { display: flex; gap: 12px; flex-wrap: wrap; }
+    .approval-card {
+      flex: 1 1 220px;
+      padding: 12px;
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+    }
+    .approval-card label {
+      font-size: 11px; font-weight: 600;
+      color: var(--text-tertiary); text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .approval-card .field {
+      margin-top: 6px;
+      border-bottom: 1px dashed var(--border-strong);
+      min-height: 22px;
+    }
+    .verdict {
+      display: flex; gap: 14px; padding: 12px 16px;
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      flex-wrap: wrap;
+    }
+    .verdict label {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 13px;
+    }
+
+    /* Small inline call-out chip */
+    .callout {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 9px;
+      border-radius: 999px;
+      font-size: 11px; font-weight: 600;
+      letter-spacing: 0.04em;
+    }
+    .callout--new      { background: var(--accent-soft); color: var(--accent-text); }
+    .callout--changed  { background: var(--warning-soft); color: var(--warning-text); }
+    .callout--existing { background: var(--neutral-soft); color: var(--neutral); }
+  </style>
+</head>
+<body>
+
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<!-- Header                                                              -->
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<header class="doc-header">
+  <div class="doc-eyebrow">Maugood · Design Proposal</div>
+  <h1 class="doc-title">Absent Status &amp; Exception Workflow</h1>
+  <div class="doc-meta">
+    <span><b>Version:</b> v1 — for review</span>
+    <span><b>Date:</b> 2026-05-21</span>
+    <span><b>Scope:</b> Calendar → Per Person · Day Detail Drawer</span>
+    <span><b>Tickets:</b> MAU-008 · MAU-009 · MAU-010 · MAU-011 · MAU-021 · MAU-022 · MAU-023 · MAU-024</span>
+    <span class="doc-status-chip">Pending approval</span>
+  </div>
+</header>
+
+<nav class="doc-toc">
+  <a href="#sec-1">1. Three-state matrix</a>
+  <a href="#sec-2">2. Real absence</a>
+  <a href="#sec-3">3. Camera miss</a>
+  <a href="#sec-4">4. Exception approved</a>
+  <a href="#sec-5">5. Camera event notes</a>
+  <a href="#sec-6">6. Evidence gallery</a>
+  <a href="#sec-7">7. Raise Escalation flow</a>
+  <a href="#sec-8">8. Escalation history</a>
+  <a href="#sec-9">9. Role visibility</a>
+  <a href="#sec-10">10. Empty states</a>
+  <a href="#sec-11">11. Day timeline upgrade</a>
+  <a href="#sec-12">12. Status legend</a>
+  <a href="#approval">Sign-off</a>
+</nav>
+
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<!-- 1. Three-state matrix                                                -->
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<section id="sec-1" class="doc-section">
+  <h2 class="section-title"><span class="section-num">1</span>Three-state matrix — what does "absent" actually mean?</h2>
+  <p class="section-sub">
+    The current build collapses three very different situations into a single
+    "Absent" label. Operators can't tell why an employee is absent, which
+    makes triage impossible. The proposal differentiates three states at
+    the engine level and surfaces them with distinct visuals.
+  </p>
+
+  <div class="compare-grid">
+    <div class="compare-cell real">
+      <h4>Real absence</h4>
+      <p class="descr">No event captured in the shift window; no approved exception.</p>
+      <ul>
+        <li>Cell tint: <b>danger-soft</b> · banner: <b>danger</b></li>
+        <li>Detection events present: <b>0</b></li>
+        <li>Operator action: confirm absence, optionally request comment from employee</li>
+        <li>Counts toward "Absent" KPI</li>
+      </ul>
+    </div>
+    <div class="compare-cell miss">
+      <h4>Camera miss <span class="callout callout--new">New</span></h4>
+      <p class="descr">Detection events exist but none matched the employee, OR positioning was off.</p>
+      <ul>
+        <li>Cell tint: <b>miss-soft</b> · banner: <b>miss (teal)</b></li>
+        <li>Detection events present: <b>≥ 1</b>, none matched</li>
+        <li>Operator action: review camera evidence, raise escalation if needed</li>
+        <li>NOT counted toward "Absent" KPI — surfaced separately on dashboards</li>
+      </ul>
+    </div>
+    <div class="compare-cell approved">
+      <h4>Exception approved</h4>
+      <p class="descr">Employee submitted an exception; Manager + HR approved.</p>
+      <ul>
+        <li>Cell tint: <b>success-soft</b> · banner: <b>success</b></li>
+        <li>Approval chain visible in drawer</li>
+        <li>Operator action: none — drawer shows the audit trail</li>
+        <li>Counts as <b>"Excused"</b> on KPIs, not absent</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="section-annotate">
+    <b>Engineering note:</b> This split is the "<code>waiting</code> status taxonomy"
+    work in MAU-021 + MAU-022. The status enum gains <code>camera_miss</code> and
+    <code>excused</code> server-side. Single source of truth in
+    <code>attendance_calendar/queries.py</code>; consumed identically by Calendar,
+    Daily Attendance, Employee tab, Reports.
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<!-- 2. Real absence detail                                               -->
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<section id="sec-2" class="doc-section">
+  <h2 class="section-title"><span class="section-num">2</span>Real absence — detail drawer mock</h2>
+  <p class="section-sub">Visible to all roles. Employee role sees the Escalation CTA.</p>
+
+  <div class="drawer-mock status--real-absence">
+    <div class="drawer-head">
+      <div class="drawer-eyebrow">Day · 13 May 2026 · Wed</div>
+      <div class="drawer-title">Anya Bashir <span style="color: var(--text-tertiary); font-weight: 400; font-size: 12.5px;">· EMP-0042 · Engineering</span></div>
+    </div>
+    <div class="drawer-body">
+
+      <!-- STATUS BANNER -->
+      <div class="status-banner">
+        <div class="ico">✕</div>
+        <div>
+          <div class="status-banner-title">Real absence</div>
+          <div class="status-banner-sub">
+            No face was captured on this day, and there is no approved
+            exception. The shift window has closed; this is a confirmed
+            absent day.
+          </div>
+        </div>
+      </div>
+
+      <!-- SUMMARY TILES -->
+      <div class="tile-row">
+        <div class="tile"><div class="tile-label">In time</div><div class="tile-value muted">—</div></div>
+        <div class="tile"><div class="tile-label">Out time</div><div class="tile-value muted">—</div></div>
+        <div class="tile"><div class="tile-label">Total</div><div class="tile-value muted">—</div></div>
+      </div>
+
+      <!-- DAY TIMELINE — EMPTY -->
+      <div>
+        <div class="drawer-section-label">Day timeline</div>
+        <div class="timeline-ribbon" style="height: 48px; display: grid; place-items: center;">
+          <span style="font-size: 12px; color: var(--text-tertiary);">No detections recorded</span>
+        </div>
+      </div>
+
+      <!-- ESCALATION CTA — EMPLOYEE ONLY -->
+      <div style="
+        padding: 12px;
+        border-radius: var(--radius-md);
+        border: 1px dashed var(--danger);
+        background: var(--bg-elev);
+        display: flex; gap: 12px; align-items: center;">
+        <div style="font-size: 24px;">⚠</div>
+        <div style="flex: 1; font-size: 12.5px; color: var(--text-secondary);">
+          <b style="color: var(--text);">Were you present?</b><br />
+          If you believe you were present and the camera missed your face,
+          raise an escalation for HR to review.
+        </div>
+        <button class="btn btn-danger">Raise escalation</button>
+      </div>
+
+      <!-- POLICY -->
+      <div>
+        <div class="drawer-section-label">Policy applied</div>
+        <div style="
+          padding: 12px; border-radius: var(--radius-md);
+          background: var(--bg-elev); border: 1px solid var(--border);
+          display: flex; justify-content: space-between; align-items: flex-start;">
+          <div>
+            <div style="font-size: 13px; font-weight: 600;">Office Flex</div>
+            <div style="font-size: 11.5px; color: var(--text-tertiary); margin-top: 2px;">
+              Applied to this employee
+            </div>
+          </div>
+          <span style="background: var(--success-soft); color: var(--success-text);
+            font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em;
+            text-transform: uppercase; padding: 3px 9px; border-radius: 999px;">
+            Flexible shift
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-annotate">
+    <b>Visual recipe:</b> danger-soft cell background tint + danger-bordered
+    status banner with ✕ icon + dashed-border escalation CTA. The "no
+    detections" timeline empty state mirrors the gallery's empty state for
+    consistency. Tiles render em-dash placeholders rather than zeros so the
+    absence of data is unambiguous.
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<!-- 3. Camera miss detail                                                -->
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<section id="sec-3" class="doc-section">
+  <h2 class="section-title"><span class="section-num">3</span>Camera miss — detail drawer mock</h2>
+  <p class="section-sub">
+    Detections exist but none confidently matched the employee. Operators
+    should see the camera evidence before deciding whether to mark
+    absence or escalate.
+  </p>
+
+  <div class="drawer-mock status--camera-miss">
+    <div class="drawer-head">
+      <div class="drawer-eyebrow">Day · 14 May 2026 · Thu</div>
+      <div class="drawer-title">Anya Bashir <span style="color: var(--text-tertiary); font-weight: 400; font-size: 12.5px;">· EMP-0042 · Engineering</span></div>
+    </div>
+    <div class="drawer-body">
+
+      <!-- STATUS BANNER -->
+      <div class="status-banner">
+        <div class="ico">📷</div>
+        <div>
+          <div class="status-banner-title">Possible camera miss</div>
+          <div class="status-banner-sub">
+            12 detection events were recorded on this day but the
+            employee's face wasn't confidently matched. Review the
+            camera evidence below — this may be a positioning or
+            recognition issue, not a real absence.
+          </div>
+        </div>
+      </div>
+
+      <!-- CAMERA EVENT NOTES -->
+      <div>
+        <div class="drawer-section-label">Camera events · 12</div>
+        <div class="event-note-list">
+          <div class="event-note">
+            <div class="thumb"></div>
+            <div class="event-note-body">
+              <div class="event-note-row">
+                <span class="mono">07:32</span>
+                <span>· Main Entry · conf 38%</span>
+                <span class="note-chip note-chip--unclear">Face not clear</span>
+              </div>
+              <div style="font-size: 11px; color: var(--text-tertiary); margin-top: 2px;">
+                Detection score below match threshold (45%)
+              </div>
+            </div>
+          </div>
+          <div class="event-note">
+            <div class="thumb"></div>
+            <div class="event-note-body">
+              <div class="event-note-row">
+                <span class="mono">07:45</span>
+                <span>· Main Entry · no match</span>
+                <span class="note-chip note-chip--missed">Camera missed event</span>
+              </div>
+              <div style="font-size: 11px; color: var(--text-tertiary); margin-top: 2px;">
+                Face detected but not in reference photo set
+              </div>
+            </div>
+          </div>
+          <div class="event-note">
+            <div class="thumb"></div>
+            <div class="event-note-body">
+              <div class="event-note-row">
+                <span class="mono">08:01</span>
+                <span>· Side Door · conf 41%</span>
+                <span class="note-chip note-chip--pose">Possible positioning issue</span>
+              </div>
+              <div style="font-size: 11px; color: var(--text-tertiary); margin-top: 2px;">
+                Face angle off-axis &gt; 35°
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ESCALATION CTA -->
+      <div style="
+        padding: 12px;
+        border-radius: var(--radius-md);
+        background: var(--miss-soft);
+        border: 1px solid var(--miss);
+        display: flex; gap: 12px; align-items: center;">
+        <div style="font-size: 24px;">🛟</div>
+        <div style="flex: 1; font-size: 12.5px; color: var(--text-secondary);">
+          <b style="color: var(--miss-text);">Were you present?</b><br />
+          The camera saw people but couldn't confirm it was you.
+          Raise an escalation so HR can re-validate.
+        </div>
+        <button class="btn" style="background: var(--miss); color: #fff; border-color: var(--miss);">
+          Raise escalation
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-annotate">
+    <b>Backend classification:</b> The chip categories — "Face not clear",
+    "Camera missed event", "Possible positioning issue", "Real absence
+    detected" — are computed server-side in <code>detection_events</code>
+    classification logic (MAU-010). Each rule has explicit, auditable thresholds
+    so the same event never shows two chips.
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<!-- 4. Exception approved                                                -->
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<section id="sec-4" class="doc-section">
+  <h2 class="section-title"><span class="section-num">4</span>Exception approved — detail drawer mock</h2>
+  <p class="section-sub">
+    What previously rendered as "Absent" despite a Manager + HR-approved
+    exception now renders correctly as "Excused", with the full approval
+    chain visible.
+  </p>
+
+  <div class="drawer-mock status--exception">
+    <div class="drawer-head">
+      <div class="drawer-eyebrow">Day · 15 May 2026 · Fri</div>
+      <div class="drawer-title">Anya Bashir <span style="color: var(--text-tertiary); font-weight: 400; font-size: 12.5px;">· EMP-0042 · Engineering</span></div>
+    </div>
+    <div class="drawer-body">
+
+      <!-- STATUS BANNER -->
+      <div class="status-banner">
+        <div class="ico">✓</div>
+        <div>
+          <div class="status-banner-title">Excused — exception approved</div>
+          <div class="status-banner-sub">
+            Reason: <b>Doctor</b> · Submitted 14 May, approved by Manager
+            and HR on 15 May 08:12. Day counts as Excused on attendance
+            reports, not Absent.
+          </div>
+        </div>
+      </div>
+
+      <!-- APPROVAL CHAIN -->
+      <div>
+        <div class="drawer-section-label">Approval chain</div>
+        <div class="chain">
+          <div class="chain-step">
+            <div class="dot">✓</div>
+            <div>
+              <div class="chain-actor">Submitted by Anya Bashir</div>
+              <div class="chain-meta">14 May 2026 · 17:42 · Reason: Doctor</div>
+            </div>
+          </div>
+          <div class="chain-step">
+            <div class="dot">✓</div>
+            <div>
+              <div class="chain-actor">Approved by Karim Saleh <span style="color: var(--text-tertiary); font-weight: 400;">· Manager</span></div>
+              <div class="chain-meta">14 May 2026 · 19:05 · "Approved — informed of clinic visit"</div>
+            </div>
+          </div>
+          <div class="chain-step">
+            <div class="dot">✓</div>
+            <div>
+              <div class="chain-actor">Approved by Layla Hamoud <span style="color: var(--text-tertiary); font-weight: 400;">· HR</span></div>
+              <div class="chain-meta">15 May 2026 · 08:12 · "Approved"</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ATTACHMENT -->
+      <div>
+        <div class="drawer-section-label">Supporting attachment</div>
+        <div style="
+          display: flex; align-items: center; gap: 12px;
+          padding: 10px 12px; border: 1px solid var(--border);
+          border-radius: var(--radius-md); background: var(--bg-elev);">
+          <div style="font-size: 22px;">📎</div>
+          <div style="flex: 1; font-size: 12.5px;">
+            <div style="font-weight: 600;">doctor-note-2026-05-14.pdf</div>
+            <div style="font-size: 11px; color: var(--text-tertiary);">
+              182 KB · Decrypted on download
+            </div>
+          </div>
+          <button class="btn">Download</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="section-annotate">
+    <b>Status priority rule:</b> Excused &gt; Holiday &gt; Weekend &gt;
+    engine output. The approval chain is rendered from the request rows
+    that cover this date. Manager rejection terminates the chain (red
+    banner instead of green); Admin override appears as a fourth step
+    with the prescribed "⚠ Overridden by admin" label (P16 red line).
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<!-- 5. Camera event notes detail                                         -->
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<section id="sec-5" class="doc-section">
+  <h2 class="section-title"><span class="section-num">5</span>Camera event notes — chip taxonomy</h2>
+  <p class="section-sub">
+    Server-side classification of every unmatched event into one of four
+    explainer chips. Operators see qualitative context, not raw
+    confidence floats.
+  </p>
+
+  <div class="event-note-list" style="max-width: 720px;">
+    <div class="event-note">
+      <div class="thumb"></div>
+      <div class="event-note-body">
+        <div class="event-note-row">
+          <span class="mono">07:32</span>
+          <span>· conf 38%</span>
+          <span class="note-chip note-chip--unclear">Face not clear</span>
+          <span class="callout callout--new">New chip</span>
+        </div>
+        <div style="font-size: 11px; color: var(--text-tertiary); margin-top: 2px;">
+          Trigger: detection score &lt; match threshold but &gt; 30%
+        </div>
+      </div>
+    </div>
+    <div class="event-note">
+      <div class="thumb"></div>
+      <div class="event-note-body">
+        <div class="event-note-row">
+          <span class="mono">07:45</span>
+          <span>· no match</span>
+          <span class="note-chip note-chip--missed">Camera missed event</span>
+          <span class="callout callout--new">New chip</span>
+        </div>
+        <div style="font-size: 11px; color: var(--text-tertiary); margin-top: 2px;">
+          Trigger: face detected but not in any reference photo cluster
+        </div>
+      </div>
+    </div>
+    <div class="event-note">
+      <div class="thumb"></div>
+      <div class="event-note-body">
+        <div class="event-note-row">
+          <span class="mono">08:01</span>
+          <span>· conf 41%</span>
+          <span class="note-chip note-chip--pose">Possible positioning issue</span>
+          <span class="callout callout--new">New chip</span>
+        </div>
+        <div style="font-size: 11px; color: var(--text-tertiary); margin-top: 2px;">
+          Trigger: yaw or pitch &gt; 35° from frontal
+        </div>
+      </div>
+    </div>
+    <div class="event-note">
+      <div class="thumb"></div>
+      <div class="event-note-body">
+        <div class="event-note-row">
+          <span class="mono">17:32</span>
+          <span>· conf 92%</span>
+          <span class="note-chip note-chip--ok">Confirmed match</span>
+          <span class="callout callout--existing">Existing</span>
+        </div>
+        <div style="font-size: 11px; color: var(--text-tertiary); margin-top: 2px;">
+          Trigger: detection score ≥ match threshold AND identity = this employee
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<!-- 6. Evidence gallery — annotated                                      -->
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<section id="sec-6" class="doc-section">
+  <h2 class="section-title"><span class="section-num">6</span>Evidence &amp; camera-event image gallery</h2>
+  <p class="section-sub">
+    The existing rebuilt gallery (MAU-013) gets a thin overlay per card so
+    the "Face not clear" / "Camera missed event" / "Possible positioning"
+    classification rides with the visual.
+  </p>
+
+  <div class="gallery-grid" style="max-width: 560px;">
+    <div class="gallery-card note-unclear">
+      <span class="annot">Face not clear</span>
+      <span class="conf">38%</span>
+      <div class="cap"><div class="t">07:32</div>Main Entry</div>
+    </div>
+    <div class="gallery-card note-missed">
+      <span class="annot">Missed</span>
+      <span class="conf">—</span>
+      <div class="cap"><div class="t">07:45</div>Main Entry</div>
+    </div>
+    <div class="gallery-card">
+      <span class="conf">92%</span>
+      <div class="cap"><div class="t">17:32</div>Main Entry</div>
+    </div>
+    <div class="gallery-card note-unclear">
+      <span class="annot">Off-axis</span>
+      <span class="conf">41%</span>
+      <div class="cap"><div class="t">08:01</div>Side Door</div>
+    </div>
+  </div>
+
+  <div class="section-annotate">
+    <b>What's new vs. MAU-013:</b> the gallery itself doesn't change — same
+    fluid grid, same lightbox, same hover behaviour. Cards just gain (a) a
+    coloured outline matching the chip taxonomy, and (b) a small annotation
+    chip in the top-left corner. No outline = a confirmed match.
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<!-- 7. Raise Escalation flow                                             -->
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<section id="sec-7" class="doc-section">
+  <h2 class="section-title"><span class="section-num">7</span>Raise Escalation — workflow</h2>
+  <p class="section-sub">
+    Employee-initiated. Distinct from an exception request: an escalation
+    asserts "I was here, the system missed me". Routes directly to HR
+    (skips Manager pre-approval).
+  </p>
+
+  <div style="display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start;">
+
+    <!-- Step 1 — Modal -->
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      <span style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-tertiary);">Step 1 — Submit</span>
+      <div class="escalation-modal">
+        <div class="escalation-modal-head">
+          <h4>Raise escalation</h4>
+          <p>This will be reviewed by HR and is audit-logged.</p>
+        </div>
+        <div class="escalation-modal-body">
+          <div class="form-row">
+            <label>Date in question</label>
+            <input value="13 May 2026" readonly />
+          </div>
+          <div class="form-row">
+            <label>Why do you believe you were present?</label>
+            <select>
+              <option>Camera missed my face</option>
+              <option>Camera was offline / down</option>
+              <option>I used a different entrance</option>
+              <option>Other</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>Comment (required, ≥ 10 chars)</label>
+            <textarea>I arrived at 07:30 via the side entrance — the main camera was facing the wrong way that morning.</textarea>
+            <div class="form-help">Visible to your manager, HR, and any admin reviewing.</div>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn">Cancel</button>
+          <button class="btn btn-primary">Submit escalation</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2 — Pending -->
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      <span style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-tertiary);">Step 2 — Pending</span>
+      <div class="drawer-mock" style="max-width: 380px;">
+        <div class="drawer-head">
+          <div class="drawer-eyebrow">Escalation · ESC-00142</div>
+          <div class="drawer-title">Pending HR review</div>
+        </div>
+        <div class="drawer-body">
+          <div class="status-banner" style="border-color: var(--warning); background: var(--warning-soft);">
+            <div class="ico" style="background: var(--warning); color: #fff;">⏱</div>
+            <div>
+              <div class="status-banner-title">Awaiting HR decision</div>
+              <div class="status-banner-sub">
+                Submitted 13 May 18:04 · SLA 24 business hours
+              </div>
+            </div>
+          </div>
+          <div class="chain">
+            <div class="chain-step">
+              <div class="dot">✓</div>
+              <div>
+                <div class="chain-actor">Submitted by Anya Bashir</div>
+                <div class="chain-meta">13 May · 18:04</div>
+              </div>
+            </div>
+            <div class="chain-step pending">
+              <div class="dot">…</div>
+              <div>
+                <div class="chain-actor">Pending HR review</div>
+                <div class="chain-meta">Manager skipped — escalation routes to HR directly</div>
+              </div>
+            </div>
+            <div class="chain-step empty">
+              <div class="dot">—</div>
+              <div>
+                <div class="chain-actor" style="color: var(--text-tertiary);">Awaiting Admin override</div>
+                <div class="chain-meta">Only if HR rejects</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 3 — Resolved -->
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      <span style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-tertiary);">Step 3 — Resolved</span>
+      <div class="drawer-mock" style="max-width: 380px;">
+        <div class="drawer-head">
+          <div class="drawer-eyebrow">Escalation · ESC-00142</div>
+          <div class="drawer-title">Resolved — present confirmed</div>
+        </div>
+        <div class="drawer-body">
+          <div class="status-banner" style="border-color: var(--success); background: var(--success-soft);">
+            <div class="ico" style="background: var(--success); color: #fff;">✓</div>
+            <div>
+              <div class="status-banner-title">HR confirmed presence</div>
+              <div class="status-banner-sub">
+                Attendance day re-computed as Present. Audit row written.
+              </div>
+            </div>
+          </div>
+          <div class="chain">
+            <div class="chain-step">
+              <div class="dot">✓</div>
+              <div>
+                <div class="chain-actor">Submitted by Anya Bashir</div>
+                <div class="chain-meta">13 May · 18:04</div>
+              </div>
+            </div>
+            <div class="chain-step">
+              <div class="dot">✓</div>
+              <div>
+                <div class="chain-actor">Confirmed by Layla Hamoud · HR</div>
+                <div class="chain-meta">14 May · 09:12 · "Verified side-door camera offline that day."</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="section-annotate">
+    <b>Backend (MAU-024):</b> new <code>requests.type = 'escalation'</code>
+    OR a flag on the existing requests table — engineering decision before
+    implementation. Audit actions:
+    <code>attendance.escalation.raised</code>,
+    <code>attendance.escalation.resolved</code>,
+    <code>attendance.escalation.rejected</code>. Resolution triggers a
+    per-employee attendance recompute (P13 helper).
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<!-- 8. Escalation history                                                -->
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<section id="sec-8" class="doc-section">
+  <h2 class="section-title"><span class="section-num">8</span>Escalation history / audit log</h2>
+  <p class="section-sub">
+    Append-only timeline of every escalation event for this day. Same data
+    the audit table holds — surfaced here for context without making the
+    operator navigate to the Audit Log page.
+  </p>
+
+  <div class="escalation-log" style="max-width: 720px;">
+    <div class="escalation-entry">
+      <div class="stamp">15 May · 09:14</div>
+      <div class="body">
+        <span class="who">Layla Hamoud (HR)</span>
+        <span class="verb">resolved</span>
+        escalation <code>ESC-00142</code> as <b style="color: var(--success-text);">present confirmed</b>.
+        <div class="reason">"Verified side-door camera offline that day. Attendance recomputed."</div>
+      </div>
+    </div>
+    <div class="escalation-entry">
+      <div class="stamp">14 May · 09:02</div>
+      <div class="body">
+        <span class="who">Layla Hamoud (HR)</span>
+        <span class="verb">opened</span>
+        escalation <code>ESC-00142</code>.
+      </div>
+    </div>
+    <div class="escalation-entry">
+      <div class="stamp">13 May · 18:04</div>
+      <div class="body">
+        <span class="who">Anya Bashir (Employee)</span>
+        <span class="verb">raised</span>
+        escalation <code>ESC-00142</code> with reason <b>"Camera missed my face"</b>.
+        <div class="reason">"I arrived at 07:30 via the side entrance — the main camera was facing the wrong way that morning."</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<!-- 9. Role visibility matrix                                            -->
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<section id="sec-9" class="doc-section">
+  <h2 class="section-title"><span class="section-num">9</span>Manager + HR + Admin visibility matrix</h2>
+  <p class="section-sub">Every UI element above, scoped per role. Employee can see only their own; Manager sees assigned team; HR/Admin see everyone.</p>
+
+  <table class="role-table" style="max-width: 920px;">
+    <thead>
+      <tr>
+        <th style="width: 36%;">UI element</th>
+        <th>Employee</th>
+        <th>Manager</th>
+        <th>HR</th>
+        <th>Admin</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>View own day drawer</td>
+        <td class="yes">Yes (self only)</td>
+        <td class="yes">Yes (team)</td>
+        <td class="yes">Yes (all)</td>
+        <td class="yes">Yes (all)</td>
+      </tr>
+      <tr>
+        <td>See "Real absence / Camera miss / Excused" differentiation</td>
+        <td class="yes">Yes</td>
+        <td class="yes">Yes</td>
+        <td class="yes">Yes</td>
+        <td class="yes">Yes</td>
+      </tr>
+      <tr>
+        <td>See camera event notes (Face not clear, etc.)</td>
+        <td class="no">—</td>
+        <td class="yes">Yes</td>
+        <td class="yes">Yes</td>
+        <td class="yes">Yes</td>
+      </tr>
+      <tr>
+        <td>Raise escalation</td>
+        <td class="yes">Self only</td>
+        <td class="no">—</td>
+        <td class="no">—</td>
+        <td class="no">—</td>
+      </tr>
+      <tr>
+        <td>Resolve escalation</td>
+        <td class="no">—</td>
+        <td class="no">—</td>
+        <td class="yes">Yes</td>
+        <td class="yes">Yes (override)</td>
+      </tr>
+      <tr>
+        <td>View escalation history</td>
+        <td class="scoped">Own only</td>
+        <td class="scoped">Team</td>
+        <td class="yes">All</td>
+        <td class="yes">All</td>
+      </tr>
+      <tr>
+        <td>View Manager + HR comments in approval chain</td>
+        <td class="yes">Yes</td>
+        <td class="yes">Yes</td>
+        <td class="yes">Yes</td>
+        <td class="yes">Yes</td>
+      </tr>
+      <tr>
+        <td>Submit Exception (different from escalation)</td>
+        <td class="yes">Self</td>
+        <td class="yes">On behalf</td>
+        <td class="yes">On behalf</td>
+        <td class="yes">On behalf</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="section-annotate">
+    <b>Scope rule reminder:</b> Manager scope = union of <code>manager_assignments</code>
+    and <code>user_departments</code> (P8 helper).
+    Cross-tenant access returns 404, not 403 (P28.6 red line).
+    Employee → employee row matched by lower-cased email (pilot convention).
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<!-- 10. Empty states                                                     -->
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<section id="sec-10" class="doc-section">
+  <h2 class="section-title"><span class="section-num">10</span>Empty-state catalog</h2>
+  <p class="section-sub">
+    Per-status copy ensures the drawer never shows a generic
+    "no data" line. Every empty state explains <i>why</i> there's no
+    data + what the operator can do.
+  </p>
+
+  <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; max-width: 1100px;">
+
+    <div class="empty-state">
+      <div class="ico" style="color: var(--danger-text);">✕</div>
+      <div>
+        <div class="empty-state-title">No detections recorded</div>
+        <div class="empty-state-sub">No face was captured on this day. <b>Real absence</b>.</div>
+      </div>
+    </div>
+
+    <div class="empty-state">
+      <div class="ico" style="color: var(--miss-text);">📷</div>
+      <div>
+        <div class="empty-state-title">Detections recorded but no match</div>
+        <div class="empty-state-sub">12 events were captured but none confidently matched. <b>Possible camera miss.</b></div>
+      </div>
+    </div>
+
+    <div class="empty-state">
+      <div class="ico" style="color: var(--success-text);">✓</div>
+      <div>
+        <div class="empty-state-title">Marked as Excused</div>
+        <div class="empty-state-sub">Approved exception covers this day. See approval chain for the audit trail.</div>
+      </div>
+    </div>
+
+    <div class="empty-state">
+      <div class="ico" style="color: var(--warning-text);">⏱</div>
+      <div>
+        <div class="empty-state-title">Awaiting completion of the day</div>
+        <div class="empty-state-sub">Detections appear here as they come in. Today only.</div>
+      </div>
+    </div>
+
+    <div class="empty-state">
+      <div class="ico" style="color: var(--info-text);">📅</div>
+      <div>
+        <div class="empty-state-title">Weekend / Holiday</div>
+        <div class="empty-state-sub">No captures expected — day off per tenant calendar.</div>
+      </div>
+    </div>
+
+    <div class="empty-state">
+      <div class="ico" style="color: var(--text-tertiary);">⏳</div>
+      <div>
+        <div class="empty-state-title">Future date</div>
+        <div class="empty-state-sub">Captures will appear after the day starts.</div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<!-- 11. Timeline / status visualization                                   -->
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<section id="sec-11" class="doc-section">
+  <h2 class="section-title"><span class="section-num">11</span>Day timeline upgrade for camera miss</h2>
+  <p class="section-sub">
+    The MAU-007 timeline rebuild gains a teal "miss" dot for unmatched
+    events so the operator can locate the camera-side trouble even when
+    no interval was emitted.
+  </p>
+
+  <div style="max-width: 720px;">
+    <div class="timeline-ribbon">
+      <!-- intervals (none for camera miss) -->
+      <!-- gap connector -->
+      <!-- miss dots — unmatched events -->
+      <div class="dot miss-dot" style="left: 32%;"></div>
+      <div class="dot miss-dot" style="left: 34%;"></div>
+      <div class="dot miss-dot" style="left: 36%;"></div>
+      <div class="dot miss-dot" style="left: 71%;"></div>
+      <div class="dot miss-dot" style="left: 73%;"></div>
+
+      <!-- hour labels -->
+      <div class="hour" style="left: 0%;">00</div>
+      <div class="hour" style="left: 25%;">06</div>
+      <div class="hour" style="left: 50%;">12</div>
+      <div class="hour" style="left: 75%;">18</div>
+      <div class="hour" style="left: 100%;">24</div>
+    </div>
+    <div style="display: flex; gap: 12px; margin-top: 8px; font-size: 12px; flex-wrap: wrap;">
+      <span style="display: inline-flex; align-items: center; gap: 6px;">
+        <span style="width: 10px; height: 10px; border-radius: 50%; background: #fff; border: 2px solid var(--accent);"></span>
+        Matched detection
+      </span>
+      <span style="display: inline-flex; align-items: center; gap: 6px;">
+        <span style="width: 10px; height: 10px; border-radius: 50%; background: #fff; border: 2px solid var(--miss);"></span>
+        Unmatched (camera saw someone, not this employee)
+      </span>
+      <span style="display: inline-flex; align-items: center; gap: 6px;">
+        <span style="width: 12px; height: 12px; border-radius: 50%; background: var(--success);"></span>
+        First detection
+      </span>
+      <span style="display: inline-flex; align-items: center; gap: 6px;">
+        <span style="width: 12px; height: 12px; border-radius: 50%; background: var(--danger);"></span>
+        Last detection
+      </span>
+    </div>
+  </div>
+
+  <div class="section-annotate">
+    <b>Reuses the MAU-007 timeline component.</b> Two-colour dot:
+    accent-ringed for matched events, miss-ringed for unmatched. Clicking
+    a miss dot scrolls the camera-event note list to that event (same
+    pattern as MAU-007's evidence flash).
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<!-- 12. Status legend                                                    -->
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<section id="sec-12" class="doc-section">
+  <h2 class="section-title"><span class="section-num">12</span>Status legend — final taxonomy</h2>
+  <p class="section-sub">
+    Every status from MAU-022's canonical enum, with the exact label, dot
+    colour, and one-line meaning. Used by Calendar, Daily Attendance,
+    Employee tab, and Reports identically.
+  </p>
+
+  <div class="legend-grid" style="max-width: 1100px;">
+    <div class="legend-card">
+      <div class="legend-swatch" style="background: var(--success);"></div>
+      <div>
+        <div class="legend-title">Present</div>
+        <div class="legend-sub">Captured + total ≥ required hours.</div>
+      </div>
+    </div>
+    <div class="legend-card">
+      <div class="legend-swatch" style="background: var(--warning);"></div>
+      <div>
+        <div class="legend-title">Late</div>
+        <div class="legend-sub">Captured but in-time past grace minutes.</div>
+      </div>
+    </div>
+    <div class="legend-card">
+      <div class="legend-swatch" style="background: var(--danger);"></div>
+      <div>
+        <div class="legend-title">Real absence</div>
+        <div class="legend-sub">No event captured, no approved exception.</div>
+      </div>
+    </div>
+    <div class="legend-card">
+      <div class="legend-swatch" style="background: var(--miss); border: 1px solid var(--miss-text);"></div>
+      <div>
+        <div class="legend-title">Camera miss <span class="callout callout--new">New</span></div>
+        <div class="legend-sub">Events captured but employee not matched.</div>
+      </div>
+    </div>
+    <div class="legend-card">
+      <div class="legend-swatch" style="background: var(--success); border: 2px solid var(--success-text);"></div>
+      <div>
+        <div class="legend-title">Excused <span class="callout callout--new">New</span></div>
+        <div class="legend-sub">Approved exception covers the day.</div>
+      </div>
+    </div>
+    <div class="legend-card">
+      <div class="legend-swatch" style="background: var(--accent);"></div>
+      <div>
+        <div class="legend-title">Waiting</div>
+        <div class="legend-sub">Today only — within open shift window.</div>
+      </div>
+    </div>
+    <div class="legend-card">
+      <div class="legend-swatch" style="background: var(--info);"></div>
+      <div>
+        <div class="legend-title">Leave / Holiday</div>
+        <div class="legend-sub">Approved leave or tenant holiday covers the day.</div>
+      </div>
+    </div>
+    <div class="legend-card">
+      <div class="legend-swatch" style="background: var(--neutral-soft); border: 1px solid var(--border-strong);"></div>
+      <div>
+        <div class="legend-title">Weekend / Future / No record</div>
+        <div class="legend-sub">Days not expected to have captures.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<!-- Approval / sign-off                                                  -->
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<section id="approval" class="approval-block">
+  <h3>Approval &amp; sign-off</h3>
+  <p style="margin: 0 0 8px; color: var(--text-secondary); font-size: 13px; max-width: 760px;">
+    Implementation does not start until this design is signed off. Either
+    accept the proposal as-is, request specific changes, or reject the
+    proposal entirely.
+  </p>
+
+  <div class="verdict">
+    <label><input type="radio" name="verdict" /> ✅ Approved — proceed with implementation</label>
+    <label><input type="radio" name="verdict" /> ✏️ Approved with changes (see comments below)</label>
+    <label><input type="radio" name="verdict" /> 🛑 Rework — major changes needed</label>
+  </div>
+
+  <div class="approval-row">
+    <div class="approval-card">
+      <label>Reviewer (product)</label>
+      <div class="field"></div>
+    </div>
+    <div class="approval-card">
+      <label>Reviewer (engineering)</label>
+      <div class="field"></div>
+    </div>
+    <div class="approval-card">
+      <label>Reviewer (Omran HR — Arabic copy)</label>
+      <div class="field"></div>
+    </div>
+    <div class="approval-card">
+      <label>Date approved</label>
+      <div class="field"></div>
+    </div>
+  </div>
+
+  <div class="approval-card" style="flex: 1 1 100%;">
+    <label>Comments / requested changes</label>
+    <div class="field" style="min-height: 64px;"></div>
+  </div>
+
+  <div style="font-size: 11px; color: var(--text-tertiary); padding-top: 8px;">
+    Tickets: MAU-008 · MAU-009 · MAU-010 · MAU-011 · MAU-021 · MAU-022 · MAU-023 · MAU-024 ·
+    Carry-over: P21 Arabic native-speaker review required before launch.
+  </div>
+</section>
+
+</body>
+</html>

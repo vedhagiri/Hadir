@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Anomaly Notes — Design Proposal</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #ffffff;
+    --bg-elev: #f7f7f5;
+    --bg-sunken: #f0f0ec;
+    --border: #e4e4e0;
+    --text: #1a1a18;
+    --text-secondary: #5a5a56;
+    --text-tertiary: #9a9a94;
+    --accent: #0d6efd;
+    --accent-soft: #e8f0fe;
+    --accent-text: #1a5ccc;
+    --success: #18a34a;
+    --success-soft: #e6f9ed;
+    --success-text: #15803d;
+    --warning: #d97706;
+    --warning-soft: #fef3c7;
+    --warning-text: #b45309;
+    --danger: #dc2626;
+    --danger-soft: #fee2e2;
+    --danger-text: #b91c1c;
+    --info: #0891b2;
+    --info-soft: #e0f2fe;
+    --info-text: #0e7490;
+    --neutral-soft: #f0f0ec;
+    --neutral-text: #5a5a56;
+    --radius: 10px;
+    --shadow-sm: 0 1px 4px rgba(0,0,0,0.07);
+    --shadow: 0 2px 8px rgba(0,0,0,0.10);
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-mono: "Menlo", "Consolas", monospace;
+  }
+
+  body { font-family: var(--font); background: #f4f4f0; color: var(--text); font-size: 14px; line-height: 1.5; padding: 32px 24px; }
+
+  .page-header { max-width: 960px; margin: 0 auto 40px; }
+  .page-header h1 { font-size: 24px; font-weight: 700; margin-bottom: 6px; }
+  .page-header p { color: var(--text-secondary); font-size: 14px; max-width: 640px; }
+
+  .section { max-width: 960px; margin: 0 auto 48px; }
+  .section-title { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-tertiary); margin-bottom: 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+
+  /* ── Note pill component ── */
+  .note { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 600; line-height: 1.3; }
+  .note-block { display: flex; align-items: flex-start; gap: 8px; padding: 8px 12px; border-radius: 8px; font-size: 12.5px; font-weight: 500; line-height: 1.5; }
+  .note .icon { font-size: 12px; flex-shrink: 0; }
+  .note-block .icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+
+  .note-warning { background: var(--warning-soft); color: var(--warning-text); }
+  .note-danger  { background: var(--danger-soft);  color: var(--danger-text); }
+  .note-info    { background: var(--info-soft);    color: var(--info-text); }
+  .note-neutral { background: var(--neutral-soft); color: var(--neutral-text); }
+  .note-success { background: var(--success-soft); color: var(--success-text); }
+
+  /* ── Card ── */
+  .card { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); overflow: hidden; }
+  .card-body { padding: 18px; }
+
+  /* ── Table mockup ── */
+  .mock-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .mock-table th { background: var(--bg-sunken); padding: 8px 12px; text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); border-bottom: 1px solid var(--border); }
+  .mock-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .mock-table tr:last-child td { border-bottom: none; }
+
+  /* ── Face thumb ── */
+  .face-thumb { width: 44px; height: 44px; border-radius: 7px; background: #e8e8e4; border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 18px; overflow: hidden; flex-shrink: 0; }
+  .face-thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .face-thumb.has-crop { background: #2a2a28; }
+  .face-thumb.no-crop  { background: var(--bg-sunken); border-style: dashed; }
+
+  /* ── Evidence grid mockup ── */
+  .evidence-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .evidence-card { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--bg-sunken); }
+  .evidence-img  { aspect-ratio: 4/5; background: #2a2a28; display: flex; align-items: center; justify-content: center; font-size: 22px; }
+  .evidence-meta { padding: 6px 8px; }
+  .evidence-meta .time { font-family: var(--font-mono); font-size: 11px; font-weight: 600; }
+  .evidence-meta .cam  { font-size: 10.5px; color: var(--text-tertiary); font-family: var(--font-mono); }
+
+  /* ── Attendance row ── */
+  .att-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; }
+  .att-row + .att-row { margin-top: 6px; }
+  .att-row .date { font-family: var(--font-mono); font-size: 12px; width: 90px; color: var(--text-secondary); }
+  .att-row .status { width: 72px; }
+  .att-row .time-pair { display: flex; gap: 6px; }
+  .time-chip { background: var(--bg-sunken); border: 1px solid var(--border); padding: 2px 8px; border-radius: 6px; font-family: var(--font-mono); font-size: 11.5px; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .pill-success { background: var(--success-soft); color: var(--success-text); }
+  .pill-warning { background: var(--warning-soft); color: var(--warning-text); }
+  .pill-danger  { background: var(--danger-soft);  color: var(--danger-text); }
+  .pill-neutral { background: var(--neutral-soft); color: var(--neutral-text); }
+  .pill-info    { background: var(--info-soft);    color: var(--info-text); }
+
+  /* ── Decision table ── */
+  .decision-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .decision-table th { background: var(--bg-sunken); padding: 8px 12px; text-align: left; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); border-bottom: 1px solid var(--border); }
+  .decision-table td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  .decision-table tr:last-child td { border-bottom: none; }
+  .decision-table .cond { font-family: var(--font-mono); font-size: 11.5px; color: var(--accent-text); background: var(--accent-soft); padding: 2px 6px; border-radius: 4px; white-space: nowrap; }
+
+  /* ── Face crop strip ── */
+  .crop-strip { display: grid; grid-template-columns: repeat(6, 72px); gap: 6px; }
+  .crop-tile { position: relative; aspect-ratio: 1; background: #1a1a18; border-radius: 6px; overflow: hidden; display: flex; align-items: center; justify-content: center; font-size: 20px; border: 1px solid #333; }
+  .crop-tile.matched { border: 2px solid var(--success); }
+  .crop-uc { position: absolute; top: 3px; left: 3px; background: rgba(0,0,0,0.6); color: #fff; font-family: var(--font-mono); font-size: 9px; padding: 0 4px; border-radius: 2px; }
+
+  /* ── Tabs ── */
+  .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+  .tab { padding: 8px 14px; font-size: 13px; cursor: pointer; border-bottom: 2px solid transparent; color: var(--text-secondary); }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .label-row { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+
+  hr.divider { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+
+  .badge-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+  .approval-box { background: #fffbeb; border: 1.5px solid #fbbf24; border-radius: 10px; padding: 16px 20px; margin-top: 32px; display: flex; gap: 14px; align-items: flex-start; }
+  .approval-box .icon { font-size: 22px; flex-shrink: 0; margin-top: 1px; }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <h1>Anomaly Notes — Design Proposal</h1>
+  <p>Contextual intelligent notes shown near image preview sections across Camera Logs, Daily Attendance, Clip Analytics, Calendar Evidence, and Employee tabs. Purpose: help users understand why events or images are missing or unclear, and surface attendance anomalies during verification.</p>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════════
+     SECTION 1 — NOTE COMPONENT VARIANTS
+══════════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-title">1 — Note component variants</div>
+  <div class="card">
+    <div class="card-body">
+      <p style="font-size:12.5px;color:var(--text-secondary);margin-bottom:16px;">
+        Two display formats: <strong>inline pill</strong> (used inside table rows and evidence tiles) and <strong>block note</strong> (used below a group of crops or in attendance cards).
+      </p>
+
+      <p style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-tertiary);margin-bottom:10px;">Inline pills</p>
+      <div class="badge-row" style="margin-bottom:24px;">
+        <span class="note note-warning"><span class="icon">⚠</span> Low match confidence</span>
+        <span class="note note-danger"><span class="icon">⚠</span> Face not captured</span>
+        <span class="note note-info"><span class="icon">ℹ</span> Face partially captured</span>
+        <span class="note note-info"><span class="icon">ℹ</span> Unmatched — not in database</span>
+        <span class="note note-warning"><span class="icon">⚠</span> Former employee detected</span>
+        <span class="note note-danger"><span class="icon">⚠</span> Camera offline period</span>
+        <span class="note note-warning"><span class="icon">⚠</span> Low detection quality</span>
+        <span class="note note-info"><span class="icon">ℹ</span> Very small face crop</span>
+        <span class="note note-neutral"><span class="icon">ℹ</span> No crop on disk</span>
+      </div>
+
+      <p style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-tertiary);margin-bottom:10px;">Block notes (below a group)</p>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <div class="note-block note-warning"><span class="icon">⚠</span><span>Camera positioning issue detected — several events show partial face crops. Consider adjusting camera angle or mounting height for better coverage.</span></div>
+        <div class="note-block note-danger"><span class="icon">⚠</span><span>Camera was offline for 47 min during the shift window — attendance events may be incomplete. Raise an escalation request if attendance was affected.</span></div>
+        <div class="note-block note-info"><span class="icon">ℹ</span><span>Face detected but could not be matched to any employee. The person may not be enrolled or may be a visitor.</span></div>
+        <div class="note-block note-warning"><span class="icon">⚠</span><span>Attendance anomaly — employee was marked <strong>Late in</strong> and <strong>Early out</strong>. Review detection events below to verify the recorded times.</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════════
+     SECTION 2 — DECISION LOGIC
+══════════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-title">2 — Decision logic (client-side, no new API)</div>
+  <div class="card">
+    <div class="card-body" style="padding:0;">
+      <table class="decision-table">
+        <thead>
+          <tr>
+            <th>Condition (data already available)</th>
+            <th>Note shown</th>
+            <th>Tone</th>
+            <th>Where</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code class="cond">has_crop === false</code></td>
+            <td>Face not captured — no crop image available</td>
+            <td><span class="pill pill-danger">danger</span></td>
+            <td>Camera Logs, Emp Events</td>
+          </tr>
+          <tr>
+            <td><code class="cond">confidence &lt; 0.30</code></td>
+            <td>Very low match confidence — face may be partially blocked</td>
+            <td><span class="pill pill-danger">danger</span></td>
+            <td>Camera Logs, Emp Events, Calendar Evidence</td>
+          </tr>
+          <tr>
+            <td><code class="cond">confidence &gt;= 0.30 &amp;&amp; &lt; 0.50</code></td>
+            <td>Low match confidence — identity may be uncertain</td>
+            <td><span class="pill pill-warning">warning</span></td>
+            <td>Camera Logs, Emp Events, Calendar Evidence</td>
+          </tr>
+          <tr>
+            <td><code class="cond">confidence === null &amp;&amp; has_crop</code></td>
+            <td>Face detected but not matched to any employee</td>
+            <td><span class="pill pill-info">info</span></td>
+            <td>Camera Logs, Emp Events</td>
+          </tr>
+          <tr>
+            <td><code class="cond">former_employee_match === true</code></td>
+            <td>Former employee detected</td>
+            <td><span class="pill pill-warning">warning</span></td>
+            <td>Camera Logs, Emp Events</td>
+          </tr>
+          <tr>
+            <td><code class="cond">quality_score &lt; 0.30</code> (FaceCropOut)</td>
+            <td>Low face quality — possible blur or partial capture</td>
+            <td><span class="pill pill-warning">warning</span></td>
+            <td>Clip Analytics</td>
+          </tr>
+          <tr>
+            <td><code class="cond">detection_score &lt; 0.50</code> (FaceCropOut)</td>
+            <td>Face not detected clearly — low detection score</td>
+            <td><span class="pill pill-info">info</span></td>
+            <td>Clip Analytics</td>
+          </tr>
+          <tr>
+            <td><code class="cond">width &lt; 60 || height &lt; 60</code> (FaceCropOut)</td>
+            <td>Face partially captured — very small crop area</td>
+            <td><span class="pill pill-info">info</span></td>
+            <td>Clip Analytics</td>
+          </tr>
+          <tr>
+            <td><code class="cond">match_confidence === null</code> (FaceCropOut)</td>
+            <td>No match confidence — face unmatched or legacy record</td>
+            <td><span class="pill pill-neutral">neutral</span></td>
+            <td>Clip Analytics</td>
+          </tr>
+          <tr>
+            <td><code class="cond">camera_gaps.length &gt; 0</code> (DayDetail)</td>
+            <td>Camera was offline N min during shift — events may be missing</td>
+            <td><span class="pill pill-danger">danger</span></td>
+            <td>Calendar Evidence, Emp Attendance</td>
+          </tr>
+          <tr>
+            <td><code class="cond">evidence.length === 0 &amp;&amp; status === "present"</code></td>
+            <td>Attendance recorded but no face evidence crops available</td>
+            <td><span class="pill pill-warning">warning</span></td>
+            <td>Calendar Evidence</td>
+          </tr>
+          <tr>
+            <td><code class="cond">late || early_out || short_hours</code></td>
+            <td>Attendance anomaly — [late / early out / short hours] detected</td>
+            <td><span class="pill pill-warning">warning</span></td>
+            <td>Daily Attendance, Emp Attendance</td>
+          </tr>
+          <tr>
+            <td><code class="cond">absent === true</code></td>
+            <td>No attendance recorded for this working day</td>
+            <td><span class="pill pill-danger">danger</span></td>
+            <td>Daily Attendance, Emp Attendance</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════════
+     SECTION 3 — PLACEMENT MOCKUPS
+══════════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-title">3 — Placement mockups per surface</div>
+
+  <!-- 3a Camera Logs -->
+  <p style="font-size:13px;font-weight:600;margin-bottom:10px;">A — Camera Logs &amp; Employee → Camera Events</p>
+  <div class="card" style="margin-bottom:24px;">
+    <div class="card-body" style="padding:0;">
+      <table class="mock-table">
+        <thead>
+          <tr>
+            <th style="width:56px;">Face</th>
+            <th>Time</th>
+            <th>Camera</th>
+            <th>Confidence</th>
+            <th>Note</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><div class="face-thumb has-crop">😊</div></td>
+            <td class="mono" style="font-size:12px;">01:48 PM</td>
+            <td>Office Camera 1</td>
+            <td class="mono">92%</td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td><div class="face-thumb has-crop">😐</div></td>
+            <td class="mono" style="font-size:12px;">02:14 PM</td>
+            <td>Entrance A</td>
+            <td class="mono" style="color:var(--warning-text);">38%</td>
+            <td><span class="note note-warning"><span class="icon">⚠</span> Low match confidence</span></td>
+          </tr>
+          <tr>
+            <td><div class="face-thumb has-crop">😶</div></td>
+            <td class="mono" style="font-size:12px;">02:31 PM</td>
+            <td>Lobby</td>
+            <td class="mono" style="color:var(--danger-text);">18%</td>
+            <td><span class="note note-danger"><span class="icon">⚠</span> Very low confidence — face may be blocked</span></td>
+          </tr>
+          <tr>
+            <td><div class="face-thumb no-crop">—</div></td>
+            <td class="mono" style="font-size:12px;">03:05 PM</td>
+            <td>Parking Gate</td>
+            <td class="mono">—</td>
+            <td><span class="note note-danger"><span class="icon">⚠</span> Face not captured</span></td>
+          </tr>
+          <tr>
+            <td><div class="face-thumb has-crop">🧑</div></td>
+            <td class="mono" style="font-size:12px;">04:22 PM</td>
+            <td>Office Camera 2</td>
+            <td class="mono">—</td>
+            <td><span class="note note-info"><span class="icon">ℹ</span> Unmatched — not in database</span></td>
+          </tr>
+          <tr>
+            <td><div class="face-thumb has-crop">👤</div></td>
+            <td class="mono" style="font-size:12px;">04:55 PM</td>
+            <td>Side Entrance</td>
+            <td class="mono" style="color:var(--warning-text);">61%</td>
+            <td><span class="note note-warning"><span class="icon">⚠</span> Former employee detected</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 3b Calendar Evidence -->
+  <p style="font-size:13px;font-weight:600;margin-bottom:10px;">B — Calendar → Day Detail → Evidence section</p>
+  <div class="card" style="margin-bottom:24px;">
+    <div class="card-body">
+      <!-- Camera offline block note -->
+      <div class="note-block note-danger" style="margin-bottom:14px;">
+        <span class="icon">⚠</span>
+        <span>Camera <strong>Lobby</strong> was offline for <strong>47 min</strong> during the shift window (09:12 – 09:59 AM). Some detection events may be missing from the evidence below.</span>
+      </div>
+      <div class="evidence-grid">
+        <div class="evidence-card">
+          <div class="evidence-img">😊</div>
+          <div class="evidence-meta">
+            <div class="time">07:34</div>
+            <div class="cam">CAM-01</div>
+          </div>
+        </div>
+        <div class="evidence-card">
+          <div class="evidence-img" style="position:relative;">😐</div>
+          <div class="evidence-meta">
+            <div class="time">12:18</div>
+            <div class="cam">CAM-01</div>
+            <span class="note note-warning" style="font-size:10px;margin-top:4px;display:inline-flex;"><span class="icon">⚠</span> Low confidence</span>
+          </div>
+        </div>
+        <div class="evidence-card">
+          <div class="evidence-img">😊</div>
+          <div class="evidence-meta">
+            <div class="time">15:31</div>
+            <div class="cam">CAM-02</div>
+          </div>
+        </div>
+        <div class="evidence-card" style="border-style:dashed;opacity:.7;">
+          <div class="evidence-img" style="background:#1a1a18;">📷</div>
+          <div class="evidence-meta">
+            <div class="time">—</div>
+            <div class="cam" style="color:var(--danger-text);">No crop</div>
+            <span class="note note-danger" style="font-size:10px;margin-top:4px;display:inline-flex;"><span class="icon">⚠</span> Not captured</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3c Clip Analytics face crops -->
+  <p style="font-size:13px;font-weight:600;margin-bottom:10px;">C — Clip Analytics → Face crops strip</p>
+  <div class="card" style="margin-bottom:24px;">
+    <div class="card-body">
+      <p style="font-size:12px;color:var(--text-secondary);margin-bottom:10px;">Face crops (latest)</p>
+      <div class="crop-strip" style="margin-bottom:12px;">
+        <div class="crop-tile matched">😊<span class="crop-uc">UC1</span></div>
+        <div class="crop-tile matched">😊<span class="crop-uc">UC1</span></div>
+        <div class="crop-tile">🙂<span class="crop-uc">UC2</span></div>
+        <div class="crop-tile">😐<span class="crop-uc">UC2</span></div>
+        <div class="crop-tile">😶<span class="crop-uc">UC1</span></div>
+        <div class="crop-tile">👤<span class="crop-uc">UC3</span></div>
+      </div>
+      <!-- Per-crop inline notes shown as a compact list below the strip -->
+      <div style="display:flex;flex-direction:column;gap:5px;">
+        <span class="note note-warning" style="font-size:11px;align-self:flex-start;"><span class="icon">⚠</span> 2 crops: low face quality (Q &lt; 0.30)</span>
+        <span class="note note-info" style="font-size:11px;align-self:flex-start;"><span class="icon">ℹ</span> 1 crop: very small face area (48×52 px)</span>
+        <span class="note note-neutral" style="font-size:11px;align-self:flex-start;"><span class="icon">ℹ</span> 1 crop: no match confidence — legacy record</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3d Daily Attendance + Employee Attendance -->
+  <p style="font-size:13px;font-weight:600;margin-bottom:10px;">D — Daily Attendance &amp; Employee → Attendance tab</p>
+  <div class="card" style="margin-bottom:24px;">
+    <div class="card-body">
+      <div class="att-row">
+        <div class="date">Wed 21 May</div>
+        <div class="status"><span class="pill pill-success">Present</span></div>
+        <div class="time-pair"><div class="time-chip">07:28</div><div class="time-chip">15:42</div></div>
+        <div style="flex:1;"></div>
+        <span class="note note-warning" style="font-size:11px;"><span class="icon">⚠</span> Short hours — 7.2 h of 8 h required</span>
+      </div>
+      <div class="att-row">
+        <div class="date">Thu 22 May</div>
+        <div class="status"><span class="pill pill-warning">Late in</span></div>
+        <div class="time-pair"><div class="time-chip" style="color:var(--warning-text);">08:14</div><div class="time-chip">16:05</div></div>
+        <div style="flex:1;"></div>
+        <span class="note note-warning" style="font-size:11px;"><span class="icon">⚠</span> Late in — 29 min after grace period</span>
+      </div>
+      <div class="att-row">
+        <div class="date">Fri 23 May</div>
+        <div class="status"><span class="pill pill-danger">Absent</span></div>
+        <div class="time-pair"><div class="time-chip" style="opacity:.4;">—</div><div class="time-chip" style="opacity:.4;">—</div></div>
+        <div style="flex:1;"></div>
+        <span class="note note-danger" style="font-size:11px;"><span class="icon">⚠</span> No attendance recorded for this working day</span>
+      </div>
+      <div class="att-row">
+        <div class="date">Sat 24 May</div>
+        <div class="status"><span class="pill pill-success">Present</span></div>
+        <div class="time-pair"><div class="time-chip">07:31</div><div class="time-chip">14:50</div></div>
+        <div style="flex:1;"></div>
+        <span class="note note-info" style="font-size:11px;"><span class="icon">ℹ</span> Early out — left 40 min before shift end</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════════
+     SECTION 4 — IMPLEMENTATION SCOPE
+══════════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-title">4 — Implementation scope</div>
+  <div class="card">
+    <div class="card-body">
+      <div class="two-col">
+        <div>
+          <p style="font-weight:600;margin-bottom:10px;">Files to change</p>
+          <ul style="font-size:12.5px;color:var(--text-secondary);line-height:2;padding-left:18px;">
+            <li><code>features/camera-logs/CameraLogsPage.tsx</code> — add Note column</li>
+            <li><code>features/employees/EmployeeViewDrawer.tsx</code> — Camera Events + Attendance tabs</li>
+            <li><code>features/calendar/DayDetailDrawer.tsx</code> — Evidence section</li>
+            <li><code>features/attendance/DailyAttendancePage.tsx</code> — row notes</li>
+            <li><code>features/clip-analytics/ClipAnalyticsPage.tsx</code> — face crop strip notes</li>
+            <li><code>components/AnomalyNote.tsx</code> — new shared note component</li>
+          </ul>
+        </div>
+        <div>
+          <p style="font-weight:600;margin-bottom:10px;">No backend changes required</p>
+          <p style="font-size:12.5px;color:var(--text-secondary);line-height:1.7;">All note conditions are derived from data already returned by existing API responses. No new endpoints, migrations, or ML models are needed. Notes are computed client-side via a pure helper function.</p>
+          <br/>
+          <p style="font-weight:600;margin-bottom:10px;">i18n</p>
+          <p style="font-size:12.5px;color:var(--text-secondary);line-height:1.7;">All note strings added to <code>en.json</code> and <code>ar.json</code> under a new <code>anomaly.*</code> key block.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Approval -->
+<div class="section">
+  <div class="approval-box">
+    <span class="icon">📋</span>
+    <div>
+      <p style="font-weight:700;margin-bottom:4px;">Awaiting approval before implementation</p>
+      <p style="font-size:13px;color:#92400e;line-height:1.6;">Please review the note types, decision thresholds, and placement shown above. Once approved, development will begin across all 5 surfaces with a single shared <code>AnomalyNote</code> component and zero backend changes.</p>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

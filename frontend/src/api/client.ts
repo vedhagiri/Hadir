@@ -16,6 +16,31 @@ export class ApiError extends Error {
   }
 }
 
+// ── Refresh gate ────────────────────────────────────────────────────────────
+// When any non-auth API call gets a 401, the first caller attempts one silent
+// POST /api/auth/refresh.  All concurrent 401s wait on the same Promise so
+// the refresh endpoint is never hammered and each caller retries once after
+// a successful refresh rather than surfacing the error immediately.
+let _refreshGate: Promise<boolean> | null = null;
+
+const _NO_REFRESH_PATHS = new Set([
+  "/api/auth/refresh",
+  "/api/auth/login",
+  "/api/auth/logout",
+]);
+
+async function _tryRefresh(): Promise<boolean> {
+  try {
+    const r = await fetch("/api/auth/refresh", {
+      method: "POST",
+      credentials: "same-origin",
+    });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
 
 // BUG-002 — unified error-to-string extractor. Every Maugood backend
 // endpoint returns errors as either a plain string ``detail`` or a
@@ -81,6 +106,33 @@ export async function api<T>(path: string, init: ApiRequest = {}): Promise<T> {
   }
 
   if (!response.ok) {
+    // On 401: try one silent refresh (serialised across concurrent callers),
+    // then replay the original request once.  Skip for auth endpoints to
+    // avoid infinite loops and to let explicit sign-in/out flows surface the
+    // 401 directly to their own error handlers.
+    if (response.status === 401 && !_NO_REFRESH_PATHS.has(path)) {
+      if (!_refreshGate) {
+        _refreshGate = _tryRefresh().finally(() => {
+          _refreshGate = null;
+        });
+      }
+      const refreshed = await _refreshGate;
+      if (refreshed) {
+        // Replay original request once after a successful refresh.
+        const r2 = await fetch(path, request);
+        let b2: unknown = null;
+        const t2 = await r2.text();
+        if (t2) {
+          try {
+            b2 = JSON.parse(t2);
+          } catch {
+            b2 = t2;
+          }
+        }
+        if (r2.ok) return b2 as T;
+        throw new ApiError(r2.status, b2);
+      }
+    }
     throw new ApiError(response.status, parsed);
   }
   return parsed as T;

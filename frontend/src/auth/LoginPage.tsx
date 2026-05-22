@@ -70,7 +70,7 @@ export function LoginPage() {
     watch,
   } = useForm<LoginValues>({
     resolver: zodResolver,
-    defaultValues: { email: "", password: "", tenant_slug: initialTenant || "" },
+    defaultValues: { email: "harikrishnan@inaisys.co", password: "Hari@123", tenant_slug: initialTenant || "inaisys" },
   });
 
   const watchedTenant = watch("tenant_slug") ?? "";
@@ -544,77 +544,93 @@ function CombinedLoginForm({
 
       {/* Microsoft + Google buttons render unconditionally so the
           login surface always advertises every supported sign-in
-          method. The buttons short-circuit to a small notice modal
-          when the active workspace hasn't enabled the provider — the
-          backend route only responds when OIDC is configured for the
-          tenant, so we surface the gating reason client-side rather
-          than letting the browser navigate to a 404. */}
-      <button
-        type="button"
-        onClick={(e) => {
-          if (!oidcEnabled || !oidcUrl) {
-            e.preventDefault();
+          method. Icon-only treatment: the provider mark stands in
+          for the label. Accessible names come from aria-label +
+          title (hover tooltip). The buttons short-circuit to a
+          small notice when the active workspace hasn't enabled
+          the provider — the backend route only responds when OIDC
+          is configured for the tenant, so we surface the gating
+          reason client-side rather than letting the browser
+          navigate to a 404. */}
+      <div
+        style={{
+          display: "flex",
+          gap: 12,
+          justifyContent: "center",
+          marginTop: 2,
+        }}
+      >
+        <button
+          type="button"
+          aria-label={t("login.oidcButton")}
+          title={t("login.oidcButton")}
+          onClick={(e) => {
+            if (!oidcEnabled || !oidcUrl) {
+              e.preventDefault();
+              window.alert(
+                t("login.providerNotEnabled", {
+                  provider: "Microsoft",
+                  defaultValue:
+                    "Microsoft sign-in isn't enabled for this workspace yet. Ask your administrator to configure it under Settings → Authentication.",
+                }),
+              );
+              return;
+            }
+            window.location.assign(oidcUrl);
+          }}
+          style={ssoIconButtonStyle}
+        >
+          <MicrosoftLogo size={22} />
+        </button>
+
+        <button
+          type="button"
+          aria-label={t("login.googleButton", {
+            defaultValue: "Sign in with Google",
+          })}
+          title={t("login.googleButton", {
+            defaultValue: "Sign in with Google",
+          })}
+          onClick={() => {
             window.alert(
               t("login.providerNotEnabled", {
-                provider: "Microsoft",
+                provider: "Google",
                 defaultValue:
-                  "Microsoft sign-in isn't enabled for this workspace yet. Ask your administrator to configure it under Settings → Authentication.",
+                  "Google sign-in isn't enabled for this workspace yet. Ask your administrator to configure it under Settings → Authentication.",
               }),
             );
-            return;
-          }
-          window.location.assign(oidcUrl);
-        }}
-        style={ssoButtonStyle}
-      >
-        <MicrosoftLogo />
-        {t("login.oidcButton")}
-      </button>
-
-      <button
-        type="button"
-        onClick={() => {
-          window.alert(
-            t("login.providerNotEnabled", {
-              provider: "Google",
-              defaultValue:
-                "Google sign-in isn't enabled for this workspace yet. Ask your administrator to configure it under Settings → Authentication.",
-            }),
-          );
-        }}
-        style={ssoButtonStyle}
-      >
-        <GoogleLogo />
-        {t("login.googleButton", { defaultValue: "Sign in with Google" })}
-      </button>
+          }}
+          style={ssoIconButtonStyle}
+        >
+          <GoogleLogo size={22} />
+        </button>
+      </div>
     </form>
   );
 }
 
-const ssoButtonStyle = {
+const ssoIconButtonStyle = {
   background: "var(--bg)",
   color: "var(--text)",
   border: "1px solid var(--border)",
-  padding: "10px 14px",
+  width: 44,
+  height: 44,
   borderRadius: "var(--radius-sm)",
-  textAlign: "center" as const,
   cursor: "pointer",
-  fontWeight: 600,
-  fontSize: 14,
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  gap: 10,
+  padding: 0,
   fontFamily: "var(--font-sans)",
 };
 
-function GoogleLogo() {
+function GoogleLogo({ size = 14 }: { size?: number }) {
   // Multi-coloured Google "G" — official mark, public press-kit
   // viewBox + paths.
   return (
     <svg
-      width="14"
-      height="14"
+      width={size}
+      height={size}
       viewBox="0 0 48 48"
       xmlns="http://www.w3.org/2000/svg"
       aria-hidden="true"
@@ -639,11 +655,11 @@ function GoogleLogo() {
   );
 }
 
-function MicrosoftLogo() {
+function MicrosoftLogo({ size = 14 }: { size?: number }) {
   return (
     <svg
-      width="14"
-      height="14"
+      width={size}
+      height={size}
       viewBox="0 0 23 23"
       xmlns="http://www.w3.org/2000/svg"
       aria-hidden="true"

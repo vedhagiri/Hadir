@@ -102,6 +102,7 @@ export function CamerasPage() {
           <thead>
             <tr>
               <th style={{ width: 96 }}>ID</th>
+              <th style={{ width: 52 }}>Logo</th>
               <th>Name</th>
               <th>Zone</th>
               <th>Location</th>
@@ -118,7 +119,7 @@ export function CamerasPage() {
           <tbody>
             {list.isLoading && (
               <tr>
-                <td colSpan={12} className="text-sm text-dim" style={{ padding: 16 }}>
+                <td colSpan={13} className="text-sm text-dim" style={{ padding: 16 }}>
                   Loading…
                 </td>
               </tr>
@@ -126,7 +127,7 @@ export function CamerasPage() {
             {list.isError && (
               <tr>
                 <td
-                  colSpan={12}
+                  colSpan={13}
                   className="text-sm"
                   style={{ padding: 16, color: "var(--danger-text)" }}
                 >
@@ -148,27 +149,16 @@ export function CamerasPage() {
                 <td className="mono text-sm" style={{ fontWeight: 600 }}>
                   {cam.camera_code}
                 </td>
+                <td style={{ textAlign: "center" }}>
+                  <BrandLogo brand={cam.brand} size={32} />
+                </td>
                 <td>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                    }}
-                  >
-                    <BrandLogo brand={cam.brand} size={28} />
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: 500 }}>{cam.name}</div>
-                      {metadataLine && (
-                        <div
-                          className="text-xs text-dim mono"
-                          style={{ marginTop: 2 }}
-                        >
-                          {metadataLine}
-                        </div>
-                      )}
+                  <div style={{ fontWeight: 500 }}>{cam.name}</div>
+                  {metadataLine && (
+                    <div className="text-xs text-dim mono" style={{ marginTop: 2 }}>
+                      {metadataLine}
                     </div>
-                  </div>
+                  )}
                 </td>
                 <td className="text-sm">
                   {cam.zone ? (
@@ -225,7 +215,7 @@ export function CamerasPage() {
             })}
             {list.data && list.data.items.length === 0 && !list.isLoading && (
               <tr>
-                <td colSpan={12} className="text-sm text-dim" style={{ padding: 16 }}>
+                <td colSpan={13} className="text-sm text-dim" style={{ padding: 16 }}>
                   No cameras yet. Add one to see its preview frame.
                 </td>
               </tr>

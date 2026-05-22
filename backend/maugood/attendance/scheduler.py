@@ -127,8 +127,23 @@ def _maybe_notify_overtime(
 def _recompute_for_inner(
     scope: TenantScope, *, employee_id: int, the_date
 ) -> bool:
+    from sqlalchemy import select as _select  # noqa: PLC0415
+    from maugood.db import attendance_records as _ar  # noqa: PLC0415
+
     engine = get_engine()
     with engine.begin() as conn:
+        # Skip rows that were locked by an escalation approval — those
+        # records must not be reverted to "absent" by the scheduler.
+        locked_row = conn.execute(
+            _select(_ar.c.locked).where(
+                _ar.c.tenant_id == scope.tenant_id,
+                _ar.c.employee_id == employee_id,
+                _ar.c.date == the_date,
+                _ar.c.locked.is_(True),
+            )
+        ).first()
+        if locked_row is not None:
+            return True  # already locked — treat as computed
         settings = attendance_repo.load_tenant_settings(conn, scope)
         policy_map = attendance_repo.resolve_policies_for_employees(
             conn, scope, the_date=the_date, employee_ids=[employee_id]

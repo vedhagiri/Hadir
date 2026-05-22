@@ -12,6 +12,7 @@
 
 import { useTranslation } from "react-i18next";
 
+import { LateBadge } from "../../components/LateBadge";
 import { Icon } from "../../shell/Icon";
 import type { CalendarStatus, PersonDay, PersonMonth } from "./types";
 
@@ -104,17 +105,16 @@ function DayCell({
   // window — distinct from absent (danger) so the operator isn't
   // misled about staff who simply haven't checked in yet.
   const bg =
-    day.status === "weekend"
-      ? "var(--info-soft)"
-      : day.status === "holiday"
-        ? "var(--accent-soft)"
-        : day.status === "leave"
-          ? "var(--warning-soft)"
-          : day.status === "absent"
-            ? "var(--danger-soft)"
-            : day.status === "waiting"
-              ? "var(--accent-soft)"
-              : "var(--bg-elev)";
+    day.status === "weekend"        ? "var(--info-soft)"
+    : day.status === "holiday"      ? "var(--accent-soft)"
+    : day.status === "leave"        ? "var(--warning-soft)"
+    : day.status === "absent"       ? "var(--danger-soft)"
+    : day.status === "waiting"      ? "var(--accent-soft)"
+    : day.status === "late"         ? "var(--warning-soft)"
+    : day.status === "present"      ? "var(--success-soft)"
+    : day.status === "escalation_present" ? "var(--success-soft)"
+    : day.status === "no_record"    ? "var(--bg-sunken)"
+    : "var(--bg-elev)";
 
   const totalHours =
     day.total_minutes != null && day.total_minutes > 0
@@ -158,6 +158,41 @@ function DayCell({
         minHeight: 96,
       }}
     >
+      {/* Late status stripe */}
+      {day.status === "late" && (
+        <span
+          aria-hidden
+          style={{
+            position: "absolute",
+            insetInlineStart: 0,
+            top: 0,
+            bottom: 0,
+            width: 3,
+            background: "var(--warning-text)",
+            borderTopLeftRadius: 7,
+            borderBottomLeftRadius: 7,
+          }}
+        />
+      )}
+      {/* Escalation-present stripe — teal accent stripe marks that the
+          attendance was confirmed via Manager + HR escalation approval,
+          not a direct camera detection. */}
+      {day.status === "escalation_present" && (
+        <span
+          aria-hidden
+          style={{
+            position: "absolute",
+            insetInlineStart: 0,
+            top: 0,
+            bottom: 0,
+            width: 3,
+            background: "var(--accent)",
+            borderTopLeftRadius: 7,
+            borderBottomLeftRadius: 7,
+          }}
+        />
+      )}
+
       {/* Day number — top-right per screenshot */}
       <div
         style={{
@@ -185,7 +220,19 @@ function DayCell({
         <TimeRow
           arrow="in"
           time={day.in_time.slice(0, 5)}
-          color="var(--success-text, var(--success))"
+          color={
+            day.status === "late"
+              ? "var(--warning-text)"
+              : "var(--success-text, var(--success))"
+          }
+        />
+      )}
+      {/* Late: show expected time + late-by duration beneath the in-time row */}
+      {day.status === "late" && day.in_time && day.policy_shift_start && (
+        <LateByRow
+          inTime={day.in_time}
+          shiftStart={day.policy_shift_start}
+          graceMinutes={day.policy_grace_minutes ?? 0}
         />
       )}
       {day.out_time && (
@@ -251,12 +298,44 @@ function TimeRow({
   );
 }
 
+function LateByRow({
+  inTime,
+  shiftStart,
+  graceMinutes,
+}: {
+  inTime: string;
+  shiftStart: string;
+  graceMinutes: number;
+}) {
+  const lateBy = calcLateMinutes(inTime, shiftStart, graceMinutes);
+  if (lateBy == null || lateBy <= 0) return null;
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 3,
+        fontSize: 10,
+        color: "var(--warning-text)",
+        fontWeight: 600,
+        lineHeight: 1,
+      }}
+    >
+      <span aria-hidden>+</span>
+      <span className="mono">{fmtMinutes(lateBy)}</span>
+    </div>
+  );
+}
+
 function StatusPill({ day }: { day: PersonDay }) {
   const { t } = useTranslation();
-  // Distinct labels per status — only render when the status carries
-  // information (week off, holiday, leave, absent). For "present" /
-  // "late" / "no_record" the time row already conveys the state and
-  // a redundant pill would clutter the cell.
+  // Late is the call-to-action status, so it gets a dedicated badge
+  // with stronger weight + an icon (see ``LateBadge``). Other states
+  // keep the soft generic pill — they communicate state without
+  // demanding the operator's attention.
+  if (day.status === "late") {
+    return <LateBadge size="sm" />;
+  }
   const label = labelFor(day, t);
   if (label === null) return null;
   return (
@@ -294,68 +373,54 @@ function labelFor(
     }) as string;
   }
   if (day.status === "absent") {
-    return t("calendar.absentShort", {
-      defaultValue: "Absent",
-    }) as string;
+    return t("calendar.absentShort", { defaultValue: "Absent" }) as string;
   }
   if (day.status === "late") {
-    return t("calendar.lateShort", {
-      defaultValue: "Late",
-    }) as string;
+    return t("calendar.lateShort", { defaultValue: "Late" }) as string;
+  }
+  if (day.status === "escalation_present") {
+    return t("calendar.escalationPresentShort", { defaultValue: "Escalation" }) as string;
   }
   return null;
 }
 
 function pillBg(status: CalendarStatus): string {
   switch (status) {
-    case "weekend":
-      return "var(--info-soft)";
-    case "holiday":
-      return "var(--accent-soft)";
-    case "leave":
-      return "var(--warning-soft)";
-    case "absent":
-      return "var(--danger-soft)";
-    case "late":
-      return "var(--warning-soft)";
-    case "waiting":
-      return "var(--accent-soft)";
-    default:
-      return "var(--bg-sunken)";
+    case "weekend":          return "var(--info-soft)";
+    case "holiday":          return "var(--accent-soft)";
+    case "leave":            return "var(--warning-soft)";
+    case "absent":           return "var(--danger-soft)";
+    case "late":             return "var(--warning-soft)";
+    case "waiting":          return "var(--accent-soft)";
+    case "present":          return "var(--success-soft)";
+    case "escalation_present": return "color-mix(in oklab, var(--accent) 18%, var(--bg))";
+    default:                 return "var(--bg-sunken)";
   }
 }
 
 function pillFg(status: CalendarStatus): string {
   switch (status) {
-    case "weekend":
-      return "var(--info-text, var(--info))";
-    case "holiday":
-      return "var(--accent-text)";
-    case "leave":
-      return "var(--warning-text)";
-    case "absent":
-      return "var(--danger-text)";
-    case "late":
-      return "var(--warning-text)";
-    default:
-      return "var(--text-secondary)";
+    case "weekend":          return "var(--info-text, var(--info))";
+    case "holiday":          return "var(--accent-text)";
+    case "leave":            return "var(--warning-text)";
+    case "absent":           return "var(--danger-text)";
+    case "late":             return "var(--warning-text)";
+    case "present":          return "var(--success-text)";
+    case "escalation_present": return "var(--accent-text)";
+    default:                 return "var(--text-secondary)";
   }
 }
 
 function pillBorder(status: CalendarStatus): string {
   switch (status) {
-    case "weekend":
-      return "var(--info-text, var(--info))";
-    case "holiday":
-      return "var(--accent-text)";
-    case "leave":
-      return "var(--warning-text)";
-    case "absent":
-      return "var(--danger-text)";
-    case "late":
-      return "var(--warning-text)";
-    default:
-      return "var(--border)";
+    case "weekend":          return "var(--info-text, var(--info))";
+    case "holiday":          return "var(--accent-text)";
+    case "leave":            return "var(--warning-text)";
+    case "absent":           return "var(--danger-text)";
+    case "late":             return "var(--warning-text)";
+    case "present":          return "var(--success-text)";
+    case "escalation_present": return "var(--accent)";
+    default:                 return "var(--border)";
   }
 }
 
@@ -374,4 +439,36 @@ function isoToday(): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
+}
+
+/** Parse ``HH:MM[:SS]`` → minutes since midnight. Returns null on parse failure. */
+function hhmToMinutes(s: string): number | null {
+  const parts = s.split(":");
+  const h = parseInt(parts[0] ?? "", 10);
+  const m = parseInt(parts[1] ?? "", 10);
+  if (Number.isNaN(h) || Number.isNaN(m)) return null;
+  return h * 60 + m;
+}
+
+/** How many minutes past the grace-end did the employee arrive?
+ *  Returns null when inputs are insufficient, 0 when on time. */
+export function calcLateMinutes(
+  inTime: string,
+  shiftStart: string,
+  graceMinutes: number,
+): number | null {
+  const actual = hhmToMinutes(inTime);
+  const expected = hhmToMinutes(shiftStart);
+  if (actual == null || expected == null) return null;
+  const graceEnd = expected + graceMinutes;
+  return Math.max(0, actual - graceEnd);
+}
+
+/** Format a minute count as a compact ``Xh Ym`` / ``Xm`` string. */
+export function fmtMinutes(mins: number): string {
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
 }

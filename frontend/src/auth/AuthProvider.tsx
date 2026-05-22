@@ -21,6 +21,14 @@ const ME_KEY = ["auth", "me"] as const;
 // a skewed local clock can't produce a wrong remaining time.
 let serverTimeOffsetMs = 0;
 
+// UTC epoch ms of the most recently confirmed session_started_at from
+// a POST /api/auth/refresh response.  fetchMe() uses this to prevent
+// a concurrent GET /api/auth/me — which reads the DB *before*
+// bump_refresh_anchor() commits — from overwriting the fresh anchor
+// with a stale value.  Reset to 0 on logout so it never bleeds into
+// the next login session.
+let _lastRefreshAnchorMs = 0;
+
 export function serverNow(): number {
   return Date.now() + serverTimeOffsetMs;
 }
@@ -40,6 +48,16 @@ async function fetchMe(): Promise<MeResponse | null> {
   try {
     const me = await api<MeResponse>("/api/auth/me");
     applyServerTimeSync(me.server_time);
+    // Protect against the stale-anchor race: a GET /api/auth/me that
+    // started *before* a concurrent POST /api/auth/refresh committed
+    // bump_refresh_anchor() will carry the old session_started_at.  If
+    // we have a more recent anchor from a successful refresh, keep it.
+    if (me.session_started_at && _lastRefreshAnchorMs > 0) {
+      const fetchedMs = new Date(me.session_started_at).getTime();
+      if (_lastRefreshAnchorMs > fetchedMs) {
+        me.session_started_at = new Date(_lastRefreshAnchorMs).toISOString();
+      }
+    }
     return me;
   } catch (err) {
     // Treat 401 as "not logged in" — the caller decides whether to
@@ -108,6 +126,7 @@ export function useLogout() {
       await api<null>("/api/auth/logout", { method: "POST" });
     },
     onSuccess: () => {
+      _lastRefreshAnchorMs = 0;
       qc.setQueryData(ME_KEY, null);
     },
   });
@@ -132,20 +151,22 @@ export function useRefreshSession() {
         server_time: string;
       }>("/api/auth/refresh", { method: "POST" }),
     onSuccess: (res) => {
-      // Re-sync the server-time offset so the countdown stays anchored
-      // to the backend's clock regardless of local drift.
       applyServerTimeSync(res.server_time);
-      // Patch the cached me with the new expiry so the watcher's
-      // useEffect reschedules the warning timer.
+      const nextStartedAt =
+        res.session_started_at ?? null;
+      // Record the anchor so fetchMe() can shield subsequent GET /api/auth/me
+      // responses that carry a stale session_started_at (read before
+      // bump_refresh_anchor committed) from overwriting the fresh value.
+      if (nextStartedAt) {
+        _lastRefreshAnchorMs = new Date(nextStartedAt).getTime();
+      }
       const cur = qc.getQueryData<MeResponse | null>(ME_KEY);
       if (cur) {
-        const nextStartedAt =
-          res.session_started_at ?? cur.session_started_at ?? null;
         qc.setQueryData<MeResponse>(ME_KEY, {
           ...cur,
           session_expires_at: res.session_expires_at,
           session_idle_minutes: res.session_idle_minutes,
-          session_started_at: nextStartedAt,
+          session_started_at: nextStartedAt ?? cur.session_started_at ?? null,
           server_time: res.server_time,
         });
       }

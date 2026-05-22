@@ -15,6 +15,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import { useMe } from "../../auth/AuthProvider";
 import { DatePicker, todayIso } from "../../components/DatePicker";
+import { LateBadge } from "../../components/LateBadge";
 import { useConfidentialDownload } from "../../components/useConfidentialDownload";
 import { usePolicies } from "../../policies/hooks";
 import { useInboxPending, useInboxSummary } from "../../requests/hooks";
@@ -1633,6 +1634,6 @@ function AttendancePill({ it }: { it: AttendanceItem }) {
   }
   if (b === "onLeave") return <span className="pill pill-info">On leave</span>;
   if (b === "absent") return <span className="pill pill-danger">Absent</span>;
-  if (b === "late") return <span className="pill pill-warning">Late</span>;
+  if (b === "late") return <LateBadge size="md" />;
   return <span className="pill pill-success">Present</span>;
 }

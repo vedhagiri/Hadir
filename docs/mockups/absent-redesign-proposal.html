@@ -1,0 +1,1438 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Maugood — Absent Status Redesign (Design Proposal)</title>
+  <!--
+    DESIGN PROPOSAL — HTML prototype for stakeholder review.
+    Static file; no backend calls. Shows all 5 Absent sub-states.
+    Approval gates implementation work.
+  -->
+  <style>
+    :root {
+      --accent: #2563EB;
+      --accent-soft: #DBEAFE;
+      --accent-text: #1D4ED8;
+
+      --success: #16A34A;
+      --success-soft: #DCFCE7;
+      --success-text: #15803D;
+
+      --warning: #F59E0B;
+      --warning-soft: #FEF3C7;
+      --warning-text: #B45309;
+
+      --danger: #DC2626;
+      --danger-soft: #FEE2E2;
+      --danger-text: #B91C1C;
+
+      --info: #0EA5E9;
+      --info-soft: #E0F2FE;
+      --info-text: #0369A1;
+
+      --miss: #0891B2;
+      --miss-soft: #CFFAFE;
+      --miss-text: #155E75;
+
+      --purple: #7C3AED;
+      --purple-soft: #EDE9FE;
+      --purple-text: #5B21B6;
+
+      --bg: #F8FAFC;
+      --bg-elev: #FFFFFF;
+      --bg-sunken: #F1F5F9;
+      --bg-hover: #E2E8F0;
+      --border: #E2E8F0;
+      --border-strong: #CBD5E1;
+      --text: #0F172A;
+      --text-secondary: #334155;
+      --text-tertiary: #64748B;
+      --shadow-sm: 0 1px 3px rgba(15,23,42,0.07);
+      --shadow-md: 0 4px 14px rgba(15,23,42,0.09);
+    }
+
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+    code, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+    /* ── Page chrome ─────────────────────────────────────────────────────── */
+    .doc-header {
+      background: linear-gradient(135deg, #0F172A 0%, #1E293B 60%, #334155 100%);
+      color: #fff;
+      padding: 28px 40px 22px;
+    }
+    .doc-eyebrow { font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: rgba(255,255,255,.6); margin-bottom: 6px; }
+    .doc-title { font-size: 26px; font-weight: 700; margin: 0 0 10px; letter-spacing: -.02em; }
+    .doc-meta { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12px; color: rgba(255,255,255,.8); }
+    .doc-meta b { color: #fff; }
+    .chip-pending {
+      display: inline-block; padding: 3px 10px;
+      background: rgba(245,158,11,.22); border: 1px solid rgba(245,158,11,.55);
+      color: #FCD34D; border-radius: 999px; font-weight: 600; font-size: 11px;
+      letter-spacing: .05em; text-transform: uppercase;
+    }
+
+    /* ── State switcher ──────────────────────────────────────────────────── */
+    .switcher-bar {
+      background: var(--bg-elev);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 40px 0;
+    }
+    .switcher-label {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .1em; color: var(--text-tertiary); margin-bottom: 10px;
+    }
+    .switcher-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+    .state-tab {
+      padding: 7px 14px; border-radius: 8px 8px 0 0;
+      border: 1.5px solid transparent; border-bottom: none;
+      font-size: 12.5px; font-weight: 600; cursor: pointer;
+      background: transparent; color: var(--text-tertiary);
+      transition: all 120ms ease;
+      outline: none;
+    }
+    .state-tab:hover { background: var(--bg-sunken); color: var(--text); }
+    .state-tab.active {
+      background: var(--bg-elev);
+      border-color: var(--border);
+      color: var(--text);
+      margin-bottom: -1px;
+      position: relative; z-index: 1;
+      box-shadow: 0 -2px 8px rgba(0,0,0,.04);
+    }
+    .state-tab .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-inline-end: 6px; }
+
+    /* ── Main content ────────────────────────────────────────────────────── */
+    .content-area { max-width: 1280px; margin: 0 auto; padding: 28px 40px; }
+
+    .layout { display: grid; grid-template-columns: 380px 1fr; gap: 28px; align-items: start; }
+
+    /* ── Drawer mockup ───────────────────────────────────────────────────── */
+    .drawer-mockup {
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: var(--shadow-md);
+      overflow: hidden;
+      position: sticky;
+      top: 20px;
+    }
+    .drawer-head {
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: flex-start; justify-content: space-between;
+      background: var(--bg-elev);
+    }
+    .drawer-head-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--text-tertiary); margin-bottom: 3px; font-weight: 600; }
+    .drawer-head-name { font-size: 15px; font-weight: 700; color: var(--text); }
+    .drawer-head-date { font-size: 12px; color: var(--text-tertiary); margin-top: 2px; }
+    .close-btn {
+      width: 28px; height: 28px; border-radius: 6px;
+      background: var(--bg-sunken); border: 1px solid var(--border);
+      display: grid; place-items: center; cursor: pointer; color: var(--text-tertiary);
+      font-size: 14px; flex-shrink: 0; font-weight: 600;
+    }
+    .drawer-body { padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; max-height: 76vh; overflow-y: auto; }
+    .drawer-foot {
+      padding: 12px 18px;
+      border-top: 1px solid var(--border);
+      background: var(--bg-sunken);
+      display: flex; gap: 8px; justify-content: flex-end;
+    }
+
+    /* ── Chip strip ──────────────────────────────────────────────────────── */
+    .chip-strip { display: flex; gap: 6px; flex-wrap: wrap; }
+    .chip {
+      padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 600;
+      border: 1px solid transparent;
+    }
+    .chip-neutral { background: var(--bg-sunken); color: var(--text-secondary); border-color: var(--border); }
+    .chip-danger  { background: var(--danger-soft); color: var(--danger-text); border-color: #FCA5A5; }
+    .chip-warning { background: var(--warning-soft); color: var(--warning-text); border-color: #FCD34D; }
+    .chip-miss    { background: var(--miss-soft); color: var(--miss-text); border-color: #A5F3FC; }
+    .chip-info    { background: var(--info-soft); color: var(--info-text); border-color: #7DD3FC; }
+    .chip-purple  { background: var(--purple-soft); color: var(--purple-text); border-color: #C4B5FD; }
+    .chip-success { background: var(--success-soft); color: var(--success-text); border-color: #86EFAC; }
+
+    /* ── Status banner ───────────────────────────────────────────────────── */
+    .status-banner {
+      border-radius: 12px; padding: 14px 16px;
+      display: flex; gap: 14px; align-items: flex-start;
+    }
+    .status-banner .icon-circle {
+      width: 42px; height: 42px; border-radius: 50%;
+      display: grid; place-items: center;
+      font-size: 18px; flex-shrink: 0;
+    }
+    .status-banner .banner-body { flex: 1; min-width: 0; }
+    .status-banner .banner-title { font-size: 14.5px; font-weight: 700; margin-bottom: 4px; }
+    .status-banner .banner-sub { font-size: 12px; line-height: 1.55; color: var(--text-secondary); }
+    .status-banner .banner-date { font-size: 11px; margin-top: 8px; color: var(--text-tertiary); display: flex; align-items: center; gap: 5px; }
+
+    .banner-danger  { background: var(--danger-soft); border: 1px solid #FCA5A5; }
+    .banner-danger  .icon-circle { background: var(--danger); color: #fff; }
+    .banner-danger  .banner-title { color: var(--danger-text); }
+
+    .banner-warning { background: var(--warning-soft); border: 1px solid #FCD34D; }
+    .banner-warning .icon-circle { background: var(--warning); color: #fff; }
+    .banner-warning .banner-title { color: var(--warning-text); }
+
+    .banner-miss    { background: var(--miss-soft); border: 1px solid #A5F3FC; }
+    .banner-miss    .icon-circle { background: var(--miss); color: #fff; }
+    .banner-miss    .banner-title { color: var(--miss-text); }
+
+    .banner-info    { background: var(--info-soft); border: 1px solid #7DD3FC; }
+    .banner-info    .icon-circle { background: var(--info); color: #fff; }
+    .banner-info    .banner-title { color: var(--info-text); }
+
+    .banner-purple  { background: var(--purple-soft); border: 1px solid #C4B5FD; }
+    .banner-purple  .icon-circle { background: var(--purple); color: #fff; }
+    .banner-purple  .banner-title { color: var(--purple-text); }
+
+    .banner-success { background: var(--success-soft); border: 1px solid #86EFAC; }
+    .banner-success .icon-circle { background: var(--success); color: #fff; }
+    .banner-success .banner-title { color: var(--success-text); }
+
+    /* ── Detection snapshot card ─────────────────────────────────────────── */
+    .detect-card {
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+    }
+    .section-eyebrow {
+      font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .07em; color: var(--text-tertiary); margin-bottom: 10px;
+    }
+    .detect-zero {
+      display: flex; gap: 10px; align-items: center;
+      background: var(--bg-sunken); border-radius: 8px; padding: 10px 12px;
+    }
+    .detect-zero-icon { font-size: 22px; flex-shrink: 0; }
+    .detect-zero-text { font-size: 12px; color: var(--text-secondary); line-height: 1.55; }
+    .detect-zero-text b { color: var(--text); }
+
+    .detect-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .detect-tile {
+      background: var(--bg-sunken); border-radius: 8px; padding: 8px 10px;
+      display: flex; flex-direction: column; gap: 3px;
+    }
+    .detect-tile-label { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-tertiary); font-weight: 600; }
+    .detect-tile-val { font-size: 14px; font-weight: 700; color: var(--text); font-family: ui-monospace, monospace; }
+    .detect-tile-sub { font-size: 10.5px; color: var(--text-tertiary); }
+
+    /* Low-confidence crops row */
+    .crops-row { display: flex; gap: 8px; margin-top: 10px; }
+    .crop-card {
+      width: 70px; flex-shrink: 0;
+      border: 1.5px solid var(--warning);
+      border-radius: 8px; overflow: hidden;
+      background: var(--bg-sunken);
+    }
+    .crop-thumb {
+      width: 100%; aspect-ratio: 4/5;
+      background: linear-gradient(135deg, #E2E8F0 0%, #CBD5E1 100%);
+      display: grid; place-items: center; font-size: 20px;
+    }
+    .crop-footer { padding: 4px 6px; font-size: 9.5px; font-weight: 700; color: var(--warning-text); font-family: monospace; }
+
+    /* ── Camera status ───────────────────────────────────────────────────── */
+    .cam-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 10px; border-radius: 8px; background: var(--bg-sunken);
+      font-size: 12px;
+    }
+    .cam-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+    .cam-dot-on { background: var(--success); box-shadow: 0 0 0 3px rgba(22,163,74,.18); }
+    .cam-dot-off { background: var(--danger); box-shadow: 0 0 0 3px rgba(220,38,38,.18); }
+    .cam-name { font-weight: 600; color: var(--text); flex: 1; }
+    .cam-status { font-size: 11px; color: var(--text-tertiary); }
+    .cam-status.unreachable { color: var(--danger-text); font-weight: 600; }
+
+    /* ── Shift block ─────────────────────────────────────────────────────── */
+    .shift-block {
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+    }
+    .shift-block-head {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .shift-block-name {
+      display: inline-block; padding: 2px 8px; border-radius: 999px;
+      font-size: 10.5px; font-weight: 600;
+      background: var(--accent-soft); color: var(--accent-text);
+    }
+    .shift-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .shift-tile {
+      background: var(--bg-sunken); border-radius: 8px; padding: 8px 10px;
+    }
+    .shift-tile-lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-tertiary); font-weight: 600; margin-bottom: 3px; }
+    .shift-tile-val { font-size: 14px; font-weight: 700; color: var(--text); font-family: ui-monospace, monospace; }
+
+    /* ── Timeline stub ───────────────────────────────────────────────────── */
+    .timeline-stub {
+      background: var(--bg-sunken); border: 1px solid var(--border);
+      border-radius: 9px; padding: 10px 12px 16px;
+      position: relative;
+    }
+    .timeline-rail {
+      height: 6px; border-radius: 3px; background: var(--border); margin: 10px 0 6px;
+      position: relative;
+    }
+    .timeline-rail-fill {
+      height: 100%; border-radius: 3px; background: var(--border-strong);
+    }
+    .timeline-rail-dot {
+      width: 12px; height: 12px; border-radius: 50%;
+      position: absolute; top: 50%; transform: translateY(-50%);
+      border: 2px solid var(--bg-elev);
+    }
+    .timeline-labels {
+      display: flex; justify-content: space-between;
+      font-size: 10px; color: var(--text-tertiary); font-family: monospace;
+    }
+    .timeline-empty-msg {
+      text-align: center; font-size: 11.5px; color: var(--text-tertiary);
+      margin-top: 8px; padding: 10px;
+      background: var(--bg-elev); border-radius: 7px;
+      border: 1px dashed var(--border-strong);
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+    }
+
+    /* ── Approval chain ──────────────────────────────────────────────────── */
+    .chain-wrap { display: flex; flex-direction: column; gap: 10px; }
+    .chain-step { display: flex; gap: 10px; align-items: flex-start; }
+    .chain-dot {
+      width: 20px; height: 20px; border-radius: 50%;
+      display: grid; place-items: center; flex-shrink: 0; margin-top: 1px;
+      font-size: 10px; font-weight: 700;
+    }
+    .chain-dot-done { background: var(--success); color: #fff; }
+    .chain-dot-pend { background: var(--bg-sunken); border: 1.5px dashed var(--border-strong); color: var(--text-tertiary); }
+    .chain-dot-curr { background: var(--info); color: #fff; }
+    .chain-body { flex: 1; min-width: 0; }
+    .chain-label { font-size: 12.5px; font-weight: 600; color: var(--text); }
+    .chain-meta { font-size: 11px; color: var(--text-tertiary); margin-top: 1px; }
+    .chain-comment {
+      margin-top: 5px; padding: 5px 9px;
+      background: var(--bg-sunken); border-radius: 6px;
+      font-size: 11.5px; color: var(--text-secondary);
+      font-style: italic;
+    }
+    .chain-connector {
+      width: 1.5px; height: 10px; background: var(--border);
+      margin-inline-start: 9px; margin-block: 2px;
+    }
+
+    /* ── Progress tracker for pending request ────────────────────────────── */
+    .progress-track {
+      display: flex; align-items: center; gap: 0;
+      background: var(--bg-sunken); border-radius: 10px; padding: 12px 14px;
+    }
+    .progress-step {
+      display: flex; flex-direction: column; align-items: center; flex: 1;
+      font-size: 11px; text-align: center;
+    }
+    .progress-step .step-circle {
+      width: 28px; height: 28px; border-radius: 50%;
+      display: grid; place-items: center; font-size: 11px; font-weight: 700;
+      margin-bottom: 5px;
+    }
+    .step-done .step-circle { background: var(--success); color: #fff; }
+    .step-curr .step-circle { background: var(--info); color: #fff; border: 2px solid var(--info-soft); box-shadow: 0 0 0 3px rgba(14,165,233,.15); }
+    .step-wait .step-circle { background: var(--bg-elev); border: 1.5px dashed var(--border-strong); color: var(--text-tertiary); }
+    .step-label { color: var(--text-secondary); line-height: 1.35; }
+    .step-label.done { color: var(--success-text); font-weight: 600; }
+    .step-label.curr { color: var(--info-text); font-weight: 600; }
+    .progress-line { height: 2px; width: 100%; flex-shrink: 0; max-width: 28px; margin-top: -14px; }
+    .progress-line.done { background: var(--success); }
+    .progress-line.wait { background: var(--border); }
+
+    /* ── Info note ───────────────────────────────────────────────────────── */
+    .info-note {
+      display: flex; gap: 10px; align-items: flex-start;
+      background: var(--bg-sunken); border-radius: 8px; padding: 10px 12px;
+      font-size: 12px; color: var(--text-secondary); line-height: 1.55;
+    }
+    .info-note-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+
+    /* ── Actions panel ───────────────────────────────────────────────────── */
+    .actions-panel {
+      background: var(--bg-elev); border: 1px solid var(--border);
+      border-radius: 10px; overflow: hidden;
+    }
+    .actions-panel-head {
+      padding: 8px 14px; border-bottom: 1px solid var(--border);
+      font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .07em; color: var(--text-tertiary);
+    }
+    .action-row {
+      display: flex; gap: 12px; align-items: flex-start;
+      padding: 11px 14px; border-bottom: 1px solid var(--border);
+    }
+    .action-row:last-child { border-bottom: none; }
+    .action-icon-box {
+      width: 32px; height: 32px; border-radius: 8px;
+      background: var(--bg-sunken); display: grid; place-items: center;
+      flex-shrink: 0; font-size: 15px;
+    }
+    .action-copy { flex: 1; min-width: 0; }
+    .action-title { font-size: 12.5px; font-weight: 600; color: var(--text); margin-bottom: 1px; }
+    .action-sub { font-size: 11.5px; color: var(--text-tertiary); line-height: 1.45; }
+    .action-cta { flex-shrink: 0; }
+
+    /* ── Buttons ─────────────────────────────────────────────────────────── */
+    .btn {
+      padding: 7px 14px; border-radius: 7px;
+      font-size: 12.5px; font-weight: 600; cursor: pointer;
+      border: 1.5px solid var(--border);
+      background: var(--bg-elev); color: var(--text);
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .btn-primary { background: var(--text); color: #fff; border-color: var(--text); }
+    .btn-danger  { background: var(--danger); color: #fff; border-color: var(--danger); }
+    .btn-info    { background: var(--info); color: #fff; border-color: var(--info); }
+    .btn-success { background: var(--success); color: #fff; border-color: var(--success); }
+    .btn-sm { padding: 5px 10px; font-size: 11.5px; }
+    .btn-ghost { background: transparent; border-color: transparent; color: var(--text-secondary); }
+
+    /* ── Design notes panel ──────────────────────────────────────────────── */
+    .notes-panel { display: flex; flex-direction: column; gap: 16px; }
+
+    .note-card {
+      background: var(--bg-elev); border: 1px solid var(--border);
+      border-radius: 12px; padding: 18px 20px;
+      box-shadow: var(--shadow-sm);
+    }
+    .note-card-title { font-size: 15px; font-weight: 700; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+    .note-card-title .badge {
+      font-size: 10px; padding: 2px 8px; border-radius: 999px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .06em;
+    }
+
+    .note-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+    .note-list li {
+      display: flex; gap: 8px; align-items: flex-start;
+      font-size: 12.5px; color: var(--text-secondary); line-height: 1.5;
+    }
+    .note-list li::before { content: "→"; color: var(--accent); font-weight: 700; flex-shrink: 0; }
+
+    .state-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .state-table th {
+      text-align: left; padding: 7px 10px; background: var(--bg-sunken);
+      border: 1px solid var(--border); font-weight: 700; font-size: 11px;
+      text-transform: uppercase; letter-spacing: .05em; color: var(--text-tertiary);
+    }
+    .state-table td { padding: 8px 10px; border: 1px solid var(--border); vertical-align: top; }
+    .state-table tr:nth-child(even) td { background: #FAFBFC; }
+
+    .color-bar { height: 6px; width: 100%; border-radius: 3px; margin-top: 14px; }
+
+    .divider { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
+
+    /* ── Backend delta ───────────────────────────────────────────────────── */
+    .delta-block {
+      background: #0F172A; color: #E2E8F0;
+      border-radius: 10px; padding: 14px 16px;
+      font-family: ui-monospace, Menlo, Consolas, monospace;
+      font-size: 11.5px; line-height: 1.7; overflow-x: auto;
+    }
+    .delta-add { color: #86EFAC; }
+    .delta-key { color: #93C5FD; }
+    .delta-val { color: #FCD34D; }
+    .delta-comment { color: #64748B; }
+
+    /* ── States hidden/shown ─────────────────────────────────────────────── */
+    .state-view { display: none; }
+    .state-view.active { display: block; }
+
+    /* ── Responsive ──────────────────────────────────────────────────────── */
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+      .drawer-mockup { position: static; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════ Page header ════════════════════════════════════ -->
+<div class="doc-header">
+  <div class="doc-eyebrow">Maugood Attendance Platform · UI Design Proposal</div>
+  <h1 class="doc-title">Absent Status Redesign</h1>
+  <div class="doc-meta">
+    <span><b>Date:</b> 21 May 2026</span>
+    <span><b>Author:</b> Product / Claude Code</span>
+    <span><b>Status:</b> <span class="chip-pending">Awaiting Approval</span></span>
+    <span><b>Scope:</b> Day Detail Drawer · Absent sub-states</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════ State tabs ═════════════════════════════════════ -->
+<div class="switcher-bar">
+  <div class="switcher-label">Select absent sub-state to preview</div>
+  <div class="switcher-tabs">
+    <button class="state-tab active" onclick="showState('s1', this)">
+      <span class="dot" style="background:var(--danger)"></span>State 1 — Complete Absence
+    </button>
+    <button class="state-tab" onclick="showState('s2', this)">
+      <span class="dot" style="background:var(--miss)"></span>State 2 — Camera Offline
+    </button>
+    <button class="state-tab" onclick="showState('s3', this)">
+      <span class="dot" style="background:var(--warning)"></span>State 3 — Low Confidence
+    </button>
+    <button class="state-tab" onclick="showState('s4', this)">
+      <span class="dot" style="background:var(--purple)"></span>State 4 — Request Pending
+    </button>
+    <button class="state-tab" onclick="showState('s5', this)">
+      <span class="dot" style="background:var(--success)"></span>State 5 — Request Approved
+    </button>
+  </div>
+</div>
+
+<!-- ═══════════════════════ Main layout ════════════════════════════════════ -->
+<div class="content-area">
+
+  <!-- ─── STATE 1 — Complete Absence ──────────────────────────────────── -->
+  <div class="state-view active" id="s1">
+    <div class="layout">
+
+      <!-- Drawer mockup -->
+      <div class="drawer-mockup">
+        <div class="drawer-head">
+          <div>
+            <div class="drawer-head-label">Day Detail</div>
+            <div class="drawer-head-name">Ahmed Al-Rashidi</div>
+            <div class="drawer-head-date mono">Wednesday, 14 May 2026</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn btn-sm">⬇ Export</button>
+            <div class="close-btn">✕</div>
+          </div>
+        </div>
+
+        <div class="drawer-body">
+          <!-- Chip strip -->
+          <div class="chip-strip">
+            <span class="chip chip-neutral mono">OM0047</span>
+            <span class="chip chip-neutral">Engineering</span>
+            <span class="chip chip-danger">⊘ Absent</span>
+          </div>
+
+          <!-- Status banner -->
+          <div class="status-banner banner-danger">
+            <div class="icon-circle">✕</div>
+            <div class="banner-body">
+              <div class="banner-title">No attendance recorded</div>
+              <div class="banner-sub">
+                This employee was not detected at any entry point on this day.
+                No exception or leave has been approved.
+              </div>
+              <div class="banner-date">📅 Wednesday, 14 May 2026 · Shift: 07:30 – 15:30</div>
+            </div>
+          </div>
+
+          <!-- Detection snapshot -->
+          <div class="detect-card">
+            <div class="section-eyebrow">📷 What the system saw</div>
+            <div class="detect-grid">
+              <div class="detect-tile">
+                <div class="detect-tile-label">Detections</div>
+                <div class="detect-tile-val" style="color:var(--danger-text)">0</div>
+                <div class="detect-tile-sub">No face events</div>
+              </div>
+              <div class="detect-tile">
+                <div class="detect-tile-label">Cameras active</div>
+                <div class="detect-tile-val">2 / 2</div>
+                <div class="detect-tile-sub">All online</div>
+              </div>
+              <div class="detect-tile">
+                <div class="detect-tile-label">Coverage</div>
+                <div class="detect-tile-val" style="color:var(--success-text)">100%</div>
+                <div class="detect-tile-sub">Full shift</div>
+              </div>
+            </div>
+
+            <!-- Timeline stub — empty -->
+            <div style="margin-top:10px">
+              <div style="font-size:10.5px;color:var(--text-tertiary);margin-bottom:6px;font-weight:600">Day timeline (07:00 – 17:00)</div>
+              <div class="timeline-stub">
+                <div class="timeline-rail">
+                  <div class="timeline-rail-fill" style="width:0%"></div>
+                </div>
+                <div class="timeline-labels"><span>07:00</span><span>11:00</span><span>15:00</span><span>17:00</span></div>
+                <div class="timeline-empty-msg">⏺ No detections recorded during the expected shift window</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Expected shift -->
+          <div class="shift-block">
+            <div class="shift-block-head">
+              <div class="section-eyebrow" style="margin-bottom:0">🗓 Expected shift</div>
+              <span class="shift-block-name">Default Fixed Shift</span>
+            </div>
+            <div class="shift-tiles">
+              <div class="shift-tile"><div class="shift-tile-lbl">Shift start</div><div class="shift-tile-val">07:30</div></div>
+              <div class="shift-tile"><div class="shift-tile-lbl">Shift end</div><div class="shift-tile-val">15:30</div></div>
+              <div class="shift-tile"><div class="shift-tile-lbl">Required</div><div class="shift-tile-val">8 h</div></div>
+            </div>
+          </div>
+
+          <!-- Guidance note -->
+          <div class="info-note">
+            <span class="info-note-icon">ℹ️</span>
+            <div>
+              If the employee was present but the system missed them, they can
+              <b>raise an escalation</b>. If there is a valid reason for absence,
+              they can <b>submit an exception request</b> for HR review.
+            </div>
+          </div>
+
+          <!-- Actions panel -->
+          <div class="actions-panel">
+            <div class="actions-panel-head">What you can do</div>
+            <div class="action-row">
+              <div class="action-icon-box">📋</div>
+              <div class="action-copy">
+                <div class="action-title">Submit an exception request</div>
+                <div class="action-sub">Valid reason for absence? Submit for manager and HR review.</div>
+              </div>
+              <div class="action-cta"><button class="btn btn-sm btn-primary">Submit</button></div>
+            </div>
+            <div class="action-row">
+              <div class="action-icon-box">⚡</div>
+              <div class="action-copy">
+                <div class="action-title">Raise an escalation</div>
+                <div class="action-sub">Were you present but missed by the camera? Escalate for review.</div>
+              </div>
+              <div class="action-cta"><button class="btn btn-sm btn-danger">Escalate</button></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="drawer-foot">
+          <button class="btn">Cancel</button>
+        </div>
+      </div>
+
+      <!-- Notes panel -->
+      <div class="notes-panel">
+        <div class="note-card">
+          <div class="note-card-title">
+            State 1 — Complete Absence
+            <span class="badge" style="background:var(--danger-soft);color:var(--danger-text)">Most common</span>
+          </div>
+          <div style="font-size:12.5px;color:var(--text-secondary);line-height:1.6;margin-bottom:14px">
+            Employee has an attendance_record with <code>absent=true</code>, no in_time, no pending requests,
+            and all cameras were online during the shift. This is a genuine no-show.
+          </div>
+          <ul class="note-list">
+            <li>Red danger banner clearly states "No attendance recorded" — replaces the current vague message</li>
+            <li>Detection snapshot card shows <b>0 detections</b> and camera online count — removes "empty space" feel</li>
+            <li>Timeline ribbon stays but shows an explicit "No detections recorded" state instead of just being blank</li>
+            <li>Expected shift tiles give context on what was expected (used by HR when reviewing exception requests)</li>
+            <li>Guidance note explains the two paths available before showing the action buttons</li>
+            <li>Two clear CTAs: <b>Submit exception</b> (valid absence reason) vs <b>Raise escalation</b> (camera miss)</li>
+          </ul>
+          <hr class="divider">
+          <div style="font-size:12px;color:var(--text-tertiary)"><b>Data source (no new API needed):</b> existing <code>DayDetail</code> fields — <code>evidence</code>, <code>timeline</code>, <code>policy_shift_start</code>, <code>is_holiday</code></div>
+        </div>
+
+        <div class="note-card">
+          <div class="note-card-title" style="margin-bottom:10px">Color system for Absent sub-states</div>
+          <table class="state-table">
+            <thead>
+              <tr><th>State</th><th>Color</th><th>Trigger condition</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><b>Complete absence</b></td><td><span class="chip chip-danger">Danger red</span></td><td>0 detections, cameras OK</td></tr>
+              <tr><td><b>Camera offline</b></td><td><span class="chip chip-miss">Teal-miss</span></td><td>Camera unreachable during shift</td></tr>
+              <tr><td><b>Low confidence</b></td><td><span class="chip chip-warning">Warning amber</span></td><td>Detections exist, all below threshold</td></tr>
+              <tr><td><b>Request pending</b></td><td><span class="chip chip-purple">Purple</span></td><td>Open exception / escalation exists</td></tr>
+              <tr><td><b>Request approved</b></td><td><span class="chip chip-success">Success green</span></td><td>exception approved or escalation confirmed</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ─── STATE 2 — Camera Offline ─────────────────────────────────────── -->
+  <div class="state-view" id="s2">
+    <div class="layout">
+
+      <div class="drawer-mockup">
+        <div class="drawer-head">
+          <div>
+            <div class="drawer-head-label">Day Detail</div>
+            <div class="drawer-head-name">Sara Al-Balushi</div>
+            <div class="drawer-head-date mono">Thursday, 15 May 2026</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn btn-sm">⬇ Export</button>
+            <div class="close-btn">✕</div>
+          </div>
+        </div>
+
+        <div class="drawer-body">
+          <div class="chip-strip">
+            <span class="chip chip-neutral mono">OM0029</span>
+            <span class="chip chip-neutral">Operations</span>
+            <span class="chip chip-miss">📷 Camera missed</span>
+          </div>
+
+          <!-- Status banner — miss tone -->
+          <div class="status-banner banner-miss">
+            <div class="icon-circle">📷</div>
+            <div class="banner-body">
+              <div class="banner-title">Camera coverage was incomplete</div>
+              <div class="banner-sub">
+                One or more cameras covering this employee's area were
+                unreachable during their expected shift. A missed detection
+                is possible.
+              </div>
+              <div class="banner-date">📅 Thursday, 15 May 2026 · Shift: 07:30 – 15:30</div>
+            </div>
+          </div>
+
+          <!-- Detection snapshot -->
+          <div class="detect-card">
+            <div class="section-eyebrow">📷 Camera status on this day</div>
+            <!-- Camera rows -->
+            <div style="display:flex;flex-direction:column;gap:7px">
+              <div class="cam-row">
+                <div class="cam-dot cam-dot-on"></div>
+                <div class="cam-name">Main Entrance (CAM-01)</div>
+                <div class="cam-status">Online · 100% of shift</div>
+              </div>
+              <div class="cam-row" style="background:rgba(220,38,38,.06);border:1px solid #FCA5A5">
+                <div class="cam-dot cam-dot-off"></div>
+                <div class="cam-name">Side Entrance (CAM-02)</div>
+                <div class="cam-status unreachable">⚠ Unreachable 07:42 – 15:19</div>
+              </div>
+            </div>
+
+            <!-- Detection counts -->
+            <div class="detect-grid" style="margin-top:10px">
+              <div class="detect-tile">
+                <div class="detect-tile-label">Detections</div>
+                <div class="detect-tile-val" style="color:var(--text-tertiary)">0</div>
+                <div class="detect-tile-sub">Via active cam</div>
+              </div>
+              <div class="detect-tile">
+                <div class="detect-tile-label">Missed window</div>
+                <div class="detect-tile-val" style="color:var(--danger-text)">7h 37m</div>
+                <div class="detect-tile-sub">CAM-02 offline</div>
+              </div>
+              <div class="detect-tile">
+                <div class="detect-tile-label">Coverage</div>
+                <div class="detect-tile-val" style="color:var(--danger-text)">50%</div>
+                <div class="detect-tile-sub">Entry coverage</div>
+              </div>
+            </div>
+
+            <!-- Timeline with offline block -->
+            <div style="margin-top:10px">
+              <div style="font-size:10.5px;color:var(--text-tertiary);margin-bottom:6px;font-weight:600">Day timeline (07:00 – 17:00)</div>
+              <div class="timeline-stub">
+                <div class="timeline-rail">
+                  <!-- offline window visualised -->
+                  <div style="position:absolute;left:9%;width:76%;height:100%;background:rgba(220,38,38,.15);border-radius:3px;border-top:2px dashed var(--danger)"></div>
+                </div>
+                <div class="timeline-labels"><span>07:00</span><span>11:00</span><span>15:00</span><span>17:00</span></div>
+                <div class="timeline-empty-msg" style="border-color:var(--danger);color:var(--danger-text)">
+                  🔴 CAM-02 offline 07:42 – 15:19 (shown in red). Detections may have been missed.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Shift block -->
+          <div class="shift-block">
+            <div class="shift-block-head">
+              <div class="section-eyebrow" style="margin-bottom:0">🗓 Expected shift</div>
+              <span class="shift-block-name">Default Fixed Shift</span>
+            </div>
+            <div class="shift-tiles">
+              <div class="shift-tile"><div class="shift-tile-lbl">Shift start</div><div class="shift-tile-val">07:30</div></div>
+              <div class="shift-tile"><div class="shift-tile-lbl">Shift end</div><div class="shift-tile-val">15:30</div></div>
+              <div class="shift-tile"><div class="shift-tile-lbl">Required</div><div class="shift-tile-val">8 h</div></div>
+            </div>
+          </div>
+
+          <div class="info-note">
+            <span class="info-note-icon">ℹ️</span>
+            <div>
+              Because a camera was offline during your shift, the system may have missed
+              your arrival. You can raise an escalation so HR can review the situation.
+            </div>
+          </div>
+
+          <div class="actions-panel">
+            <div class="actions-panel-head">What you can do</div>
+            <div class="action-row">
+              <div class="action-icon-box">⚡</div>
+              <div class="action-copy">
+                <div class="action-title">Raise an escalation</div>
+                <div class="action-sub">Camera coverage was incomplete — raise an escalation for HR to investigate.</div>
+              </div>
+              <div class="action-cta"><button class="btn btn-sm btn-info">Escalate</button></div>
+            </div>
+            <div class="action-row">
+              <div class="action-icon-box">📋</div>
+              <div class="action-copy">
+                <div class="action-title">Submit an exception request</div>
+                <div class="action-sub">If you have a valid reason for absence regardless of camera status.</div>
+              </div>
+              <div class="action-cta"><button class="btn btn-sm">Submit</button></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="drawer-foot">
+          <button class="btn">Cancel</button>
+        </div>
+      </div>
+
+      <div class="notes-panel">
+        <div class="note-card">
+          <div class="note-card-title">
+            State 2 — Camera Offline / Missed Detection
+            <span class="badge" style="background:var(--miss-soft);color:var(--miss-text)">New detection</span>
+          </div>
+          <div style="font-size:12.5px;color:var(--text-secondary);line-height:1.6;margin-bottom:14px">
+            The system knows from <code>camera_health_snapshots</code> that one or more cameras were
+            unreachable during this employee's shift window. A detection miss is a real possibility.
+            Currently the UI shows a plain "absent" — indistinguishable from a real no-show.
+          </div>
+          <ul class="note-list">
+            <li>Teal "camera-miss" color (distinct from danger-red) immediately signals a technical reason</li>
+            <li>Per-camera status rows show exactly which camera was offline and for how long</li>
+            <li>Timeline ribbon shows the offline window as a red hatched region so the operator sees coverage gaps instantly</li>
+            <li>Coverage % tile (50%) gives a quick quantitative answer: "half the entry points were blind"</li>
+            <li>The escalation CTA is promoted to primary (blue) because the most likely action is to escalate, not submit an excuse</li>
+          </ul>
+          <hr class="divider">
+          <div class="delta-block">
+<span class="delta-comment"># New field needed on DayDetail</span>
+<span class="delta-add">+ camera_gaps: list[CameraGap]</span>
+  <span class="delta-comment"># Each gap = {camera_name, offline_from, offline_to}</span>
+  <span class="delta-comment"># Source: camera_health_snapshots WHERE reachable=false</span>
+  <span class="delta-comment"># Filtered to the employee's shift window only</span>
+          </div>
+        </div>
+        <div class="note-card">
+          <div class="note-card-title">How camera gap detection works</div>
+          <ul class="note-list">
+            <li>Query <code>camera_health_snapshots</code> for the tenant, on the employee's shift date</li>
+            <li>Filter snapshots where <code>reachable = false</code> AND <code>captured_at</code> is within the shift window</li>
+            <li>Group by camera, produce <code>(offline_from, offline_to)</code> intervals</li>
+            <li>If any gap overlaps the shift window → show State 2 instead of plain absent</li>
+            <li>Show at most 3 cameras in the drawer (most relevant to the employee's building zone)</li>
+          </ul>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ─── STATE 3 — Low Confidence ─────────────────────────────────────── -->
+  <div class="state-view" id="s3">
+    <div class="layout">
+
+      <div class="drawer-mockup">
+        <div class="drawer-head">
+          <div>
+            <div class="drawer-head-label">Day Detail</div>
+            <div class="drawer-head-name">Khalid Al-Maamari</div>
+            <div class="drawer-head-date mono">Friday, 16 May 2026</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn btn-sm">⬇ Export</button>
+            <div class="close-btn">✕</div>
+          </div>
+        </div>
+
+        <div class="drawer-body">
+          <div class="chip-strip">
+            <span class="chip chip-neutral mono">OM0103</span>
+            <span class="chip chip-neutral">Administration</span>
+            <span class="chip chip-warning">👤 Face unclear</span>
+          </div>
+
+          <!-- Status banner — warning amber -->
+          <div class="status-banner banner-warning">
+            <div class="icon-circle">👤</div>
+            <div class="banner-body">
+              <div class="banner-title">Face detected — confidence too low</div>
+              <div class="banner-sub">
+                The camera captured a face matching this employee, but
+                the similarity score was below the required threshold.
+                The detection could not be confirmed.
+              </div>
+              <div class="banner-date">📅 Friday, 16 May 2026 · 3 detections below threshold</div>
+            </div>
+          </div>
+
+          <!-- Detection snapshot with low-conf crops -->
+          <div class="detect-card">
+            <div class="section-eyebrow">📷 Detections found (unconfirmed)</div>
+            <div class="detect-grid">
+              <div class="detect-tile">
+                <div class="detect-tile-label">Total events</div>
+                <div class="detect-tile-val" style="color:var(--warning-text)">3</div>
+                <div class="detect-tile-sub">All below threshold</div>
+              </div>
+              <div class="detect-tile">
+                <div class="detect-tile-label">Best match</div>
+                <div class="detect-tile-val" style="color:var(--warning-text)">38%</div>
+                <div class="detect-tile-sub">Threshold: 45%</div>
+              </div>
+              <div class="detect-tile">
+                <div class="detect-tile-label">Required</div>
+                <div class="detect-tile-val">45%</div>
+                <div class="detect-tile-sub">System minimum</div>
+              </div>
+            </div>
+
+            <!-- Low-conf crops -->
+            <div style="margin-top:10px">
+              <div style="font-size:10.5px;color:var(--warning-text);font-weight:700;margin-bottom:7px">⚠ Low-confidence face crops (not confirmed)</div>
+              <div class="crops-row">
+                <div class="crop-card">
+                  <div class="crop-thumb">😐</div>
+                  <div class="crop-footer">08:42 · 38%</div>
+                </div>
+                <div class="crop-card">
+                  <div class="crop-thumb">😐</div>
+                  <div class="crop-footer">10:15 · 29%</div>
+                </div>
+                <div class="crop-card">
+                  <div class="crop-thumb">😐</div>
+                  <div class="crop-footer">14:07 · 22%</div>
+                </div>
+              </div>
+              <div style="font-size:11px;color:var(--text-tertiary);margin-top:7px">
+                Face crops are shown to help identify if this is the correct employee.
+                Scores below 45% are not automatically counted as attendance.
+              </div>
+            </div>
+
+            <!-- Timeline with faint blobs -->
+            <div style="margin-top:10px">
+              <div style="font-size:10.5px;color:var(--text-tertiary);margin-bottom:6px;font-weight:600">Day timeline (07:00 – 17:00)</div>
+              <div class="timeline-stub">
+                <div class="timeline-rail">
+                  <!-- faint dots at detection times -->
+                  <div class="timeline-rail-dot" style="left:19%;background:var(--warning);width:10px;height:10px;border-color:var(--bg-elev)"></div>
+                  <div class="timeline-rail-dot" style="left:33%;background:var(--warning);width:10px;height:10px;border-color:var(--bg-elev)"></div>
+                  <div class="timeline-rail-dot" style="left:71%;background:var(--warning);width:10px;height:10px;border-color:var(--bg-elev)"></div>
+                </div>
+                <div class="timeline-labels"><span>07:00</span><span>11:00</span><span>15:00</span><span>17:00</span></div>
+                <div class="timeline-empty-msg" style="border-color:var(--warning);color:var(--warning-text)">
+                  🟡 3 low-confidence detection events (amber dots). Not counted as confirmed presence.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Shift block -->
+          <div class="shift-block">
+            <div class="shift-block-head">
+              <div class="section-eyebrow" style="margin-bottom:0">🗓 Expected shift</div>
+              <span class="shift-block-name">Default Fixed Shift</span>
+            </div>
+            <div class="shift-tiles">
+              <div class="shift-tile"><div class="shift-tile-lbl">Shift start</div><div class="shift-tile-val">07:30</div></div>
+              <div class="shift-tile"><div class="shift-tile-lbl">Shift end</div><div class="shift-tile-val">15:30</div></div>
+              <div class="shift-tile"><div class="shift-tile-lbl">Required</div><div class="shift-tile-val">8 h</div></div>
+            </div>
+          </div>
+
+          <div class="info-note">
+            <span class="info-note-icon">💡</span>
+            <div>
+              The system detected a face similar to yours, but the match score was too low
+              to confirm automatically. Updating your reference photo can improve future
+              accuracy. You may also raise an escalation if you were present.
+            </div>
+          </div>
+
+          <div class="actions-panel">
+            <div class="actions-panel-head">What you can do</div>
+            <div class="action-row">
+              <div class="action-icon-box">🖼</div>
+              <div class="action-copy">
+                <div class="action-title">Update reference photo</div>
+                <div class="action-sub">A clearer, recent photo improves recognition accuracy. Ask your Admin.</div>
+              </div>
+              <div class="action-cta"><button class="btn btn-sm">Request update</button></div>
+            </div>
+            <div class="action-row">
+              <div class="action-icon-box">⚡</div>
+              <div class="action-copy">
+                <div class="action-title">Raise an escalation</div>
+                <div class="action-sub">Were you present? Raise an escalation — HR can manually confirm attendance.</div>
+              </div>
+              <div class="action-cta"><button class="btn btn-sm btn-danger">Escalate</button></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="drawer-foot">
+          <button class="btn">Cancel</button>
+        </div>
+      </div>
+
+      <div class="notes-panel">
+        <div class="note-card">
+          <div class="note-card-title">
+            State 3 — Low Confidence Detection
+            <span class="badge" style="background:var(--warning-soft);color:var(--warning-text)">Amber state</span>
+          </div>
+          <div style="font-size:12.5px;color:var(--text-secondary);line-height:1.6;margin-bottom:14px">
+            <code>detection_events</code> rows exist for this employee on this day, but all have
+            <code>confidence &lt; MAUGOOD_MATCH_THRESHOLD</code> (default 0.45). The system decided
+            not to count them as confirmed presence. This is meaningfully different from a complete
+            absence — the employee <em>may</em> have been there.
+          </div>
+          <ul class="note-list">
+            <li>Amber "face unclear" badge replaces the plain red "Absent" — immediately signals a partial detection</li>
+            <li>Detection snapshot shows <b>best match score</b> vs threshold — HR can see exactly how close it was</li>
+            <li>Low-confidence face crops are shown with confidence % badges — HR can visually confirm or deny</li>
+            <li>Timeline dots (amber) appear at detection times — not the solid blue bars of confirmed presence</li>
+            <li>"Update reference photo" action is promoted — this is the long-term fix for chronic low-confidence</li>
+          </ul>
+          <hr class="divider">
+          <div class="delta-block">
+<span class="delta-comment"># Uses existing DayDetail.evidence field.</span>
+<span class="delta-comment"># New logic: if evidence exists but attendance absent=true,</span>
+<span class="delta-comment"># it means all detections were below threshold.</span>
+<span class="delta-comment"># Frontend detects: status==="absent" && evidence.length > 0</span>
+<span class="delta-add">→ Show State 3 (amber) instead of State 1 (red)</span>
+<span class="delta-comment"># No new backend API needed for this state.</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ─── STATE 4 — Request Pending ────────────────────────────────────── -->
+  <div class="state-view" id="s4">
+    <div class="layout">
+
+      <div class="drawer-mockup">
+        <div class="drawer-head">
+          <div>
+            <div class="drawer-head-label">Day Detail</div>
+            <div class="drawer-head-name">Fatima Al-Hinai</div>
+            <div class="drawer-head-date mono">Saturday, 17 May 2026</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn btn-sm">⬇ Export</button>
+            <div class="close-btn">✕</div>
+          </div>
+        </div>
+
+        <div class="drawer-body">
+          <div class="chip-strip">
+            <span class="chip chip-neutral mono">OM0062</span>
+            <span class="chip chip-neutral">HR Dept</span>
+            <span class="chip chip-purple">⏳ Under review</span>
+          </div>
+
+          <!-- Status banner — purple/pending -->
+          <div class="status-banner banner-purple">
+            <div class="icon-circle">⏳</div>
+            <div class="banner-body">
+              <div class="banner-title">Escalation under review</div>
+              <div class="banner-sub">
+                An escalation has been submitted for this day and is currently
+                awaiting review. Attendance will be updated automatically once
+                all approvals are complete.
+              </div>
+              <div class="banner-date">📅 Saturday, 17 May 2026 · Submitted 18 May 2026, 09:14 AM</div>
+            </div>
+          </div>
+
+          <!-- Progress tracker -->
+          <div class="detect-card">
+            <div class="section-eyebrow">📋 Request progress</div>
+            <div class="progress-track">
+              <!-- Step 1: Submitted -->
+              <div class="progress-step step-done">
+                <div class="step-circle">✓</div>
+                <div class="step-label done">Submitted</div>
+              </div>
+              <div class="progress-line done" style="width:100%;max-width:none;flex:1"></div>
+              <!-- Step 2: Manager -->
+              <div class="progress-step step-curr">
+                <div class="step-circle">👤</div>
+                <div class="step-label curr">Manager<br>review</div>
+              </div>
+              <div class="progress-line wait" style="width:100%;max-width:none;flex:1"></div>
+              <!-- Step 3: HR -->
+              <div class="progress-step step-wait">
+                <div class="step-circle">🏢</div>
+                <div class="step-label">HR<br>review</div>
+              </div>
+              <div class="progress-line wait" style="width:100%;max-width:none;flex:1"></div>
+              <!-- Step 4: Confirmed -->
+              <div class="progress-step step-wait">
+                <div class="step-circle">✔</div>
+                <div class="step-label">Confirmed<br>present</div>
+              </div>
+            </div>
+
+            <!-- Request summary -->
+            <div style="margin-top:12px;padding:10px 12px;background:var(--bg-sunken);border-radius:8px">
+              <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-tertiary);margin-bottom:8px">Request details</div>
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <div style="display:flex;gap:8px;font-size:12px">
+                  <span style="color:var(--text-tertiary);width:80px;flex-shrink:0">Reason</span>
+                  <span style="font-weight:600;color:var(--text)">Different area of building</span>
+                </div>
+                <div style="display:flex;gap:8px;font-size:12px">
+                  <span style="color:var(--text-tertiary);width:80px;flex-shrink:0">Details</span>
+                  <span style="color:var(--text-secondary);font-style:italic">"I was attending a meeting in Block C all morning — the camera there may not cover my entry route."</span>
+                </div>
+                <div style="display:flex;gap:8px;font-size:12px">
+                  <span style="color:var(--text-tertiary);width:80px;flex-shrink:0">Submitted</span>
+                  <span class="mono" style="color:var(--text)">18 May 2026 · 09:14 AM</span>
+                </div>
+                <div style="display:flex;gap:8px;font-size:12px">
+                  <span style="color:var(--text-tertiary);width:80px;flex-shrink:0">Assigned to</span>
+                  <span style="font-weight:600;color:var(--purple-text)">Mohammed Al-Balushi (Manager)</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="info-note">
+            <span class="info-note-icon">⏳</span>
+            <div>
+              Your request is currently with your manager. Once they approve it,
+              it will move to HR. You will receive a notification when a decision is made.
+            </div>
+          </div>
+
+          <div class="actions-panel">
+            <div class="actions-panel-head">Available actions</div>
+            <div class="action-row">
+              <div class="action-icon-box">👁</div>
+              <div class="action-copy">
+                <div class="action-title">View full request details</div>
+                <div class="action-sub">See the complete request, attachments, and approval history.</div>
+              </div>
+              <div class="action-cta"><button class="btn btn-sm btn-primary">View request</button></div>
+            </div>
+            <div class="action-row">
+              <div class="action-icon-box">❌</div>
+              <div class="action-copy">
+                <div class="action-title">Cancel this request</div>
+                <div class="action-sub">Cancel while the request is still awaiting approval.</div>
+              </div>
+              <div class="action-cta"><button class="btn btn-sm">Cancel request</button></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="drawer-foot">
+          <button class="btn">Close</button>
+        </div>
+      </div>
+
+      <div class="notes-panel">
+        <div class="note-card">
+          <div class="note-card-title">
+            State 4 — Request Pending
+            <span class="badge" style="background:var(--purple-soft);color:var(--purple-text)">New sub-state</span>
+          </div>
+          <div style="font-size:12.5px;color:var(--text-secondary);line-height:1.6;margin-bottom:14px">
+            The employee has already submitted an escalation or exception request for this absent day.
+            Currently the drawer shows nothing about this — the employee has no way to see the status
+            without navigating to the Approvals page. This state fills that gap.
+          </div>
+          <ul class="note-list">
+            <li>Purple "Under review" badge replaces the alarming red "Absent" — the situation is in hand</li>
+            <li>4-step progress tracker gives the employee a clear picture of where they are in the flow</li>
+            <li>Request summary card shows reason, comment excerpt, and who it's currently assigned to</li>
+            <li>Actions change from "submit" to "view" / "cancel" — no duplicate submissions possible</li>
+            <li>Escalation and exception requests are both shown this way — the progress steps are identical</li>
+          </ul>
+          <hr class="divider">
+          <div class="delta-block">
+<span class="delta-comment"># New field needed on DayDetail</span>
+<span class="delta-add">+ pending_request: PendingRequestSnapshot | None</span>
+  <span class="delta-comment">  # request_id, type, status, submitted_at,</span>
+  <span class="delta-comment">  # reason_category, reason_text,</span>
+  <span class="delta-comment">  # current_stage (submitted/manager_approved/etc.)</span>
+  <span class="delta-comment">  # assigned_to_name</span>
+          </div>
+        </div>
+        <div class="note-card">
+          <div class="note-card-title">Backend query for pending request</div>
+          <div class="delta-block">
+<span class="delta-comment">-- In fetch_day_detail(), after the escalation confirmed check:</span>
+<span class="delta-key">SELECT</span> id, type, status, submitted_at,
+       reason_category, reason_text
+<span class="delta-key">FROM</span> requests
+<span class="delta-key">WHERE</span> tenant_id = :tid
+  <span class="delta-key">AND</span> employee_id = :eid
+  <span class="delta-key">AND</span> target_date_start = :date
+  <span class="delta-key">AND</span> status <span class="delta-key">NOT IN</span> (
+    <span class="delta-val">'hr_approved'</span>, <span class="delta-val">'admin_approved'</span>,
+    <span class="delta-val">'rejected_by_manager'</span>,
+    <span class="delta-val">'rejected_by_hr'</span>, <span class="delta-val">'cancelled'</span>
+  )
+<span class="delta-key">ORDER BY</span> id <span class="delta-key">DESC</span> <span class="delta-key">LIMIT</span> 1;
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ─── STATE 5 — Request Approved ───────────────────────────────────── -->
+  <div class="state-view" id="s5">
+    <div class="layout">
+
+      <div class="drawer-mockup">
+        <div class="drawer-head">
+          <div>
+            <div class="drawer-head-label">Day Detail</div>
+            <div class="drawer-head-name">Yousef Al-Kindi</div>
+            <div class="drawer-head-date mono">Sunday, 18 May 2026</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn btn-sm">⬇ Export</button>
+            <div class="close-btn">✕</div>
+          </div>
+        </div>
+
+        <div class="drawer-body">
+          <div class="chip-strip">
+            <span class="chip chip-neutral mono">OM0088</span>
+            <span class="chip chip-neutral">Engineering</span>
+            <span class="chip chip-success">✓ Absence approved</span>
+          </div>
+
+          <!-- Status banner — success green -->
+          <div class="status-banner banner-success">
+            <div class="icon-circle">✓</div>
+            <div class="banner-body">
+              <div class="banner-title">Exception approved — absence on record</div>
+              <div class="banner-sub">
+                An exception request for this day was reviewed by the manager
+                and HR, and approved. The absence is officially recorded and
+                no further action is required.
+              </div>
+              <div class="banner-date">📅 Sunday, 18 May 2026 · Approved 19 May 2026, 11:30 AM</div>
+            </div>
+          </div>
+
+          <!-- Approved exception summary -->
+          <div class="detect-card">
+            <div class="section-eyebrow">📋 Approval details</div>
+            <!-- Request fact row -->
+            <div style="padding:10px 12px;background:var(--bg-sunken);border-radius:8px;margin-bottom:10px">
+              <div style="display:flex;gap:8px;margin-bottom:6px;font-size:12px">
+                <span style="color:var(--text-tertiary);width:80px;flex-shrink:0">Type</span>
+                <span style="font-weight:600;color:var(--text)">Exception request · Annual leave day</span>
+              </div>
+              <div style="display:flex;gap:8px;font-size:12px">
+                <span style="color:var(--text-tertiary);width:80px;flex-shrink:0">Reason</span>
+                <span style="color:var(--text-secondary);font-style:italic">"Family emergency — had to travel unexpectedly."</span>
+              </div>
+            </div>
+
+            <!-- Approval chain -->
+            <div class="chain-wrap">
+              <div class="chain-step">
+                <div class="chain-dot chain-dot-done">✓</div>
+                <div class="chain-body">
+                  <div class="chain-label">Submitted by employee</div>
+                  <div class="chain-meta">18 May 2026 · 08:05 AM</div>
+                </div>
+              </div>
+              <div class="chain-connector"></div>
+              <div class="chain-step">
+                <div class="chain-dot chain-dot-done">✓</div>
+                <div class="chain-body">
+                  <div class="chain-label">Manager approved · Hamad Al-Farsi</div>
+                  <div class="chain-meta">18 May 2026 · 10:22 AM</div>
+                  <div class="chain-comment">"Noted — approved for this instance."</div>
+                </div>
+              </div>
+              <div class="chain-connector"></div>
+              <div class="chain-step">
+                <div class="chain-dot chain-dot-done" style="background:var(--success-text)">✓</div>
+                <div class="chain-body">
+                  <div class="chain-label" style="color:var(--success-text)">HR approved · Aisha Al-Rawas</div>
+                  <div class="chain-meta">19 May 2026 · 11:30 AM</div>
+                  <div class="chain-comment">"Approved. Annual leave deducted."</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="info-note" style="background:var(--success-soft);border:1px solid #86EFAC">
+            <span class="info-note-icon">✅</span>
+            <div style="color:var(--success-text)">
+              This absence has been reviewed and approved. Annual leave
+              has been deducted from the employee's leave balance. No further action needed.
+            </div>
+          </div>
+
+          <div class="actions-panel">
+            <div class="actions-panel-head">Reference</div>
+            <div class="action-row">
+              <div class="action-icon-box">👁</div>
+              <div class="action-copy">
+                <div class="action-title">View full request history</div>
+                <div class="action-sub">See the complete request thread, attachments, and audit trail.</div>
+              </div>
+              <div class="action-cta"><button class="btn btn-sm">View</button></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="drawer-foot">
+          <button class="btn">Close</button>
+        </div>
+      </div>
+
+      <div class="notes-panel">
+        <div class="note-card">
+          <div class="note-card-title">
+            State 5 — Exception / Leave Approved
+            <span class="badge" style="background:var(--success-soft);color:var(--success-text)">Resolved</span>
+          </div>
+          <div style="font-size:12.5px;color:var(--text-secondary);line-height:1.6;margin-bottom:14px">
+            The attendance record's absence has been authorised through the approval workflow.
+            This is different from the escalation-confirmed "present" state (State 5 of the
+            original workflow) — here the employee was genuinely absent, but the absence is
+            approved. The distinction: escalation <em>changes</em> absent→present;
+            exception <em>acknowledges</em> the absence.
+          </div>
+          <ul class="note-list">
+            <li>Green "Absence approved" badge replaces alarming red — the situation is resolved</li>
+            <li>Full approval chain with names, timestamps, and comments is shown inline</li>
+            <li>Distinction between exception (valid reason) and leave (deducted from balance) is shown clearly</li>
+            <li>No escalation or exception buttons shown — the day is settled, actions would be inappropriate</li>
+            <li>A single "View history" link gives access to the complete audit trail</li>
+          </ul>
+          <hr class="divider">
+          <div style="font-size:12px;color:var(--text-tertiary)"><b>Uses existing fields:</b> <code>escalation_request</code> model is extended to cover both exception and escalation approvals — or a new <code>approved_request</code> field is added. See backend delta below.</div>
+        </div>
+        <div class="note-card">
+          <div class="note-card-title">All 5 states — decision tree</div>
+          <div class="delta-block" style="font-size:11px;line-height:1.8">
+<span class="delta-comment">// DayDetailDrawer absent-state selector (frontend)</span>
+<span class="delta-key">if</span> (detail.escalation_confirmed)           → <span class="delta-val">EscalationConfirmedCard</span> (present)
+<span class="delta-key">else if</span> (detail.approved_request)          → <span class="delta-val">State 5</span> – Approved absence
+<span class="delta-key">else if</span> (detail.pending_request)           → <span class="delta-val">State 4</span> – Request in progress
+<span class="delta-key">else if</span> (evidence.length > 0)             → <span class="delta-val">State 3</span> – Low confidence
+<span class="delta-key">else if</span> (camera_gaps.length > 0)          → <span class="delta-val">State 2</span> – Camera offline
+<span class="delta-key">else</span>                                        → <span class="delta-val">State 1</span> – Complete absence
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</div><!-- /content-area -->
+
+<!-- ═══════════════════════ Summary + Implementation delta ═════════════════ -->
+<div style="background:var(--bg-elev);border-top:1px solid var(--border);padding:28px 40px;margin-top:8px">
+  <div style="max-width:1280px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:28px">
+
+    <div>
+      <div style="font-size:16px;font-weight:700;margin-bottom:14px">New fields required on DayDetail API</div>
+      <table class="state-table" style="font-size:12px">
+        <thead><tr><th>Field</th><th>Type</th><th>Source</th><th>States</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="mono">camera_gaps</td>
+            <td>list[CameraGap]</td>
+            <td>camera_health_snapshots WHERE reachable=false within shift window</td>
+            <td><span class="chip chip-miss chip-sm">2</span></td>
+          </tr>
+          <tr>
+            <td class="mono">pending_request</td>
+            <td>PendingRequestSnapshot | None</td>
+            <td>requests WHERE status NOT IN terminal states</td>
+            <td><span class="chip chip-purple chip-sm">4</span></td>
+          </tr>
+          <tr>
+            <td class="mono">approved_request</td>
+            <td>ApprovedRequestSnapshot | None</td>
+            <td>requests WHERE status IN (hr_approved, admin_approved) AND type != escalation</td>
+            <td><span class="chip chip-success chip-sm">5</span></td>
+          </tr>
+        </tbody>
+      </table>
+      <div style="font-size:12px;color:var(--text-tertiary);margin-top:10px">
+        <b>States 1 and 3</b> require no new backend fields — they are derived from existing
+        <code>evidence</code> and <code>timeline</code> data already in <code>DayDetail</code>.
+      </div>
+    </div>
+
+    <div>
+      <div style="font-size:16px;font-weight:700;margin-bottom:14px">Approval checklist before implementation</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <label style="display:flex;gap:10px;font-size:13px;align-items:flex-start;cursor:pointer">
+          <input type="checkbox" style="margin-top:2px;width:16px;height:16px">
+          <span><b>Color system approved</b> — danger / teal-miss / amber / purple / green for 5 states</span>
+        </label>
+        <label style="display:flex;gap:10px;font-size:13px;align-items:flex-start;cursor:pointer">
+          <input type="checkbox" style="margin-top:2px;width:16px;height:16px">
+          <span><b>State 2 camera gap</b> — camera_health_snapshots query scope confirmed</span>
+        </label>
+        <label style="display:flex;gap:10px;font-size:13px;align-items:flex-start;cursor:pointer">
+          <input type="checkbox" style="margin-top:2px;width:16px;height:16px">
+          <span><b>State 3 threshold</b> — show low-conf crops to Employee role or HR/Admin only?</span>
+        </label>
+        <label style="display:flex;gap:10px;font-size:13px;align-items:flex-start;cursor:pointer">
+          <input type="checkbox" style="margin-top:2px;width:16px;height:16px">
+          <span><b>State 4 cancel</b> — allow cancel from this drawer or only from Approvals page?</span>
+        </label>
+        <label style="display:flex;gap:10px;font-size:13px;align-items:flex-start;cursor:pointer">
+          <input type="checkbox" style="margin-top:2px;width:16px;height:16px">
+          <span><b>State 5 distinction</b> — treat "leave approved" the same as "exception approved" visually?</span>
+        </label>
+        <label style="display:flex;gap:10px;font-size:13px;align-items:flex-start;cursor:pointer">
+          <input type="checkbox" style="margin-top:2px;width:16px;height:16px">
+          <span><b>Arabic translations</b> — all new strings need Omran HR native-speaker review (existing carryover)</span>
+        </label>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  function showState(id, el) {
+    document.querySelectorAll('.state-view').forEach(v => v.classList.remove('active'));
+    document.querySelectorAll('.state-tab').forEach(t => t.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+    el.classList.add('active');
+  }
+</script>
+</body>
+</html>

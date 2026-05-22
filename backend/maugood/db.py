@@ -654,7 +654,10 @@ requests = Table(
         nullable=False,
         server_default=func.now(),
     ),
-    CheckConstraint("type IN ('exception','leave')", name="ck_requests_type"),
+    CheckConstraint(
+        "type IN ('exception','leave','escalation')",
+        name="ck_requests_type",
+    ),
     CheckConstraint(
         "status IN ("
         "'submitted','manager_approved','manager_rejected',"
@@ -669,7 +672,7 @@ requests = Table(
     ),
     CheckConstraint(
         "(type = 'leave' AND leave_type_id IS NOT NULL) "
-        "OR (type = 'exception' AND leave_type_id IS NULL)",
+        "OR (type IN ('exception','escalation') AND leave_type_id IS NULL)",
         name="ck_requests_leave_type_consistency",
     ),
     Index("ix_requests_tenant_status", "tenant_id", "status"),
@@ -2043,6 +2046,12 @@ attendance_records = Table(
         ForeignKey("leave_types.id", ondelete="SET NULL"),
         nullable=True,
     ),
+    # Escalation-confirmed flag (0063). When TRUE the attendance scheduler
+    # skips recomputing this row so an HR-confirmed escalation day is not
+    # silently reverted to absent by the next tick.
+    Column("locked", Boolean, nullable=True, default=None),
+    # Human-readable reason stored at escalation-approval time.
+    Column("escalation_note", Text, nullable=True, default=None),
     UniqueConstraint(
         "tenant_id", "employee_id", "date", name="uq_attendance_records_tenant_emp_date"
     ),

@@ -290,10 +290,12 @@ export function CalendarPage() {
           employeeId={drawerEmployeeId}
           isoDate={drawerDate}
           onClose={() => setDrawerDate(null)}
-          onSubmitException={(iso) => {
-            setExceptionDate(iso);
-            setDrawerDate(null);
-          }}
+          {...(role !== "Admin" && {
+            onSubmitException: (iso: string) => {
+              setExceptionDate(iso);
+              setDrawerDate(null);
+            },
+          })}
         />
       )}
 

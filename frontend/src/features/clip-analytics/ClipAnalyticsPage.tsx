@@ -11,6 +11,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "../../api/client";
+import { AnomalyInfoBanner } from "../../components/AnomalyNote";
 import { ModalShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
 import type { IconName } from "../../shell/Icon";
@@ -4456,21 +4457,22 @@ function LiveProcessingModal({
             )}
 
             {/* Live face crops */}
-            {(uc1Crops.data?.items ?? uc2Crops.data?.items ?? uc3Crops.data?.items) && (
-              <>
-                <SectionLabelLive style={{ marginTop: 18 }}>
-                  Face crops (latest)
-                </SectionLabelLive>
-                <LiveCropsStrip
-                  clipId={clip.id}
-                  crops={[
-                    ...(uc1Crops.data?.items ?? []),
-                    ...(uc2Crops.data?.items ?? []),
-                    ...(uc3Crops.data?.items ?? []),
-                  ]}
-                />
-              </>
-            )}
+            {(uc1Crops.data?.items ?? uc2Crops.data?.items ?? uc3Crops.data?.items) && (() => {
+              const allCrops = [
+                ...(uc1Crops.data?.items ?? []),
+                ...(uc2Crops.data?.items ?? []),
+                ...(uc3Crops.data?.items ?? []),
+              ];
+              return (
+                <>
+                  <SectionLabelLive style={{ marginTop: 18 }}>
+                    Face crops (latest)
+                  </SectionLabelLive>
+                  <AnomalyInfoBanner message="If the camera misses certain events due to camera positioning, capture limitations, lighting, or brightness conditions, those cases should be treated as possible anomalies." />
+                  <LiveCropsStrip clipId={clip.id} crops={allCrops} />
+                </>
+              );
+            })()}
 
             {/* Errors */}
             {anyUcFailed(ucResults) && (
@@ -5094,6 +5096,7 @@ function LiveCropsStrip({
               height: "100%",
               objectFit: "cover",
               display: "block",
+
             }}
           />
           {c.use_case && (
@@ -5118,6 +5121,7 @@ function LiveCropsStrip({
     </div>
   );
 }
+
 
 function fmtMaybeMs(ms: number | null | undefined): string {
   if (ms == null) return "—";

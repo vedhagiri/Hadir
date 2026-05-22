@@ -7,7 +7,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
-RequestType = Literal["exception", "leave"]
+RequestType = Literal["exception", "leave", "escalation"]
 Decision = Literal["approve", "reject"]
 Status = Literal[
     "submitted",
@@ -46,8 +46,11 @@ class RequestCreate(BaseModel):
             raise ValueError("target_date_end must be >= target_date_start")
         if self.type == "leave" and self.leave_type_id is None:
             raise ValueError("leave requests require leave_type_id")
-        if self.type == "exception" and self.leave_type_id is not None:
-            raise ValueError("exception requests must not carry leave_type_id")
+        if self.type in ("exception", "escalation") and self.leave_type_id is not None:
+            raise ValueError(f"{self.type} requests must not carry leave_type_id")
+        # Escalation targets exactly one day — no multi-day range.
+        if self.type == "escalation" and self.target_date_end is not None:
+            raise ValueError("escalation requests target a single day — omit target_date_end")
         return self
 
 
