@@ -71,6 +71,7 @@ from maugood.departments_router import router as departments_router
 from maugood.divisions_router import router as divisions_router
 from maugood.sections_router import router as sections_router
 from maugood.users_lookup import router as users_lookup_router
+from maugood.unidentified_faces.router import router as unidentified_faces_router
 
 
 def _configure_logging() -> None:
@@ -310,6 +311,7 @@ def create_app() -> FastAPI:
     app.include_router(clip_pipeline_router)
     app.include_router(pipeline_monitor_router)
     app.include_router(face_crops_router)
+    app.include_router(unidentified_faces_router)
 
     # Dev-only test endpoints — used by the Playwright smoke test in
     # frontend/tests/. Mounted ONLY when MAUGOOD_ENV=dev so a production

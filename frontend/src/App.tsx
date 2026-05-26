@@ -32,6 +32,7 @@ import { AuditLogPage } from "./features/audit-log/AuditLogPage";
 import { DailyAttendancePage } from "./features/attendance/DailyAttendancePage";
 import { MyAttendancePage } from "./features/attendance/MyAttendancePage";
 import { CameraLogsPage } from "./features/camera-logs/CameraLogsPage";
+import { UnidentifiedFacesPage } from "./features/unidentified-faces/UnidentifiedFacesPage";
 import { CamerasPage } from "./features/cameras/CamerasPage";
 import { FaceCropsPage } from "./features/face-crops/FaceCropsPage";
 import { PersonClipsPage } from "./features/person-clips/PersonClipsPage";
@@ -136,6 +137,7 @@ export function App() {
         <Route path="employees" element={<EmployeesPage />} />
         <Route path="cameras" element={<CamerasPage />} />
         <Route path="camera-logs" element={<CameraLogsPage />} />
+        <Route path="unidentified-faces" element={<UnidentifiedFacesPage />} />
         <Route path="person-clips" element={<PersonClipsPage />} />
         <Route path="clip-analytics" element={<ClipAnalyticsPage />} />
         <Route path="face-crops" element={<FaceCropsPage />} />
@@ -198,6 +200,7 @@ export function App() {
             id !== "photo-approvals" &&
             id !== "cameras" &&
             id !== "camera-logs" &&
+            id !== "unidentified-faces" &&
             id !== "person-clips" &&
             id !== "clip-analytics" &&
             id !== "face-crops" &&
