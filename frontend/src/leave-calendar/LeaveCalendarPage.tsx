@@ -57,7 +57,7 @@ export function LeaveCalendarPage() {
         </h1>
         <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 13 }}>
           Configure leave types, the holiday calendar, and the approved-leave
-          ledger. Submission + approval workflow ships in P14–P15.
+          ledger.
         </p>
       </header>
 

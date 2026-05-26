@@ -20,7 +20,7 @@ import type {
   TeamMembersResponse,
 } from "./types";
 
-export type EmployeeSortBy = "employee_code" | "full_name" | "department";
+export type EmployeeSortBy = "employee_code" | "full_name" | "department" | "created_at";
 export type EmployeeSortDir = "asc" | "desc";
 
 export interface EmployeeListFilters {
@@ -55,8 +55,8 @@ export function useEmployeeList(
   }
   params.set("page", String(filters.page));
   params.set("page_size", String(filters.page_size));
-  params.set("sort_by", filters.sort_by ?? "employee_code");
-  params.set("sort_dir", filters.sort_dir ?? "asc");
+  params.set("sort_by", filters.sort_by ?? "created_at");
+  params.set("sort_dir", filters.sort_dir ?? "desc");
   const path = `/api/employees?${params.toString()}`;
 
   return useQuery({

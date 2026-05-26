@@ -121,7 +121,7 @@
   },
   "approvals": {
     "title": "Approvals",
-    "subtitle": "Two-stage workflow · Manager → HR · Admin override per BRD FR-REQ-006. Manager rejection is final unless overridden.",
+    "subtitle": "Two-stage workflow · Manager → HR · Admin override per BRD. Manager rejection is final unless overridden.",
     "tabs": {
       "pending": "Pending my decision",
       "decided": "Decided by me",
@@ -422,6 +422,7 @@
       "location": "e.g. HQ · North entrance"
     },
     "errors": {
+      "nameRequired": "Camera name is required.",
       "rtspRequired": "RTSP URL is required.",
       "saveFailed": "Could not save camera. Check the RTSP URL and try again."
     },
@@ -914,6 +915,7 @@
       "actions": "Actions"
     },
     "exportSelected": "Export {{count}} selected",
+    "exportNoData": "No employee data available to export",
     "importButton": "Import XLSX/CSV",
     "bulkDelete": {
       "selectedButton": "Delete {{count}} selected",

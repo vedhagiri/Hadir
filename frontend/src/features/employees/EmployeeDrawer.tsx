@@ -21,7 +21,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { ApiError, api } from "../../api/client";
 import { useMe } from "../../auth/AuthProvider";
@@ -129,6 +129,7 @@ function fromEmployee(e: Employee): FormState {
 
 export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
   const { t } = useTranslation();
+  const qc = useQueryClient();
   const me = useMe();
   const role = me.data ? primaryRole(me.data.roles) : "Employee";
   const isAdmin = role === "Admin";
@@ -263,6 +264,26 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
       (k) => form[k] !== initialForm[k],
     );
   }, [form, initialForm]);
+
+  // Add-mode: all required fields must be non-empty before the Create
+  // button enables. Edit-mode uses isDirty instead.
+  const canSubmitAdd = useMemo(() => {
+    if (!form.employee_code.trim()) return false;
+    if (!form.full_name.trim()) return false;
+    // department_id === 0 is the "division cleared it" sentinel.
+    if (!form.department_id) return false;
+    // Email is required when platform login creation is requested.
+    if ((isAdmin || isHr) && createLogin && !form.email.trim()) return false;
+    return true;
+  }, [
+    form.employee_code,
+    form.full_name,
+    form.department_id,
+    form.email,
+    isAdmin,
+    isHr,
+    createLogin,
+  ]);
 
   const onField = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((s) => ({ ...s, [key]: value }));
@@ -406,6 +427,18 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
                 : "Could not create login";
             toast.error(msg);
           }
+        }
+        // Re-invalidate after login creation so the employee list
+        // refetches with role_codes populated. The first invalidation
+        // (from useCreateEmployee.onSuccess) fires before the user row
+        // exists and caches an empty role. This second invalidation
+        // fires after the user is in the DB, giving the list the
+        // correct roles on the very next background refetch.
+        void qc.invalidateQueries({ queryKey: ["employees"] });
+        if (form.email.trim()) {
+          void qc.invalidateQueries({
+            queryKey: ["users", "by-email", form.email.trim().toLowerCase()],
+          });
         }
         onSaved?.(created);
         toast.success(
@@ -720,6 +753,7 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
             />
             <Select
               label={t("employees.field.department") as string}
+              required
               value={form.department_id ? String(form.department_id) : ""}
               onChange={(v) =>
                 // Department change clears the section so the picker
@@ -1030,7 +1064,10 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
                     canEditRoles={isAdmin}
                     canResetPassword={isAdmin}
                     availableRoles={rolesQuery.data?.items ?? []}
-                    onChanged={() => linkedUser.refetch()}
+                    onChanged={() => {
+                      void linkedUser.refetch();
+                      void qc.invalidateQueries({ queryKey: ["employees"] });
+                    }}
                   />
                 )}
               </div>
@@ -1382,7 +1419,7 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
               disabled={
                 create.isPending ||
                 update.isPending ||
-                (!isAddMode && !isDirty)
+                (isAddMode ? !canSubmitAdd : !isDirty)
               }
             >
               {isAddMode
@@ -1493,7 +1530,18 @@ function Field({
         style={{ fontWeight: 500, color: "var(--text-secondary)" }}
       >
         {label}
-        {required ? " *" : ""}
+        {required && (
+          <span
+            aria-hidden="true"
+            style={{
+              color: "var(--danger-text, #e02020)",
+              marginInlineStart: 3,
+              fontWeight: 600,
+            }}
+          >
+            *
+          </span>
+        )}
       </label>
       {type === "date" ? (
         <div style={{ marginTop: 4 }}>
@@ -1536,11 +1584,13 @@ function Select({
   value,
   onChange,
   options,
+  required,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
+  required?: boolean;
 }) {
   return (
     <div>
@@ -1549,6 +1599,18 @@ function Select({
         style={{ fontWeight: 500, color: "var(--text-secondary)" }}
       >
         {label}
+        {required && (
+          <span
+            aria-hidden="true"
+            style={{
+              color: "var(--danger-text, #e02020)",
+              marginInlineStart: 3,
+              fontWeight: 600,
+            }}
+          >
+            *
+          </span>
+        )}
       </label>
       <select
         value={value}

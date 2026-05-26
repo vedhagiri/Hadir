@@ -105,10 +105,21 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
 
   const submitting = create.isPending || patch.isPending;
 
+  // Add Camera is enabled only after the two hard-required fields are filled.
+  // Edit Save is always enabled (all required fields were set at create time).
+  const canSubmit =
+    mode === "edit"
+      ? !submitting
+      : !submitting && name.trim().length > 0 && rtspUrl.trim().length > 0;
+
   const submit = async () => {
     setError(null);
     try {
       if (mode === "create") {
+        if (!name.trim()) {
+          setError(t("cameras.errors.nameRequired"));
+          return;
+        }
         if (!rtspUrl.trim()) {
           setError(t("cameras.errors.rtspRequired"));
           return;
@@ -224,7 +235,7 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
             </Field>
           )}
 
-          <Field label={t("cameras.fields.name")}>
+          <Field label={t("cameras.fields.name")} required={mode === "create"}>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -295,6 +306,7 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
 
           <Field
             label={t("cameras.fields.rtspUrl")}
+            required={mode === "create"}
             hint={
               mode === "edit"
                 ? t("cameras.hints.rtspEdit")
@@ -574,7 +586,7 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
           <button className="btn" onClick={onClose} disabled={submitting}>
             {t("common.cancel")}
           </button>
-          <button className="btn btn-primary" onClick={submit} disabled={submitting}>
+          <button className="btn btn-primary" onClick={submit} disabled={!canSubmit}>
             <Icon name="check" size={12} />
             {submitting
               ? t("common.saving")
@@ -635,10 +647,12 @@ function ToggleRow({
 function Field({
   label,
   hint,
+  required,
   children,
 }: {
   label: string;
   hint?: string;
+  required?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -649,9 +663,17 @@ function Field({
           textTransform: "uppercase",
           letterSpacing: "0.04em",
           color: "var(--text-tertiary)",
+          display: "flex",
+          alignItems: "center",
+          gap: 3,
         }}
       >
         {label}
+        {required && (
+          <span aria-hidden style={{ color: "var(--danger-text)", fontWeight: 700, fontSize: 13, lineHeight: 1 }}>
+            *
+          </span>
+        )}
       </span>
       {children}
       {hint && <span className="text-xs text-dim">{hint}</span>}

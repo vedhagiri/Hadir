@@ -80,7 +80,7 @@ export function CamerasPage() {
             {list.data
               ? `${list.data.items.length} camera${list.data.items.length === 1 ? "" : "s"}`
               : "—"}
-            {" · on-demand preview only · background capture arrives in P8"}
+            {" · on-demand preview only·"}
           </p>
         </div>
         <div className="page-actions">

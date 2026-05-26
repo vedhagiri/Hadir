@@ -56,8 +56,8 @@ export function EmployeesPage() {
   >(null);
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
-  const [sortBy, setSortBy] = useState<EmployeeSortBy>("employee_code");
-  const [sortDir, setSortDir] = useState<EmployeeSortDir>("asc");
+  const [sortBy, setSortBy] = useState<EmployeeSortBy>("created_at");
+  const [sortDir, setSortDir] = useState<EmployeeSortDir>("desc");
 
   const { data: me } = useMe();
   const isAdmin = !!me?.roles?.includes("Admin");
@@ -209,7 +209,7 @@ export function EmployeesPage() {
           )}
           {(isAdmin || isHr) && selected.size === 0 && (
             <button
-              className="btn"
+              className="btn btn-danger"
               onClick={() => setBulkDeleteScope("all")}
               title={t("employees.bulkDelete.allTooltip") as string}
             >
@@ -217,14 +217,40 @@ export function EmployeesPage() {
               {t("employees.bulkDelete.allButton") as string}
             </button>
           )}
-          <button className="btn" onClick={onExport}>
-            <Icon name="download" size={12} />
-            {selected.size > 0
-              ? (t("employees.exportSelected", {
-                  count: selected.size,
-                }) as string)
-              : (t("common.export") as string)}
-          </button>
+          {(() => {
+            const noData =
+              selected.size === 0 &&
+              list.data !== undefined &&
+              list.data.total === 0;
+            return (
+              <button
+                className="btn"
+                onClick={onExport}
+                disabled={noData}
+                aria-disabled={noData}
+                title={
+                  noData
+                    ? (t("employees.exportNoData", {
+                        defaultValue:
+                          "No employee data available to export",
+                      }) as string)
+                    : undefined
+                }
+                style={
+                  noData
+                    ? { opacity: 0.45, cursor: "not-allowed" }
+                    : undefined
+                }
+              >
+                <Icon name="download" size={12} />
+                {selected.size > 0
+                  ? (t("employees.exportSelected", {
+                      count: selected.size,
+                    }) as string)
+                  : (t("common.export") as string)}
+              </button>
+            );
+          })()}
           <button className="btn" onClick={() => setImportOpen(true)}>
             <Icon name="upload" size={12} />
             {t("employees.importButton") as string}

@@ -7,7 +7,7 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 
-import { BsXCircleFill, BsClipboard2PlusFill, BsChevronRight } from "react-icons/bs";
+import { BsXCircleFill, BsClipboard2PlusFill, BsChevronRight, BsBoxArrowInRight, BsBoxArrowRight, BsClockFill } from "react-icons/bs";
 
 import { api, extractApiError } from "../../api/client";
 import { AnomalyInfoBanner } from "../../components/AnomalyNote";
@@ -115,13 +115,8 @@ export function DayDetailContent({
 
           {detail.data.status === "waiting" && (
             <AbsentWaitingCard
-              status="waiting"
               isoDate={isoDate}
-              policyName={detail.data.policy_name ?? null}
-              policyType={detail.data.policy_type ?? null}
-              policyShiftStart={detail.data.policy_shift_start ?? null}
-              policyShiftEnd={detail.data.policy_shift_end ?? null}
-              policyRequiredHours={detail.data.policy_required_hours ?? null}
+              detail={detail.data}
               onSubmitException={onSubmitException ?? null}
               onRaiseEscalation={isEmployee ? () => setShowEscalation(true) : null}
             />
@@ -143,6 +138,22 @@ export function DayDetailContent({
                   if (el) evidenceRefs.current.set(eventId, el);
                   else evidenceRefs.current.delete(eventId);
                 }}
+              />
+            ) : detail.data.status === "holiday" ? (
+              <HolidayDayContent
+                detail={detail.data}
+                isoDate={isoDate}
+                highlightedEventId={highlightedEventId}
+                onEventActivate={onTimelineEventActivate}
+                registerRef={(eventId, el) => {
+                  if (el) evidenceRefs.current.set(eventId, el);
+                  else evidenceRefs.current.delete(eventId);
+                }}
+              />
+            ) : detail.data.status === "no_record" || detail.data.status === "future" ? (
+              <NoRecordCard
+                isoDate={isoDate}
+                isFuture={detail.data.status === "future"}
               />
             ) : (
               <>
@@ -242,10 +253,37 @@ export function DayDetailDrawer({
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <a className="btn btn-sm" href={exportHref} target="_blank" rel="noopener noreferrer">
-              <Icon name="download" size={12} />
-              {t("calendar.export") as string}
-            </a>
+            {(() => {
+              const d = detail.data;
+              const worked = d != null && (
+                d.in_time != null ||
+                (d.total_minutes != null && d.total_minutes > 0) ||
+                d.timeline.length > 0
+              );
+              const disableExport =
+                !d ||
+                d.status === "no_record" ||
+                d.status === "future"  ||
+                d.status === "absent"  ||
+                d.status === "waiting" ||
+                (d.status === "weekend" && !worked) ||
+                (d.status === "holiday" && !worked);
+              return disableExport ? (
+                <span
+                  className="btn btn-sm"
+                  aria-disabled="true"
+                  style={{ opacity: 0.4, pointerEvents: "none", cursor: "not-allowed" }}
+                >
+                  <Icon name="download" size={12} />
+                  {t("calendar.export") as string}
+                </span>
+              ) : (
+                <a className="btn btn-sm" href={exportHref} target="_blank" rel="noopener noreferrer">
+                  <Icon name="download" size={12} />
+                  {t("calendar.export") as string}
+                </a>
+              );
+            })()}
             <button
               className="icon-btn"
               onClick={onClose}
@@ -1426,6 +1464,612 @@ const DAY_ABBR: Record<string, string> = {
   Sunday: "Sun",
 };
 
+// ---------------------------------------------------------------------------
+// No-record / future state card
+// ---------------------------------------------------------------------------
+
+function NoRecordCard({
+  isoDate,
+  isFuture,
+}: {
+  isoDate: string;
+  isFuture: boolean;
+}) {
+  const { t } = useTranslation();
+
+  const parsedDate = (() => {
+    try {
+      return new Date(isoDate + "T00:00:00").toLocaleDateString(undefined, {
+        weekday: "long", year: "numeric", month: "long", day: "numeric",
+      });
+    } catch { return isoDate; }
+  })();
+
+  const shortDate = (() => {
+    try {
+      return new Date(isoDate + "T00:00:00").toLocaleDateString(undefined, {
+        month: "short", day: "numeric", year: "numeric",
+      });
+    } catch { return isoDate; }
+  })();
+
+  if (isFuture) {
+    return (
+      <div style={{ borderRadius: 16, border: "1px solid var(--border)", overflow: "hidden", background: "var(--bg-elev)" }}>
+        <div aria-hidden style={{ height: 3, background: "var(--accent)" }} />
+        <div style={{
+          padding: "32px 24px 22px",
+          display: "flex", flexDirection: "column", alignItems: "center",
+          gap: 14, textAlign: "center",
+          background: "linear-gradient(180deg, color-mix(in oklab, var(--accent) 5%, var(--bg-elev)) 0%, var(--bg-elev) 100%)",
+        }}>
+          {/* Illustration ring */}
+          <div style={{ position: "relative", marginBottom: 4 }}>
+            <div aria-hidden style={{
+              position: "absolute", inset: -10,
+              borderRadius: "50%",
+              border: "1.5px dashed color-mix(in oklab, var(--accent) 35%, var(--border))",
+            }} />
+            <div style={{
+              width: 74, height: 74, borderRadius: "50%",
+              background: "color-mix(in oklab, var(--accent) 9%, var(--bg-elev))",
+              border: "1.5px solid color-mix(in oklab, var(--accent) 28%, var(--border))",
+              display: "grid", placeItems: "center",
+            }}>
+              <svg width="40" height="40" viewBox="0 0 40 40" fill="none" aria-hidden>
+                <rect x="4" y="9" width="32" height="28" rx="4"
+                  style={{ fill: "none", stroke: "var(--accent-text)", strokeWidth: "1.7" }} />
+                <line x1="4" y1="17" x2="36" y2="17"
+                  style={{ stroke: "var(--accent-text)", strokeWidth: "1.5" }} />
+                <rect x="12" y="5" width="4" height="8" rx="2" style={{ fill: "var(--accent-text)" }} />
+                <rect x="24" y="5" width="4" height="8" rx="2" style={{ fill: "var(--accent-text)" }} />
+                {/* Three future dots */}
+                <circle cx="13" cy="26" r="2" style={{ fill: "var(--accent-text)", opacity: 0.35 }} />
+                <circle cx="20" cy="26" r="2" style={{ fill: "var(--accent-text)", opacity: 0.65 }} />
+                <circle cx="27" cy="26" r="2" style={{ fill: "var(--accent-text)" }} />
+              </svg>
+            </div>
+          </div>
+
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text)", marginBottom: 5 }}>
+              {t("calendar.noRecord.futureTitle", { defaultValue: "Future Date" }) as string}
+            </div>
+            <div style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+              <Icon name="calendar" size={12} aria-hidden />
+              {parsedDate}
+            </div>
+          </div>
+        </div>
+
+        <div style={{
+          padding: "13px 20px 15px",
+          borderTop: "1px solid color-mix(in oklab, var(--accent) 14%, var(--border))",
+          background: "color-mix(in oklab, var(--accent) 4%, var(--bg-sunken))",
+          display: "flex", gap: 10, alignItems: "flex-start",
+        }}>
+          <div style={{
+            width: 26, height: 26, borderRadius: 7, flexShrink: 0,
+            background: "color-mix(in oklab, var(--accent) 14%, var(--bg-elev))",
+            border: "1px solid color-mix(in oklab, var(--accent) 22%, var(--border))",
+            display: "grid", placeItems: "center",
+          }}>
+            <Icon name="clock" size={13} style={{ color: "var(--accent-text)" }} aria-hidden />
+          </div>
+          <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.65, fontFamily: "var(--font-sans)" }}>
+            {t("calendar.noRecord.futureSub", {
+              defaultValue: "Attendance monitoring will begin once this date arrives. Check back then to see detections, face crops, and the computed record.",
+            }) as string}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // ── no_record state ────────────────────────────────────────────────────────
+  return (
+    <div style={{ borderRadius: 16, border: "1px solid var(--border)", overflow: "hidden", background: "var(--bg-elev)" }}>
+      <div aria-hidden style={{ height: 3, background: "color-mix(in oklab, var(--text-tertiary) 45%, var(--border))" }} />
+
+      {/* Illustration + title */}
+      <div style={{
+        padding: "32px 24px 22px",
+        display: "flex", flexDirection: "column", alignItems: "center",
+        gap: 14, textAlign: "center",
+        background: "linear-gradient(180deg, color-mix(in oklab, var(--text-tertiary) 4%, var(--bg-elev)) 0%, var(--bg-elev) 100%)",
+      }}>
+        <div style={{ position: "relative", marginBottom: 4 }}>
+          <div aria-hidden style={{
+            position: "absolute", inset: -10,
+            borderRadius: "50%",
+            border: "1.5px dashed color-mix(in oklab, var(--text-tertiary) 30%, var(--border))",
+          }} />
+          <div style={{
+            width: 74, height: 74, borderRadius: "50%",
+            background: "color-mix(in oklab, var(--text-tertiary) 7%, var(--bg-elev))",
+            border: "1.5px solid color-mix(in oklab, var(--text-tertiary) 18%, var(--border))",
+            display: "grid", placeItems: "center",
+          }}>
+            {/* Camera body with question-mark lens */}
+            <svg width="40" height="40" viewBox="0 0 40 40" fill="none" aria-hidden>
+              <rect x="4" y="14" width="32" height="21" rx="3.5"
+                style={{ stroke: "var(--text-tertiary)", strokeWidth: "1.7", fill: "none" }} />
+              <path d="M15 14V12a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2"
+                style={{ stroke: "var(--text-tertiary)", strokeWidth: "1.5", fill: "none" }} />
+              <circle cx="20" cy="24.5" r="6.5"
+                style={{ stroke: "var(--text-tertiary)", strokeWidth: "1.5", fill: "none" }} />
+              <text x="20" y="28.5" textAnchor="middle"
+                style={{ fill: "var(--text-tertiary)", fontSize: "10px", fontWeight: 700, fontFamily: "sans-serif" }}>
+                ?
+              </text>
+            </svg>
+          </div>
+        </div>
+
+        <div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text)", marginBottom: 5 }}>
+            {t("calendar.noRecord.title", { defaultValue: "No Data for This Day" }) as string}
+          </div>
+          <div style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+            <Icon name="calendar" size={12} aria-hidden />
+            {parsedDate}
+          </div>
+        </div>
+
+        <span style={{
+          display: "inline-flex", alignItems: "center",
+          padding: "4px 12px", borderRadius: 999,
+          background: "var(--bg-sunken)", border: "1px solid var(--border)",
+        }}>
+          <span style={{ fontSize: 11.5, fontWeight: 500, color: "var(--text-tertiary)" }}>{shortDate}</span>
+        </span>
+      </div>
+
+      {/* Three fact rows */}
+      <div style={{
+        borderTop: "1px solid var(--border)",
+        background: "var(--bg-sunken)",
+        padding: "14px 18px",
+        display: "flex", flexDirection: "column", gap: 12,
+      }}>
+        {/* Fact 1 — No attendance record */}
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 11 }}>
+          <div style={{
+            width: 28, height: 28, borderRadius: 8, flexShrink: 0,
+            background: "var(--bg-elev)", border: "1px solid var(--border)",
+            display: "grid", placeItems: "center", color: "var(--text-tertiary)",
+          }}>
+            <Icon name="clipboard" size={13} aria-hidden />
+          </div>
+          <div style={{ paddingTop: 3 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)", lineHeight: 1.3, marginBottom: 2 }}>
+              {t("calendar.noRecord.fact1Title", { defaultValue: "No attendance record" }) as string}
+            </div>
+            <div style={{ fontSize: 11.5, color: "var(--text-tertiary)", lineHeight: 1.55 }}>
+              {t("calendar.noRecord.fact1Sub", { defaultValue: "The attendance engine found no data to process for this date." }) as string}
+            </div>
+          </div>
+        </div>
+
+        {/* Fact 2 — No detections */}
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 11 }}>
+          <div style={{
+            width: 28, height: 28, borderRadius: 8, flexShrink: 0,
+            background: "var(--bg-elev)", border: "1px solid var(--border)",
+            display: "grid", placeItems: "center", color: "var(--text-tertiary)",
+          }}>
+            <Icon name="camera" size={13} aria-hidden />
+          </div>
+          <div style={{ paddingTop: 3 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)", lineHeight: 1.3, marginBottom: 2 }}>
+              {t("calendar.noRecord.fact2Title", { defaultValue: "No detections available" }) as string}
+            </div>
+            <div style={{ fontSize: 11.5, color: "var(--text-tertiary)", lineHeight: 1.55 }}>
+              {t("calendar.noRecord.fact2Sub", { defaultValue: "No camera detection events were recorded on this date." }) as string}
+            </div>
+          </div>
+        </div>
+
+        {/* Fact 3 — No face crops */}
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 11 }}>
+          <div style={{
+            width: 28, height: 28, borderRadius: 8, flexShrink: 0,
+            background: "var(--bg-elev)", border: "1px solid var(--border)",
+            display: "grid", placeItems: "center", color: "var(--text-tertiary)",
+          }}>
+            <Icon name="user" size={13} aria-hidden />
+          </div>
+          <div style={{ paddingTop: 3 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)", lineHeight: 1.3, marginBottom: 2 }}>
+              {t("calendar.noRecord.fact3Title", { defaultValue: "No face crops captured" }) as string}
+            </div>
+            <div style={{ fontSize: 11.5, color: "var(--text-tertiary)", lineHeight: 1.55 }}>
+              {t("calendar.noRecord.fact3Sub", { defaultValue: "The system did not capture or store any face images for this date." }) as string}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom note */}
+      <div style={{
+        padding: "11px 18px 13px",
+        borderTop: "1px solid var(--border)",
+        background: "var(--bg-elev)",
+        display: "flex", gap: 9, alignItems: "flex-start",
+      }}>
+        <Icon name="info" size={13} style={{ color: "var(--text-tertiary)", flexShrink: 0, marginTop: 2 }} aria-hidden />
+        <p style={{ margin: 0, fontSize: 12, color: "var(--text-tertiary)", lineHeight: 1.65, fontFamily: "var(--font-sans)" }}>
+          {t("calendar.noRecord.note", {
+            defaultValue: "This may indicate the employee was absent, the camera was offline, or this date predates the system setup.",
+          }) as string}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// HolidayDayContent — premium holiday state card
+// ---------------------------------------------------------------------------
+
+function HolidayDayContent({
+  detail,
+  isoDate,
+  highlightedEventId,
+  onEventActivate,
+  registerRef,
+}: {
+  detail: import("./types").DayDetail;
+  isoDate: string;
+  highlightedEventId: number | null;
+  onEventActivate: (eventId: number) => void;
+  registerRef: (eventId: number, el: HTMLDivElement | null) => void;
+}) {
+  const { t } = useTranslation();
+
+  const workedOnHoliday =
+    detail.in_time != null ||
+    (detail.total_minutes != null && detail.total_minutes > 0) ||
+    detail.timeline.length > 0;
+
+  const holidayName = detail.holiday_name ?? t("calendar.holiday.unknownName", { defaultValue: "Public Holiday" }) as string;
+
+  const parsedDate = (() => {
+    try {
+      return new Date(`${isoDate}T00:00:00`).toLocaleDateString(undefined, {
+        weekday: "long", year: "numeric", month: "long", day: "numeric",
+      });
+    } catch { return isoDate; }
+  })();
+
+  const shortDate = (() => {
+    try {
+      return new Date(`${isoDate}T00:00:00`).toLocaleDateString(undefined, {
+        day: "numeric", month: "short", year: "numeric",
+      });
+    } catch { return isoDate; }
+  })();
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+      {/* ── Hero banner ── */}
+      <div style={{
+        background: "var(--bg-elev)",
+        border: "1px solid color-mix(in oklab, var(--info) 40%, var(--border))",
+        borderRadius: 14,
+        overflow: "hidden",
+      }}>
+        {/* Accent top bar */}
+        <div aria-hidden style={{ height: 4, background: "var(--info)", opacity: 0.85 }} />
+
+        <div style={{ padding: "20px 20px 18px", display: "flex", gap: 16, alignItems: "flex-start" }}>
+          {/* Star illustration */}
+          <div aria-hidden style={{
+            width: 54, height: 54, borderRadius: 14, flexShrink: 0,
+            background: "color-mix(in oklab, var(--info) 12%, var(--bg-elev))",
+            border: "1.5px solid color-mix(in oklab, var(--info) 30%, var(--border))",
+            display: "grid", placeItems: "center",
+          }}>
+            <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden>
+              <path
+                d="M14 2l2.94 6.26L24 9.27l-5 5.14 1.18 7.1L14 18.26l-6.18 3.25L9 14.41l-5-5.14 7.06-1.01L14 2z"
+                fill="var(--info)"
+                fillOpacity="0.85"
+                stroke="var(--info)"
+                strokeWidth="1"
+                strokeLinejoin="round"
+              />
+              {/* inner sparkle dots */}
+              <circle cx="14" cy="14" r="2.5" fill="var(--bg-elev)" />
+              <circle cx="6" cy="5" r="1.2" fill="var(--info)" fillOpacity="0.45" />
+              <circle cx="22" cy="5" r="1.2" fill="var(--info)" fillOpacity="0.45" />
+              <circle cx="4" cy="15" r="1" fill="var(--info)" fillOpacity="0.3" />
+              <circle cx="24" cy="15" r="1" fill="var(--info)" fillOpacity="0.3" />
+            </svg>
+          </div>
+
+          {/* Text block */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
+              <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)", lineHeight: 1.15, flex: 1, minWidth: 0 }}>
+                {holidayName}
+              </div>
+              <span style={{
+                padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700,
+                background: "color-mix(in oklab, var(--info) 14%, var(--bg-elev))",
+                color: "var(--info-text)",
+                border: "1px solid color-mix(in oklab, var(--info) 35%, transparent)",
+                flexShrink: 0, whiteSpace: "nowrap", marginTop: 1,
+              }}>
+                {t("calendar.holiday.officialBadge", { defaultValue: "Official Holiday" }) as string}
+              </span>
+            </div>
+            <div style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.6, marginBottom: 6 }}>
+              {t("calendar.holiday.noAttendanceMessage", { defaultValue: "No attendance is expected today. This day is excluded from the absent count." }) as string}
+            </div>
+            <div className="mono" style={{ fontSize: 11.5, color: "var(--text-tertiary)", display: "flex", alignItems: "center", gap: 5 }}>
+              <Icon name="calendar" size={11} aria-hidden />
+              {parsedDate}
+            </div>
+          </div>
+        </div>
+
+        {/* Date chip row */}
+        <div style={{
+          borderTop: "1px solid color-mix(in oklab, var(--info) 20%, var(--border))",
+          background: "color-mix(in oklab, var(--info) 5%, var(--bg-elev))",
+          padding: "10px 20px",
+          display: "flex", alignItems: "center", gap: 10,
+        }}>
+          <span style={{
+            display: "inline-flex", alignItems: "center", gap: 5,
+            padding: "4px 12px", borderRadius: 999,
+            background: "color-mix(in oklab, var(--info) 13%, var(--bg-elev))",
+            border: "1px solid color-mix(in oklab, var(--info) 25%, var(--border))",
+          }}>
+            <Icon name="calendar" size={11} style={{ color: "var(--info-text)" }} aria-hidden />
+            <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--info-text)" }}>{shortDate}</span>
+          </span>
+          {!workedOnHoliday && (
+            <span style={{
+              display: "inline-flex", alignItems: "center", gap: 5,
+              padding: "4px 12px", borderRadius: 999,
+              background: "color-mix(in oklab, var(--success) 10%, var(--bg-elev))",
+              border: "1px solid color-mix(in oklab, var(--success) 25%, var(--border))",
+            }}>
+              <span aria-hidden style={{ fontSize: 10, color: "var(--success-text)" }}>✓</span>
+              <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--success-text)" }}>
+                {t("calendar.holiday.noActivityChip", { defaultValue: "No activity" }) as string}
+              </span>
+            </span>
+          )}
+          {workedOnHoliday && detail.overtime_minutes > 0 && (
+            <span style={{
+              display: "inline-flex", alignItems: "center", gap: 5,
+              padding: "4px 12px", borderRadius: 999,
+              background: "color-mix(in oklab, var(--warning) 12%, var(--bg-elev))",
+              border: "1px solid color-mix(in oklab, var(--warning) 30%, var(--border))",
+            }}>
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--warning-text)" }}>
+                +{(detail.overtime_minutes / 60).toFixed(1)}h OT
+              </span>
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* ── If NOT worked: 3 informational fact rows ── */}
+      {!workedOnHoliday && (
+        <div style={{
+          background: "var(--bg-elev)",
+          border: "1px solid var(--border)",
+          borderRadius: 12,
+          overflow: "hidden",
+        }}>
+          <div style={{
+            padding: "10px 16px 8px",
+            fontSize: 10.5, fontWeight: 700, textTransform: "uppercase",
+            letterSpacing: "0.06em", color: "var(--text-tertiary)",
+            borderBottom: "1px solid var(--border)",
+            background: "var(--bg-sunken)",
+          }}>
+            {t("calendar.holiday.detailsLabel", { defaultValue: "Holiday details" }) as string}
+          </div>
+
+          <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
+            {/* Fact 1 */}
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+              <div style={{
+                width: 32, height: 32, borderRadius: 9, flexShrink: 0,
+                background: "color-mix(in oklab, var(--success) 12%, var(--bg-elev))",
+                border: "1px solid color-mix(in oklab, var(--success) 25%, var(--border))",
+                display: "grid", placeItems: "center",
+              }}>
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
+                  <path d="M2.5 7l3 3 6-6" stroke="var(--success-text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </div>
+              <div style={{ paddingTop: 2 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", lineHeight: 1.3, marginBottom: 2 }}>
+                  {t("calendar.holiday.fact1Title", { defaultValue: "No attendance required" }) as string}
+                </div>
+                <div style={{ fontSize: 12, color: "var(--text-tertiary)", lineHeight: 1.55 }}>
+                  {t("calendar.holiday.fact1Sub", { defaultValue: "Employees are not expected to work on this official holiday." }) as string}
+                </div>
+              </div>
+            </div>
+
+            {/* Fact 2 */}
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+              <div style={{
+                width: 32, height: 32, borderRadius: 9, flexShrink: 0,
+                background: "color-mix(in oklab, var(--info) 10%, var(--bg-elev))",
+                border: "1px solid color-mix(in oklab, var(--info) 22%, var(--border))",
+                display: "grid", placeItems: "center",
+              }}>
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
+                  <rect x="1.5" y="3" width="11" height="9" rx="1.5" stroke="var(--info-text)" strokeWidth="1.4" />
+                  <path d="M1.5 6h11" stroke="var(--info-text)" strokeWidth="1.4" />
+                  <path d="M4.5 1.5v3M9.5 1.5v3" stroke="var(--info-text)" strokeWidth="1.4" strokeLinecap="round" />
+                </svg>
+              </div>
+              <div style={{ paddingTop: 2 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", lineHeight: 1.3, marginBottom: 2 }}>
+                  {t("calendar.holiday.fact2Title", { defaultValue: "Record stays clean" }) as string}
+                </div>
+                <div style={{ fontSize: 12, color: "var(--text-tertiary)", lineHeight: 1.55 }}>
+                  {t("calendar.holiday.fact2Sub", { defaultValue: "Absence on a public holiday is not counted against the employee's attendance record." }) as string}
+                </div>
+              </div>
+            </div>
+
+            {/* Fact 3 */}
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+              <div style={{
+                width: 32, height: 32, borderRadius: 9, flexShrink: 0,
+                background: "color-mix(in oklab, var(--warning) 10%, var(--bg-elev))",
+                border: "1px solid color-mix(in oklab, var(--warning) 22%, var(--border))",
+                display: "grid", placeItems: "center",
+              }}>
+                <BsClockFill style={{ fontSize: 13, color: "var(--warning-text)" }} aria-hidden />
+              </div>
+              <div style={{ paddingTop: 2 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", lineHeight: 1.3, marginBottom: 2 }}>
+                  {t("calendar.holiday.fact3Title", { defaultValue: "Overtime applies if worked" }) as string}
+                </div>
+                <div style={{ fontSize: 12, color: "var(--text-tertiary)", lineHeight: 1.55 }}>
+                  {t("calendar.holiday.fact3Sub", { defaultValue: "Any hours logged by the camera on this day are treated as overtime per the assigned shift policy." }) as string}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── If worked: show worked-on-holiday warning banner + data ── */}
+      {workedOnHoliday && (
+        <>
+          {/* Warning card */}
+          <div style={{
+            background: "var(--warning-soft)",
+            border: "1px solid var(--warning)",
+            borderRadius: 12,
+            overflow: "hidden",
+          }}>
+            <div aria-hidden style={{ height: 4, background: "var(--warning)" }} />
+            <div style={{ padding: "14px 16px", display: "flex", gap: 12, alignItems: "flex-start" }}>
+              <div aria-hidden style={{
+                width: 36, height: 36, borderRadius: 9,
+                background: "var(--warning)", color: "#fff",
+                display: "grid", placeItems: "center", fontSize: 17, flexShrink: 0,
+              }}>⚠</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "var(--warning-text)", marginBottom: 3 }}>
+                  {t("calendar.holiday.workedTitle", { defaultValue: "Worked on a public holiday" }) as string}
+                </div>
+                <div style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                  {t("calendar.holiday.workedSubtitle", {
+                    name: holidayName,
+                    defaultValue: `Camera detections were recorded on ${holidayName}. Hours are counted as overtime per policy.`,
+                  }) as string}
+                </div>
+              </div>
+              {detail.overtime_minutes > 0 && (
+                <span style={{
+                  padding: "3px 10px", borderRadius: 999, fontSize: 11.5, fontWeight: 700,
+                  background: "var(--warning)", color: "#fff", flexShrink: 0, whiteSpace: "nowrap",
+                }}>
+                  +{(detail.overtime_minutes / 60).toFixed(1)}h OT
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Summary tiles */}
+          <div className="grid grid-4" style={{ gap: 10 }}>
+            <Tile label={t("calendar.inTime") as string} value={detail.in_time?.slice(0, 5) ?? "—"} />
+            <Tile label={t("calendar.outTime") as string} value={detail.out_time?.slice(0, 5) ?? "—"} />
+            <Tile
+              label={t("calendar.total") as string}
+              value={detail.total_minutes != null ? `${(detail.total_minutes / 60).toFixed(1)}h` : "—"}
+            />
+            <Tile
+              label={t("calendar.overtime") as string}
+              value={detail.overtime_minutes > 0 ? `+${(detail.overtime_minutes / 60).toFixed(1)}h` : "—"}
+            />
+          </div>
+
+          {/* Timeline */}
+          <Section label={t("calendar.dayTimeline") as string}>
+            <DayTimelineRibbon
+              intervals={detail.timeline}
+              evidence={detail.evidence}
+              inTime={detail.in_time ?? null}
+              outTime={detail.out_time ?? null}
+              totalMinutes={detail.total_minutes ?? null}
+              onEventActivate={onEventActivate}
+            />
+            {detail.timeline.length === 0 && (
+              <div className="text-xs text-dim" style={{ marginTop: 6 }}>
+                {t("calendar.noTimeline") as string}
+              </div>
+            )}
+          </Section>
+
+          {/* Policy */}
+          {detail.policy_name && (
+            <Section label={t("calendar.policyApplied") as string}>
+              <PolicyAppliedCard detail={detail} />
+            </Section>
+          )}
+
+          {/* Evidence */}
+          <Section label={`${t("calendar.evidence") as string}${detail.evidence.length > 0 ? ` · ${detail.evidence.length}` : ""}`}>
+            <EvidenceGallery
+              evidence={detail.evidence}
+              status={detail.status}
+              highlightedEventId={highlightedEventId}
+              isoDate={isoDate}
+              registerRef={registerRef}
+            />
+          </Section>
+        </>
+      )}
+
+      {/* ── Assigned policy (not-worked path) ── */}
+      {!workedOnHoliday && detail.policy_name && (
+        <Section label={t("calendar.weekOff.shiftPolicy", { defaultValue: "Assigned shift policy" }) as string}>
+          <PolicyAppliedCard detail={detail} />
+        </Section>
+      )}
+
+      {/* ── Bottom note ── */}
+      {!workedOnHoliday && (
+        <div style={{
+          display: "flex", gap: 10, alignItems: "flex-start",
+          padding: "11px 14px",
+          background: "var(--bg-sunken)",
+          border: "1px solid var(--border)",
+          borderRadius: 8, borderStyle: "dashed",
+        }}>
+          <span aria-hidden style={{
+            width: 20, height: 20, borderRadius: "50%",
+            background: "var(--text-tertiary)", color: "var(--bg)",
+            fontSize: 11, fontWeight: 700, display: "grid", placeItems: "center",
+            flexShrink: 0, marginTop: 1,
+          }}>i</span>
+          <span style={{ fontSize: 12, color: "var(--text-tertiary)", lineHeight: 1.6 }}>
+            {t("calendar.holiday.note", {
+              defaultValue: "If this day should have been a working day, contact your HR team to update the holiday schedule.",
+            }) as string}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function WeekOffDayContent({
   detail,
   isoDate,
@@ -1707,7 +2351,7 @@ function WeekOffDayContent({
             </div>
           </div>
 
-          {/* Today */}
+          {/* Selected day */}
           <div
             style={{
               padding: "10px 12px",
@@ -1716,20 +2360,6 @@ function WeekOffDayContent({
               border: "1px solid var(--accent)",
             }}
           >
-            <div
-              className="text-xs"
-              style={{
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-                fontWeight: 500,
-                marginBottom: 4,
-                color: "var(--accent-text)",
-              }}
-            >
-              {t("calendar.weekOff.statToday", {
-                defaultValue: "Today",
-              }) as string}
-            </div>
             <div
               style={{
                 fontSize: 15,
@@ -1742,7 +2372,7 @@ function WeekOffDayContent({
             </div>
             <div
               className="mono text-xs"
-              style={{ marginTop: 3, color: "var(--accent-text)", opacity: 0.75 }}
+              style={{ marginTop: 4, color: "var(--accent-text)", opacity: 0.75 }}
             >
               {isoDate}
             </div>
@@ -2050,6 +2680,14 @@ function EscalationConfirmedCard({
     }
   };
 
+  // Parse employee-submitted timings from the encoded reason_text.
+  const parsedTimings = parseEscalationTimes(snapshot?.reason_text);
+  const hasTimings = parsedTimings.inTime !== null || parsedTimings.outTime !== null;
+  // Show only the plain comment in the chain step, not the encoded prefix line.
+  const submittedComment = hasTimings
+    ? (parsedTimings.comment || (snapshot?.reason_category ?? null))
+    : (snapshot?.reason_text ?? snapshot?.reason_category ?? null);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       {/* Success banner */}
@@ -2109,6 +2747,14 @@ function EscalationConfirmedCard({
         </div>
       </div>
 
+      {/* Employee-submitted timings (parsed from reason_text) */}
+      {snapshot && hasTimings && (
+        <EscalationTimingCard
+          inTime={parsedTimings.inTime}
+          outTime={parsedTimings.outTime}
+        />
+      )}
+
       {/* Approval chain */}
       {snapshot && (
         <div
@@ -2136,7 +2782,7 @@ function EscalationConfirmedCard({
               label={t("escalation.chainSubmitted", { defaultValue: "Submitted" }) as string}
               actor={null}
               meta={fmtDt(snapshot.submitted_at)}
-              comment={snapshot.reason_text ?? snapshot.reason_category}
+              comment={submittedComment}
               done
             />
             <ChainStep
@@ -2285,34 +2931,187 @@ function SimpleAbsentCard({
     } catch { return isoDate; }
   })();
 
+  const shortDate = (() => {
+    try {
+      return new Date(`${isoDate}T00:00:00`).toLocaleDateString(undefined, {
+        month: "short", day: "numeric", year: "numeric",
+      });
+    } catch { return isoDate; }
+  })();
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      {/* Absent status card */}
-      <div style={{ background: "var(--danger-soft)", border: "1px solid var(--danger)", borderRadius: 12, overflow: "hidden" }}>
-        <div aria-hidden style={{ height: 4, background: "var(--danger-text)" }} />
-        <div style={{ padding: "14px 16px", display: "flex", gap: 12, alignItems: "flex-start" }}>
-          <BsXCircleFill aria-hidden style={{ flexShrink: 0, fontSize: 22, color: "var(--danger-text)", marginTop: 1 }} />
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "var(--danger-text)", marginBottom: 4 }}>
-              {t("calendar.absent.noRecordTitle", { defaultValue: "No attendance recorded" }) as string}
-            </div>
-            <div style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.55 }}>
-              {parsedDate}
-            </div>
-            <div style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.55, marginTop: 6 }}>
-              {onRaiseEscalation
-                ? t("calendar.absent.escalationHint", {
-                    defaultValue: "If you were present but the system missed you, submit an escalation request for manager and HR review.",
-                  }) as string
-                : t("calendar.absent.noRequestSubmitted", {
-                    defaultValue: "The employee has not submitted an escalation request for this day.",
-                  }) as string}
+      {/* ── Main illustrated absent-state card ── */}
+      <div style={{
+        borderRadius: 16,
+        border: "1px solid var(--danger)",
+        overflow: "hidden",
+        background: "var(--bg-elev)",
+      }}>
+        {/* Accent top bar */}
+        <div aria-hidden style={{ height: 3, background: "var(--danger-text)" }} />
+
+        {/* Illustration + title section */}
+        <div style={{
+          padding: "32px 24px 22px",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 16,
+          textAlign: "center",
+          background: "linear-gradient(180deg, color-mix(in oklab, var(--danger-text) 5%, var(--bg-elev)) 0%, var(--bg-elev) 100%)",
+        }}>
+          {/* Illustration ring + icon */}
+          <div style={{ position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+            {/* Outer dashed ring */}
+            <div aria-hidden style={{
+              position: "absolute",
+              width: 92,
+              height: 92,
+              borderRadius: "50%",
+              border: "1.5px dashed color-mix(in oklab, var(--danger-text) 20%, transparent)",
+            }} />
+            {/* Main icon circle */}
+            <div style={{
+              width: 74,
+              height: 74,
+              borderRadius: "50%",
+              background: "color-mix(in oklab, var(--danger-text) 9%, var(--bg-elev))",
+              border: "1.5px solid color-mix(in oklab, var(--danger-text) 18%, transparent)",
+              display: "grid",
+              placeItems: "center",
+            }}>
+              {/* Calendar + X SVG illustration */}
+              <svg
+                width="40"
+                height="40"
+                viewBox="0 0 40 40"
+                fill="none"
+                aria-hidden="true"
+              >
+                {/* Calendar body */}
+                <rect
+                  x="4" y="9" width="32" height="28" rx="4"
+                  style={{ fill: "none", stroke: "var(--danger-text)", strokeWidth: "1.7" }}
+                />
+                {/* Header divider line */}
+                <line
+                  x1="4" y1="17" x2="36" y2="17"
+                  style={{ stroke: "var(--danger-text)", strokeWidth: "1.5" }}
+                />
+                {/* Ring pin — left */}
+                <rect
+                  x="12" y="5" width="4" height="8" rx="2"
+                  style={{ fill: "var(--danger-text)" }}
+                />
+                {/* Ring pin — right */}
+                <rect
+                  x="24" y="5" width="4" height="8" rx="2"
+                  style={{ fill: "var(--danger-text)" }}
+                />
+                {/* X cross — left-to-right diagonal */}
+                <line
+                  x1="13" y1="23" x2="27" y2="32"
+                  style={{ stroke: "var(--danger-text)", strokeWidth: "2.3", strokeLinecap: "round" }}
+                />
+                {/* X cross — right-to-left diagonal */}
+                <line
+                  x1="27" y1="23" x2="13" y2="32"
+                  style={{ stroke: "var(--danger-text)", strokeWidth: "2.3", strokeLinecap: "round" }}
+                />
+              </svg>
             </div>
           </div>
+
+          {/* Title */}
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text)", marginBottom: 5 }}>
+              {t("calendar.absent.noRecordTitle", { defaultValue: "No Attendance Recorded" }) as string}
+            </div>
+            <div style={{
+              fontSize: 12.5,
+              color: "var(--text-secondary)",
+              lineHeight: 1.5,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 5,
+            }}>
+              <Icon name="calendar" size={12} aria-hidden />
+              {parsedDate}
+            </div>
+          </div>
+
+          {/* Status + date chips */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+            <span style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
+              padding: "4px 11px",
+              borderRadius: 999,
+              background: "color-mix(in oklab, var(--danger-text) 10%, transparent)",
+              border: "1px solid color-mix(in oklab, var(--danger-text) 22%, transparent)",
+            }}>
+              <span aria-hidden style={{
+                width: 6,
+                height: 6,
+                borderRadius: "50%",
+                background: "var(--danger-text)",
+                flexShrink: 0,
+              }} />
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--danger-text)", letterSpacing: ".03em" }}>
+                {t("calendar.statusAbsent", { defaultValue: "Absent" }) as string}
+              </span>
+            </span>
+            <span style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
+              padding: "4px 11px",
+              borderRadius: 999,
+              background: "var(--bg-sunken)",
+              border: "1px solid var(--border)",
+            }}>
+              <span style={{ fontSize: 11.5, fontWeight: 500, color: "var(--text-tertiary)", letterSpacing: ".01em" }}>
+                {shortDate}
+              </span>
+            </span>
+          </div>
+        </div>
+
+        {/* Guidance strip */}
+        <div style={{
+          padding: "12px 20px 16px",
+          borderTop: "1px solid color-mix(in oklab, var(--danger-text) 10%, var(--border))",
+          background: "color-mix(in oklab, var(--danger-text) 3%, var(--bg-elev))",
+          display: "flex",
+          gap: 9,
+          alignItems: "flex-start",
+        }}>
+          <BsXCircleFill
+            aria-hidden
+            style={{ flexShrink: 0, fontSize: 14, color: "var(--danger-text)", marginTop: 2, opacity: 0.7 }}
+          />
+          <p style={{
+            margin: 0,
+            fontSize: 12.5,
+            color: "var(--text-secondary)",
+            lineHeight: 1.65,
+            fontFamily: "var(--font-sans)",
+          }}>
+            {onRaiseEscalation
+              ? t("calendar.absent.escalationHint", {
+                  defaultValue: "If you were present but the system missed you, submit an escalation request for manager and HR review.",
+                }) as string
+              : t("calendar.absent.noRequestSubmitted", {
+                  defaultValue: "No escalation request was submitted for this day. The employee may have been on leave or may not have reported the attendance issue.",
+                }) as string}
+          </p>
         </div>
       </div>
 
-      {/* Exception CTA — Employee role only */}
+      {/* ── Escalation CTA — Employee role only ── */}
       {onRaiseEscalation && (
         <button
           type="button"
@@ -2320,18 +3119,43 @@ function SimpleAbsentCard({
           onMouseEnter={() => setHovered(true)}
           onMouseLeave={() => setHovered(false)}
           style={{
-            display: "flex", alignItems: "center", gap: 12,
-            padding: "13px 16px", borderRadius: 10,
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            padding: "13px 16px",
+            borderRadius: 10,
             background: "var(--bg-elev)",
             border: `1.5px solid ${hovered ? "var(--accent)" : "var(--border)"}`,
             boxShadow: hovered ? "0 2px 12px rgba(0,0,0,0.09)" : "var(--shadow-sm)",
-            cursor: "pointer", textAlign: "start", width: "100%",
+            cursor: "pointer",
+            textAlign: "start",
+            width: "100%",
             transition: "border-color 150ms ease, box-shadow 150ms ease",
             fontFamily: "var(--font-sans)",
           }}
         >
-          <div aria-hidden style={{ flexShrink: 0, width: 38, height: 38, borderRadius: 10, background: hovered ? "color-mix(in oklab, var(--accent) 14%, var(--bg-elev))" : "var(--bg-sunken)", display: "grid", placeItems: "center", transition: "background 150ms ease" }}>
-            <BsClipboard2PlusFill style={{ fontSize: 18, color: hovered ? "var(--accent)" : "var(--text-secondary)", transition: "color 150ms ease" }} />
+          <div
+            aria-hidden
+            style={{
+              flexShrink: 0,
+              width: 38,
+              height: 38,
+              borderRadius: 10,
+              background: hovered
+                ? "color-mix(in oklab, var(--accent) 14%, var(--bg-elev))"
+                : "var(--bg-sunken)",
+              display: "grid",
+              placeItems: "center",
+              transition: "background 150ms ease",
+            }}
+          >
+            <BsClipboard2PlusFill
+              style={{
+                fontSize: 18,
+                color: hovered ? "var(--accent)" : "var(--text-secondary)",
+                transition: "color 150ms ease",
+              }}
+            />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text)" }}>
@@ -2349,6 +3173,172 @@ function SimpleAbsentCard({
     </div>
   );
 }
+
+// ─ Escalation time parser ─────────────────────────────────────────────────────
+// The EscalationDrawer bakes in/out times into reason_text as:
+// "Estimated time present — In: HH:MM  |  Out: HH:MM\n<comment>"
+// We parse them out here so they can be shown in a structured timing card.
+
+function parseEscalationTimes(reasonText: string | null | undefined): {
+  inTime: string | null;
+  outTime: string | null;
+  comment: string;
+} {
+  if (!reasonText) return { inTime: null, outTime: null, comment: "" };
+  const lines = reasonText.split("\n");
+  const first = lines[0] ?? "";
+  const PREFIX = "Estimated time present — ";
+  if (!first.startsWith(PREFIX)) {
+    return { inTime: null, outTime: null, comment: reasonText };
+  }
+  const parts = first.slice(PREFIX.length).split("  |  ");
+  let inTime: string | null = null;
+  let outTime: string | null = null;
+  for (const p of parts) {
+    const s = p.trim();
+    if (s.startsWith("In: ")) inTime = s.slice(4);
+    else if (s.startsWith("Out: ")) outTime = s.slice(5);
+  }
+  return { inTime, outTime, comment: lines.slice(1).join("\n") };
+}
+
+// ─ EscalationTimingCard ───────────────────────────────────────────────────────
+
+function EscalationTimingCard({
+  inTime,
+  outTime,
+}: {
+  inTime: string | null;
+  outTime: string | null;
+}) {
+  const { t } = useTranslation();
+
+  // Convert "HH:MM" to "H:MM AM/PM"; returns "—" for null/unknown.
+  const fmt12 = (raw: string | null): string => {
+    if (!raw) return "—";
+    const [hStr, mStr] = raw.split(":");
+    const h = parseInt(hStr ?? "", 10);
+    const m = (mStr ?? "00").padStart(2, "0");
+    if (isNaN(h)) return raw;
+    const suffix = h >= 12 ? "PM" : "AM";
+    const h12 = h % 12 === 0 ? 12 : h % 12;
+    return `${h12}:${m} ${suffix}`;
+  };
+
+  return (
+    <div style={{ borderRadius: 10, overflow: "hidden", border: "1px solid var(--border)" }}>
+      {/* Header */}
+      <div style={{
+        padding: "8px 13px",
+        background: "var(--bg-sunken)",
+        borderBottom: "1px solid var(--border)",
+        display: "flex",
+        alignItems: "center",
+        gap: 7,
+      }}>
+        <BsClockFill aria-hidden style={{ fontSize: 11, color: "var(--accent-text)", flexShrink: 0 }} />
+        <span style={{
+          fontSize: 10.5, fontWeight: 700,
+          textTransform: "uppercase", letterSpacing: "0.06em",
+          color: "var(--text-secondary)",
+          flex: 1,
+        }}>
+          {t("calendar.absent.submittedTimings", { defaultValue: "Employee-submitted timings" }) as string}
+        </span>
+        <span style={{
+          fontSize: 9.5, fontWeight: 600,
+          color: "var(--accent-text)",
+          background: "color-mix(in oklab, var(--accent) 14%, transparent)",
+          padding: "2px 8px", borderRadius: 999,
+          border: "1px solid color-mix(in oklab, var(--accent) 26%, transparent)",
+          whiteSpace: "nowrap",
+        }}>
+          {t("calendar.absent.employeeSubmitted", { defaultValue: "Employee-submitted" }) as string}
+        </span>
+      </div>
+
+      {/* Two highlighted time panels */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
+        {/* In Time panel */}
+        <div style={{
+          padding: "18px 14px 16px",
+          background: "color-mix(in oklab, var(--success) 10%, var(--bg-elev))",
+          borderRight: "1px solid color-mix(in oklab, var(--success) 22%, var(--border))",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 9,
+          textAlign: "center",
+        }}>
+          <div style={{
+            width: 38, height: 38, borderRadius: "50%",
+            background: "color-mix(in oklab, var(--success) 18%, var(--bg-elev))",
+            border: "2px solid color-mix(in oklab, var(--success) 45%, transparent)",
+            display: "grid", placeItems: "center",
+          }}>
+            <BsBoxArrowInRight aria-hidden style={{ fontSize: 17, color: "var(--success)" }} />
+          </div>
+          <div style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 21,
+            fontWeight: 800,
+            color: inTime ? "var(--success)" : "var(--text-tertiary)",
+            letterSpacing: "0.01em",
+            lineHeight: 1,
+          }}>
+            {fmt12(inTime)}
+          </div>
+          <div style={{
+            fontSize: 10, fontWeight: 700,
+            textTransform: "uppercase", letterSpacing: "0.07em",
+            color: "color-mix(in oklab, var(--success) 80%, var(--text-tertiary))",
+          }}>
+            {t("calendar.inTime", { defaultValue: "In Time" }) as string}
+          </div>
+        </div>
+
+        {/* Out Time panel */}
+        <div style={{
+          padding: "18px 14px 16px",
+          background: "color-mix(in oklab, var(--warning) 10%, var(--bg-elev))",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 9,
+          textAlign: "center",
+        }}>
+          <div style={{
+            width: 38, height: 38, borderRadius: "50%",
+            background: "color-mix(in oklab, var(--warning) 18%, var(--bg-elev))",
+            border: "2px solid color-mix(in oklab, var(--warning) 45%, transparent)",
+            display: "grid", placeItems: "center",
+          }}>
+            <BsBoxArrowRight aria-hidden style={{ fontSize: 17, color: "var(--warning-text)" }} />
+          </div>
+          <div style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 21,
+            fontWeight: 800,
+            color: outTime ? "var(--warning-text)" : "var(--text-tertiary)",
+            letterSpacing: "0.01em",
+            lineHeight: 1,
+          }}>
+            {fmt12(outTime)}
+          </div>
+          <div style={{
+            fontSize: 10, fontWeight: 700,
+            textTransform: "uppercase", letterSpacing: "0.07em",
+            color: "color-mix(in oklab, var(--warning-text) 80%, var(--text-tertiary))",
+          }}>
+            {t("calendar.outTime", { defaultValue: "Out Time" }) as string}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 function RequestPendingCard({
   detail,
@@ -2444,17 +3434,48 @@ function RequestPendingCard({
         </div>
 
         {/* Request summary */}
-        <div style={{ marginTop: 14, padding: "10px 12px", background: "var(--bg-sunken)", borderRadius: 8, display: "flex", flexDirection: "column", gap: 6 }}>
-          <FactRow label={t("calendar.absent.typeLabel", { defaultValue: "Type" }) as string} value={typeLabel} />
-          <FactRow label={t("calendar.absent.reasonLabel", { defaultValue: "Reason" }) as string} value={req.reason_category} />
-          {req.reason_text && (
+        <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+          {/* Meta facts */}
+          <div style={{ padding: "10px 12px", background: "var(--bg-sunken)", borderRadius: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+            <FactRow label={t("calendar.absent.typeLabel", { defaultValue: "Type" }) as string} value={typeLabel} />
+            <FactRow label={t("calendar.absent.reasonLabel", { defaultValue: "Reason" }) as string} value={req.reason_category} />
+            <FactRow label={t("calendar.absent.submittedAt", { defaultValue: "Submitted" }) as string} value={fmtDt(req.submitted_at)} mono />
+            {req.manager_name && (
+              <FactRow label={t("calendar.absent.assignedTo", { defaultValue: "Assigned to" }) as string} value={req.manager_name} bold />
+            )}
+            <FactRow label={t("calendar.absent.currentStage", { defaultValue: "Status" }) as string} value={stageLabel} accent />
+          </div>
+
+          {/* Escalation: structured timing card + comment */}
+          {req.request_type === "escalation" && (() => {
+            const { inTime, outTime, comment } = parseEscalationTimes(req.reason_text);
+            const hasTimings = inTime !== null || outTime !== null;
+            return (
+              <>
+                {hasTimings && (
+                  <EscalationTimingCard inTime={inTime} outTime={outTime} />
+                )}
+                {comment && (
+                  <div style={{ padding: "10px 12px", background: "var(--bg-sunken)", borderRadius: 8 }}>
+                    <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-tertiary)", marginBottom: 5 }}>
+                      {t("calendar.absent.commentLabel", { defaultValue: "Employee comment" }) as string}
+                    </div>
+                    <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.6, fontStyle: "italic", fontFamily: "var(--font-sans)" }}>
+                      &ldquo;{comment}&rdquo;
+                    </p>
+                  </div>
+                )}
+                {!hasTimings && req.reason_text && (
+                  <FactRow label={t("calendar.absent.detailsLabel", { defaultValue: "Details" }) as string} value={`"${req.reason_text}"`} italic />
+                )}
+              </>
+            );
+          })()}
+
+          {/* Exception: plain details row */}
+          {req.request_type !== "escalation" && req.reason_text && (
             <FactRow label={t("calendar.absent.detailsLabel", { defaultValue: "Details" }) as string} value={`"${req.reason_text}"`} italic />
           )}
-          <FactRow label={t("calendar.absent.submittedAt", { defaultValue: "Submitted" }) as string} value={fmtDt(req.submitted_at)} mono />
-          {req.manager_name && (
-            <FactRow label={t("calendar.absent.assignedTo", { defaultValue: "Assigned to" }) as string} value={req.manager_name} bold />
-          )}
-          <FactRow label={t("calendar.absent.currentStage", { defaultValue: "Status" }) as string} value={stageLabel} accent />
         </div>
       </div>
 
@@ -2823,294 +3844,148 @@ function ApprovalChainStep({
 // ---------------------------------------------------------------------------
 
 function AbsentWaitingCard({
-  status,
   isoDate,
-  policyName,
-  policyType: _policyType,
-  policyShiftStart,
-  policyShiftEnd,
-  policyRequiredHours,
+  detail,
   onSubmitException,
   onRaiseEscalation,
 }: {
-  status: "absent" | "waiting";
   isoDate: string;
-  policyName: string | null;
-  policyType: string | null;
-  policyShiftStart: string | null;
-  policyShiftEnd: string | null;
-  policyRequiredHours: number | null;
+  detail: DayDetail;
   onSubmitException: ((isoDate: string) => void) | null;
   onRaiseEscalation: (() => void) | null;
 }) {
   const { t } = useTranslation();
-  const isAbsent = status === "absent";
-
-  // Colours and icon per status
-  const accent = isAbsent ? "var(--danger-text)" : "var(--warning-text)";
-  const accentSoft = isAbsent ? "var(--danger-soft)" : "var(--warning-soft)";
-  const accentBorder = isAbsent ? "var(--danger)" : "var(--warning)";
-  const icon = isAbsent ? "✕" : "⏳";
-
-  const headingKey = isAbsent ? "absentHeading" : "waitingHeading";
-  const subtitleKey = isAbsent ? "absentSubtitle" : "waitingSubtitle";
-  const headingDefault = isAbsent
-    ? "No attendance recorded"
-    : "Day in progress";
-  const subtitleDefault = isAbsent
-    ? "This employee was not captured on this day and no approved exception exists."
-    : "The shift window is still open. Attendance will update as detections come in.";
-
-  // Format an HH:MM time string into a 12-hr-style friendly label
-  const friendly = (t: string | null) => {
-    if (!t) return null;
-    const [hStr, mStr] = t.split(":");
-    const h = parseInt(hStr ?? "", 10);
-    const m = mStr ?? "00";
-    if (isNaN(h)) return t;
-    const suffix = h >= 12 ? "PM" : "AM";
-    const h12 = h % 12 === 0 ? 12 : h % 12;
-    return `${h12}:${m} ${suffix}`;
-  };
 
   const parsedDate = (() => {
     try {
       return new Date(`${isoDate}T00:00:00`).toLocaleDateString(undefined, {
-        weekday: "long",
-        year: "numeric",
-        month: "long",
-        day: "numeric",
+        weekday: "long", year: "numeric", month: "long", day: "numeric",
       });
-    } catch {
-      return isoDate;
-    }
+    } catch { return isoDate; }
   })();
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      {/* Status banner */}
-      <div
-        style={{
-          background: accentSoft,
-          border: `1px solid ${accentBorder}`,
-          borderRadius: 12,
-          padding: "16px 16px",
-          display: "flex",
-          gap: 14,
-          alignItems: "flex-start",
-        }}
-      >
-        <span
-          style={{
-            width: 40,
-            height: 40,
-            borderRadius: "50%",
-            background: isAbsent ? "var(--danger)" : "var(--warning)",
-            color: "#fff",
-            display: "grid",
-            placeItems: "center",
-            fontSize: 18,
-            flexShrink: 0,
-          }}
-        >
-          {icon}
-        </span>
-        <div>
-          <div style={{ fontSize: 15, fontWeight: 700, color: accent, marginBottom: 4 }}>
-            {t(`calendar.${headingKey}`, { defaultValue: headingDefault }) as string}
+
+      {/* ── Banner ── */}
+      <div style={{
+        borderRadius: 14,
+        border: "1px solid color-mix(in oklab, var(--warning) 55%, var(--border))",
+        overflow: "hidden",
+        background: "color-mix(in oklab, var(--warning) 7%, var(--bg-elev))",
+      }}>
+        <div aria-hidden style={{ height: 3, background: "var(--warning-text)" }} />
+        <div style={{ padding: "16px 18px 14px", display: "flex", gap: 14, alignItems: "flex-start" }}>
+          <div style={{ position: "relative", flexShrink: 0 }}>
+            <div style={{
+              width: 44, height: 44, borderRadius: "50%",
+              background: "color-mix(in oklab, var(--warning) 22%, var(--bg-elev))",
+              border: "2px solid color-mix(in oklab, var(--warning) 50%, transparent)",
+              display: "grid", placeItems: "center", fontSize: 20,
+            }}>⏳</div>
+            <span aria-hidden style={{
+              position: "absolute", top: 1, right: 1,
+              width: 10, height: 10, borderRadius: "50%",
+              background: "var(--warning-text)", border: "2px solid var(--bg-elev)",
+            }} />
           </div>
-          <div style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.55 }}>
-            {t(`calendar.${subtitleKey}`, { defaultValue: subtitleDefault }) as string}
-          </div>
-          <div
-            className="mono"
-            style={{
-              fontSize: 11,
-              marginTop: 8,
-              color: "var(--text-tertiary)",
-              display: "flex",
-              alignItems: "center",
-              gap: 5,
-            }}
-          >
-            <Icon name="calendar" size={11} />
-            {parsedDate}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 5 }}>
+              <span style={{ fontSize: 15, fontWeight: 800, color: "var(--warning-text)", lineHeight: 1 }}>
+                {t("calendar.waitingHeading", { defaultValue: "Day In Progress" }) as string}
+              </span>
+              <span style={{
+                fontSize: 9.5, fontWeight: 700,
+                textTransform: "uppercase", letterSpacing: "0.07em",
+                color: "var(--warning-text)",
+                background: "color-mix(in oklab, var(--warning) 18%, transparent)",
+                border: "1px solid color-mix(in oklab, var(--warning) 40%, transparent)",
+                padding: "2px 7px", borderRadius: 999,
+              }}>
+                {t("calendar.waitingLiveBadge", { defaultValue: "Live" }) as string}
+              </span>
+            </div>
+            <div style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.6 }}>
+              {t("calendar.waitingSubtitle", { defaultValue: "The shift window is still open. Attendance will update as detections come in." }) as string}
+            </div>
+            <div className="mono" style={{ fontSize: 11, marginTop: 7, color: "var(--text-tertiary)", display: "flex", alignItems: "center", gap: 5 }}>
+              <Icon name="calendar" size={11} aria-hidden />
+              {parsedDate}
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Expected shift — from policy if available */}
-      {(policyShiftStart || policyShiftEnd || policyRequiredHours) && (
-        <div
-          style={{
-            background: "var(--bg-elev)",
-            border: "1px solid var(--border)",
-            borderRadius: 10,
-            padding: "12px 14px",
-          }}
-        >
-          <div
-            style={{
-              fontSize: 10.5,
-              fontWeight: 700,
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-              color: "var(--text-tertiary)",
-              marginBottom: 10,
-            }}
-          >
-            {t("calendar.expectedShift", {
-              defaultValue: "Expected shift",
-            }) as string}
-            {policyName && (
-              <span
-                style={{
-                  marginInlineStart: 8,
-                  fontSize: 10.5,
-                  fontWeight: 600,
-                  background: "var(--accent-soft)",
-                  color: "var(--accent-text)",
-                  padding: "1px 7px",
-                  borderRadius: 999,
-                  textTransform: "none",
-                  letterSpacing: 0,
-                }}
-              >
-                {policyName}
-              </span>
-            )}
-          </div>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(3, 1fr)",
-              gap: 8,
-            }}
-          >
-            {policyShiftStart && (
-              <div
-                style={{
-                  background: "var(--bg-sunken)",
-                  borderRadius: 8,
-                  padding: "8px 10px",
-                }}
-              >
-                <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-tertiary)", fontWeight: 600, marginBottom: 4 }}>
-                  {t("calendar.startTime", { defaultValue: "Start" }) as string}
-                </div>
-                <div className="mono" style={{ fontSize: 14, fontWeight: 700 }}>
-                  {friendly(policyShiftStart) ?? policyShiftStart}
-                </div>
-              </div>
-            )}
-            {policyShiftEnd && (
-              <div
-                style={{
-                  background: "var(--bg-sunken)",
-                  borderRadius: 8,
-                  padding: "8px 10px",
-                }}
-              >
-                <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-tertiary)", fontWeight: 600, marginBottom: 4 }}>
-                  {t("calendar.endTime", { defaultValue: "End" }) as string}
-                </div>
-                <div className="mono" style={{ fontSize: 14, fontWeight: 700 }}>
-                  {friendly(policyShiftEnd) ?? policyShiftEnd}
-                </div>
-              </div>
-            )}
-            {policyRequiredHours != null && (
-              <div
-                style={{
-                  background: "var(--bg-sunken)",
-                  borderRadius: 8,
-                  padding: "8px 10px",
-                }}
-              >
-                <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-tertiary)", fontWeight: 600, marginBottom: 4 }}>
-                  {t("calendar.requiredHours", { defaultValue: "Required" }) as string}
-                </div>
-                <div className="mono" style={{ fontSize: 14, fontWeight: 700 }}>
-                  {policyRequiredHours}{" "}
-                  <span style={{ fontSize: 11, fontWeight: 500 }}>
-                    {t("calendar.hoursShort", { defaultValue: "h" }) as string}
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+      {/* ── Expected shift — PolicyAppliedCard style ── */}
+      {detail.policy_name && (
+        <PolicyAppliedCard detail={detail} />
       )}
 
-      {/* What-to-do actions */}
-      <div
-        style={{
-          background: "var(--bg-elev)",
-          border: "1px solid var(--border)",
-          borderRadius: 10,
-          padding: "12px 14px",
-          display: "flex",
-          flexDirection: "column",
-          gap: 10,
-        }}
-      >
-        <div
-          style={{
-            fontSize: 10.5,
-            fontWeight: 700,
-            textTransform: "uppercase",
-            letterSpacing: "0.05em",
-            color: "var(--text-tertiary)",
-          }}
-        >
-          {t("calendar.whatNext", { defaultValue: "What you can do" }) as string}
+      {/* ── Live monitoring strip ── */}
+      <div style={{
+        display: "flex", gap: 11, alignItems: "flex-start",
+        background: "color-mix(in oklab, var(--accent) 6%, var(--bg-elev))",
+        border: "1px solid color-mix(in oklab, var(--accent) 20%, var(--border))",
+        borderRadius: 10, padding: "11px 14px",
+      }}>
+        <div style={{
+          width: 30, height: 30, borderRadius: 8, flexShrink: 0,
+          background: "color-mix(in oklab, var(--accent) 14%, var(--bg-elev))",
+          border: "1px solid color-mix(in oklab, var(--accent) 24%, var(--border))",
+          display: "grid", placeItems: "center",
+        }}>
+          <Icon name="camera" size={14} style={{ color: "var(--accent-text)" }} aria-hidden />
         </div>
+        <div>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--accent-text)", marginBottom: 2 }}>
+            {t("calendar.waitingMonitoringTitle", { defaultValue: "Camera monitoring active" }) as string}
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.55 }}>
+            {t("calendar.waitingMonitoringSub", { defaultValue: "The system is actively watching for detections. Any face captured today will automatically update this record." }) as string}
+          </div>
+        </div>
+      </div>
 
-        <ActionRow
-          icon="clipboard"
-          title={t("calendar.actionSubmitException", {
-            defaultValue: "Submit an exception request",
-          }) as string}
-          sub={t("calendar.actionSubmitExceptionSub", {
-            defaultValue:
-              "If you have a valid reason, raise an exception for manager and HR review.",
-          }) as string}
-          cta={
-            onSubmitException ? (
-              <button
-                type="button"
-                className="btn btn-sm btn-primary"
-                onClick={() => onSubmitException(isoDate)}
-              >
-                {t("calendar.submitException") as string}
-              </button>
-            ) : null
-          }
-        />
-
-        {onRaiseEscalation && (
+      {/* ── Actions ── */}
+      {(onSubmitException || onRaiseEscalation) && (
+        <div style={{
+          background: "var(--bg-elev)", border: "1px solid var(--border)",
+          borderRadius: 10, padding: "12px 14px",
+          display: "flex", flexDirection: "column", gap: 10,
+        }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-tertiary)" }}>
+            {t("calendar.whatNext", { defaultValue: "What you can do" }) as string}
+          </div>
           <ActionRow
-            icon="zap"
-            title={t("escalation.actionTitle", {
-              defaultValue: "Raise an escalation (I was present)",
-            }) as string}
-            sub={t("escalation.actionSub", {
-              defaultValue:
-                "If you believe the camera missed you, raise an escalation. It routes to your manager then HR, and updates your attendance automatically when approved.",
-            }) as string}
+            icon="clipboard"
+            title={t("calendar.actionSubmitException", { defaultValue: "Submit an exception request" }) as string}
+            sub={t("calendar.actionSubmitExceptionSub", { defaultValue: "If you have a valid reason, raise an exception for manager and HR review." }) as string}
             cta={
-              <button
-                type="button"
-                className="btn btn-sm"
-                style={{ background: "var(--danger)", color: "#fff", borderColor: "var(--danger)" }}
-                onClick={onRaiseEscalation}
-              >
-                {t("escalation.raiseButton", { defaultValue: "Raise escalation" }) as string}
-              </button>
+              onSubmitException ? (
+                <button type="button" className="btn btn-sm btn-primary" onClick={() => onSubmitException(isoDate)}>
+                  {t("calendar.submitException") as string}
+                </button>
+              ) : null
             }
           />
-        )}
-      </div>
+          {onRaiseEscalation && (
+            <ActionRow
+              icon="zap"
+              title={t("escalation.actionTitle", { defaultValue: "Raise an escalation (I was present)" }) as string}
+              sub={t("escalation.actionSub", { defaultValue: "If you believe the camera missed you, raise an escalation. It routes to your manager then HR, and updates your attendance automatically when approved." }) as string}
+              cta={
+                <button
+                  type="button" className="btn btn-sm"
+                  style={{ background: "var(--danger)", color: "#fff", borderColor: "var(--danger)" }}
+                  onClick={onRaiseEscalation}
+                >
+                  {t("escalation.raiseButton", { defaultValue: "Raise escalation" }) as string}
+                </button>
+              }
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 }

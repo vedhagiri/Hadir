@@ -422,6 +422,7 @@
       "location": "مثل: المقر · المدخل الشمالي"
     },
     "errors": {
+      "nameRequired": "اسم الكاميرا مطلوب.",
       "rtspRequired": "عنوان RTSP مطلوب.",
       "saveFailed": "تعذّر حفظ الكاميرا. تحقّق من عنوان RTSP وحاول مرة أخرى."
     },
@@ -917,6 +918,7 @@
       "actions": "الإجراءات"
     },
     "exportSelected": "تصدير {{count}} محدد",
+    "exportNoData": "لا توجد بيانات موظفين متاحة للتصدير",
     "importButton": "استيراد XLSX/CSV",
     "bulkDelete": {
       "selectedButton": "حذف {{count}} محدد",

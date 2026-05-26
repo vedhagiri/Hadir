@@ -419,12 +419,12 @@ def list_my_team_endpoint(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
     sort_by: Annotated[
-        Literal["employee_code", "full_name", "department"],
-        Query(description="Sort key (employee_code | full_name | department)."),
-    ] = "employee_code",
+        Literal["employee_code", "full_name", "department", "created_at"],
+        Query(description="Sort key (employee_code | full_name | department | created_at)."),
+    ] = "created_at",
     sort_dir: Annotated[
         Literal["asc", "desc"], Query(description="Sort direction.")
-    ] = "asc",
+    ] = "desc",
 ) -> EmployeeListOut:
     """Manager-scoped employee list.
 
@@ -508,12 +508,12 @@ def list_employees_endpoint(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
     sort_by: Annotated[
-        Literal["employee_code", "full_name", "department"],
-        Query(description="Sort key (employee_code | full_name | department)."),
-    ] = "employee_code",
+        Literal["employee_code", "full_name", "department", "created_at"],
+        Query(description="Sort key (employee_code | full_name | department | created_at)."),
+    ] = "created_at",
     sort_dir: Annotated[
         Literal["asc", "desc"], Query(description="Sort direction.")
-    ] = "asc",
+    ] = "desc",
 ) -> EmployeeListOut:
     scope = TenantScope(tenant_id=user.tenant_id)
     # Manager scoping: narrow the result set to the manager's visible

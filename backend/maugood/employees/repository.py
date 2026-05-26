@@ -263,7 +263,7 @@ def list_employees(
     """Return a page of employees and the total count matching the filters.
 
     ``sort_by`` accepts ``employee_code`` | ``full_name`` |
-    ``department``. Anything else falls back to ``employee_code``.
+    ``department`` | ``created_at``. Anything else falls back to ``created_at``.
     ``sort_dir`` is ``asc`` or ``desc``; anything else is ``asc``.
 
     ``restrict_to_ids`` (when not None) narrows the query to the
@@ -310,8 +310,9 @@ def list_employees(
         "employee_code": employees.c.employee_code,
         "full_name": employees.c.full_name,
         "department": departments.c.name,
+        "created_at": employees.c.created_at,
     }
-    primary = sort_columns.get(sort_by, employees.c.employee_code)
+    primary = sort_columns.get(sort_by, employees.c.created_at)
     primary = primary.desc() if sort_dir == "desc" else primary.asc()
     # Always tie-break on employee_code so the page slice is stable
     # across reloads when the primary sort has duplicate values

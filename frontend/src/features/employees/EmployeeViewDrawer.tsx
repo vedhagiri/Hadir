@@ -15,7 +15,7 @@
 // explicit.
 
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
@@ -43,6 +43,129 @@ import type { Employee, Photo } from "./types";
 
 type Tab = "details" | "events" | "attendance" | "team" | "clips";
 
+// ---------------------------------------------------------------------------
+// Resizable drawer
+// ---------------------------------------------------------------------------
+
+const DRAWER_WIDTH_KEY = "maugood.employee_drawer.width";
+const DRAWER_DEFAULT_W = 540;
+const DRAWER_MIN_W = 360;
+const DRAWER_MAX_W_VW = 0.94;
+
+function useResizableDrawer() {
+  const [width, setWidth] = useState<number>(() => {
+    try {
+      const s = localStorage.getItem(DRAWER_WIDTH_KEY);
+      if (s) {
+        const n = parseInt(s, 10);
+        if (!isNaN(n) && n >= DRAWER_MIN_W) return n;
+      }
+    } catch {}
+    return DRAWER_DEFAULT_W;
+  });
+
+  const widthRef = useRef(width);
+  widthRef.current = width;
+
+  const isDragging = useRef(false);
+  const startX = useRef(0);
+  const startW = useRef(0);
+  const isRtlRef = useRef(false);
+
+  const onHandleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isDragging.current = true;
+    startX.current = e.clientX;
+    startW.current = widthRef.current;
+    isRtlRef.current = document.documentElement.dir === "rtl";
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+  }, []);
+
+  const resetWidth = useCallback(() => {
+    setWidth(DRAWER_DEFAULT_W);
+    try {
+      localStorage.removeItem(DRAWER_WIDTH_KEY);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!isDragging.current) return;
+      const dx = isRtlRef.current
+        ? e.clientX - startX.current
+        : startX.current - e.clientX;
+      const maxW = window.innerWidth * DRAWER_MAX_W_VW;
+      const next = Math.max(DRAWER_MIN_W, Math.min(maxW, startW.current + dx));
+      setWidth(next);
+    };
+    const onUp = () => {
+      if (!isDragging.current) return;
+      isDragging.current = false;
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+      try {
+        localStorage.setItem(
+          DRAWER_WIDTH_KEY,
+          String(Math.round(widthRef.current)),
+        );
+      } catch {}
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    return () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+  }, []);
+
+  return { width, onHandleMouseDown, resetWidth };
+}
+
+function ResizeHandle({
+  onMouseDown,
+  onDoubleClick,
+}: {
+  onMouseDown: (e: React.MouseEvent) => void;
+  onDoubleClick: () => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const isRtl = document.documentElement.dir === "rtl";
+
+  return (
+    <div
+      onMouseDown={onMouseDown}
+      onDoubleClick={onDoubleClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      aria-hidden="true"
+      title="Drag to resize · Double-click to reset"
+      style={{
+        position: "absolute",
+        top: 0,
+        bottom: 0,
+        [isRtl ? "right" : "left"]: 0,
+        width: 8,
+        cursor: "col-resize",
+        zIndex: 10,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <div
+        style={{
+          width: 4,
+          borderRadius: 2,
+          height: hovered ? 72 : 36,
+          background: hovered ? "var(--accent)" : "var(--border)",
+          transition: "height 0.15s ease, background 0.15s ease",
+        }}
+      />
+    </div>
+  );
+}
+
 export function EmployeeViewDrawer({
   employeeId,
   onClose,
@@ -61,10 +184,12 @@ export function EmployeeViewDrawer({
   const detail = useEmployeeDetail(employeeId);
   const photos = useEmployeePhotos(employeeId);
   const [tab, setTab] = useState<Tab>("details");
+  const { width, onHandleMouseDown, resetWidth } = useResizableDrawer();
 
   return (
     <DrawerShell onClose={onClose}>
-      <div className="drawer">
+      <div className="drawer" style={{ width: `${width}px`, maxWidth: "none" }}>
+        <ResizeHandle onMouseDown={onHandleMouseDown} onDoubleClick={resetWidth} />
         <div className="drawer-head">
           <div>
             <div className="mono text-xs text-dim">
@@ -182,10 +307,8 @@ export function EmployeeViewDrawer({
 function TeamMembersTab({ employeeId }: { employeeId: number }) {
   const { t } = useTranslation();
   const team = useEmployeeTeamMembers(employeeId);
-  // Dev/debug toggle — the three org-tier columns are off by default
-  // and revealed via the "Show org tiers" button. Keeps the tab tidy
-  // for everyday use without losing the rule-tracing visibility.
   const [showTiers, setShowTiers] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   if (team.isLoading) {
     return (
@@ -203,8 +326,23 @@ function TeamMembersTab({ employeeId }: { employeeId: number }) {
   }
 
   const { scope, scope_name, items } = team.data;
+
+  const needle = searchQuery.trim().toLowerCase();
+  const filteredItems = needle
+    ? items.filter(
+        (m) =>
+          m.employee_code.toLowerCase().includes(needle) ||
+          m.full_name.toLowerCase().includes(needle) ||
+          (m.designation ?? "").toLowerCase().includes(needle) ||
+          (m.department_name ?? "").toLowerCase().includes(needle),
+      )
+    : items;
+
+  const showFiltered = needle.length > 0;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {/* Scope + controls bar */}
       <div
         style={{
           display: "flex",
@@ -262,7 +400,14 @@ function TeamMembersTab({ employeeId }: { employeeId: number }) {
                 }) as string)}
           </button>
           <span className="mono text-xs text-dim">
-            {items.length}{" "}
+            {showFiltered ? (
+              <>
+                {filteredItems.length}
+                <span style={{ opacity: 0.6 }}>/{items.length}</span>
+              </>
+            ) : (
+              items.length
+            )}{" "}
             {t("employees.team.members", {
               count: items.length,
               defaultValue: items.length === 1 ? "member" : "members",
@@ -271,11 +416,109 @@ function TeamMembersTab({ employeeId }: { employeeId: number }) {
         </div>
       </div>
 
+      {/* Search bar */}
+      <div style={{ position: "relative" }}>
+        <span
+          style={{
+            position: "absolute",
+            insetInlineStart: 10,
+            top: "50%",
+            transform: "translateY(-50%)",
+            pointerEvents: "none",
+            color: "var(--text-dim)",
+            display: "flex",
+            alignItems: "center",
+          }}
+          aria-hidden="true"
+        >
+          <Icon name="search" size={14} />
+        </span>
+        <input
+          type="search"
+          className="input"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder={
+            t("employees.team.searchPlaceholder", {
+              defaultValue: "Search by ID, name, designation or department…",
+            }) as string
+          }
+          aria-label={
+            t("employees.team.searchPlaceholder", {
+              defaultValue: "Search by ID, name, designation or department…",
+            }) as string
+          }
+          style={{ paddingInlineStart: 32, width: "100%" }}
+        />
+        {searchQuery && (
+          <button
+            type="button"
+            onClick={() => setSearchQuery("")}
+            aria-label={t("common.clear", { defaultValue: "Clear" }) as string}
+            style={{
+              position: "absolute",
+              insetInlineEnd: 8,
+              top: "50%",
+              transform: "translateY(-50%)",
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              padding: 2,
+              color: "var(--text-dim)",
+              display: "flex",
+              alignItems: "center",
+            }}
+          >
+            <Icon name="x" size={13} />
+          </button>
+        )}
+      </div>
+
+      {/* Table or empty states */}
       {items.length === 0 ? (
-        <div className="text-sm text-dim" style={{ padding: 8 }}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 8,
+            padding: "32px 16px",
+            color: "var(--text-dim)",
+            fontSize: 13,
+            textAlign: "center",
+          }}
+        >
+          <Icon name="users" size={28} />
           {t("employees.team.empty", {
             defaultValue: "No other team members in this scope.",
           }) as string}
+        </div>
+      ) : filteredItems.length === 0 ? (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 8,
+            padding: "32px 16px",
+            color: "var(--text-dim)",
+            fontSize: 13,
+            textAlign: "center",
+          }}
+        >
+          <Icon name="search" size={28} />
+          <div>
+            {t("employees.team.noResults", {
+              defaultValue: "No members match your search.",
+            }) as string}
+          </div>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => setSearchQuery("")}
+          >
+            {t("common.clearSearch", { defaultValue: "Clear search" }) as string}
+          </button>
         </div>
       ) : (
         <div style={{ overflowX: "auto" }}>
@@ -319,7 +562,7 @@ function TeamMembersTab({ employeeId }: { employeeId: number }) {
               </tr>
             </thead>
             <tbody>
-              {items.map((m) => (
+              {filteredItems.map((m) => (
                 <tr key={m.id}>
                   <td className="mono text-sm">{m.employee_code}</td>
                   <td className="text-sm" style={{ fontWeight: 500 }}>
