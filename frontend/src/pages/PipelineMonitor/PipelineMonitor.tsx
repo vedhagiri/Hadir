@@ -25,7 +25,6 @@ type StageKey =
   | "workers"
   | "rtsp"
   | "recording"
-  | "encoding"
   | "identify"
   | "queues";
 
@@ -111,7 +110,6 @@ const TABS: { key: StageKey; label: string; icon: IconName }[] = [
   { key: "workers", label: "Workers", icon: "activity" },
   { key: "rtsp", label: "RTSP Feed", icon: "camera" },
   { key: "recording", label: "Clip Recording", icon: "videocam" },
-  { key: "encoding", label: "Encoding", icon: "activity" },
   { key: "identify", label: "Identify Event", icon: "user" },
   { key: "queues", label: "Queue Pipeline", icon: "activity" },
 ];
@@ -331,7 +329,6 @@ export function PipelineMonitor() {
           {data && tab === "recording" && (
             <RecordingPanel data={data.recording} />
           )}
-          {data && tab === "encoding" && <EncodingPanel data={data.encoding} />}
           {data && tab === "identify" && <IdentifyPanel data={data.identify} />}
           {tab === "queues" && <QueuePipelinePanel />}
           {tab === "workers" && <WorkersTablePanel />}
@@ -793,83 +790,7 @@ function RecordingPanel({
 }
 
 // ---------------------------------------------------------------------------
-// Tab 3: Encoding Worker (ClipWorker queues + ffmpeg)
-// ---------------------------------------------------------------------------
-
-function EncodingPanel({ data }: { data: PipelineMonitorOut["encoding"] }) {
-  const totalInPipeline = data.queued + data.processing;
-  return (
-    <>
-      <CountStrip
-        items={[
-          {
-            label: "Pending queue",
-            value: data.queued,
-            tone: data.queued > 0 ? "warn" : "neutral",
-          },
-          {
-            label: "Processing",
-            value: data.processing,
-            tone: data.processing > 0 ? "ok" : "neutral",
-          },
-          {
-            label: "Completed today",
-            value: data.completed_today,
-            tone: "ok",
-          },
-          {
-            label: "Failed today",
-            value: data.failed_today,
-            tone: data.failed_today > 0 ? "danger" : "neutral",
-          },
-        ]}
-      />
-
-      {/* Per-worker queue depth — one row per camera's ClipWorker. */}
-      <table className="table" style={{ marginTop: 12 }}>
-        <thead>
-          <tr>
-            <th>Camera</th>
-            <th style={{ width: 130 }}>Worker</th>
-            <th style={{ width: 150 }}>Queue depth</th>
-            <th style={{ width: 110 }}>Utilization</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.workers.length === 0 && (
-            <tr>
-              <td colSpan={4} className="text-sm text-dim" style={{ padding: 16 }}>
-                No encoding workers running.
-              </td>
-            </tr>
-          )}
-          {data.workers.map((w) => {
-            const pct = totalInPipeline === 0 ? 0 : (w.queue_size / Math.max(1, totalInPipeline)) * 100;
-            return (
-              <tr key={w.camera_id}>
-                <td style={{ fontWeight: 500 }}>{w.camera_name}</td>
-                <td>
-                  {w.alive ? (
-                    <Pill tone="ok">Alive</Pill>
-                  ) : (
-                    <Pill tone="danger">Stopped</Pill>
-                  )}
-                </td>
-                <td className="mono text-sm">{w.queue_size}</td>
-                <td>
-                  <ProgressBar pct={pct} tone={w.queue_size > 8 ? "warn" : "ok"} />
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Tab 4: Identify Event Worker (face-match jobs)
+// Tab 3: Identify Event Worker (face-match jobs)
 // ---------------------------------------------------------------------------
 
 // Visual catalogue mirroring the UC tile design from Clip Analytics
@@ -1326,31 +1247,6 @@ function PulseDot({ color }: { color?: string }) {
   );
 }
 
-function ProgressBar({ pct, tone }: { pct: number; tone: Tone }) {
-  const p = paletteFor(tone);
-  const width = Math.max(0, Math.min(100, pct));
-  return (
-    <div
-      style={{
-        width: "100%",
-        height: 8,
-        borderRadius: 999,
-        background: "var(--bg-sunken)",
-        overflow: "hidden",
-        border: "1px solid var(--border)",
-      }}
-    >
-      <div
-        style={{
-          width: `${width}%`,
-          height: "100%",
-          background: p.fg,
-          transition: "width 240ms ease",
-        }}
-      />
-    </div>
-  );
-}
 
 function paletteFor(tone: Tone): { bg: string; fg: string } {
   switch (tone) {

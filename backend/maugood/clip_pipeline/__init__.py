@@ -22,3 +22,4 @@ Public singleton: ``clip_pipeline``. Lifespan calls ``.start()`` /
 """
 
 from maugood.clip_pipeline.pipeline import clip_pipeline  # noqa: F401
+from maugood.clip_pipeline.reconcile import reconcile_scheduler  # noqa: F401

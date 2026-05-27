@@ -456,3 +456,197 @@ def submit_all(
         skipped_jobs=batch.skipped_jobs,
         deleted_prior=deleted_prior,
     )
+
+
+# ---- reconcile endpoints ----------------------------------------------------
+
+
+@router.get("/reconcile-status")
+def reconcile_status(
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
+) -> dict:
+    """Return the most recent reconcile sweep result per tenant schema.
+
+    The reconcile scheduler runs every ``MAUGOOD_RECONCILE_INTERVAL_S``
+    seconds (default 300) and re-submits completed clips that were never
+    processed, recovers stuck CPR rows, and spot-checks file integrity.
+    This endpoint surfaces those results for the Pipeline Monitor dashboard.
+    """
+    from maugood.clip_pipeline.reconcile import reconcile_scheduler  # noqa: PLC0415
+
+    return reconcile_scheduler.last_summaries()
+
+
+@router.post("/reconcile-now")
+def reconcile_now(
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
+) -> dict:
+    """Trigger an immediate reconcile sweep across all tenants (blocking).
+
+    Returns the per-tenant sweep summaries. Useful when an operator
+    knows there are unprocessed saved clips and doesn't want to wait for
+    the next scheduled sweep.
+    """
+    from maugood.clip_pipeline.reconcile import reconcile_scheduler  # noqa: PLC0415
+
+    summaries = reconcile_scheduler.run_now(clip_pipeline)
+    return {
+        "tenants_swept": len(summaries),
+        "results": reconcile_scheduler.last_summaries(),
+    }
+
+
+class RetryFailedRequest(BaseModel):
+    """Body for ``POST /api/clip-pipeline/retry-failed``.
+
+    ``use_cases`` selects which failed (clip, use_case) pairs to retry.
+    ``max_clips`` caps how many clips are retried in one call (safety
+    valve — failed rows can accumulate; avoid queuing thousands at once).
+    """
+
+    use_cases: list[str] = Field(
+        default=["uc1", "uc2", "uc3"], min_length=1, max_length=3
+    )
+    max_clips: int = Field(default=200, gt=0, le=2000)
+
+
+class RetryFailedResponse(BaseModel):
+    batch_id: str
+    clips_found: int
+    cpr_rows_cleared: int
+    queued_jobs: int
+    skipped_jobs: int
+
+
+@router.post("/retry-failed", response_model=RetryFailedResponse)
+def retry_failed(
+    body: RetryFailedRequest,
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
+) -> RetryFailedResponse:
+    """Retry clips whose ``clip_processing_results`` rows are in ``failed`` state.
+
+    1. Finds distinct ``person_clip_id`` values where at least one CPR row
+       for the requested use-cases is ``failed``.
+    2. Deletes those failed CPR rows (completed rows for other use-cases are
+       untouched).
+    3. Re-submits the clip_ids to ``clip_pipeline.submit_batch`` with
+       ``skip_existing=True`` so successfully-completed use-cases on the
+       same clip aren't re-run.
+    """
+    bad = [uc for uc in body.use_cases if uc not in VALID_USE_CASES]
+    if bad:
+        raise HTTPException(
+            status_code=400,
+            detail=f"unknown use_cases: {bad} (valid: {list(VALID_USE_CASES)})",
+        )
+
+    if not clip_pipeline._started:  # type: ignore[attr-defined]  # noqa: SLF001
+        raise HTTPException(status_code=503, detail="clip_pipeline not running")
+
+    engine = get_engine()
+    from maugood.tenants.scope import resolve_tenant_schema_via_engine  # noqa: PLC0415
+
+    schema = resolve_tenant_schema_via_engine(engine, user.tenant_id)
+    scope = TenantScope(tenant_id=user.tenant_id, tenant_schema=schema)
+
+    from sqlalchemy import delete, select  # noqa: PLC0415
+
+    from maugood.db import clip_processing_results, person_clips, tenant_context  # noqa: PLC0415
+
+    with tenant_context(scope.tenant_schema):
+        with engine.begin() as conn:
+            # Find distinct clip_ids with at least one failed CPR for the
+            # requested use_cases. Join back to person_clips to confirm the
+            # clip is still in completed state (avoid retrying failed clips
+            # that were later abandoned/deleted).
+            rows = conn.execute(
+                select(clip_processing_results.c.person_clip_id)
+                .distinct()
+                .join(
+                    person_clips,
+                    person_clips.c.id
+                    == clip_processing_results.c.person_clip_id,
+                )
+                .where(
+                    clip_processing_results.c.tenant_id == scope.tenant_id,
+                    clip_processing_results.c.status == "failed",
+                    clip_processing_results.c.use_case.in_(body.use_cases),
+                    person_clips.c.recording_status == "completed",
+                    person_clips.c.file_path.is_not(None),
+                )
+                .order_by(clip_processing_results.c.person_clip_id.desc())
+                .limit(body.max_clips)
+            ).all()
+
+            clip_ids = [int(r.person_clip_id) for r in rows]
+            clips_found = len(clip_ids)
+
+            if not clip_ids:
+                # Nothing to retry — return a zero-result response without
+                # creating a batch.
+                return RetryFailedResponse(
+                    batch_id="",
+                    clips_found=0,
+                    cpr_rows_cleared=0,
+                    queued_jobs=0,
+                    skipped_jobs=0,
+                )
+
+            # Delete the failed CPR rows so submit_batch won't skip them.
+            # We only delete ``failed`` rows for the exact use_cases
+            # requested; completed rows for other use_cases are untouched.
+            del_result = conn.execute(
+                delete(clip_processing_results).where(
+                    clip_processing_results.c.tenant_id == scope.tenant_id,
+                    clip_processing_results.c.person_clip_id.in_(clip_ids),
+                    clip_processing_results.c.use_case.in_(body.use_cases),
+                    clip_processing_results.c.status == "failed",
+                )
+            )
+            cpr_rows_cleared = int(del_result.rowcount or 0)
+
+    batch = clip_pipeline.submit_batch(
+        scope=scope,
+        clip_ids=clip_ids,
+        use_cases=body.use_cases,
+        skip_existing=True,
+        submitted_by_user_id=user.id,
+        submitted_by_email=user.email,
+    )
+
+    with tenant_context(scope.tenant_schema):
+        with engine.begin() as conn:
+            write_audit(
+                conn,
+                tenant_id=scope.tenant_id,
+                actor_user_id=user.id,
+                action="clip_pipeline.retry_failed",
+                entity_type="clip_pipeline_batch",
+                entity_id=batch.batch_id,
+                after={
+                    "use_cases": body.use_cases,
+                    "clips_found": clips_found,
+                    "cpr_rows_cleared": cpr_rows_cleared,
+                    "queued_jobs": batch.queued_jobs,
+                    "skipped_jobs": batch.skipped_jobs,
+                },
+            )
+
+    logger.info(
+        "clip_pipeline retry-failed: tenant=%s batch=%s clips=%d "
+        "cpr_cleared=%d queued=%d skipped=%d",
+        scope.tenant_id,
+        batch.batch_id,
+        clips_found,
+        cpr_rows_cleared,
+        batch.queued_jobs,
+        batch.skipped_jobs,
+    )
+
+    return RetryFailedResponse(
+        batch_id=batch.batch_id,
+        clips_found=clips_found,
+        cpr_rows_cleared=cpr_rows_cleared,
+        queued_jobs=batch.queued_jobs,
+        skipped_jobs=batch.skipped_jobs,
+    )

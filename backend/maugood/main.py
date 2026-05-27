@@ -72,6 +72,7 @@ from maugood.divisions_router import router as divisions_router
 from maugood.sections_router import router as sections_router
 from maugood.users_lookup import router as users_lookup_router
 from maugood.unidentified_faces.router import router as unidentified_faces_router
+from maugood.storage_analytics import router as storage_analytics_router
 
 
 def _configure_logging() -> None:
@@ -132,8 +133,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     # Queue-based clip-processing pipeline (cropping + matching
     # workers). Side-by-side with the legacy ReprocessFaceMatchWorker
     # path — operators submit batches via /api/clip-pipeline/submit.
-    from maugood.clip_pipeline import clip_pipeline  # noqa: PLC0415
+    from maugood.clip_pipeline import clip_pipeline, reconcile_scheduler  # noqa: PLC0415
     clip_pipeline.start()
+    reconcile_scheduler.start(clip_pipeline)
     # P29 — legacy ReprocessFaceMatchWorker recovery for any
     # person_clips rows left in ``matched_status='processing'`` by
     # an unclean shutdown. Deferred + drip-fed so it doesn't compete
@@ -159,6 +161,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         notification_worker.stop()
         retention_scheduler.stop()
         lifecycle_scheduler.stop()
+        reconcile_scheduler.stop()
         clip_pipeline.stop()
         limiter.stop()
 
@@ -312,6 +315,7 @@ def create_app() -> FastAPI:
     app.include_router(pipeline_monitor_router)
     app.include_router(face_crops_router)
     app.include_router(unidentified_faces_router)
+    app.include_router(storage_analytics_router)
 
     # Dev-only test endpoints — used by the Playwright smoke test in
     # frontend/tests/. Mounted ONLY when MAUGOOD_ENV=dev so a production

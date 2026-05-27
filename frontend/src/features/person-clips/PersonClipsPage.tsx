@@ -7185,32 +7185,16 @@ export function ClipDetailDrawer({
               ))}
           </div>
 
-          {/* Person / match summary */}
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6 }}>
-              <span
-                style={{
-                  fontWeight: 700,
-                  fontSize: 20,
-                  color: personCountColor(clip.person_count ?? 0),
-                }}
-              >
-                {clip.person_count ?? 0}
-              </span>
-              <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-                {(clip.person_count ?? 0) === 1 ? "person" : "persons"}
-              </span>
+          {/* Matched employee name pills — only when at least one match */}
+          {clip.matched_employee_names.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 16 }}>
+              {clip.matched_employee_names.map((n) => (
+                <span key={n} className="pill pill-primary" style={{ fontSize: 10 }}>
+                  {n}
+                </span>
+              ))}
             </div>
-            {clip.matched_employee_names.length > 0 && (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                {clip.matched_employee_names.map((n) => (
-                  <span key={n} className="pill pill-primary" style={{ fontSize: 10 }}>
-                    {n}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
+          )}
 
           {/* Inline reprocess form */}
           {showReprocessForm && (

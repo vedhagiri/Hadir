@@ -388,3 +388,74 @@ export function useClipPipelineBatch(
     staleTime: 500,
   });
 }
+
+// ---- reconcile / processing-health hooks ------------------------------------
+
+export interface ReconcileTenantSummary {
+  saved_submitted: number;
+  saved_found: number;
+  stuck_found: number;
+  missing_files: number;
+  flagged_cprs: number;
+  duration_ms: number;
+  ran_at: string;
+}
+
+export type ReconcileStatusResponse = Record<string, ReconcileTenantSummary>;
+
+export function useReconcileStatus(): UseQueryResult<
+  ReconcileStatusResponse,
+  Error
+> {
+  return useQuery<ReconcileStatusResponse>({
+    queryKey: ["clip-pipeline", "reconcile-status"],
+    queryFn: () =>
+      api<ReconcileStatusResponse>("/api/clip-pipeline/reconcile-status"),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+}
+
+export function useReconcileNow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      api<{ tenants_swept: number; results: ReconcileStatusResponse }>(
+        "/api/clip-pipeline/reconcile-now",
+        { method: "POST" },
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["clip-pipeline", "reconcile-status"] });
+      qc.invalidateQueries({ queryKey: ["clip-analytics", "list"] });
+      qc.invalidateQueries({ queryKey: ["clip-pipeline", "status"] });
+    },
+  });
+}
+
+export interface RetryFailedRequest {
+  use_cases: string[];
+  max_clips: number;
+}
+
+export interface RetryFailedResponse {
+  batch_id: string;
+  clips_found: number;
+  cpr_rows_cleared: number;
+  queued_jobs: number;
+  skipped_jobs: number;
+}
+
+export function useRetryFailed() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: RetryFailedRequest) =>
+      api<RetryFailedResponse>("/api/clip-pipeline/retry-failed", {
+        method: "POST",
+        body,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["clip-analytics", "list"] });
+      qc.invalidateQueries({ queryKey: ["clip-pipeline", "status"] });
+    },
+  });
+}

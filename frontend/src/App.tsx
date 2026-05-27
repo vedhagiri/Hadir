@@ -37,6 +37,7 @@ import { CamerasPage } from "./features/cameras/CamerasPage";
 import { FaceCropsPage } from "./features/face-crops/FaceCropsPage";
 import { PersonClipsPage } from "./features/person-clips/PersonClipsPage";
 import { ClipAnalyticsPage } from "./features/clip-analytics/ClipAnalyticsPage";
+import { StorageAnalyticsPage } from "./features/storage-analytics/StorageAnalyticsPage";
 import { DashboardRouter } from "./features/dashboard/DashboardRouter";
 import { EmployeesPage } from "./features/employees/EmployeesPage";
 import { MyProfilePage } from "./features/employees/MyProfilePage";
@@ -140,6 +141,7 @@ export function App() {
         <Route path="unidentified-faces" element={<UnidentifiedFacesPage />} />
         <Route path="person-clips" element={<PersonClipsPage />} />
         <Route path="clip-analytics" element={<ClipAnalyticsPage />} />
+        <Route path="storage-analytics" element={<AdminOnly><StorageAnalyticsPage /></AdminOnly>} />
         <Route path="face-crops" element={<FaceCropsPage />} />
         <Route path="live" element={<LiveCapturePage />} />
         <Route path="system" element={<SystemPage />} />
@@ -222,7 +224,8 @@ export function App() {
             id !== "my-requests" &&
             id !== "approvals" &&
             id !== "pipeline" &&
-            id !== "api-docs",
+            id !== "api-docs" &&
+            id !== "storage-analytics",
         ).map((id) => (
           <Route key={id} path={id} element={<Placeholder pageId={id} />} />
         ))}

@@ -24,7 +24,10 @@ import {
   useClipPipelineStatus,
   useClipPipelineSubmitAll,
   useProcessedClipCounts,
+  useReconcileNow,
+  useReconcileStatus,
   useReprocessStatus,
+  useRetryFailed,
   useSingleClipReprocess,
 } from "../person-clips/hooks";
 import type { ClipPipelineBatch } from "../person-clips/hooks";
@@ -548,6 +551,296 @@ function MatchRow({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Processing Health Panel — aggregate reconcile sweep results + action buttons
+// ---------------------------------------------------------------------------
+
+import type { ReconcileTenantSummary } from "../person-clips/hooks";
+
+function ProcessingHealthPanel({
+  reconcileStatus,
+  reconcileLoading,
+  onReconcileNow,
+  retryLoading,
+  retryDone,
+  onRetryFailed,
+}: {
+  reconcileStatus: Record<string, ReconcileTenantSummary> | null;
+  reconcileLoading: boolean;
+  onReconcileNow: () => void;
+  retryLoading: boolean;
+  retryDone: { clips_found: number; queued_jobs: number } | null;
+  onRetryFailed: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  // Aggregate across all tenants visible to this user. In practice a
+  // regular Admin sees only their own tenant schema; only a Super-Admin
+  // sweeping multiple tenants gets multiple entries.
+  const tenants = Object.entries(reconcileStatus ?? {});
+  const totalSaved = tenants.reduce((s, [, t]) => s + t.saved_found, 0);
+  const totalStuck = tenants.reduce((s, [, t]) => s + t.stuck_found, 0);
+  const totalMissing = tenants.reduce((s, [, t]) => s + t.missing_files, 0);
+  const lastRanAt =
+    tenants.length > 0
+      ? tenants.map(([, t]) => t.ran_at).sort().at(-1) ?? null
+      : null;
+
+  const hasIssues = totalSaved > 0 || totalStuck > 0 || totalMissing > 0;
+
+  function fmtRelative(iso: string | null): string {
+    if (!iso) return "never";
+    const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return iso;
+    const diffS = Math.round((Date.now() - d.getTime()) / 1000);
+    if (diffS < 60) return `${diffS}s ago`;
+    if (diffS < 3600) return `${Math.round(diffS / 60)}m ago`;
+    return `${Math.round(diffS / 3600)}h ago`;
+  }
+
+  return (
+    <div
+      style={{
+        border: `1px solid ${hasIssues ? "rgba(245,158,11,0.4)" : "var(--border)"}`,
+        borderRadius: "var(--radius-sm)",
+        marginBottom: 12,
+        background: hasIssues
+          ? "rgba(245,158,11,0.04)"
+          : "var(--bg)",
+        overflow: "hidden",
+      }}
+    >
+      {/* Summary row — always visible */}
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          width: "100%",
+          padding: "8px 14px",
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
+          textAlign: "start",
+        }}
+        aria-expanded={expanded}
+        aria-label="Toggle processing health panel"
+      >
+        <Icon
+          name={expanded ? "chevronDown" : "chevronRight"}
+          size={12}
+        />
+        <span style={{ fontWeight: 600, fontSize: 13, color: "var(--text)" }}>
+          Processing Health
+        </span>
+        {hasIssues ? (
+          <span
+            style={{
+              fontSize: 11,
+              color: "#b45309",
+              background: "rgba(245,158,11,0.14)",
+              border: "1px solid rgba(245,158,11,0.4)",
+              borderRadius: 999,
+              padding: "1px 7px",
+              fontWeight: 600,
+            }}
+          >
+            {[
+              totalSaved > 0 && `${totalSaved} unprocessed`,
+              totalStuck > 0 && `${totalStuck} stuck`,
+              totalMissing > 0 && `${totalMissing} missing files`,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </span>
+        ) : (
+          <span
+            style={{
+              fontSize: 11,
+              color: "#047857",
+              background: "rgba(16,185,129,0.10)",
+              border: "1px solid rgba(16,185,129,0.30)",
+              borderRadius: 999,
+              padding: "1px 7px",
+              fontWeight: 600,
+            }}
+          >
+            All clear
+          </span>
+        )}
+        <span
+          style={{
+            marginInlineStart: "auto",
+            fontSize: 11,
+            color: "var(--text-tertiary)",
+          }}
+        >
+          Last sweep: {fmtRelative(lastRanAt)}
+        </span>
+      </button>
+
+      {/* Expanded detail */}
+      {expanded && (
+        <div
+          style={{
+            padding: "0 14px 14px",
+            borderTop: "1px solid var(--border)",
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 16,
+            alignItems: "flex-start",
+          }}
+        >
+          {/* Stat tiles */}
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+              flexWrap: "wrap",
+              marginTop: 12,
+            }}
+          >
+            {(
+              [
+                {
+                  label: "Unprocessed saved",
+                  value: totalSaved,
+                  tone: totalSaved > 0 ? "warn" : "ok",
+                  title:
+                    "Clips in completed state with no processing results — the reconcile sweep will re-submit these automatically every 5 minutes",
+                },
+                {
+                  label: "Stuck processing",
+                  value: totalStuck,
+                  tone: totalStuck > 0 ? "warn" : "ok",
+                  title:
+                    "clip_processing_results rows stuck at processing for >20 minutes — the sweep triggers recovery automatically",
+                },
+                {
+                  label: "Missing files",
+                  value: totalMissing,
+                  tone: totalMissing > 0 ? "danger" : "ok",
+                  title:
+                    "Clips whose file is gone from disk — these cannot be recovered; CPR rows are marked failed",
+                },
+              ] as const
+            ).map(({ label, value, tone, title }) => (
+              <div
+                key={label}
+                title={title}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: "var(--radius-sm)",
+                  border: `1px solid ${
+                    tone === "danger"
+                      ? "rgba(220,38,38,0.35)"
+                      : tone === "warn"
+                        ? "rgba(245,158,11,0.4)"
+                        : "var(--border)"
+                  }`,
+                  background:
+                    tone === "danger"
+                      ? "rgba(220,38,38,0.07)"
+                      : tone === "warn"
+                        ? "rgba(245,158,11,0.07)"
+                        : "var(--bg-sunken)",
+                  minWidth: 130,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 22,
+                    fontWeight: 700,
+                    fontVariantNumeric: "tabular-nums",
+                    color:
+                      tone === "danger"
+                        ? "#b91c1c"
+                        : tone === "warn"
+                          ? "#b45309"
+                          : "#047857",
+                    lineHeight: 1.2,
+                  }}
+                >
+                  {value}
+                </div>
+                <div
+                  style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}
+                >
+                  {label}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Per-tenant breakdown when multiple tenants */}
+          {tenants.length > 1 && (
+            <div style={{ marginTop: 12, fontSize: 11, color: "var(--text-secondary)" }}>
+              {tenants.map(([schema, t]) => (
+                <div key={schema} style={{ marginBottom: 4 }}>
+                  <strong style={{ color: "var(--text)" }}>{schema}</strong>
+                  {" — "}
+                  submitted {t.saved_submitted} · stuck {t.stuck_found} · missing {t.missing_files}
+                  <span style={{ marginInlineStart: 8, color: "var(--text-tertiary)" }}>
+                    ({fmtRelative(t.ran_at)})
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Action buttons */}
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              marginTop: 12,
+              flexWrap: "wrap",
+              alignItems: "center",
+            }}
+          >
+            <button
+              className="btn btn-sm"
+              onClick={onReconcileNow}
+              disabled={reconcileLoading}
+              title="Trigger an immediate reconcile sweep — finds and re-submits all unprocessed saved clips, recovers stuck processing rows, and spot-checks file integrity"
+            >
+              <Icon name="refresh" size={11} />
+              {reconcileLoading ? "Running sweep…" : "Run Reconcile Now"}
+            </button>
+            <button
+              className="btn btn-sm"
+              onClick={onRetryFailed}
+              disabled={retryLoading}
+              title="Find clips with failed processing results and re-queue them"
+            >
+              <Icon name="activity" size={11} />
+              {retryLoading ? "Retrying…" : "Retry Failed Clips"}
+            </button>
+            {retryDone !== null && (
+              <span
+                style={{
+                  fontSize: 12,
+                  color:
+                    retryDone.clips_found > 0 ? "#047857" : "var(--text-secondary)",
+                }}
+              >
+                {retryDone.clips_found === 0
+                  ? "No failed clips found"
+                  : `${retryDone.clips_found} clip${retryDone.clips_found === 1 ? "" : "s"} found · ${retryDone.queued_jobs} queued`}
+              </span>
+            )}
+            <span style={{ fontSize: 11, color: "var(--text-tertiary)", marginInlineStart: 4 }}>
+              The reconcile sweep runs automatically every 5 minutes.
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ClipAnalyticsPage() {
   // ---- server-driven filters ----
   const [page, setPage] = useState(1);
@@ -558,6 +851,7 @@ export function ClipAnalyticsPage() {
   const [endDate, setEndDate] = useState<string>("");
 
   // ---- client-side filters ----
+  const [clipIdQ, setClipIdQ] = useState("");
   const [clipNameQ, setClipNameQ] = useState("");
   const [processedUcFilter, setProcessedUcFilter] =
     useState<ProcessedUcFilter>("any");
@@ -597,6 +891,15 @@ export function ClipAnalyticsPage() {
   );
   const pipelineBatchRunning = activeBatches.length > 0;
   const batchRunning = legacyBatchRunning || pipelineBatchRunning;
+
+  // ---- reconcile / processing-health panel ----
+  const reconcileStatus = useReconcileStatus();
+  const reconcileNow = useReconcileNow();
+  const retryFailed = useRetryFailed();
+  const [retryDone, setRetryDone] = useState<{
+    clips_found: number;
+    queued_jobs: number;
+  } | null>(null);
   // The inline "Identify Event running…" banner under the page header
   // shows aggregate progress for every active pipeline batch the
   // operator has *not* dismissed. Dismissed ids live here so the
@@ -723,6 +1026,10 @@ export function ClipAnalyticsPage() {
           c.processed_use_cases.length > 0,
       );
     }
+    const idQ = clipIdQ.trim();
+    if (idQ) {
+      rows = rows.filter((c) => String(c.id).includes(idQ));
+    }
     const q = clipNameQ.trim().toLowerCase();
     if (q) {
       rows = rows.filter((c) =>
@@ -737,7 +1044,7 @@ export function ClipAnalyticsPage() {
       );
     }
     return rows;
-  }, [list.data, processingFilter, clipNameQ, processedUcFilter]);
+  }, [list.data, processingFilter, clipIdQ, clipNameQ, processedUcFilter]);
 
   const total = list.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -911,6 +1218,35 @@ export function ClipAnalyticsPage() {
         />
       )}
 
+      {/* Processing Health panel — shows aggregate saved/stuck/missing
+          counts from the last reconcile sweep and provides one-click
+          actions to process unhandled clips or retry failed ones.
+          Collapsed by default; expands on click so it doesn't crowd
+          the page for users who never touch it. */}
+      <ProcessingHealthPanel
+        reconcileStatus={reconcileStatus.data ?? null}
+        reconcileLoading={reconcileNow.isPending}
+        onReconcileNow={() => {
+          reconcileNow.mutate();
+        }}
+        retryLoading={retryFailed.isPending}
+        retryDone={retryDone}
+        onRetryFailed={() => {
+          setRetryDone(null);
+          retryFailed.mutate(
+            { use_cases: ["uc1", "uc2", "uc3"], max_clips: 200 },
+            {
+              onSuccess: (res) => {
+                setRetryDone({
+                  clips_found: res.clips_found,
+                  queued_jobs: res.queued_jobs,
+                });
+              },
+            },
+          );
+        }}
+      />
+
       <div className="card">
         {/* Sticky thead is two rows: the column titles + a per-column
             filter row. Each <th>/<td> in the sticky region carries an
@@ -984,7 +1320,16 @@ export function ClipAnalyticsPage() {
             {/* Row 2 — per-column filter inputs */}
             <tr>
               <th style={{ background: "var(--bg)" }} />
-              <th style={{ background: "var(--bg)" }} />
+              <th style={{ background: "var(--bg)" }}>
+                <input
+                  type="search"
+                  placeholder="ID"
+                  value={clipIdQ}
+                  onChange={(e) => setClipIdQ(e.target.value)}
+                  style={filterControlStyle}
+                  aria-label="Filter by clip ID"
+                />
+              </th>
               <th style={{ background: "var(--bg)" }}>
                 <select
                   value={cameraId ?? ""}
@@ -1209,6 +1554,32 @@ export function ClipAnalyticsPage() {
                       onEdit={() => alert("Edit coming soon")}
                       onDelete={() => setDeleteTarget(c)}
                       onIdentify={() => setIdentifyTarget(c)}
+                      onRetry={
+                        c.recording_status === "completed" &&
+                        c.processed_use_cases.length < 3 &&
+                        (c.processing_use_cases ?? []).length === 0
+                          ? () => {
+                              setRetryDone(null);
+                              retryFailed.mutate(
+                                {
+                                  use_cases: ALL_USE_CASES.filter(
+                                    (uc) =>
+                                      !c.processed_use_cases.includes(uc),
+                                  ),
+                                  max_clips: 1,
+                                },
+                                {
+                                  onSuccess: (res) => {
+                                    setRetryDone({
+                                      clips_found: res.clips_found,
+                                      queued_jobs: res.queued_jobs,
+                                    });
+                                  },
+                                },
+                              );
+                            }
+                          : undefined
+                      }
                     />
                   </td>
                 </tr>
@@ -1557,6 +1928,7 @@ function RowMenu({
   onEdit,
   onDelete,
   onIdentify,
+  onRetry,
 }: {
   // ``onViewDetails`` is gated upstream — only ``completed`` clips
   // get the prop. ``recording`` / ``finalizing`` clips render the
@@ -1565,6 +1937,9 @@ function RowMenu({
   onEdit: () => void;
   onDelete: () => void;
   onIdentify: () => void;
+  // ``onRetry`` is only passed for clips with failed CPR rows so
+  // the entry only appears when there is something to retry.
+  onRetry?: (() => void) | undefined;
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -1650,6 +2025,16 @@ function RowMenu({
               onIdentify();
             }}
           />
+          {onRetry && (
+            <MenuItem
+              label="Retry Failed UCs"
+              iconName="refresh"
+              onClick={() => {
+                setOpen(false);
+                onRetry();
+              }}
+            />
+          )}
           <MenuItem
             label="Delete"
             iconName="trash"
