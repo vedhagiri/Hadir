@@ -737,6 +737,14 @@ def create_employee_endpoint(
         # BUG-009 — duplicate email pre-check. The frontend previously
         # showed an error toast but the row still landed because no
         # backend guard existed; now we 409 before INSERT.
+        #
+        # The check **excludes ``status IN ('deleted', 'inactive')``** so
+        # a soft-deleted (Deactivate) or PDPL-deleted employee doesn't
+        # lock their old email forever. PDPL already redacts the email
+        # to ``deleted-{id}@maugood.local`` so the original wouldn't
+        # match anyway — the status filter is defence in depth and
+        # additionally covers the soft-delete path. Active employees
+        # still block duplicates as before.
         if payload.email:
             from sqlalchemy import select as _select  # noqa: PLC0415
             from maugood.db import employees as _employees  # noqa: PLC0415
@@ -745,6 +753,7 @@ def create_employee_endpoint(
                 _select(_employees.c.employee_code, _employees.c.full_name).where(
                     _employees.c.tenant_id == scope.tenant_id,
                     _employees.c.email == payload.email.strip().lower(),
+                    _employees.c.status.not_in(("deleted", "inactive")),
                 )
             ).first()
             if dup_email is not None:
@@ -1666,7 +1675,10 @@ def patch_employee_endpoint(
 
         # BUG-008 / BUG-009 — duplicate email/phone pre-check on
         # PATCH too. Excludes the row being edited so an unrelated
-        # update doesn't false-positive against its own values.
+        # update doesn't false-positive against its own values, and
+        # excludes ``status IN ('deleted','inactive')`` so soft-deleted
+        # or PDPL-deleted employees don't lock their old email. See
+        # the CREATE handler for the full rationale.
         if "email" in provided and provided["email"]:
             from sqlalchemy import select as _se  # noqa: PLC0415
             from maugood.db import employees as _emps  # noqa: PLC0415
@@ -1676,6 +1688,7 @@ def patch_employee_endpoint(
                     _emps.c.tenant_id == scope.tenant_id,
                     _emps.c.id != employee_id,
                     _emps.c.email == str(provided["email"]).strip().lower(),
+                    _emps.c.status.not_in(("deleted", "inactive")),
                 )
             ).first()
             if dup_e is not None:

@@ -307,6 +307,17 @@ def _execute_hard_delete(
             scope, employee_code, conn, employee_id
         )
 
+        # Redact the linked ``users`` (login) row before the employees
+        # DELETE — ``users`` has a DB-level unique constraint on
+        # (tenant_id, email) and is NOT cascade-linked to employees, so
+        # without this step the email stays locked on the login table
+        # and a re-create of the same employee fails at the
+        # POST /api/users step the frontend Employee drawer runs.
+        from maugood.employees.pdpl import (  # noqa: PLC0415
+            redact_linked_user_account,
+        )
+        linked_user_id = redact_linked_user_account(conn, scope, email)
+
         # Cascade-aware single DELETE. Postgres handles every per-tenant
         # FK in turn (employee_photos, custom_field_values,
         # manager_assignments, attendance_records, requests,
@@ -346,6 +357,7 @@ def _execute_hard_delete(
                 "delete_request_id": delete_request_id,
                 "requester_user_id": requester_user_id,
                 "files_removed": files_removed,
+                "linked_user_id_redacted": linked_user_id,
             },
         )
 

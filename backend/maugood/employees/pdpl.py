@@ -42,6 +42,7 @@ from maugood.db import (
     custom_field_values,
     employee_photos,
     employees,
+    users,
 )
 from maugood.identification.matcher import matcher_cache
 from maugood.logging_config import audit_logger
@@ -59,6 +60,49 @@ def _redacted_email(employee_id: int) -> str:
     original address."""
 
     return f"deleted-{employee_id}@maugood.local"
+
+
+def redact_linked_user_account(
+    conn: Connection,
+    scope: TenantScope,
+    original_email: str | None,
+) -> int | None:
+    """When an employee is permanently deleted, free up the email on
+    the **linked ``users`` (login) row** too.
+
+    ``users`` carries a DB-level ``UniqueConstraint(tenant_id, email)``
+    and is NOT cascade-linked to ``employees``. Without this redaction
+    the stale login row strands the email forever — a subsequent
+    re-create of the employee with the same email succeeds at the
+    ``employees`` table but fails at the ``POST /api/users`` step the
+    frontend Employee drawer runs to create the login.
+
+    Renames the row's email to ``deleted-{user_id}@maugood.local`` and
+    flips ``is_active=false`` so the credential can no longer be used.
+    Returns the affected ``users.id`` or ``None`` if no row matched.
+    Called from both ``_redact_employee`` (PDPL) and the P28.7
+    hard-delete path so the cleanup is symmetric.
+    """
+
+    if not original_email:
+        return None
+    email_lower = str(original_email).strip().lower()
+    row = conn.execute(
+        select(users.c.id).where(
+            users.c.tenant_id == scope.tenant_id,
+            users.c.email == email_lower,
+        )
+    ).first()
+    if row is None:
+        return None
+    user_id = int(row.id)
+    redacted = f"deleted-{user_id}@maugood.local"
+    conn.execute(
+        update(users)
+        .where(users.c.id == user_id)
+        .values(email=redacted, is_active=False)
+    )
+    return user_id
 
 
 @dataclass
@@ -180,6 +224,14 @@ def pdpl_delete_employee(
         )
     )
 
+    # 3.5. Redact the linked ``users`` (login) row too. ``users`` has a
+    # DB-level unique constraint on (tenant_id, email) and is NOT
+    # cascade-linked to employees, so without this step a future
+    # create-employee+login flow with the same email would fail at the
+    # POST /api/users step even though the employees-side dup check
+    # passes. See ``redact_linked_user_account`` for the full rationale.
+    linked_user_id = redact_linked_user_account(conn, scope, previous_email)
+
     # 4. Invalidate the in-memory matcher cache so a captured
     # face never re-matches against this employee post-delete.
     try:
@@ -202,6 +254,7 @@ def pdpl_delete_employee(
         "photo_rows_deleted": photo_rows_deleted,
         "photo_files_deleted": photo_files_deleted,
         "custom_field_values_deleted": custom_field_values_deleted,
+        "linked_user_id_redacted": linked_user_id,
         "confirmation_phrase": confirmation_phrase,
     }
     write_audit(

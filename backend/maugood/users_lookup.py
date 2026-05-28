@@ -208,16 +208,49 @@ def create_user(
     engine = get_engine()
     with engine.begin() as conn:
         existing = conn.execute(
-            select(users.c.id).where(
+            select(users.c.id, users.c.is_active).where(
                 users.c.tenant_id == scope.tenant_id,
                 users.c.email == email_lower,
             )
         ).first()
         if existing is not None:
-            raise HTTPException(
-                status_code=409,
-                detail={"field": "email", "message": "email already exists"},
-            )
+            # Auto-recovery for stranded rows. Older PDPL / hard-delete
+            # paths didn't clean up the linked ``users`` row, so the
+            # email could stay locked indefinitely. If the existing row
+            # is inactive AND no ACTIVE employee depends on this email,
+            # redact it on the fly so the new INSERT can proceed. This
+            # is the backward-compat half of the fix; the forward half
+            # lives in ``redact_linked_user_account`` (called from
+            # PDPL + hard-delete).
+            if not bool(existing.is_active):
+                from maugood.db import employees as _employees  # noqa: PLC0415
+
+                active_emp = conn.execute(
+                    select(_employees.c.id).where(
+                        _employees.c.tenant_id == scope.tenant_id,
+                        _employees.c.email == email_lower,
+                        _employees.c.status == "active",
+                    )
+                ).first()
+                if active_emp is None:
+                    redacted = f"deleted-{int(existing.id)}@maugood.local"
+                    conn.execute(
+                        users.update()
+                        .where(users.c.id == int(existing.id))
+                        .values(email=redacted)
+                    )
+                    logger.info(
+                        "user create: auto-redacted stale inactive row id=%s "
+                        "to free email=%s for new account",
+                        int(existing.id),
+                        email_lower,
+                    )
+                    existing = None  # let the INSERT proceed
+            if existing is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail={"field": "email", "message": "email already exists"},
+                )
 
         # Resolve every requested role code → row id. Reject the whole
         # request on the first unknown code rather than silently dropping
