@@ -234,9 +234,12 @@ def _resolve_visible_employees(
     """Return the role-scoped employee_id allow-list, or ``None`` for
     Admin/HR (= no narrowing).
 
-    Manager → team-rule team (My Team / Team Members tab) — replaces
-    the legacy P8 visible-set so every team-scoped surface reads
-    consistently.
+    Manager → team-rule team (My Team / Team Members tab) **union the
+    Manager's own employee row** so the same endpoint serves both the
+    "Team Calendar" and "My Attendance" personal-view flows. Without
+    the self-union a Manager would get 404 on their own person view —
+    the team-helper returns reports-to relationships, not the
+    Manager's own row.
     Employee → just the employee row that maps to their email.
     """
 
@@ -244,9 +247,12 @@ def _resolve_visible_employees(
         return None
     if _is_manager(user):
         with get_engine().begin() as conn:
-            visible = manager_team_employee_ids(
+            visible = set(manager_team_employee_ids(
                 conn, scope, user_email=user.email, user_id=user.id
-            )
+            ))
+        own_eid = _employee_row_id_for(user)
+        if own_eid is not None:
+            visible.add(int(own_eid))
         return sorted(int(x) for x in visible)
     # Employee
     eid = _employee_row_id_for(user)

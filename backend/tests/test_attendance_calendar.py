@@ -491,11 +491,14 @@ def test_company_view_manager_scoped_to_visible_employees(
     seeded_calendar: dict,
     admin_engine: Engine,
 ) -> None:
-    """Manager assigned to ENG (department_id=1) sees only ENG headcount.
+    """Manager assigned to ENG sees ENG headcount + themselves.
 
     ENG has 2 active employees (ENG-001 + ENG-002); OPS has 1 (OPS-001).
-    The Manager's company view should report ``active_employees == 2``,
-    not 3.
+    The Manager is also seeded as an ENG employee (MGR-{user_id}) by
+    ``_set_user_to_manager``. Visible set is the team (ENG-001 + ENG-002)
+    plus the Manager's own row (so they can see their own calendar via
+    the same endpoint), giving ``active_employees == 3``. OPS-001 stays
+    out of scope.
     """
 
     _set_user_to_manager(admin_engine, user_id=admin_user["id"], department_id=1)
@@ -509,7 +512,7 @@ def test_company_view_manager_scoped_to_visible_employees(
         # for the manager's scope (the count is rolled at the scope
         # level, not per-day).
         first = body["days"][0]
-        assert first["active_employees"] == 2, body["days"][0]
+        assert first["active_employees"] == 3, body["days"][0]
     finally:
         _restore_admin(admin_engine, user_id=admin_user["id"])
 

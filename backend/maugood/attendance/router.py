@@ -603,7 +603,17 @@ def regenerate_attendance_employee(
             if emp_row is None:
                 raise HTTPException(status_code=404, detail="employee_not_found")
 
-            if not is_admin_hr:
+            # Self-row fast path: a user regenerating their own
+            # attendance is always allowed, regardless of role-specific
+            # visible-set membership. ``get_manager_visible_employee_ids``
+            # excludes the Manager's own row by design (Team Members
+            # shape), which would otherwise 403 a Manager opening My
+            # Attendance and clicking Regenerate.
+            is_self_row = (
+                emp_row.email is not None
+                and str(emp_row.email).lower() == user.email.lower()
+            )
+            if not is_admin_hr and not is_self_row:
                 # Manager: must see this employee via team membership.
                 if "Manager" in user.roles:
                     from maugood.manager_assignments.repository import (  # noqa: PLC0415
@@ -616,11 +626,10 @@ def regenerate_attendance_employee(
                         raise HTTPException(status_code=403, detail="forbidden")
                 else:
                     # Employee role: only their own row, matched by email.
-                    if (
-                        emp_row.email is None
-                        or str(emp_row.email).lower() != user.email.lower()
-                    ):
-                        raise HTTPException(status_code=403, detail="forbidden")
+                    # The self-row guard above already handled the happy
+                    # path; this raises for the "Employee asking for
+                    # someone else's row" case.
+                    raise HTTPException(status_code=403, detail="forbidden")
 
     # Synchronous recompute — same helper the scheduler uses.
     upserted = bool(
