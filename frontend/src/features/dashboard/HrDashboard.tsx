@@ -29,6 +29,7 @@ import type {
   AttendanceItem,
   AttendanceListResponse,
 } from "../attendance/types";
+import { formatMinutes } from "../attendance/timeFormat";
 import { useDepartments } from "../departments/hooks";
 import { BarChart } from "./charts/BarChart";
 import { Donut } from "./charts/Donut";
@@ -152,10 +153,8 @@ function shortTime(iso: string | null): string {
   return iso.length >= 5 ? iso.slice(0, 5) : iso;
 }
 
-function hoursDecimal(min: number | null): string {
-  if (min === null) return "—";
-  return `${(min / 60).toFixed(1)}h`;
-}
+// HR dashboard reuses the shared ``formatMinutes`` helper from
+// attendance/timeFormat for consistent ``8h 45m`` rendering across pages.
 
 // ---------------------------------------------------------------------------
 // 7-day attendance series via parallel queries. Yes, that's 7 round
@@ -1604,7 +1603,7 @@ function LiveAttendance({
                 <td className="mono text-sm">{shortTime(it.in_time)}</td>
                 <td className="mono text-sm">{shortTime(it.out_time)}</td>
                 <td className="mono text-sm">
-                  {hoursDecimal(it.total_minutes)}
+                  {formatMinutes(it.total_minutes)}
                 </td>
                 <td>
                   <AttendancePill it={it} />

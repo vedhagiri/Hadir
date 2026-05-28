@@ -11,6 +11,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
 import { DatePicker } from "../../components/DatePicker";
@@ -27,6 +28,8 @@ import {
   useMappedFaces,
   useRawUnidentifiedFaces,
   useUnidentifiedFaceClusters,
+  useUnmapByEmployee,
+  useUnmapEvents,
 } from "./hooks";
 import type {
   FaceClusterOut,
@@ -39,6 +42,7 @@ import type {
   RawFaceEventOut,
   RawUnidentifiedFilters,
   UnidentifiedFacesFilters,
+  UnmapEventsResponse,
 } from "./types";
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -414,6 +418,329 @@ const INJECTED_STYLE = `
 .unid-filterbar input[type="number"]::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
+}
+
+/* ── Active-tag filter bar (in-cluster redesign) ────────────────────
+   "+ Add filter" pattern: each active filter appears as a removable
+   tag; the trigger opens a grouped menu (Similarity / Quality /
+   Clarity). Replaces the old 3-row chip layout. */
+.unid-tagbar-wrap {
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  margin-top: 4px;
+}
+.unid-tagbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.unid-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 4px 4px 10px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--accent) 14%, var(--bg-elev));
+  border: 1px solid color-mix(in oklab, var(--accent) 30%, var(--border));
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+}
+.unid-tag-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.unid-tag-x:hover {
+  background: color-mix(in oklab, var(--text) 12%, transparent);
+  color: var(--text);
+}
+.unid-tag-x:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.unid-addbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--bg-elev);
+  border: 1px dashed var(--border);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+.unid-addbtn:hover,
+.unid-addbtn[aria-expanded="true"] {
+  border-color: var(--text);
+  color: var(--text);
+  border-style: solid;
+}
+.unid-addbtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.unid-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  inset-inline-start: 0;
+  min-width: 220px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
+  padding: 6px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+}
+.unid-menu-section {
+  display: flex;
+  flex-direction: column;
+}
+.unid-menu-section + .unid-menu-section {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.unid-menu-heading {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary);
+  padding: 4px 10px 2px;
+}
+.unid-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  text-align: start;
+  cursor: pointer;
+}
+.unid-menu-item:hover {
+  background: var(--bg-sunken);
+}
+.unid-menu-item[aria-pressed="true"] {
+  background: color-mix(in oklab, var(--accent) 16%, transparent);
+  font-weight: 600;
+}
+.unid-menu-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.unid-menu-empty {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  padding: 6px 10px;
+}
+.unid-menu-range {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  padding: 4px 10px 2px;
+  font-variant-numeric: tabular-nums;
+}
+.unid-menu-custom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--bg-sunken);
+  border-radius: var(--radius-sm);
+  margin: 4px 2px 2px;
+}
+.unid-menu-custom input[type="number"] {
+  width: 54px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 6px;
+  text-align: end;
+  outline: none;
+  font-variant-numeric: tabular-nums;
+}
+.unid-menu-custom input[type="number"]:focus {
+  border-color: var(--text);
+}
+.unid-menu-custom input[type="number"]::-webkit-outer-spin-button,
+.unid-menu-custom input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.unid-modetoggle {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--bg-elev);
+}
+.unid-modetoggle button {
+  padding: 2px 8px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  min-width: 22px;
+  line-height: 1.2;
+}
+.unid-modetoggle button[aria-pressed="true"] {
+  background: var(--text);
+  color: var(--bg);
+}
+.unid-apply-btn {
+  margin-inline-start: auto;
+  padding: 3px 10px;
+  border: 1px solid var(--text);
+  background: var(--text);
+  color: var(--bg);
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.unid-apply-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.unid-tagbar-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+.unid-reset-btn {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--text);
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.unid-reset-btn:hover {
+  border-color: var(--text);
+}
+
+/* ── Hierarchical sticky nav (primary tabs + sub-pills) ───────────── */
+.unid-nav-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.unid-nav-inner {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 28px;
+}
+.unid-nav-primary {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.unid-nav-tab {
+  position: relative;
+  padding: 12px 20px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.12s;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+.unid-nav-tab:hover {
+  color: var(--text);
+}
+.unid-nav-tab--active {
+  color: var(--text);
+  font-weight: 600;
+}
+.unid-nav-tab--active::after {
+  content: "";
+  position: absolute;
+  inset-inline-start: 16px;
+  inset-inline-end: 16px;
+  bottom: -1px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 999px 999px 0 0;
+}
+.unid-nav-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.unid-nav-sub {
+  display: flex;
+  gap: 6px;
+  padding: 10px 0 12px;
+}
+.unid-nav-pill {
+  padding: 5px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.unid-nav-pill:hover:not(.unid-nav-pill--active) {
+  border-color: var(--text);
+  color: var(--text);
+}
+.unid-nav-pill--active {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--bg);
+  font-weight: 600;
+}
+.unid-nav-pill--active:hover {
+  /* keep the inverted active colors on hover so the label stays
+     readable instead of going text-on-text invisible. */
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--bg);
+}
+.unid-nav-pill:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* ── Timeline activity cards (P28.x redesign) ──────────────────────── */
@@ -2495,6 +2822,391 @@ function clarityOf(quality: string, faceType: string): Exclude<ClarityFilter, "a
   return "clear";
 }
 
+// ----------------------------------------------------------------------
+// ClusterFilterBar — in-cluster filter UI.
+//
+// Replaces the previous 3-row stacked chip layout. Active filters appear
+// as removable tags; "+ Add filter" opens a grouped menu (Similarity /
+// Quality / Clarity). The menu uses ``createPortal`` for the popover
+// position so ancestor ``overflow: hidden`` doesn't clip it; the
+// outside-click / Escape handlers restore focus to the trigger.
+// ----------------------------------------------------------------------
+
+interface ClusterFilterBarProps {
+  simPct: number;
+  simMode: "gte" | "eq";
+  qualityFilter: QualityFilter;
+  clarityFilter: ClarityFilter;
+  setSimPct: (n: number) => void;
+  setSimMode: (m: "gte" | "eq") => void;
+  setQualityFilter: (q: QualityFilter) => void;
+  setClarityFilter: (c: ClarityFilter) => void;
+  simRangeMin: number;
+  simRangeMax: number;
+  presets: number[];
+  shown: number;
+  total: number;
+}
+
+// Small dropdown shell used by ClusterFilterBar — three instances, one
+// per filter category. Owns its trigger ref + outside-click / Escape
+// handling so the parent only juggles which key is open.
+interface FilterDropdownProps {
+  label: string;
+  isOpen: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+  children: React.ReactNode;
+}
+
+function FilterDropdown({ label, isOpen, onToggle, onClose, children }: FilterDropdownProps) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (
+        menuRef.current && !menuRef.current.contains(target) &&
+        triggerRef.current && !triggerRef.current.contains(target)
+      ) {
+        onClose();
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [isOpen, onClose]);
+
+  return (
+    <div style={{ position: "relative" }}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="unid-addbtn"
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
+        onClick={onToggle}
+      >
+        <Icon name="plus" size={10} aria-hidden />
+        <span>{label}</span>
+        <Icon name="chevronDown" size={10} aria-hidden />
+      </button>
+      {isOpen && (
+        <div ref={menuRef} role="menu" className="unid-menu" aria-label={label}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ClusterFilterBar({
+  simPct,
+  simMode,
+  qualityFilter,
+  clarityFilter,
+  setSimPct,
+  setSimMode,
+  setQualityFilter,
+  setClarityFilter,
+  simRangeMin,
+  simRangeMax,
+  presets,
+  shown,
+  total,
+}: ClusterFilterBarProps) {
+  const { t } = useTranslation();
+  // Only one dropdown open at a time — clicking a second button closes
+  // the first. ``null`` = all closed.
+  const [openKey, setOpenKey] = useState<"sim" | "quality" | "clarity" | null>(null);
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customValue, setCustomValue] = useState<string>(simPct > 0 ? String(simPct) : "");
+  const [customMode, setCustomMode] = useState<"gte" | "eq">(simMode);
+
+  const hasAny = simPct > 0 || qualityFilter !== "all" || clarityFilter !== "all";
+
+  const closeAll = useCallback(() => {
+    setOpenKey(null);
+    setCustomOpen(false);
+  }, []);
+  const toggleKey = (k: "sim" | "quality" | "clarity") => () => {
+    setOpenKey((cur) => (cur === k ? null : k));
+    if (k !== "sim") setCustomOpen(false);
+  };
+
+  const applySim = (pct: number, mode: "gte" | "eq") => {
+    setSimPct(pct);
+    setSimMode(mode);
+    closeAll();
+  };
+
+  const qualityLabel = (k: QualityFilter): string => ({
+    all: "",
+    high: t("unidentifiedFaces.qHighChip", "High") as string,
+    medium: t("unidentifiedFaces.qMediumChip", "Medium") as string,
+    low: t("unidentifiedFaces.qLowChip", "Low") as string,
+  })[k];
+
+  const clarityLabel = (k: ClarityFilter): string => ({
+    all: "",
+    clear: t("unidentifiedFaces.cClearChip", "Clear face") as string,
+    blur: t("unidentifiedFaces.cBlurChip", "Blur face") as string,
+    side: t("unidentifiedFaces.cSideChip", "Side face") as string,
+    partial: t("unidentifiedFaces.cPartialChip", "Partial face") as string,
+  })[k];
+
+  const QUALITY_OPTIONS: readonly [QualityFilter, string, string][] = [
+    ["high", t("unidentifiedFaces.qHighChip", "High") as string, "#22c55e"],
+    ["medium", t("unidentifiedFaces.qMediumChip", "Medium") as string, "#f59e0b"],
+    ["low", t("unidentifiedFaces.qLowChip", "Low") as string, "#94a3b8"],
+  ];
+  const CLARITY_OPTIONS: readonly [ClarityFilter, string, string][] = [
+    ["clear", t("unidentifiedFaces.cClearChip", "Clear face") as string, "#22c55e"],
+    ["blur", t("unidentifiedFaces.cBlurChip", "Blur face") as string, "#94a3b8"],
+    ["side", t("unidentifiedFaces.cSideChip", "Side face") as string, "#a855f7"],
+    ["partial", t("unidentifiedFaces.cPartialChip", "Partial face") as string, "#f97316"],
+  ];
+
+  return (
+    <div className="unid-tagbar-wrap">
+      <div className="unid-tagbar">
+        {/* Active filter tags */}
+        {simPct > 0 && (
+          <span className="unid-tag">
+            <span>
+              {t("unidentifiedFaces.filterSim", "Similarity") as string}{" "}
+              {simMode === "gte" ? "≥" : "="}{simPct}%
+            </span>
+            <button
+              type="button"
+              className="unid-tag-x"
+              onClick={() => setSimPct(0)}
+              aria-label={t("unidentifiedFaces.clearSimFilter", "Clear similarity filter") as string}
+            >
+              <Icon name="x" size={10} />
+            </button>
+          </span>
+        )}
+        {qualityFilter !== "all" && (
+          <span className="unid-tag">
+            <span>
+              {t("unidentifiedFaces.filterQuality", "Quality") as string}{" "}
+              {qualityLabel(qualityFilter)}
+            </span>
+            <button
+              type="button"
+              className="unid-tag-x"
+              onClick={() => setQualityFilter("all")}
+              aria-label={t("unidentifiedFaces.clearQualityFilter", "Clear quality filter") as string}
+            >
+              <Icon name="x" size={10} />
+            </button>
+          </span>
+        )}
+        {clarityFilter !== "all" && (
+          <span className="unid-tag">
+            <span>
+              {t("unidentifiedFaces.filterClarity", "Clarity") as string}{" "}
+              {clarityLabel(clarityFilter)}
+            </span>
+            <button
+              type="button"
+              className="unid-tag-x"
+              onClick={() => setClarityFilter("all")}
+              aria-label={t("unidentifiedFaces.clearClarityFilter", "Clear clarity filter") as string}
+            >
+              <Icon name="x" size={10} />
+            </button>
+          </span>
+        )}
+
+        {/* Three independent category dropdowns. Each owns its trigger
+            + popover; ``openKey`` ensures only one is visible at a time. */}
+        <FilterDropdown
+          label={t("unidentifiedFaces.filterSim", "Similarity") as string}
+          isOpen={openKey === "sim"}
+          onToggle={toggleKey("sim")}
+          onClose={closeAll}
+        >
+          {presets.length > 0 ? (
+            presets.map((p) => (
+              <button
+                key={p}
+                role="menuitem"
+                type="button"
+                className="unid-menu-item"
+                aria-pressed={simPct === p && simMode === "gte"}
+                onClick={() => applySim(p, "gte")}
+              >
+                ≥{p}%
+              </button>
+            ))
+          ) : (
+            <div className="unid-menu-empty">
+              {t("unidentifiedFaces.noSimRange", "No similarity range data") as string}
+            </div>
+          )}
+          <button
+            role="menuitem"
+            type="button"
+            className="unid-menu-item"
+            aria-expanded={customOpen}
+            onClick={() => setCustomOpen((v) => !v)}
+          >
+            {t("unidentifiedFaces.customSim", "Custom…") as string}
+          </button>
+          {customOpen && (
+            <div className="unid-menu-custom">
+              <div
+                role="group"
+                className="unid-modetoggle"
+                aria-label={t("unidentifiedFaces.simModeAria", "Similarity match mode") as string}
+              >
+                <button
+                  type="button"
+                  aria-pressed={customMode === "gte"}
+                  onClick={() => setCustomMode("gte")}
+                  title={t("unidentifiedFaces.simModeGteHint", "Greater than or equal to") as string}
+                >≥</button>
+                <button
+                  type="button"
+                  aria-pressed={customMode === "eq"}
+                  onClick={() => setCustomMode("eq")}
+                  title={t("unidentifiedFaces.simModeEqHint", "Equal to") as string}
+                >=</button>
+              </div>
+              <input
+                type="number"
+                min={1}
+                max={100}
+                step={1}
+                value={customValue}
+                onChange={(e) => setCustomValue(e.target.value)}
+                placeholder={t("unidentifiedFaces.simAnyPlaceholder", "any") as string}
+                aria-label={t("unidentifiedFaces.filterSimAria", "Similarity percentage") as string}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    const n = parseInt(customValue, 10);
+                    if (!Number.isNaN(n) && n >= 1 && n <= 100) {
+                      applySim(n, customMode);
+                    }
+                  }
+                }}
+              />
+              <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>%</span>
+              <button
+                type="button"
+                className="unid-apply-btn"
+                disabled={(() => {
+                  const n = parseInt(customValue, 10);
+                  return Number.isNaN(n) || n < 1 || n > 100;
+                })()}
+                onClick={() => {
+                  const n = parseInt(customValue, 10);
+                  if (!Number.isNaN(n) && n >= 1 && n <= 100) {
+                    applySim(n, customMode);
+                  }
+                }}
+              >
+                {t("unidentifiedFaces.apply", "Apply") as string}
+              </button>
+            </div>
+          )}
+          {simRangeMin < simRangeMax && (
+            <div className="unid-menu-range">
+              {t("unidentifiedFaces.simRangeHint", "in cluster: {{min}}–{{max}}%", {
+                min: simRangeMin,
+                max: simRangeMax,
+              }) as string}
+            </div>
+          )}
+        </FilterDropdown>
+
+        <FilterDropdown
+          label={t("unidentifiedFaces.filterQuality", "Quality") as string}
+          isOpen={openKey === "quality"}
+          onToggle={toggleKey("quality")}
+          onClose={closeAll}
+        >
+          {QUALITY_OPTIONS.map(([key, label, dot]) => (
+            <button
+              key={key}
+              role="menuitem"
+              type="button"
+              className="unid-menu-item"
+              aria-pressed={qualityFilter === key}
+              onClick={() => {
+                setQualityFilter(key);
+                closeAll();
+              }}
+            >
+              <span className="unid-chip-dot" style={{ background: dot }} />
+              {label}
+            </button>
+          ))}
+        </FilterDropdown>
+
+        <FilterDropdown
+          label={t("unidentifiedFaces.filterClarity", "Clarity") as string}
+          isOpen={openKey === "clarity"}
+          onToggle={toggleKey("clarity")}
+          onClose={closeAll}
+        >
+          {CLARITY_OPTIONS.map(([key, label, dot]) => (
+            <button
+              key={key}
+              role="menuitem"
+              type="button"
+              className="unid-menu-item"
+              aria-pressed={clarityFilter === key}
+              onClick={() => {
+                setClarityFilter(key);
+                closeAll();
+              }}
+            >
+              <span className="unid-chip-dot" style={{ background: dot }} />
+              {label}
+            </button>
+          ))}
+        </FilterDropdown>
+      </div>
+
+      {hasAny && (
+        <div className="unid-tagbar-footer">
+          <span>
+            {t("unidentifiedFaces.filterStat", "Showing {{shown}} of {{total}}", {
+              shown,
+              total,
+            }) as string}
+          </span>
+          <button
+            type="button"
+            className="unid-reset-btn"
+            onClick={() => {
+              setSimPct(0);
+              setQualityFilter("all");
+              setClarityFilter("all");
+            }}
+          >
+            {t("unidentifiedFaces.clearFilters", "Reset filters") as string}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ClusterDrawer({ cluster, onClose }: ClusterDrawerProps) {
   const { t } = useTranslation();
   const [showMapModal, setShowMapModal] = useState(false);
@@ -2786,234 +3498,37 @@ function ClusterDrawer({ cluster, onClose }: ClusterDrawerProps) {
             </div>
           </div>
 
-          {/* ── In-cluster filters (data/filters section — first per the
-              Clip Analytics investigation flow) ── */}
+          {/* ── In-cluster filters — active-tag bar + "+ Add filter" menu */}
           <div style={{ padding: "16px 18px 0" }}>
-            <div className="unid-filterbar">
-              <div className="unid-filterbar-row">
-                <span className="unid-filterbar-label">
-                  {t("unidentifiedFaces.filterSim", "Similarity")}
-                </span>
-
-                {/* Mode toggle — ≥ (greater-or-equal) vs = (equal-to).
-                    Two adjacent segmented buttons; the active mode changes
-                    how ``simPct`` is interpreted. Sits inline with the
-                    input so the row reads as "Similarity ≥ 60 %". */}
-                <div
-                  role="group"
-                  aria-label={t("unidentifiedFaces.simModeAria", "Similarity match mode")}
-                  style={{
-                    display: "flex",
-                    border: "1px solid var(--border)",
-                    borderRadius: 999,
-                    overflow: "hidden",
-                    background: "var(--bg-elev)",
-                  }}
-                >
-                  {([
-                    ["gte", "≥", t("unidentifiedFaces.simModeGteHint", "Greater than or equal to")],
-                    ["eq", "=", t("unidentifiedFaces.simModeEqHint", "Equal to")],
-                  ] as const).map(([key, glyph, hint]) => {
-                    const isActive = simMode === key;
-                    return (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => setSimMode(key)}
-                        aria-pressed={isActive}
-                        title={hint}
-                        style={{
-                          padding: "3px 10px",
-                          minWidth: 30,
-                          border: "none",
-                          background: isActive ? "var(--text)" : "transparent",
-                          color: isActive ? "var(--bg)" : "var(--text)",
-                          fontWeight: 700,
-                          fontSize: 13,
-                          cursor: "pointer",
-                          lineHeight: 1.2,
-                        }}
-                      >
-                        {glyph}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Number input — operator types the percentage. The unit
-                    glyph in front mirrors the active mode (≥ or =) so the
-                    row visually reads as a complete inequality. */}
-                <div style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  background: "var(--bg-elev)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 999,
-                  padding: "3px 10px",
-                }}>
-                  <span style={{ fontSize: 11.5, color: "var(--text-tertiary)", fontWeight: 600 }}>
-                    {simMode === "gte" ? "≥" : "="}
-                  </span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    step={1}
-                    value={simPct === 0 ? "" : simPct}
-                    placeholder={t("unidentifiedFaces.simAnyPlaceholder", "any")}
-                    aria-label={t("unidentifiedFaces.filterSimAria", "Similarity percentage")}
-                    onChange={(e) => {
-                      const raw = e.target.value;
-                      if (raw === "") { setSimPct(0); return; }
-                      const n = parseInt(raw, 10);
-                      if (Number.isNaN(n)) return;
-                      setSimPct(Math.max(0, Math.min(100, n)));
-                    }}
-                    style={{
-                      width: 52,
-                      border: "none",
-                      background: "transparent",
-                      color: "var(--text)",
-                      fontSize: 12.5,
-                      fontWeight: 600,
-                      fontVariantNumeric: "tabular-nums",
-                      outline: "none",
-                      padding: 0,
-                      textAlign: "end",
-                      MozAppearance: "textfield",
-                    }}
-                  />
-                  <span style={{ fontSize: 11.5, color: "var(--text-tertiary)" }}>%</span>
-                </div>
-
-                {cropSims.length > 0 && simRangeMin < simRangeMax && (
-                  <span style={{
-                    fontSize: 11,
-                    color: "var(--text-tertiary)",
-                    fontVariantNumeric: "tabular-nums",
-                  }}>
-                    {t("unidentifiedFaces.simRangeHint", "in cluster: {{min}}–{{max}}%", {
-                      min: simRangeMin,
-                      max: simRangeMax,
-                    })}
-                  </span>
-                )}
-
-                {/* Preset chips — quartile picks from the observed range.
-                    Chip prefix tracks the active mode so the operator sees
-                    "≥60%" / "≥75%" / ... in gte mode and "=60%" / "=75%"
-                    in eq mode. */}
-                {(() => {
-                  if (cropSims.length < 2 || simRangeMin >= simRangeMax) return null;
-                  const span = simRangeMax - simRangeMin;
-                  const presets = [
-                    simRangeMin + Math.round(span * 0.25),
-                    simRangeMin + Math.round(span * 0.5),
-                    simRangeMin + Math.round(span * 0.75),
-                  ];
-                  const seen = new Set<number>();
-                  const unique = presets.filter((p) => {
-                    if (seen.has(p)) return false;
-                    seen.add(p);
-                    return true;
-                  });
-                  return unique.map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() => setSimPct(preset)}
-                      aria-pressed={simPct === preset}
-                      className="unid-chip"
-                      style={{ padding: "3px 8px", fontSize: 11 }}
-                    >
-                      {simMode === "gte" ? `≥${preset}%` : `=${preset}%`}
-                    </button>
-                  ));
-                })()}
-
-                {simPct > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setSimPct(0)}
-                    className="unid-chip"
-                    style={{ padding: "3px 8px", fontSize: 11 }}
-                    aria-label={t("unidentifiedFaces.clearSimFilter", "Clear similarity filter")}
-                  >
-                    <Icon name="x" size={10} />
-                  </button>
-                )}
-              </div>
-              <div className="unid-filterbar-row">
-                <span className="unid-filterbar-label">
-                  {t("unidentifiedFaces.filterQuality", "Quality")}
-                </span>
-                {([
-                  ["all", t("unidentifiedFaces.qAllChip", "All"), undefined],
-                  ["high", t("unidentifiedFaces.qHighChip", "High"), "#22c55e"],
-                  ["medium", t("unidentifiedFaces.qMediumChip", "Medium"), "#f59e0b"],
-                  ["low", t("unidentifiedFaces.qLowChip", "Low"), "#94a3b8"],
-                ] as const).map(([key, label, dot]) => (
-                  <button
-                    key={key}
-                    onClick={() => setQualityFilter(key)}
-                    aria-pressed={qualityFilter === key}
-                    className="unid-chip"
-                  >
-                    {dot && <span className="unid-chip-dot" style={{ background: dot }} />}
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <div className="unid-filterbar-row">
-                <span className="unid-filterbar-label">
-                  {t("unidentifiedFaces.filterClarity", "Clarity")}
-                </span>
-                {([
-                  ["all", t("unidentifiedFaces.cAllChip", "All"), undefined],
-                  ["clear", t("unidentifiedFaces.cClearChip", "Clear face"), "#22c55e"],
-                  ["blur", t("unidentifiedFaces.cBlurChip", "Blur face"), "#94a3b8"],
-                  ["side", t("unidentifiedFaces.cSideChip", "Side face"), "#a855f7"],
-                  ["partial", t("unidentifiedFaces.cPartialChip", "Partial face"), "#f97316"],
-                ] as const).map(([key, label, dot]) => (
-                  <button
-                    key={key}
-                    onClick={() => setClarityFilter(key)}
-                    aria-pressed={clarityFilter === key}
-                    className="unid-chip"
-                  >
-                    {dot && <span className="unid-chip-dot" style={{ background: dot }} />}
-                    {label}
-                  </button>
-                ))}
-              </div>
-              {(simPct > 0 || qualityFilter !== "all" || clarityFilter !== "all") && (
-                <div style={{
-                  fontSize: 11.5,
-                  color: "var(--text-secondary)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 8,
-                  paddingTop: 4,
-                  borderTop: "1px solid var(--border)",
-                }}>
-                  <span>
-                    {t("unidentifiedFaces.filterStat", "Showing {{shown}} of {{total}}", {
-                      shown: filteredCropIds.length,
-                      total: cluster.crop_event_ids.length,
-                    })}
-                  </span>
-                  <button
-                    onClick={() => { setSimPct(0); setQualityFilter("all"); setClarityFilter("all"); }}
-                    className="btn btn-sm"
-                    style={{ padding: "3px 10px", fontSize: 11.5 }}
-                  >
-                    {t("unidentifiedFaces.clearFilters", "Clear filters")}
-                  </button>
-                </div>
-              )}
-            </div>
+            <ClusterFilterBar
+              simPct={simPct}
+              simMode={simMode}
+              qualityFilter={qualityFilter}
+              clarityFilter={clarityFilter}
+              setSimPct={setSimPct}
+              setSimMode={setSimMode}
+              setQualityFilter={setQualityFilter}
+              setClarityFilter={setClarityFilter}
+              simRangeMin={simRangeMin}
+              simRangeMax={simRangeMax}
+              presets={(() => {
+                if (cropSims.length < 2 || simRangeMin >= simRangeMax) return [];
+                const span = simRangeMax - simRangeMin;
+                const raw = [
+                  simRangeMin + Math.round(span * 0.25),
+                  simRangeMin + Math.round(span * 0.5),
+                  simRangeMin + Math.round(span * 0.75),
+                ];
+                const seen = new Set<number>();
+                return raw.filter((p) => {
+                  if (seen.has(p)) return false;
+                  seen.add(p);
+                  return true;
+                });
+              })()}
+              shown={filteredCropIds.length}
+              total={cluster.crop_event_ids.length}
+            />
           </div>
 
           {/* ── Face crop grid (4 per row, no big banner) ── */}
@@ -3490,6 +4005,236 @@ interface MappedRenderProps {
   pageSize: number;
 }
 
+// ── Unmap confirm modal ───────────────────────────────────────────────
+//
+// Shared confirmation modal for reverting Map-to-Employee operations.
+// One UI for the single-event "Unmap" path and the per-employee
+// "Unmap all" path — they only differ in count + description.
+//
+// Spells out exactly what will happen (events return to Unknown pool,
+// attendance is recomputed for the affected dates, reference photos
+// stay) so the operator can't tap-through unintentionally.
+
+interface UnmapConfirmModalProps {
+  eventIds: number[];
+  /** Plain-English subject — "this detection", "Hari's mappings", … */
+  subject: string;
+  onClose: () => void;
+  onDone: (result: UnmapEventsResponse) => void;
+}
+
+function UnmapConfirmModal({
+  eventIds,
+  subject,
+  onClose,
+  onDone,
+}: UnmapConfirmModalProps) {
+  const { t } = useTranslation();
+  const unmap = useUnmapEvents();
+  const [resultMsg, setResultMsg] = useState<string | null>(null);
+
+  const handleConfirm = () => {
+    setResultMsg(null);
+    unmap.mutate(
+      { event_ids: eventIds },
+      {
+        onSuccess: (res) => {
+          onDone(res);
+        },
+        onError: (err) => {
+          setResultMsg(
+            (t("unidentifiedFaces.unmapModal.failed", {
+              defaultValue: "Unmap failed — please try again.",
+            }) as string) +
+              ` (${(err as Error).message})`,
+          );
+        },
+      },
+    );
+  };
+
+  // Close on Escape.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !unmap.isPending) {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [onClose, unmap.isPending]);
+
+  // Portal up to document.body so ``position: fixed`` is interpreted
+  // relative to the viewport, not the containing tile. ``.unid-card``
+  // has ``overflow: hidden`` + a fade-in animation that creates a
+  // containing block, which clips the modal to the tile box if we
+  // render in-place. Portal escapes both.
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="unmap-confirm-title"
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.5)",
+        display: "grid",
+        placeItems: "center",
+        zIndex: 9000,
+        padding: 24,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "var(--bg)",
+          border: "1px solid var(--border)",
+          borderRadius: 10,
+          boxShadow: "0 18px 48px rgba(0,0,0,0.35)",
+          width: "min(460px, 92vw)",
+          padding: 18,
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+        }}
+      >
+        <div
+          id="unmap-confirm-title"
+          style={{
+            fontSize: 15,
+            fontWeight: 700,
+            color: "var(--text)",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <span
+            aria-hidden
+            style={{
+              width: 26,
+              height: 26,
+              borderRadius: "50%",
+              background: "var(--warn-soft, #fef3c7)",
+              color: "var(--warn, #ca8a04)",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Icon name="refresh" size={13} />
+          </span>
+          {t("unidentifiedFaces.unmapModal.title", {
+            defaultValue: "Revert this employee mapping?",
+          }) as string}
+        </div>
+
+        <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.55 }}>
+          {t("unidentifiedFaces.unmapModal.body", {
+            defaultValue:
+              "{{count}} detection event(s) for {{subject}} will be returned to the Unknown Faces pool. Attendance for the affected dates will be recomputed and the live matcher cache will be refreshed.",
+            count: eventIds.length,
+            subject,
+          }) as string}
+        </div>
+
+        <ul
+          style={{
+            fontSize: 12,
+            color: "var(--text-tertiary)",
+            paddingInlineStart: 18,
+            margin: 0,
+            display: "flex",
+            flexDirection: "column",
+            gap: 3,
+          }}
+        >
+          <li>
+            {t("unidentifiedFaces.unmapModal.note1", {
+              defaultValue: "Events reappear in Unknown Faces + Similarity Groups",
+            }) as string}
+          </li>
+          <li>
+            {t("unidentifiedFaces.unmapModal.note2", {
+              defaultValue: "Camera Logs + Matched Clips drop the employee tag",
+            }) as string}
+          </li>
+          <li>
+            {t("unidentifiedFaces.unmapModal.note3", {
+              defaultValue: "Attendance for the affected dates is recomputed",
+            }) as string}
+          </li>
+          <li>
+            {t("unidentifiedFaces.unmapModal.note4", {
+              defaultValue:
+                "Reference photos copied earlier are NOT removed — manage them via Employee → Reference Photos.",
+            }) as string}
+          </li>
+        </ul>
+
+        {resultMsg && (
+          <div
+            style={{
+              padding: "8px 10px",
+              borderRadius: 6,
+              fontSize: 12,
+              background: "var(--danger-soft, #fee2e2)",
+              border: "1px solid var(--danger, #fca5a5)",
+              color: "var(--danger-text, #991b1b)",
+            }}
+          >
+            {resultMsg}
+          </div>
+        )}
+
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: 8,
+            marginTop: 4,
+          }}
+        >
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={onClose}
+            disabled={unmap.isPending}
+          >
+            {t("common.cancel", { defaultValue: "Cancel" }) as string}
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm"
+            style={{
+              background: "var(--danger, #dc2626)",
+              borderColor: "var(--danger, #dc2626)",
+              color: "white",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+            onClick={handleConfirm}
+            disabled={unmap.isPending}
+          >
+            <Icon name="refresh" size={11} />
+            {unmap.isPending
+              ? (t("unidentifiedFaces.unmapModal.unmapping", {
+                  defaultValue: "Reverting…",
+                }) as string)
+              : (t("unidentifiedFaces.unmapModal.confirm", {
+                  defaultValue: "Revert {{n}} event(s)",
+                  n: eventIds.length,
+                }) as string)}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 interface MappedFacesGridProps extends MappedRenderProps {
   data: { items: MappedFaceEventOut[]; total: number } | undefined;
 }
@@ -3546,6 +4291,7 @@ function MappedFacesGrid({
 function MappedFaceTile({ event }: { event: MappedFaceEventOut }) {
   const { t } = useTranslation();
   const [imgFailed, setImgFailed] = useState(false);
+  const [unmapOpen, setUnmapOpen] = useState(false);
   const confPct =
     event.confidence !== null ? Math.round(event.confidence * 100) : null;
   return (
@@ -3612,6 +4358,39 @@ function MappedFaceTile({ event }: { event: MappedFaceEventOut }) {
             ? `${confPct}%`
             : t("unidentifiedFaces.mappedChip", "MAPPED")}
         </div>
+        {/* Unmap button — top-right overlay. Opens a confirm modal
+            that calls the revert endpoint. Same modal is shared by
+            the per-employee "Unmap all" path on the cluster cards. */}
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); setUnmapOpen(true); }}
+          aria-label={t("unidentifiedFaces.unmapTileAria", {
+            defaultValue: "Revert this employee mapping",
+          }) as string}
+          title={t("unidentifiedFaces.unmapTileTitle", {
+            defaultValue: "Revert mapping",
+          }) as string}
+          style={{
+            position: "absolute",
+            top: 6,
+            insetInlineEnd: 6,
+            width: 24,
+            height: 24,
+            borderRadius: 999,
+            background: "rgba(0,0,0,0.65)",
+            border: "1px solid rgba(255,255,255,0.18)",
+            color: "#fff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            backdropFilter: "blur(4px)",
+            WebkitBackdropFilter: "blur(4px)",
+            padding: 0,
+          }}
+        >
+          <Icon name="refresh" size={11} />
+        </button>
       </div>
       <div
         style={{
@@ -3684,6 +4463,17 @@ function MappedFaceTile({ event }: { event: MappedFaceEventOut }) {
           </span>
         </div>
       </div>
+
+      {unmapOpen && (
+        <UnmapConfirmModal
+          eventIds={[event.id]}
+          subject={
+            event.employee_name ?? `Employee #${event.employee_id}`
+          }
+          onClose={() => setUnmapOpen(false)}
+          onDone={() => setUnmapOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -3697,6 +4487,15 @@ interface MappedClustersGridProps extends MappedRenderProps {
         total_employees: number;
       }
     | undefined;
+  // Page-level filter pass-through so the per-employee unmap matches
+  // the exact event set the rollup card is summarising. Without these,
+  // an "Unmap all" click could revert events outside the visible
+  // filter window — surprising behaviour for the operator.
+  unmapFilter: {
+    start: string | null;
+    end: string | null;
+    camera_id: number | null;
+  };
 }
 
 function MappedClustersGrid({
@@ -3712,6 +4511,7 @@ function MappedClustersGrid({
   renderSkeleton,
   renderPagination,
   pageSize,
+  unmapFilter,
 }: MappedClustersGridProps) {
   const { t } = useTranslation();
   return (
@@ -3751,7 +4551,11 @@ function MappedClustersGrid({
               }}
             >
               {data.items.map((emp) => (
-                <MappedEmployeeCard key={emp.employee_id} group={emp} />
+                <MappedEmployeeCard
+                  key={emp.employee_id}
+                  group={emp}
+                  unmapFilter={unmapFilter}
+                />
               ))}
             </div>
           </div>
@@ -3762,8 +4566,23 @@ function MappedClustersGrid({
   );
 }
 
-function MappedEmployeeCard({ group }: { group: MappedEmployeeGroupOut }) {
+function MappedEmployeeCard({
+  group,
+  unmapFilter,
+}: {
+  group: MappedEmployeeGroupOut;
+  unmapFilter: {
+    start: string | null;
+    end: string | null;
+    camera_id: number | null;
+  };
+}) {
   const { t } = useTranslation();
+  const [unmapOpen, setUnmapOpen] = useState(false);
+  const [unmapResult, setUnmapResult] = useState<{
+    tone: "ok" | "err";
+    text: string;
+  } | null>(null);
   const previews = group.sample_event_ids.slice(0, 4);
   const confPct =
     group.avg_confidence !== null ? Math.round(group.avg_confidence * 100) : null;
@@ -3777,10 +4596,51 @@ function MappedEmployeeCard({ group }: { group: MappedEmployeeGroupOut }) {
         display: "flex",
         flexDirection: "column",
         animation: "unid-fadein 0.18s ease both",
+        position: "relative",
       }}
       role="article"
       aria-label={t("unidentifiedFaces.mappedEmployeeCardAria", "Mapped employee")}
     >
+      {/* Unmap-all action — top-right overlay on the card. Acts on
+          ``sample_event_ids`` (up to 8 most-recent crop events for
+          this employee). For larger backfills the operator can
+          repeat the action — the bounded sample makes the revert
+          predictable. */}
+      <button
+        type="button"
+        onClick={() => setUnmapOpen(true)}
+        aria-label={t("unidentifiedFaces.unmapCardAria", {
+          defaultValue: "Revert all sample mappings for this employee",
+        }) as string}
+        title={t("unidentifiedFaces.unmapCardTitle", {
+          defaultValue: "Revert sample mappings",
+        }) as string}
+        style={{
+          position: "absolute",
+          top: 8,
+          insetInlineEnd: 8,
+          zIndex: 2,
+          padding: "3px 8px",
+          background: "rgba(0,0,0,0.65)",
+          border: "1px solid rgba(255,255,255,0.18)",
+          borderRadius: 999,
+          color: "#fff",
+          fontSize: 10.5,
+          fontWeight: 600,
+          cursor: "pointer",
+          backdropFilter: "blur(4px)",
+          WebkitBackdropFilter: "blur(4px)",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 4,
+        }}
+      >
+        <Icon name="refresh" size={9} />
+        {t("unidentifiedFaces.unmapCardBtn", {
+          defaultValue: "Unmap",
+        }) as string}
+      </button>
+
       {/* Preview strip — up to 4 sample crops side-by-side. */}
       <div
         style={{
@@ -3969,7 +4829,278 @@ function MappedEmployeeCard({ group }: { group: MappedEmployeeGroupOut }) {
           </span>
         </div>
       </div>
+
+      {/* Inline result banner — sits inside the card so the operator
+          sees confirmation in context after the unmap completes. */}
+      {unmapResult && (
+        <div
+          style={{
+            padding: "6px 10px",
+            margin: "0 12px 10px",
+            fontSize: 11,
+            borderRadius: 6,
+            background:
+              unmapResult.tone === "ok"
+                ? "rgba(22,163,74,0.10)"
+                : "rgba(220,38,38,0.10)",
+            border:
+              unmapResult.tone === "ok"
+                ? "1px solid rgba(22,163,74,0.30)"
+                : "1px solid rgba(220,38,38,0.30)",
+            color: unmapResult.tone === "ok" ? "#15803d" : "#b91c1c",
+          }}
+        >
+          {unmapResult.text}
+        </div>
+      )}
+
+      {unmapOpen && (
+        <UnmapByEmployeeModal
+          employeeId={group.employee_id}
+          subject={
+            group.employee_name ?? `Employee #${group.employee_id}`
+          }
+          count={group.count}
+          filter={unmapFilter}
+          onClose={() => setUnmapOpen(false)}
+          onDone={(res) => {
+            setUnmapOpen(false);
+            setUnmapResult({
+              tone: "ok",
+              text: t("unidentifiedFaces.unmapModal.cardSuccess", {
+                defaultValue:
+                  "Reverted {{n}} mapping(s). {{dates}} day(s) recomputed.",
+                n: res.unmapped_events,
+                dates: res.attendance_dates_recomputed.length,
+              }) as string,
+            });
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+// ── UnmapByEmployeeModal — per-employee revert ─────────────────────
+// Mirrors UnmapConfirmModal in copy but submits to the
+// /unmap-by-employee endpoint with the page-level filter so the
+// server selects the exact event set the card was summarising.
+
+function UnmapByEmployeeModal({
+  employeeId,
+  subject,
+  count,
+  filter,
+  onClose,
+  onDone,
+}: {
+  employeeId: number;
+  subject: string;
+  count: number;
+  filter: {
+    start: string | null;
+    end: string | null;
+    camera_id: number | null;
+  };
+  onClose: () => void;
+  onDone: (res: UnmapEventsResponse) => void;
+}) {
+  const { t } = useTranslation();
+  const unmap = useUnmapByEmployee();
+  const [errMsg, setErrMsg] = useState<string | null>(null);
+
+  // Same date-encoding the listing queries use: start is start-of-day
+  // UTC, end is end-of-day UTC. Matches the existing `/mapped` filter
+  // so the server selects identical rows.
+  const handleConfirm = () => {
+    setErrMsg(null);
+    unmap.mutate(
+      {
+        employee_id: employeeId,
+        start: filter.start ? filter.start + "T00:00:00Z" : null,
+        end: filter.end ? filter.end + "T23:59:59Z" : null,
+        camera_id: filter.camera_id,
+      },
+      {
+        onSuccess: (res) => {
+          onDone(res);
+        },
+        onError: (err) => {
+          setErrMsg(
+            (t("unidentifiedFaces.unmapModal.failed", {
+              defaultValue: "Unmap failed — please try again.",
+            }) as string) +
+              ` (${(err as Error).message})`,
+          );
+        },
+      },
+    );
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !unmap.isPending) {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [onClose, unmap.isPending]);
+
+  // Portal to document.body — same rationale as UnmapConfirmModal: the
+  // MappedEmployeeCard ancestor uses overflow/animation that would
+  // otherwise contain the fixed-position modal to the card box.
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.5)",
+        display: "grid",
+        placeItems: "center",
+        zIndex: 9000,
+        padding: 24,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "var(--bg)",
+          border: "1px solid var(--border)",
+          borderRadius: 10,
+          boxShadow: "0 18px 48px rgba(0,0,0,0.35)",
+          width: "min(460px, 92vw)",
+          padding: 18,
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+        }}
+      >
+        <div style={{
+          fontSize: 15,
+          fontWeight: 700,
+          color: "var(--text)",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+        }}>
+          <span aria-hidden style={{
+            width: 26,
+            height: 26,
+            borderRadius: "50%",
+            background: "var(--warn-soft, #fef3c7)",
+            color: "var(--warn, #ca8a04)",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}>
+            <Icon name="refresh" size={13} />
+          </span>
+          {t("unidentifiedFaces.unmapModal.titleAll", {
+            defaultValue: "Revert all mappings for {{name}}?",
+            name: subject,
+          }) as string}
+        </div>
+
+        <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.55 }}>
+          {t("unidentifiedFaces.unmapModal.bodyAll", {
+            defaultValue:
+              "All {{count}} mapped detection(s) attributed to {{name}} within the current filter (date range + camera) will be returned to the Unknown Faces pool. Attendance for the affected dates will be recomputed.",
+            count,
+            name: subject,
+          }) as string}
+        </div>
+
+        <ul style={{
+          fontSize: 12,
+          color: "var(--text-tertiary)",
+          paddingInlineStart: 18,
+          margin: 0,
+          display: "flex",
+          flexDirection: "column",
+          gap: 3,
+        }}>
+          <li>
+            {t("unidentifiedFaces.unmapModal.note1", {
+              defaultValue: "Events reappear in Unknown Faces + Similarity Groups",
+            }) as string}
+          </li>
+          <li>
+            {t("unidentifiedFaces.unmapModal.note2", {
+              defaultValue: "Camera Logs + Matched Clips drop the employee tag",
+            }) as string}
+          </li>
+          <li>
+            {t("unidentifiedFaces.unmapModal.note3", {
+              defaultValue: "Attendance for the affected dates is recomputed",
+            }) as string}
+          </li>
+          <li>
+            {t("unidentifiedFaces.unmapModal.note4", {
+              defaultValue:
+                "Reference photos copied earlier are NOT removed — manage them via Employee → Reference Photos.",
+            }) as string}
+          </li>
+        </ul>
+
+        {errMsg && (
+          <div style={{
+            padding: "8px 10px",
+            borderRadius: 6,
+            fontSize: 12,
+            background: "var(--danger-soft, #fee2e2)",
+            border: "1px solid var(--danger, #fca5a5)",
+            color: "var(--danger-text, #991b1b)",
+          }}>
+            {errMsg}
+          </div>
+        )}
+
+        <div style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          gap: 8,
+          marginTop: 4,
+        }}>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={onClose}
+            disabled={unmap.isPending}
+          >
+            {t("common.cancel", { defaultValue: "Cancel" }) as string}
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm"
+            style={{
+              background: "var(--danger, #dc2626)",
+              borderColor: "var(--danger, #dc2626)",
+              color: "white",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+            onClick={handleConfirm}
+            disabled={unmap.isPending}
+          >
+            <Icon name="refresh" size={11} />
+            {unmap.isPending
+              ? (t("unidentifiedFaces.unmapModal.unmapping", {
+                  defaultValue: "Reverting…",
+                }) as string)
+              : (t("unidentifiedFaces.unmapModal.confirmAll", {
+                  defaultValue: "Revert {{n}} mapping(s)",
+                  n: count,
+                }) as string)}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -4001,9 +5132,6 @@ export function UnidentifiedFacesPage() {
   });
   const [uiThreshold, setUiThreshold] = useState(DEFAULT_THRESHOLD);
   const [uiMinCount, setUiMinCount] = useState(DEFAULT_MIN_COUNT);
-
-  // ── Tab 2: similarity range filter ──
-  const [simRange, setSimRange] = useState<"all" | "low" | "mid" | "high">("all");
 
   // ── Raw (Tab 1) specific state ──
   const [rawPage, setRawPage] = useState(1);
@@ -4037,15 +5165,10 @@ export function UnidentifiedFacesPage() {
   const isClusterPlaceholder = clusterResult.isPlaceholderData;
   const totalClusterPages = Math.max(1, Math.ceil((clusterData?.total_clusters ?? 0) / PAGE_SIZE));
 
-  // Client-side similarity range filter
-  const filteredClusters = clusterData
-    ? clusterData.clusters.filter((c) => {
-        if (simRange === "low") return c.avg_similarity < 0.60;
-        if (simRange === "mid") return c.avg_similarity >= 0.60 && c.avg_similarity < 0.80;
-        if (simRange === "high") return c.avg_similarity >= 0.80;
-        return true;
-      })
-    : [];
+  // Similarity is filtered ONLY inside the cluster detail drawer
+  // (via ``ClusterFilterBar``). The Groups grid shows every cluster the
+  // backend returns, paginated by the cluster threshold + min_count.
+  const clusters = clusterData?.clusters ?? [];
 
   // ── Tab 1: raw events query ──
   const rawQueryFilters: RawUnidentifiedFilters = {
@@ -4119,7 +5242,6 @@ export function UnidentifiedFacesPage() {
     setFilters((prev) => ({ ...prev, page: 1, ...patch }));
     setRawPage(1);
     setSelectedIds(new Set());
-    setSimRange("all");
   }, []);
 
   // Cleanup debounce on unmount
@@ -4265,98 +5387,72 @@ export function UnidentifiedFacesPage() {
     <>
       <style>{INJECTED_STYLE}</style>
 
-      <div style={{ padding: "24px 28px", display: "flex", flexDirection: "column", gap: 18, maxWidth: 1400 }}>
+      {/* Page title — scrolls away once the sticky nav reaches the top. */}
+      <div style={{ padding: "24px 28px 14px", maxWidth: 1400 }}>
+        <h1 className="page-title">{t("unidentifiedFaces.title", "Unidentified Faces")}</h1>
+      </div>
 
-        {/* ── Page header + tab switcher ── */}
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-          <h1 className="page-title">{t("unidentifiedFaces.title", "Unidentified Faces")}</h1>
-
-          {/* Tab switcher */}
-          <div style={{ display: "flex", border: "1px solid var(--border)", borderRadius: "var(--radius)", overflow: "hidden" }}>
-            {(["raw", "groups"] as const).map((tab, idx) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                aria-pressed={activeTab === tab}
-                className="btn"
-                style={{
-                  borderRadius: 0,
-                  borderRight: idx === 0 ? "1px solid var(--border)" : undefined,
-                  background: activeTab === tab ? "var(--text)" : "var(--bg-elev)",
-                  color: activeTab === tab ? "var(--bg)" : "var(--text)",
-                  fontWeight: activeTab === tab ? 600 : 400,
-                  padding: "6px 16px",
-                  fontSize: 13,
-                }}
-              >
-                {tab === "raw"
-                  ? t("unidentifiedFaces.tabAllFaces", "All Unknown Faces")
-                  : t("unidentifiedFaces.tabGroups", "Similarity Groups")}
-              </button>
-            ))}
+      {/* Hierarchical sticky nav: primary underline tabs + secondary pill row.
+          Sticks to the top of ``.content`` (the scrolling ancestor) so the
+          operator never loses their place in the hierarchy when scrolling
+          a long cluster grid. Pure CSS sticky — no JS measurement needed. */}
+      <div className="unid-nav-sticky">
+        <div className="unid-nav-inner">
+          <div role="tablist" aria-label={t("unidentifiedFaces.title", "Unidentified Faces") as string} className="unid-nav-primary">
+            {(["raw", "groups"] as const).map((tab) => {
+              const isActive = activeTab === tab;
+              const label = tab === "raw"
+                ? (t("unidentifiedFaces.tabAllFaces", "All Unknown Faces") as string)
+                : (t("unidentifiedFaces.tabGroups", "Similarity Groups") as string);
+              return (
+                <button
+                  key={tab}
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  onClick={() => setActiveTab(tab)}
+                  className={isActive ? "unid-nav-tab unid-nav-tab--active" : "unid-nav-tab"}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+          <div role="tablist" aria-label={t("unidentifiedFaces.subTabsAria", "Section views") as string} className="unid-nav-sub">
+            {(["primary", "mapped"] as const).map((sub) => {
+              const isActive =
+                activeTab === "raw" ? rawSubTab === sub : groupsSubTab === sub;
+              const label = (() => {
+                if (activeTab === "raw") {
+                  return sub === "primary"
+                    ? (t("unidentifiedFaces.subUnknownFaces", "Unknown Faces") as string)
+                    : (t("unidentifiedFaces.subMappedEmployees", "Mapped Employees") as string);
+                }
+                return sub === "primary"
+                  ? (t("unidentifiedFaces.subSimilarityClusters", "Similarity Clusters") as string)
+                  : (t("unidentifiedFaces.subMappedEmployees", "Mapped Employees") as string);
+              })();
+              return (
+                <button
+                  key={sub}
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  onClick={() => {
+                    if (activeTab === "raw") setRawSubTab(sub);
+                    else setGroupsSubTab(sub);
+                  }}
+                  className={isActive ? "unid-nav-pill unid-nav-pill--active" : "unid-nav-pill"}
+                >
+                  {label}
+                </button>
+              );
+            })}
           </div>
         </div>
+      </div>
 
-        {/* ── Sub-tab switcher ──
-            Each top tab gets a pair of sub-tabs:
-              "raw"    → Unknown Faces / Mapped Employees
-              "groups" → Similarity Clusters / Mapped Employees
-            Mapped Employees is the secondary investigation surface —
-            same date+camera filter envelope, but anchored to
-            detection_events that already carry an employee_id. */}
-        <div style={{
-          display: "flex",
-          gap: 4,
-          padding: 4,
-          background: "var(--bg-sunken)",
-          border: "1px solid var(--border)",
-          borderRadius: 999,
-          width: "fit-content",
-          marginTop: -4,
-        }}>
-          {(["primary", "mapped"] as const).map((sub) => {
-            const isActive =
-              activeTab === "raw"
-                ? rawSubTab === sub
-                : groupsSubTab === sub;
-            const label = (() => {
-              if (activeTab === "raw") {
-                return sub === "primary"
-                  ? t("unidentifiedFaces.subUnknownFaces", "Unknown Faces")
-                  : t("unidentifiedFaces.subMappedEmployees", "Mapped Employees");
-              }
-              return sub === "primary"
-                ? t("unidentifiedFaces.subSimilarityClusters", "Similarity Clusters")
-                : t("unidentifiedFaces.subMappedEmployees", "Mapped Employees");
-            })();
-            return (
-              <button
-                key={sub}
-                onClick={() => {
-                  if (activeTab === "raw") setRawSubTab(sub);
-                  else setGroupsSubTab(sub);
-                }}
-                aria-pressed={isActive}
-                className="btn"
-                style={{
-                  borderRadius: 999,
-                  border: "none",
-                  background: isActive ? "var(--bg-elev)" : "transparent",
-                  color: isActive ? "var(--text)" : "var(--text-secondary)",
-                  fontWeight: isActive ? 600 : 500,
-                  padding: "5px 14px",
-                  fontSize: 12.5,
-                  boxShadow: isActive
-                    ? "0 1px 3px rgba(0,0,0,0.08)"
-                    : "none",
-                  transition: "background 0.12s, color 0.12s",
-                }}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
+      <div style={{ padding: "18px 28px 24px", display: "flex", flexDirection: "column", gap: 18, maxWidth: 1400 }}>
 
         {/* ── Stats pills (tab-specific) ── */}
         {activeTab === "raw" ? (
@@ -4371,9 +5467,6 @@ export function UnidentifiedFacesPage() {
           clusterData ? (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               <StatPill label={t("unidentifiedFaces.clusters", "clusters")} value={clusterData.total_clusters.toLocaleString()} />
-              {simRange !== "all" && (
-                <StatPill label={t("unidentifiedFaces.filtered", "filtered")} value={filteredClusters.length.toLocaleString()} warn />
-              )}
               <StatPill label={t("unidentifiedFaces.totalEvents", "total events")} value={clusterData.total_unidentified_events.toLocaleString()} />
               <StatPill label={t("unidentifiedFaces.withEmbedding", "with embedding")} value={clusterData.events_with_embedding.toLocaleString()} />
               {clusterData.events_without_embedding > 0 && (
@@ -4438,10 +5531,39 @@ export function UnidentifiedFacesPage() {
                 </select>
               </div>
             )}
+            {/* Min appearances + Reset defaults — Similarity-Clusters-only
+                knobs. Hidden on the Mapped Employees sub-tab, which is
+                already mapped/reviewed data and isn't re-clustered. */}
+            {activeTab === "groups" && groupsSubTab === "primary" && (
+              <>
+                <div>
+                  <label style={labelStyle}>{t("unidentifiedFaces.minCount", "Min appearances")}</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={uiMinCount}
+                    onChange={(e) => { const v = Math.max(1, parseInt(e.target.value, 10) || 1); setUiMinCount(v); scheduleCommit({ min_count: v }); }}
+                    style={{ ...inputStyle, width: 90 }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setUiThreshold(DEFAULT_THRESHOLD); setUiMinCount(DEFAULT_MIN_COUNT); commitNow({ threshold: DEFAULT_THRESHOLD, min_count: DEFAULT_MIN_COUNT }); }}
+                  className="btn btn-sm"
+                  style={{ alignSelf: "flex-end" }}
+                  title={t("unidentifiedFaces.resetDefaultsHint", "Reset threshold and min appearances to defaults") as string}
+                >
+                  {t("unidentifiedFaces.resetDefaults", "Reset defaults")}
+                </button>
+              </>
+            )}
           </div>
 
-          {/* Tab 2: threshold + min_count */}
-          {activeTab === "groups" && (
+          {/* Threshold slider — only on the Similarity Clusters sub-tab.
+              The Mapped Employees view is already-reviewed data, not
+              re-clustered, so the clustering knobs would be misleading. */}
+          {activeTab === "groups" && groupsSubTab === "primary" && (
             <>
               <div style={{ paddingTop: 12, borderTop: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 12 }}>
                 {/* Similarity threshold card */}
@@ -4484,56 +5606,8 @@ export function UnidentifiedFacesPage() {
                   </div>
                 </div>
 
-                {/* Min appearances + reset row */}
-                <div style={{ display: "flex", alignItems: "flex-end", gap: 14, flexWrap: "wrap" }}>
-                  <div>
-                    <label style={labelStyle}>{t("unidentifiedFaces.minCount", "Min appearances")}</label>
-                    <input type="number" min={1} max={100} value={uiMinCount}
-                      onChange={(e) => { const v = Math.max(1, parseInt(e.target.value, 10) || 1); setUiMinCount(v); scheduleCommit({ min_count: v }); }}
-                      style={{ ...inputStyle, width: 90 }}
-                    />
-                  </div>
-                  <button
-                    onClick={() => { setUiThreshold(DEFAULT_THRESHOLD); setUiMinCount(DEFAULT_MIN_COUNT); commitNow({ threshold: DEFAULT_THRESHOLD, min_count: DEFAULT_MIN_COUNT }); }}
-                    className="btn btn-sm"
-                  >
-                    {t("unidentifiedFaces.resetDefaults", "Reset defaults")}
-                  </button>
-                </div>
               </div>
 
-              {/* Similarity range filter chips */}
-              <div style={{ paddingTop: 12, borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 11.5, color: "var(--text-tertiary)", fontWeight: 500 }}>
-                  {t("unidentifiedFaces.simFilter", "Similarity:")}
-                </span>
-                {(["all", "low", "mid", "high"] as const).map((range) => {
-                  const labels: Record<typeof range, string> = {
-                    all: t("unidentifiedFaces.simAll", "All"),
-                    low: t("unidentifiedFaces.simLow", "< 60%"),
-                    mid: t("unidentifiedFaces.simMid", "60–80%"),
-                    high: t("unidentifiedFaces.simHigh", "> 80%"),
-                  };
-                  const isActive = simRange === range;
-                  return (
-                    <button
-                      key={range}
-                      onClick={() => setSimRange(range)}
-                      aria-pressed={isActive}
-                      className="btn btn-sm"
-                      style={{
-                        background: isActive ? "var(--text)" : "var(--bg-elev)",
-                        color: isActive ? "var(--bg)" : "var(--text)",
-                        borderColor: isActive ? "var(--text)" : "var(--border)",
-                        fontWeight: isActive ? 600 : 400,
-                        fontSize: 12,
-                      }}
-                    >
-                      {labels[range]}
-                    </button>
-                  );
-                })}
-              </div>
             </>
           )}
         </div>
@@ -4593,19 +5667,16 @@ export function UnidentifiedFacesPage() {
             {!clusterResult.isLoading && !clusterResult.isError && clusterData && clusterData.clusters.length === 0 && renderEmpty(
               t("unidentifiedFaces.emptyHint", "Try expanding the date range or lowering the similarity threshold.")
             )}
-            {clusterData && clusterData.clusters.length > 0 && filteredClusters.length === 0 && (
-              renderEmpty(t("unidentifiedFaces.emptySimFilter", "No clusters match this similarity range. Try a different filter."))
-            )}
-            {clusterData && filteredClusters.length > 0 && (
+            {clusterData && clusters.length > 0 && (
               <div style={{ opacity: isClusterPlaceholder ? 0.6 : 1, transition: "opacity 0.2s" }}>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(175px, 1fr))", gap: 12 }}>
-                  {filteredClusters.map((cluster) => (
+                  {clusters.map((cluster) => (
                     <ClusterCard key={cluster.cluster_id} cluster={cluster} onOpen={setOpenCluster} />
                   ))}
                 </div>
               </div>
             )}
-            {clusterData && simRange === "all" && renderPagination(filters.page, totalClusterPages, (p) => setFilters((f) => ({ ...f, page: p })))}
+            {clusterData && renderPagination(filters.page, totalClusterPages, (p) => setFilters((f) => ({ ...f, page: p })))}
           </>
         )}
 
@@ -4624,6 +5695,11 @@ export function UnidentifiedFacesPage() {
             renderSkeleton={renderSkeleton}
             renderPagination={renderPagination}
             pageSize={MAPPED_CLUSTERS_PAGE_SIZE}
+            unmapFilter={{
+              start: filters.start,
+              end: filters.end,
+              camera_id: filters.camera_id,
+            }}
           />
         )}
 

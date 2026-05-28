@@ -11,6 +11,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
+import { extractApiError } from "../../api/client";
 import { useMe } from "../../auth/AuthProvider";
 import { Icon } from "../../shell/Icon";
 import { NewRequestDrawer } from "../../requests/NewRequestDrawer";
@@ -20,6 +21,7 @@ import { usePersonCalendar } from "../calendar/hooks";
 import type { CalendarStatus, PersonDay } from "../calendar/types";
 import { useMyEmployee } from "../employees/hooks";
 import { useMyRecentAttendance, useRegenerateAttendanceForEmployee } from "./hooks";
+import { formatMinutes } from "./timeFormat";
 import type { AttendanceItem } from "./types";
 
 export function MyAttendancePage() {
@@ -59,7 +61,7 @@ export function MyAttendancePage() {
         onError: (err) => {
           setRegenInfo({
             tone: "err",
-            text: `Regenerate failed: ${(err as Error).message}`,
+            text: `Regenerate failed: ${extractApiError(err, "request failed")}`,
           });
         },
       },
@@ -332,15 +334,13 @@ function TodayCard({
   const onSite = !!day?.in_time && !day?.out_time;
   const totalLabel =
     day?.total_minutes != null && day.total_minutes > 0
-      ? formatHoursColon(day.total_minutes)
-      : onSite
-        ? "—"
-        : "—";
+      ? formatMinutes(day.total_minutes)
+      : "—";
 
   const otLabel =
     day && day.overtime_minutes > 0
-      ? `${(day.overtime_minutes / 60).toFixed(1)}h`
-      : "0h";
+      ? formatMinutes(day.overtime_minutes)
+      : "0m";
 
   return (
     <div className="card">
@@ -438,8 +438,8 @@ function AtAGlanceCard({
   monthLabel: string;
 }) {
   const counts = useMemo(() => countStatuses(days), [days]);
-  const overtimeHours = useMemo(
-    () => days.reduce((s, d) => s + (d.overtime_minutes ?? 0), 0) / 60,
+  const overtimeMinutes = useMemo(
+    () => days.reduce((s, d) => s + (d.overtime_minutes ?? 0), 0),
     [days],
   );
 
@@ -491,7 +491,7 @@ function AtAGlanceCard({
           />
           <Counter
             label="Overtime"
-            value={`${overtimeHours.toFixed(1)}h`}
+            value={overtimeMinutes > 0 ? formatMinutes(overtimeMinutes) : "0m"}
             kind="success"
           />
         </div>
@@ -655,7 +655,7 @@ function Rolling14Row({
             )}
             {item.overtime_minutes > 0 && (
               <span className="pill pill-accent">
-                +{(item.overtime_minutes / 60).toFixed(1)}h OT
+                +{formatMinutes(item.overtime_minutes)} OT
               </span>
             )}
           </div>
@@ -892,12 +892,6 @@ function countStatuses(days: PersonDay[]): {
     else if (d.status === "absent") acc.absent += 1;
   }
   return acc;
-}
-
-function formatHoursColon(totalMinutes: number): string {
-  const h = Math.floor(totalMinutes / 60);
-  const m = totalMinutes % 60;
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
 function parseHourFloat(hhmm: string): number {

@@ -123,6 +123,23 @@ export interface MapAsAttendanceResponse {
   attendance_dates_recomputed: string[];  // ISO YYYY-MM-DD strings
 }
 
+export interface UnmapEventsBody {
+  event_ids: number[];
+}
+
+export interface UnmapByEmployeeBody {
+  employee_id: number;
+  start: string | null;
+  end: string | null;
+  camera_id: number | null;
+}
+
+export interface UnmapEventsResponse {
+  unmapped_events: number;
+  affected_employee_ids: number[];
+  attendance_dates_recomputed: string[];  // ISO YYYY-MM-DD strings
+}
+
 // ── Mapped Employees (sub-tabs) ─────────────────────────────────────
 
 export interface MappedFaceEventOut {

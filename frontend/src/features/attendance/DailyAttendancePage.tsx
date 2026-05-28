@@ -21,6 +21,7 @@ import { useDepartments } from "../departments/hooks";
 import { useEmployeeList, useMyTeamList } from "../employees/hooks";
 import { AttendanceDrawer } from "./AttendanceDrawer";
 import { useAttendance, useRegenerateAttendance } from "./hooks";
+import { formatMinutes } from "./timeFormat";
 import type { AttendanceItem } from "./types";
 
 type ScopeMode = "company" | "department" | "team" | "individual";
@@ -705,11 +706,9 @@ export function DailyAttendancePage() {
                 </td>
                 <td className="mono text-sm">{shortTime(it.in_time)}</td>
                 <td className="mono text-sm">{shortTime(it.out_time)}</td>
-                <td className="mono text-sm">{decimalHours(it.total_minutes)}</td>
+                <td className="mono text-sm">{formatMinutes(it.total_minutes)}</td>
                 <td className="mono text-sm">
-                  {it.overtime_minutes > 0
-                    ? `${(it.overtime_minutes / 60).toFixed(1)}h`
-                    : "—"}
+                  {it.overtime_minutes > 0 ? formatMinutes(it.overtime_minutes) : "—"}
                 </td>
                 <td>
                   <FlagText item={it} />
@@ -892,7 +891,7 @@ function FlagText({ item }: { item: AttendanceItem }) {
   if (item.early_out) parts.push("Early out");
   if (item.short_hours) parts.push("Short hours");
   if (item.overtime_minutes > 0) {
-    parts.push(`OT ${(item.overtime_minutes / 60).toFixed(1)}h`);
+    parts.push(`OT ${formatMinutes(item.overtime_minutes)}`);
   }
   if (parts.length === 0) {
     return <span className="text-xs text-dim">—</span>;
@@ -961,11 +960,6 @@ function shortTime(iso: string | null): string {
   return iso.length >= 5 ? iso.slice(0, 5) : iso;
 }
 
-function decimalHours(minutes: number | null): string {
-  if (minutes === null) return "—";
-  return `${(minutes / 60).toFixed(1)}h`;
-}
-
 const selectStyle = {
   padding: "6px 10px",
   fontSize: 12.5,
@@ -996,7 +990,7 @@ export function FlagPills({ item }: { item: AttendanceItem }) {
       {item.short_hours && <span className="pill pill-info">short</span>}
       {item.overtime_minutes > 0 && (
         <span className="pill pill-accent">
-          OT {(item.overtime_minutes / 60).toFixed(1)}h
+          OT {formatMinutes(item.overtime_minutes)}
         </span>
       )}
       {!item.late &&

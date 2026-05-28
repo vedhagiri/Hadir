@@ -18,6 +18,7 @@ import { useConfidentialDownload } from "../../components/useConfidentialDownloa
 import { Icon } from "../../shell/Icon";
 import { useEmployeeList, useEmployeeDetail } from "../employees/hooks";
 import type { Employee } from "../employees/types";
+import { formatMinutes } from "../attendance/timeFormat";
 import type { AttendanceItem, AttendanceListResponse } from "../attendance/types";
 
 // ---------------------------------------------------------------------------
@@ -45,10 +46,10 @@ function shortTime(iso: string | null): string {
   return iso.length >= 5 ? iso.slice(0, 5) : iso;
 }
 
-function decimalHours(minutes: number | null): string {
-  if (minutes === null) return "—";
-  return `${(minutes / 60).toFixed(1)}h`;
-}
+// Display-side hour formatting uses ``formatMinutes`` from
+// attendance/timeFormat for consistent ``8h 45m`` rendering.
+// CSV/Excel exports keep decimal hours via ``(min / 60).toFixed(2)``
+// at the row-build sites — that's a data-shape concern, not display.
 
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -189,8 +190,8 @@ export function EmployeeReportPage() {
       late,
       absent,
       leave,
-      totalHours: totalMinutes / 60,
-      otHours: otMinutes / 60,
+      totalMinutes,
+      otMinutes,
       presentPct,
     };
   }, [items, start, end]);
@@ -547,10 +548,10 @@ export function EmployeeReportPage() {
             <StatTile label="Absent" value={stats.absent} tone="danger" />
             <StatTile
               label="Total hours"
-              value={stats.totalHours.toFixed(1)}
+              value={stats.totalMinutes > 0 ? formatMinutes(stats.totalMinutes) : "—"}
               hint={
-                stats.otHours > 0
-                  ? `+${stats.otHours.toFixed(1)}h OT`
+                stats.otMinutes > 0
+                  ? `+${formatMinutes(stats.otMinutes)} OT`
                   : undefined
               }
               hintTone="success"
@@ -652,11 +653,11 @@ export function EmployeeReportPage() {
                           {shortTime(it?.out_time ?? null)}
                         </td>
                         <td className="mono text-sm">
-                          {decimalHours(it?.total_minutes ?? null)}
+                          {formatMinutes(it?.total_minutes ?? null)}
                         </td>
                         <td className="mono text-sm">
                           {it && it.overtime_minutes > 0
-                            ? `+${(it.overtime_minutes / 60).toFixed(1)}h`
+                            ? `+${formatMinutes(it.overtime_minutes)}`
                             : "—"}
                         </td>
                         <td className="text-xs">
@@ -966,7 +967,7 @@ function flagText(item: AttendanceItem | null): string {
   if (item.early_out) parts.push("Early out");
   if (item.short_hours) parts.push("Short hours");
   if (item.overtime_minutes > 0) {
-    parts.push(`+${(item.overtime_minutes / 60).toFixed(1)}h OT`);
+    parts.push(`+${formatMinutes(item.overtime_minutes)} OT`);
   }
   return parts.length === 0 ? "—" : parts.join(" · ");
 }

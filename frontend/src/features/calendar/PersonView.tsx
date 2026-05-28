@@ -14,6 +14,7 @@ import { useTranslation } from "react-i18next";
 
 import { LateBadge } from "../../components/LateBadge";
 import { Icon } from "../../shell/Icon";
+import { formatMinutes } from "../attendance/timeFormat";
 import type { CalendarStatus, PersonDay, PersonMonth } from "./types";
 
 interface Props {
@@ -118,7 +119,7 @@ function DayCell({
 
   const totalHours =
     day.total_minutes != null && day.total_minutes > 0
-      ? `${(day.total_minutes / 60).toFixed(0)} ${t("calendar.hrs", { defaultValue: "hrs" }) as string}`
+      ? formatMinutes(day.total_minutes)
       : null;
 
   const tooltip = [
@@ -322,7 +323,7 @@ function LateByRow({
       }}
     >
       <span aria-hidden>+</span>
-      <span className="mono">{fmtMinutes(lateBy)}</span>
+      <span className="mono">{formatMinutes(lateBy)}</span>
     </div>
   );
 }
@@ -464,11 +465,9 @@ export function calcLateMinutes(
   return Math.max(0, actual - graceEnd);
 }
 
-/** Format a minute count as a compact ``Xh Ym`` / ``Xm`` string. */
-export function fmtMinutes(mins: number): string {
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  if (h === 0) return `${m}m`;
-  if (m === 0) return `${h}h`;
-  return `${h}h ${m}m`;
-}
+/** Format a minute count as a compact ``Xh Ym`` / ``Xm`` string.
+ *  Re-export so existing call sites (LateBy row) keep working; the
+ *  canonical implementation lives in ``attendance/timeFormat`` so
+ *  total / overtime / late durations all render identically.
+ */
+export { formatMinutes as fmtMinutes };

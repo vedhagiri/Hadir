@@ -298,6 +298,47 @@ class MapAsAttendanceResponse(BaseModel):
     attendance_dates_recomputed: list[str]
 
 
+class UnmapEventsBody(BaseModel):
+    """Revert a previous Map-to-Employee operation.
+
+    Accepts a list of detection_event IDs. Every row in the list that
+    has ``employee_id IS NOT NULL`` gets its attribution cleared so the
+    event returns to the unidentified pool. Rows without an employee_id
+    are silently ignored (idempotent).
+    """
+
+    event_ids: list[int]
+
+    @field_validator("event_ids")
+    @classmethod
+    def _validate_event_ids(cls, v: list[int]) -> list[int]:
+        if not v:
+            raise ValueError("event_ids must not be empty")
+        return v[:200]
+
+
+class UnmapEventsResponse(BaseModel):
+    unmapped_events: int
+    affected_employee_ids: list[int]
+    # ISO date strings (YYYY-MM-DD) — every tenant-local day where at
+    # least one attendance row got recomputed after the unmap.
+    attendance_dates_recomputed: list[str]
+
+
+class UnmapByEmployeeBody(BaseModel):
+    """Per-employee bulk revert — unmaps every event attributed to
+    ``employee_id`` within the same date/camera envelope the Mapped
+    Employees view used. Used by the "Unmap" button on each employee
+    rollup card so the operator's intent ("revert this entire
+    mapping") matches the click.
+    """
+
+    employee_id: int
+    start: Optional[datetime] = None
+    end: Optional[datetime] = None
+    camera_id: Optional[int] = None
+
+
 # ---------------------------------------------------------------------------
 # "Mapped Employees" sub-tab schemas
 # ---------------------------------------------------------------------------
@@ -1354,4 +1395,342 @@ def map_as_attendance(
         employee_name=employee_name,
         employee_code=employee_code,
         attendance_dates_recomputed=recomputed,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Unmap — revert a previous Map-to-Employee operation
+# ---------------------------------------------------------------------------
+
+
+@router.post("/unmap-events", response_model=UnmapEventsResponse)
+def unmap_events(
+    user: Annotated[CurrentUser, ADMIN_HR],
+    body: UnmapEventsBody,
+    scope: Annotated[TenantScope, Depends(get_tenant_scope)],
+) -> UnmapEventsResponse:
+    """Revert mapped events back to the unidentified pool.
+
+    Per-row effect:
+      * ``detection_events.employee_id`` → NULL.
+      * ``detection_events.former_employee_match`` → False AND
+        ``former_match_employee_id`` → NULL — so the row is fully
+        unattributed and shows up in Unknown Faces / Similarity Groups
+        on the next read. The operator can re-map later (correct
+        employee, training, or attendance) without state mismatches.
+      * ``confidence`` left alone — it's a historical match score, not
+        an attribution flag, and clearing it would erase forensic info.
+
+    Side-effects:
+      * For every (previous_employee_id, tenant_local_date) pair the
+        unmapped events covered, attendance is recomputed (the
+        employee's in/out times will shift if these events were the
+        boundary detections).
+      * Matcher cache is invalidated for every previously-attributed
+        employee. The next live capture re-evaluates from scratch.
+      * Cluster cache is evicted for the tenant — the events
+        re-entering the unidentified pool change the fingerprint, but
+        we evict explicitly so the next /api/unidentified-faces call
+        is guaranteed fresh.
+
+    What's NOT touched:
+      * Reference photos copied via the Reference workflow stay on
+        ``employee_photos`` — they're an independent asset; delete
+        them via Employee → Reference Photos if they were copied
+        from these specific events. The unmap audit row carries the
+        affected event IDs so an operator can reconcile if needed.
+    """
+    from maugood.attendance import scheduler as att_scheduler  # noqa: PLC0415
+    from maugood.attendance.repository import (  # noqa: PLC0415
+        load_tenant_settings,
+        local_tz_for,
+    )
+
+    # Dedup so a sloppy frontend doesn't re-fire the same row.
+    event_ids = list(dict.fromkeys(body.event_ids))
+
+    with get_engine().begin() as conn:
+        # Snapshot every targeted row's previous attribution. Filter on
+        # the live employee_id (or former_match_employee_id) so a row
+        # that's already unattributed is a no-op for that ID.
+        rows = conn.execute(
+            select(
+                detection_events.c.id,
+                detection_events.c.captured_at,
+                detection_events.c.employee_id,
+                detection_events.c.former_match_employee_id,
+                detection_events.c.former_employee_match,
+            )
+            .where(
+                detection_events.c.tenant_id == scope.tenant_id,
+                detection_events.c.id.in_(event_ids),
+            )
+        ).all()
+
+        # Filter to rows that actually have something to unmap.
+        affected_rows = [
+            r for r in rows
+            if r.employee_id is not None or r.former_employee_match
+        ]
+        if not affected_rows:
+            return UnmapEventsResponse(
+                unmapped_events=0,
+                affected_employee_ids=[],
+                attendance_dates_recomputed=[],
+            )
+
+        affected_ids = [int(r.id) for r in affected_rows]
+
+        # Capture which employees were attributed BEFORE we clear the
+        # column. Need this for: (a) attendance recompute, (b) matcher
+        # cache invalidation, (c) audit row.
+        emp_dates: dict[int, set] = {}
+        former_only_employees: set[int] = set()
+        for r in affected_rows:
+            if r.employee_id is not None:
+                eid = int(r.employee_id)
+                if r.captured_at is not None:
+                    emp_dates.setdefault(eid, set()).add(r.captured_at)
+            elif r.former_match_employee_id is not None:
+                former_only_employees.add(int(r.former_match_employee_id))
+
+        affected_employees = sorted(
+            set(emp_dates.keys()) | former_only_employees
+        )
+
+        # Bulk UPDATE — clear the attribution columns in one round.
+        conn.execute(
+            update(detection_events)
+            .where(
+                detection_events.c.tenant_id == scope.tenant_id,
+                detection_events.c.id.in_(affected_ids),
+            )
+            .values(
+                employee_id=None,
+                former_employee_match=False,
+                former_match_employee_id=None,
+            )
+        )
+
+        # Tenant timezone — needed to convert captured_at (UTC) into the
+        # calendar day attendance_records is keyed on.
+        _settings = load_tenant_settings(conn, scope)
+        tz = local_tz_for(_settings)
+        dates_per_employee: dict[int, set] = {}
+        for eid, timestamps in emp_dates.items():
+            for ts in timestamps:
+                dates_per_employee.setdefault(eid, set()).add(
+                    ts.astimezone(tz).date()
+                )
+
+        # Audit BEFORE the recompute so the trail exists even if a
+        # downstream recompute raises.
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="unidentified_face.unmapped",
+            entity_type="detection_event",
+            entity_id=",".join(str(i) for i in affected_ids[:20]),
+            before={
+                "event_ids": affected_ids,
+                "previous_employee_ids": sorted(
+                    {int(r.employee_id) for r in affected_rows
+                     if r.employee_id is not None}
+                ),
+                "former_employee_ids": sorted(former_only_employees),
+            },
+            after={
+                "unmapped_event_count": len(affected_ids),
+                "attendance_dates_to_recompute": sorted(
+                    d.isoformat()
+                    for ds in dates_per_employee.values()
+                    for d in ds
+                ),
+            },
+        )
+
+    # 2. Matcher cache invalidation — per affected employee. Future
+    #    captures should not rely on a stale per-employee vector set
+    #    (especially if the operator follows up by deleting the
+    #    reference photos the mapping had created).
+    try:
+        from maugood.identification.matcher import matcher_cache  # noqa: PLC0415
+        for eid in affected_employees:
+            matcher_cache.invalidate_employee(eid)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "unmap_events: matcher cache invalidation failed: %s",
+            type(exc).__name__,
+        )
+
+    # 3. Cluster cache eviction — defence in depth on top of the
+    #    fingerprint-based key invalidation.
+    _cluster_cache_evict_tenant(scope.tenant_id)
+
+    # 4. Attendance recompute — one call per unique (employee, date).
+    #    Failures are logged but don't abort other dates.
+    recomputed: set[str] = set()
+    for eid, dates in dates_per_employee.items():
+        for the_date in sorted(dates):
+            try:
+                if att_scheduler.recompute_for(
+                    scope, employee_id=eid, the_date=the_date
+                ):
+                    recomputed.add(the_date.isoformat())
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "unmap_events: recompute failed employee=%d date=%s: %s",
+                    eid, the_date, type(exc).__name__,
+                )
+
+    return UnmapEventsResponse(
+        unmapped_events=len(affected_ids),
+        affected_employee_ids=affected_employees,
+        attendance_dates_recomputed=sorted(recomputed),
+    )
+
+
+@router.post("/unmap-by-employee", response_model=UnmapEventsResponse)
+def unmap_by_employee(
+    user: Annotated[CurrentUser, ADMIN_HR],
+    body: UnmapByEmployeeBody,
+    scope: Annotated[TenantScope, Depends(get_tenant_scope)],
+) -> UnmapEventsResponse:
+    """Revert every mapped event for one employee within the same
+    date/camera envelope the Mapped Employees rollup uses.
+
+    The endpoint selects ``detection_events`` rows matching the filter
+    + employee_id (or former_match_employee_id) and reuses the same
+    side-effect bundle as ``/unmap-events``:
+
+      * Clear employee_id / former_employee_match / former_match_employee_id
+      * Recompute attendance for each affected (employee, date)
+      * Invalidate matcher cache + evict cluster cache
+      * One ``unidentified_face.unmapped`` audit row covering the
+        whole batch (with event count + before/after snapshot)
+
+    Reference photos created earlier by the Reference workflow stay
+    intact — same red line as ``/unmap-events``: this endpoint reverts
+    the *attribution*, not the training data.
+    """
+    from maugood.attendance import scheduler as att_scheduler  # noqa: PLC0415
+    from maugood.attendance.repository import (  # noqa: PLC0415
+        load_tenant_settings,
+        local_tz_for,
+    )
+
+    # Default date range = last 7 days (matches the page default).
+    start = body.start or _default_start()
+    end = body.end
+
+    with get_engine().begin() as conn:
+        conds = [
+            detection_events.c.tenant_id == scope.tenant_id,
+            (
+                (detection_events.c.employee_id == body.employee_id)
+                | (
+                    (detection_events.c.former_match_employee_id == body.employee_id)
+                    & (detection_events.c.former_employee_match.is_(True))
+                )
+            ),
+        ]
+        if body.camera_id is not None:
+            conds.append(detection_events.c.camera_id == body.camera_id)
+        if start is not None:
+            conds.append(detection_events.c.captured_at >= start)
+        if end is not None:
+            conds.append(detection_events.c.captured_at <= end)
+
+        rows = conn.execute(
+            select(
+                detection_events.c.id,
+                detection_events.c.captured_at,
+                detection_events.c.employee_id,
+                detection_events.c.former_match_employee_id,
+                detection_events.c.former_employee_match,
+            ).where(*conds)
+        ).all()
+
+        if not rows:
+            return UnmapEventsResponse(
+                unmapped_events=0,
+                affected_employee_ids=[],
+                attendance_dates_recomputed=[],
+            )
+
+        affected_ids = [int(r.id) for r in rows]
+        dates: set = set()
+        _settings = load_tenant_settings(conn, scope)
+        tz = local_tz_for(_settings)
+        for r in rows:
+            if r.captured_at is not None:
+                dates.add(r.captured_at.astimezone(tz).date())
+
+        conn.execute(
+            update(detection_events)
+            .where(
+                detection_events.c.tenant_id == scope.tenant_id,
+                detection_events.c.id.in_(affected_ids),
+            )
+            .values(
+                employee_id=None,
+                former_employee_match=False,
+                former_match_employee_id=None,
+            )
+        )
+
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="unidentified_face.unmapped",
+            entity_type="employee",
+            entity_id=str(body.employee_id),
+            before={
+                "employee_id": body.employee_id,
+                "event_count": len(affected_ids),
+                "filter": {
+                    "start": start.isoformat() if start else None,
+                    "end": end.isoformat() if end else None,
+                    "camera_id": body.camera_id,
+                },
+            },
+            after={
+                "attendance_dates_to_recompute": sorted(
+                    d.isoformat() for d in dates
+                ),
+            },
+        )
+
+    # Matcher cache + cluster cache hygiene.
+    try:
+        from maugood.identification.matcher import matcher_cache  # noqa: PLC0415
+
+        matcher_cache.invalidate_employee(body.employee_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "unmap_by_employee: matcher cache invalidation failed: %s",
+            type(exc).__name__,
+        )
+    _cluster_cache_evict_tenant(scope.tenant_id)
+
+    # Attendance recompute — one call per affected day.
+    recomputed: set[str] = set()
+    for the_date in sorted(dates):
+        try:
+            if att_scheduler.recompute_for(
+                scope, employee_id=body.employee_id, the_date=the_date
+            ):
+                recomputed.add(the_date.isoformat())
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "unmap_by_employee: recompute failed employee=%d date=%s: %s",
+                body.employee_id, the_date, type(exc).__name__,
+            )
+
+    return UnmapEventsResponse(
+        unmapped_events=len(affected_ids),
+        affected_employee_ids=[body.employee_id],
+        attendance_dates_recomputed=sorted(recomputed),
     )

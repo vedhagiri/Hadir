@@ -17,6 +17,7 @@ import { Icon } from "../../shell/Icon";
 import { useMe } from "../../auth/AuthProvider";
 import { primaryRole } from "../../types";
 import { useRegenerateAttendanceForEmployee } from "../attendance/hooks";
+import { formatMinutes } from "../attendance/timeFormat";
 import { EscalationDrawer } from "./EscalationDrawer";
 import { useDayDetail } from "./hooks";
 import { calcLateMinutes, fmtMinutes } from "./PersonView";
@@ -161,8 +162,8 @@ export function DayDetailContent({
                 <div className="grid grid-4" style={{ gap: 10, marginBottom: 16 }}>
                   <Tile label={t("calendar.inTime")   as string} value={detail.data.in_time?.slice(0, 5) ?? "—"} />
                   <Tile label={t("calendar.outTime")  as string} value={detail.data.out_time?.slice(0, 5) ?? "—"} />
-                  <Tile label={t("calendar.total")    as string} value={detail.data.total_minutes != null ? `${(detail.data.total_minutes / 60).toFixed(1)}h` : "—"} />
-                  <Tile label={t("calendar.overtime") as string} value={detail.data.overtime_minutes > 0 ? `${(detail.data.overtime_minutes / 60).toFixed(1)}h` : "—"} />
+                  <Tile label={t("calendar.total")    as string} value={formatMinutes(detail.data.total_minutes)} />
+                  <Tile label={t("calendar.overtime") as string} value={detail.data.overtime_minutes > 0 ? formatMinutes(detail.data.overtime_minutes) : "—"} />
                 </div>
 
                 <Section label={t("calendar.dayTimeline") as string}>
@@ -271,7 +272,7 @@ export function DayDetailDrawer({
             tone: "err",
             text: (t("attendance.regenFailed", {
               defaultValue: "Regenerate failed: {{reason}}",
-              reason: (err as Error).message,
+              reason: extractApiError(err, "request failed"),
             }) as string),
           });
         },
@@ -1946,7 +1947,7 @@ function HolidayDayContent({
               border: "1px solid color-mix(in oklab, var(--warning) 30%, var(--border))",
             }}>
               <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--warning-text)" }}>
-                +{(detail.overtime_minutes / 60).toFixed(1)}h OT
+                +{formatMinutes(detail.overtime_minutes)} OT
               </span>
             </span>
           )}
@@ -2074,7 +2075,7 @@ function HolidayDayContent({
                   padding: "3px 10px", borderRadius: 999, fontSize: 11.5, fontWeight: 700,
                   background: "var(--warning)", color: "#fff", flexShrink: 0, whiteSpace: "nowrap",
                 }}>
-                  +{(detail.overtime_minutes / 60).toFixed(1)}h OT
+                  +{formatMinutes(detail.overtime_minutes)} OT
                 </span>
               )}
             </div>
@@ -2086,11 +2087,11 @@ function HolidayDayContent({
             <Tile label={t("calendar.outTime") as string} value={detail.out_time?.slice(0, 5) ?? "—"} />
             <Tile
               label={t("calendar.total") as string}
-              value={detail.total_minutes != null ? `${(detail.total_minutes / 60).toFixed(1)}h` : "—"}
+              value={formatMinutes(detail.total_minutes)}
             />
             <Tile
               label={t("calendar.overtime") as string}
-              value={detail.overtime_minutes > 0 ? `+${(detail.overtime_minutes / 60).toFixed(1)}h` : "—"}
+              value={detail.overtime_minutes > 0 ? `+${formatMinutes(detail.overtime_minutes)}` : "—"}
             />
           </div>
 
@@ -2662,7 +2663,7 @@ function WeekOffDayContent({
                 whiteSpace: "nowrap",
               }}
             >
-              +{(detail.overtime_minutes / 60).toFixed(1)}h OT
+              +{formatMinutes(detail.overtime_minutes)} OT
             </span>
           )}
         </div>
@@ -2680,17 +2681,13 @@ function WeekOffDayContent({
         />
         <Tile
           label={t("calendar.total") as string}
-          value={
-            detail.total_minutes != null
-              ? `${(detail.total_minutes / 60).toFixed(1)}h`
-              : "—"
-          }
+          value={formatMinutes(detail.total_minutes)}
         />
         <Tile
           label={t("calendar.overtime") as string}
           value={
             detail.overtime_minutes > 0
-              ? `+${(detail.overtime_minutes / 60).toFixed(1)}h`
+              ? `+${formatMinutes(detail.overtime_minutes)}`
               : "—"
           }
         />

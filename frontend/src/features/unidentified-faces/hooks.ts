@@ -19,6 +19,9 @@ import type {
   UnidentifiedEventsResponse,
   UnidentifiedFacesFilters,
   UnidentifiedFacesResponse,
+  UnmapByEmployeeBody,
+  UnmapEventsBody,
+  UnmapEventsResponse,
 } from "./types";
 
 const LIST_KEY = ["unidentified-faces", "clusters"] as const;
@@ -299,5 +302,109 @@ export function useMappedClusters(
       ),
     staleTime: 30_000,
     placeholderData: (prev) => prev,
+  });
+}
+
+/**
+ * Revert a Map-to-Employee operation. Clears ``employee_id`` (and
+ * ``former_employee_match`` / ``former_match_employee_id``) on the
+ * supplied detection events so they return to the unidentified pool.
+ *
+ * Endpoint: ``POST /api/unidentified-faces/unmap-events``
+ * Body: ``{event_ids: number[]}`` (server caps at 200/request).
+ *
+ * Side effects on the server (handled atomically):
+ *   - Audit row ``unidentified_face.unmapped`` with the affected
+ *     event IDs + previously-attributed employee IDs.
+ *   - Attendance recompute for every (prev_employee, local_date)
+ *     pair the unmapped events covered (in/out times shift).
+ *   - matcher_cache.invalidate_employee for each previously-mapped
+ *     employee — next live capture re-evaluates from scratch.
+ *   - Cluster cache eviction for the tenant.
+ *
+ * Cache hygiene on the client (this hook):
+ *   - Optimistically strips the affected event IDs from MAPPED_KEY +
+ *     MAPPED_CLUSTERS_KEY so they disappear from the Mapped views
+ *     instantly without waiting for refetch.
+ *   - Invalidates RAW_KEY + LIST_KEY so the events reappear in
+ *     Unknown Faces + Similarity Groups on the next render.
+ *   - Invalidates attendance + calendar + detection-events queries
+ *     so downstream surfaces refresh from the post-recompute state.
+ */
+export function useUnmapEvents() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: UnmapEventsBody) =>
+      api<UnmapEventsResponse>("/api/unidentified-faces/unmap-events", {
+        method: "POST",
+        body,
+      }),
+    onSuccess: (_result, variables) => {
+      const unmappedIds = new Set<number>(variables.event_ids);
+
+      // Optimistic update: drop the unmapped events from every
+      // cached Mapped query so the UI removes them immediately.
+      queryClient.setQueriesData<MappedFacesResponse>(
+        { queryKey: MAPPED_KEY },
+        (old) => {
+          if (!old) return old;
+          const items = old.items.filter((it) => !unmappedIds.has(it.id));
+          if (items.length === old.items.length) return old;
+          return {
+            ...old,
+            items,
+            total: Math.max(0, old.total - (old.items.length - items.length)),
+          };
+        },
+      );
+
+      // Mapped clusters need a refetch — the per-employee aggregates
+      // (count, first_seen, last_seen, sample_event_ids) depend on the
+      // full event set, and we don't have that here. Invalidate and
+      // let the server reaggregate.
+      void queryClient.invalidateQueries({ queryKey: MAPPED_KEY });
+      void queryClient.invalidateQueries({ queryKey: MAPPED_CLUSTERS_KEY });
+
+      // Unidentified views need a full refetch so the now-back-in-pool
+      // events appear there (they would re-cluster server-side).
+      void queryClient.invalidateQueries({ queryKey: LIST_KEY });
+      void queryClient.invalidateQueries({ queryKey: RAW_KEY });
+
+      // Attendance + downstream surfaces — recompute already ran on
+      // the server, just refresh the cached reads.
+      void queryClient.invalidateQueries({ queryKey: ["attendance"] });
+      void queryClient.invalidateQueries({ queryKey: ["attendance-calendar"] });
+      void queryClient.invalidateQueries({ queryKey: ["detection-events"] });
+    },
+  });
+}
+
+/**
+ * Per-employee bulk revert. Same server-side side-effects as
+ * ``useUnmapEvents`` but the server picks the rows from a
+ * (employee_id + date/camera) filter — used by the "Unmap" button
+ * on each MappedEmployeeCard so the entire mapping for that
+ * employee within the visible filter is reverted in one round trip.
+ */
+export function useUnmapByEmployee() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: UnmapByEmployeeBody) =>
+      api<UnmapEventsResponse>(
+        "/api/unidentified-faces/unmap-by-employee",
+        { method: "POST", body },
+      ),
+    onSuccess: () => {
+      // We don't know which event IDs server-side touched, so just
+      // invalidate every relevant cache and let the refetch land
+      // canonical data.
+      void queryClient.invalidateQueries({ queryKey: MAPPED_KEY });
+      void queryClient.invalidateQueries({ queryKey: MAPPED_CLUSTERS_KEY });
+      void queryClient.invalidateQueries({ queryKey: LIST_KEY });
+      void queryClient.invalidateQueries({ queryKey: RAW_KEY });
+      void queryClient.invalidateQueries({ queryKey: ["attendance"] });
+      void queryClient.invalidateQueries({ queryKey: ["attendance-calendar"] });
+      void queryClient.invalidateQueries({ queryKey: ["detection-events"] });
+    },
   });
 }

@@ -6,6 +6,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { extractApiError } from "../../api/client";
 import { DrawerShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
 import { DayDetailContent } from "../calendar/DayDetailDrawer";
@@ -53,7 +54,7 @@ export function AttendanceDrawer({ item, onClose }: Props) {
             tone: "err",
             text: (t("attendance.regenFailed", {
               defaultValue: "Regenerate failed: {{reason}}",
-              reason: (err as Error).message,
+              reason: extractApiError(err, "request failed"),
             }) as string),
           });
         },

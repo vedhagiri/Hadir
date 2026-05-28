@@ -932,7 +932,10 @@ function EmployeeSearchSelect({
               left: pos.left,
               width: pos.width,
               zIndex: 1000,
-              background: "var(--surface)",
+              // ``--surface`` is not defined in the design CSS, which
+              // made the popover transparent and let the form fields +
+              // table behind it bleed through. Use the elevated bg var.
+              background: "var(--bg-elev)",
               border: "1px solid var(--border)",
               borderRadius: "var(--radius-sm)",
               boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
@@ -971,7 +974,7 @@ function EmployeeSearchSelect({
                       textAlign: "start",
                       padding: "6px 10px",
                       border: "none",
-                      background: isSel ? "var(--bg)" : "transparent",
+                      background: isSel ? "var(--bg-sunken)" : "transparent",
                       color: "var(--text)",
                       cursor: "pointer",
                       fontSize: 13,

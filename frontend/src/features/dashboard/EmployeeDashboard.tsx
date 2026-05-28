@@ -10,16 +10,12 @@ import { useTranslation } from "react-i18next";
 
 import { useMyEmployee } from "../employees/hooks";
 import { useMyRecentAttendance } from "../attendance/hooks";
+import { formatMinutes } from "../attendance/timeFormat";
 import { useMyRequests } from "../../requests/hooks";
 
 
-function _fmtMinutes(min: number): string {
-  if (!Number.isFinite(min) || min <= 0) return "—";
-  const h = Math.floor(min / 60);
-  const m = Math.round(min - h * 60);
-  if (h === 0) return `${m} min`;
-  return `${h}h ${m.toString().padStart(2, "0")}m`;
-}
+// Dashboard reuses the shared ``formatMinutes`` helper from
+// attendance/timeFormat for consistent ``8h 45m`` rendering.
 
 function _fmtTime(iso: string | null): string {
   if (!iso) return "—";
@@ -129,7 +125,7 @@ export function EmployeeDashboard() {
         />
         <KpiTile
           label="Hours this week"
-          value={_fmtMinutes(totalMinutes)}
+          value={totalMinutes > 0 ? formatMinutes(totalMinutes) : "—"}
           color="#2563eb"
           sub={lateCount > 0 ? `${lateCount} late arrival(s)` : "no late arrivals"}
         />
@@ -231,7 +227,9 @@ export function EmployeeDashboard() {
                           fontVariantNumeric: "tabular-nums",
                         }}
                       >
-                        {_fmtMinutes(it.total_minutes ?? 0)}
+                        {it.total_minutes != null && it.total_minutes > 0
+                          ? formatMinutes(it.total_minutes)
+                          : "—"}
                       </td>
                     </tr>
                   );

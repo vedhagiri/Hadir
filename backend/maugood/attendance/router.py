@@ -18,7 +18,7 @@ from maugood.attendance import repository as repo
 from maugood.auth.dependencies import CurrentUser, current_user
 from maugood.db import employees, get_engine
 from maugood.employees.repository import manager_team_employee_ids
-from maugood.tenants.scope import TenantScope
+from maugood.tenants.scope import TenantScope, get_tenant_scope
 
 logger = logging.getLogger(__name__)
 
@@ -548,6 +548,7 @@ def regenerate_attendance(
 def regenerate_attendance_employee(
     body: RegenerateEmployeeBody,
     user: Annotated[CurrentUser, Depends(current_user)],
+    scope: Annotated[TenantScope, Depends(get_tenant_scope)],
 ) -> RegenerateEmployeeOut:
     """Recompute attendance for ONE (employee, date) synchronously.
 
@@ -562,9 +563,14 @@ def regenerate_attendance_employee(
     the 15-min scheduler tick — no background queue. By the time the
     response lands the row is upserted, so the UI can refetch and show
     the fresh numbers immediately.
+
+    ``scope`` is taken from ``get_tenant_scope`` so ``scope.tenant_schema``
+    is the request's actual tenant schema. Constructing
+    ``TenantScope(tenant_id=...)`` here would silently default
+    ``tenant_schema='main'`` and the downstream ``tenant_context(...)``
+    wraps would route queries to the pilot schema in multi-mode.
     """
 
-    scope = TenantScope(tenant_id=user.tenant_id)
     from maugood.attendance import scheduler as attendance_scheduler  # noqa: PLC0415
     from maugood.attendance.repository import (  # noqa: PLC0415
         load_tenant_settings,

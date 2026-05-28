@@ -25,6 +25,7 @@ import { PdfOptionsModal } from "../../components/PdfOptionsModal";
 import { useConfidentialDownload } from "../../components/useConfidentialDownload";
 import { Icon, type IconName } from "../../shell/Icon";
 import { useAttendance } from "../attendance/hooks";
+import { formatMinutes } from "../attendance/timeFormat";
 import type {
   AttendanceItem,
   AttendanceListResponse,
@@ -131,10 +132,8 @@ function shortTime(iso: string | null): string {
   return iso.length >= 5 ? iso.slice(0, 5) : iso;
 }
 
-function decimalHours(minutes: number | null): string {
-  if (minutes === null) return "—";
-  return `${(minutes / 60).toFixed(1)}h`;
-}
+// Display-side hour formatting uses ``formatMinutes`` from
+// attendance/timeFormat for consistent ``8h 45m`` rendering.
 
 function formatTimestamp(iso: string): string {
   // Server sends ISO; render as "YYYY-MM-DD HH:mm:ss" without TZ noise.
@@ -669,10 +668,10 @@ function AttendancePreview({
             </td>
             <td className="mono text-sm">{shortTime(it.in_time)}</td>
             <td className="mono text-sm">{shortTime(it.out_time)}</td>
-            <td className="mono text-sm">{decimalHours(it.total_minutes)}</td>
+            <td className="mono text-sm">{formatMinutes(it.total_minutes)}</td>
             <td className="mono text-sm">
               {it.overtime_minutes > 0
-                ? `${(it.overtime_minutes / 60).toFixed(1)}h`
+                ? formatMinutes(it.overtime_minutes)
                 : "—"}
             </td>
           </tr>
@@ -1219,9 +1218,9 @@ function DepartmentSummaryPreview({
         </EmptyTableRow>
       ) : (
         previewRows.map((r, idx) => {
-          const workedHours =
+          const avgWorkedMinutes =
             r.present + r.late > 0
-              ? r.totalMinutes / 60 / (r.present + r.late)
+              ? r.totalMinutes / (r.present + r.late)
               : 0;
           return (
             <tr key={r.id}>
@@ -1234,7 +1233,9 @@ function DepartmentSummaryPreview({
               <td className="mono text-sm">{r.late}</td>
               <td className="mono text-sm">{r.absent}</td>
               <td className="mono text-sm">{r.onLeave}</td>
-              <td className="mono text-sm">{workedHours.toFixed(1)}h</td>
+              <td className="mono text-sm">
+                {avgWorkedMinutes > 0 ? formatMinutes(avgWorkedMinutes) : "—"}
+              </td>
             </tr>
           );
         })
@@ -1402,6 +1403,52 @@ function PreviewCard({
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {/* Download buttons sit at the leading edge of the filter row
+              so the two primary export actions are reachable without
+              scrolling the table footer into view. Disabled mirrors the
+              footer behaviour — no exports on an empty dataset. */}
+          {onDownloadPdf && (
+            <button
+              className="btn btn-sm"
+              onClick={onDownloadPdf}
+              disabled={
+                downloadingXlsx || downloadingPdf || totalCount === 0
+              }
+              title={
+                totalCount === 0
+                  ? "No data to export — adjust the filters"
+                  : undefined
+              }
+            >
+              <Icon name="fileText" size={11} />
+              {downloadingPdf ? "Generating PDF…" : "Download PDF"}
+            </button>
+          )}
+          <button
+            className="btn btn-sm"
+            onClick={downloadXlsx}
+            disabled={
+              downloadingXlsx || downloadingPdf || totalCount === 0
+            }
+            title={
+              totalCount === 0
+                ? "No data to export — adjust the filters"
+                : undefined
+            }
+          >
+            <Icon name="download" size={11} />
+            {downloadingXlsx ? "Downloading…" : downloadXlsxLabel}
+          </button>
+          {/* Vertical separator between download actions and filters. */}
+          <span
+            aria-hidden
+            style={{
+              width: 1,
+              height: 20,
+              background: "var(--border)",
+              margin: "0 2px",
+            }}
+          />
           {filterSlot ?? (
             <>
               <DatePicker
@@ -1504,44 +1551,8 @@ function PreviewCard({
             )}
           </span>
         )}
-        {/* BUG-028 / BUG-029 — disable both download buttons when the
-            preview has zero rows. Without this the operator could
-            "Download XLSX" on an empty dataset and get a one-row
-            (header only) file with no warning. */}
-        <div style={{ display: "flex", gap: 8 }}>
-          {onDownloadPdf && (
-            <button
-              className="btn btn-sm"
-              onClick={onDownloadPdf}
-              disabled={
-                downloadingXlsx || downloadingPdf || totalCount === 0
-              }
-              title={
-                totalCount === 0
-                  ? "No data to export — adjust the filters above"
-                  : undefined
-              }
-            >
-              <Icon name="fileText" size={11} />
-              {downloadingPdf ? "Generating PDF…" : "Download PDF"}
-            </button>
-          )}
-          <button
-            className="btn btn-sm"
-            onClick={downloadXlsx}
-            disabled={
-              downloadingXlsx || downloadingPdf || totalCount === 0
-            }
-            title={
-              totalCount === 0
-                ? "No data to export — adjust the filters above"
-                : undefined
-            }
-          >
-            <Icon name="download" size={11} />
-            {downloadingXlsx ? "Downloading…" : downloadXlsxLabel}
-          </button>
-        </div>
+        {/* Download buttons moved to the card head (left of filters).
+            The footer keeps the row-count message only. */}
       </div>
     </div>
   );
