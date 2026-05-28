@@ -1227,6 +1227,11 @@ def _emit_attendance_detection_events(
                             if c.embedding is not None
                             else None
                         ),
+                        # Migration 0067 — clip-reprocess attribution is a
+                        # matcher decision, not an operator action, so it
+                        # tags as ``auto`` (the Mapped Employees review
+                        # tabs filter to manual_* only).
+                        mapping_source="auto",
                     )
                 )
 

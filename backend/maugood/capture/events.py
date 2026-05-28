@@ -351,6 +351,14 @@ def emit_detection_event(
                 "metadata snapshot failed: %s", type(exc).__name__
             )
 
+    # ``mapping_source`` distinguishes live-matcher hits from operator
+    # corrections (migration 0067). Only set when the matcher actually
+    # attributed an employee — rows whose ``employee_id`` is NULL stay
+    # NULL here too. Former-employee matches also stay NULL because
+    # ``employee_id`` is NULL on those (the FK lands on
+    # ``former_match_employee_id`` instead).
+    mapping_source = "auto" if employee_id is not None else None
+
     with engine.begin() as conn:
         new_id = conn.execute(
             insert(detection_events)
@@ -367,6 +375,7 @@ def emit_detection_event(
                 former_employee_match=former_employee_match,
                 former_match_employee_id=former_match_employee_id,
                 detection_metadata=detection_metadata,
+                mapping_source=mapping_source,
             )
             .returning(detection_events.c.id)
         ).scalar_one()

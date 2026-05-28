@@ -752,29 +752,25 @@ def pick_evidence(
     employee_id: int,
     in_time: Optional[time],
     out_time: Optional[time],
-    max_crops: int = 5,
+    max_crops: int = 24,
 ) -> list[EvidenceCrop]:
-    """Pick up to ``max_crops`` events spread across the day.
+    """Pick evidence crops for the Day Detail drawer.
 
-    Five buckets:
+    Strategy:
 
-    * arrival   = ``in_time ± 30 min``
-    * morning   = ``in_time + 30 min`` → ``noon``
-    * midday    = 11:00 → 14:00
-    * afternoon = 14:00 → ``out_time - 30 min``
-    * departure = ``out_time ± 30 min``
-
-    From each bucket we take the highest-confidence event. Empty
-    buckets skip — so a day with only arrival + departure events
-    yields exactly two crops, not five.
-
-    The picker ignores events whose underlying file has been swept
-    by the orphan cleanup (``has_crop=False``) — those would
-    return 404 from the crop endpoint.
+    1. Drop events whose underlying file is missing (``has_crop=False``
+       — those would return 404 from the crop endpoint).
+    2. Collapse multiple events captured in the same wall-clock minute
+       to a single thumbnail (highest confidence wins; tie → lowest
+       id). Prevents three near-identical crops from one dwell.
+    3. If the deduped set is ≤ ``max_crops``, return everything sorted
+       chronologically — an operator who manually mapped 7 faces
+       wants to see all 7.
+    4. Otherwise bucket-sample across five time-of-day windows so the
+       operator still sees a representative spread (arrival / morning
+       / midday / afternoon / departure / edge) rather than a packed
+       block from one busy hour. Per-bucket cap = ``max_crops // 5``.
     """
-
-    if not events:
-        return []
 
     def parse_t(iso: str) -> time:
         # Accept either "HH:MM:SS" or full datetime ISO strings.
@@ -783,6 +779,60 @@ def pick_evidence(
         h, m, s = iso.split(":")
         return time(int(h), int(m), int(float(s)))
 
+    def _to_crop(ev: dict) -> EvidenceCrop:
+        return EvidenceCrop(
+            detection_event_id=int(ev["id"]),
+            captured_at=str(ev["captured_at"]),
+            camera_code=str(ev.get("camera_name") or "CAM"),
+            confidence=(
+                float(ev["confidence"])
+                if ev.get("confidence") is not None
+                else None
+            ),
+            crop_url=(
+                f"/api/attendance/calendar/evidence/"
+                f"{employee_id}/{int(ev['id'])}/crop"
+            ),
+        )
+
+    cropped = [ev for ev in events if ev.get("has_crop")]
+    if not cropped:
+        return []
+
+    # Minute-level dedupe — collapse multiple events captured within
+    # the same wall-clock minute to one tile so the gallery doesn't
+    # show three near-identical crops from the same dwell. Within a
+    # minute we prefer the highest-confidence event (auto-matches
+    # carry confidence; manual maps don't, so they sort last) and
+    # break ties by lowest id (first captured wins). One thumbnail
+    # per minute matches the operator mental model in the example
+    # "5:01 → one image, 5:02 → another image".
+    by_minute: dict[str, dict] = {}
+    for ev in cropped:
+        t = parse_t(ev["captured_at"])
+        minute_key = f"{t.hour:02d}:{t.minute:02d}"
+        prev = by_minute.get(minute_key)
+        if prev is None:
+            by_minute[minute_key] = ev
+            continue
+        prev_conf = prev.get("confidence") if prev.get("confidence") is not None else -1.0
+        this_conf = ev.get("confidence") if ev.get("confidence") is not None else -1.0
+        if this_conf > prev_conf or (
+            this_conf == prev_conf and int(ev["id"]) < int(prev["id"])
+        ):
+            by_minute[minute_key] = ev
+    cropped = list(by_minute.values())
+
+    # Small-set fast path: show every (deduped) mapped event. Re-sort
+    # defensively in case a caller passes an unordered list.
+    if len(cropped) <= max_crops:
+        cropped.sort(key=lambda e: parse_t(e["captured_at"]))
+        return [_to_crop(ev) for ev in cropped]
+
+    # Large-set path: bucket-sample so the drawer doesn't dump all
+    # 100+ thumbnails. Per-bucket cap derived from max_crops so the
+    # five buckets together stay near the limit.
+    per_bucket_cap = max(1, max_crops // 5)
     by_bucket: dict[str, list[dict]] = {
         "arrival": [],
         "morning": [],
@@ -790,12 +840,8 @@ def pick_evidence(
         "afternoon": [],
         "departure": [],
     }
-    for ev in events:
-        if not ev.get("has_crop"):
-            continue
+    for ev in cropped:
         t = parse_t(ev["captured_at"])
-        # Arrival / departure use offsets vs. policy in/out times when
-        # known. Without those we fall back to "first / last detection".
         in_t = in_time
         out_t = out_time
         in_minus_30 = _shift(in_t, -30) if in_t else None
@@ -818,39 +864,31 @@ def pick_evidence(
         if out_minus_30 is not None and t >= time(14, 0) and t < out_minus_30:
             by_bucket["afternoon"].append(ev)
             continue
-        # Falls outside every bucket — drop silently. Common for
-        # very-early or very-late events around shift boundaries.
+        # Outside every bucket (very-early or very-late) — keep it,
+        # we'll fold these into a synthetic "edge" bucket below so a
+        # 4 AM / 11 PM event isn't silently dropped.
+        by_bucket.setdefault("edge", []).append(ev)
 
-    out: list[EvidenceCrop] = []
-    for bucket_name in ("arrival", "morning", "midday", "afternoon", "departure"):
-        bucket = by_bucket[bucket_name]
+    chosen: list[dict] = []
+    for bucket_name in (
+        "arrival",
+        "morning",
+        "midday",
+        "afternoon",
+        "departure",
+        "edge",
+    ):
+        bucket = by_bucket.get(bucket_name, [])
         if not bucket:
             continue
-        # Highest-confidence event in this bucket (None confidence
-        # sorts last).
-        best = max(
-            bucket,
-            key=lambda e: (e.get("confidence") if e.get("confidence") is not None else 0.0),
-        )
-        out.append(
-            EvidenceCrop(
-                detection_event_id=int(best["id"]),
-                captured_at=str(best["captured_at"]),
-                camera_code=str(best.get("camera_name") or "CAM"),
-                confidence=(
-                    float(best["confidence"])
-                    if best.get("confidence") is not None
-                    else None
-                ),
-                crop_url=(
-                    f"/api/attendance/calendar/evidence/"
-                    f"{employee_id}/{int(best['id'])}/crop"
-                ),
-            )
-        )
-        if len(out) >= max_crops:
+        bucket.sort(key=lambda e: parse_t(e["captured_at"]))
+        chosen.extend(bucket[:per_bucket_cap])
+        if len(chosen) >= max_crops:
             break
-    return out
+
+    chosen = chosen[:max_crops]
+    chosen.sort(key=lambda e: parse_t(e["captured_at"]))
+    return [_to_crop(ev) for ev in chosen]
 
 
 def _shift(t: time, minutes: int) -> Optional[time]:

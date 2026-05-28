@@ -142,6 +142,13 @@ export interface UnmapEventsResponse {
 
 // ── Mapped Employees (sub-tabs) ─────────────────────────────────────
 
+/**
+ * How this detection_events row got its employee_id. Migration 0067.
+ * The Mapped Employees subtabs filter to the two ``manual_*`` values
+ * so auto live-matches are excluded from the review UI.
+ */
+export type MappingSource = "auto" | "manual_reference" | "manual_attendance";
+
 export interface MappedFaceEventOut {
   id: number;
   captured_at: string;
@@ -152,6 +159,7 @@ export interface MappedFaceEventOut {
   employee_name: string | null;
   employee_code: string | null;
   confidence: number | null;
+  mapping_source: MappingSource | null;
 }
 
 export interface MappedFacesResponse {
@@ -172,6 +180,15 @@ export interface MappedEmployeeGroupOut {
   camera_names: string[];
   sample_event_ids: number[];
   avg_confidence: number | null;
+  /**
+   * Distinct ``mapping_source`` values across the rows in this group.
+   * Empty if the server pre-dates migration 0067 or the group is
+   * mid-migration. Typically one of:
+   *   - ``["manual_reference"]``  → all from Reference Mapping
+   *   - ``["manual_attendance"]`` → all from Attendance Mapping
+   *   - ``["manual_attendance", "manual_reference"]`` → mixed
+   */
+  mapping_sources: MappingSource[];
 }
 
 export interface MappedEmployeesResponse {

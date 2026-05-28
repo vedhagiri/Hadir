@@ -100,17 +100,25 @@ export function useCameraList(): UseQueryResult<{ items: Camera[] }, Error> {
  * Common cache-coherency logic for every Map-to-Employee mutation.
  *
  * Both workflows (Reference + Attendance) attribute events to an
- * employee, which means the events leave the unidentified pool and
- * enter the mapped pool. This helper:
+ * employee AND recompute attendance for the affected tenant-local
+ * dates server-side, so every downstream surface that reads off
+ * ``detection_events.employee_id`` or ``attendance_records`` needs
+ * to refresh. This helper:
  *
  *   1. Optimistically strips the just-mapped event IDs out of every
  *      cached unidentified query so the UI removes them instantly —
  *      bypassing the `placeholderData: (prev) => prev` window that
  *      otherwise keeps stale rows on screen during the refetch.
- *   2. Invalidates every relevant query key so the canonical server
- *      result reconciles any optimistic drift (clusters may regroup
- *      once events leave the pool; similarity ranges may shift; the
- *      mapped views need to refresh).
+ *   2. Invalidates the unidentified + mapped grids so the canonical
+ *      server result reconciles any optimistic drift (clusters may
+ *      regroup once events leave the pool; similarity ranges may
+ *      shift; the mapped views need to refresh).
+ *   3. Invalidates the downstream surfaces — attendance grid +
+ *      calendar + detection-events. The Day Detail Drawer (evidence
+ *      crops + day timeline), Daily Attendance page, Calendar
+ *      person view, and Camera Logs all live behind those keys and
+ *      would otherwise keep showing pre-map data until their stale
+ *      timers expire.
  *
  * Called from `onSuccess` of each mutation hook below.
  */
@@ -191,6 +199,15 @@ function applyMapSuccess(
   void queryClient.invalidateQueries({ queryKey: RAW_KEY });
   void queryClient.invalidateQueries({ queryKey: MAPPED_KEY });
   void queryClient.invalidateQueries({ queryKey: MAPPED_CLUSTERS_KEY });
+
+  // 4. Downstream surfaces — attendance grid, calendar (Day Detail
+  //    Drawer reads from here), and the detection-events feed that
+  //    backs Camera Logs + the evidence crops in the day drawer.
+  //    The server has already recomputed; we just need the cached
+  //    reads to refetch.
+  void queryClient.invalidateQueries({ queryKey: ["attendance"] });
+  void queryClient.invalidateQueries({ queryKey: ["attendance-calendar"] });
+  void queryClient.invalidateQueries({ queryKey: ["detection-events"] });
 }
 
 export function useMapToEmployee() {
@@ -254,12 +271,11 @@ export function useMapAsAttendance() {
         { method: "POST", body },
       ),
     onSuccess: (_result, variables) => {
+      // ``applyMapSuccess`` already invalidates attendance,
+      // attendance-calendar, and detection-events for every Map-to-
+      // Employee mutation (the server recomputes attendance in both
+      // workflows), so we don't need to duplicate them here.
       applyMapSuccess(queryClient, variables.event_ids);
-      // Surfaces that read attendance need a refresh because the
-      // server has recomputed at least one (employee, date) row.
-      void queryClient.invalidateQueries({ queryKey: ["attendance"] });
-      void queryClient.invalidateQueries({ queryKey: ["attendance-calendar"] });
-      void queryClient.invalidateQueries({ queryKey: ["detection-events"] });
     },
   });
 }

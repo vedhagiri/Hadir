@@ -3740,7 +3740,6 @@ function RawEventViewer({ event, onClose, onMap }: RawEventViewerProps) {
     <>
       <div
         role="presentation"
-        onClick={onClose}
         style={{
           position: "fixed", inset: 0, zIndex: 499,
           background: "rgba(0,0,0,0.7)",
@@ -3759,7 +3758,6 @@ function RawEventViewer({ event, onClose, onMap }: RawEventViewerProps) {
         }}
       >
         <div
-          onClick={(e) => e.stopPropagation()}
           style={{
             pointerEvents: "auto",
             background: "var(--bg-elev)",
@@ -4265,7 +4263,7 @@ function MappedFacesGrid({
         renderEmpty(
           t(
             "unidentifiedFaces.emptyMapped",
-            "No mapped detections in this date range. Adjust the filter or pivot to Unknown Faces.",
+            "No manually-mapped detections yet. Use Map to Employee on an Unknown face to populate this tab — auto live-matches appear in Camera Logs.",
           ),
         )}
       {data && data.items.length > 0 && (
@@ -4285,6 +4283,67 @@ function MappedFacesGrid({
       )}
       {data && renderPagination(page, totalPages, onPage)}
     </>
+  );
+}
+
+// ── Mapping-source chip ────────────────────────────────────────────────────
+//
+// Renders a small badge labelling how a detection got its employee_id.
+// Surfaced on Mapped Employees rows so the operator can tell at a glance
+// whether a row came from the Reference Mapping or Attendance Mapping
+// workflow. The ``/mapped`` + ``/mapped-clusters`` endpoints already
+// filter out ``auto`` rows, so this component only ever shows the two
+// manual variants — but it also handles ``"auto"`` defensively (legacy
+// rows + future surfaces).
+
+function MappingSourceChip({
+  source,
+}: {
+  source: import("./types").MappingSource | null | undefined;
+}) {
+  const { t } = useTranslation();
+  if (!source) return null;
+  const PALETTE: Record<
+    import("./types").MappingSource,
+    { bg: string; fg: string; key: string; fallback: string }
+  > = {
+    manual_reference: {
+      bg: "rgba(59,130,246,0.16)",
+      fg: "#2563eb",
+      key: "unidentifiedFaces.sourceReference",
+      fallback: "Reference",
+    },
+    manual_attendance: {
+      bg: "rgba(34,197,94,0.18)",
+      fg: "#16a34a",
+      key: "unidentifiedFaces.sourceAttendance",
+      fallback: "Attendance",
+    },
+    auto: {
+      bg: "rgba(148,163,184,0.18)",
+      fg: "var(--text-secondary)",
+      key: "unidentifiedFaces.sourceAuto",
+      fallback: "Auto",
+    },
+  };
+  const p = PALETTE[source];
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        padding: "1px 7px",
+        borderRadius: 999,
+        background: p.bg,
+        color: p.fg,
+        fontSize: 10,
+        fontWeight: 700,
+        letterSpacing: "0.04em",
+        textTransform: "uppercase",
+      }}
+    >
+      {t(p.key, p.fallback) as string}
+    </span>
   );
 }
 
@@ -4421,6 +4480,11 @@ function MappedFaceTile({ event }: { event: MappedFaceEventOut }) {
             {event.employee_code}
           </div>
         )}
+        {event.mapping_source && (
+          <div style={{ marginTop: 2 }}>
+            <MappingSourceChip source={event.mapping_source} />
+          </div>
+        )}
         <div
           style={{
             fontSize: 11.5,
@@ -4525,7 +4589,7 @@ function MappedClustersGrid({
         renderEmpty(
           t(
             "unidentifiedFaces.emptyMappedClusters",
-            "No employees have mapped detections in this date range.",
+            "No employees have manually-mapped detections in this date range. This tab only shows operator-reviewed maps from Reference / Attendance Mapping — auto live-matches appear in Camera Logs.",
           ),
         )}
       {data && data.items.length > 0 && (
@@ -4710,6 +4774,34 @@ function MappedEmployeeCard({
             style={{ fontSize: 10.5, color: "var(--text-tertiary)" }}
           >
             {group.employee_code}
+          </div>
+        )}
+        {/* Mapping-source chip(s). Single value → that workflow's
+            label. Multiple → "Mixed". Empty list (pre-0067 row or
+            mid-migration) renders nothing. */}
+        {group.mapping_sources && group.mapping_sources.length > 0 && (
+          <div style={{ marginTop: 4 }}>
+            {group.mapping_sources.length === 1 ? (
+              <MappingSourceChip source={group.mapping_sources[0]} />
+            ) : (
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  padding: "1px 7px",
+                  borderRadius: 999,
+                  background: "rgba(148,163,184,0.22)",
+                  color: "var(--text-secondary)",
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: "0.04em",
+                  textTransform: "uppercase",
+                }}
+                title={group.mapping_sources.join(", ")}
+              >
+                {t("unidentifiedFaces.sourceMixed", "Mixed") as string}
+              </span>
+            )}
           </div>
         )}
       </div>

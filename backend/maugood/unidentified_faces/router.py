@@ -235,20 +235,20 @@ class MapToEmployeeResponse(BaseModel):
 # Two-workflow Map-to-Employee schemas (reference vs attendance)
 # ---------------------------------------------------------------------------
 # Both workflows attribute the chosen events to ``employee_id`` (which
-# removes them from Unknown Faces / Similarity Groups). They differ in
-# the *additional* side-effect that's appropriate for the operator's
-# intent:
+# removes them from Unknown Faces / Similarity Groups) AND recompute
+# attendance for every tenant-local date the events touch — the
+# attribution is a real fact and every downstream surface that reads
+# off ``detection_events.employee_id`` or ``attendance_records`` would
+# go stale otherwise. They differ in the *additional* training-side
+# effect that's appropriate for the operator's intent:
 #
 #   Reference Image Mapping
 #     - Copies selected face crops into ``employee_photos`` (training
 #       set) so future automatic matching gets stronger.
 #     - Invalidates the matcher cache so the new reference vectors are
 #       picked up immediately by the live capture pipeline.
-#     - No attendance recompute.
 #
 #   Attendance Event Mapping
-#     - Recomputes the attendance row for the employee on every local
-#       date covered by the event timestamps.
 #     - Does NOT copy crops as reference photos (the operator is
 #       correcting a missed attribution, not curating training data).
 #     - Does NOT invalidate matcher cache (no training data changed).
@@ -366,6 +366,10 @@ class MappedFaceEventOut(BaseModel):
     employee_name: Optional[str] = None
     employee_code: Optional[str] = None
     confidence: Optional[float] = None  # NULL for legacy / hand-mapped rows
+    # Migration 0067. ``manual_reference`` or ``manual_attendance``
+    # (the ``/mapped`` endpoint filters auto-matches out, but the field
+    # is still surfaced so the UI can show a per-row chip).
+    mapping_source: Optional[str] = None
 
 
 class MappedFacesResponse(BaseModel):
@@ -392,6 +396,11 @@ class MappedEmployeeGroupOut(BaseModel):
     # tiles + the modal gallery can navigate without a follow-up call.
     sample_event_ids: list[int]
     avg_confidence: Optional[float] = None
+    # Migration 0067. Set of distinct ``mapping_source`` values across
+    # the rows that contributed to this group — the cluster card can
+    # show a chip ("Reference", "Attendance", or "Mixed") without
+    # fetching individual rows.
+    mapping_sources: list[str] = []
 
 
 class MappedEmployeesResponse(BaseModel):
@@ -752,6 +761,7 @@ def list_events_for_cluster(
 def map_cluster_to_employee(
     user: Annotated[CurrentUser, ADMIN_HR],
     body: MapToEmployeeBody,
+    scope: Annotated[TenantScope, Depends(get_tenant_scope)],
 ) -> MapToEmployeeResponse:
     """Map a cluster of unidentified detection events to an employee.
 
@@ -761,9 +771,21 @@ def map_cluster_to_employee(
     embedding — no InsightFace re-inference needed.
 
     Updates detection_events.employee_id for ALL provided event IDs so
-    they no longer surface on the unidentified-faces page.
+    they no longer surface on the unidentified-faces page. Attendance
+    rows for every tenant-local date covered by the events are
+    recomputed so the daily attendance view, the calendar, and the
+    day-detail drawer reflect the new attribution immediately.
     """
-    scope = TenantScope(tenant_id=user.tenant_id)
+    # Recompute helpers are local-imported to avoid a circular at module
+    # load time (scheduler imports from maugood.attendance.repository
+    # which imports from db, which we re-enter here).
+    from maugood.attendance import scheduler as att_scheduler  # noqa: PLC0415
+    from maugood.attendance.repository import (  # noqa: PLC0415
+        load_tenant_settings,
+        local_tz_for,
+    )
+
+    affected_dates: set = set()
 
     with get_engine().begin() as conn:
         # 1. Validate employee belongs to this tenant.
@@ -859,15 +881,35 @@ def map_cluster_to_employee(
                     type(exc).__name__,
                 )
 
-        # 4. Attribute all valid events to the employee.
+        # 4. Attribute all valid events to the employee. ``mapping_source``
+        #    is tagged ``manual_reference`` (migration 0067) so the
+        #    Mapped Employees review tabs surface these rows — auto-
+        #    matches stay filtered out.
         conn.execute(
             update(detection_events)
             .where(
                 detection_events.c.tenant_id == scope.tenant_id,
                 detection_events.c.id.in_(valid_ids),
             )
-            .values(employee_id=employee_id)
+            .values(
+                employee_id=employee_id,
+                mapping_source="manual_reference",
+            )
         )
+
+        # 4b. Compute the unique tenant-local calendar days touched by
+        #     the events so we can recompute their attendance rows
+        #     post-commit. ``captured_at`` is TIMESTAMPTZ (UTC) — convert
+        #     via the tenant's configured timezone (P11) so the dates
+        #     align with what the attendance engine keys on.
+        settings = load_tenant_settings(conn, scope)
+        tz = local_tz_for(settings)
+        for r in event_rows:
+            ts = r.captured_at
+            if ts is None:
+                continue
+            local = ts.astimezone(tz)
+            affected_dates.add(local.date())
 
         # 5. Audit.
         write_audit(
@@ -882,6 +924,7 @@ def map_cluster_to_employee(
                 "employee_name": employee_name,
                 "mapped_events": len(valid_ids),
                 "photos_created": len(photo_ids),
+                "attendance_dates": sorted(d.isoformat() for d in affected_dates),
             },
         )
 
@@ -907,6 +950,24 @@ def map_cluster_to_employee(
             "map_cluster: evicted %d stale cluster cache entries for tenant %d",
             evicted, scope.tenant_id,
         )
+
+    # 8. Recompute attendance for each affected (employee, date). The
+    #    helper handles its own transactional boundary and is
+    #    idempotent. A failure on one date doesn't abort the others —
+    #    we log and continue so partial recovery is still useful. This
+    #    is what makes the Day Detail Drawer + Daily Attendance row
+    #    + Calendar pivot pick up the new attribution without an
+    #    operator-triggered "Regenerate".
+    for the_date in sorted(affected_dates):
+        try:
+            att_scheduler.recompute_for(
+                scope, employee_id=employee_id, the_date=the_date
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "map_cluster: recompute failed employee=%d date=%s: %s",
+                employee_id, the_date, type(exc).__name__,
+            )
 
     return MapToEmployeeResponse(
         mapped_events=len(valid_ids),
@@ -937,11 +998,17 @@ def list_mapped_events(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 48,
 ) -> MappedFacesResponse:
-    """Detection events with a real ``employee_id`` set.
+    """Manually-mapped detection events.
 
-    Excludes ``former_employee_match=true`` rows so a deleted/inactive
-    employee re-detection (P28.7 lifecycle path) doesn't pollute the
-    Mapped Employees view — those have a dedicated report.
+    Filters to the two operator-triggered mapping sources
+    (``manual_reference`` / ``manual_attendance``) — auto live-matches
+    are excluded because the Mapped Employees tab is for review of
+    corrective / curated work, not the auto-match firehose. Camera
+    Logs is the surface for auto-matched detections.
+
+    Also excludes ``former_employee_match=true`` rows so a deleted/
+    inactive employee re-detection (P28.7 lifecycle path) doesn't
+    pollute the view — those have a dedicated report.
     """
 
     scope = TenantScope(tenant_id=user.tenant_id)
@@ -952,6 +1019,10 @@ def list_mapped_events(
         detection_events.c.tenant_id == scope.tenant_id,
         detection_events.c.employee_id.isnot(None),
         detection_events.c.former_employee_match.is_(False),
+        # Migration 0067 — manual mappings only.
+        detection_events.c.mapping_source.in_(
+            ["manual_reference", "manual_attendance"]
+        ),
     ]
     if camera_id is not None:
         conditions.append(detection_events.c.camera_id == camera_id)
@@ -996,6 +1067,7 @@ def list_mapped_events(
                 detection_events.c.face_crop_path,
                 detection_events.c.employee_id,
                 detection_events.c.confidence,
+                detection_events.c.mapping_source,
                 employees.c.full_name.label("employee_name"),
                 employees.c.employee_code,
             )
@@ -1017,6 +1089,9 @@ def list_mapped_events(
             employee_name=str(r.employee_name) if r.employee_name else None,
             employee_code=str(r.employee_code) if r.employee_code else None,
             confidence=float(r.confidence) if r.confidence is not None else None,
+            mapping_source=(
+                str(r.mapping_source) if r.mapping_source is not None else None
+            ),
         )
         for r in rows
     ]
@@ -1037,11 +1112,15 @@ def list_mapped_clusters(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 24,
 ) -> MappedEmployeesResponse:
-    """Group mapped detection events by employee_id.
+    """Group manually-mapped detection events by employee_id.
 
     Returns one entry per employee with their count + first/last seen +
     camera names + up to 8 sample event_ids (newest first, only events
-    with a crop on disk so the UI can preview).
+    with a crop on disk so the UI can preview). Filters to the two
+    operator-triggered mapping sources (``manual_reference`` /
+    ``manual_attendance``) — auto live-matches are excluded because
+    the Mapped Employees subtab is for review of corrective / curated
+    work (migration 0067).
 
     Pagination is over employees, not events; the result is ordered by
     count desc (most-active employee first) then by employee name.
@@ -1055,6 +1134,10 @@ def list_mapped_clusters(
         detection_events.c.tenant_id == scope.tenant_id,
         detection_events.c.employee_id.isnot(None),
         detection_events.c.former_employee_match.is_(False),
+        # Migration 0067 — manual mappings only.
+        detection_events.c.mapping_source.in_(
+            ["manual_reference", "manual_attendance"]
+        ),
     ]
     if camera_id is not None:
         base_conditions.append(detection_events.c.camera_id == camera_id)
@@ -1177,6 +1260,28 @@ def list_mapped_clusters(
             if len(bucket) < 8:
                 bucket.append(int(s.id))
 
+        # Distinct mapping_source values per employee on this page so
+        # the cluster card chip can render "Reference" / "Attendance" /
+        # "Mixed" without fetching individual rows (migration 0067).
+        source_rows = conn.execute(
+            select(
+                detection_events.c.employee_id,
+                detection_events.c.mapping_source,
+            )
+            .where(
+                *base_conditions,
+                detection_events.c.employee_id.in_(page_emp_ids),
+            )
+            .distinct()
+        ).all()
+        sources_by_emp: dict[int, list[str]] = {}
+        for sr in source_rows:
+            if sr.mapping_source is None:
+                continue
+            bucket_s = sources_by_emp.setdefault(int(sr.employee_id), [])
+            if sr.mapping_source not in bucket_s:
+                bucket_s.append(str(sr.mapping_source))
+
     items: list[MappedEmployeeGroupOut] = []
     for r in page_rows:
         eid = int(r.employee_id)
@@ -1195,6 +1300,7 @@ def list_mapped_clusters(
                 avg_confidence=(
                     float(r.avg_confidence) if r.avg_confidence is not None else None
                 ),
+                mapping_sources=sorted(sources_by_emp.get(eid, [])),
             )
         )
 
@@ -1217,6 +1323,7 @@ def list_mapped_clusters(
 def map_as_reference(
     user: Annotated[CurrentUser, ADMIN_HR],
     body: MapAsReferenceBody,
+    scope: Annotated[TenantScope, Depends(get_tenant_scope)],
 ) -> MapToEmployeeResponse:
     """Reference Image Mapping — improve future recognition.
 
@@ -1226,10 +1333,13 @@ def map_as_reference(
     invalidated so the live pipeline starts matching against the new
     reference vectors on the very next capture.
 
-    No attendance recompute — that's the responsibility of the
-    ``/map-as-attendance`` endpoint. Use this workflow when you're
-    curating the training set; use the attendance one when you're
-    correcting a missed live-match for a real attendance event.
+    Attendance is recomputed for every tenant-local date covered by
+    the events — the attribution side-effect is identical to the
+    ``/map-as-attendance`` workflow, only the additional
+    reference-photo copy step is different. Without the recompute the
+    Day Detail Drawer + Daily Attendance row + Calendar would lag
+    behind ``detection_events.employee_id`` (which they read off live)
+    until the next 15-min scheduler tick.
     """
     # The reference workflow is byte-for-byte equivalent to the
     # legacy ``map-to-employee`` endpoint — we just expose it under
@@ -1240,7 +1350,7 @@ def map_as_reference(
         event_ids=body.event_ids,
         photo_assignments=body.photo_assignments,
     )
-    return map_cluster_to_employee(user=user, body=legacy_body)
+    return map_cluster_to_employee(user=user, body=legacy_body, scope=scope)
 
 
 # ---------------------------------------------------------------------------
@@ -1321,14 +1431,19 @@ def map_as_attendance(
         employee_code = str(emp_row.employee_code)
         employee_name = str(emp_row.full_name)
 
-        # 3. Attribute every event in one bulk UPDATE.
+        # 3. Attribute every event in one bulk UPDATE. ``mapping_source``
+        #    is tagged ``manual_attendance`` (migration 0067) so the
+        #    Mapped Employees review tabs include these rows.
         conn.execute(
             update(detection_events)
             .where(
                 detection_events.c.tenant_id == scope.tenant_id,
                 detection_events.c.id.in_(valid_ids),
             )
-            .values(employee_id=employee_id)
+            .values(
+                employee_id=employee_id,
+                mapping_source="manual_attendance",
+            )
         )
 
         # 4. Compute the unique tenant-local calendar days touched by
@@ -1499,6 +1614,8 @@ def unmap_events(
         )
 
         # Bulk UPDATE — clear the attribution columns in one round.
+        # ``mapping_source`` clears to NULL so a future re-map writes
+        # the right tag (migration 0067).
         conn.execute(
             update(detection_events)
             .where(
@@ -1509,6 +1626,7 @@ def unmap_events(
                 employee_id=None,
                 former_employee_match=False,
                 former_match_employee_id=None,
+                mapping_source=None,
             )
         )
 
@@ -1677,6 +1795,7 @@ def unmap_by_employee(
                 employee_id=None,
                 former_employee_match=False,
                 former_match_employee_id=None,
+                mapping_source=None,
             )
         )
 

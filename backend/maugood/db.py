@@ -1908,6 +1908,15 @@ detection_events = Table(
     # can extend without another migration. NULL on rows that pre-date
     # migration 0032. See ``maugood/detection/metadata.py``.
     Column("detection_metadata", JSONB, nullable=True),
+    # Migration 0067. Records how this row's ``employee_id`` got set:
+    #   * ``auto``              — live capture matcher at insert time
+    #   * ``manual_reference``  — operator via Reference Image Mapping
+    #   * ``manual_attendance`` — operator via Attendance Event Mapping
+    # NULL on rows where ``employee_id`` is NULL (unmapped). The
+    # ``/mapped`` + ``/mapped-clusters`` endpoints filter to the two
+    # ``manual_*`` values so the Mapped Employees review tabs surface
+    # only corrective / curated work, not the auto-match firehose.
+    Column("mapping_source", String(length=32), nullable=True),
     Index(
         "ix_detection_events_tenant_captured_at",
         "tenant_id",
@@ -1924,6 +1933,11 @@ detection_events = Table(
         "tenant_id",
         "employee_id",
         "captured_at",
+    ),
+    CheckConstraint(
+        "mapping_source IS NULL OR mapping_source IN "
+        "('auto', 'manual_reference', 'manual_attendance')",
+        name="ck_detection_events_mapping_source",
     ),
 )
 

@@ -1393,6 +1393,12 @@
     "thresholdHint": "(higher = tighter clusters)",
     "resetDefaults": "Reset defaults",
     "mapToEmployee": "Map to Employee",
+    "sourceReference": "Reference",
+    "sourceAttendance": "Attendance",
+    "sourceAuto": "Auto",
+    "sourceMixed": "Mixed",
+    "emptyMapped": "No manually-mapped detections yet. Use Map to Employee on an Unknown face to populate this tab — auto live-matches appear in Camera Logs.",
+    "emptyMappedClusters": "No employees have manually-mapped detections in this date range. This tab only shows operator-reviewed maps from Reference / Attendance Mapping — auto live-matches appear in Camera Logs.",
     "mapModal": {
       "title": "Map to Employee",
       "confirmTitle": "Confirm Mapping",

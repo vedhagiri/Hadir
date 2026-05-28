@@ -110,6 +110,8 @@ def seed_detection(
                 employee_id=int(emp_row.id),
                 confidence=payload.confidence,
                 track_id=f"_test-{int(captured_at.timestamp())}",
+                # Test seeds simulate live-matcher hits.
+                mapping_source="auto",
             )
             .returning(detection_events.c.id)
         ).scalar_one()
