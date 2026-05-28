@@ -47,6 +47,8 @@ import sqlalchemy as sa
 
 from maugood.db import (
     clip_processing_results,
+    detection_events,
+    face_crops,
     get_engine,
     person_clips,
     tenant_context,
@@ -108,11 +110,21 @@ class FileIntegrityResult:
 
 
 @dataclass
+class FanoutBackfillResult:
+    tenant_schema: str
+    clips_found: int = 0
+    events_emitted: int = 0
+    errors: int = 0
+    ran_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
 class ReconcileSweepSummary:
     tenant_schema: str
     saved: SavedClipsSweepResult
     stuck: StuckSweepResult
     integrity: FileIntegrityResult
+    fanout: FanoutBackfillResult
     duration_ms: float = 0.0
     ran_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -319,6 +331,108 @@ def sweep_file_integrity(
 
 
 # ---------------------------------------------------------------------------
+# Sweep 4: unidentified face_crops → detection_events backfill
+# ---------------------------------------------------------------------------
+
+def sweep_unidentified_fanout(
+    scope: TenantScope,
+    *,
+    max_clips: int = 200,
+) -> FanoutBackfillResult:
+    """Back-fill detection_events rows for clips that have unidentified
+    face_crops but were processed before the fan-out code emitted them.
+
+    A clip qualifies when:
+    - It has at least one ``face_crops`` row with ``employee_id IS NULL``
+    - It has zero ``detection_events`` rows whose ``track_id`` matches
+      the ``clip-{id}-unk-%`` pattern (the format written by the current
+      ``_emit_attendance_detection_events``).
+
+    For each qualifying clip, we call ``_emit_attendance_detection_events``
+    which is idempotent — it deletes any existing unk-% rows before
+    re-inserting, so safe to call multiple times.
+    """
+    from maugood.person_clips.reprocess import (  # noqa: PLC0415
+        _emit_attendance_detection_events,
+    )
+
+    result = FanoutBackfillResult(tenant_schema=scope.tenant_schema)
+    engine = get_engine()
+
+    with tenant_context(scope.tenant_schema):
+        with engine.connect() as conn:
+            # Find completed clips that have unidentified face_crops but no
+            # detection_events with the unk- track_id pattern yet.
+            # First, collect clip IDs that have unidentified crops but
+            # no unk fan-out rows. We do this in two steps so we can
+            # build a per-clip LIKE pattern cleanly.
+            candidate_rows = conn.execute(
+                sa.select(
+                    person_clips.c.id.label("clip_id"),
+                    person_clips.c.camera_id,
+                )
+                .where(
+                    person_clips.c.tenant_id == scope.tenant_id,
+                    person_clips.c.recording_status == "completed",
+                    sa.exists(
+                        sa.select(face_crops.c.id).where(
+                            face_crops.c.tenant_id == scope.tenant_id,
+                            face_crops.c.person_clip_id == person_clips.c.id,
+                            face_crops.c.employee_id.is_(None),
+                        )
+                    ),
+                )
+                .order_by(person_clips.c.id.desc())
+                .limit(max_clips * 5)  # over-fetch; we'll filter below
+            ).all()
+
+            # Filter to only clips that have NO unk detection_events yet
+            rows = []
+            for candidate in candidate_rows:
+                cid = int(candidate.clip_id)
+                pattern = f"clip-{cid}-unk-%"
+                has_fanout = conn.execute(
+                    sa.select(sa.literal(1)).where(
+                        detection_events.c.tenant_id == scope.tenant_id,
+                        detection_events.c.track_id.like(pattern),
+                    ).limit(1)
+                ).first()
+                if has_fanout is None:
+                    rows.append(candidate)
+                if len(rows) >= max_clips:
+                    break
+
+        result.clips_found = len(rows)
+        if not rows:
+            return result
+
+        for row in rows:
+            try:
+                emitted = _emit_attendance_detection_events(
+                    engine, scope, int(row.clip_id), int(row.camera_id)
+                )
+                result.events_emitted += emitted
+            except Exception:  # noqa: BLE001
+                result.errors += 1
+                logger.warning(
+                    "reconcile fanout: error on clip=%s tenant=%s",
+                    row.clip_id, scope.tenant_schema,
+                    exc_info=True,
+                )
+
+    if result.clips_found:
+        logger.info(
+            "reconcile fanout: tenant=%s clips_found=%d events_emitted=%d errors=%d",
+            scope.tenant_schema,
+            result.clips_found,
+            result.events_emitted,
+            result.errors,
+        )
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Full per-tenant sweep
 # ---------------------------------------------------------------------------
 
@@ -330,6 +444,7 @@ def run_tenant_sweep(
     saved = sweep_saved_clips(scope, pipeline)
     stuck = sweep_stuck_processing(scope, pipeline)
     integrity = sweep_file_integrity(scope)
+    fanout = sweep_unidentified_fanout(scope)
     duration_ms = (time.monotonic() - t0) * 1000
 
     summary = ReconcileSweepSummary(
@@ -337,15 +452,17 @@ def run_tenant_sweep(
         saved=saved,
         stuck=stuck,
         integrity=integrity,
+        fanout=fanout,
         duration_ms=duration_ms,
     )
     logger.info(
         "reconcile sweep done: tenant=%s saved_submitted=%d stuck_found=%d "
-        "missing_files=%d duration_ms=%.0f",
+        "missing_files=%d fanout_emitted=%d duration_ms=%.0f",
         scope.tenant_schema,
         saved.submitted,
         stuck.found,
         integrity.missing,
+        fanout.events_emitted,
         duration_ms,
     )
     return summary
@@ -454,6 +571,9 @@ class ReconcileScheduler:
                     "stuck_found": s.stuck.found,
                     "missing_files": s.integrity.missing,
                     "flagged_cprs": s.integrity.flagged_cprs,
+                    "fanout_clips_found": s.fanout.clips_found,
+                    "fanout_events_emitted": s.fanout.events_emitted,
+                    "fanout_errors": s.fanout.errors,
                     "duration_ms": s.duration_ms,
                     "ran_at": s.ran_at.isoformat(),
                 }

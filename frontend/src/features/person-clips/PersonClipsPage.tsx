@@ -6055,11 +6055,13 @@ function FaceCropLightbox({
           background: "var(--bg)",
           borderRadius: 16,
           boxShadow: "0 24px 64px rgba(0,0,0,0.45)",
-          maxWidth: "min(92vw, 1080px)",
+          maxWidth: "min(94vw, 1180px)",
           width: "100%",
-          maxHeight: "92vh",
+          maxHeight: "94vh",
           display: "grid",
-          gridTemplateColumns: "minmax(0, 1.4fr) minmax(280px, 1fr)",
+          gridTemplateColumns: "minmax(0, 1.4fr) minmax(300px, 1fr)",
+          gridTemplateRows: "minmax(0, 1fr) auto",
+          gridTemplateAreas: '"stage panel" "strip strip"',
           overflow: "hidden",
           fontFamily: "var(--font-sans)",
         }}
@@ -6067,6 +6069,7 @@ function FaceCropLightbox({
         {/* Left — image with prev/next overlays */}
         <div
           style={{
+            gridArea: "stage",
             position: "relative",
             background: "#0b1220",
             display: "grid",
@@ -6180,11 +6183,14 @@ function FaceCropLightbox({
         {/* Right — metadata panel */}
         <div
           style={{
+            gridArea: "panel",
             padding: "20px 22px",
             display: "flex",
             flexDirection: "column",
             gap: 14,
             overflowY: "auto",
+            background: "var(--bg)",
+            borderInlineStart: "1px solid var(--border)",
           }}
         >
           {/* UC chip + close */}
@@ -6369,11 +6375,121 @@ function FaceCropLightbox({
                 borderTop: "1px solid var(--border)",
               }}
             >
-              ← → to navigate · Esc to close
+              ← → to navigate · Esc to close · click a thumbnail below
             </div>
           )}
         </div>
+
+        {/* Gallery thumbnail strip — direct jump-to-any-crop navigation
+            matching the Unidentified Faces investigation pattern. Only
+            renders when there's more than one crop. Active thumb is
+            highlighted + auto-scrolled into view. */}
+        {crops.length > 1 && (
+          <CropThumbStrip
+            clipId={clipId}
+            crops={crops}
+            activeIndex={index}
+            onPick={setIndex}
+          />
+        )}
       </div>
+    </div>
+  );
+}
+
+// ── CropThumbStrip ───────────────────────────────────────────────────────────
+// Horizontal scrollable strip of every crop in the lightbox, used to jump
+// directly to any image. Mirrors the gallery pattern from Unidentified
+// Faces' cluster drawer modal.
+
+function CropThumbStrip({
+  clipId,
+  crops,
+  activeIndex,
+  onPick,
+}: {
+  clipId: number;
+  crops: LightboxCrop[];
+  activeIndex: number;
+  onPick: (idx: number) => void;
+}) {
+  const activeBtnRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (activeBtnRef.current) {
+      activeBtnRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+        inline: "center",
+      });
+    }
+  }, [activeIndex]);
+
+  return (
+    <div
+      role="tablist"
+      aria-label="Face crop thumbnails"
+      style={{
+        gridArea: "strip",
+        background: "rgba(2, 6, 23, 0.92)",
+        borderTop: "1px solid rgba(255,255,255,0.08)",
+        padding: "10px 14px",
+        display: "flex",
+        gap: 8,
+        overflowX: "auto",
+        scrollBehavior: "smooth",
+      }}
+    >
+      {crops.map((c, i) => {
+        const isActive = i === activeIndex;
+        return (
+          <button
+            key={c.id}
+            ref={isActive ? activeBtnRef : null}
+            type="button"
+            role="tab"
+            aria-selected={isActive}
+            aria-current={isActive}
+            aria-label={`Face crop ${i + 1} of ${crops.length}`}
+            onClick={() => onPick(i)}
+            style={{
+              flexShrink: 0,
+              width: 64,
+              height: 64,
+              padding: 0,
+              border: isActive
+                ? "2px solid #fff"
+                : "2px solid transparent",
+              borderRadius: 8,
+              overflow: "hidden",
+              background: "rgba(255,255,255,0.06)",
+              cursor: "pointer",
+              opacity: isActive ? 1 : 0.55,
+              transition: "opacity 0.15s, border-color 0.15s, transform 0.15s",
+              transform: isActive ? "scale(1.04)" : "scale(1)",
+            }}
+            onMouseEnter={(e) => {
+              if (!isActive) e.currentTarget.style.opacity = "0.85";
+            }}
+            onMouseLeave={(e) => {
+              if (!isActive) e.currentTarget.style.opacity = "0.55";
+            }}
+          >
+            <img
+              src={`/api/person-clips/${clipId}/face-crops/${c.id}/image`}
+              alt=""
+              loading="lazy"
+              decoding="async"
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                display: "block",
+              }}
+            />
+          </button>
+        );
+      })}
     </div>
   );
 }

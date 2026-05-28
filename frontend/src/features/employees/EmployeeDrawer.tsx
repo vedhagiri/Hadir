@@ -35,6 +35,7 @@ import { useDivisions } from "../divisions/hooks";
 import { useSections } from "../sections/hooks";
 import { DeleteConfirmModal } from "./DeleteConfirmModal";
 import {
+  useBulkDeletePhotos,
   useCreateEmployee,
   useDecideDeleteRequest,
   useDeletePhoto,
@@ -187,6 +188,20 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
   ]);
   // Lightbox state for reference-photo zoom (click thumbnail → modal).
   const [zoomPhotoId, setZoomPhotoId] = useState<number | null>(null);
+
+  // Reference-photo multi-select state. ``selectedPhotoIds`` is empty
+  // when not in select mode; toggling any tile's checkbox enters
+  // select mode and the bulk action toolbar appears. ``bulkConfirm``
+  // gates the destructive POST behind a confirmation modal.
+  const [selectedPhotoIds, setSelectedPhotoIds] = useState<Set<number>>(
+    () => new Set(),
+  );
+  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
+  const [bulkResultMessage, setBulkResultMessage] = useState<{
+    tone: "ok" | "warn";
+    text: string;
+  } | null>(null);
+  const bulkDelete = useBulkDeletePhotos();
 
   const rolesQuery = useQuery({
     queryKey: ["users", "roles"],
@@ -1085,6 +1100,164 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
                 {t("employees.section.referencePhotos") as string}
               </SectionLabel>
 
+              {/* Bulk-select toolbar — appears as soon as the operator
+                  picks a single tile via its checkbox. Stays visible
+                  while ``selectedPhotoIds.size > 0``. */}
+              {(() => {
+                const photoList = photos.data?.items ?? [];
+                const selectedCount = selectedPhotoIds.size;
+                const allSelected =
+                  photoList.length > 0 &&
+                  selectedCount === photoList.length;
+                if (photoList.length === 0) return null;
+                return (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      flexWrap: "wrap",
+                      padding: "8px 10px",
+                      marginBottom: 10,
+                      border: "1px solid var(--border)",
+                      borderRadius: 8,
+                      background:
+                        selectedCount > 0
+                          ? "var(--accent-soft, var(--bg-sunken))"
+                          : "var(--bg-sunken)",
+                    }}
+                  >
+                    <label
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 6,
+                        cursor: "pointer",
+                        fontSize: 12.5,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={allSelected}
+                        // ``indeterminate`` is a DOM-only attr in React,
+                        // so set it via ref after each render so the
+                        // visual state matches partial selection.
+                        ref={(el) => {
+                          if (el)
+                            el.indeterminate =
+                              selectedCount > 0 && !allSelected;
+                        }}
+                        onChange={() => {
+                          if (allSelected) {
+                            setSelectedPhotoIds(new Set());
+                          } else {
+                            setSelectedPhotoIds(
+                              new Set(photoList.map((x) => x.id)),
+                            );
+                          }
+                        }}
+                        aria-label={
+                          t("employees.photos.selectAll", {
+                            defaultValue: "Select all reference photos",
+                          }) as string
+                        }
+                      />
+                      <span style={{ fontWeight: 600 }}>
+                        {selectedCount > 0
+                          ? (t("employees.photos.selectedCount", {
+                              defaultValue: "{{n}} selected",
+                              n: selectedCount,
+                            }) as string)
+                          : (t("employees.photos.selectMode", {
+                              defaultValue: "Select photos",
+                            }) as string)}
+                      </span>
+                    </label>
+
+                    <div style={{ flex: 1 }} />
+
+                    {selectedCount > 0 && (
+                      <>
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          onClick={() => setSelectedPhotoIds(new Set())}
+                          disabled={bulkDelete.isPending}
+                        >
+                          {t("common.clear", { defaultValue: "Clear" }) as string}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          style={{
+                            background: "var(--danger, #dc2626)",
+                            borderColor: "var(--danger, #dc2626)",
+                            color: "white",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                          }}
+                          onClick={() => setBulkConfirmOpen(true)}
+                          disabled={bulkDelete.isPending}
+                          aria-label={
+                            t("employees.photos.bulkDeleteAria", {
+                              defaultValue:
+                                "Delete {{n}} selected photo(s)",
+                              n: selectedCount,
+                            }) as string
+                          }
+                        >
+                          <Icon name="trash" size={11} />
+                          {bulkDelete.isPending
+                            ? (t("employees.photos.deleting", {
+                                defaultValue: "Deleting…",
+                              }) as string)
+                            : (t("employees.photos.deleteSelected", {
+                                defaultValue: "Delete Selected ({{n}})",
+                                n: selectedCount,
+                              }) as string)}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Per-bulk-action status banner. Auto-clears next time
+                  the operator opens the confirm modal. */}
+              {bulkResultMessage && (
+                <div
+                  style={{
+                    padding: "8px 12px",
+                    marginBottom: 10,
+                    borderRadius: 6,
+                    fontSize: 12.5,
+                    background:
+                      bulkResultMessage.tone === "ok"
+                        ? "var(--success-soft, var(--bg-sunken))"
+                        : "var(--warn-soft, var(--bg-sunken))",
+                    border:
+                      bulkResultMessage.tone === "ok"
+                        ? "1px solid var(--success, var(--border))"
+                        : "1px solid var(--warn, var(--border))",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
+                  <span>{bulkResultMessage.text}</span>
+                  <div style={{ flex: 1 }} />
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    style={{ padding: "2px 8px", fontSize: 11 }}
+                    onClick={() => setBulkResultMessage(null)}
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
+
               {/* Existing photos — preview + delete + position label.*/}
               {(photos.data?.items.length ?? 0) > 0 ? (
                 <div
@@ -1100,33 +1273,99 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
                     <div
                       key={p.id}
                       style={{
-                        border: "1px solid var(--border)",
+                        border: selectedPhotoIds.has(p.id)
+                          ? "2px solid var(--accent)"
+                          : "1px solid var(--border)",
                         borderRadius: 8,
                         overflow: "hidden",
                         background: "var(--bg-sunken)",
                         position: "relative",
+                        boxShadow: selectedPhotoIds.has(p.id)
+                          ? "0 0 0 2px var(--accent-soft, transparent)"
+                          : undefined,
                       }}
                     >
                       <img
                         src={`/api/employees/${employeeId}/photos/${p.id}/image`}
                         alt={p.angle}
-                        onClick={() => setZoomPhotoId(p.id)}
+                        onClick={() => {
+                          // While in select mode, image click toggles
+                          // the selection rather than opening the
+                          // zoom — fewer accidental zooms during a
+                          // bulk review.
+                          if (selectedPhotoIds.size > 0) {
+                            setSelectedPhotoIds((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(p.id)) next.delete(p.id);
+                              else next.add(p.id);
+                              return next;
+                            });
+                          } else {
+                            setZoomPhotoId(p.id);
+                          }
+                        }}
                         style={{
                           display: "block",
                           width: "100%",
                           aspectRatio: "1 / 1",
                           objectFit: "cover",
-                          cursor: "zoom-in",
+                          cursor:
+                            selectedPhotoIds.size > 0
+                              ? "pointer"
+                              : "zoom-in",
+                          opacity: selectedPhotoIds.has(p.id) ? 0.85 : 1,
                         }}
                       />
-                      {/* Position pill (top-left). Always visible so the
-                          operator can tell front/left/right at a glance. */}
+                      {/* Per-tile checkbox — top-left. Always shown so
+                          one click into select mode is enough; the
+                          position pill moves down to stay visible. */}
+                      <label
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          position: "absolute",
+                          top: 6,
+                          insetInlineStart: 6,
+                          width: 22,
+                          height: 22,
+                          borderRadius: 4,
+                          background: "rgba(0,0,0,0.55)",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedPhotoIds.has(p.id)}
+                          onChange={() => {
+                            setSelectedPhotoIds((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(p.id)) next.delete(p.id);
+                              else next.add(p.id);
+                              return next;
+                            });
+                          }}
+                          aria-label={
+                            t("employees.photos.selectOne", {
+                              defaultValue: "Select reference photo",
+                            }) as string
+                          }
+                          style={{
+                            margin: 0,
+                            cursor: "pointer",
+                            accentColor: "var(--accent)",
+                          }}
+                        />
+                      </label>
+                      {/* Position pill (now top-right, away from
+                          checkbox). */}
                       <span
                         className="pill pill-accent mono text-xs"
                         style={{
                           position: "absolute",
                           top: 6,
-                          insetInlineStart: 6,
+                          insetInlineEnd: 36,
                           padding: "1px 6px",
                           fontSize: 10,
                         }}
@@ -1135,7 +1374,7 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
                           defaultValue: p.angle,
                         }) as string}
                       </span>
-                      {/* Delete button (top-right). */}
+                      {/* Single-delete button (top-right). */}
                       <button
                         type="button"
                         className="icon-btn"
@@ -1442,6 +1681,190 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
             if (isHr) onClose();
           }}
         />
+      )}
+
+      {/* Bulk-delete confirmation modal — counts + warning about face
+          training dataset / recognition cache impact. Operator must
+          explicitly click "Delete N photos" to commit; backdrop/Esc
+          dismiss WITHOUT deleting. While the mutation is in flight the
+          buttons are disabled and the primary action shows a spinner
+          label. Per-photo failures are reported via ``bulkResultMessage``. */}
+      {bulkConfirmOpen && employeeId !== null && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="bulk-photo-delete-title"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.6)",
+            display: "grid",
+            placeItems: "center",
+            zIndex: 9998,
+            padding: 24,
+          }}
+          onClick={() => {
+            if (!bulkDelete.isPending) setBulkConfirmOpen(false);
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "var(--bg)",
+              border: "1px solid var(--border)",
+              borderRadius: 10,
+              boxShadow: "0 18px 48px rgba(0,0,0,0.35)",
+              width: "min(440px, 92vw)",
+              padding: 18,
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+            }}
+          >
+            <div
+              id="bulk-photo-delete-title"
+              style={{
+                fontSize: 15,
+                fontWeight: 700,
+                color: "var(--text)",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <span
+                aria-hidden
+                style={{
+                  width: 26,
+                  height: 26,
+                  borderRadius: "50%",
+                  background: "var(--danger-soft, #fee2e2)",
+                  color: "var(--danger, #dc2626)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Icon name="trash" size={13} />
+              </span>
+              {t("employees.photos.bulkConfirmTitle", {
+                defaultValue: "Delete {{n}} reference photo(s)?",
+                n: selectedPhotoIds.size,
+              }) as string}
+            </div>
+
+            <div
+              style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.5 }}
+            >
+              {t("employees.photos.bulkConfirmBody", {
+                defaultValue:
+                  "This permanently removes the selected photos and their encrypted files. The employee's face training dataset, recognition cache, and downstream face matching will refresh on the next match — past detections are not affected.",
+              }) as string}
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 8,
+                marginTop: 4,
+              }}
+            >
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => setBulkConfirmOpen(false)}
+                disabled={bulkDelete.isPending}
+              >
+                {t("common.cancel", { defaultValue: "Cancel" }) as string}
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm"
+                style={{
+                  background: "var(--danger, #dc2626)",
+                  borderColor: "var(--danger, #dc2626)",
+                  color: "white",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+                disabled={bulkDelete.isPending || selectedPhotoIds.size === 0}
+                onClick={() => {
+                  setBulkResultMessage(null);
+                  const ids = Array.from(selectedPhotoIds);
+                  bulkDelete.mutate(
+                    { employeeId: employeeId, photoIds: ids },
+                    {
+                      onSuccess: (res) => {
+                        setBulkConfirmOpen(false);
+                        setSelectedPhotoIds(new Set());
+                        // Compose a single status line so the operator
+                        // sees the outcome inline rather than via a
+                        // toast that disappears.
+                        const parts: string[] = [];
+                        parts.push(
+                          t("employees.photos.bulkResultDeleted", {
+                            defaultValue:
+                              "Deleted {{n}} photo(s).",
+                            n: res.deleted_count,
+                          }) as string,
+                        );
+                        if (res.not_found_ids.length > 0) {
+                          parts.push(
+                            t("employees.photos.bulkResultNotFound", {
+                              defaultValue:
+                                "{{n}} were already removed.",
+                              n: res.not_found_ids.length,
+                            }) as string,
+                          );
+                        }
+                        if (res.errors.length > 0) {
+                          parts.push(
+                            t("employees.photos.bulkResultErrors", {
+                              defaultValue:
+                                "{{n}} failed — re-try or check the audit log.",
+                              n: res.errors.length,
+                            }) as string,
+                          );
+                        }
+                        setBulkResultMessage({
+                          tone:
+                            res.errors.length === 0 &&
+                            res.not_found_ids.length === 0
+                              ? "ok"
+                              : "warn",
+                          text: parts.join(" "),
+                        });
+                      },
+                      onError: (err) => {
+                        setBulkResultMessage({
+                          tone: "warn",
+                          text:
+                            (t("employees.photos.bulkResultFailed", {
+                              defaultValue:
+                                "Bulk delete failed — please try again.",
+                            }) as string) +
+                            ` (${(err as Error).message})`,
+                        });
+                      },
+                    },
+                  );
+                }}
+              >
+                <Icon name="trash" size={11} />
+                {bulkDelete.isPending
+                  ? (t("employees.photos.deleting", {
+                      defaultValue: "Deleting…",
+                    }) as string)
+                  : (t("employees.photos.bulkConfirmAction", {
+                      defaultValue: "Delete {{n}} photos",
+                      n: selectedPhotoIds.size,
+                    }) as string)}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Photo zoom lightbox — clicking a thumbnail opens this; click

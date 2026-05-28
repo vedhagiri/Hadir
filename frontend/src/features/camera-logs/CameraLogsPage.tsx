@@ -247,7 +247,8 @@ export function CameraLogsPage() {
               <th style={{ width: 88 }}>Crop</th>
               <th>Captured</th>
               <th>Camera</th>
-              <th>Employee</th>
+              <th style={{ width: 120 }}>Status</th>
+              <th>Person</th>
               <th style={{ width: 80 }}>Confidence</th>
               <th>Track</th>
             </tr>
@@ -255,7 +256,7 @@ export function CameraLogsPage() {
           <tbody>
             {events.isLoading && (
               <tr>
-                <td colSpan={6} className="text-sm text-dim" style={{ padding: 16 }}>
+                <td colSpan={7} className="text-sm text-dim" style={{ padding: 16 }}>
                   Loading…
                 </td>
               </tr>
@@ -263,7 +264,7 @@ export function CameraLogsPage() {
             {events.isError && (
               <tr>
                 <td
-                  colSpan={6}
+                  colSpan={7}
                   className="text-sm"
                   style={{ padding: 16, color: "var(--danger-text)" }}
                 >
@@ -376,6 +377,15 @@ export function CameraLogsPage() {
                       ) : null}
                     </td>
                     <td className="text-sm">{ev.camera_name}</td>
+                    <td>
+                      {ev.employee_id ? (
+                        <span className="pill pill-success">Identified</span>
+                      ) : ev.former_employee_match ? (
+                        <span className="pill pill-danger">Former employee</span>
+                      ) : (
+                        <span className="pill pill-warning">Unidentified</span>
+                      )}
+                    </td>
                     <td className="text-sm">
                       {ev.employee_id ? (
                         <span>
@@ -414,15 +424,15 @@ export function CameraLogsPage() {
                               : "Former employee"
                           }
                         >
-                          <span className="pill pill-danger">
-                            Former employee
+                          <span style={{ fontWeight: 500, color: "var(--text-secondary)" }}>
+                            {ev.former_match_employee_name ?? "Unknown"}
                           </span>{" "}
                           <span className="mono text-xs text-dim">
                             {ev.former_match_employee_code ?? "—"}
                           </span>
                         </span>
                       ) : (
-                        <span className="pill pill-warning">Unidentified</span>
+                        <span className="text-dim">—</span>
                       )}
                     </td>
                     <td className="mono text-sm">
@@ -478,12 +488,21 @@ export function CameraLogsPage() {
                         <td className="text-sm text-dim">
                           {child.camera_name}
                         </td>
+                        <td>
+                          {child.employee_id ? (
+                            <span className="pill pill-success">Identified</span>
+                          ) : child.former_employee_match ? (
+                            <span className="pill pill-danger">Former employee</span>
+                          ) : (
+                            <span className="pill pill-warning">Unidentified</span>
+                          )}
+                        </td>
                         <td className="text-sm text-dim">
                           {child.employee_id
-                            ? child.employee_name ?? `EMP ${child.employee_id}`
+                            ? (child.employee_name ?? `EMP ${child.employee_id}`)
                             : child.former_employee_match
-                              ? "Former employee"
-                              : "Unidentified"}
+                              ? (child.former_match_employee_name ?? "Former employee")
+                              : "—"}
                         </td>
                         <td className="mono text-sm text-dim">
                           {child.confidence !== null
@@ -500,7 +519,7 @@ export function CameraLogsPage() {
             })}
             {events.data && events.data.items.length === 0 && !events.isLoading && (
               <tr>
-                <td colSpan={6} className="text-sm text-dim" style={{ padding: 16 }}>
+                <td colSpan={7} className="text-sm text-dim" style={{ padding: 16 }}>
                   No events match. Try widening filters.
                 </td>
               </tr>

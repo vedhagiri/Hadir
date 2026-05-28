@@ -450,3 +450,53 @@ export function useDeletePhoto() {
     },
   });
 }
+
+// Response shape mirrors ``BulkDeletePhotosResponse`` in the backend
+// router. Failed rows are returned as a separate ``errors`` list so the
+// UI can show per-id failures without re-running the whole flow.
+export interface BulkDeletePhotosResponse {
+  deleted_count: number;
+  deleted_ids: number[];
+  not_found_ids: number[];
+  errors: { photo_id: number; reason: string }[];
+}
+
+/**
+ * Bulk-delete reference photos for one employee.
+ *
+ * Hits ``POST /api/employees/{id}/photos/bulk-delete`` with the chosen
+ * photo IDs (hard-capped server-side at 200). The server runs each
+ * delete in its own transaction so a single bad row doesn't roll back
+ * the rest; it audits each deletion and invalidates the matcher cache
+ * once at the end — that flushes the face training dataset, the
+ * recognition cache, and downstream face matching in a single shot
+ * (next ``matcher_cache.match()`` reloads the employee's vectors).
+ *
+ * On success we invalidate the same query keys as the single-delete
+ * hook so the photo grid refreshes immediately.
+ */
+export function useBulkDeletePhotos() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      employeeId: number;
+      photoIds: number[];
+    }): Promise<BulkDeletePhotosResponse> =>
+      api<BulkDeletePhotosResponse>(
+        `/api/employees/${args.employeeId}/photos/bulk-delete`,
+        {
+          method: "POST",
+          body: { photo_ids: args.photoIds },
+        },
+      ),
+    onSuccess: (_result, variables) => {
+      qc.invalidateQueries({
+        queryKey: ["employees", "photos", variables.employeeId],
+      });
+      qc.invalidateQueries({
+        queryKey: ["employees", "detail", variables.employeeId],
+      });
+      qc.invalidateQueries({ queryKey: ["employees", "list"] });
+    },
+  });
+}

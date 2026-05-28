@@ -8,7 +8,7 @@
 // union of department membership + manager_assignments (handled in
 // the router, not here).
 
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { AnomalyInfoBanner } from "../../components/AnomalyNote";
 
@@ -44,6 +44,62 @@ export function DailyAttendancePage() {
   const [regenInfo, setRegenInfo] = useState<string | null>(null);
   const [pdfModalOpen, setPdfModalOpen] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
+
+  // Client-side quick-find — matches the displayed rows in the table
+  // (stats below still reflect the full scope so the operator sees
+  // accurate totals while narrowing the visible list).
+  const [searchQuery, setSearchQuery] = useState<string>("");
+
+  // Sticky-stack measurement. Four sticky regions stack on each other
+  // (each with its own ``top`` = sum of the heights of everything above
+  // it), so there's no card-split seam and no z-index overlap:
+  //
+  //   ┌──────────────────────────────┐  ← topStickyRef
+  //   │ page header + regen + filter │     top: 0
+  //   │ + stat tiles                 │
+  //   ├──────────────────────────────┤  ← cardHeadRef  (inside card)
+  //   │ "Attendance for {date}" head │     top: topH
+  //   ├──────────────────────────────┤  ← anomalyRef   (inside card)
+  //   │ anomaly info banner          │     top: topH + cardHeadH
+  //   ├──────────────────────────────┤  ← <th>          (inside card)
+  //   │ EMPLOYEE  DEPT  STATUS …     │     top: topH + cardHeadH + anomalyH
+  //   ├──────────────────────────────┤
+  //   │ scrolling tbody rows         │
+  //
+  // ``useLayoutEffect`` so the heights are set before the first paint —
+  // no first-frame flash where the thead briefly overlaps the controls.
+  // ``getBoundingClientRect().height`` (not offsetHeight) + Math.round
+  // so any sub-pixel jitter from inherited transforms doesn't oscillate
+  // the offsets every frame.
+  const topStickyRef = useRef<HTMLDivElement | null>(null);
+  const cardHeadRef = useRef<HTMLDivElement | null>(null);
+  const anomalyRef = useRef<HTMLDivElement | null>(null);
+  const [topH, setTopH] = useState(0);
+  const [cardHeadH, setCardHeadH] = useState(0);
+  const [anomalyH, setAnomalyH] = useState(0);
+  useLayoutEffect(() => {
+    const measure = (
+      el: HTMLElement | null,
+      setH: (n: number) => void,
+    ): ResizeObserver | null => {
+      if (!el) return null;
+      const update = () =>
+        setH(Math.round(el.getBoundingClientRect().height));
+      update();
+      const ro = new ResizeObserver(update);
+      ro.observe(el);
+      return ro;
+    };
+    const obs = [
+      measure(topStickyRef.current, setTopH),
+      measure(cardHeadRef.current, setCardHeadH),
+      measure(anomalyRef.current, setAnomalyH),
+    ];
+    return () => {
+      for (const ro of obs) ro?.disconnect();
+    };
+  }, []);
+  const theadTop = topH + cardHeadH + anomalyH;
 
   // Every report download is gated through the confidentiality modal.
   const { gate: gateDownload, modal: confidentialModal } =
@@ -131,6 +187,19 @@ export function DailyAttendancePage() {
     };
   }, [list.data]);
 
+  // Apply the live search filter to the rendered rows only — stats stay
+  // on the unfiltered list so the "in scope" totals remain accurate.
+  const filteredItems = useMemo(() => {
+    const items = list.data?.items ?? [];
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter(
+      (it) =>
+        it.full_name.toLowerCase().includes(q) ||
+        it.employee_code.toLowerCase().includes(q),
+    );
+  }, [list.data, searchQuery]);
+
   const onRegenerate = () => {
     setRegenInfo(null);
     regenerate.mutate(date, {
@@ -194,6 +263,21 @@ export function DailyAttendancePage() {
 
   return (
     <>
+      {/* Top sticky region — page header, action buttons, filter row
+          (with live employee search), and the summary stat tiles.
+          Anchored at top:0 of the .content scroll container. The card
+          head / anomaly / thead each pin under this with their own
+          measured offsets (see ``topH``, ``cardHeadH``, ``anomalyH``). */}
+      <div
+        ref={topStickyRef}
+        style={{
+          position: "sticky",
+          top: 0,
+          zIndex: 30,
+          background: "var(--bg)",
+          paddingBottom: 0,
+        }}
+      >
       <div className="page-header">
         <div>
           <h1 className="page-title">Daily attendance</h1>
@@ -272,6 +356,58 @@ export function DailyAttendancePage() {
             max={todayIso()}
             ariaLabel="Attendance date"
           />
+        </div>
+
+        {/* Live search — name or employee code. Filters the rendered
+            rows only; stats above stay on the full scope. */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            background: "var(--bg-elev)",
+            border: "1px solid var(--border)",
+            borderRadius: 999,
+            padding: "4px 10px",
+            minWidth: 220,
+          }}
+        >
+          <span aria-hidden style={{ opacity: 0.6, fontSize: 13 }}>🔎</span>
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search name or ID…"
+            aria-label="Search by employee name or code"
+            style={{
+              flex: 1,
+              border: "none",
+              outline: "none",
+              background: "transparent",
+              color: "var(--text)",
+              fontSize: 13,
+              padding: "2px 0",
+              minWidth: 140,
+            }}
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery("")}
+              aria-label="Clear search"
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "var(--text-tertiary)",
+                cursor: "pointer",
+                fontSize: 14,
+                lineHeight: 1,
+                padding: 2,
+              }}
+            >
+              ×
+            </button>
+          )}
         </div>
 
         <div className="seg" role="tablist" aria-label="Attendance scope">
@@ -395,11 +531,43 @@ export function DailyAttendancePage() {
         <StatTile label="On leave" value={stats.onLeave} tone="info" />
       </div>
 
+      </div>{/* /top sticky wrapper — page-header + filter + stats end here */}
+
+      {/* Single table card. Inside it, three child regions each use
+          position: sticky with a stacked ``top`` offset:
+            1. card-head  → pins below the top-sticky wrapper
+            2. anomaly    → pins below card-head
+            3. each <th>  → pins below anomaly
+          No card-splitting, no visible seam, no z-index overlap. */}
       <div className="card">
-        <div className="card-head">
+        <div
+          ref={cardHeadRef}
+          className="card-head"
+          style={{
+            position: "sticky",
+            top: topH,
+            zIndex: 25,
+            background: "var(--bg-elev, #fff)",
+            // The card-head's natural border-bottom needs to stay
+            // visible when pinned so it reads as a divider, not a
+            // floating row.
+          }}
+        >
           <div>
             <h3 className="card-title">
               Attendance for {list.data?.date ?? date}
+              {searchQuery && (
+                <span
+                  style={{
+                    marginInlineStart: 8,
+                    fontSize: 12,
+                    color: "var(--text-tertiary)",
+                    fontWeight: 400,
+                  }}
+                >
+                  · {filteredItems.length} match{filteredItems.length === 1 ? "" : "es"} for "{searchQuery}"
+                </span>
+              )}
             </h3>
           </div>
           <div style={{ display: "flex", gap: 6 }}>
@@ -421,19 +589,43 @@ export function DailyAttendancePage() {
             </button>
           </div>
         </div>
-        <AnomalyInfoBanner message="If the camera misses certain events due to camera positioning, capture limitations, lighting, or brightness conditions, those cases should be treated as possible anomalies." />
+        <div
+          ref={anomalyRef}
+          style={{
+            position: "sticky",
+            top: topH + cardHeadH,
+            zIndex: 22,
+            background: "var(--bg-elev, #fff)",
+          }}
+        >
+          <AnomalyInfoBanner message="If the camera misses certain events due to camera positioning, capture limitations, lighting, or brightness conditions, those cases should be treated as possible anomalies." />
+        </div>
 
         <table className="table">
           <thead>
             <tr>
-              <th>Employee</th>
-              <th>Department</th>
-              <th>Status</th>
-              <th>In</th>
-              <th>Out</th>
-              <th>Hours</th>
-              <th>OT</th>
-              <th>Flags</th>
+              {/* Per-cell ``position: sticky`` (not on <thead>) — the
+                  design CSS uses ``border-collapse: collapse`` which
+                  breaks sticky on <thead> in some browsers but works
+                  reliably when applied per <th>. ``zIndex`` is below
+                  the card-head + anomaly so a long header doesn't
+                  overlap them on the way out. */}
+              {([
+                "Employee", "Department", "Status",
+                "In", "Out", "Hours", "OT", "Flags",
+              ] as const).map((label) => (
+                <th
+                  key={label}
+                  style={{
+                    position: "sticky",
+                    top: theadTop,
+                    zIndex: 18,
+                    background: "var(--bg-elev, #fff)",
+                  }}
+                >
+                  {label}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -459,7 +651,7 @@ export function DailyAttendancePage() {
                 </td>
               </tr>
             )}
-            {list.data?.items.map((it) => (
+            {filteredItems.map((it) => (
               <tr
                 key={`${it.employee_id}-${it.date}`}
                 onClick={() => setDrawerItem(it)}
@@ -536,6 +728,37 @@ export function DailyAttendancePage() {
                 </td>
               </tr>
             )}
+            {list.data &&
+              list.data.items.length > 0 &&
+              filteredItems.length === 0 &&
+              !list.isLoading && (
+                <tr>
+                  <td
+                    colSpan={8}
+                    className="text-sm text-dim"
+                    style={{ padding: 16 }}
+                  >
+                    No employees match "{searchQuery}". Try a different name or
+                    code, or{" "}
+                    <button
+                      type="button"
+                      onClick={() => setSearchQuery("")}
+                      style={{
+                        background: "transparent",
+                        border: "none",
+                        color: "var(--accent)",
+                        cursor: "pointer",
+                        padding: 0,
+                        font: "inherit",
+                        textDecoration: "underline",
+                      }}
+                    >
+                      clear the search
+                    </button>
+                    .
+                  </td>
+                </tr>
+              )}
           </tbody>
         </table>
       </div>

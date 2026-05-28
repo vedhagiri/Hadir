@@ -45,10 +45,32 @@ from maugood.auth.audit import write_audit
 from maugood.config import get_settings
 from maugood.db import detection_events, employees, get_engine, person_clips, clip_processing_results, face_crops
 from maugood.employees.photos import decrypt_bytes, encrypt_bytes
+from maugood.identification.embeddings import encrypt_embedding
 from maugood.identification.matcher import matcher_cache
 from maugood.tenants.scope import TenantScope
 
 logger = logging.getLogger(__name__)
+
+
+def _encrypt_embedding_safe(emb: Any) -> Optional[bytes]:
+    """Fernet-encrypt a detection's L2-normalised embedding for storage on
+    ``face_crops.embedding``. Returns ``None`` if there's no embedding to
+    store, the shape is wrong, or Fernet isn't configured — never raises.
+
+    Mirrors the defence in ``capture/events.py::emit_detection_event``
+    so a detection without a recognition pass still INSERTs cleanly.
+    """
+    if emb is None:
+        return None
+    try:
+        arr = np.asarray(emb, dtype=np.float32)
+        if arr.size == 0:
+            return None
+        return encrypt_embedding(arr)
+    except (RuntimeError, ValueError) as exc:
+        logger.debug("skipping embedding encryption: %s", type(exc).__name__)
+        return None
+
 
 # Sample ~2 fps from the clip for face detection.
 _FRAMES_PER_SECOND_SAMPLE = 2
@@ -230,7 +252,13 @@ def _match_detections(
             mm = matcher_cache.match(scope, probe)
             if mm is not None and mm.classification == "active":
                 eid = mm.employee_id
-                conf = float(getattr(mm, "confidence", 0.0))
+                # Match's attribute is ``score`` (the cosine similarity,
+                # 0..1), NOT ``confidence``. The earlier ``getattr(...,
+                # "confidence", 0.0)`` always fell through to the 0.0
+                # default, which is why every face_crops row was landing
+                # with match_confidence=0.0 and every UI surface showed
+                # "0%". This name mismatch is the load-bearing fix.
+                conf = float(getattr(mm, "score", 0.0))
                 det_employee_map[(frame_idx, det_idx)] = eid
                 det["match_confidence"] = conf
                 matched_ids.add(eid)
@@ -783,6 +811,12 @@ def _save_face_crops_uc2_best_per_track(
                         # confidence so the face crop preview can render
                         # the actual score for this frame's match.
                         match_confidence=det.get("match_confidence"),
+                        # Migration 0066 — store the in-memory embedding
+                        # (already computed for matching above) so the
+                        # detection_events fan-out below can copy it.
+                        # Without this column, Unidentified Faces →
+                        # Similarity Groups has no embedding to cluster.
+                        embedding=_encrypt_embedding_safe(det.get("embedding")),
                     )
                 )
         except Exception:  # noqa: BLE001
@@ -979,6 +1013,12 @@ def _save_face_crops_to_db(
                                 if det_employee_map is not None
                                 else None
                             ),
+                            # Migration 0066 — same Fernet-encrypted
+                            # embedding the matcher just used. Copied
+                            # verbatim into detection_events on fan-out
+                            # so Unidentified Faces clustering has
+                            # something to work with.
+                            embedding=_encrypt_embedding_safe(det.get("embedding")),
                         ).returning(face_crops.c.id)
                     )
                     inserted_id = int(result.scalar_one())
@@ -1053,56 +1093,28 @@ def _emit_attendance_detection_events(
     clip_id: int,
     camera_id: int,
 ) -> int:
-    """Fan out matched face_crops into detection_events rows so the
-    attendance engine picks them up.
+    """Fan out face_crops into detection_events rows so Camera Logs and
+    the attendance engine see every detected face from the clip.
 
-    For each matched employee on this clip we emit TWO detection_events
-    rows: one anchored at the EARLIEST matched frame (drives ``in_time``)
-    and one at the LATEST (drives ``out_time``). When the earliest and
-    latest are the same crop — i.e. the employee was matched on exactly
-    one frame in this clip — we emit a single row.
+    **Identified employees** — two rows per employee: earliest matched
+    frame (drives ``in_time``) and latest (drives ``out_time``). When
+    both are the same crop a single row is emitted.
 
-    Anchoring is the **actual frame** the face was captured in
-    (``face_crops.event_timestamp = clip_start + frame_offset``), not
-    the clip's start time, not the matcher worker's wall-clock, not
-    the DB write time. This is the load-bearing requirement.
+    **Unidentified crops** — one row per crop with ``employee_id=NULL``.
+    These are invisible to the attendance engine (which only processes
+    rows with a real ``employee_id``) but appear in Camera Logs so
+    operators can review every face the pipeline detected.
 
-    Idempotent on (clip, employee): both inserts use stable track_ids
-    (``clip-{id}-emp-{eid}-in`` / ``-out``), so re-running the matcher
-    deletes the prior pair before re-inserting.
+    Anchoring uses the actual in-video ``event_timestamp`` for both
+    kinds of row — not the wall-clock write time.
 
-    Returns the number of rows inserted.
+    Idempotent: identified rows use stable track_ids
+    ``clip-{id}-emp-{eid}-in`` / ``-out``; unidentified rows use
+    ``clip-{id}-unk-{crop_id}``. Re-running deletes the prior rows
+    before re-inserting.
+
+    Returns the total number of rows inserted.
     """
-
-    with engine.begin() as conn:
-        rows = conn.execute(
-            sa_select(
-                face_crops.c.id.label("crop_id"),
-                face_crops.c.employee_id,
-                face_crops.c.event_timestamp,
-                face_crops.c.match_confidence,
-                face_crops.c.width,
-                face_crops.c.height,
-                face_crops.c.file_path,
-            ).where(
-                face_crops.c.tenant_id == scope.tenant_id,
-                face_crops.c.person_clip_id == clip_id,
-                face_crops.c.employee_id.isnot(None),
-            )
-        ).all()
-
-    # Group by employee. For each employee compute:
-    #   * earliest crop  → in_time anchor
-    #   * latest crop    → out_time anchor
-    # ``event_timestamp`` is the load-bearing field — it's the in-video
-    # frame moment, stable across reruns of the matcher.
-    by_emp: dict[int, list] = {}
-    for r in rows:
-        eid = int(r.employee_id)
-        by_emp.setdefault(eid, []).append(r)
-
-    if not by_emp:
-        return 0
 
     import re as _re  # noqa: PLC0415
 
@@ -1115,11 +1127,48 @@ def _emit_attendance_detection_events(
         yy, mo, dd, hh, mi, se = (int(x) for x in m.groups())
         return datetime(yy, mo, dd, hh, mi, se, tzinfo=timezone.utc)
 
+    _crop_cols = (
+        face_crops.c.id.label("crop_id"),
+        face_crops.c.employee_id,
+        face_crops.c.event_timestamp,
+        face_crops.c.match_confidence,
+        face_crops.c.width,
+        face_crops.c.height,
+        face_crops.c.file_path,
+        # Migration 0066 — Fernet-encrypted embedding for clustering.
+        face_crops.c.embedding,
+    )
+
+    with engine.begin() as conn:
+        matched_rows = conn.execute(
+            sa_select(*_crop_cols).where(
+                face_crops.c.tenant_id == scope.tenant_id,
+                face_crops.c.person_clip_id == clip_id,
+                face_crops.c.employee_id.isnot(None),
+            )
+        ).all()
+
+        unk_rows = conn.execute(
+            sa_select(*_crop_cols).where(
+                face_crops.c.tenant_id == scope.tenant_id,
+                face_crops.c.person_clip_id == clip_id,
+                face_crops.c.employee_id.is_(None),
+            )
+        ).all()
+
+    if not matched_rows and not unk_rows:
+        return 0
+
+    # Group identified crops by employee.
+    by_emp: dict[int, list] = {}
+    for r in matched_rows:
+        eid = int(r.employee_id)
+        by_emp.setdefault(eid, []).append(r)
+
     inserted = 0
     with engine.begin() as conn:
+        # --- Identified employees: earliest + latest crop per employee ---
         for eid, crops in by_emp.items():
-            # Sort by parsed UTC timestamp ascending; drop anything
-            # unparseable so we don't anchor on bad data.
             parsed: list[tuple[datetime, object]] = []
             for c in crops:
                 t = _parse(str(c.event_timestamp or ""))
@@ -1169,6 +1218,15 @@ def _emit_attendance_detection_events(
                             else None
                         ),
                         track_id=f"clip-{clip_id}-emp-{eid}-{track_suffix}",
+                        # Migration 0066 — copy embedding from face_crops
+                        # so Similarity Groups can cluster identified
+                        # detections too (matters for the All Unknown
+                        # Faces → Similarity Groups stat consistency).
+                        embedding=(
+                            bytes(c.embedding)
+                            if c.embedding is not None
+                            else None
+                        ),
                     )
                 )
 
@@ -1180,6 +1238,48 @@ def _emit_attendance_detection_events(
             if last_c.crop_id != first_c.crop_id:
                 _emit("out", last_t, last_c)
                 inserted += 1
+
+        # --- Unidentified crops: one detection_events row per crop ---
+        # Delete any prior unidentified fan-out rows for this clip
+        # before reinserting so the operation stays idempotent on
+        # repeated matcher runs.
+        conn.execute(
+            detection_events.delete().where(
+                detection_events.c.tenant_id == scope.tenant_id,
+                detection_events.c.track_id.like(f"clip-{clip_id}-unk-%"),
+            )
+        )
+        for unk in unk_rows:
+            t = _parse(str(unk.event_timestamp or ""))
+            if t is None:
+                continue
+            conn.execute(
+                sa_insert(detection_events).values(
+                    tenant_id=scope.tenant_id,
+                    camera_id=camera_id,
+                    captured_at=t,
+                    bbox={
+                        "x": 0, "y": 0,
+                        "w": int(unk.width or 0),
+                        "h": int(unk.height or 0),
+                    },
+                    face_crop_path=unk.file_path,
+                    employee_id=None,
+                    confidence=None,
+                    track_id=f"clip-{clip_id}-unk-{unk.crop_id}",
+                    # Migration 0066 — load-bearing copy for Unidentified
+                    # Faces → Similarity Groups. Without this, the
+                    # cluster endpoint sees ``embedding IS NULL`` on
+                    # every fan-out row and produces zero clusters.
+                    embedding=(
+                        bytes(unk.embedding)
+                        if unk.embedding is not None
+                        else None
+                    ),
+                )
+            )
+            inserted += 1
+
     return inserted
 
 

@@ -18,6 +18,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useSearchParams } from "react-router-dom";
 
 import { useMe } from "../../auth/AuthProvider";
 import { Icon } from "../../shell/Icon";
@@ -58,6 +59,19 @@ export function EmployeesPage() {
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
   const [sortBy, setSortBy] = useState<EmployeeSortBy>("created_at");
   const [sortDir, setSortDir] = useState<EmployeeSortDir>("desc");
+
+  // Deep-link support — opening this page with ``?employee=ID`` pops
+  // the view drawer for that employee. Used by the bulk-upload
+  // results screen so the operator can immediately verify the
+  // freshly-uploaded reference photos. We clear the param on close
+  // so the back button doesn't re-open the drawer.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const raw = searchParams.get("employee");
+    if (raw === null) return;
+    const id = Number.parseInt(raw, 10);
+    if (Number.isFinite(id) && id > 0) setViewId(id);
+  }, [searchParams]);
 
   const { data: me } = useMe();
   const isAdmin = !!me?.roles?.includes("Admin");
@@ -596,7 +610,14 @@ export function EmployeesPage() {
       {viewId !== null && (
         <EmployeeViewDrawer
           employeeId={viewId}
-          onClose={() => setViewId(null)}
+          onClose={() => {
+            setViewId(null);
+            if (searchParams.has("employee")) {
+              const next = new URLSearchParams(searchParams);
+              next.delete("employee");
+              setSearchParams(next, { replace: true });
+            }
+          }}
           onEdit={() => setDrawerId(viewId)}
         />
       )}

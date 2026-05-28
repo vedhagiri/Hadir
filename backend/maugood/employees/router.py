@@ -3423,3 +3423,142 @@ def delete_photo_endpoint(
     matcher_cache.invalidate_employee(employee_id)
     response.status_code = status.HTTP_204_NO_CONTENT
     return response
+
+
+# ---------------------------------------------------------------------------
+# Bulk delete (Admin / HR — Reference Photos multi-select)
+# ---------------------------------------------------------------------------
+
+
+class BulkDeletePhotosBody(_PA_BaseModel):
+    """Photo IDs to drop in one request. Hard-capped at 200 so a runaway
+    UI can't tar-pit a single transaction; pages with more selections
+    can call the endpoint in batches.
+    """
+
+    photo_ids: list[int]
+
+
+class BulkDeletePhotoFailure(_PA_BaseModel):
+    photo_id: int
+    reason: str  # "not_found" | "drop_failed"
+
+
+class BulkDeletePhotosResponse(_PA_BaseModel):
+    deleted_count: int
+    deleted_ids: list[int]
+    not_found_ids: list[int]
+    errors: list[BulkDeletePhotoFailure]
+
+
+@router.post(
+    "/{employee_id}/photos/bulk-delete",
+    response_model=BulkDeletePhotosResponse,
+)
+def bulk_delete_photos_endpoint(
+    employee_id: int,
+    body: BulkDeletePhotosBody,
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
+) -> BulkDeletePhotosResponse:
+    """Drop several reference photos in one request.
+
+    Per-photo behaviour:
+      * Validate the photo belongs to this employee in this tenant — IDs
+        that don't match land in ``not_found_ids`` (404-equivalent
+        per-row; the rest still process).
+      * Delete the DB row, then best-effort drop the encrypted file on
+        disk. Disk-drop failures are surfaced via ``errors`` but the DB
+        row stays deleted (single source of truth).
+      * One ``photo.deleted`` audit row per successfully deleted photo.
+
+    Cache: ``matcher_cache.invalidate_employee`` runs **once** at the
+    end when at least one row was deleted — the matcher loads all of
+    an employee's vectors in a single shot, so we don't need to flush
+    per row. The face training dataset (``employee_photos.embedding``
+    columns), the recognition cache, and downstream face matching are
+    all keyed off these rows, so a single invalidate is enough.
+
+    Idempotent: re-running with the same IDs after a successful run
+    reports every id under ``not_found_ids`` and is otherwise a no-op.
+    """
+
+    # Dedup so a sloppy frontend doesn't double-process the same id.
+    photo_ids = list(dict.fromkeys(body.photo_ids))
+    if not photo_ids:
+        return BulkDeletePhotosResponse(
+            deleted_count=0,
+            deleted_ids=[],
+            not_found_ids=[],
+            errors=[],
+        )
+    if len(photo_ids) > 200:
+        raise HTTPException(
+            status_code=413,
+            detail="too_many_photos (cap 200 per request)",
+        )
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+
+    deleted_ids: list[int] = []
+    not_found_ids: list[int] = []
+    failures: list[BulkDeletePhotoFailure] = []
+    paths_to_drop: list[str] = []
+
+    # Run each photo in its own transaction so a per-row failure doesn't
+    # roll back the others. The matcher cache invalidation at the end
+    # covers the whole set regardless of which rows succeeded.
+    for pid in photo_ids:
+        try:
+            with get_engine().begin() as conn:
+                row = photos_io.get_photo(
+                    conn, scope, photo_id=pid, employee_id=employee_id
+                )
+                if row is None:
+                    not_found_ids.append(pid)
+                    continue
+                photos_io.delete_photo_row(conn, scope, photo_id=pid)
+                write_audit(
+                    conn,
+                    tenant_id=scope.tenant_id,
+                    actor_user_id=user.id,
+                    action="photo.deleted",
+                    entity_type="photo",
+                    entity_id=str(pid),
+                    before={"angle": row.angle, "file_path": row.file_path},
+                    after={"employee_id": employee_id, "bulk": True},
+                )
+                deleted_ids.append(pid)
+                if row.file_path:
+                    paths_to_drop.append(str(row.file_path))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "bulk photo delete failed for id=%s: %s",
+                pid, type(exc).__name__,
+            )
+            failures.append(
+                BulkDeletePhotoFailure(photo_id=pid, reason="drop_failed")
+            )
+
+    # On-disk cleanup happens after the DB commits so we never orphan a
+    # row pointing at a path we just deleted. Per-file failures don't
+    # rewind the deletion.
+    for path in paths_to_drop:
+        try:
+            _drop_file(path)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "bulk photo file drop failed: path=%s reason=%s",
+                path, type(exc).__name__,
+            )
+
+    if deleted_ids:
+        # One cache invalidation per employee — the matcher reloads the
+        # whole vector set on next match() call.
+        matcher_cache.invalidate_employee(employee_id)
+
+    return BulkDeletePhotosResponse(
+        deleted_count=len(deleted_ids),
+        deleted_ids=deleted_ids,
+        not_found_ids=not_found_ids,
+        errors=failures,
+    )

@@ -2454,6 +2454,13 @@ face_crops = Table(
     # crop wasn't matched to any employee (employee_id is NULL) or for
     # legacy rows that pre-date this column.
     Column("match_confidence", Float, nullable=True),
+    # Migration 0066 — Fernet-encrypted 512-float32 InsightFace embedding
+    # for this crop. Stored at extraction time so the fan-out into
+    # ``detection_events`` can copy it without recomputing — the cluster
+    # endpoint depends on ``detection_events.embedding`` for similarity
+    # grouping (Unidentified Faces → Similarity Groups). NULL allowed
+    # for legacy rows + crops whose embedding extraction failed.
+    Column("embedding", LargeBinary, nullable=True),
     Column(
         "created_at",
         DateTime(timezone=True),

@@ -43,6 +43,7 @@ import { EmployeesPage } from "./features/employees/EmployeesPage";
 import { MyProfilePage } from "./features/employees/MyProfilePage";
 import { MyTeamPage } from "./features/employees/MyTeamPage";
 import { PhotoApprovalsPage } from "./features/employees/PhotoApprovalsPage";
+import { BulkPhotoUploadPage } from "./features/employees/BulkPhotoUploadPage";
 import { CalendarPage } from "./features/calendar/CalendarPage";
 import { EmployeeReportPage } from "./features/reports/EmployeeReportPage";
 import { FormerEmployeesSeenReport } from "./features/reports/FormerEmployeesSeenReport";
@@ -191,6 +192,7 @@ export function App() {
         <Route path="my-team" element={<MyTeamPage />} />
         <Route path="my-profile" element={<MyProfilePage />} />
         <Route path="photo-approvals" element={<PhotoApprovalsPage />} />
+        <Route path="bulk-photo-upload" element={<AdminOnly><BulkPhotoUploadPage /></AdminOnly>} />
         <Route path="pipeline" element={<PipelinePage />} />
         <Route path="api-docs" element={<AdminOnly><ApiDocsPage /></AdminOnly>} />
         {ALL_PAGE_IDS.filter(
@@ -225,7 +227,8 @@ export function App() {
             id !== "approvals" &&
             id !== "pipeline" &&
             id !== "api-docs" &&
-            id !== "storage-analytics",
+            id !== "storage-analytics" &&
+            id !== "bulk-photo-upload",
         ).map((id) => (
           <Route key={id} path={id} element={<Placeholder pageId={id} />} />
         ))}
