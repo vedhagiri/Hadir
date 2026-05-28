@@ -4,6 +4,10 @@ import type { UseQueryResult } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import type { Camera } from "../cameras/types";
 import type {
+  FaceClusterOut,
+  MapAsAttendanceBody,
+  MapAsAttendanceResponse,
+  MapAsReferenceBody,
   MapToEmployeeBody,
   MapToEmployeeResponse,
   MappedClustersFilters,
@@ -89,6 +93,103 @@ export function useCameraList(): UseQueryResult<{ items: Camera[] }, Error> {
   });
 }
 
+/**
+ * Common cache-coherency logic for every Map-to-Employee mutation.
+ *
+ * Both workflows (Reference + Attendance) attribute events to an
+ * employee, which means the events leave the unidentified pool and
+ * enter the mapped pool. This helper:
+ *
+ *   1. Optimistically strips the just-mapped event IDs out of every
+ *      cached unidentified query so the UI removes them instantly —
+ *      bypassing the `placeholderData: (prev) => prev` window that
+ *      otherwise keeps stale rows on screen during the refetch.
+ *   2. Invalidates every relevant query key so the canonical server
+ *      result reconciles any optimistic drift (clusters may regroup
+ *      once events leave the pool; similarity ranges may shift; the
+ *      mapped views need to refresh).
+ *
+ * Called from `onSuccess` of each mutation hook below.
+ */
+function applyMapSuccess(
+  queryClient: ReturnType<typeof useQueryClient>,
+  mappedEventIds: number[],
+): void {
+  const mappedIds = new Set<number>(mappedEventIds);
+
+  // 1. Raw events grid — drop the matching items.
+  queryClient.setQueriesData<RawUnidentifiedResponse>(
+    { queryKey: RAW_KEY },
+    (old) => {
+      if (!old) return old;
+      const items = old.items.filter((it) => !mappedIds.has(it.id));
+      if (items.length === old.items.length) return old;
+      return {
+        ...old,
+        items,
+        total: Math.max(0, old.total - (old.items.length - items.length)),
+      };
+    },
+  );
+
+  // 2. Cluster grid — peel mapped events out of each cluster and
+  //    drop clusters that empty out.
+  queryClient.setQueriesData<UnidentifiedFacesResponse>(
+    { queryKey: LIST_KEY },
+    (old) => {
+      if (!old) return old;
+      let totalRemoved = 0;
+      const clusters: FaceClusterOut[] = [];
+      for (const c of old.clusters) {
+        const keptEventIds: number[] = [];
+        const keptSims: number[] = [];
+        const keptQualities: typeof c.event_qualities = [];
+        const keptFaceTypes: typeof c.event_face_types = [];
+        for (let i = 0; i < c.event_ids.length; i += 1) {
+          const id = c.event_ids[i];
+          if (id === undefined || mappedIds.has(id)) {
+            if (id !== undefined) totalRemoved += 1;
+            continue;
+          }
+          keptEventIds.push(id);
+          keptSims.push(c.event_similarities[i] ?? 0);
+          keptQualities.push(c.event_qualities[i] ?? "unknown");
+          keptFaceTypes.push(c.event_face_types[i] ?? "unknown");
+        }
+        if (keptEventIds.length === 0) continue;
+        clusters.push({
+          ...c,
+          event_ids: keptEventIds,
+          crop_event_ids: c.crop_event_ids.filter((id) => !mappedIds.has(id)),
+          count: keptEventIds.length,
+          event_similarities: keptSims,
+          event_qualities: keptQualities,
+          event_face_types: keptFaceTypes,
+        });
+      }
+      return {
+        ...old,
+        clusters,
+        total_clusters: clusters.length,
+        total_unidentified_events: Math.max(
+          0,
+          old.total_unidentified_events - totalRemoved,
+        ),
+        events_with_embedding: Math.max(
+          0,
+          old.events_with_embedding - totalRemoved,
+        ),
+      };
+    },
+  );
+
+  // 3. Invalidate so a fresh fetch reconciles any drift.
+  void queryClient.invalidateQueries({ queryKey: LIST_KEY });
+  void queryClient.invalidateQueries({ queryKey: RAW_KEY });
+  void queryClient.invalidateQueries({ queryKey: MAPPED_KEY });
+  void queryClient.invalidateQueries({ queryKey: MAPPED_CLUSTERS_KEY });
+}
+
 export function useMapToEmployee() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -97,14 +198,65 @@ export function useMapToEmployee() {
         method: "POST",
         body,
       }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: LIST_KEY });
-      // A newly-mapped event leaves the unidentified pool and enters
-      // the mapped pool — refresh both views so the operator sees the
-      // pivot immediately without a page reload.
-      void queryClient.invalidateQueries({ queryKey: RAW_KEY });
-      void queryClient.invalidateQueries({ queryKey: MAPPED_KEY });
-      void queryClient.invalidateQueries({ queryKey: MAPPED_CLUSTERS_KEY });
+    onSuccess: (_result, variables) => {
+      applyMapSuccess(queryClient, variables.event_ids);
+    },
+  });
+}
+
+/**
+ * Reference Image Mapping — adds crops to the employee's training set
+ * and attributes the events. Use when curating the recognition dataset.
+ *
+ * Endpoint: ``POST /api/unidentified-faces/map-as-reference``.
+ * Body: ``{employee_id, event_ids, photo_assignments}``.
+ *
+ * The backend invalidates the matcher cache so future captures match
+ * against the new reference vectors immediately. No attendance
+ * recompute fires; use ``useMapAsAttendance`` for that workflow.
+ */
+export function useMapAsReference() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: MapAsReferenceBody) =>
+      api<MapToEmployeeResponse>("/api/unidentified-faces/map-as-reference", {
+        method: "POST",
+        body,
+      }),
+    onSuccess: (_result, variables) => {
+      applyMapSuccess(queryClient, variables.event_ids);
+    },
+  });
+}
+
+/**
+ * Attendance Event Mapping — corrects a missed live match. Attributes
+ * events to the employee and recomputes the attendance_records row for
+ * every tenant-local date covered by the event timestamps.
+ *
+ * Endpoint: ``POST /api/unidentified-faces/map-as-attendance``.
+ * Body: ``{employee_id, event_ids}`` (no photo_assignments).
+ *
+ * Camera Logs / Matched Clips / Day Detail Drawer pivot immediately
+ * because they read straight off ``detection_events.employee_id``. The
+ * additional attendance-table refresh is invalidated below so the
+ * daily attendance page reflects the new in/out times right away.
+ */
+export function useMapAsAttendance() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: MapAsAttendanceBody) =>
+      api<MapAsAttendanceResponse>(
+        "/api/unidentified-faces/map-as-attendance",
+        { method: "POST", body },
+      ),
+    onSuccess: (_result, variables) => {
+      applyMapSuccess(queryClient, variables.event_ids);
+      // Surfaces that read attendance need a refresh because the
+      // server has recomputed at least one (employee, date) row.
+      void queryClient.invalidateQueries({ queryKey: ["attendance"] });
+      void queryClient.invalidateQueries({ queryKey: ["attendance-calendar"] });
+      void queryClient.invalidateQueries({ queryKey: ["detection-events"] });
     },
   });
 }

@@ -98,6 +98,31 @@ export interface MapToEmployeeResponse {
   photo_ids: number[];
 }
 
+// Workflow that the operator picks on the modal. ``reference`` adds
+// crops to the employee's training set; ``attendance`` recomputes
+// attendance for the dates covered by the events. Both attribute the
+// events to ``employee_id`` and remove them from Unknown views.
+export type MapWorkflow = "reference" | "attendance";
+
+export interface MapAsReferenceBody {
+  employee_id: number;
+  event_ids: number[];
+  photo_assignments: PhotoAssignment[];
+}
+
+export interface MapAsAttendanceBody {
+  employee_id: number;
+  event_ids: number[];
+}
+
+export interface MapAsAttendanceResponse {
+  mapped_events: number;
+  employee_id: number;
+  employee_name: string | null;
+  employee_code: string | null;
+  attendance_dates_recomputed: string[];  // ISO YYYY-MM-DD strings
+}
+
 // ── Mapped Employees (sub-tabs) ─────────────────────────────────────
 
 export interface MappedFaceEventOut {

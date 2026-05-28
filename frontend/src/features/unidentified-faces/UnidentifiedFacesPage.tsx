@@ -21,7 +21,8 @@ import type { Employee } from "../employees/types";
 import {
   useCameraList,
   useClusterEvents,
-  useMapToEmployee,
+  useMapAsAttendance,
+  useMapAsReference,
   useMappedClusters,
   useMappedFaces,
   useRawUnidentifiedFaces,
@@ -29,9 +30,11 @@ import {
 } from "./hooks";
 import type {
   FaceClusterOut,
+  MapAsAttendanceResponse,
   MappedEmployeeGroupOut,
   MappedFaceEventOut,
   MapToEmployeeResponse,
+  MapWorkflow,
   PhotoAssignment,
   RawFaceEventOut,
   RawUnidentifiedFilters,
@@ -844,7 +847,7 @@ type MapAngle = "front" | "left" | "right" | "other";
 interface MapToEmployeeModalProps {
   cluster: FaceClusterOut;
   onClose: () => void;
-  onSuccess: (result: MapToEmployeeResponse) => void;
+  onSuccess: (result: MapToEmployeeResponse | MapAsAttendanceResponse) => void;
 }
 
 interface PhotoSelectionState {
@@ -853,19 +856,48 @@ interface PhotoSelectionState {
   angle: MapAngle;
 }
 
+// Result envelope normalised across the two workflows so the success
+// screen can read the same shape regardless of which mutation fired.
+type AnyMapResult =
+  | { kind: "reference"; data: MapToEmployeeResponse }
+  | { kind: "attendance"; data: MapAsAttendanceResponse };
+
 function MapToEmployeeModal({ cluster, onClose, onSuccess }: MapToEmployeeModalProps) {
   const { t } = useTranslation();
-  const [step, setStep] = useState<"search" | "confirm" | "done">("search");
+
+  // Step machine. ``workflow`` is the new entry step: operator picks
+  // which side-effect bag to fire (training-set update vs attendance
+  // recompute) before anything else happens. The rest of the flow
+  // (search → confirm → done) is parameterised on that choice.
+  const [step, setStep] = useState<"workflow" | "search" | "confirm" | "done">(
+    "workflow",
+  );
+  const [workflow, setWorkflow] = useState<MapWorkflow>("reference");
   const [searchInput, setSearchInput] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
   const [selected, setSelected] = useState<Employee | null>(null);
-  const [result, setResult] = useState<MapToEmployeeResponse | null>(null);
+  const [result, setResult] = useState<AnyMapResult | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
-  // Per-photo selection state: initialised when entering confirm step
+  // Per-photo selection state: initialised when entering confirm step.
+  // Only relevant for the Reference workflow; the Attendance workflow
+  // ignores photoSelections entirely.
   const [photoSelections, setPhotoSelections] = useState<PhotoSelectionState[]>([]);
 
-  const mapMutation = useMapToEmployee();
+  // Per-event opt-in for the Attendance workflow. The cluster /
+  // bulk selection arrives with N event IDs; in the confirm step
+  // the operator can deselect any that don't actually belong to
+  // this employee before triggering the attribution + attendance
+  // recompute. Defaults to all selected; backed by a Set for O(1)
+  // lookup during render.
+  const [attendanceSelection, setAttendanceSelection] = useState<Set<number>>(
+    () => new Set(),
+  );
+  const MAX_EVENTS_PER_REQUEST = 200;
+
+  const refMutation = useMapAsReference();
+  const attMutation = useMapAsAttendance();
+  const mapMutation = workflow === "reference" ? refMutation : attMutation;
 
   // Debounce search input
   useEffect(() => {
@@ -897,6 +929,11 @@ function MapToEmployeeModal({ cluster, onClose, onSuccess }: MapToEmployeeModalP
         angle: "front" as MapAngle,
       }))
     );
+    // Initialise attendance per-event selection: every event in the
+    // incoming cluster is opted-in by default. The operator can
+    // deselect outliers (events that don't actually belong to this
+    // employee) before confirming.
+    setAttendanceSelection(new Set(cluster.event_ids));
     setStep("confirm");
   };
 
@@ -916,21 +953,36 @@ function MapToEmployeeModal({ cluster, onClose, onSuccess }: MapToEmployeeModalP
 
   const handleConfirm = async () => {
     if (!selected) return;
-    const photoAssignments: PhotoAssignment[] = selectedPhotos.map((p) => ({
-      event_id: p.event_id,
-      angle: p.angle,
-    }));
     try {
-      const res = await mapMutation.mutateAsync({
-        employee_id: selected.id,
-        event_ids: cluster.event_ids,
-        photo_assignments: photoAssignments,
-      });
-      setResult(res);
-      setStep("done");
-      onSuccess(res);
+      if (workflow === "reference") {
+        const photoAssignments: PhotoAssignment[] = selectedPhotos.map((p) => ({
+          event_id: p.event_id,
+          angle: p.angle,
+        }));
+        const res = await refMutation.mutateAsync({
+          employee_id: selected.id,
+          event_ids: cluster.event_ids,
+          photo_assignments: photoAssignments,
+        });
+        setResult({ kind: "reference", data: res });
+        setStep("done");
+        onSuccess(res);
+      } else {
+        // Attendance workflow — submit only the events the operator
+        // left checked in the per-event selection grid.
+        const selectedEventIds = cluster.event_ids.filter((id) =>
+          attendanceSelection.has(id),
+        );
+        const res = await attMutation.mutateAsync({
+          employee_id: selected.id,
+          event_ids: selectedEventIds,
+        });
+        setResult({ kind: "attendance", data: res });
+        setStep("done");
+        onSuccess(res);
+      }
     } catch {
-      // Error shown via mapMutation.isError
+      // Error surfaced via the active mutation's isError state.
     }
   };
 
@@ -1011,11 +1063,48 @@ function MapToEmployeeModal({ cluster, onClose, onSuccess }: MapToEmployeeModalP
                   ? t("unidentifiedFaces.mapModal.successTitle", "Mapping Complete")
                   : step === "confirm"
                   ? t("unidentifiedFaces.mapModal.confirmTitle", "Confirm Mapping")
-                  : t("unidentifiedFaces.mapModal.title", "Map to Employee")}
+                  : step === "search"
+                  ? t("unidentifiedFaces.mapModal.searchTitle", "Choose Employee")
+                  : t("unidentifiedFaces.mapModal.workflowTitle", "Map to Employee")}
               </div>
               {step !== "done" && (
-                <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginTop: 2 }}>
-                  {t("unidentifiedFaces.clusterOf", "Cluster of {{count}} faces", { count: cluster.count })}
+                <div style={{
+                  fontSize: 11.5,
+                  color: "var(--text-secondary)",
+                  marginTop: 2,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  flexWrap: "wrap",
+                }}>
+                  <span>
+                    {t("unidentifiedFaces.clusterOf", "Cluster of {{count}} faces", { count: cluster.count })}
+                  </span>
+                  {step !== "workflow" && (
+                    <>
+                      <span aria-hidden style={{ opacity: 0.5 }}>·</span>
+                      <span
+                        style={{
+                          padding: "1px 7px",
+                          borderRadius: 999,
+                          background:
+                            workflow === "reference"
+                              ? "rgba(59,130,246,0.15)"
+                              : "rgba(34,197,94,0.15)",
+                          color:
+                            workflow === "reference" ? "#2563eb" : "#16a34a",
+                          fontSize: 10.5,
+                          fontWeight: 600,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.04em",
+                        }}
+                      >
+                        {workflow === "reference"
+                          ? t("unidentifiedFaces.mapModal.wfRefChip", "Reference")
+                          : t("unidentifiedFaces.mapModal.wfAttChip", "Attendance")}
+                      </span>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -1028,6 +1117,143 @@ function MapToEmployeeModal({ cluster, onClose, onSuccess }: MapToEmployeeModalP
               <Icon name="x" size={16} />
             </button>
           </div>
+
+          {/* ── Step 0: Workflow picker ──
+              Two distinct workflows with explicit side-effect copy
+              under each so the operator can't pick the wrong one by
+              accident. Picking either advances to the search step. */}
+          {step === "workflow" && (
+            <div style={{
+              padding: "16px 18px 18px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+              flex: 1,
+            }}>
+              <div style={{
+                fontSize: 12.5,
+                color: "var(--text-secondary)",
+                marginBottom: 2,
+              }}>
+                {t(
+                  "unidentifiedFaces.mapModal.workflowIntro",
+                  "Both workflows attribute the selected faces to the chosen employee. Pick the workflow that matches what you're doing:",
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => { setWorkflow("reference"); setStep("search"); }}
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 12,
+                  padding: "12px 14px",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius)",
+                  background: "var(--bg)",
+                  textAlign: "start",
+                  cursor: "pointer",
+                  transition: "border-color 0.12s, background 0.12s",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = "#3b82f6";
+                  e.currentTarget.style.background = "rgba(59,130,246,0.04)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = "var(--border)";
+                  e.currentTarget.style.background = "var(--bg)";
+                }}
+              >
+                <span
+                  aria-hidden
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 8,
+                    background: "rgba(59,130,246,0.15)",
+                    color: "#2563eb",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  <Icon name="camera" size={16} />
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 3 }}>
+                    {t(
+                      "unidentifiedFaces.mapModal.wfReferenceTitle",
+                      "Add as reference photos",
+                    )}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.45 }}>
+                    {t(
+                      "unidentifiedFaces.mapModal.wfReferenceBody",
+                      "Adds the selected face crops to the employee's training set. Improves automatic recognition for future captures of this person.",
+                    )}
+                  </div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { setWorkflow("attendance"); setStep("search"); }}
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 12,
+                  padding: "12px 14px",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius)",
+                  background: "var(--bg)",
+                  textAlign: "start",
+                  cursor: "pointer",
+                  transition: "border-color 0.12s, background 0.12s",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = "#16a34a";
+                  e.currentTarget.style.background = "rgba(34,197,94,0.04)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = "var(--border)";
+                  e.currentTarget.style.background = "var(--bg)";
+                }}
+              >
+                <span
+                  aria-hidden
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 8,
+                    background: "rgba(34,197,94,0.15)",
+                    color: "#16a34a",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  <Icon name="clock" size={16} />
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 3 }}>
+                    {t(
+                      "unidentifiedFaces.mapModal.wfAttendanceTitle",
+                      "Correct attendance event",
+                    )}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.45 }}>
+                    {t(
+                      "unidentifiedFaces.mapModal.wfAttendanceBody",
+                      "Marks the chosen events as the employee's attendance. Updates Camera Logs + Matched Clips and recomputes the attendance record for the affected dates.",
+                    )}
+                  </div>
+                </div>
+              </button>
+            </div>
+          )}
 
           {/* ── Step 1: Search ── */}
           {step === "search" && (
@@ -1124,8 +1350,12 @@ function MapToEmployeeModal({ cluster, onClose, onSuccess }: MapToEmployeeModalP
                   <span style={{ fontSize: 11.5, color: "var(--text-tertiary)" }}>{selected.employee_code}</span>
                 </div>
 
-                {/* Photo selection section */}
-                {photoSelections.length === 0 ? (
+                {/* Photo selection section — Reference workflow only.
+                    The Attendance workflow doesn't copy photos, so we
+                    swap the block out for an attendance-correction
+                    summary below. */}
+                {workflow === "reference" && (
+                  photoSelections.length === 0 ? (
                   <div style={{ fontSize: 12.5, color: "var(--text-tertiary)", marginBottom: 14 }}>
                     {t("unidentifiedFaces.mapModal.noCropsToAdd", "No face crops available. Events will be attributed without adding reference photos.")}
                   </div>
@@ -1222,7 +1452,255 @@ function MapToEmployeeModal({ cluster, onClose, onSuccess }: MapToEmployeeModalP
                       ))}
                     </div>
                   </>
+                )
                 )}
+
+                {/* Attendance workflow — per-event picker grid.
+                    Every event in the cluster shows up as a tile with
+                    a checkbox; defaults to selected. The operator can
+                    deselect outliers (events that don't actually
+                    belong to this employee) before triggering the
+                    attribution + attendance recompute.
+
+                    Backend caps each request at 200 events; the count
+                    badge below surfaces that limit. */}
+                {workflow === "attendance" && (() => {
+                  // Build event tiles only for events with a crop on
+                  // disk — those are the ones we have visible
+                  // evidence for. Events without crops still get
+                  // attributed (the operator already chose to include
+                  // them via the upstream selection); they just don't
+                  // appear in the picker grid because there's nothing
+                  // to render.
+                  const cropIds = cluster.crop_event_ids;
+                  const otherIds = cluster.event_ids.filter(
+                    (id) => !cropIds.includes(id),
+                  );
+                  const selectedCount = cluster.event_ids.filter((id) =>
+                    attendanceSelection.has(id),
+                  ).length;
+                  const overCap = selectedCount > MAX_EVENTS_PER_REQUEST;
+                  const toggle = (id: number) => {
+                    setAttendanceSelection((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(id)) next.delete(id);
+                      else next.add(id);
+                      return next;
+                    });
+                  };
+                  const setAll = (on: boolean) => {
+                    setAttendanceSelection(
+                      on ? new Set(cluster.event_ids) : new Set(),
+                    );
+                  };
+                  return (
+                    <div style={{ marginBottom: 14 }}>
+                      {/* Header row: title + Select all + count chip */}
+                      <div style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                        marginBottom: 10,
+                        flexWrap: "wrap",
+                      }}>
+                        <div style={{
+                          fontSize: 12,
+                          fontWeight: 600,
+                          color: "var(--text)",
+                        }}>
+                          {t(
+                            "unidentifiedFaces.mapModal.attendanceSelectTitle",
+                            "Pick events for this attendance correction",
+                          )}
+                        </div>
+                        <div style={{ flex: 1 }} />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setAll(
+                              selectedCount !== cluster.event_ids.length,
+                            )
+                          }
+                          className="btn btn-sm"
+                          style={{ padding: "3px 9px", fontSize: 11 }}
+                          disabled={mapMutation.isPending}
+                        >
+                          {selectedCount === cluster.event_ids.length
+                            ? t(
+                                "unidentifiedFaces.mapModal.deselectAll",
+                                "Deselect all",
+                              )
+                            : t(
+                                "unidentifiedFaces.mapModal.selectAll",
+                                "Select all",
+                              )}
+                        </button>
+                        <span
+                          style={{
+                            fontSize: 11,
+                            padding: "2.5px 10px",
+                            borderRadius: 999,
+                            background: overCap
+                              ? "rgba(220,38,38,0.12)"
+                              : "rgba(34,197,94,0.12)",
+                            color: overCap ? "#dc2626" : "#16a34a",
+                            border: overCap
+                              ? "1px solid rgba(220,38,38,0.25)"
+                              : "1px solid rgba(34,197,94,0.25)",
+                            fontVariantNumeric: "tabular-nums",
+                            fontWeight: 600,
+                          }}
+                        >
+                          {selectedCount} / {cluster.event_ids.length}
+                          {overCap
+                            ? ` · max ${MAX_EVENTS_PER_REQUEST}`
+                            : ""}
+                        </span>
+                      </div>
+
+                      {overCap && (
+                        <div
+                          style={{
+                            padding: "8px 12px",
+                            marginBottom: 8,
+                            background: "rgba(220,38,38,0.06)",
+                            border: "1px solid rgba(220,38,38,0.25)",
+                            borderRadius: "var(--radius-sm)",
+                            fontSize: 11.5,
+                            color: "#dc2626",
+                          }}
+                        >
+                          {t(
+                            "unidentifiedFaces.mapModal.tooManyEvents",
+                            "Too many events selected. Deselect at least {{n}} — the server caps each request at {{max}}.",
+                            {
+                              n: selectedCount - MAX_EVENTS_PER_REQUEST,
+                              max: MAX_EVENTS_PER_REQUEST,
+                            },
+                          )}
+                        </div>
+                      )}
+
+                      {cropIds.length === 0 ? (
+                        <div style={{
+                          fontSize: 12.5,
+                          color: "var(--text-tertiary)",
+                          fontStyle: "italic",
+                          padding: "10px 12px",
+                          background: "var(--bg-sunken)",
+                          borderRadius: "var(--radius-sm)",
+                        }}>
+                          {t(
+                            "unidentifiedFaces.mapModal.attendanceNoCrops",
+                            "No face crops available to preview. {{count}} event(s) will still be attributed if you continue.",
+                            { count: cluster.event_ids.length },
+                          )}
+                        </div>
+                      ) : (
+                        <div style={{
+                          display: "grid",
+                          gridTemplateColumns: "repeat(auto-fill, minmax(78px, 1fr))",
+                          gap: 6,
+                          maxHeight: 240,
+                          overflowY: "auto",
+                          padding: 2,
+                        }}>
+                          {cropIds.map((id) => {
+                            const isOn = attendanceSelection.has(id);
+                            return (
+                              <button
+                                key={id}
+                                type="button"
+                                onClick={() => toggle(id)}
+                                aria-pressed={isOn}
+                                aria-label={t(
+                                  "unidentifiedFaces.mapModal.attendanceTileAria",
+                                  "Toggle event #{{id}}",
+                                  { id },
+                                ) as string}
+                                style={{
+                                  position: "relative",
+                                  padding: 0,
+                                  border: isOn
+                                    ? "2px solid #16a34a"
+                                    : "1px solid var(--border)",
+                                  borderRadius: "var(--radius-sm)",
+                                  overflow: "hidden",
+                                  background: "var(--bg-sunken)",
+                                  cursor: "pointer",
+                                  aspectRatio: "1",
+                                  opacity: isOn ? 1 : 0.45,
+                                  transition: "opacity 0.12s, border-color 0.12s",
+                                }}
+                              >
+                                <img
+                                  src={`/api/detection-events/${id}/crop`}
+                                  alt=""
+                                  loading="lazy"
+                                  decoding="async"
+                                  style={{
+                                    width: "100%",
+                                    height: "100%",
+                                    objectFit: "cover",
+                                    display: "block",
+                                  }}
+                                />
+                                <span
+                                  aria-hidden
+                                  style={{
+                                    position: "absolute",
+                                    top: 4,
+                                    insetInlineEnd: 4,
+                                    width: 18,
+                                    height: 18,
+                                    borderRadius: 4,
+                                    background: isOn
+                                      ? "#16a34a"
+                                      : "rgba(0,0,0,0.55)",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    color: "#fff",
+                                    fontSize: 11,
+                                  }}
+                                >
+                                  {isOn ? <Icon name="check" size={10} /> : ""}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {otherIds.length > 0 && (
+                        <div style={{
+                          fontSize: 11,
+                          color: "var(--text-tertiary)",
+                          marginTop: 6,
+                          fontStyle: "italic",
+                        }}>
+                          {t(
+                            "unidentifiedFaces.mapModal.attendanceNoPreviewNote",
+                            "+{{n}} event(s) without a saved crop. They follow the same selection as the preview tiles (toggle Select all to opt out).",
+                            { n: otherIds.length },
+                          )}
+                        </div>
+                      )}
+
+                      <div style={{
+                        marginTop: 10,
+                        fontSize: 11,
+                        color: "var(--text-tertiary)",
+                        fontStyle: "italic",
+                      }}>
+                        {t(
+                          "unidentifiedFaces.mapModal.attendanceNoteRefs",
+                          "No reference photos will be added — use the Reference workflow to also train the matcher with these crops.",
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* attribution summary */}
                 <div style={{
@@ -1270,7 +1748,15 @@ function MapToEmployeeModal({ cluster, onClose, onSuccess }: MapToEmployeeModalP
                 flexShrink: 0,
               }}>
                 <button
-                  onClick={() => { setStep("search"); mapMutation.reset(); }}
+                  onClick={() => {
+                    // Back goes to search so the operator can pick a
+                    // different employee without losing the workflow
+                    // choice. A separate "Change workflow" affordance
+                    // lives in the header chip if needed.
+                    setStep("search");
+                    refMutation.reset();
+                    attMutation.reset();
+                  }}
                   className="btn btn-sm"
                   disabled={mapMutation.isPending}
                 >
@@ -1279,11 +1765,32 @@ function MapToEmployeeModal({ cluster, onClose, onSuccess }: MapToEmployeeModalP
                 <button
                   onClick={() => { void handleConfirm(); }}
                   className="btn btn-sm btn-primary"
-                  disabled={mapMutation.isPending}
+                  disabled={
+                    mapMutation.isPending
+                    // Attendance workflow needs at least one event
+                    // selected and must respect the 200-per-request
+                    // server cap. The reference workflow doesn't gate
+                    // on the per-event picker because it always
+                    // attributes the entire cluster.
+                    || (workflow === "attendance" && (
+                      attendanceSelection.size === 0
+                      || cluster.event_ids.filter((id) => attendanceSelection.has(id)).length
+                          > MAX_EVENTS_PER_REQUEST
+                    ))
+                  }
                 >
                   {mapMutation.isPending
                     ? t("unidentifiedFaces.mapModal.mapping", "Mapping…")
-                    : t("unidentifiedFaces.mapModal.confirmBtn", "Confirm Mapping")}
+                    : workflow === "attendance"
+                      ? (t(
+                          "unidentifiedFaces.mapModal.confirmBtnAtt",
+                          "Confirm ({{n}} event{{plural}})",
+                          {
+                            n: cluster.event_ids.filter((id) => attendanceSelection.has(id)).length,
+                            plural: cluster.event_ids.filter((id) => attendanceSelection.has(id)).length === 1 ? "" : "s",
+                          },
+                        ) as string)
+                      : (t("unidentifiedFaces.mapModal.confirmBtn", "Confirm Mapping") as string)}
                 </button>
               </div>
             </div>
@@ -1307,16 +1814,52 @@ function MapToEmployeeModal({ cluster, onClose, onSuccess }: MapToEmployeeModalP
                 <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>
                   {t("unidentifiedFaces.mapModal.successTitle", "Mapping Complete")}
                 </div>
-                <div style={{ fontSize: 13, color: "var(--text-secondary)", maxWidth: 320 }}>
-                  {t("unidentifiedFaces.mapModal.successDetail",
-                    "Marked {{events}} event(s) as identified and added {{photos}} reference photo(s) for {{name}}.",
-                    {
-                      events: result.mapped_events,
-                      photos: result.photos_created,
-                      name: selected.full_name,
-                    }
-                  )}
+                <div style={{ fontSize: 13, color: "var(--text-secondary)", maxWidth: 360 }}>
+                  {result.kind === "reference"
+                    ? (t("unidentifiedFaces.mapModal.successDetail",
+                        "Marked {{events}} event(s) as identified and added {{photos}} reference photo(s) for {{name}}.",
+                        {
+                          events: result.data.mapped_events,
+                          photos: result.data.photos_created,
+                          name: selected.full_name,
+                        },
+                      ) as string)
+                    : (t("unidentifiedFaces.mapModal.successDetailAttendance",
+                        "Marked {{events}} event(s) as {{name}}'s attendance and recomputed {{dates}} day(s).",
+                        {
+                          events: result.data.mapped_events,
+                          name: selected.full_name,
+                          dates: result.data.attendance_dates_recomputed.length,
+                        },
+                      ) as string)}
                 </div>
+                {result.kind === "attendance" &&
+                  result.data.attendance_dates_recomputed.length > 0 && (
+                    <div style={{
+                      marginTop: 10,
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: 6,
+                      justifyContent: "center",
+                    }}>
+                      {result.data.attendance_dates_recomputed.map((d) => (
+                        <span
+                          key={d}
+                          style={{
+                            fontSize: 11,
+                            padding: "2px 8px",
+                            borderRadius: 999,
+                            background: "rgba(34,197,94,0.12)",
+                            color: "#16a34a",
+                            fontVariantNumeric: "tabular-nums",
+                            border: "1px solid rgba(34,197,94,0.25)",
+                          }}
+                        >
+                          {d}
+                        </span>
+                      ))}
+                    </div>
+                  )}
               </div>
               <button onClick={onClose} className="btn btn-sm btn-primary" style={{ marginTop: 8 }}>
                 {t("unidentifiedFaces.mapModal.done", "Done")}

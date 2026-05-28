@@ -19,7 +19,7 @@ import { PersonView } from "../calendar/PersonView";
 import { usePersonCalendar } from "../calendar/hooks";
 import type { CalendarStatus, PersonDay } from "../calendar/types";
 import { useMyEmployee } from "../employees/hooks";
-import { useMyRecentAttendance } from "./hooks";
+import { useMyRecentAttendance, useRegenerateAttendanceForEmployee } from "./hooks";
 import type { AttendanceItem } from "./types";
 
 export function MyAttendancePage() {
@@ -36,6 +36,35 @@ export function MyAttendancePage() {
 
   const person = usePersonCalendar(employeeId, month);
   const recent = useMyRecentAttendance(14);
+  const regen = useRegenerateAttendanceForEmployee();
+  const [regenInfo, setRegenInfo] = useState<{
+    tone: "ok" | "err";
+    text: string;
+  } | null>(null);
+
+  const triggerRegen = () => {
+    if (employeeId === null) return;
+    setRegenInfo(null);
+    regen.mutate(
+      { employee_id: employeeId },
+      {
+        onSuccess: (resp) => {
+          setRegenInfo({
+            tone: "ok",
+            text: resp.upserted
+              ? `Refreshed today's attendance from camera events (${resp.date}).`
+              : `No policy resolves for ${resp.date} — nothing to refresh.`,
+          });
+        },
+        onError: (err) => {
+          setRegenInfo({
+            tone: "err",
+            text: `Regenerate failed: ${(err as Error).message}`,
+          });
+        },
+      },
+    );
+  };
 
   const todayDate = todayIso();
   const todayDay = person.data?.days.find((d) => d.date === todayDate) ?? null;
@@ -74,6 +103,18 @@ export function MyAttendancePage() {
             <Icon name="upload" size={12} />
             Update photo
           </Link>
+          {employeeId !== null && (
+            <button
+              type="button"
+              className="btn"
+              onClick={triggerRegen}
+              disabled={regen.isPending}
+              title="Recompute today's attendance from current camera events"
+            >
+              <span aria-hidden style={{ marginInlineEnd: 4 }}>↻</span>
+              {regen.isPending ? "Regenerating…" : "Regenerate from events"}
+            </button>
+          )}
           <button
             type="button"
             className="btn btn-primary"
@@ -84,6 +125,39 @@ export function MyAttendancePage() {
           </button>
         </div>
       </div>
+
+      {regenInfo && (
+        <div
+          className="card"
+          style={{
+            padding: "10px 14px",
+            marginBottom: 12,
+            background:
+              regenInfo.tone === "ok"
+                ? "var(--info-soft, var(--bg-sunken))"
+                : "var(--danger-soft, var(--bg-sunken))",
+            borderColor:
+              regenInfo.tone === "ok"
+                ? "var(--info, var(--border))"
+                : "var(--danger, var(--border))",
+            fontSize: 13,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <span>{regenInfo.text}</span>
+          <div style={{ flex: 1 }} />
+          <button
+            type="button"
+            className="btn btn-sm"
+            style={{ padding: "2px 8px", fontSize: 11 }}
+            onClick={() => setRegenInfo(null)}
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {/* ---------- Today + at-a-glance ---------- */}
       <div

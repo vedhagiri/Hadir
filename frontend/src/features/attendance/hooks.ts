@@ -42,6 +42,46 @@ export function useRegenerateAttendance() {
   });
 }
 
+/**
+ * Per-employee single-day regenerate. Same synchronous recompute the
+ * 15-min scheduler runs, scoped to one (employee, date) — used by
+ * focused views (My Attendance, AttendanceDrawer, Calendar Day Detail)
+ * so an operator can refresh one row instantly without paying for a
+ * full-tenant sweep.
+ *
+ * Endpoint: ``POST /api/attendance/regenerate-employee``
+ * Body: ``{employee_id, target_date?}`` (date defaults to today in
+ *        the tenant's timezone).
+ */
+export function useRegenerateAttendanceForEmployee() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      employee_id: number;
+      target_date?: string | null;
+    }): Promise<{ employee_id: number; date: string; upserted: boolean }> => {
+      return api<{ employee_id: number; date: string; upserted: boolean }>(
+        "/api/attendance/regenerate-employee",
+        {
+          method: "POST",
+          body: {
+            employee_id: args.employee_id,
+            target_date: args.target_date ?? null,
+          },
+        },
+      );
+    },
+    onSuccess: () => {
+      // Both the daily-attendance list and the per-employee history
+      // hooks read off the same root key, so a blanket invalidate
+      // covers every consumer.
+      qc.invalidateQueries({ queryKey: ["attendance"] });
+      qc.invalidateQueries({ queryKey: ["attendance-calendar"] });
+      qc.invalidateQueries({ queryKey: ["detection-events"] });
+    },
+  });
+}
+
 export function useMyRecentAttendance(
   days: number,
 ): UseQueryResult<AttendanceListResponse, Error> {

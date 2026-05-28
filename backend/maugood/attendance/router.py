@@ -465,6 +465,23 @@ class RegenerateOut(BaseModel):
     rows_upserted: int
 
 
+class RegenerateEmployeeBody(BaseModel):
+    """Per-employee single-day recompute. Lets a focused view (Day
+    Detail drawer, Attendance drawer, My Attendance card) trigger the
+    same recompute the 15-min scheduler does, but scoped to one
+    (employee, date) — no full-tenant sweep, instant UI refresh.
+    """
+
+    employee_id: int
+    target_date: Optional[date_type] = None
+
+
+class RegenerateEmployeeOut(BaseModel):
+    employee_id: int
+    date: date_type
+    upserted: bool  # True iff a row was upserted; False if no policy resolved
+
+
 @router.post("/regenerate", response_model=RegenerateOut)
 def regenerate_attendance(
     user: Annotated[CurrentUser, Depends(current_user)],
@@ -525,6 +542,98 @@ def regenerate_attendance(
         rows,
     )
     return RegenerateOut(date=the_date, rows_upserted=rows)
+
+
+@router.post("/regenerate-employee", response_model=RegenerateEmployeeOut)
+def regenerate_attendance_employee(
+    body: RegenerateEmployeeBody,
+    user: Annotated[CurrentUser, Depends(current_user)],
+) -> RegenerateEmployeeOut:
+    """Recompute attendance for ONE (employee, date) synchronously.
+
+    Authorisation:
+      * Admin / HR can recompute any employee.
+      * Manager can recompute any employee on their visible team
+        (department membership ∪ manager_assignments).
+      * Everyone else can recompute their own row only (matched on
+        lower-cased email — same pattern the GET endpoints use).
+
+    The recompute runs **inline** on the request thread, exactly like
+    the 15-min scheduler tick — no background queue. By the time the
+    response lands the row is upserted, so the UI can refetch and show
+    the fresh numbers immediately.
+    """
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    from maugood.attendance import scheduler as attendance_scheduler  # noqa: PLC0415
+    from maugood.attendance.repository import (  # noqa: PLC0415
+        load_tenant_settings,
+        local_tz_for,
+    )
+    from maugood.db import employees as _employees, tenant_context  # noqa: PLC0415
+    from sqlalchemy import select  # noqa: PLC0415
+
+    is_admin_hr = "Admin" in user.roles or "HR" in user.roles
+
+    # Resolve "today" in the tenant's timezone for the default-date branch.
+    with get_engine().begin() as conn:
+        _settings = load_tenant_settings(conn, scope)
+    tenant_tz = local_tz_for(_settings)
+    today_local = datetime.now(timezone.utc).astimezone(tenant_tz).date()
+    the_date = body.target_date or today_local
+
+    # Authorisation check + employee existence proof.
+    with tenant_context(scope.tenant_schema):
+        with get_engine().begin() as conn:
+            emp_row = conn.execute(
+                select(
+                    _employees.c.id,
+                    _employees.c.email,
+                ).where(
+                    _employees.c.tenant_id == scope.tenant_id,
+                    _employees.c.id == body.employee_id,
+                )
+            ).first()
+            if emp_row is None:
+                raise HTTPException(status_code=404, detail="employee_not_found")
+
+            if not is_admin_hr:
+                # Manager: must see this employee via team membership.
+                if "Manager" in user.roles:
+                    from maugood.manager_assignments.repository import (  # noqa: PLC0415
+                        get_manager_visible_employee_ids,
+                    )
+                    visible = get_manager_visible_employee_ids(
+                        conn, scope, manager_user_id=user.id
+                    )
+                    if body.employee_id not in visible:
+                        raise HTTPException(status_code=403, detail="forbidden")
+                else:
+                    # Employee role: only their own row, matched by email.
+                    if (
+                        emp_row.email is None
+                        or str(emp_row.email).lower() != user.email.lower()
+                    ):
+                        raise HTTPException(status_code=403, detail="forbidden")
+
+    # Synchronous recompute — same helper the scheduler uses.
+    upserted = bool(
+        attendance_scheduler.recompute_for(
+            scope, employee_id=body.employee_id, the_date=the_date
+        )
+    )
+    logger.info(
+        "attendance regenerate-employee by user %s — employee=%s date=%s upserted=%s",
+        user.id,
+        body.employee_id,
+        the_date,
+        upserted,
+    )
+    return RegenerateEmployeeOut(
+        employee_id=body.employee_id,
+        date=the_date,
+        upserted=upserted,
+    )
 
 
 class RegenerateRangePerDate(BaseModel):

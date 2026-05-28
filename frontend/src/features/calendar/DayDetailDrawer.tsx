@@ -16,6 +16,7 @@ import { LateBadge } from "../../components/LateBadge";
 import { Icon } from "../../shell/Icon";
 import { useMe } from "../../auth/AuthProvider";
 import { primaryRole } from "../../types";
+import { useRegenerateAttendanceForEmployee } from "../attendance/hooks";
 import { EscalationDrawer } from "./EscalationDrawer";
 import { useDayDetail } from "./hooks";
 import { calcLateMinutes, fmtMinutes } from "./PersonView";
@@ -235,10 +236,48 @@ export function DayDetailDrawer({
   // Same cache key as DayDetailContent — TanStack Query deduplicates; no
   // extra network request. Used only for the drawer header employee name.
   const detail = useDayDetail(employeeId, isoDate);
+  const regen = useRegenerateAttendanceForEmployee();
+  const [regenInfo, setRegenInfo] = useState<{
+    tone: "ok" | "err";
+    text: string;
+  } | null>(null);
 
   const exportHref =
     `/api/attendance/calendar/export?month=${isoDate.slice(0, 7)}` +
     `&employee_id=${employeeId}&date=${isoDate}`;
+
+  const triggerRegen = () => {
+    setRegenInfo(null);
+    regen.mutate(
+      { employee_id: employeeId, target_date: isoDate },
+      {
+        onSuccess: (resp) => {
+          setRegenInfo({
+            tone: "ok",
+            text: resp.upserted
+              ? (t("attendance.regenOk", {
+                  defaultValue: "Refreshed attendance for {{date}}.",
+                  date: resp.date,
+                }) as string)
+              : (t("attendance.regenNoPolicy", {
+                  defaultValue:
+                    "No policy resolves for {{date}} — nothing to refresh.",
+                  date: resp.date,
+                }) as string),
+          });
+        },
+        onError: (err) => {
+          setRegenInfo({
+            tone: "err",
+            text: (t("attendance.regenFailed", {
+              defaultValue: "Regenerate failed: {{reason}}",
+              reason: (err as Error).message,
+            }) as string),
+          });
+        },
+      },
+    );
+  };
 
   return (
     <DrawerShell onClose={onClose}>
@@ -253,6 +292,27 @@ export function DayDetailDrawer({
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={triggerRegen}
+              disabled={regen.isPending}
+              title={
+                t("attendance.regenTooltip", {
+                  defaultValue:
+                    "Recompute this row from current camera events",
+                }) as string
+              }
+            >
+              <span aria-hidden style={{ marginInlineEnd: 4 }}>↻</span>
+              {regen.isPending
+                ? (t("attendance.regenerating", {
+                    defaultValue: "Regenerating…",
+                  }) as string)
+                : (t("attendance.regenFromEvents", {
+                    defaultValue: "Regenerate",
+                  }) as string)}
+            </button>
             {(() => {
               const d = detail.data;
               const worked = d != null && (
@@ -293,6 +353,40 @@ export function DayDetailDrawer({
             </button>
           </div>
         </div>
+
+        {regenInfo && (
+          <div
+            style={{
+              margin: "8px 16px 0",
+              padding: "8px 12px",
+              borderRadius: 6,
+              fontSize: 12.5,
+              background:
+                regenInfo.tone === "ok"
+                  ? "var(--info-soft, var(--bg-sunken))"
+                  : "var(--danger-soft, var(--bg-sunken))",
+              border:
+                regenInfo.tone === "ok"
+                  ? "1px solid var(--info, var(--border))"
+                  : "1px solid var(--danger, var(--border))",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <span>{regenInfo.text}</span>
+            <div style={{ flex: 1 }} />
+            <button
+              type="button"
+              className="btn btn-sm"
+              style={{ padding: "2px 8px", fontSize: 11 }}
+              onClick={() => setRegenInfo(null)}
+              aria-label={t("calendar.close") as string}
+            >
+              ×
+            </button>
+          </div>
+        )}
 
         <div className="drawer-body">
           <DayDetailContent

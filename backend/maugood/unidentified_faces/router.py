@@ -44,7 +44,7 @@ from maugood.auth.audit import write_audit
 from maugood.auth.dependencies import CurrentUser, require_any_role
 from maugood.db import cameras, detection_events, employee_photos, employees, get_engine
 from maugood.employees.photos import create_photo_row, storage_dir
-from maugood.tenants.scope import TenantScope
+from maugood.tenants.scope import TenantScope, get_tenant_scope
 from maugood.unidentified_faces.clustering import (
     DEFAULT_CLUSTER_THRESHOLD,
     FaceCluster,
@@ -104,6 +104,27 @@ def _cluster_cache_put(key: tuple, val: _CachedClusterResult) -> None:
         _CLUSTER_CACHE.move_to_end(key)
         while len(_CLUSTER_CACHE) > _CLUSTER_CACHE_MAX:
             _CLUSTER_CACHE.popitem(last=False)
+
+
+def _cluster_cache_evict_tenant(tenant_id: int) -> int:
+    """Drop every cached cluster result for this tenant.
+
+    Called after any write that changes which events are unidentified
+    (currently: ``map_cluster_to_employee``). Defence in depth on top
+    of the fingerprint-based key invalidation — the cache key already
+    flips on a ``count(employee_id IS NULL)`` drop, but evicting on
+    write means a stale entry can never linger even if the fingerprint
+    math drifts in a future change.
+    """
+    evicted = 0
+    with _CLUSTER_CACHE_LOCK:
+        # The cache key is a tuple whose first element is tenant_id.
+        # Collect → delete to avoid mutating during iteration.
+        targets = [k for k in _CLUSTER_CACHE if k and k[0] == tenant_id]
+        for k in targets:
+            del _CLUSTER_CACHE[k]
+            evicted += 1
+    return evicted
 
 ADMIN_HR = Depends(require_any_role("Admin", "HR"))
 
@@ -208,6 +229,73 @@ class MapToEmployeeResponse(BaseModel):
     mapped_events: int
     photos_created: int
     photo_ids: list[int]
+
+
+# ---------------------------------------------------------------------------
+# Two-workflow Map-to-Employee schemas (reference vs attendance)
+# ---------------------------------------------------------------------------
+# Both workflows attribute the chosen events to ``employee_id`` (which
+# removes them from Unknown Faces / Similarity Groups). They differ in
+# the *additional* side-effect that's appropriate for the operator's
+# intent:
+#
+#   Reference Image Mapping
+#     - Copies selected face crops into ``employee_photos`` (training
+#       set) so future automatic matching gets stronger.
+#     - Invalidates the matcher cache so the new reference vectors are
+#       picked up immediately by the live capture pipeline.
+#     - No attendance recompute.
+#
+#   Attendance Event Mapping
+#     - Recomputes the attendance row for the employee on every local
+#       date covered by the event timestamps.
+#     - Does NOT copy crops as reference photos (the operator is
+#       correcting a missed attribution, not curating training data).
+#     - Does NOT invalidate matcher cache (no training data changed).
+#
+# Schema split rather than a single endpoint with a ``mode`` field
+# because the response shape, the audit action, and the downstream
+# data-sync semantics differ between the two — keeping them as
+# distinct endpoints makes the operator's intent explicit in audit
+# rows and removes branching from the request body.
+
+
+class MapAsReferenceBody(BaseModel):
+    employee_id: int
+    event_ids: list[int]
+    photo_assignments: list[PhotoAssignment] = []
+
+    @field_validator("event_ids")
+    @classmethod
+    def _validate_event_ids(cls, v: list[int]) -> list[int]:
+        if not v:
+            raise ValueError("event_ids must not be empty")
+        return v[:200]
+
+
+class MapAsAttendanceBody(BaseModel):
+    """Attendance correction — no photo copies, attendance recompute on."""
+
+    employee_id: int
+    event_ids: list[int]
+
+    @field_validator("event_ids")
+    @classmethod
+    def _validate_event_ids(cls, v: list[int]) -> list[int]:
+        if not v:
+            raise ValueError("event_ids must not be empty")
+        return v[:200]
+
+
+class MapAsAttendanceResponse(BaseModel):
+    mapped_events: int
+    employee_id: int
+    employee_name: Optional[str] = None
+    employee_code: Optional[str] = None
+    # ISO date strings (YYYY-MM-DD) for every tenant-local calendar day
+    # that had at least one attribution + recompute. Surfaced so the
+    # UI can pivot the operator to "review attendance for these dates".
+    attendance_dates_recomputed: list[str]
 
 
 # ---------------------------------------------------------------------------
@@ -766,6 +854,19 @@ def map_cluster_to_employee(
             "map_cluster: cache invalidation failed: %s", type(exc).__name__
         )
 
+    # 7. Defence-in-depth: drop the tenant's entries from the cluster
+    #    cache so the next /api/unidentified-faces call computes a fresh
+    #    clustering against the post-map dataset. The fingerprint key
+    #    already changes on this write (employee_id IS NULL count drops),
+    #    so a stale entry would never be looked up — but evicting on
+    #    write costs ~µs and removes the dependency on the math.
+    evicted = _cluster_cache_evict_tenant(scope.tenant_id)
+    if evicted:
+        logger.debug(
+            "map_cluster: evicted %d stale cluster cache entries for tenant %d",
+            evicted, scope.tenant_id,
+        )
+
     return MapToEmployeeResponse(
         mapped_events=len(valid_ids),
         photos_created=len(photo_ids),
@@ -1063,4 +1164,194 @@ def list_mapped_clusters(
         page_size=page_size,
         total_events=total_events,
         total_employees=total_employees,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Map-to-Employee — Reference workflow
+# ---------------------------------------------------------------------------
+
+
+@router.post("/map-as-reference", response_model=MapToEmployeeResponse)
+def map_as_reference(
+    user: Annotated[CurrentUser, ADMIN_HR],
+    body: MapAsReferenceBody,
+) -> MapToEmployeeResponse:
+    """Reference Image Mapping — improve future recognition.
+
+    Attributes every selected event to ``employee_id`` (removing them
+    from the unidentified pool) AND copies the operator-selected
+    crops into ``employee_photos`` for training. Matcher cache is
+    invalidated so the live pipeline starts matching against the new
+    reference vectors on the very next capture.
+
+    No attendance recompute — that's the responsibility of the
+    ``/map-as-attendance`` endpoint. Use this workflow when you're
+    curating the training set; use the attendance one when you're
+    correcting a missed live-match for a real attendance event.
+    """
+    # The reference workflow is byte-for-byte equivalent to the
+    # legacy ``map-to-employee`` endpoint — we just expose it under
+    # a name that names the operator's intent. Keeping a single
+    # implementation prevents drift between the two surfaces.
+    legacy_body = MapToEmployeeBody(
+        employee_id=body.employee_id,
+        event_ids=body.event_ids,
+        photo_assignments=body.photo_assignments,
+    )
+    return map_cluster_to_employee(user=user, body=legacy_body)
+
+
+# ---------------------------------------------------------------------------
+# Map-to-Employee — Attendance workflow
+# ---------------------------------------------------------------------------
+
+
+@router.post("/map-as-attendance", response_model=MapAsAttendanceResponse)
+def map_as_attendance(
+    user: Annotated[CurrentUser, ADMIN_HR],
+    body: MapAsAttendanceBody,
+    scope: Annotated[TenantScope, Depends(get_tenant_scope)],
+) -> MapAsAttendanceResponse:
+    """Attendance Event Mapping — correct a missed live match.
+
+    Attributes every selected event to ``employee_id`` (removing them
+    from the unidentified pool), then triggers an attendance recompute
+    for every tenant-local calendar day covered by the events. Camera
+    Logs / Matched Clips / Day Detail Drawer all reflect the new
+    attribution immediately because they read straight off
+    ``detection_events.employee_id``; the recompute additionally
+    refreshes the ``attendance_records`` row so the per-day timeline
+    + status pill update for the operator.
+
+    No reference photos are copied — that's the
+    ``/map-as-reference`` workflow's job. Use this when you're
+    fixing a missed attribution for a real attendance event, not
+    when you're curating training data.
+    """
+    # Tenant-local timezone — used to convert event captured_at (UTC)
+    # into the calendar day that attendance_records is keyed on.
+    # ``load_tenant_settings`` + ``local_tz_for`` live alongside the
+    # attendance repository (not in a standalone ``tenant_settings``
+    # module — that was a first-guess wrong path that 500'd at import).
+    from maugood.attendance import scheduler as att_scheduler  # noqa: PLC0415
+    from maugood.attendance.repository import (  # noqa: PLC0415
+        load_tenant_settings,
+        local_tz_for,
+    )
+
+    with get_engine().begin() as conn:
+        # 1. Validate employee.
+        emp_row = conn.execute(
+            select(
+                employees.c.id,
+                employees.c.employee_code,
+                employees.c.full_name,
+                employees.c.status,
+            ).where(
+                employees.c.tenant_id == scope.tenant_id,
+                employees.c.id == body.employee_id,
+            )
+        ).first()
+        if emp_row is None:
+            raise HTTPException(status_code=404, detail="employee_not_found")
+        if emp_row.status == "deleted":
+            raise HTTPException(status_code=422, detail="employee_is_deleted")
+
+        # 2. Pull still-unidentified events.
+        event_rows = conn.execute(
+            select(
+                detection_events.c.id,
+                detection_events.c.captured_at,
+            )
+            .where(
+                detection_events.c.tenant_id == scope.tenant_id,
+                detection_events.c.employee_id.is_(None),
+                detection_events.c.former_employee_match.is_(False),
+                detection_events.c.id.in_(body.event_ids),
+            )
+        ).all()
+
+        valid_ids = [int(r.id) for r in event_rows]
+        if not valid_ids:
+            raise HTTPException(status_code=422, detail="no_valid_events")
+
+        employee_id = int(emp_row.id)
+        employee_code = str(emp_row.employee_code)
+        employee_name = str(emp_row.full_name)
+
+        # 3. Attribute every event in one bulk UPDATE.
+        conn.execute(
+            update(detection_events)
+            .where(
+                detection_events.c.tenant_id == scope.tenant_id,
+                detection_events.c.id.in_(valid_ids),
+            )
+            .values(employee_id=employee_id)
+        )
+
+        # 4. Compute the unique tenant-local calendar days touched by
+        #    the events. ``captured_at`` is UTC; convert via the
+        #    tenant's configured timezone so the dates align with
+        #    what the attendance engine expects.
+        settings = load_tenant_settings(conn, scope)
+        tz = local_tz_for(settings)
+        dates: set = set()
+        for r in event_rows:
+            ts = r.captured_at
+            if ts is None:
+                continue
+            # ``captured_at`` is stored as TIMESTAMPTZ → already aware.
+            local = ts.astimezone(tz)
+            dates.add(local.date())
+
+        # 5. Audit BEFORE recompute so the audit row exists even if
+        #    one of the recomputes raises.
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="unidentified_face.mapped_attendance",
+            entity_type="employee",
+            entity_id=str(employee_id),
+            after={
+                "employee_code": employee_code,
+                "employee_name": employee_name,
+                "mapped_events": len(valid_ids),
+                "attendance_dates": sorted(d.isoformat() for d in dates),
+            },
+        )
+
+    # 6. Defence in depth: drop the tenant's cluster cache entries.
+    evicted = _cluster_cache_evict_tenant(scope.tenant_id)
+    if evicted:
+        logger.debug(
+            "map_as_attendance: evicted %d stale cluster cache entries "
+            "for tenant %d",
+            evicted, scope.tenant_id,
+        )
+
+    # 7. Recompute attendance for each affected (employee, date). The
+    #    helper handles its own transactional boundary and is
+    #    idempotent. A failure on one date doesn't abort the others —
+    #    we log and continue so partial recovery is still useful.
+    recomputed: list[str] = []
+    for the_date in sorted(dates):
+        try:
+            if att_scheduler.recompute_for(
+                scope, employee_id=employee_id, the_date=the_date
+            ):
+                recomputed.append(the_date.isoformat())
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "map_as_attendance: recompute failed employee=%d date=%s: %s",
+                employee_id, the_date, type(exc).__name__,
+            )
+
+    return MapAsAttendanceResponse(
+        mapped_events=len(valid_ids),
+        employee_id=employee_id,
+        employee_name=employee_name,
+        employee_code=employee_code,
+        attendance_dates_recomputed=recomputed,
     )
