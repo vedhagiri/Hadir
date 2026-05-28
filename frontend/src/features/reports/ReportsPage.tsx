@@ -871,6 +871,31 @@ function EventLogPreview({
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* Download CSV sits on the leading edge of the filter row,
+              matching the Attendance / Department Summary cards.
+              The footer keeps only the pager. */}
+          <button
+            className="btn btn-sm"
+            onClick={onDownload}
+            disabled={downloading !== null || total === 0}
+            title={
+              total === 0
+                ? "No events to export — adjust the filter"
+                : undefined
+            }
+          >
+            <Icon name="download" size={11} />
+            {downloading === "xlsx" ? "Downloading…" : "Download CSV"}
+          </button>
+          <span
+            aria-hidden
+            style={{
+              width: 1,
+              height: 20,
+              background: "var(--border)",
+              margin: "0 2px",
+            }}
+          />
           <DatePicker
             value={date}
             onChange={setDate}
@@ -991,13 +1016,13 @@ function EventLogPreview({
         </tbody>
       </table>
 
-      {/* Pager */}
+      {/* Pager — Download CSV moved to the card head (top, left of
+          the date filter) to mirror the other report cards. */}
       <div
         style={{
           padding: "10px 14px",
           display: "flex",
           alignItems: "center",
-          justifyContent: "space-between",
           borderTop: "1px solid var(--border)",
           fontSize: 12.5,
           color: "var(--text-secondary)",
@@ -1012,14 +1037,6 @@ function EventLogPreview({
           setPage={setPage}
           setPageSize={setPageSize}
         />
-        <button
-          className="btn btn-sm"
-          onClick={onDownload}
-          disabled={downloading !== null}
-        >
-          <Icon name="download" size={11} />
-          {downloading === "xlsx" ? "Downloading…" : "Download CSV"}
-        </button>
       </div>
     </div>
   );
