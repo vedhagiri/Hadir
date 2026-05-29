@@ -133,6 +133,10 @@ export function EmployeeReportPage() {
   const me = useMe();
   const isAdmin = me.data?.active_role === "Admin";
 
+  // Downloads need a selected employee. Disabled until one is picked
+  // (or while a download is in flight).
+  const downloadDisabled = selectedEmployeeId === null || downloading !== null;
+
   // Every download (XLSX / PDF / CSV) is gated behind a one-time
   // confidentiality acknowledgement. ``gateDownload`` opens the
   // warning; only on confirm does ``action`` actually run.
@@ -343,7 +347,11 @@ export function EmployeeReportPage() {
                 action: downloadXlsx,
               });
             }}
-            disabled={selectedEmployeeId === null || downloading !== null}
+            disabled={downloadDisabled}
+            style={{
+              opacity: downloadDisabled ? 0.5 : 1,
+              cursor: downloadDisabled ? "not-allowed" : "pointer",
+            }}
           >
             <Icon name="download" size={12} />
             {downloading === "xlsx" ? "Downloading…" : "Download XLSX"}
@@ -358,7 +366,8 @@ export function EmployeeReportPage() {
                 action: () => setPdfModalOpen(true),
               });
             }}
-            disabled={selectedEmployeeId === null || downloading !== null}
+            disabled={downloadDisabled}
+            style={{ cursor: downloadDisabled ? "not-allowed" : "pointer" }}
           >
             <Icon name="fileText" size={12} />
             {downloading === "pdf" ? "Generating…" : "PDF"}
