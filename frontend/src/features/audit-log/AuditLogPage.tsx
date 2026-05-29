@@ -5,6 +5,7 @@
 import { useMemo, useState } from "react";
 
 import { Icon } from "../../shell/Icon";
+import { useTenantDateTime } from "../../util/datetime";
 import { useAuditLog } from "./hooks";
 import type { AuditFilters } from "./types";
 
@@ -21,6 +22,7 @@ export function AuditLogPage() {
     page_size: PAGE_SIZE,
   });
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const dt = useTenantDateTime();
 
   const audit = useAuditLog(filters);
 
@@ -146,7 +148,7 @@ export function AuditLogPage() {
                     </td>
                     <td className="mono text-sm">{row.id}</td>
                     <td className="mono text-xs text-dim">
-                      {new Date(row.created_at).toLocaleString()}
+                      {dt.formatDateTime(row.created_at)}
                     </td>
                     <td className="text-sm">
                       {row.actor_email ? (

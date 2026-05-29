@@ -8,6 +8,7 @@ import { useState } from "react";
 
 import { Icon } from "../../shell/Icon";
 import { useCameras } from "../cameras/hooks";
+import { ClipCleanupCard } from "./ClipCleanupCard";
 import { useStorageAnalytics } from "./hooks";
 import type { CameraStorageRow, DailyStorageRow, DaysWindow } from "./types";
 
@@ -505,6 +506,9 @@ export function StorageAnalyticsPage() {
           )}
         </div>
       </div>
+
+      {/* ── Clip cleanup (Admin-only; the route already gates this page) ── */}
+      <ClipCleanupCard />
 
       {/* ── Processing status card ── */}
       {ov && ov.total_clips > 0 && (

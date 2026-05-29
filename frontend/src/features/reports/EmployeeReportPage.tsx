@@ -16,6 +16,7 @@ import { DatePicker } from "../../components/DatePicker";
 import { PdfOptionsModal } from "../../components/PdfOptionsModal";
 import { useConfidentialDownload } from "../../components/useConfidentialDownload";
 import { Icon } from "../../shell/Icon";
+import { useTenantDateTime } from "../../util/datetime";
 import { useEmployeeList, useEmployeeDetail } from "../employees/hooks";
 import type { Employee } from "../employees/types";
 import { formatMinutes } from "../attendance/timeFormat";
@@ -41,11 +42,10 @@ function firstOfMonthIso(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
 }
 
-function shortTime(iso: string | null): string {
-  if (!iso) return "—";
-  return iso.length >= 5 ? iso.slice(0, 5) : iso;
-}
-
+// Migration 0068 — display-side time formatting goes through the
+// tenant ``useTenantDateTime`` hook; the legacy ``shortTime`` helper
+// was removed since it ignored the operator's 12h/24h choice.
+//
 // Display-side hour formatting uses ``formatMinutes`` from
 // attendance/timeFormat for consistent ``8h 45m`` rendering.
 // CSV/Excel exports keep decimal hours via ``(min / 60).toFixed(2)``
@@ -111,6 +111,11 @@ function rowsToCsv(headers: string[], rows: (string | number | null)[][]): strin
 // ---------------------------------------------------------------------------
 
 export function EmployeeReportPage() {
+  const dt = useTenantDateTime();
+  const fmtShort = (iso: string | null): string => {
+    if (!iso) return "—";
+    return dt.formatLocalTime(iso) || iso;
+  };
   const [start, setStart] = useState<string>(firstOfMonthIso());
   const [end, setEnd] = useState<string>(todayIso());
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | null>(
@@ -279,8 +284,8 @@ export function EmployeeReportPage() {
           d,
           dayName(d),
           statusLabel(it ?? null),
-          shortTime(it?.in_time ?? null),
-          shortTime(it?.out_time ?? null),
+          fmtShort(it?.in_time ?? null),
+          fmtShort(it?.out_time ?? null),
           it?.total_minutes != null ? (it.total_minutes / 60).toFixed(2) : "",
           it && it.overtime_minutes > 0
             ? `${(it.overtime_minutes / 60).toFixed(1)}h`
@@ -641,16 +646,16 @@ export function EmployeeReportPage() {
                     const it = itemByDate.get(d) ?? null;
                     return (
                       <tr key={d}>
-                        <td className="mono text-sm">{d}</td>
+                        <td className="mono text-sm">{dt.formatLocalDate(d) || d}</td>
                         <td className="text-sm">{dayName(d)}</td>
                         <td>
                           <DayStatusPill item={it} isoDate={d} />
                         </td>
                         <td className="mono text-sm">
-                          {shortTime(it?.in_time ?? null)}
+                          {fmtShort(it?.in_time ?? null)}
                         </td>
                         <td className="mono text-sm">
-                          {shortTime(it?.out_time ?? null)}
+                          {fmtShort(it?.out_time ?? null)}
                         </td>
                         <td className="mono text-sm">
                           {formatMinutes(it?.total_minutes ?? null)}

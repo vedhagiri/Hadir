@@ -41,3 +41,45 @@ export interface StorageAnalyticsResponse {
 }
 
 export type DaysWindow = 7 | 14 | 30 | 90 | 365;
+
+// ── Clip cleanup (migration 0069) ──────────────────────────────────────────
+
+export type ClipCleanupMode = "hours" | "days" | "range";
+
+export interface ClipCleanupFilter {
+  older_than_hours?: number;
+  older_than_days?: number;
+  start_date?: string; // YYYY-MM-DD
+  end_date?: string; // YYYY-MM-DD
+  camera_id?: number;
+}
+
+export interface CleanupCameraImpact {
+  camera_id: number;
+  camera_name: string;
+  clip_count: number;
+  total_bytes: number;
+}
+
+export interface ClipCleanupPreviewResponse {
+  clip_count: number;
+  total_bytes: number;
+  oldest_clip_at: string | null;
+  newest_clip_at: string | null;
+  by_camera: CleanupCameraImpact[];
+  capped: boolean;
+  cap: number;
+}
+
+export interface ClipCleanupRunResponse {
+  deleted_count: number;
+  bytes_freed: number;
+  files_unlinked: number;
+  files_missing: number;
+  files_failed: number;
+  has_more: boolean;
+}
+
+export interface ClipRetentionSetting {
+  clip_retention_days: number | null;
+}

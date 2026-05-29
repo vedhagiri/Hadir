@@ -115,10 +115,19 @@ class ApprovedLeaveCreateRequest(BaseModel):
         return self
 
 
+VALID_DATE_FORMATS = frozenset({"DD/MM/YYYY", "MM/DD/YYYY", "YYYY-MM-DD"})
+VALID_TIME_FORMATS = frozenset({"12h", "24h"})
+
+
 class TenantSettingsResponse(BaseModel):
     tenant_id: int
     weekend_days: list[str]
     timezone: str
+    # Migration 0068. Drives every datetime formatter in the platform
+    # (UI hooks, PDF/Excel report renderers, ERP exports, notification
+    # emails). Defaults match GCC convention.
+    date_format: str = "DD/MM/YYYY"
+    time_format: str = "24h"
     # Migration 0059 — when False the capture analyzer skips face
     # detection / recognition / matcher_cache / detection_events
     # emission entirely. Person bounding boxes still drive the live
@@ -132,6 +141,8 @@ class TenantSettingsResponse(BaseModel):
 class TenantSettingsPatchRequest(BaseModel):
     weekend_days: Optional[list[str]] = None
     timezone: Optional[str] = Field(default=None, max_length=64)
+    date_format: Optional[str] = None
+    time_format: Optional[str] = None
     live_matching_enabled: Optional[bool] = None
 
     @model_validator(mode="after")
@@ -147,4 +158,14 @@ class TenantSettingsPatchRequest(BaseModel):
                 ZoneInfo(self.timezone)
             except ZoneInfoNotFoundError as exc:
                 raise ValueError(f"unknown timezone: {self.timezone!r}") from exc
+        if self.date_format is not None and self.date_format not in VALID_DATE_FORMATS:
+            raise ValueError(
+                f"date_format must be one of {sorted(VALID_DATE_FORMATS)}, "
+                f"got {self.date_format!r}"
+            )
+        if self.time_format is not None and self.time_format not in VALID_TIME_FORMATS:
+            raise ValueError(
+                f"time_format must be one of {sorted(VALID_TIME_FORMATS)}, "
+                f"got {self.time_format!r}"
+            )
         return self

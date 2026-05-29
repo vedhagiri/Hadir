@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Icon } from "../shell/Icon";
+import { useTenantDateTime } from "../util/datetime";
 import { NewRequestDrawer } from "./NewRequestDrawer";
 import { RequestDetailDrawer } from "./RequestDetailDrawer";
 import { StatusPill } from "./StatusPill";
@@ -26,6 +27,7 @@ const STATUS_GROUPS: Record<StatusFilter, ReadonlyArray<RequestStatus>> = {
 export function MyRequestsPage() {
   const { t } = useTranslation();
   const requests = useMyRequests();
+  const dt = useTenantDateTime();
   const [openDrawer, setOpenDrawer] = useState<"new" | null>(null);
   const [openRequestId, setOpenRequestId] = useState<number | null>(null);
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
@@ -180,7 +182,7 @@ export function MyRequestsPage() {
                     <StatusPill status={r.status} />
                   </td>
                   <td className="mono text-xs text-dim">
-                    {new Date(r.submitted_at).toLocaleString()}
+                    {dt.formatDateTime(r.submitted_at)}
                   </td>
                   <td style={{ textAlign: "end" }}>
                     <Icon name="chevronRight" size={13} className="text-dim" />

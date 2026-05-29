@@ -6,12 +6,9 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 
 import { AnomalyInfoBanner } from "../../components/AnomalyNote";
-import {
-  RelativeTime,
-  formatExact,
-  formatRelative,
-} from "../../components/RelativeTime";
+import { RelativeTime, relativeText } from "../../components/RelativeTime";
 import { Icon } from "../../shell/Icon";
+import { useTenantDateTime, type TenantDateTime } from "../../util/datetime";
 import { useCameraOptions, useDetectionEvents } from "./hooks";
 import type { DetectionEvent, DetectionEventFilters } from "./types";
 
@@ -80,16 +77,16 @@ function groupEvents(events: DetectionEvent[]): EventGroup[] {
 }
 
 function formatTimeRange(group: EventGroup, now: number): string {
-  if (group.children.length === 1) return formatRelative(group.lastAt, now);
-  // Multi-event group: show the latest as a relative anchor; the
-  // tooltip on the row gives the operator the exact times if they
-  // need them.
-  return formatRelative(group.lastAt, now);
+  // Always relative for the table cell. Tooltip carries the exact
+  // tenant-local times (see formatRangeTooltip).
+  return relativeText(group.lastAt, now);
 }
 
-function formatRangeTooltip(group: EventGroup): string {
-  if (group.children.length === 1) return formatExact(group.lastAt);
-  return `${formatExact(group.firstAt)} → ${formatExact(group.lastAt)}`;
+function formatRangeTooltip(group: EventGroup, dt: TenantDateTime): string {
+  if (group.children.length === 1) return dt.formatTimeWithSeconds(group.lastAt);
+  return `${dt.formatTimeWithSeconds(group.firstAt)} → ${dt.formatTimeWithSeconds(
+    group.lastAt,
+  )}`;
 }
 
 export function CameraLogsPage() {
@@ -105,6 +102,8 @@ export function CameraLogsPage() {
   // P28.7: client-side toggle wired through to the new
   // ``former_only=true`` query param.
   const [formerOnly, setFormerOnly] = useState(false);
+  // Migration 0068 — tenant tz + format for the row tooltip.
+  const dt = useTenantDateTime();
   // Grouping: which group ids are currently expanded. Resets on
   // filter change (the group ids are derived from primary event id,
   // so a fresh page reset clears stale entries naturally).
@@ -347,7 +346,7 @@ export function CameraLogsPage() {
                             size={11}
                           />
                         )}
-                        <span title={formatRangeTooltip(group)}>
+                        <span title={formatRangeTooltip(group, dt)}>
                           {formatTimeRange(group, nowTick)}
                         </span>
                         {isGrouped && (

@@ -251,6 +251,12 @@
       "timezoneLabel": "Workspace timezone",
       "customTimezone": "Custom IANA timezone…",
       "customLabel": "Custom timezone (Continent/City)",
+      "dateFormatTitle": "Date format",
+      "dateFormatDesc": "Applied across every page, drawer, export, and notification email. Sample below uses today.",
+      "timeFormatTitle": "Time format",
+      "timeFormatDesc": "12-hour shows AM/PM; 24-hour is the GCC default. Applies to every timestamp the platform renders.",
+      "timeFormat24h": "24-hour",
+      "timeFormat12h": "12-hour (AM/PM)",
       "weekendTitle": "Weekend days",
       "weekendDesc": "Days marked as weekend never count as Absent — work captured on these days flows to overtime."
     }

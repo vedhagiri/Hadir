@@ -12,6 +12,7 @@ what was swept.
 | ``notifications``         | 90 days            | BRD §"Notifications"  |
 | ``report_runs``           | 90 days (file first) | BRD §"Reports"      |
 | ``user_sessions``         | 7 days post-expiry | BRD §"Sessions"       |
+| ``person_clips`` videos   | per-tenant opt-in   | Storage Analytics 0069 |
 
 The job intentionally **never** touches:
 
@@ -24,6 +25,11 @@ The job intentionally **never** touches:
 
 Operators who need to override the cutoffs set
 ``MAUGOOD_RETENTION_*_DAYS`` env vars (see ``maugood.config``).
+
+For ``person_clips`` videos the sweep is opt-in per-tenant via
+``tenant_settings.clip_retention_days`` (NULL = leave alone). The
+sweep delegates to ``maugood.storage_analytics.cleanup.run_clip_cleanup``
+so the audit + soft-clear semantics match the manual cleanup path.
 """
 
 from __future__ import annotations
@@ -49,6 +55,12 @@ from maugood.db import (
     user_sessions,
 )
 from maugood.logging_config import audit_logger
+from maugood.storage_analytics.cleanup import (
+    CLEANUP_CAP,
+    ClipCleanupFilter,
+    get_clip_retention_days,
+    run_clip_cleanup,
+)
 from maugood.tenants.scope import TenantScope
 
 logger = logging.getLogger(__name__)
@@ -91,6 +103,8 @@ class TenantRetentionResult:
     report_runs_deleted: int = 0
     report_files_deleted: int = 0
     user_sessions_deleted: int = 0
+    clip_videos_cleared: int = 0
+    clip_bytes_freed: int = 0
     errors: list[str] = field(default_factory=list)
 
 
@@ -206,6 +220,42 @@ def _sweep_tenant(
             )
             result.user_sessions_deleted = int(res.rowcount or 0)
 
+        # person_clips video files — opt-in per tenant via
+        # ``tenant_settings.clip_retention_days``. NULL = the
+        # admin hasn't enabled automatic reclamation; leave the
+        # rows untouched (the manual cleanup page is the
+        # operator surface). When a positive integer is set we
+        # soft-clear any clip whose ``clip_start`` is older
+        # than N days. The cleanup helper writes its own
+        # ``clip_cleanup.executed`` audit row per batch.
+        scope = TenantScope(tenant_id=tenant_id)
+        with engine.begin() as conn:
+            clip_days = get_clip_retention_days(conn, scope)
+        if clip_days is not None:
+            cleared = 0
+            bytes_freed = 0
+            # Loop until ``has_more`` is false so a large backlog
+            # finishes in one sweep tick. CLEANUP_CAP bounds each
+            # round-trip; a tenant with 50,000 stale clips simply
+            # iterates 10× rather than blowing up a single
+            # transaction.
+            for _ in range(100):  # absolute safety bound
+                with engine.begin() as conn:
+                    r = run_clip_cleanup(
+                        conn,
+                        scope,
+                        ClipCleanupFilter(older_than_days=clip_days),
+                        actor_user_id=None,
+                        cap=CLEANUP_CAP,
+                        now=now,
+                    )
+                cleared += r.deleted_count
+                bytes_freed += r.bytes_freed
+                if not r.has_more:
+                    break
+            result.clip_videos_cleared = cleared
+            result.clip_bytes_freed = bytes_freed
+
         # Audit row — append-only by grant, so this can never be
         # purged by a future retention pass (would also be a
         # red-line violation if it could).
@@ -214,6 +264,7 @@ def _sweep_tenant(
             or result.notifications_deleted
             or result.report_runs_deleted
             or result.user_sessions_deleted
+            or result.clip_videos_cleared
         ):
             with engine.begin() as conn:
                 write_audit(
@@ -229,6 +280,8 @@ def _sweep_tenant(
                         "report_runs_deleted": result.report_runs_deleted,
                         "report_files_deleted": result.report_files_deleted,
                         "user_sessions_deleted": result.user_sessions_deleted,
+                        "clip_videos_cleared": result.clip_videos_cleared,
+                        "clip_bytes_freed": result.clip_bytes_freed,
                         "ran_at": now.isoformat(),
                     },
                 )
@@ -236,7 +289,8 @@ def _sweep_tenant(
     audit_logger().info(
         "retention.swept tenant=%s schema=%s "
         "camera_health=%d notifications=%d report_runs=%d "
-        "report_files=%d user_sessions=%d",
+        "report_files=%d user_sessions=%d clip_videos=%d "
+        "clip_bytes=%d",
         tenant_id,
         tenant_schema,
         result.camera_health_deleted,
@@ -244,6 +298,8 @@ def _sweep_tenant(
         result.report_runs_deleted,
         result.report_files_deleted,
         result.user_sessions_deleted,
+        result.clip_videos_cleared,
+        result.clip_bytes_freed,
     )
     return result
 

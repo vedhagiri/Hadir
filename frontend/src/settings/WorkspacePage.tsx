@@ -5,6 +5,7 @@
 // makes — shift boundaries, "today" rollover, scheduler firings,
 // report dates. This page is where Admin / HR sets it.
 
+import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -119,6 +120,32 @@ export function WorkspacePage() {
     try {
       await patch.mutateAsync({ weekend_days: Array.from(current) });
       setSavedToast("Weekend days updated");
+    } catch (err) {
+      setError(extractError(err));
+    }
+  };
+
+  // Migration 0068 — date / time format pickers. Both write through
+  // the same patch mutation; useMe is invalidated on success so every
+  // useTenantDateTime consumer re-renders with the new choice.
+  const onSelectDateFormat = async (
+    fmt: "DD/MM/YYYY" | "MM/DD/YYYY" | "YYYY-MM-DD",
+  ) => {
+    setError(null);
+    setSavedToast(null);
+    try {
+      await patch.mutateAsync({ date_format: fmt });
+      setSavedToast(`Date format set to ${fmt}`);
+    } catch (err) {
+      setError(extractError(err));
+    }
+  };
+  const onSelectTimeFormat = async (fmt: "12h" | "24h") => {
+    setError(null);
+    setSavedToast(null);
+    try {
+      await patch.mutateAsync({ time_format: fmt });
+      setSavedToast(`Time format set to ${fmt}`);
     } catch (err) {
       setError(extractError(err));
     }
@@ -251,6 +278,88 @@ export function WorkspacePage() {
             </div>
 
             <LiveClock timezone={settings.data.timezone} />
+          </section>
+
+          {/* --- Date format card (migration 0068) --- */}
+          <section
+            className="card"
+            style={{ padding: 18, display: "flex", flexDirection: "column", gap: 12 }}
+          >
+            <header>
+              <h2 style={cardTitleStyle}>
+                <Icon name="calendar" size={13} />
+                {t("settings.workspace.dateFormatTitle", "Date format")}
+              </h2>
+              <p style={cardSubStyle}>
+                {t(
+                  "settings.workspace.dateFormatDesc",
+                  "Applied across every page, drawer, export, and notification email. Sample below uses today.",
+                )}
+              </p>
+            </header>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {(
+                ["DD/MM/YYYY", "MM/DD/YYYY", "YYYY-MM-DD"] as const
+              ).map((fmt) => {
+                const on = settings.data!.date_format === fmt;
+                return (
+                  <button
+                    key={fmt}
+                    type="button"
+                    onClick={() => void onSelectDateFormat(fmt)}
+                    aria-pressed={on}
+                    disabled={patch.isPending}
+                    style={pillStyle(on)}
+                  >
+                    <span className="mono">{fmt}</span>
+                    <span style={{ marginLeft: 8, opacity: 0.7, fontSize: 11 }}>
+                      {formatSampleDate(fmt)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* --- Time format card (migration 0068) --- */}
+          <section
+            className="card"
+            style={{ padding: 18, display: "flex", flexDirection: "column", gap: 12 }}
+          >
+            <header>
+              <h2 style={cardTitleStyle}>
+                <Icon name="clock" size={13} />
+                {t("settings.workspace.timeFormatTitle", "Time format")}
+              </h2>
+              <p style={cardSubStyle}>
+                {t(
+                  "settings.workspace.timeFormatDesc",
+                  "12-hour shows AM/PM; 24-hour is the GCC default. Applies to every timestamp the platform renders.",
+                )}
+              </p>
+            </header>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {(["24h", "12h"] as const).map((fmt) => {
+                const on = settings.data!.time_format === fmt;
+                return (
+                  <button
+                    key={fmt}
+                    type="button"
+                    onClick={() => void onSelectTimeFormat(fmt)}
+                    aria-pressed={on}
+                    disabled={patch.isPending}
+                    style={pillStyle(on)}
+                  >
+                    {fmt === "24h"
+                      ? t("settings.workspace.timeFormat24h", "24-hour")
+                      : t("settings.workspace.timeFormat12h", "12-hour (AM/PM)")}
+                    <span style={{ marginLeft: 8, opacity: 0.7, fontSize: 11 }}>
+                      {formatSampleTime(fmt)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </section>
 
           {/* --- Weekend days card --- */}
@@ -671,3 +780,47 @@ const selectStyle = {
   fontFamily: "var(--font-sans)",
   minWidth: 320,
 };
+
+function pillStyle(on: boolean): React.CSSProperties {
+  return {
+    fontSize: 12,
+    padding: "6px 12px",
+    borderRadius: 999,
+    border: on ? "1px solid var(--accent-border)" : "1px solid var(--border)",
+    background: on ? "var(--accent-soft)" : "var(--bg)",
+    color: on ? "var(--accent-text)" : "var(--text)",
+    cursor: "pointer",
+    fontWeight: on ? 600 : 400,
+    display: "inline-flex",
+    alignItems: "center",
+  };
+}
+
+// Workspace-page-local samples (independent of the tenant choice
+// because the operator hasn't saved yet — the sample shows what the
+// picked format would look like). Uses Intl with no timezone so the
+// preview reflects the operator's wall clock rather than the tenant
+// tz; that matches the chip-style "this is what DD/MM/YYYY means"
+// preview an operator would expect.
+function formatSampleDate(fmt: "DD/MM/YYYY" | "MM/DD/YYYY" | "YYYY-MM-DD"): string {
+  const d = new Date();
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = String(d.getFullYear());
+  if (fmt === "DD/MM/YYYY") return `${dd}/${mm}/${yyyy}`;
+  if (fmt === "MM/DD/YYYY") return `${mm}/${dd}/${yyyy}`;
+  return `${yyyy}-${mm}-${dd}`;
+}
+function formatSampleTime(fmt: "12h" | "24h"): string {
+  const d = new Date();
+  if (fmt === "24h") {
+    const h = String(d.getHours()).padStart(2, "0");
+    const m = String(d.getMinutes()).padStart(2, "0");
+    return `${h}:${m}`;
+  }
+  const hours = d.getHours();
+  const m = String(d.getMinutes()).padStart(2, "0");
+  const ampm = hours >= 12 ? "PM" : "AM";
+  const h12 = hours % 12 === 0 ? 12 : hours % 12;
+  return `${String(h12).padStart(2, "0")}:${m} ${ampm}`;
+}

@@ -75,7 +75,19 @@ _jinja_env = Environment(
 
 
 def _format_time(t: Optional[time]) -> str:
+    # Legacy default — only used as the fallback when the
+    # tenant-aware formatter isn't threaded in. The active code path
+    # (``_format_time_for``) uses ``maugood.util.datetime`` so the
+    # report respects the tenant's chosen format (migration 0068).
     return t.strftime("%H:%M:%S") if t is not None else ""
+
+
+def _format_time_for(formatter, t: Optional[time]) -> str:  # type: ignore[no-untyped-def]
+    """Tenant-aware time render. Returns empty string for None so
+    Jinja can interpolate without a guard."""
+    if t is None:
+        return ""
+    return formatter.format_time(t)
 
 
 def _logo_data_url(logo_path: Optional[str]) -> Optional[str]:
@@ -252,6 +264,7 @@ def _build_employees(
     scope: TenantScope,
     *,
     include_employee_photos: bool = True,
+    formatter=None,  # type: ignore[no-untyped-def]
 ) -> list[dict]:
     """Group flat rows by employee + compute per-employee totals.
 
@@ -302,9 +315,25 @@ def _build_employees(
             in_crop, out_crop = None, None
         emp["days"].append(
             {
-                "date": r.date.isoformat(),
-                "in_time": _format_time(r.in_time),
-                "out_time": _format_time(r.out_time),
+                # Migration 0068 — render through the tenant formatter
+                # when available (build_pdf threads it in). ``isoformat``
+                # remains the fallback when an older caller hasn't
+                # supplied one yet.
+                "date": (
+                    formatter.format_date(r.date)
+                    if formatter is not None
+                    else r.date.isoformat()
+                ),
+                "in_time": (
+                    _format_time_for(formatter, r.in_time)
+                    if formatter is not None
+                    else _format_time(r.in_time)
+                ),
+                "out_time": (
+                    _format_time_for(formatter, r.out_time)
+                    if formatter is not None
+                    else _format_time(r.out_time)
+                ),
                 "in_crop_data_url": in_crop,
                 "out_crop_data_url": out_crop,
                 "total_hours": total_hours,
@@ -440,11 +469,18 @@ def build_pdf(
         department_ids=department_ids,
         employee_id=employee_id,
     )
+    # Migration 0068 — tenant tz + format applied to every date/time
+    # in the rendered PDF. Generated-at also moves into tenant local
+    # so the footer reads consistently with the rest of the report.
+    from maugood.util.datetime import load_tenant_formatter  # noqa: PLC0415
+
+    fmt = load_tenant_formatter(conn, scope.tenant_id)
     employees_grouped = _build_employees(
         rows,
         conn,
         scope,
         include_employee_photos=include_employee_photos,
+        formatter=fmt,
     )
 
     day_count = (end_date - start_date).days + 1
@@ -459,10 +495,10 @@ def build_pdf(
         branding=branding_ctx,
         summary=summary,
         employees=employees_grouped,
-        start_label=start_date.isoformat(),
-        end_label=end_date.isoformat(),
-        generated_at_label=datetime.now(timezone.utc).strftime(
-            "%Y-%m-%d %H:%M UTC"
+        start_label=fmt.format_date(start_date),
+        end_label=fmt.format_date(end_date),
+        generated_at_label=fmt.format_datetime(
+            datetime.now(timezone.utc)
         ),
         generated_by_email=generated_by_email or "—",
         filters={"department_label": department_label},

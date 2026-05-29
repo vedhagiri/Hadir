@@ -134,6 +134,17 @@ class MeResponse(BaseModel):
     # ``None`` on density = "comfortable" (the design's default).
     preferred_theme: str | None = None
     preferred_density: str | None = None
+    # Migration 0068 — tenant-wide datetime rendering. Surfaced on
+    # ``/api/auth/me`` so every frontend datetime renderer reads the
+    # values from one place (the React auth store) without per-page
+    # fetching. ``tenant_timezone`` is the IANA name; ``date_format``
+    # is one of DD/MM/YYYY · MM/DD/YYYY · YYYY-MM-DD; ``time_format``
+    # is one of 12h · 24h. Defaults below match the seed defaults
+    # so the shape is always populated even on a cold tenant before
+    # the row is materialised.
+    tenant_timezone: str = "Asia/Muscat"
+    tenant_date_format: str = "DD/MM/YYYY"
+    tenant_time_format: str = "24h"
     # Display name of the active tenant — read directly from
     # ``public.tenants.name``. Empty string on a fresh install before
     # the operator's setup wizard renames it; the frontend falls back
@@ -547,6 +558,7 @@ def login(
     )
 
     has_logo, version = _resolve_brand_logo_meta(target_tenant_id)
+    tz, date_fmt, time_fmt = _resolve_tenant_datetime_settings(target_tenant_id)
     return MeResponse(
         id=bundle.id,
         email=bundle.email,
@@ -558,6 +570,9 @@ def login(
         preferred_language=bundle.preferred_language,
         preferred_theme=bundle.preferred_theme,
         preferred_density=bundle.preferred_density,
+        tenant_timezone=tz,
+        tenant_date_format=date_fmt,
+        tenant_time_format=time_fmt,
         tenant_name=_resolve_tenant_name(target_tenant_id),
         has_brand_logo=has_logo,
         brand_logo_version=version,
@@ -704,6 +719,42 @@ def _resolve_brand_logo_meta(tenant_id: int) -> tuple[bool, str | None]:
     return True, row.updated_at.isoformat()
 
 
+def _resolve_tenant_datetime_settings(
+    tenant_id: int,
+) -> tuple[str, str, str]:
+    """Read (timezone, date_format, time_format) from tenant_settings.
+
+    Falls back to the seed defaults (Asia/Muscat / DD/MM/YYYY / 24h)
+    when the row hasn't been materialised yet — guarantees the
+    ``/api/auth/me`` shape is always populated so the frontend's
+    centralised datetime hook never has to guard against missing
+    fields. The row gets lazily created the first time
+    ``/api/tenant-settings`` is read.
+    """
+
+    from maugood.db import tenant_settings  # noqa: PLC0415
+
+    engine = get_engine()
+    try:
+        with engine.begin() as conn:
+            row = conn.execute(
+                select(
+                    tenant_settings.c.timezone,
+                    tenant_settings.c.date_format,
+                    tenant_settings.c.time_format,
+                ).where(tenant_settings.c.tenant_id == tenant_id)
+            ).first()
+    except Exception:
+        row = None
+    if row is None:
+        return ("Asia/Muscat", "DD/MM/YYYY", "24h")
+    return (
+        str(row.timezone) if row.timezone is not None else "Asia/Muscat",
+        str(row.date_format) if row.date_format is not None else "DD/MM/YYYY",
+        str(row.time_format) if row.time_format is not None else "24h",
+    )
+
+
 def _to_me_response(
     user: CurrentUser,
     *,
@@ -712,6 +763,7 @@ def _to_me_response(
     request: Request | None = None,
 ) -> MeResponse:
     has_logo, version = _resolve_brand_logo_meta(user.tenant_id)
+    tz, date_fmt, time_fmt = _resolve_tenant_datetime_settings(user.tenant_id)
     settings = get_settings()
     # The session expiry is stashed on ``request.state`` by
     # ``current_user`` as a side effect of touch_session. Synthetic
@@ -736,6 +788,9 @@ def _to_me_response(
         preferred_language=user.preferred_language,
         preferred_theme=user.preferred_theme,
         preferred_density=user.preferred_density,
+        tenant_timezone=tz,
+        tenant_date_format=date_fmt,
+        tenant_time_format=time_fmt,
         tenant_name=_resolve_tenant_name(user.tenant_id),
         has_brand_logo=has_logo,
         brand_logo_version=version,

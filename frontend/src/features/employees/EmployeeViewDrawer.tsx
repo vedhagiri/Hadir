@@ -25,6 +25,7 @@ import { useMe } from "../../auth/AuthProvider";
 import { DatePicker, todayIso } from "../../components/DatePicker";
 import { DrawerShell } from "../../components/DrawerShell";
 import { RelativeTime } from "../../components/RelativeTime";
+import { useTenantDateTime } from "../../util/datetime";
 import { Icon } from "../../shell/Icon";
 import { DayDetailContent } from "../calendar/DayDetailDrawer";
 import { useDetectionEvents } from "../camera-logs/hooks";
@@ -600,6 +601,7 @@ function DetailsTab({
   photos: Photo[];
 }) {
   const { t } = useTranslation();
+  const dt = useTenantDateTime();
   const [zoomPhotoId, setZoomPhotoId] = useState<number | null>(null);
   const role = primaryRoleFromCodes(employee.role_codes ?? []);
 
@@ -685,14 +687,14 @@ function DetailsTab({
 
       <Section label={t("employees.section.lifecycle") as string}>
         <Row label={t("employees.field.joinDate") as string}>
-          {employee.joining_date ?? "—"}
+          {employee.joining_date ? dt.formatLocalDate(employee.joining_date) : "—"}
         </Row>
         <Row label={t("employees.field.relievingDate") as string}>
-          {employee.relieving_date ?? "—"}
+          {employee.relieving_date ? dt.formatLocalDate(employee.relieving_date) : "—"}
         </Row>
         <Row label={t("employees.field.deactivatedAt") as string}>
           {employee.deactivated_at
-            ? new Date(employee.deactivated_at).toLocaleString()
+            ? dt.formatDateTime(employee.deactivated_at)
             : "—"}
         </Row>
       </Section>
@@ -1354,6 +1356,7 @@ function MatchedClipCard({
   onOpen: () => void;
 }) {
   const [thumbError, setThumbError] = useState(false);
+  const fmtClipTime = useFmtClipTime();
   const playable = clip.recording_status === "completed";
   // Prefer the matched employee's face crop when the API returned one
   // (populated by the list endpoint when called with ?matched_employee_id=N).
@@ -1575,13 +1578,11 @@ function fmtClipSize(bytes: number): string {
   return `${n.toFixed(n >= 100 || i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
-function fmtClipTime(iso: string): string {
-  try {
-    const d = new Date(iso);
-    return `${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })} ${d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`;
-  } catch {
-    return iso;
-  }
+// Migration 0068 — hook factory replaces a module-level helper so
+// the rendered string respects the tenant's date+time format.
+function useFmtClipTime(): (iso: string) => string {
+  const dt = useTenantDateTime();
+  return (iso) => dt.formatDateTime(iso) || iso;
 }
 
 function ucAccentSoft(uc: string): string {
@@ -1791,6 +1792,7 @@ function DetectionEventLightbox({
   initialIndex: number;
   onClose: () => void;
 }) {
+  const dt = useTenantDateTime();
   const [index, setIndex] = useState(initialIndex);
   const total = events.length;
   const ev = events[index]!;
@@ -1805,29 +1807,9 @@ function DetectionEventLightbox({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose, total]);
 
-  const detTime = (() => {
-    try {
-      return new Date(ev.captured_at).toLocaleTimeString(undefined, {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-      });
-    } catch {
-      return ev.captured_at;
-    }
-  })();
-
-  const detDate = (() => {
-    try {
-      return new Date(ev.captured_at).toLocaleDateString(undefined, {
-        day: "numeric",
-        month: "short",
-        year: "numeric",
-      });
-    } catch {
-      return "";
-    }
-  })();
+  // Migration 0068 — tenant tz + format.
+  const detTime = dt.formatTimeWithSeconds(ev.captured_at) || ev.captured_at;
+  const detDate = dt.formatDate(ev.captured_at) || "";
 
   const confidencePct =
     ev.confidence != null

@@ -28,6 +28,15 @@ export interface MeResponse {
   // (the design's default).
   preferred_theme?: "system" | "light" | "dark" | null;
   preferred_density?: "compact" | "comfortable" | null;
+  // Migration 0068 — tenant-wide datetime rendering. Read by the
+  // ``useTenantDateTime`` hook in ``src/util/datetime.ts`` and applied
+  // by every page that renders a timestamp. ``tenant_timezone`` is an
+  // IANA name; the format strings are the three / two values the
+  // Workspace picker exposes. Defaults baked in so the hook can render
+  // sensibly even on the very first paint before /me resolves.
+  tenant_timezone?: string;
+  tenant_date_format?: "DD/MM/YYYY" | "MM/DD/YYYY" | "YYYY-MM-DD";
+  tenant_time_format?: "12h" | "24h";
   // Display name of the active tenant (``public.tenants.name``).
   // Empty string on a fresh install before the operator's setup
   // wizard runs; the sidebar falls back to "Maugood" in that case.

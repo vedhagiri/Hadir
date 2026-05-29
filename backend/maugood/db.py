@@ -506,6 +506,22 @@ tenant_settings = Table(
         nullable=False,
         server_default="Asia/Muscat",
     ),
+    # Migration 0068. End-to-end format normalization — every surface
+    # (UI, PDF, Excel, ERP, emails) renders datetimes through one
+    # tenant-level format choice. CHECK-constrained so the renderers
+    # can map without defensive fallbacks.
+    Column(
+        "date_format",
+        String(length=16),
+        nullable=False,
+        server_default="DD/MM/YYYY",
+    ),
+    Column(
+        "time_format",
+        String(length=8),
+        nullable=False,
+        server_default="24h",
+    ),
     # P28.5c: system-wide detection + tracker config. Per-camera
     # ``capture_config`` (P28.5b) carries ``max_event_duration_sec``
     # too — per-camera value OVERRIDES the tenant default for shared
@@ -566,11 +582,34 @@ tenant_settings = Table(
         nullable=False,
         server_default=text("false"),
     ),
+    # Migration 0069 — opt-in automatic clip-video reclamation. NULL
+    # (the default) keeps the P25 retention sweep hands-off; a positive
+    # integer instructs the sweep to soft-clear any clip older than N
+    # days. CHECK constraint pins the range; the API layer also clamps
+    # to the same window for defence in depth.
+    Column(
+        "clip_retention_days",
+        Integer,
+        nullable=True,
+    ),
     Column(
         "updated_at",
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
+    ),
+    CheckConstraint(
+        "date_format IN ('DD/MM/YYYY', 'MM/DD/YYYY', 'YYYY-MM-DD')",
+        name="ck_tenant_settings_date_format",
+    ),
+    CheckConstraint(
+        "time_format IN ('12h', '24h')",
+        name="ck_tenant_settings_time_format",
+    ),
+    CheckConstraint(
+        "clip_retention_days IS NULL "
+        "OR (clip_retention_days >= 1 AND clip_retention_days <= 3650)",
+        name="ck_tenant_settings_clip_retention_days",
     ),
 )
 
@@ -2268,6 +2307,17 @@ person_clips = Table(
         nullable=False,
         server_default="completed",
     ),
+    # Migration 0069 — Storage Analytics clip cleanup. NULL means the
+    # video file is on disk (or, for ``recording_status`` in
+    # {abandoned, failed}, never materialised). Non-NULL marks a
+    # soft-clear: ``file_path`` is also NULL and ``filesize_bytes``
+    # is 0. The row stays so face_crops + clip_processing_results
+    # FKs survive.
+    Column(
+        "clip_file_deleted_at",
+        DateTime(timezone=True),
+        nullable=True,
+    ),
     Column(
         "created_at",
         DateTime(timezone=True),
@@ -2284,6 +2334,15 @@ person_clips = Table(
         "ix_person_clips_tenant_employee_created",
         "tenant_id",
         "employee_id",
+        "created_at",
+    ),
+    # Migration 0069 — accelerates the cleanup preview and sweep
+    # queries (filter by tenant + clip_file_deleted_at IS NULL +
+    # ORDER BY created_at).
+    Index(
+        "ix_person_clips_tenant_deleted_created",
+        "tenant_id",
+        "clip_file_deleted_at",
         "created_at",
     ),
     # Migration 0041 — face crop extraction lifecycle.

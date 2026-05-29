@@ -14,6 +14,7 @@ import { api } from "../../api/client";
 import { AnomalyInfoBanner } from "../../components/AnomalyNote";
 import { ModalShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
+import { useTenantDateTime } from "../../util/datetime";
 import type { IconName } from "../../shell/Icon";
 import { useCameras } from "../cameras/hooks";
 import {
@@ -74,6 +75,7 @@ function CellDateTime({
   // tested as more scannable than two equally-weighted columns.
   emphasize?: boolean;
 }) {
+  const dt = useTenantDateTime();
   if (!iso) {
     return <span style={{ color: "var(--text-tertiary)" }}>—</span>;
   }
@@ -87,54 +89,29 @@ function CellDateTime({
     return <span className="mono text-sm">{iso}</span>;
   }
 
-  const now = new Date();
-  const sameDay =
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate();
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
-  const isYesterday =
-    d.getFullYear() === yesterday.getFullYear() &&
-    d.getMonth() === yesterday.getMonth() &&
-    d.getDate() === yesterday.getDate();
-  const withinWeek =
-    Math.abs(now.getTime() - d.getTime()) <= 7 * 24 * 3600 * 1000;
+  // Migration 0068 — tenant tz + format. The Today/Yesterday
+  // shortcuts still apply (relative anchors are more readable than
+  // an absolute date for very recent events) but they compare
+  // tenant-local calendar days, not browser-local.
+  const tenantToday = dt.formatLocalDate(new Date().toISOString().slice(0, 10));
+  const dDate = dt.formatDate(d);
+  const yesterdayDate = new Date();
+  yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+  const tenantYesterday = dt.formatLocalDate(
+    yesterdayDate.toISOString().slice(0, 10),
+  );
 
-  const timeStr = d.toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  });
-
-  let dateStr: string;
-  if (sameDay) {
-    dateStr = "Today";
-  } else if (isYesterday) {
-    dateStr = "Yesterday";
-  } else if (withinWeek) {
-    dateStr = d.toLocaleDateString(undefined, {
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-    });
-  } else if (d.getFullYear() === now.getFullYear()) {
-    dateStr = d.toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-    });
-  } else {
-    dateStr = d.toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
-  }
+  const timeStr = dt.formatTimeWithSeconds(d);
+  const dateStr =
+    dDate === tenantToday
+      ? "Today"
+      : dDate === tenantYesterday
+        ? "Yesterday"
+        : dDate;
 
   return (
     <div
-      title={d.toLocaleString()}
+      title={dt.formatDateTime(d)}
       style={{
         display: "flex",
         flexDirection: "column",
@@ -158,7 +135,7 @@ function CellDateTime({
         style={{
           fontSize: 11,
           color: "var(--text-secondary)",
-          fontWeight: sameDay ? 600 : 400,
+          fontWeight: dateStr === "Today" ? 600 : 400,
         }}
       >
         {dateStr}
@@ -3487,10 +3464,11 @@ function BatchProcessStatusModal({
 
 
 function BatchHeading({ batch }: { batch: ClipPipelineBatch }) {
+  const dt = useTenantDateTime();
   const submittedAt = new Date(batch.submitted_at);
   const submittedLabel = isNaN(submittedAt.getTime())
     ? batch.submitted_at
-    : submittedAt.toLocaleString();
+    : dt.formatDateTime(submittedAt);
   return (
     <div
       style={{

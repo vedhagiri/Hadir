@@ -9,6 +9,7 @@ import { DrawerShell } from "../components/DrawerShell";
 
 import { ApiError } from "../api/client";
 import { Icon } from "../shell/Icon";
+import { useTenantDateTime } from "../util/datetime";
 import { StatusPill } from "./StatusPill";
 import {
   useAdminOverride,
@@ -47,6 +48,7 @@ export function RequestDetailDrawer({
   const cancel = useCancelRequest();
   const upload = useUploadAttachment();
   const delAttachment = useDeleteAttachment(requestId);
+  const dt = useTenantDateTime();
   const [error, setError] = useState<string | null>(null);
 
   const onCancel = async () => {
@@ -162,7 +164,7 @@ export function RequestDetailDrawer({
                   </span>
                 </div>
                 <div className="text-xs text-dim">
-                  {new Date(r.submitted_at).toLocaleString()}
+                  {dt.formatDateTime(r.submitted_at)}
                 </div>
               </div>
 
@@ -353,6 +355,7 @@ export function RequestDetailDrawer({
 }
 
 function Timeline({ request }: { request: RequestRecord }) {
+  const dt = useTenantDateTime();
   const stages = [
     {
       name: "Submitted",
@@ -471,7 +474,7 @@ function Timeline({ request }: { request: RequestRecord }) {
             </div>
             {s.at && (
               <div className="text-xs text-dim">
-                {new Date(s.at as string).toLocaleString()}
+                {dt.formatDateTime(s.at as string)}
               </div>
             )}
             {"comment" in s && s.comment && (

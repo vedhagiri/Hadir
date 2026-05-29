@@ -142,6 +142,16 @@ def build_xlsx(
     the buffer is well under a MB.
     """
 
+    # Migration 0068 — render dates + times through the tenant
+    # formatter so the Excel file matches the UI exactly. Spreadsheets
+    # benefit from a stable text shape across cells; we render to
+    # text deliberately rather than passing Python ``date``/``time``
+    # objects so Excel doesn't auto-format them against the operator's
+    # locale (which differs from the tenant locale).
+    from maugood.util.datetime import load_tenant_formatter  # noqa: PLC0415
+
+    fmt = load_tenant_formatter(conn, scope.tenant_id)
+
     wb = Workbook(write_only=True)
     sheets: dict[str, object] = {}
 
@@ -172,9 +182,9 @@ def build_xlsx(
             [
                 row.employee_code,
                 row.full_name,
-                row.date.isoformat(),
-                _format_time(row.in_time),
-                _format_time(row.out_time),
+                fmt.format_date(row.date),
+                fmt.format_time(row.in_time),
+                fmt.format_time(row.out_time),
                 total_hours,
                 bool(row.late),
                 bool(row.early_out),

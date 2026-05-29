@@ -14,6 +14,7 @@ import { AnomalyInfoBanner } from "../../components/AnomalyNote";
 import { DrawerShell } from "../../components/DrawerShell";
 import { LateBadge } from "../../components/LateBadge";
 import { Icon } from "../../shell/Icon";
+import { useTenantDateTime } from "../../util/datetime";
 import { useMe } from "../../auth/AuthProvider";
 import { primaryRole } from "../../types";
 import { useRegenerateAttendanceForEmployee } from "../attendance/hooks";
@@ -67,6 +68,8 @@ export function DayDetailContent({
     void qc.refetchQueries({ queryKey: ["calendar", "day", employeeId, isoDate], exact: true });
     void qc.refetchQueries({ queryKey: ["calendar", "person", employeeId, month], exact: true });
   }, [qc, isoDate, employeeId]);
+
+  const dt = useTenantDateTime();
 
   const evidenceRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const onTimelineEventActivate = useCallback((eventId: number) => {
@@ -160,8 +163,8 @@ export function DayDetailContent({
             ) : (
               <>
                 <div className="grid grid-4" style={{ gap: 10, marginBottom: 16 }}>
-                  <Tile label={t("calendar.inTime")   as string} value={detail.data.in_time?.slice(0, 5) ?? "—"} />
-                  <Tile label={t("calendar.outTime")  as string} value={detail.data.out_time?.slice(0, 5) ?? "—"} />
+                  <Tile label={t("calendar.inTime")   as string} value={dt.formatLocalTime(detail.data.in_time ?? null) || "—"} />
+                  <Tile label={t("calendar.outTime")  as string} value={dt.formatLocalTime(detail.data.out_time ?? null) || "—"} />
                   <Tile label={t("calendar.total")    as string} value={formatMinutes(detail.data.total_minutes)} />
                   <Tile label={t("calendar.overtime") as string} value={detail.data.overtime_minutes > 0 ? formatMinutes(detail.data.overtime_minutes) : "—"} />
                 </div>
@@ -1175,24 +1178,21 @@ const SHIFT_TYPE_ACCENT: Record<string, { bg: string; fg: string }> = {
 /** Format an ISO ``YYYY-MM-DD`` to a friendly short date in the
  *  browser locale — e.g. "13 Feb 2026". Falls back to the raw
  *  string when parsing fails. */
-function formatShortDate(iso: string | null | undefined): string {
-  if (!iso) return "";
-  try {
-    const d = new Date(`${iso}T00:00:00`);
-    if (Number.isNaN(d.getTime())) return iso;
-    return d.toLocaleDateString(undefined, {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-    });
-  } catch {
-    return iso;
-  }
+/**
+ * Migration 0068 — hook factory replaces the old module-level
+ * formatShortDate. Apply the tenant's date format to a bare
+ * YYYY-MM-DD string (no tz conversion needed; the input is a
+ * calendar date).
+ */
+function useFormatShortDate(): (iso: string | null | undefined) => string {
+  const dt = useTenantDateTime();
+  return (iso) => (iso ? dt.formatLocalDate(iso) : "");
 }
 
 
 function PolicyAppliedCard({ detail }: { detail: DayDetail }) {
   const { t } = useTranslation();
+  const formatShortDate = useFormatShortDate();
 
   if (!detail.policy_name) {
     return (
@@ -1571,22 +1571,15 @@ function NoRecordCard({
   isFuture: boolean;
 }) {
   const { t } = useTranslation();
+  const dt = useTenantDateTime();
 
-  const parsedDate = (() => {
-    try {
-      return new Date(isoDate + "T00:00:00").toLocaleDateString(undefined, {
-        weekday: "long", year: "numeric", month: "long", day: "numeric",
-      });
-    } catch { return isoDate; }
-  })();
-
-  const shortDate = (() => {
-    try {
-      return new Date(isoDate + "T00:00:00").toLocaleDateString(undefined, {
-        month: "short", day: "numeric", year: "numeric",
-      });
-    } catch { return isoDate; }
-  })();
+  // Migration 0068 — tenant date format. The drawer used to render a
+  // long localised "Wednesday, May 28, 2026" via toLocaleDateString;
+  // operators reported confusion when the same date appeared in two
+  // formats across the app. Switching to the tenant format keeps
+  // every surface consistent.
+  const parsedDate = dt.formatLocalDate(isoDate) || isoDate;
+  const shortDate = parsedDate;
 
   if (isFuture) {
     return (
@@ -1821,6 +1814,7 @@ function HolidayDayContent({
   registerRef: (eventId: number, el: HTMLDivElement | null) => void;
 }) {
   const { t } = useTranslation();
+  const dt = useTenantDateTime();
 
   const workedOnHoliday =
     detail.in_time != null ||
@@ -1829,21 +1823,9 @@ function HolidayDayContent({
 
   const holidayName = detail.holiday_name ?? t("calendar.holiday.unknownName", { defaultValue: "Public Holiday" }) as string;
 
-  const parsedDate = (() => {
-    try {
-      return new Date(`${isoDate}T00:00:00`).toLocaleDateString(undefined, {
-        weekday: "long", year: "numeric", month: "long", day: "numeric",
-      });
-    } catch { return isoDate; }
-  })();
-
-  const shortDate = (() => {
-    try {
-      return new Date(`${isoDate}T00:00:00`).toLocaleDateString(undefined, {
-        day: "numeric", month: "short", year: "numeric",
-      });
-    } catch { return isoDate; }
-  })();
+  // Migration 0068 — tenant date format.
+  const parsedDate = dt.formatLocalDate(isoDate) || isoDate;
+  const shortDate = parsedDate;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -2083,8 +2065,8 @@ function HolidayDayContent({
 
           {/* Summary tiles */}
           <div className="grid grid-4" style={{ gap: 10 }}>
-            <Tile label={t("calendar.inTime") as string} value={detail.in_time?.slice(0, 5) ?? "—"} />
-            <Tile label={t("calendar.outTime") as string} value={detail.out_time?.slice(0, 5) ?? "—"} />
+            <Tile label={t("calendar.inTime") as string} value={dt.formatLocalTime(detail.in_time ?? null) || "—"} />
+            <Tile label={t("calendar.outTime") as string} value={dt.formatLocalTime(detail.out_time ?? null) || "—"} />
             <Tile
               label={t("calendar.total") as string}
               value={formatMinutes(detail.total_minutes)}
@@ -2758,18 +2740,10 @@ function EscalationConfirmedCard({
   snapshot: EscalationRequestSnapshot | null;
 }) {
   const { t } = useTranslation();
+  const dt = useTenantDateTime();
 
-  const fmtDt = (iso: string | null | undefined) => {
-    if (!iso) return null;
-    try {
-      return new Date(iso).toLocaleString(undefined, {
-        dateStyle: "medium",
-        timeStyle: "short",
-      });
-    } catch {
-      return iso;
-    }
-  };
+  const fmtDt = (iso: string | null | undefined) =>
+    iso ? dt.formatDateTime(iso) : null;
 
   // Parse employee-submitted timings from the encoded reason_text.
   const parsedTimings = parseEscalationTimes(snapshot?.reason_text);
@@ -3012,23 +2986,12 @@ function SimpleAbsentCard({
   onRaiseEscalation: (() => void) | null;
 }) {
   const { t } = useTranslation();
+  const dt = useTenantDateTime();
   const [hovered, setHovered] = useState(false);
 
-  const parsedDate = (() => {
-    try {
-      return new Date(`${isoDate}T00:00:00`).toLocaleDateString(undefined, {
-        weekday: "long", year: "numeric", month: "long", day: "numeric",
-      });
-    } catch { return isoDate; }
-  })();
-
-  const shortDate = (() => {
-    try {
-      return new Date(`${isoDate}T00:00:00`).toLocaleDateString(undefined, {
-        month: "short", day: "numeric", year: "numeric",
-      });
-    } catch { return isoDate; }
-  })();
+  // Migration 0068 — tenant date format.
+  const parsedDate = dt.formatLocalDate(isoDate) || isoDate;
+  const shortDate = parsedDate;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -3441,6 +3404,7 @@ function RequestPendingCard({
   onDecisionMade: () => void;
 }) {
   const { t } = useTranslation();
+  const dt = useTenantDateTime();
   const req = detail.pending_request!;
 
   // Inline decision state
@@ -3449,11 +3413,7 @@ function RequestPendingCard({
   const [deciding, setDeciding] = useState(false);
   const [decisionError, setDecisionError] = useState<string | null>(null);
 
-  const fmtDt = (iso: string): string => {
-    try {
-      return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
-    } catch { return iso; }
-  };
+  const fmtDt = (iso: string): string => dt.formatDateTime(iso) || iso;
 
   const statusMap: Record<string, [boolean, boolean, boolean]> = {
     submitted:        [true, false, false],
@@ -3698,14 +3658,11 @@ function RequestPendingCard({
 
 function ApprovedAbsenceCard({ detail }: { detail: DayDetail }) {
   const { t } = useTranslation();
+  const dt = useTenantDateTime();
   const req = detail.approved_request!;
 
-  const fmtDt = (iso: string | null | undefined): string | null => {
-    if (!iso) return null;
-    try {
-      return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
-    } catch { return iso; }
-  };
+  const fmtDt = (iso: string | null | undefined): string | null =>
+    iso ? dt.formatDateTime(iso) : null;
 
   const typeLabel =
     req.request_type === "leave"
@@ -3946,14 +3903,10 @@ function AbsentWaitingCard({
   onRaiseEscalation: (() => void) | null;
 }) {
   const { t } = useTranslation();
+  const dt = useTenantDateTime();
 
-  const parsedDate = (() => {
-    try {
-      return new Date(`${isoDate}T00:00:00`).toLocaleDateString(undefined, {
-        weekday: "long", year: "numeric", month: "long", day: "numeric",
-      });
-    } catch { return isoDate; }
-  })();
+  // Migration 0068 — tenant date format.
+  const parsedDate = dt.formatLocalDate(isoDate) || isoDate;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>

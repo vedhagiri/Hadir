@@ -178,6 +178,12 @@ export function usePatchTenantSettings() {
       qc.invalidateQueries({ queryKey: ["attendance"] });
       qc.invalidateQueries({ queryKey: ["calendar"] });
       qc.invalidateQueries({ queryKey: ["system"] });
+      // Migration 0068 — ``tenant_timezone`` / ``tenant_date_format``
+      // / ``tenant_time_format`` ride on ``/api/auth/me`` so every
+      // ``useTenantDateTime`` consumer refreshes. Without this the
+      // formatters stay on the pre-save values until the next /me
+      // poll (~30s) or a fresh login.
+      qc.invalidateQueries({ queryKey: ["auth", "me"] });
     },
   });
 }

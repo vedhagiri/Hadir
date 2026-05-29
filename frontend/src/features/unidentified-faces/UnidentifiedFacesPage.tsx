@@ -16,6 +16,7 @@ import { useTranslation } from "react-i18next";
 
 import { DatePicker } from "../../components/DatePicker";
 import { Icon } from "../../shell/Icon";
+import { useTenantDateTime } from "../../util/datetime";
 import type { EmployeeListFilters } from "../employees/hooks";
 import { useEmployeeList } from "../employees/hooks";
 import type { Employee } from "../employees/types";
@@ -54,13 +55,16 @@ const DEBOUNCE_MS = 400;
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+/**
+ * Migration 0068: every fmtDate caller is a React function component,
+ * so the formatter is exposed as a hook factory. Each component calls
+ * ``const fmtDate = useFmtDate();`` once and the rest of the JSX stays
+ * untouched. Renders through ``useTenantDateTime`` so the tenant's
+ * configured timezone + date/time format apply automatically.
+ */
+function useFmtDate(): (iso: string) => string {
+  const dt = useTenantDateTime();
+  return (iso: string) => dt.formatDateTime(iso);
 }
 
 function defaultStart(): string {
@@ -964,6 +968,7 @@ interface ClusterCardProps {
 
 function ClusterCard({ cluster, onOpen }: ClusterCardProps) {
   const { t } = useTranslation();
+  const fmtDate = useFmtDate();
   const repId = cluster.representative_event_id;
   const [imgFailed, setImgFailed] = useState(false);
   const simPct = Math.round(cluster.avg_similarity * 100);
@@ -2251,6 +2256,7 @@ function ClusterGalleryModal({
   onClose,
 }: ClusterGalleryModalProps) {
   const { t } = useTranslation();
+  const dt = useTenantDateTime();
 
   // Per-event metadata map built once from the parallel arrays on the
   // cluster. event_ids/event_similarities/event_qualities/event_face_types
@@ -2619,15 +2625,11 @@ function ClusterGalleryModal({
           >
             <GalleryMetaCell
               label={t("unidentifiedFaces.detectionTimeLabel", "Detection time")}
-              value={captured ? new Date(captured).toLocaleTimeString(undefined, {
-                hour: "2-digit", minute: "2-digit", second: "2-digit",
-              }) : "—"}
+              value={captured ? dt.formatTimeWithSeconds(captured) || "—" : "—"}
             />
             <GalleryMetaCell
               label={t("unidentifiedFaces.detectionDateLabel", "Detection date")}
-              value={captured ? new Date(captured).toLocaleDateString(undefined, {
-                day: "2-digit", month: "short", year: "numeric",
-              }) : "—"}
+              value={captured ? dt.formatDate(captured) || "—" : "—"}
             />
             <GalleryMetaCell
               label={t("unidentifiedFaces.camera", "Camera")}
@@ -3209,6 +3211,7 @@ function ClusterFilterBar({
 
 function ClusterDrawer({ cluster, onClose }: ClusterDrawerProps) {
   const { t } = useTranslation();
+  const dt = useTenantDateTime();
   const [showMapModal, setShowMapModal] = useState(false);
   const [galleryEventId, setGalleryEventId] = useState<number | null>(null);
 
@@ -3336,10 +3339,9 @@ function ClusterDrawer({ cluster, onClose }: ClusterDrawerProps) {
     const d = Math.floor(h / 24);
     return t("unidentifiedFaces.spanDays", "{{n}}d {{r}}h", { n: d, r: h % 24 });
   };
-  const fmtTime = (iso: string) =>
-    new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: true });
-  const fmtDay = (iso: string) =>
-    new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  // Migration 0068 — tenant tz + format.
+  const fmtTime = (iso: string) => dt.formatTime(iso) || iso;
+  const fmtDay = (iso: string) => dt.formatDate(iso) || iso;
 
   return (
     <>
@@ -3726,6 +3728,7 @@ interface RawEventViewerProps {
 
 function RawEventViewer({ event, onClose, onMap }: RawEventViewerProps) {
   const { t } = useTranslation();
+  const fmtDate = useFmtDate();
   const [imgFailed, setImgFailed] = useState(false);
 
   useEffect(() => {
@@ -3854,6 +3857,7 @@ interface RawEventCardProps {
 
 function RawEventCard({ event, selected, selectMode, onToggleSelect, onView, onMap }: RawEventCardProps) {
   const { t } = useTranslation();
+  const fmtDate = useFmtDate();
   const [imgFailed, setImgFailed] = useState(false);
 
   const handleCardClick = () => {
@@ -4349,6 +4353,7 @@ function MappingSourceChip({
 
 function MappedFaceTile({ event }: { event: MappedFaceEventOut }) {
   const { t } = useTranslation();
+  const fmtDate = useFmtDate();
   const [imgFailed, setImgFailed] = useState(false);
   const [unmapOpen, setUnmapOpen] = useState(false);
   const confPct =
@@ -4642,6 +4647,7 @@ function MappedEmployeeCard({
   };
 }) {
   const { t } = useTranslation();
+  const fmtDate = useFmtDate();
   const [unmapOpen, setUnmapOpen] = useState(false);
   const [unmapResult, setUnmapResult] = useState<{
     tone: "ok" | "err";

@@ -3,6 +3,7 @@
 import { Trans, useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 
+import { useTenantDateTime } from "../util/datetime";
 import { useMarkAllRead, useMarkRead, useNotifications } from "./hooks";
 
 
@@ -11,6 +12,7 @@ export function NotificationsPage() {
   const list = useNotifications(100);
   const markRead = useMarkRead();
   const markAll = useMarkAllRead();
+  const dt = useTenantDateTime();
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -95,7 +97,7 @@ export function NotificationsPage() {
                   }}
                 >
                   <td className="mono text-xs">
-                    {new Date(n.created_at).toLocaleString()}
+                    {dt.formatDateTime(n.created_at)}
                   </td>
                   <td className="text-xs">
                     {t(`notifications.categories.${n.category}`, {

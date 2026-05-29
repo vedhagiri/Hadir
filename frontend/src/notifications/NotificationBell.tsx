@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 
 import { Icon } from "../shell/Icon";
+import { useTenantDateTime } from "../util/datetime";
 import {
   useMarkAllRead,
   useMarkRead,
@@ -187,6 +188,7 @@ function RowAction({
   onClick: () => void;
 }) {
   const { t } = useTranslation();
+  const dt = useTenantDateTime();
   const inner = (
     <div
       style={{
@@ -202,7 +204,7 @@ function RowAction({
           defaultValue: notification.category,
         })}
         <span style={{ marginInlineStart: 8 }}>
-          {new Date(notification.created_at).toLocaleString()}
+          {dt.formatDateTime(notification.created_at)}
         </span>
       </div>
       <div

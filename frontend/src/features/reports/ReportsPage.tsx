@@ -24,6 +24,7 @@ import { DatePicker } from "../../components/DatePicker";
 import { PdfOptionsModal } from "../../components/PdfOptionsModal";
 import { useConfidentialDownload } from "../../components/useConfidentialDownload";
 import { Icon, type IconName } from "../../shell/Icon";
+import { useTenantDateTime } from "../../util/datetime";
 import { useAttendance } from "../attendance/hooks";
 import { formatMinutes } from "../attendance/timeFormat";
 import type {
@@ -127,26 +128,9 @@ const PRESET_LABELS: { key: PresetKey; label: string }[] = [
   { key: "custom", label: "Custom range" },
 ];
 
-function shortTime(iso: string | null): string {
-  if (!iso) return "—";
-  return iso.length >= 5 ? iso.slice(0, 5) : iso;
-}
-
 // Display-side hour formatting uses ``formatMinutes`` from
-// attendance/timeFormat for consistent ``8h 45m`` rendering.
-
-function formatTimestamp(iso: string): string {
-  // Server sends ISO; render as "YYYY-MM-DD HH:mm:ss" without TZ noise.
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return iso;
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  const ss = String(d.getSeconds()).padStart(2, "0");
-  return `${y}-${m}-${dd} ${hh}:${mm}:${ss}`;
-}
+// attendance/timeFormat for consistent ``8h 45m`` rendering. Date +
+// time rendering is centralised in ``util/datetime`` (migration 0068).
 
 function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
@@ -180,6 +164,7 @@ function rowsToCsv(headers: string[], rows: (string | number | null)[][]): strin
 // ---------------------------------------------------------------------------
 
 export function ReportsPage() {
+  const dt = useTenantDateTime();
   const [activeReport, setActiveReport] = useState<ReportKey>("attendance");
   // Attendance uses a date range (start..end); Event Log + Department
   // Summary keep a single-day picker. The single ``date`` state below
@@ -341,6 +326,7 @@ export function ReportsPage() {
               action: () =>
                 downloadEventLog({
                   date,
+                  dt,
                   setDownloading,
                   setInfo,
                   setError,
@@ -493,6 +479,7 @@ function AttendancePreview({
   downloading: "xlsx" | "pdf" | null;
   onDownload: (format: "xlsx" | "pdf") => void;
 }) {
+  const dt = useTenantDateTime();
   const [preset, setPreset] = useState<PresetKey>("today");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
@@ -662,12 +649,12 @@ function AttendancePreview({
               {it.full_name}
             </td>
             <td className="text-sm">{it.department.name}</td>
-            <td className="mono text-sm">{it.date}</td>
+            <td className="mono text-sm">{dt.formatLocalDate(it.date)}</td>
             <td>
               <DailyStatusPill item={it} />
             </td>
-            <td className="mono text-sm">{shortTime(it.in_time)}</td>
-            <td className="mono text-sm">{shortTime(it.out_time)}</td>
+            <td className="mono text-sm">{dt.formatLocalTime(it.in_time) || "—"}</td>
+            <td className="mono text-sm">{dt.formatLocalTime(it.out_time) || "—"}</td>
             <td className="mono text-sm">{formatMinutes(it.total_minutes)}</td>
             <td className="mono text-sm">
               {it.overtime_minutes > 0
@@ -833,6 +820,7 @@ function EventLogPreview({
   downloading: "xlsx" | "pdf" | null;
   onDownload: () => void;
 }) {
+  const dt = useTenantDateTime();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
 
@@ -985,7 +973,7 @@ function EventLogPreview({
                   EV-{String(evt.id).padStart(6, "0")}
                 </td>
                 <td className="mono text-sm">
-                  {formatTimestamp(evt.captured_at)}
+                  {dt.formatDateTime(evt.captured_at) || evt.captured_at}
                 </td>
                 <td className="text-sm">{evt.camera_name}</td>
                 <td className="text-sm">
@@ -1044,11 +1032,15 @@ function EventLogPreview({
 
 async function downloadEventLog({
   date,
+  dt,
   setDownloading,
   setInfo,
   setError,
 }: {
   date: string;
+  // Migration 0068 — caller passes the tenant formatter so CSV
+  // timestamps render in the operator-configured tz + format.
+  dt: import("../../util/datetime").TenantDateTime;
   setDownloading: (v: "xlsx" | "pdf" | null) => void;
   setInfo: (v: string | null) => void;
   setError: (v: string | null) => void;
@@ -1075,7 +1067,7 @@ async function downloadEventLog({
       all.map((evt, idx) => [
         idx + 1,
         `EV-${String(evt.id).padStart(6, "0")}`,
-        formatTimestamp(evt.captured_at),
+        dt.formatDateTime(evt.captured_at) || evt.captured_at,
         evt.camera_name,
         evt.employee_name ?? "Unidentified",
         evt.employee_code ?? "",

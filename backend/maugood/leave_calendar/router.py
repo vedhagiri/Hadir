@@ -927,6 +927,11 @@ def _to_tenant_settings_response(row) -> TenantSettingsResponse:  # type: ignore
         tenant_id=int(row.tenant_id),
         weekend_days=list(row.weekend_days or []),
         timezone=str(row.timezone),
+        # Migration 0068 — surface format choice. ``getattr`` fallbacks
+        # so a deployment that's missed the migration on one schema
+        # still serves a sane default instead of 500'ing.
+        date_format=str(getattr(row, "date_format", None) or "DD/MM/YYYY"),
+        time_format=str(getattr(row, "time_format", None) or "24h"),
         live_matching_enabled=bool(
             getattr(row, "live_matching_enabled", False)
         ),
@@ -948,6 +953,8 @@ def get_tenant_settings(
                 tenant_settings.c.tenant_id,
                 tenant_settings.c.weekend_days,
                 tenant_settings.c.timezone,
+                tenant_settings.c.date_format,
+                tenant_settings.c.time_format,
                 tenant_settings.c.live_matching_enabled,
                 tenant_settings.c.updated_at,
             ).where(tenant_settings.c.tenant_id == scope.tenant_id)
@@ -985,6 +992,8 @@ def patch_tenant_settings(
             select(
                 tenant_settings.c.weekend_days,
                 tenant_settings.c.timezone,
+                tenant_settings.c.date_format,
+                tenant_settings.c.time_format,
                 tenant_settings.c.live_matching_enabled,
             ).where(tenant_settings.c.tenant_id == scope.tenant_id)
         ).first()
@@ -993,6 +1002,10 @@ def patch_tenant_settings(
             values["weekend_days"] = payload.weekend_days
         if payload.timezone is not None:
             values["timezone"] = payload.timezone
+        if payload.date_format is not None:
+            values["date_format"] = payload.date_format
+        if payload.time_format is not None:
+            values["time_format"] = payload.time_format
         if payload.live_matching_enabled is not None:
             values["live_matching_enabled"] = payload.live_matching_enabled
 
@@ -1032,6 +1045,12 @@ def patch_tenant_settings(
                 {
                     "weekend_days": list(before.weekend_days or []),
                     "timezone": str(before.timezone),
+                    "date_format": str(
+                        getattr(before, "date_format", None) or "DD/MM/YYYY"
+                    ),
+                    "time_format": str(
+                        getattr(before, "time_format", None) or "24h"
+                    ),
                     "live_matching_enabled": bool(
                         getattr(before, "live_matching_enabled", True)
                     ),
@@ -1049,6 +1068,8 @@ def patch_tenant_settings(
                 tenant_settings.c.tenant_id,
                 tenant_settings.c.weekend_days,
                 tenant_settings.c.timezone,
+                tenant_settings.c.date_format,
+                tenant_settings.c.time_format,
                 tenant_settings.c.live_matching_enabled,
                 tenant_settings.c.updated_at,
             ).where(tenant_settings.c.tenant_id == scope.tenant_id)

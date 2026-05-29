@@ -17,6 +17,7 @@ import { DatePicker, todayIso } from "../../components/DatePicker";
 import { PdfOptionsModal } from "../../components/PdfOptionsModal";
 import { useConfidentialDownload } from "../../components/useConfidentialDownload";
 import { primaryRole } from "../../types";
+import { useTenantDateTime } from "../../util/datetime";
 import { useDepartments } from "../departments/hooks";
 import { useEmployeeList, useMyTeamList } from "../employees/hooks";
 import { AttendanceDrawer } from "./AttendanceDrawer";
@@ -31,6 +32,7 @@ export function DailyAttendancePage() {
   const role = me.data ? primaryRole(me.data.roles) : "Employee";
   const isAdminLike = role === "Admin" || role === "HR";
   const isManager = role === "Manager";
+  const fmtTime = useShortTime();
 
   const [date, setDate] = useState<string>(todayIso());
   // Manager default lands on "team" — that's their natural scope (the
@@ -704,8 +706,8 @@ export function DailyAttendancePage() {
                 <td>
                   <StatusPill item={it} />
                 </td>
-                <td className="mono text-sm">{shortTime(it.in_time)}</td>
-                <td className="mono text-sm">{shortTime(it.out_time)}</td>
+                <td className="mono text-sm">{fmtTime(it.in_time)}</td>
+                <td className="mono text-sm">{fmtTime(it.out_time)}</td>
                 <td className="mono text-sm">{formatMinutes(it.total_minutes)}</td>
                 <td className="mono text-sm">
                   {it.overtime_minutes > 0 ? formatMinutes(it.overtime_minutes) : "—"}
@@ -954,10 +956,17 @@ function Avatar({ name, seed }: { name: string; seed: string }) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function shortTime(iso: string | null): string {
-  if (!iso) return "—";
-  // Server sends "HH:MM:SS"; trim seconds for display.
-  return iso.length >= 5 ? iso.slice(0, 5) : iso;
+/**
+ * Hook factory — applies the tenant's time format (migration 0068)
+ * to backend "HH:MM:SS" local strings. Backend has already
+ * converted to the tenant tz; this just picks 12h vs 24h.
+ */
+function useShortTime(): (iso: string | null) => string {
+  const dt = useTenantDateTime();
+  return (iso: string | null) => {
+    if (!iso) return "—";
+    return dt.formatLocalTime(iso);
+  };
 }
 
 const selectStyle = {

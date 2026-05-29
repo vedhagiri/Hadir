@@ -74,10 +74,16 @@ export interface TenantSettings {
   tenant_id: number;
   weekend_days: string[];
   timezone: string;
+  // Migration 0068 — datetime rendering choices read by the
+  // ``useTenantDateTime`` hook (src/util/datetime.ts).
+  date_format: "DD/MM/YYYY" | "MM/DD/YYYY" | "YYYY-MM-DD";
+  time_format: "12h" | "24h";
   updated_at: string;
 }
 
 export interface TenantSettingsPatchInput {
   weekend_days?: string[];
   timezone?: string;
+  date_format?: "DD/MM/YYYY" | "MM/DD/YYYY" | "YYYY-MM-DD";
+  time_format?: "12h" | "24h";
 }
