@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "../../api/client";
+import { useMe } from "../../auth/AuthProvider";
 import { DatePicker } from "../../components/DatePicker";
 import { PdfOptionsModal } from "../../components/PdfOptionsModal";
 import { useConfidentialDownload } from "../../components/useConfidentialDownload";
@@ -126,6 +127,11 @@ export function EmployeeReportPage() {
   const [info, setInfo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pdfModalOpen, setPdfModalOpen] = useState(false);
+
+  // Admins don't raise requests on behalf of employees — the button
+  // only shows for non-Admin roles (HR / Manager / Employee).
+  const me = useMe();
+  const isAdmin = me.data?.active_role === "Admin";
 
   // Every download (XLSX / PDF / CSV) is gated behind a one-time
   // confidentiality acknowledgement. ``gateDownload`` opens the
@@ -515,17 +521,19 @@ export function EmployeeReportPage() {
                   </span>
                 </div>
               </div>
-              <button
-                type="button"
-                className="btn"
-                title="Open the request submission flow on behalf of this employee"
-                onClick={() => {
-                  window.location.assign("/my-requests");
-                }}
-              >
-                <Icon name="plus" size={11} />
-                Raise request
-              </button>
+              {!isAdmin && (
+                <button
+                  type="button"
+                  className="btn"
+                  title="Open the request submission flow on behalf of this employee"
+                  onClick={() => {
+                    window.location.assign("/my-requests");
+                  }}
+                >
+                  <Icon name="plus" size={11} />
+                  Raise request
+                </button>
+              )}
             </div>
           </div>
 
