@@ -24,6 +24,7 @@ import type {
   ClipProcessingResult,
   ClipQueueStats,
   FaceCropListResponse,
+  FaceCropOut,
   PersonClipFilters,
   PersonClipOut,
   PersonClipStats,
@@ -6709,6 +6710,115 @@ function FaceCropTile({
   );
 }
 
+// ── PaginatedCropGrid ────────────────────────────────────────────────────────
+// Per-UC face crop grid with a footer pager. Long-running clips on
+// busy cameras can produce hundreds of saved crops per UC — rendering
+// them all at once turns the drawer into an inline scroll wall. 24
+// tiles per page (matches the auto-fill grid's 4 × 6 layout at the
+// drawer's natural width) keeps the section navigable.
+//
+// The lightbox callback receives the index into the *full* ``ordered``
+// array (not the slice) so keyboard navigation in the lightbox
+// continues to walk every crop in the UC, not just the visible page.
+
+function PaginatedCropGrid({
+  ordered,
+  page,
+  setPage,
+  perPage,
+  clipId,
+  onOpenLightbox,
+}: {
+  ordered: FaceCropOut[];
+  page: number;
+  setPage: (p: number) => void;
+  perPage: number;
+  clipId: number;
+  onOpenLightbox: (indexInOrdered: number) => void;
+}) {
+  const totalPages = Math.max(1, Math.ceil(ordered.length / perPage));
+  // Clamp the page whenever the underlying set shrinks (re-process
+  // emptied it, focusEmployeeId narrowed it, etc.). Runs on every
+  // change to ordered.length so we never leave the operator on a
+  // stale page-3 with an empty grid.
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+    else if (page < 1) setPage(1);
+  }, [page, totalPages, setPage]);
+
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const start = (safePage - 1) * perPage;
+  const end = start + perPage;
+  const pageCrops = ordered.slice(start, end);
+
+  return (
+    <>
+      <div
+        style={{
+          padding: "12px 16px 16px",
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))",
+          gap: 10,
+        }}
+      >
+        {pageCrops.map((c, i) => (
+          <FaceCropTile
+            key={c.id}
+            clipId={clipId}
+            cropId={c.id}
+            name={c.employee_name}
+            quality={c.quality_score}
+            matched={c.employee_id !== null}
+            onClick={() => onOpenLightbox(start + i)}
+          />
+        ))}
+      </div>
+      {ordered.length > perPage && (
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            padding: "10px 16px",
+            borderTop: "1px solid var(--border)",
+            fontSize: 12,
+          }}
+        >
+          <span className="text-dim">
+            Page {safePage} of {totalPages}
+            {" · "}
+            {ordered.length.toLocaleString()} crops
+          </span>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              type="button"
+              className="btn"
+              disabled={safePage <= 1}
+              onClick={() => setPage(Math.max(1, safePage - 1))}
+              aria-label="Previous page of face crops"
+              style={{ padding: "8px 14px", fontSize: 13 }}
+            >
+              <Icon name="chevronLeft" size={14} />
+              Previous
+            </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={safePage >= totalPages}
+              onClick={() => setPage(Math.min(totalPages, safePage + 1))}
+              aria-label="Next page of face crops"
+              style={{ padding: "8px 14px", fontSize: 13 }}
+            >
+              Next
+              <Icon name="chevronRight" size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // ── UseCaseResultSection ─────────────────────────────────────────────────────
 // One dashboard-style card per UC: header strip, KPI row, crop grid.
 
@@ -6733,6 +6843,12 @@ function UseCaseResultSection({
   const meta = UC_META[useCase];
   if (!meta) return null;
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  // Per-section grid pagination — 24 tiles/page lands at 4 cols × 6
+  // rows in the default ``minmax(110px, 1fr)`` auto-fill grid, which
+  // fits the drawer without forcing a long inline scroll on clips
+  // with hundreds of saved crops (e.g. busy hallway cameras).
+  const CROPS_PER_PAGE = 24;
+  const [page, setPage] = useState<number>(1);
 
   // Resolve per-employee best confidence from match_details so the
   // lightbox can show a "match confidence" bar even though per-crop
@@ -6972,26 +7088,14 @@ function UseCaseResultSection({
       )}
 
       {!loading && ordered.length > 0 && (
-        <div
-          style={{
-            padding: "12px 16px 16px",
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))",
-            gap: 10,
-          }}
-        >
-          {ordered.map((c, i) => (
-            <FaceCropTile
-              key={c.id}
-              clipId={clipId}
-              cropId={c.id}
-              name={c.employee_name}
-              quality={c.quality_score}
-              matched={c.employee_id !== null}
-              onClick={() => setLightboxIndex(i)}
-            />
-          ))}
-        </div>
+        <PaginatedCropGrid
+          ordered={ordered}
+          page={page}
+          setPage={setPage}
+          perPage={CROPS_PER_PAGE}
+          clipId={clipId}
+          onOpenLightbox={setLightboxIndex}
+        />
       )}
 
       {/* Error */}

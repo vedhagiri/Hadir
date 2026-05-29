@@ -1207,6 +1207,13 @@ function MapToEmployeeModal({ cluster, onClose, onSuccess }: MapToEmployeeModalP
   const [workflow, setWorkflow] = useState<MapWorkflow>("reference");
   const [searchInput, setSearchInput] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
+  // Employee picker pagination. The list is server-paged so a tenant
+  // with hundreds of employees doesn't stuff the whole roster into one
+  // response; the operator pages through (or narrows via the search
+  // box). Page resets to 1 on every new query so a search never lands
+  // on a stale out-of-range page.
+  const EMP_PAGE_SIZE = 15;
+  const [empPage, setEmpPage] = useState<number>(1);
   const [selected, setSelected] = useState<Employee | null>(null);
   const [result, setResult] = useState<AnyMapResult | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -1215,6 +1222,15 @@ function MapToEmployeeModal({ cluster, onClose, onSuccess }: MapToEmployeeModalP
   // Only relevant for the Reference workflow; the Attendance workflow
   // ignores photoSelections entirely.
   const [photoSelections, setPhotoSelections] = useState<PhotoSelectionState[]>([]);
+  // Confirm-step photo grid pagination. A 100+ crop cluster renders a
+  // very tall tile grid inside the modal; 24 tiles/page (4 × 6 at the
+  // modal's natural width) keeps the confirm step compact. Selection +
+  // angle state lives on ``photoSelections`` keyed by event_id, so
+  // paging never loses a checkbox or an angle choice — the slice only
+  // affects what's *rendered*, and the "{{n}} of {{total}} selected"
+  // hint still counts across every page.
+  const CONFIRM_PHOTOS_PER_PAGE = 24;
+  const [confirmPhotoPage, setConfirmPhotoPage] = useState<number>(1);
 
   // Per-event opt-in for the Attendance workflow. The cluster /
   // bulk selection arrives with N event IDs; in the confirm step
@@ -1237,6 +1253,12 @@ function MapToEmployeeModal({ cluster, onClose, onSuccess }: MapToEmployeeModalP
     return () => clearTimeout(timer);
   }, [searchInput]);
 
+  // Reset to page 1 whenever the (debounced) query changes — a new
+  // search shouldn't inherit the previous query's page number.
+  useEffect(() => {
+    setEmpPage(1);
+  }, [debouncedQ]);
+
   // Auto-focus search input when modal opens
   useEffect(() => {
     setTimeout(() => searchRef.current?.focus(), 60);
@@ -1246,10 +1268,12 @@ function MapToEmployeeModal({ cluster, onClose, onSuccess }: MapToEmployeeModalP
     q: debouncedQ,
     department_id: null,
     include_inactive: false,
-    page: 1,
-    page_size: 15,
+    page: empPage,
+    page_size: EMP_PAGE_SIZE,
   };
   const empSearch = useEmployeeList(empFilters);
+  const empTotal = empSearch.data?.total ?? 0;
+  const empTotalPages = Math.max(1, Math.ceil(empTotal / EMP_PAGE_SIZE));
 
   const enterConfirm = (emp: Employee) => {
     setSelected(emp);
@@ -1266,6 +1290,8 @@ function MapToEmployeeModal({ cluster, onClose, onSuccess }: MapToEmployeeModalP
     // deselect outliers (events that don't actually belong to this
     // employee) before confirming.
     setAttendanceSelection(new Set(cluster.event_ids));
+    // Always open the confirm photo grid on page 1.
+    setConfirmPhotoPage(1);
     setStep("confirm");
   };
 
@@ -1659,6 +1685,68 @@ function MapToEmployeeModal({ cluster, onClose, onSuccess }: MapToEmployeeModalP
                   </button>
                 ))}
               </div>
+              {/* Employee picker pager — only when the result set spans
+                  more than one page. The scrollable list above shows
+                  one page (EMP_PAGE_SIZE rows); these controls walk the
+                  full roster without forcing the operator to refine the
+                  search. */}
+              {!empSearch.isLoading && empTotal > EMP_PAGE_SIZE && (
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "10px 12px",
+                    borderTop: "1px solid var(--border)",
+                    fontSize: 12,
+                    flexShrink: 0,
+                  }}
+                >
+                  <span className="text-dim">
+                    {t("common.pageOf", "Page {{page}} of {{total}}", {
+                      page: empPage,
+                      total: empTotalPages,
+                    })}
+                    {" · "}
+                    {empTotal.toLocaleString()}{" "}
+                    {empTotal === 1
+                      ? t("unidentifiedFaces.mapModal.employee", "employee")
+                      : t("unidentifiedFaces.mapModal.employees", "employees")}
+                  </span>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={empPage <= 1 || empSearch.isFetching}
+                      onClick={() => setEmpPage((p) => Math.max(1, p - 1))}
+                      aria-label={t(
+                        "unidentifiedFaces.mapModal.prevEmployeePage",
+                        "Previous page of employees",
+                      )}
+                      style={{ padding: "7px 12px", fontSize: 12.5 }}
+                    >
+                      <Icon name="chevronLeft" size={13} />
+                      {t("common.previous", "Previous")}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={empPage >= empTotalPages || empSearch.isFetching}
+                      onClick={() =>
+                        setEmpPage((p) => Math.min(empTotalPages, p + 1))
+                      }
+                      aria-label={t(
+                        "unidentifiedFaces.mapModal.nextEmployeePage",
+                        "Next page of employees",
+                      )}
+                      style={{ padding: "7px 12px", fontSize: 12.5 }}
+                    >
+                      {t("common.next", "Next")}
+                      <Icon name="chevronRight" size={13} />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1702,87 +1790,169 @@ function MapToEmployeeModal({ cluster, onClose, onSuccess }: MapToEmployeeModalP
                         })}
                       </span>
                     </div>
-                    <div style={{
-                      display: "grid",
-                      gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))",
-                      gap: 8,
-                      marginBottom: 16,
-                    }}>
-                      {photoSelections.map((ps) => (
-                        <div
-                          key={ps.event_id}
-                          style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: 4,
-                            opacity: ps.selected ? 1 : 0.45,
-                            transition: "opacity 0.15s",
-                          }}
-                        >
-                          {/* thumbnail with checkbox overlay */}
-                          <div
-                            style={{ position: "relative", cursor: "pointer" }}
-                            onClick={() => togglePhoto(ps.event_id)}
-                          >
-                            <img
-                              src={`/api/detection-events/${ps.event_id}/crop`}
-                              alt=""
-                              loading="lazy"
-                              decoding="async"
-                              style={{
-                                width: "100%",
-                                aspectRatio: "1",
-                                objectFit: "cover",
-                                display: "block",
-                                borderRadius: "var(--radius-sm)",
-                                border: ps.selected
-                                  ? "2px solid var(--accent)"
-                                  : "2px solid var(--border)",
-                              }}
-                            />
-                            <div style={{
-                              position: "absolute",
-                              top: 4,
-                              insetInlineEnd: 4,
-                              width: 16,
-                              height: 16,
-                              borderRadius: 3,
-                              background: ps.selected ? "var(--accent)" : "rgba(0,0,0,0.5)",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              transition: "background 0.1s",
-                            }}>
-                              {ps.selected && (
-                                <Icon name="check" size={10} style={{ color: "#fff" }} />
-                              )}
-                            </div>
+                    {(() => {
+                      const photoTotalPages = Math.max(
+                        1,
+                        Math.ceil(
+                          photoSelections.length / CONFIRM_PHOTOS_PER_PAGE,
+                        ),
+                      );
+                      const safePage = Math.min(
+                        Math.max(1, confirmPhotoPage),
+                        photoTotalPages,
+                      );
+                      const start = (safePage - 1) * CONFIRM_PHOTOS_PER_PAGE;
+                      const pagePhotos = photoSelections.slice(
+                        start,
+                        start + CONFIRM_PHOTOS_PER_PAGE,
+                      );
+                      return (
+                        <>
+                          <div style={{
+                            display: "grid",
+                            gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))",
+                            gap: 8,
+                            marginBottom: 16,
+                          }}>
+                            {pagePhotos.map((ps) => (
+                              <div
+                                key={ps.event_id}
+                                style={{
+                                  display: "flex",
+                                  flexDirection: "column",
+                                  gap: 4,
+                                  opacity: ps.selected ? 1 : 0.45,
+                                  transition: "opacity 0.15s",
+                                }}
+                              >
+                                {/* thumbnail with checkbox overlay */}
+                                <div
+                                  style={{ position: "relative", cursor: "pointer" }}
+                                  onClick={() => togglePhoto(ps.event_id)}
+                                >
+                                  <img
+                                    src={`/api/detection-events/${ps.event_id}/crop`}
+                                    alt=""
+                                    loading="lazy"
+                                    decoding="async"
+                                    style={{
+                                      width: "100%",
+                                      aspectRatio: "1",
+                                      objectFit: "cover",
+                                      display: "block",
+                                      borderRadius: "var(--radius-sm)",
+                                      border: ps.selected
+                                        ? "2px solid var(--accent)"
+                                        : "2px solid var(--border)",
+                                    }}
+                                  />
+                                  <div style={{
+                                    position: "absolute",
+                                    top: 4,
+                                    insetInlineEnd: 4,
+                                    width: 16,
+                                    height: 16,
+                                    borderRadius: 3,
+                                    background: ps.selected ? "var(--accent)" : "rgba(0,0,0,0.5)",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    transition: "background 0.1s",
+                                  }}>
+                                    {ps.selected && (
+                                      <Icon name="check" size={10} style={{ color: "#fff" }} />
+                                    )}
+                                  </div>
+                                </div>
+                                {/* angle selector — only when selected */}
+                                {ps.selected && (
+                                  <select
+                                    value={ps.angle}
+                                    onChange={(e) => setPhotoAngle(ps.event_id, e.target.value as MapAngle)}
+                                    aria-label={t("unidentifiedFaces.mapModal.angle", "Photo angle")}
+                                    style={{
+                                      fontSize: 11,
+                                      padding: "2px 4px",
+                                      border: "1px solid var(--border)",
+                                      borderRadius: 3,
+                                      background: "var(--bg-elev)",
+                                      color: "var(--text)",
+                                      fontFamily: "var(--font-sans)",
+                                      width: "100%",
+                                    }}
+                                  >
+                                    {ANGLES.map((a) => (
+                                      <option key={a} value={a}>{ANGLE_LABELS[a]}</option>
+                                    ))}
+                                  </select>
+                                )}
+                              </div>
+                            ))}
                           </div>
-                          {/* angle selector — only when selected */}
-                          {ps.selected && (
-                            <select
-                              value={ps.angle}
-                              onChange={(e) => setPhotoAngle(ps.event_id, e.target.value as MapAngle)}
-                              aria-label={t("unidentifiedFaces.mapModal.angle", "Photo angle")}
+                          {photoSelections.length > CONFIRM_PHOTOS_PER_PAGE && (
+                            <div
                               style={{
-                                fontSize: 11,
-                                padding: "2px 4px",
-                                border: "1px solid var(--border)",
-                                borderRadius: 3,
-                                background: "var(--bg-elev)",
-                                color: "var(--text)",
-                                fontFamily: "var(--font-sans)",
-                                width: "100%",
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                                marginBottom: 16,
+                                paddingTop: 10,
+                                borderTop: "1px solid var(--border)",
+                                fontSize: 12,
                               }}
                             >
-                              {ANGLES.map((a) => (
-                                <option key={a} value={a}>{ANGLE_LABELS[a]}</option>
-                              ))}
-                            </select>
+                              <span className="text-dim">
+                                {t("common.pageOf", "Page {{page}} of {{total}}", {
+                                  page: safePage,
+                                  total: photoTotalPages,
+                                })}
+                                {" · "}
+                                {photoSelections.length.toLocaleString()}{" "}
+                                {photoSelections.length === 1
+                                  ? t("unidentifiedFaces.mapModal.photo", "photo")
+                                  : t("unidentifiedFaces.mapModal.photos", "photos")}
+                              </span>
+                              <div style={{ display: "flex", gap: 8 }}>
+                                <button
+                                  type="button"
+                                  className="btn"
+                                  disabled={safePage <= 1}
+                                  onClick={() =>
+                                    setConfirmPhotoPage(Math.max(1, safePage - 1))
+                                  }
+                                  aria-label={t(
+                                    "unidentifiedFaces.mapModal.prevPhotoPage",
+                                    "Previous page of photos",
+                                  )}
+                                  style={{ padding: "7px 12px", fontSize: 12.5 }}
+                                >
+                                  <Icon name="chevronLeft" size={13} />
+                                  {t("common.previous", "Previous")}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn"
+                                  disabled={safePage >= photoTotalPages}
+                                  onClick={() =>
+                                    setConfirmPhotoPage(
+                                      Math.min(photoTotalPages, safePage + 1),
+                                    )
+                                  }
+                                  aria-label={t(
+                                    "unidentifiedFaces.mapModal.nextPhotoPage",
+                                    "Next page of photos",
+                                  )}
+                                  style={{ padding: "7px 12px", fontSize: 12.5 }}
+                                >
+                                  {t("common.next", "Next")}
+                                  <Icon name="chevronRight" size={13} />
+                                </button>
+                              </div>
+                            </div>
                           )}
-                        </div>
-                      ))}
-                    </div>
+                        </>
+                      );
+                    })()}
                   </>
                 )
                 )}
@@ -3225,6 +3395,14 @@ function ClusterDrawer({ cluster, onClose }: ClusterDrawerProps) {
   const [simMode, setSimMode] = useState<"gte" | "eq">("gte");
   const [qualityFilter, setQualityFilter] = useState<QualityFilter>("all");
   const [clarityFilter, setClarityFilter] = useState<ClarityFilter>("all");
+  // Similar Faces grid pagination — 24 tiles/page matches the
+  // ``repeat(4, ...)`` × 6 rows layout the drawer already uses, so a
+  // page is exactly one screenful at the drawer's natural width.
+  // Long clusters (a single person walking past the camera for an
+  // hour) routinely hit hundreds of crops; rendering them all at
+  // once forces the operator into a long inline scroll.
+  const SIMILAR_FACES_PER_PAGE = 24;
+  const [similarFacesPage, setSimilarFacesPage] = useState<number>(1);
 
   const events = useClusterEvents(cluster.event_ids.slice(0, 100), true);
 
@@ -3279,6 +3457,34 @@ function ClusterDrawer({ cluster, onClose }: ClusterDrawerProps) {
     if (clarityFilter !== "all" && clarityOf(meta.quality, meta.faceType) !== clarityFilter) return false;
     return true;
   });
+
+  // Similar Faces pagination. Pages flip independently of the
+  // filter row above, but any filter change shrinks the set — so
+  // clamp the page back in range whenever ``filteredCropIds.length``
+  // moves. Without this the operator can be left staring at an empty
+  // page-5 after tightening a filter.
+  const similarFacesTotalPages = Math.max(
+    1,
+    Math.ceil(filteredCropIds.length / SIMILAR_FACES_PER_PAGE),
+  );
+  useEffect(() => {
+    if (similarFacesPage > similarFacesTotalPages) {
+      setSimilarFacesPage(similarFacesTotalPages);
+    } else if (similarFacesPage < 1) {
+      setSimilarFacesPage(1);
+    }
+  }, [similarFacesPage, similarFacesTotalPages]);
+  const similarFacesSafePage = Math.min(
+    Math.max(1, similarFacesPage),
+    similarFacesTotalPages,
+  );
+  const similarFacesStart =
+    (similarFacesSafePage - 1) * SIMILAR_FACES_PER_PAGE;
+  const similarFacesEnd = similarFacesStart + SIMILAR_FACES_PER_PAGE;
+  const pageCropIds = filteredCropIds.slice(
+    similarFacesStart,
+    similarFacesEnd,
+  );
 
   // Actual similarity range across the cluster's crop events — surfaces in
   // the filter UI so the operator knows what number will actually filter.
@@ -3614,77 +3820,145 @@ function ClusterDrawer({ cluster, onClose }: ClusterDrawerProps) {
                 {t("unidentifiedFaces.noCrops", "No face crops in this cluster.")}
               </div>
             ) : (
-              <div style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-                gap: 10,
-              }}>
-                {filteredCropIds.map((id) => {
-                  const isRef = id === cluster.representative_event_id;
-                  const meta = metaByEvent.get(id);
-                  const pct = meta ? Math.round(meta.similarity * 100) : 0;
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => setGalleryEventId(id)}
-                      aria-label={t("unidentifiedFaces.openPreview", "Open preview for face #{{id}}", { id })}
-                      style={{
-                        position: "relative",
-                        padding: 0,
-                        border: isRef ? "2px solid var(--accent)" : "1px solid var(--border)",
-                        borderRadius: "var(--radius-sm)",
-                        overflow: "hidden",
-                        background: "var(--bg-sunken)",
-                        cursor: "pointer",
-                        display: "block",
-                        aspectRatio: "1",
-                        transition: "transform 0.12s, box-shadow 0.12s, border-color 0.12s",
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.transform = "translateY(-1px)";
-                        e.currentTarget.style.boxShadow = "0 4px 14px rgba(0,0,0,0.12)";
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.transform = "";
-                        e.currentTarget.style.boxShadow = "";
-                      }}
-                    >
-                      <img
-                        src={`/api/detection-events/${id}/crop`}
-                        alt=""
-                        loading="lazy"
-                        decoding="async"
+              <>
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+                  gap: 10,
+                }}>
+                  {pageCropIds.map((id) => {
+                    const isRef = id === cluster.representative_event_id;
+                    const meta = metaByEvent.get(id);
+                    const pct = meta ? Math.round(meta.similarity * 100) : 0;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => setGalleryEventId(id)}
+                        aria-label={t("unidentifiedFaces.openPreview", "Open preview for face #{{id}}", { id })}
                         style={{
-                          width: "100%",
-                          height: "100%",
-                          objectFit: "cover",
+                          position: "relative",
+                          padding: 0,
+                          border: isRef ? "2px solid var(--accent)" : "1px solid var(--border)",
+                          borderRadius: "var(--radius-sm)",
+                          overflow: "hidden",
+                          background: "var(--bg-sunken)",
+                          cursor: "pointer",
                           display: "block",
+                          aspectRatio: "1",
+                          transition: "transform 0.12s, box-shadow 0.12s, border-color 0.12s",
                         }}
-                      />
-                      {/* similarity / reference overlay */}
-                      <span
-                        style={{
-                          position: "absolute",
-                          top: 6,
-                          insetInlineStart: 6,
-                          background: isRef ? "var(--accent)" : "rgba(0,0,0,0.72)",
-                          color: "#fff",
-                          fontSize: 10,
-                          fontWeight: 700,
-                          padding: "2px 7px",
-                          borderRadius: 999,
-                          letterSpacing: "0.02em",
-                          backdropFilter: "blur(4px)",
-                          WebkitBackdropFilter: "blur(4px)",
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.transform = "translateY(-1px)";
+                          e.currentTarget.style.boxShadow = "0 4px 14px rgba(0,0,0,0.12)";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.transform = "";
+                          e.currentTarget.style.boxShadow = "";
                         }}
                       >
-                        {isRef ? t("unidentifiedFaces.refShort", "REF") : `${pct}%`}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+                        <img
+                          src={`/api/detection-events/${id}/crop`}
+                          alt=""
+                          loading="lazy"
+                          decoding="async"
+                          style={{
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover",
+                            display: "block",
+                          }}
+                        />
+                        {/* similarity / reference overlay */}
+                        <span
+                          style={{
+                            position: "absolute",
+                            top: 6,
+                            insetInlineStart: 6,
+                            background: isRef ? "var(--accent)" : "rgba(0,0,0,0.72)",
+                            color: "#fff",
+                            fontSize: 10,
+                            fontWeight: 700,
+                            padding: "2px 7px",
+                            borderRadius: 999,
+                            letterSpacing: "0.02em",
+                            backdropFilter: "blur(4px)",
+                            WebkitBackdropFilter: "blur(4px)",
+                          }}
+                        >
+                          {isRef ? t("unidentifiedFaces.refShort", "REF") : `${pct}%`}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {filteredCropIds.length > SIMILAR_FACES_PER_PAGE && (
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      marginTop: 12,
+                      paddingTop: 10,
+                      borderTop: "1px solid var(--border)",
+                      fontSize: 12,
+                    }}
+                  >
+                    <span className="text-dim">
+                      {t("common.pageOf", "Page {{page}} of {{total}}", {
+                        page: similarFacesSafePage,
+                        total: similarFacesTotalPages,
+                      })}
+                      {" · "}
+                      {filteredCropIds.length.toLocaleString()}{" "}
+                      {filteredCropIds.length === 1
+                        ? t("unidentifiedFaces.face", "face")
+                        : t("unidentifiedFaces.faces", "faces")}
+                    </span>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={similarFacesSafePage <= 1}
+                        onClick={() =>
+                          setSimilarFacesPage(
+                            Math.max(1, similarFacesSafePage - 1),
+                          )
+                        }
+                        aria-label={t(
+                          "unidentifiedFaces.prevSimilarFacesPage",
+                          "Previous page of similar faces",
+                        )}
+                        style={{ padding: "8px 14px", fontSize: 13 }}
+                      >
+                        <Icon name="chevronLeft" size={14} />
+                        {t("common.previous", "Previous")}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={similarFacesSafePage >= similarFacesTotalPages}
+                        onClick={() =>
+                          setSimilarFacesPage(
+                            Math.min(
+                              similarFacesTotalPages,
+                              similarFacesSafePage + 1,
+                            ),
+                          )
+                        }
+                        aria-label={t(
+                          "unidentifiedFaces.nextSimilarFacesPage",
+                          "Next page of similar faces",
+                        )}
+                        style={{ padding: "8px 14px", fontSize: 13 }}
+                      >
+                        {t("common.next", "Next")}
+                        <Icon name="chevronRight" size={14} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
 
