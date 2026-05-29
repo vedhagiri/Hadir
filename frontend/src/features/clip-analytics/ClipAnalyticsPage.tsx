@@ -1051,6 +1051,22 @@ export function ClipAnalyticsPage() {
 
   return (
     <>
+      {/* Sticky bg cover for ``.content``'s padding-top:20px zone.
+          Without it, scrolling tbody rows briefly show through the
+          20px strip between the topbar and the sticky table thead.
+          See DailyAttendancePage.tsx for the same pattern + rationale. */}
+      <div
+        aria-hidden
+        style={{
+          position: "sticky",
+          top: -20,
+          zIndex: 25,
+          height: 0,
+          marginTop: -20,
+          paddingTop: 20,
+          background: "var(--bg)",
+        }}
+      />
       <div className="page-header">
         <div>
           <h1 className="page-title">Clip Analytics</h1>
@@ -1232,22 +1248,33 @@ export function ClipAnalyticsPage() {
           className="table"
           style={
             {
-              ["--mg-sticky-bg" as string]: "var(--bg)",
+              ["--mg-sticky-bg" as string]: "var(--bg-elev)",
             } as React.CSSProperties
           }
         >
+          {/* Sticky thead — see EmployeesPage.tsx for the full rationale.
+              ``--bg-elev`` (card surface) avoids a colour band against
+              the card while rows scroll past; zIndex 20 sits above any
+              stacking context a row introduces; the per-<th> ``inset``
+              shadow paints the divider line *inside* the cell so a
+              sub-pixel slit above the sticky can't leak content. */}
           <thead
             style={{
               position: "sticky",
               top: 0,
-              zIndex: 2,
-              background: "var(--bg)",
-              boxShadow: "0 1px 0 var(--border)",
+              zIndex: 20,
+              background: "var(--bg-elev)",
             }}
           >
             {/* Row 1 — column titles */}
             <tr>
-              <th style={{ width: 36, background: "var(--bg)" }}>
+              <th
+                style={{
+                  width: 36,
+                  background: "var(--bg-elev)",
+                  boxShadow: "inset 0 -1px 0 var(--border)",
+                }}
+              >
                 <input
                   type="checkbox"
                   checked={allOnPageSelected}
@@ -1255,30 +1282,92 @@ export function ClipAnalyticsPage() {
                   aria-label="Select all clips on this page"
                 />
               </th>
-              <th style={{ width: 70, background: "var(--bg)" }}>ID</th>
-              <th style={{ background: "var(--bg)" }}>Camera</th>
-              <th style={{ background: "var(--bg)" }}>Clip Name</th>
-              <th style={{ width: 160, background: "var(--bg)" }}>
+              <th
+                style={{
+                  width: 70,
+                  background: "var(--bg-elev)",
+                  boxShadow: "inset 0 -1px 0 var(--border)",
+                }}
+              >
+                ID
+              </th>
+              <th
+                style={{
+                  background: "var(--bg-elev)",
+                  boxShadow: "inset 0 -1px 0 var(--border)",
+                }}
+              >
+                Camera
+              </th>
+              <th
+                style={{
+                  background: "var(--bg-elev)",
+                  boxShadow: "inset 0 -1px 0 var(--border)",
+                }}
+              >
+                Clip Name
+              </th>
+              <th
+                style={{
+                  width: 160,
+                  background: "var(--bg-elev)",
+                  boxShadow: "inset 0 -1px 0 var(--border)",
+                }}
+              >
                 Start Time
               </th>
-              <th style={{ width: 160, background: "var(--bg)" }}>
+              <th
+                style={{
+                  width: 160,
+                  background: "var(--bg-elev)",
+                  boxShadow: "inset 0 -1px 0 var(--border)",
+                }}
+              >
                 End Time
               </th>
-              <th style={{ width: 90, background: "var(--bg)" }}>
+              <th
+                style={{
+                  width: 90,
+                  background: "var(--bg-elev)",
+                  boxShadow: "inset 0 -1px 0 var(--border)",
+                }}
+              >
                 Duration
               </th>
-              <th style={{ width: 90, background: "var(--bg)" }}>
+              <th
+                style={{
+                  width: 90,
+                  background: "var(--bg-elev)",
+                  boxShadow: "inset 0 -1px 0 var(--border)",
+                }}
+              >
                 File Size
               </th>
-              <th style={{ width: 140, background: "var(--bg)" }}>
+              <th
+                style={{
+                  width: 140,
+                  background: "var(--bg-elev)",
+                  boxShadow: "inset 0 -1px 0 var(--border)",
+                }}
+              >
                 Processing Status
               </th>
-              <th style={{ width: 150, background: "var(--bg)" }}>
+              <th
+                style={{
+                  width: 150,
+                  background: "var(--bg-elev)",
+                  boxShadow: "inset 0 -1px 0 var(--border)",
+                }}
+              >
                 Processed UCs
               </th>
               {showMatchResult && (
                 <th
-                  style={{ width: 200, background: "var(--bg)" }}
+                  style={{
+                    width: 200,
+                    background: "var(--bg-elev)",
+                    boxShadow: "inset 0 -1px 0 var(--border)",
+                  }}
                   title="Toggle with Ctrl + M"
                 >
                   Match Result
@@ -1288,7 +1377,8 @@ export function ClipAnalyticsPage() {
                 style={{
                   width: 60,
                   textAlign: "end",
-                  background: "var(--bg)",
+                  background: "var(--bg-elev)",
+                  boxShadow: "inset 0 -1px 0 var(--border)",
                 }}
               >
                 Actions
@@ -1296,8 +1386,18 @@ export function ClipAnalyticsPage() {
             </tr>
             {/* Row 2 — per-column filter inputs */}
             <tr>
-              <th style={{ background: "var(--bg)" }} />
-              <th style={{ background: "var(--bg)" }}>
+              <th
+                style={{
+                  background: "var(--bg-elev)",
+                  boxShadow: "inset 0 -1px 0 var(--border)",
+                }}
+              />
+              <th
+                style={{
+                  background: "var(--bg-elev)",
+                  boxShadow: "inset 0 -1px 0 var(--border)",
+                }}
+              >
                 <input
                   type="search"
                   placeholder="ID"
@@ -1307,7 +1407,12 @@ export function ClipAnalyticsPage() {
                   aria-label="Filter by clip ID"
                 />
               </th>
-              <th style={{ background: "var(--bg)" }}>
+              <th
+                style={{
+                  background: "var(--bg-elev)",
+                  boxShadow: "inset 0 -1px 0 var(--border)",
+                }}
+              >
                 <select
                   value={cameraId ?? ""}
                   onChange={(e) =>
@@ -1326,7 +1431,12 @@ export function ClipAnalyticsPage() {
                   ))}
                 </select>
               </th>
-              <th style={{ background: "var(--bg)" }}>
+              <th
+                style={{
+                  background: "var(--bg-elev)",
+                  boxShadow: "inset 0 -1px 0 var(--border)",
+                }}
+              >
                 <input
                   type="search"
                   placeholder="Search clip name"
@@ -1336,7 +1446,12 @@ export function ClipAnalyticsPage() {
                   aria-label="Filter by clip name"
                 />
               </th>
-              <th style={{ background: "var(--bg)" }}>
+              <th
+                style={{
+                  background: "var(--bg-elev)",
+                  boxShadow: "inset 0 -1px 0 var(--border)",
+                }}
+              >
                 <input
                   type="date"
                   value={startDate}
@@ -1345,7 +1460,12 @@ export function ClipAnalyticsPage() {
                   aria-label="Filter by start date"
                 />
               </th>
-              <th style={{ background: "var(--bg)" }}>
+              <th
+                style={{
+                  background: "var(--bg-elev)",
+                  boxShadow: "inset 0 -1px 0 var(--border)",
+                }}
+              >
                 <input
                   type="date"
                   value={endDate}
@@ -1354,9 +1474,24 @@ export function ClipAnalyticsPage() {
                   aria-label="Filter by end date"
                 />
               </th>
-              <th style={{ background: "var(--bg)" }} />
-              <th style={{ background: "var(--bg)" }} />
-              <th style={{ background: "var(--bg)" }}>
+              <th
+                style={{
+                  background: "var(--bg-elev)",
+                  boxShadow: "inset 0 -1px 0 var(--border)",
+                }}
+              />
+              <th
+                style={{
+                  background: "var(--bg-elev)",
+                  boxShadow: "inset 0 -1px 0 var(--border)",
+                }}
+              />
+              <th
+                style={{
+                  background: "var(--bg-elev)",
+                  boxShadow: "inset 0 -1px 0 var(--border)",
+                }}
+              >
                 <select
                   value={processingFilter}
                   onChange={(e) =>
@@ -1373,7 +1508,12 @@ export function ClipAnalyticsPage() {
                   <option value="processed">Processed</option>
                 </select>
               </th>
-              <th style={{ background: "var(--bg)" }}>
+              <th
+                style={{
+                  background: "var(--bg-elev)",
+                  boxShadow: "inset 0 -1px 0 var(--border)",
+                }}
+              >
                 <select
                   value={processedUcFilter}
                   onChange={(e) =>
@@ -1390,9 +1530,19 @@ export function ClipAnalyticsPage() {
                 </select>
               </th>
               {showMatchResult && (
-                <th style={{ background: "var(--bg)" }} />
+                <th
+                  style={{
+                    background: "var(--bg-elev)",
+                    boxShadow: "inset 0 -1px 0 var(--border)",
+                  }}
+                />
               )}
-              <th style={{ background: "var(--bg)" }} />
+              <th
+                style={{
+                  background: "var(--bg-elev)",
+                  boxShadow: "inset 0 -1px 0 var(--border)",
+                }}
+              />
             </tr>
           </thead>
           <tbody>

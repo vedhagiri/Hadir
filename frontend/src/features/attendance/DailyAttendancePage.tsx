@@ -87,7 +87,12 @@ export function DailyAttendancePage() {
     ): ResizeObserver | null => {
       if (!el) return null;
       const update = () =>
-        setH(Math.round(el.getBoundingClientRect().height));
+        // Math.ceil (not Math.round) — rounding *down* on a fractional
+        // height leaves a 1-px slit between this sticky region and the
+        // next, through which scrolling rows bleed during fast scroll.
+        // Ceiling guarantees the next layer pins at-or-below this one's
+        // bottom edge.
+        setH(Math.ceil(el.getBoundingClientRect().height));
       update();
       const ro = new ResizeObserver(update);
       ro.observe(el);
@@ -271,6 +276,26 @@ export function DailyAttendancePage() {
           Anchored at top:0 of the .content scroll container. The card
           head / anomaly / thead each pin under this with their own
           measured offsets (see ``topH``, ``cardHeadH``, ``anomalyH``). */}
+      {/* Sticky bg cover for ``.content``'s padding-top:20px zone.
+          Without this 20px strip the sticky page-header below pins at
+          the padding-edge top, leaving an open 20px gap between the
+          topbar and the wrapper where scrolling tbody rows briefly
+          show through (the bleed in the original bug screenshot).
+          ``top: -20`` + ``marginTop: -20`` aligns the sticky pin
+          with the wrapper's natural position so the cover sits at
+          y=topbar-bottom through every scroll position. */}
+      <div
+        aria-hidden
+        style={{
+          position: "sticky",
+          top: -20,
+          zIndex: 31,
+          height: 0,
+          marginTop: -20,
+          paddingTop: 20,
+          background: "var(--bg)",
+        }}
+      />
       <div
         ref={topStickyRef}
         style={{

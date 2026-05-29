@@ -679,3 +679,25 @@ input[type="radio"]:focus-visible {
   background: var(--accent-soft);
   border-color: transparent;
 }
+
+/* Thin scrollbar inside the sidebar's scrolling nav block. The
+   default UA scrollbar (~14px on WebKit, ~12px on Firefox) eats
+   visible width from the nav rows and reads as chunky against the
+   tinted sidebar surface. */
+.sidebar-nav {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+.sidebar-nav::-webkit-scrollbar {
+  width: 6px;
+}
+.sidebar-nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar-nav::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 3px;
+}
+.sidebar-nav::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
+}

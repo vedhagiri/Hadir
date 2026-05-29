@@ -194,6 +194,22 @@ export function EmployeesPage() {
 
   return (
     <>
+      {/* Sticky bg cover for ``.content``'s padding-top:20px zone.
+          Without it, scrolling tbody rows briefly show through the
+          20px strip between the topbar and the sticky table thead.
+          See DailyAttendancePage.tsx for the same pattern + rationale. */}
+      <div
+        aria-hidden
+        style={{
+          position: "sticky",
+          top: -20,
+          zIndex: 25,
+          height: 0,
+          marginTop: -20,
+          paddingTop: 20,
+          background: "var(--bg)",
+        }}
+      />
       <div className="page-header">
         <div>
           <h1 className="page-title">{t("employees.title") as string}</h1>
@@ -368,7 +384,7 @@ export function EmployeesPage() {
           className="table"
           style={
             {
-              ["--mg-sticky-bg" as string]: "var(--bg)",
+              ["--mg-sticky-bg" as string]: "var(--bg-elev)",
             } as React.CSSProperties
           }
         >
@@ -376,13 +392,25 @@ export function EmployeesPage() {
             style={{
               position: "sticky",
               top: 0,
-              zIndex: 2,
-              background: "var(--bg)",
-              boxShadow: "0 1px 0 var(--border)",
+              // zIndex bumped from 2 → 20 so any stacking context that
+              // a row introduces (badges, hover, transforms) can't
+              // composite above the sticky header. ``--bg-elev`` matches
+              // the card surface so there's no colour band as rows
+              // scroll under. Inset shadow on each <th> below keeps the
+              // divider line while masking the 1-px sub-pixel slit that
+              // box-shadow on <thead> alone leaves on some browsers.
+              zIndex: 20,
+              background: "var(--bg-elev)",
             }}
           >
             <tr>
-              <th style={{ width: 36, background: "var(--bg)" }}>
+              <th
+                style={{
+                  width: 36,
+                  background: "var(--bg-elev)",
+                  boxShadow: "inset 0 -1px 0 var(--border)",
+                }}
+              >
                 <input
                   type="checkbox"
                   checked={allOnPageSelected}
@@ -412,17 +440,29 @@ export function EmployeesPage() {
                 direction={sortDir}
                 onClick={onSortClick}
               />
-              <th style={{ background: "var(--bg)" }}>
+              <th
+                style={{
+                  background: "var(--bg-elev)",
+                  boxShadow: "inset 0 -1px 0 var(--border)",
+                }}
+              >
                 {t("employees.col.role") as string}
               </th>
-              <th style={{ width: 130, background: "var(--bg)" }}>
+              <th
+                style={{
+                  width: 130,
+                  background: "var(--bg-elev)",
+                  boxShadow: "inset 0 -1px 0 var(--border)",
+                }}
+              >
                 {t("employees.col.photos") as string}
               </th>
               <th
                 style={{
                   width: 110,
                   textAlign: "end",
-                  background: "var(--bg)",
+                  background: "var(--bg-elev)",
+                  boxShadow: "inset 0 -1px 0 var(--border)",
                 }}
               >
                 {t("employees.col.actions") as string}
@@ -690,7 +730,8 @@ function SortableHeader({
       style={{
         ...(width != null ? { width } : {}),
         // BUG-014 — opaque so sticky-thead doesn't bleed.
-        background: "var(--bg)",
+        background: "var(--bg-elev)",
+        boxShadow: "inset 0 -1px 0 var(--border)",
       }}
     >
       <button
