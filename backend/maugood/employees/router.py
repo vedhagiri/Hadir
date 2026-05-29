@@ -1022,6 +1022,38 @@ def _resolve_self_employee_id(
     return int(row.id)
 
 
+def _validate_reference_image(
+    engine,  # type: ignore[no-untyped-def]
+    scope: TenantScope,
+    employee_id: int,
+    data: bytes,
+    current_count: int,
+    seen_hashes: set[str],
+) -> tuple[bool, str, str]:
+    """Shared count / type / size / duplicate gate for every reference-image
+    upload path (drawer, bulk, self-upload).
+
+    Returns ``(ok, content_sha256, reason)``. When ``ok`` is False,
+    ``reason`` is the operator-facing message (surfaced verbatim in the
+    rejection list) and ``content_sha256`` is empty. Order is
+    cheapest-first: count → empty/size/type → duplicate.
+    """
+
+    if current_count >= photos_io.MAX_REFERENCE_PHOTOS_PER_EMPLOYEE:
+        return False, "", photos_io.MSG_MAX_PHOTOS
+    try:
+        photos_io.validate_image_bytes(data)
+    except photos_io.PhotoValidationError as exc:
+        return False, "", str(exc)
+    sha = photos_io.content_sha256(data)
+    if sha in seen_hashes:
+        return False, "", photos_io.MSG_DUPLICATE
+    with engine.begin() as conn:
+        if photos_io.photo_hash_exists(conn, scope, employee_id, sha):
+            return False, "", photos_io.MSG_DUPLICATE
+    return True, sha, ""
+
+
 @router.get("/me/photos", response_model=PhotoListOut)
 def list_my_photos_endpoint(
     user: Annotated[CurrentUser, Depends(current_user)],
@@ -1074,13 +1106,19 @@ async def upload_my_photo_endpoint(
     accepted: list[PhotoIngestAccepted] = []
     rejected: list[PhotoIngestRejected] = []
 
+    with engine.begin() as conn:
+        current_count = photos_io.count_photos(conn, scope, emp.id)
+    seen_hashes: set[str] = set()
+
     for upload in files:
         raw_name = upload.filename or "upload.jpg"
         data = await upload.read()
-        if not data:
-            rejected.append(
-                PhotoIngestRejected(filename=raw_name, reason="empty file")
-            )
+
+        ok, sha, reason = _validate_reference_image(
+            engine, scope, emp.id, data, current_count, seen_hashes
+        )
+        if not ok:
+            rejected.append(PhotoIngestRejected(filename=raw_name, reason=reason))
             continue
 
         try:
@@ -1106,6 +1144,7 @@ async def upload_my_photo_endpoint(
                 approved_by_user_id=None,  # not approved yet
                 uploaded_by_user_id=user.id,
                 approval_status="pending",
+                content_sha256=sha,
             )
             write_audit(
                 conn,
@@ -1132,6 +1171,8 @@ async def upload_my_photo_endpoint(
                 photo_id=photo_id,
             )
         )
+        seen_hashes.add(sha)
+        current_count += 1
 
         # Pre-compute the embedding so an Admin approval is a single
         # status flip — the cache filter still keeps it dormant.
@@ -3128,6 +3169,10 @@ async def bulk_ingest_photos_endpoint(
 
     accepted: list[PhotoIngestAccepted] = []
     rejected: list[PhotoIngestRejected] = []
+    # Per-employee count + duplicate tracking — one folder dump can target
+    # many employees, each capped independently at MAX_REFERENCE_PHOTOS.
+    bulk_counts: dict[int, int] = {}
+    bulk_seen: dict[int, set[str]] = {}
 
     for upload in files:
         raw_name = upload.filename or ""
@@ -3179,6 +3224,32 @@ async def bulk_ingest_photos_endpoint(
                 )
             continue
 
+        # Lazy-load this employee's current photo count on first sight.
+        if emp.id not in bulk_counts:
+            with engine.begin() as conn:
+                bulk_counts[emp.id] = photos_io.count_photos(conn, scope, emp.id)
+            bulk_seen[emp.id] = set()
+
+        ok, sha, reason = _validate_reference_image(
+            engine, scope, emp.id, data, bulk_counts[emp.id], bulk_seen[emp.id]
+        )
+        if not ok:
+            rejected.append(PhotoIngestRejected(filename=raw_name, reason=reason))
+            with engine.begin() as conn:
+                write_audit(
+                    conn,
+                    tenant_id=scope.tenant_id,
+                    actor_user_id=user.id,
+                    action="photo.rejected",
+                    entity_type="photo",
+                    after={
+                        "filename": raw_name,
+                        "employee_code": emp.employee_code,
+                        "reason": reason,
+                    },
+                )
+            continue
+
         try:
             file_path = photos_io.write_encrypted(
                 scope.tenant_id, emp.employee_code, parsed.angle, data
@@ -3202,6 +3273,7 @@ async def bulk_ingest_photos_endpoint(
                 # uploader and auto-approve.
                 uploaded_by_user_id=user.id,
                 approval_status="approved",
+                content_sha256=sha,
             )
             write_audit(
                 conn,
@@ -3227,6 +3299,8 @@ async def bulk_ingest_photos_endpoint(
                 photo_id=photo_id,
             )
         )
+        bulk_seen[emp.id].add(sha)
+        bulk_counts[emp.id] += 1
         # Best-effort enrollment — failures here don't fail the upload.
         # ``enroll_photo`` itself invalidates the matcher cache for the
         # affected employee on success.
@@ -3274,11 +3348,19 @@ async def upload_photos_endpoint(
     accepted: list[PhotoIngestAccepted] = []
     rejected: list[PhotoIngestRejected] = []
 
+    with engine.begin() as conn:
+        current_count = photos_io.count_photos(conn, scope, emp.id)
+    seen_hashes: set[str] = set()
+
     for upload in files:
         raw_name = upload.filename or "upload.jpg"
         data = await upload.read()
-        if not data:
-            rejected.append(PhotoIngestRejected(filename=raw_name, reason="empty file"))
+
+        ok, sha, reason = _validate_reference_image(
+            engine, scope, emp.id, data, current_count, seen_hashes
+        )
+        if not ok:
+            rejected.append(PhotoIngestRejected(filename=raw_name, reason=reason))
             continue
 
         try:
@@ -3302,6 +3384,7 @@ async def upload_photos_endpoint(
                 approved_by_user_id=user.id,
                 uploaded_by_user_id=user.id,
                 approval_status="approved",
+                content_sha256=sha,
             )
             write_audit(
                 conn,
@@ -3318,6 +3401,8 @@ async def upload_photos_endpoint(
                     "filename": raw_name,
                 },
             )
+        seen_hashes.add(sha)
+        current_count += 1
 
         accepted.append(
             PhotoIngestAccepted(

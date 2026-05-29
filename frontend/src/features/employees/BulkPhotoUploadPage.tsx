@@ -8,6 +8,8 @@ import { Link } from "react-router-dom";
 
 import { api } from "../../api/client";
 import { Icon } from "../../shell/Icon";
+import { toast } from "../../shell/Toaster";
+import { validatePhotoFilesBasic } from "../../util/photoValidation";
 import { useBulkIngestPhotos } from "./hooks";
 import type { Employee, EmployeeListResponse, PhotoAngle, PhotoIngestResult } from "./types";
 
@@ -195,8 +197,12 @@ function UploadPhase({
   const inputRef = useRef<HTMLInputElement>(null);
 
   const accept = (list: FileList | File[]) => {
-    const arr = Array.from(list).filter((f) => ACCEPTED_EXTS.test(f.name));
-    onAdd(arr);
+    // Type + size validation, shared with every other upload path. The
+    // per-employee count cap is enforced on the backend (one batch maps
+    // to many employees by filename).
+    const { valid, errors } = validatePhotoFilesBasic(Array.from(list));
+    for (const msg of errors) toast.error(msg);
+    if (valid.length > 0) onAdd(valid);
   };
 
   const invalidCount = files.filter((f) => parseFilename(f.name).error !== null).length;

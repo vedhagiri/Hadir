@@ -15,6 +15,7 @@ path itself isn't sensitive — only the contents are).
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import uuid
@@ -23,7 +24,7 @@ from pathlib import Path
 from typing import Optional
 
 from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy import delete, insert, select
+from sqlalchemy import delete, func, insert, select
 from sqlalchemy.engine import Connection
 
 from maugood.config import get_settings
@@ -34,6 +35,47 @@ logger = logging.getLogger(__name__)
 
 ALLOWED_ANGLES: tuple[str, ...] = ("front", "left", "right", "other")
 DEFAULT_ANGLE: str = "front"
+
+# --- Reference-image validation (shared across every upload path) ----------
+# Every entry point that adds a reference image to an employee — the
+# Admin/HR drawer upload, the bulk folder dump, the employee self-upload,
+# and the "map unidentified face → reference" copy — funnels through these
+# rules. Keep the messages in sync with ``frontend/src/util/photoValidation.ts``.
+
+# At most this many reference images per employee.
+MAX_REFERENCE_PHOTOS_PER_EMPLOYEE: int = 10
+
+# Allowed image types, enforced by magic-byte sniff (not extension).
+ALLOWED_PHOTO_EXTS: tuple[str, ...] = ("jpg", "jpeg", "png", "webp")
+
+MSG_MAX_PHOTOS: str = (
+    f"Maximum {MAX_REFERENCE_PHOTOS_PER_EMPLOYEE} reference images are "
+    "allowed per employee. Please remove an existing image before "
+    "uploading a new one."
+)
+MSG_BAD_TYPE: str = (
+    "Invalid file type. Only JPG, JPEG, PNG, and WEBP images are allowed."
+)
+MSG_DUPLICATE: str = (
+    "This image has already been uploaded for this employee."
+)
+MSG_EMPTY: str = "empty file"
+
+
+def msg_too_large(max_mb: int) -> str:
+    return f"File size exceeds the maximum allowed limit of {max_mb} MB."
+
+
+def photo_max_bytes() -> int:
+    """Per-file size cap in bytes, from ``MAUGOOD_EMPLOYEE_PHOTO_MAX_MB``."""
+
+    return int(get_settings().employee_photo_max_mb) * 1024 * 1024
+
+
+class PhotoValidationError(ValueError):
+    """Raised when a reference image fails validation. ``message`` is the
+    operator-facing reason (surfaced verbatim in the rejection list / as
+    an HTTP 400 detail) — never carries PII or a filesystem path."""
 
 # Filenames on disk are UUIDs we generate — we don't echo the operator's
 # filename to disk because (a) it could contain path traversal, and (b)
@@ -80,6 +122,82 @@ def decrypt_bytes(cipher: bytes) -> bytes:
         raise RuntimeError(
             "stored photo could not be decrypted — key rotated?"
         ) from exc
+
+
+# --- Image validation -------------------------------------------------------
+
+
+def sniff_image_ext(data: bytes) -> Optional[str]:
+    """Return the image type ('jpg' | 'png' | 'webp') from magic bytes,
+    or ``None`` when the bytes aren't an allowed image. Extension and
+    declared content-type are never trusted — only the bytes."""
+
+    if data.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    return None
+
+
+def content_sha256(data: bytes) -> str:
+    """SHA-256 of the *plaintext* image bytes — the duplicate key. Computed
+    on the decrypted content so the same picture dedupes regardless of the
+    Fernet nonce (every encryption produces different ciphertext)."""
+
+    return hashlib.sha256(data).hexdigest()
+
+
+def validate_image_bytes(data: bytes, *, max_bytes: Optional[int] = None) -> str:
+    """Validate one reference image's raw bytes. Returns the sniffed type
+    on success; raises ``PhotoValidationError`` (with an operator-facing
+    message) otherwise. Order is cheapest-first: empty → size → type."""
+
+    if not data:
+        raise PhotoValidationError(MSG_EMPTY)
+    cap = max_bytes if max_bytes is not None else photo_max_bytes()
+    if len(data) > cap:
+        raise PhotoValidationError(msg_too_large(cap // (1024 * 1024)))
+    ext = sniff_image_ext(data)
+    if ext is None:
+        raise PhotoValidationError(MSG_BAD_TYPE)
+    return ext
+
+
+def count_photos(conn: Connection, scope: TenantScope, employee_id: int) -> int:
+    """Current number of reference photos for an employee (all statuses)."""
+
+    return int(
+        conn.execute(
+            select(func.count())
+            .select_from(employee_photos)
+            .where(
+                employee_photos.c.tenant_id == scope.tenant_id,
+                employee_photos.c.employee_id == employee_id,
+            )
+        ).scalar_one()
+    )
+
+
+def photo_hash_exists(
+    conn: Connection, scope: TenantScope, employee_id: int, sha256: str
+) -> bool:
+    """True when a reference photo with this content hash already exists
+    for the employee — the duplicate-upload guard."""
+
+    return (
+        conn.execute(
+            select(employee_photos.c.id)
+            .where(
+                employee_photos.c.tenant_id == scope.tenant_id,
+                employee_photos.c.employee_id == employee_id,
+                employee_photos.c.content_sha256 == sha256,
+            )
+            .limit(1)
+        ).first()
+        is not None
+    )
 
 
 # --- Filename parsing -------------------------------------------------------
@@ -171,6 +289,7 @@ def create_photo_row(
     approved_by_user_id: Optional[int],
     uploaded_by_user_id: Optional[int] = None,
     approval_status: str = "approved",
+    content_sha256: Optional[str] = None,
 ) -> int:
     """Insert an ``employee_photos`` row.
 
@@ -179,10 +298,9 @@ def create_photo_row(
     ``approval_status`` defaults to 'approved' for the historic
     Admin/HR ingest path; the Employee self-upload route passes
     'pending' so the matcher cache ignores it until an Admin/HR
-    flips it via the approval queue.
+    flips it via the approval queue. ``content_sha256`` (migration
+    0070) is the plaintext-content hash used for duplicate detection.
     """
-
-    from sqlalchemy import func  # local import keeps this module light
 
     new_id = conn.execute(
         insert(employee_photos)
@@ -195,6 +313,7 @@ def create_photo_row(
             approved_at=func.now() if approved_by_user_id is not None else None,
             uploaded_by_user_id=uploaded_by_user_id,
             approval_status=approval_status,
+            content_sha256=content_sha256,
         )
         .returning(employee_photos.c.id)
     ).scalar_one()

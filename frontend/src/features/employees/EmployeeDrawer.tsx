@@ -30,6 +30,7 @@ import { DatePicker } from "../../components/DatePicker";
 import { DrawerShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
 import { toast } from "../../shell/Toaster";
+import { validateReferencePhotos } from "../../util/photoValidation";
 import { useDepartments } from "../departments/hooks";
 import { useDivisions } from "../divisions/hooks";
 import { useSections } from "../sections/hooks";
@@ -1506,20 +1507,30 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
 
                 <input
                   type="file"
-                  accept="image/*"
+                  accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
                   multiple
                   disabled={upload.isPending}
                   onChange={(e) => {
-                    const files = Array.from(e.target.files ?? []);
-                    if (files.length > 0) {
+                    const picked = Array.from(e.target.files ?? []);
+                    // Reset the input so re-selecting the same file
+                    // re-triggers onChange.
+                    e.target.value = "";
+                    if (picked.length === 0) return;
+                    const currentCount =
+                      photos.data?.items.length ??
+                      detail.data?.photo_count ??
+                      0;
+                    const { valid, errors } = validateReferencePhotos(
+                      picked,
+                      currentCount,
+                    );
+                    for (const msg of errors) toast.error(msg);
+                    if (valid.length > 0) {
                       upload.mutate({
                         employeeId: employeeId!,
-                        files,
+                        files: valid,
                         angle: photoAngle,
                       });
-                      // Reset the input so re-selecting the same file
-                      // re-triggers onChange.
-                      e.target.value = "";
                     }
                   }}
                   style={{

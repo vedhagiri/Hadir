@@ -17,6 +17,11 @@ import { useTranslation } from "react-i18next";
 import { DatePicker } from "../../components/DatePicker";
 import { Icon } from "../../shell/Icon";
 import { useTenantDateTime } from "../../util/datetime";
+import {
+  MAX_REFERENCE_PHOTOS,
+  PHOTO_MESSAGES,
+  referencePhotosRemaining,
+} from "../../util/photoValidation";
 import type { EmployeeListFilters } from "../employees/hooks";
 import { useEmployeeList } from "../employees/hooks";
 import type { Employee } from "../employees/types";
@@ -1309,8 +1314,18 @@ function MapToEmployeeModal({ cluster, onClose, onSuccess }: MapToEmployeeModalP
 
   const selectedPhotos = photoSelections.filter((p) => p.selected);
 
+  // Reference-image count cap (shared rule). The employee already has
+  // ``photo_count`` reference photos; this batch can only fill the
+  // remaining slots up to MAX_REFERENCE_PHOTOS. Backend re-enforces.
+  const refRemaining = selected
+    ? referencePhotosRemaining(selected.photo_count ?? 0)
+    : MAX_REFERENCE_PHOTOS;
+  const refOverLimit =
+    workflow === "reference" && selectedPhotos.length > refRemaining;
+
   const handleConfirm = async () => {
     if (!selected) return;
+    if (refOverLimit) return; // guarded; the button is disabled too
     try {
       if (workflow === "reference") {
         const photoAssignments: PhotoAssignment[] = selectedPhotos.map((p) => ({
@@ -1789,7 +1804,26 @@ function MapToEmployeeModal({ cluster, onClose, onSuccess }: MapToEmployeeModalP
                           total: photoSelections.length,
                         })}
                       </span>
+                      <span style={{ fontWeight: 400, marginInlineStart: 6, fontSize: 11, color: "var(--text-tertiary)" }}>
+                        ({refRemaining} of {MAX_REFERENCE_PHOTOS} slots free)
+                      </span>
                     </div>
+                    {refOverLimit && (
+                      <div
+                        role="alert"
+                        style={{
+                          background: "var(--danger-soft)",
+                          color: "var(--danger-text)",
+                          border: "1px solid var(--border)",
+                          padding: "8px 10px",
+                          borderRadius: "var(--radius-sm)",
+                          fontSize: 12,
+                          marginBottom: 10,
+                        }}
+                      >
+                        {PHOTO_MESSAGES.maxImages}
+                      </div>
+                    )}
                     {(() => {
                       const photoTotalPages = Math.max(
                         1,
@@ -2279,6 +2313,9 @@ function MapToEmployeeModal({ cluster, onClose, onSuccess }: MapToEmployeeModalP
                       || cluster.event_ids.filter((id) => attendanceSelection.has(id)).length
                           > MAX_EVENTS_PER_REQUEST
                     ))
+                    // Reference workflow can't push the employee past
+                    // the per-employee reference-image cap.
+                    || refOverLimit
                   }
                 >
                   {mapMutation.isPending

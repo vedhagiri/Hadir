@@ -88,6 +88,15 @@ _JPEG_BYTES = bytes.fromhex(
 )
 
 
+def _jpeg_variant(tag: int) -> bytes:
+    """A distinct-content JPEG. Trailing bytes after the EOI marker are
+    ignored by decoders but change the SHA-256, so two variants don't trip
+    the per-employee duplicate guard. Still starts with the JPEG magic so
+    the type sniff passes."""
+
+    return _JPEG_BYTES + tag.to_bytes(2, "big")
+
+
 # ---------------------------------------------------------------------------
 # Bulk folder-dump ingest
 # ---------------------------------------------------------------------------
@@ -101,14 +110,14 @@ def test_bulk_ingest_honours_filename_convention(
     _seed_three(client)
 
     files = [
-        ("files", ("OM0098.jpg", _JPEG_BYTES, "image/jpeg")),        # unlabelled → front
-        ("files", ("OM0098_left.jpg", _JPEG_BYTES, "image/jpeg")),
-        ("files", ("OM0099_front.jpg", _JPEG_BYTES, "image/jpeg")),
-        ("files", ("OM0099_right.jpg", _JPEG_BYTES, "image/jpeg")),
-        ("files", ("OM9999_front.jpg", _JPEG_BYTES, "image/jpeg")),  # unknown employee
+        ("files", ("OM0098.jpg", _jpeg_variant(1), "image/jpeg")),        # unlabelled → front
+        ("files", ("OM0098_left.jpg", _jpeg_variant(2), "image/jpeg")),
+        ("files", ("OM0099_front.jpg", _jpeg_variant(3), "image/jpeg")),
+        ("files", ("OM0099_right.jpg", _jpeg_variant(4), "image/jpeg")),
+        ("files", ("OM9999_front.jpg", _jpeg_variant(5), "image/jpeg")),  # unknown employee
         # `!@#$.jpg` is malformed — the filename parser rejects it outright
         # before we even try to look up an employee.
-        ("files", ("!@#$.jpg", _JPEG_BYTES, "image/jpeg")),
+        ("files", ("!@#$.jpg", _jpeg_variant(6), "image/jpeg")),
     ]
     resp = client.post("/api/employees/photos/bulk", files=files)
     assert resp.status_code == 200, resp.text
@@ -224,8 +233,8 @@ def test_drawer_upload_and_photo_count_updates(
     assert detail["photo_count"] == 0
 
     files = [
-        ("files", ("a.jpg", _JPEG_BYTES, "image/jpeg")),
-        ("files", ("b.jpg", _JPEG_BYTES, "image/jpeg")),
+        ("files", ("a.jpg", _jpeg_variant(1), "image/jpeg")),
+        ("files", ("b.jpg", _jpeg_variant(2), "image/jpeg")),
     ]
     resp = client.post(
         f"/api/employees/{emp_id}/photos", files=files, data={"angle": "left"}
@@ -252,3 +261,87 @@ def test_employee_role_cannot_ingest_photos(
     _login(client, employee_user)
     files = [("files", ("OM0098.jpg", _JPEG_BYTES, "image/jpeg"))]
     assert client.post("/api/employees/photos/bulk", files=files).status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Reference-image validation: type, duplicate, max-count
+# ---------------------------------------------------------------------------
+
+
+def _om0100_id(client: TestClient) -> int:
+    return next(
+        e["id"] for e in client.get("/api/employees?q=OM0100").json()["items"]
+    )
+
+
+@pytest.mark.usefixtures("clean_employees", "clean_faces_dir")
+def test_rejects_non_image_file_type(
+    client: TestClient, admin_user: dict
+) -> None:
+    _login(client, admin_user)
+    _seed_three(client)
+    emp_id = _om0100_id(client)
+
+    # Bytes claim image/jpeg but are actually a PDF — the magic-byte
+    # sniff catches the lie regardless of the declared content-type.
+    files = [("files", ("fake.jpg", b"%PDF-1.4 not an image", "image/jpeg"))]
+    body = client.post(
+        f"/api/employees/{emp_id}/photos", files=files, data={"angle": "front"}
+    ).json()
+    assert len(body["accepted"]) == 0
+    assert len(body["rejected"]) == 1
+    assert "Only JPG, JPEG, PNG, and WEBP" in body["rejected"][0]["reason"]
+
+
+@pytest.mark.usefixtures("clean_employees", "clean_faces_dir")
+def test_rejects_duplicate_content(
+    client: TestClient, admin_user: dict
+) -> None:
+    _login(client, admin_user)
+    _seed_three(client)
+    emp_id = _om0100_id(client)
+    dup = _jpeg_variant(42)
+
+    r1 = client.post(
+        f"/api/employees/{emp_id}/photos",
+        files=[("files", ("x.jpg", dup, "image/jpeg"))],
+        data={"angle": "front"},
+    ).json()
+    assert len(r1["accepted"]) == 1
+
+    # Same content, different filename + angle → duplicate.
+    r2 = client.post(
+        f"/api/employees/{emp_id}/photos",
+        files=[("files", ("y.jpg", dup, "image/jpeg"))],
+        data={"angle": "left"},
+    ).json()
+    assert len(r2["accepted"]) == 0
+    assert "already been uploaded" in r2["rejected"][0]["reason"]
+
+
+@pytest.mark.usefixtures("clean_employees", "clean_faces_dir")
+def test_enforces_max_reference_photos(
+    client: TestClient, admin_user: dict
+) -> None:
+    _login(client, admin_user)
+    _seed_three(client)
+    emp_id = _om0100_id(client)
+
+    # 10 distinct images all fit.
+    files = [
+        ("files", (f"p{i}.jpg", _jpeg_variant(100 + i), "image/jpeg"))
+        for i in range(10)
+    ]
+    body = client.post(
+        f"/api/employees/{emp_id}/photos", files=files, data={"angle": "other"}
+    ).json()
+    assert len(body["accepted"]) == 10
+
+    # The 11th is rejected with the cap message.
+    body2 = client.post(
+        f"/api/employees/{emp_id}/photos",
+        files=[("files", ("p11.jpg", _jpeg_variant(999), "image/jpeg"))],
+        data={"angle": "other"},
+    ).json()
+    assert len(body2["accepted"]) == 0
+    assert "Maximum 10 reference images" in body2["rejected"][0]["reason"]

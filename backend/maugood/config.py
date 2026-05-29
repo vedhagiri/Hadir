@@ -78,6 +78,11 @@ class Settings(BaseSettings):
     # ``maugood.employees.photos``.
     faces_storage_path: str = "/data/faces"
 
+    # Per-file size cap for employee reference images, enforced on every
+    # upload path (drawer / bulk / self-upload). Shared with the frontend
+    # validator (``src/util/photoValidation.ts``).
+    employee_photo_max_mb: int = 10
+
     # --- Face identification (P9) ------------------------------------------
     # Cosine-similarity cutoff. Below this, the matcher refuses to set
     # an ``employee_id`` on the detection event — the threshold is

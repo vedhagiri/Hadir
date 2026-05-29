@@ -43,7 +43,15 @@ from sqlalchemy import and_, func, select, update
 from maugood.auth.audit import write_audit
 from maugood.auth.dependencies import CurrentUser, require_any_role
 from maugood.db import cameras, detection_events, employee_photos, employees, get_engine
-from maugood.employees.photos import create_photo_row, storage_dir
+from maugood.employees.photos import (
+    MAX_REFERENCE_PHOTOS_PER_EMPLOYEE,
+    content_sha256,
+    count_photos,
+    create_photo_row,
+    decrypt_bytes,
+    photo_hash_exists,
+    storage_dir,
+)
 from maugood.tenants.scope import TenantScope, get_tenant_scope
 from maugood.unidentified_faces.clustering import (
     DEFAULT_CLUSTER_THRESHOLD,
@@ -837,17 +845,40 @@ def map_cluster_to_employee(
         #    crop + embedding on disk.
         valid_event_map = {int(r.id): r for r in event_rows}
         photo_ids: list[int] = []
+        # Same per-employee cap + duplicate guard as the upload paths.
+        # Crops are system-generated images so type/size validation is
+        # not applicable; the count cap and content-hash dedup are.
+        current_count = count_photos(conn, scope, employee_id)
+        seen_hashes: set[str] = set()
 
         for assignment in body.photo_assignments:
             ev = valid_event_map.get(assignment.event_id)
             if ev is None or not ev.face_crop_path or not ev.embedding:
                 continue
+            if current_count >= MAX_REFERENCE_PHOTOS_PER_EMPLOYEE:
+                # Employee already at the reference-image cap — stop
+                # copying crops (events are still attributed below).
+                break
             try:
                 src = Path(str(ev.face_crop_path))
                 if not src.exists() or src.stat().st_size == 0:
                     continue
                 encrypted_bytes = src.read_bytes()
                 angle = assignment.angle
+
+                # Duplicate guard — hash the plaintext so a crop dedupes
+                # against uploaded reference images too. Best-effort: if
+                # decrypt fails the photo still stores with a null hash.
+                sha: Optional[str] = None
+                try:
+                    sha = content_sha256(decrypt_bytes(encrypted_bytes))
+                except Exception:  # noqa: BLE001
+                    sha = None
+                if sha is not None and (
+                    sha in seen_hashes
+                    or photo_hash_exists(conn, scope, employee_id, sha)
+                ):
+                    continue
 
                 directory = storage_dir(scope.tenant_id, employee_code, angle)
                 directory.mkdir(parents=True, exist_ok=True)
@@ -863,6 +894,7 @@ def map_cluster_to_employee(
                     approved_by_user_id=user.id,
                     uploaded_by_user_id=user.id,
                     approval_status="approved",
+                    content_sha256=sha,
                 )
                 # Copy encrypted embedding bytes directly — same Fernet key, no re-inference.
                 conn.execute(
@@ -874,6 +906,9 @@ def map_cluster_to_employee(
                     .values(embedding=bytes(ev.embedding))
                 )
                 photo_ids.append(photo_id)
+                if sha is not None:
+                    seen_hashes.add(sha)
+                current_count += 1
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "map_cluster: failed to copy crop for event %s: %s",

@@ -23,6 +23,7 @@ import { api, ApiError } from "../../api/client";
 import { useMe } from "../../auth/AuthProvider";
 import { Icon } from "../../shell/Icon";
 import { toast } from "../../shell/Toaster";
+import { validateReferencePhotos } from "../../util/photoValidation";
 import type { Employee, PhotoAngle } from "./types";
 
 const ANGLES: PhotoAngle[] = ["front", "left", "right", "other"];
@@ -407,11 +408,21 @@ function PhotosCard({
 
   async function onUpload(files: FileList | null) {
     if (!files || files.length === 0) return;
+    const currentCount = photos.length;
+    const { valid, errors } = validateReferencePhotos(
+      Array.from(files),
+      currentCount,
+    );
+    for (const msg of errors) toast.error(msg);
+    if (valid.length === 0) {
+      if (fileRef.current) fileRef.current.value = "";
+      return;
+    }
     setUploading(true);
     try {
       const fd = new FormData();
       fd.append("angle", angle);
-      for (const f of Array.from(files)) fd.append("files", f);
+      for (const f of valid) fd.append("files", f);
       const r = await fetch("/api/employees/me/photos", {
         method: "POST",
         credentials: "same-origin",
@@ -496,7 +507,7 @@ function PhotosCard({
           <input
             ref={fileRef}
             type="file"
-            accept="image/jpeg,image/png"
+            accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
             multiple
             style={{ display: "none" }}
             onChange={(e) => void onUpload(e.target.files)}

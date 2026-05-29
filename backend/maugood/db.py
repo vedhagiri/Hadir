@@ -1745,6 +1745,10 @@ employee_photos = Table(
     # Fernet-encrypted 512-float-32 embedding from InsightFace buffalo_l
     # recognition. Null until enrollment runs (lazy; P9).
     Column("embedding", LargeBinary, nullable=True),
+    # Migration 0070: SHA-256 of the plaintext image bytes — the
+    # duplicate-upload key. Null on legacy rows (pre-0070) and on rows
+    # whose source content couldn't be hashed.
+    Column("content_sha256", Text, nullable=True),
     CheckConstraint(
         "angle IN ('front','left','right','other')", name="ck_employee_photos_angle"
     ),
