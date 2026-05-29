@@ -1346,7 +1346,7 @@ function PolicyForm({
   const isEdit = !!initial;
   const cfg0 = initial?.config ?? {};
   const [name, setName] = useState(initial?.name ?? "");
-  const [type, setType] = useState<PolicyType>(initial?.type ?? "Fixed");
+  const [type, setType] = useState<PolicyType>(initial?.type ?? "Flex");
   const [activeFrom, setActiveFrom] = useState(
     initial?.active_from ?? new Date().toISOString().slice(0, 10),
   );
