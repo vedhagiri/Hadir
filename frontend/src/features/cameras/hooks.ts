@@ -7,6 +7,10 @@ import { api } from "../../api/client";
 import type {
   Camera,
   CameraCreateInput,
+  CameraExportFile,
+  CameraImportPreview,
+  CameraImportRequest,
+  CameraImportResult,
   CameraListResponse,
   CameraPatchInput,
 } from "./types";
@@ -70,6 +74,43 @@ export function useDeleteCamera() {
       // changes capture-manager state (workers start, stop, or
       // hot-reload). Cross-invalidate so the Worker Monitoring page
       // colours flip immediately instead of waiting on its 5 s poll.
+      qc.invalidateQueries({ queryKey: ["operations", "workers"] });
+    },
+  });
+}
+
+// ── Bulk JSON import / export ───────────────────────────────────────────────
+
+// Plain fetch (not a hook) — export is a one-shot button action. Returns
+// the parsed export file; the caller serialises it to a Blob and triggers
+// the browser download. ``ids`` omitted → every camera.
+export async function exportCameras(
+  ids?: number[],
+): Promise<CameraExportFile> {
+  const query = ids && ids.length > 0 ? `?ids=${ids.join(",")}` : "";
+  return api<CameraExportFile>(`/api/cameras/export${query}`);
+}
+
+export function usePreviewCameraImport() {
+  return useMutation({
+    mutationFn: (req: CameraImportRequest) =>
+      api<CameraImportPreview>("/api/cameras/import-preview", {
+        method: "POST",
+        body: req,
+      }),
+  });
+}
+
+export function useImportCameras() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (req: CameraImportRequest) =>
+      api<CameraImportResult>("/api/cameras/import", {
+        method: "POST",
+        body: req,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: LIST_KEY });
       qc.invalidateQueries({ queryKey: ["operations", "workers"] });
     },
   });

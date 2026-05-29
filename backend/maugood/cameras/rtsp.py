@@ -91,6 +91,25 @@ def rtsp_host(url: str) -> str:
     return host
 
 
+def canonical_stream_id(plain_url: str) -> str:
+    """Return a normalised "stream identity" for an RTSP URL — host:port
+    plus the path, lower-cased, credentials stripped. Two RTSP URLs that
+    point at the same physical stream produce the same string even if the
+    operator typed them with different usernames/passwords or
+    capitalisation. Used by the duplicate-camera check (BUG-032 / BUG-033)
+    and by the bulk import classifier.
+    """
+
+    try:
+        parts = urlparse(plain_url.strip().lower())
+    except Exception:  # noqa: BLE001
+        return plain_url.strip().lower()
+    host = parts.hostname or ""
+    port = parts.port if parts.port is not None else 554
+    path = parts.path or ""
+    return f"{host}:{port}{path}".rstrip("/")
+
+
 def parse_rtsp_url(url: str) -> RtspParts:
     """Validate + parse an RTSP URL. Raises ``ValueError`` if malformed.
 

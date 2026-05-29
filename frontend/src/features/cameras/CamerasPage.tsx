@@ -6,12 +6,19 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { extractApiError } from "../../api/client";
 import { ModalShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
 import { BrandLogo } from "./BrandLogo";
 import { CameraDrawer } from "./CameraDrawer";
+import { CameraImportModal } from "./CameraImportModal";
 import { PreviewModal } from "./PreviewModal";
-import { useCameras, useDeleteCamera, usePatchCamera } from "./hooks";
+import {
+  exportCameras,
+  useCameras,
+  useDeleteCamera,
+  usePatchCamera,
+} from "./hooks";
 import { useWorkers } from "../operations/hooks";
 import type { WorkerStats } from "../operations/types";
 import type { Camera } from "./types";
@@ -21,6 +28,13 @@ export function CamerasPage() {
   const workers = useWorkers();
   const del = useDeleteCamera();
   const patch = usePatchCamera();
+
+  // Bulk JSON import/export state.
+  const [showImport, setShowImport] = useState(false);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
   // Camera-id → worker payload, used by StatusDot so the pill reflects
   // the same real-time state the Worker Monitoring page shows
   // (status + RTSP stage), not the stale ``last_seen_at`` heuristic.
@@ -32,6 +46,46 @@ export function CamerasPage() {
   const [editTarget, setEditTarget] = useState<Camera | null>(null);
   const [previewTarget, setPreviewTarget] = useState<Camera | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Camera | null>(null);
+
+  const items = list.data?.items ?? [];
+  const allIds = items.map((c) => c.id);
+  const allSelected =
+    allIds.length > 0 && allIds.every((id) => selected.has(id));
+
+  const toggleOne = (id: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const toggleAll = () => {
+    setSelected(allSelected ? new Set() : new Set(allIds));
+  };
+
+  const doExport = async () => {
+    setExportError(null);
+    setExporting(true);
+    try {
+      const ids = selected.size > 0 ? [...selected] : undefined;
+      const data = await exportCameras(ids);
+      const blob = new Blob([JSON.stringify(data, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const stamp = data.exported_at ? data.exported_at.slice(0, 10) : "all";
+      a.download = `cameras-export-${stamp}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setExportError(extractApiError(e, "Export failed."));
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const openAdd = () => {
     setEditTarget(null);
@@ -84,12 +138,49 @@ export function CamerasPage() {
           </p>
         </div>
         <div className="page-actions">
+          <button
+            className="btn"
+            onClick={doExport}
+            disabled={exporting || items.length === 0}
+            title={
+              selected.size > 0
+                ? `Export ${selected.size} selected camera(s) to JSON`
+                : "Export all cameras to JSON"
+            }
+          >
+            <Icon name="download" size={12} />
+            {exporting
+              ? "Exporting…"
+              : selected.size > 0
+                ? `Export selected (${selected.size})`
+                : "Export all"}
+          </button>
+          <button className="btn" onClick={() => setShowImport(true)}>
+            <Icon name="upload" size={12} />
+            Import
+          </button>
           <button className="btn btn-primary" onClick={openAdd}>
             <Icon name="plus" size={12} />
             Add camera
           </button>
         </div>
       </div>
+
+      {exportError && (
+        <div
+          role="alert"
+          style={{
+            background: "var(--danger-soft)",
+            color: "var(--danger-text)",
+            padding: "8px 12px",
+            borderRadius: "var(--radius-sm)",
+            fontSize: 12.5,
+            marginBottom: 12,
+          }}
+        >
+          {exportError}
+        </div>
+      )}
 
       <div className="card">
         <div className="card-head">
@@ -101,6 +192,16 @@ export function CamerasPage() {
         <table className="table">
           <thead>
             <tr>
+              <th style={{ width: 36 }}>
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={toggleAll}
+                  aria-label="Select all cameras"
+                  title="Select all"
+                  disabled={items.length === 0}
+                />
+              </th>
               <th style={{ width: 96 }}>ID</th>
               <th style={{ width: 52 }}>Logo</th>
               <th>Name</th>
@@ -119,7 +220,7 @@ export function CamerasPage() {
           <tbody>
             {list.isLoading && (
               <tr>
-                <td colSpan={13} className="text-sm text-dim" style={{ padding: 16 }}>
+                <td colSpan={14} className="text-sm text-dim" style={{ padding: 16 }}>
                   Loading…
                 </td>
               </tr>
@@ -127,7 +228,7 @@ export function CamerasPage() {
             {list.isError && (
               <tr>
                 <td
-                  colSpan={13}
+                  colSpan={14}
                   className="text-sm"
                   style={{ padding: 16, color: "var(--danger-text)" }}
                 >
@@ -146,6 +247,14 @@ export function CamerasPage() {
                 .join(" · ");
               return (
               <tr key={cam.id}>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={selected.has(cam.id)}
+                    onChange={() => toggleOne(cam.id)}
+                    aria-label={`Select ${cam.name}`}
+                  />
+                </td>
                 <td className="mono text-sm" style={{ fontWeight: 600 }}>
                   {cam.camera_code}
                 </td>
@@ -215,7 +324,7 @@ export function CamerasPage() {
             })}
             {list.data && list.data.items.length === 0 && !list.isLoading && (
               <tr>
-                <td colSpan={13} className="text-sm text-dim" style={{ padding: 16 }}>
+                <td colSpan={14} className="text-sm text-dim" style={{ padding: 16 }}>
                   No cameras yet. Add one to see its preview frame.
                 </td>
               </tr>
@@ -224,6 +333,7 @@ export function CamerasPage() {
         </table>
       </div>
 
+      {showImport && <CameraImportModal onClose={() => setShowImport(false)} />}
       {drawerMode !== null && (
         <CameraDrawer
           mode={drawerMode}

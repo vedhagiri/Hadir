@@ -12,7 +12,7 @@ on/off) + ``display_enabled`` (Live Capture surfacing on/off), and
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -138,3 +138,123 @@ class CameraPatchIn(BaseModel):
     # updates by switching to a dedicated CaptureConfigPatch model.
     capture_config: Optional[CaptureConfig] = None
     brand: Optional[str] = Field(default=None, max_length=64)
+
+
+# --- Import / export (bulk JSON transfer) ----------------------------------
+#
+# The export carries the operator's choice from the AskUserQuestion: the
+# FULL plaintext ``rtsp_url`` (credentials included) so a round-trip
+# import recreates cameras with no re-entry. The downloadable file is the
+# only place the plaintext travels — audit rows + server logs still carry
+# ``rtsp_host`` at most (see the cameras router red line). Treat the
+# export file as a secret.
+
+
+class CameraExportItem(BaseModel):
+    """One camera's configuration in an export file. Mirrors the
+    create/patch API surface; runtime + auto-detected state
+    (``detected_*``, ``last_seen_at``, ``images_captured_24h``) is
+    deliberately omitted — the export is configuration, not telemetry."""
+
+    camera_code: str
+    name: str
+    location: str
+    zone: Optional[str] = None
+    rtsp_url: str  # PLAINTEXT — see module note above.
+    worker_enabled: bool
+    display_enabled: bool
+    detection_enabled: bool
+    clip_recording_enabled: bool
+    clip_detection_source: str
+    capture_config: CaptureConfig
+    brand: Optional[str] = None
+
+
+class CameraExportFile(BaseModel):
+    """Top-level export payload. ``version`` lets a future import reject
+    or migrate an incompatible shape."""
+
+    version: int
+    exported_at: datetime
+    tenant_slug: Optional[str] = None
+    count: int
+    cameras: list[CameraExportItem]
+
+
+class CameraImportItem(BaseModel):
+    """One camera row from an uploaded file. Every field is optional and
+    loosely typed so a single malformed row produces a per-row error in
+    the preview rather than a request-level 422. Extra keys from a
+    round-tripped export (``detected_*`` etc.) are ignored."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    camera_code: Optional[str] = None
+    name: Optional[str] = None
+    location: Optional[str] = None
+    zone: Optional[str] = None
+    rtsp_url: Optional[str] = None
+    worker_enabled: Optional[bool] = None
+    display_enabled: Optional[bool] = None
+    detection_enabled: Optional[bool] = None
+    clip_recording_enabled: Optional[bool] = None
+    clip_detection_source: Optional[str] = None
+    capture_config: Optional[dict] = None
+    brand: Optional[str] = None
+
+
+class CameraImportRequest(BaseModel):
+    """Body for both preview + commit. ``on_existing`` selects how a row
+    that matches an existing camera (by ``camera_code``) is treated —
+    ``update`` rewrites it, ``skip`` leaves it untouched. New cameras are
+    always created; rows whose RTSP stream duplicates an existing camera
+    are always skipped."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    cameras: list[CameraImportItem] = Field(default_factory=list)
+    on_existing: Literal["update", "skip"] = "update"
+
+
+CameraImportAction = Literal["create", "update", "skip", "error"]
+
+
+class CameraImportPreviewRow(BaseModel):
+    index: int  # 1-based position in the uploaded file
+    action: CameraImportAction
+    camera_code: Optional[str] = None
+    name: Optional[str] = None
+    rtsp_host: Optional[str] = None  # credentials stripped, for display
+    matched_camera_id: Optional[int] = None
+    message: str
+
+
+class CameraImportSummary(BaseModel):
+    create: int = 0
+    update: int = 0
+    skip: int = 0
+    error: int = 0
+
+
+class CameraImportPreview(BaseModel):
+    summary: CameraImportSummary
+    rows: list[CameraImportPreviewRow]
+
+
+CameraImportResultAction = Literal["created", "updated", "skipped", "error"]
+
+
+class CameraImportResultRow(BaseModel):
+    index: int
+    action: CameraImportResultAction
+    camera_code: Optional[str] = None
+    name: Optional[str] = None
+    message: str
+
+
+class CameraImportResult(BaseModel):
+    created: int = 0
+    updated: int = 0
+    skipped: int = 0
+    errors: int = 0
+    rows: list[CameraImportResultRow]

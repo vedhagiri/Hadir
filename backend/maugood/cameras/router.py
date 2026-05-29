@@ -14,18 +14,28 @@ flipped on every operator action.
 from __future__ import annotations
 
 import logging
-from typing import Annotated
+from datetime import datetime, timezone
+from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import Response as BytesResponse
+from sqlalchemy.engine import Connection
 from sqlalchemy.exc import IntegrityError
 
 from maugood.auth.audit import write_audit
 from maugood.auth.dependencies import CurrentUser, require_role
 from maugood.cameras import repository as repo
 from maugood.cameras import rtsp as rtsp_io
+from maugood.cameras import transfer
 from maugood.cameras.schemas import (
     CameraCreateIn,
+    CameraExportFile,
+    CameraImportPreview,
+    CameraImportPreviewRow,
+    CameraImportRequest,
+    CameraImportResult,
+    CameraImportResultRow,
+    CameraImportSummary,
     CameraListOut,
     CameraOut,
     CameraPatchIn,
@@ -42,23 +52,10 @@ router = APIRouter(prefix="/api/cameras", tags=["cameras"])
 ADMIN = Depends(require_role("Admin"))
 
 
-def _canonical_stream_id(plain_url: str) -> str:
-    """Return a normalised "stream identity" for an RTSP URL — host:port
-    plus the path, lower-cased, credentials stripped. Two RTSP URLs that
-    point at the same physical stream should produce the same string
-    even if the operator typed them with different usernames/passwords
-    or capitalisation. Used by the duplicate-camera check for BUG-032 /
-    BUG-033."""
-    from urllib.parse import urlparse  # noqa: PLC0415
-
-    try:
-        parts = urlparse(plain_url.strip().lower())
-    except Exception:  # noqa: BLE001
-        return plain_url.strip().lower()
-    host = parts.hostname or ""
-    port = parts.port if parts.port is not None else 554
-    path = parts.path or ""
-    return f"{host}:{port}{path}".rstrip("/")
+# Canonical stream-id lives in ``rtsp.py`` so the bulk-import classifier
+# (``cameras.transfer``) and this router agree on what "the same stream"
+# means. Kept as a module alias so existing references stay terse.
+_canonical_stream_id = rtsp_io.canonical_stream_id
 
 
 def _check_duplicate_url(
@@ -174,12 +171,364 @@ def _audit_payload(row: repo.CameraRow) -> dict:
     }
 
 
+def _load_existing(
+    conn: Connection, scope: TenantScope
+) -> list[transfer.ExistingCamera]:
+    """Snapshot existing cameras for the import classifier — decrypt each
+    stored URL once to its canonical stream id so the classifier never
+    re-lists or re-decrypts per row."""
+
+    out: list[transfer.ExistingCamera] = []
+    for r in repo.list_cameras(conn, scope):
+        try:
+            canon = rtsp_io.canonical_stream_id(
+                rtsp_io.decrypt_url(r.rtsp_url_encrypted)
+            )
+        except Exception:  # noqa: BLE001 — undecryptable row can't conflict
+            canon = None
+        out.append(
+            transfer.ExistingCamera(
+                id=r.id, name=r.name, camera_code=r.camera_code, canon=canon
+            )
+        )
+    return out
+
+
+def _bool_or(value: bool | None, default: bool) -> bool:
+    return default if value is None else bool(value)
+
+
 @router.get("", response_model=CameraListOut)
 def list_cameras_endpoint(user: Annotated[CurrentUser, ADMIN]) -> CameraListOut:
     scope = TenantScope(tenant_id=user.tenant_id)
     with get_engine().begin() as conn:
         rows = repo.list_cameras(conn, scope)
     return CameraListOut(items=[_row_to_out(r) for r in rows])
+
+
+@router.get("/export", response_model=CameraExportFile)
+def export_cameras_endpoint(
+    user: Annotated[CurrentUser, ADMIN],
+    ids: Annotated[Optional[str], Query()] = None,
+) -> CameraExportFile:
+    """Export camera configuration as JSON. ``?ids=1,2,3`` exports the
+    named cameras; omit it to export every camera in the tenant.
+
+    The payload carries the PLAINTEXT ``rtsp_url`` per the operator's
+    chosen behaviour (full round-trip). The audit row records only the
+    count + ids — never a URL."""
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    selected: Optional[set[int]] = None
+    if ids:
+        selected = set()
+        for part in ids.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                selected.add(int(part))
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "field": "ids",
+                        "message": "ids must be comma-separated integers",
+                    },
+                ) from exc
+
+    with get_engine().begin() as conn:
+        rows = repo.list_cameras(conn, scope)
+        if selected is not None:
+            rows = [r for r in rows if r.id in selected]
+        payload = transfer.build_export_payload(
+            rows,
+            decrypt_url=rtsp_io.decrypt_url,
+            tenant_slug=None,
+            exported_at=datetime.now(tz=timezone.utc),
+        )
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="camera.exported",
+            entity_type="camera",
+            entity_id=None,
+            after={"count": payload.count, "camera_ids": [r.id for r in rows]},
+        )
+    logger.info(
+        "cameras exported: tenant=%s count=%s", scope.tenant_id, payload.count
+    )
+    return payload
+
+
+@router.post("/import-preview", response_model=CameraImportPreview)
+def preview_import_cameras_endpoint(
+    payload: CameraImportRequest,
+    user: Annotated[CurrentUser, ADMIN],
+) -> CameraImportPreview:
+    """Dry-run: classify every uploaded row (create / update / skip /
+    error) without writing anything. Drives the preview table."""
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    with get_engine().begin() as conn:
+        existing = _load_existing(conn, scope)
+    classified = transfer.classify_imports(
+        existing, payload.cameras, mode=payload.on_existing
+    )
+
+    counts = {"create": 0, "update": 0, "skip": 0, "error": 0}
+    rows: list[CameraImportPreviewRow] = []
+    for row in classified:
+        counts[row.action] += 1
+        rows.append(
+            CameraImportPreviewRow(
+                index=row.index,
+                action=row.action,  # type: ignore[arg-type]
+                camera_code=(row.item.camera_code or "").strip() or None,
+                name=(row.item.name or "").strip() or None,
+                rtsp_host=row.rtsp_host,
+                matched_camera_id=row.matched_id,
+                message=row.message,
+            )
+        )
+    return CameraImportPreview(
+        summary=CameraImportSummary(**counts), rows=rows
+    )
+
+
+@router.post("/import", response_model=CameraImportResult)
+def import_cameras_endpoint(
+    payload: CameraImportRequest,
+    user: Annotated[CurrentUser, ADMIN],
+) -> CameraImportResult:
+    """Apply an import. Creates new cameras, updates existing ones (when
+    ``on_existing='update'``), and skips duplicates. Each create/update
+    runs in its own transaction so one bad row doesn't roll back the
+    rest — mirrors the employee-import contract."""
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    with get_engine().begin() as conn:
+        existing = _load_existing(conn, scope)
+    classified = transfer.classify_imports(
+        existing, payload.cameras, mode=payload.on_existing
+    )
+
+    created = updated = skipped = errors = 0
+    created_ids: list[int] = []
+    updated_ids: list[int] = []
+    result_rows: list[CameraImportResultRow] = []
+
+    for row in classified:
+        item = row.item
+        if row.action == "create":
+            try:
+                with get_engine().begin() as conn:
+                    new_id = repo.create_camera(
+                        conn,
+                        scope,
+                        name=(item.name or "").strip(),
+                        location=(item.location or "").strip(),
+                        rtsp_url_encrypted=rtsp_io.encrypt_url(
+                            (item.rtsp_url or "").strip()
+                        ),
+                        worker_enabled=_bool_or(item.worker_enabled, False),
+                        display_enabled=_bool_or(item.display_enabled, False),
+                        detection_enabled=_bool_or(item.detection_enabled, False),
+                        clip_recording_enabled=_bool_or(
+                            item.clip_recording_enabled, False
+                        ),
+                        clip_detection_source=item.clip_detection_source or "body",
+                        camera_code=(item.camera_code or "").strip() or None,
+                        zone=item.zone,
+                        capture_config=row.capture_config,
+                        brand=item.brand,
+                    )
+                    created_row = repo.get_camera(conn, scope, new_id)
+                    assert created_row is not None
+                    write_audit(
+                        conn,
+                        tenant_id=scope.tenant_id,
+                        actor_user_id=user.id,
+                        action="camera.created",
+                        entity_type="camera",
+                        entity_id=str(new_id),
+                        after=_audit_payload(created_row),
+                    )
+                created += 1
+                created_ids.append(new_id)
+                result_rows.append(
+                    CameraImportResultRow(
+                        index=row.index,
+                        action="created",
+                        camera_code=created_row.camera_code,
+                        name=created_row.name,
+                        message="created",
+                    )
+                )
+            except IntegrityError:
+                errors += 1
+                result_rows.append(
+                    CameraImportResultRow(
+                        index=row.index,
+                        action="error",
+                        camera_code=(item.camera_code or "").strip() or None,
+                        name=(item.name or "").strip() or None,
+                        message="camera_code already exists",
+                    )
+                )
+            except Exception:  # noqa: BLE001
+                errors += 1
+                logger.warning("camera import: create failed on row %s", row.index)
+                result_rows.append(
+                    CameraImportResultRow(
+                        index=row.index,
+                        action="error",
+                        camera_code=(item.camera_code or "").strip() or None,
+                        name=(item.name or "").strip() or None,
+                        message="could not create camera",
+                    )
+                )
+        elif row.action == "update" and row.matched_id is not None:
+            try:
+                with get_engine().begin() as conn:
+                    before = repo.get_camera(conn, scope, row.matched_id)
+                    if before is None:
+                        raise RuntimeError("camera vanished mid-import")
+                    fs = item.model_fields_set
+                    values: dict[str, object] = {}
+                    if "name" in fs and item.name is not None:
+                        values["name"] = item.name.strip()
+                    if "location" in fs and item.location is not None:
+                        values["location"] = item.location.strip()
+                    if "zone" in fs:
+                        values["zone"] = item.zone
+                    if "worker_enabled" in fs and item.worker_enabled is not None:
+                        values["worker_enabled"] = bool(item.worker_enabled)
+                    if "display_enabled" in fs and item.display_enabled is not None:
+                        values["display_enabled"] = bool(item.display_enabled)
+                    if (
+                        "detection_enabled" in fs
+                        and item.detection_enabled is not None
+                    ):
+                        values["detection_enabled"] = bool(item.detection_enabled)
+                    if (
+                        "clip_recording_enabled" in fs
+                        and item.clip_recording_enabled is not None
+                    ):
+                        values["clip_recording_enabled"] = bool(
+                            item.clip_recording_enabled
+                        )
+                    if (
+                        "clip_detection_source" in fs
+                        and item.clip_detection_source is not None
+                    ):
+                        values["clip_detection_source"] = item.clip_detection_source
+                    if row.capture_config is not None:
+                        values["capture_config"] = row.capture_config
+                    if "brand" in fs:
+                        values["brand"] = item.brand
+                    if "rtsp_url" in fs and item.rtsp_url is not None:
+                        values["rtsp_url_encrypted"] = rtsp_io.encrypt_url(
+                            item.rtsp_url.strip()
+                        )
+                    repo.update_camera(conn, scope, row.matched_id, values=values)
+                    after = repo.get_camera(conn, scope, row.matched_id)
+                    assert after is not None
+                    write_audit(
+                        conn,
+                        tenant_id=scope.tenant_id,
+                        actor_user_id=user.id,
+                        action="camera.updated",
+                        entity_type="camera",
+                        entity_id=str(row.matched_id),
+                        before=_audit_payload(before),
+                        after=_audit_payload(after),
+                    )
+                updated += 1
+                updated_ids.append(row.matched_id)
+                result_rows.append(
+                    CameraImportResultRow(
+                        index=row.index,
+                        action="updated",
+                        camera_code=after.camera_code,
+                        name=after.name,
+                        message="updated",
+                    )
+                )
+            except Exception:  # noqa: BLE001
+                errors += 1
+                logger.warning("camera import: update failed on row %s", row.index)
+                result_rows.append(
+                    CameraImportResultRow(
+                        index=row.index,
+                        action="error",
+                        camera_code=(item.camera_code or "").strip() or None,
+                        name=(item.name or "").strip() or None,
+                        message="could not update camera",
+                    )
+                )
+        elif row.action == "skip":
+            skipped += 1
+            result_rows.append(
+                CameraImportResultRow(
+                    index=row.index,
+                    action="skipped",
+                    camera_code=(item.camera_code or "").strip() or None,
+                    name=(item.name or "").strip() or None,
+                    message=row.message,
+                )
+            )
+        else:
+            errors += 1
+            result_rows.append(
+                CameraImportResultRow(
+                    index=row.index,
+                    action="error",
+                    camera_code=(item.camera_code or "").strip() or None,
+                    name=(item.name or "").strip() or None,
+                    message=row.message,
+                )
+            )
+
+    with get_engine().begin() as conn:
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="camera.imported",
+            entity_type="camera",
+            entity_id=None,
+            after={
+                "created": created,
+                "updated": updated,
+                "skipped": skipped,
+                "errors": errors,
+                "on_existing": payload.on_existing,
+            },
+        )
+
+    # Hot-reload capture workers for everything we touched (after commit).
+    for cid in created_ids:
+        capture_manager.on_camera_created(cid, tenant_id=scope.tenant_id)
+    for cid in updated_ids:
+        capture_manager.on_camera_updated(cid, tenant_id=scope.tenant_id)
+
+    logger.info(
+        "cameras imported: tenant=%s created=%s updated=%s skipped=%s errors=%s",
+        scope.tenant_id,
+        created,
+        updated,
+        skipped,
+        errors,
+    )
+    return CameraImportResult(
+        created=created,
+        updated=updated,
+        skipped=skipped,
+        errors=errors,
+        rows=result_rows,
+    )
 
 
 @router.post("", response_model=CameraOut, status_code=status.HTTP_201_CREATED)

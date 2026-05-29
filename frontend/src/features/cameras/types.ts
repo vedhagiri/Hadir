@@ -136,3 +136,86 @@ export const BRAND_OPTIONS = [
 ] as const;
 
 export type CameraBrand = (typeof BRAND_OPTIONS)[number];
+
+// ── Bulk JSON import / export ───────────────────────────────────────────────
+// Mirrors maugood/cameras/schemas.py transfer models. The export carries
+// the PLAINTEXT rtsp_url (operator's chosen behaviour) — treat the
+// downloaded file as a secret.
+
+export interface CameraExportItem {
+  camera_code: string;
+  name: string;
+  location: string;
+  zone: string | null;
+  rtsp_url: string;
+  worker_enabled: boolean;
+  display_enabled: boolean;
+  detection_enabled: boolean;
+  clip_recording_enabled: boolean;
+  clip_detection_source: ClipDetectionSource;
+  capture_config: CaptureConfig;
+  brand: string | null;
+}
+
+export interface CameraExportFile {
+  version: number;
+  exported_at: string;
+  tenant_slug: string | null;
+  count: number;
+  cameras: CameraExportItem[];
+}
+
+export type OnExisting = "update" | "skip";
+
+export interface CameraImportRequest {
+  // Loose by design — the file rows are forwarded verbatim; the backend
+  // validates each row and returns per-row verdicts.
+  cameras: unknown[];
+  on_existing: OnExisting;
+}
+
+export type CameraImportAction = "create" | "update" | "skip" | "error";
+
+export interface CameraImportPreviewRow {
+  index: number;
+  action: CameraImportAction;
+  camera_code: string | null;
+  name: string | null;
+  rtsp_host: string | null;
+  matched_camera_id: number | null;
+  message: string;
+}
+
+export interface CameraImportSummary {
+  create: number;
+  update: number;
+  skip: number;
+  error: number;
+}
+
+export interface CameraImportPreview {
+  summary: CameraImportSummary;
+  rows: CameraImportPreviewRow[];
+}
+
+export type CameraImportResultAction =
+  | "created"
+  | "updated"
+  | "skipped"
+  | "error";
+
+export interface CameraImportResultRow {
+  index: number;
+  action: CameraImportResultAction;
+  camera_code: string | null;
+  name: string | null;
+  message: string;
+}
+
+export interface CameraImportResult {
+  created: number;
+  updated: number;
+  skipped: number;
+  errors: number;
+  rows: CameraImportResultRow[];
+}
