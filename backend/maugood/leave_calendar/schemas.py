@@ -58,6 +58,12 @@ class HolidayCreateRequest(BaseModel):
     description: Optional[str] = Field(default=None, max_length=500)
 
 
+class HolidayPatchRequest(BaseModel):
+    date: Optional[date_type] = None
+    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    description: Optional[str] = Field(default=None, max_length=500)
+
+
 class HolidayBulkCreateRequest(BaseModel):
     holidays: list[HolidayCreateRequest] = Field(default_factory=list, max_length=500)
 
@@ -113,6 +119,14 @@ class ApprovedLeaveCreateRequest(BaseModel):
         if self.start_date > self.end_date:
             raise ValueError("start_date must be on or before end_date")
         return self
+
+
+class ApprovedLeavePatchRequest(BaseModel):
+    employee_id: Optional[int] = Field(default=None, ge=1)
+    leave_type_id: Optional[int] = Field(default=None, ge=1)
+    start_date: Optional[date_type] = None
+    end_date: Optional[date_type] = None
+    notes: Optional[str] = Field(default=None, max_length=2000)
 
 
 VALID_DATE_FORMATS = frozenset({"DD/MM/YYYY", "MM/DD/YYYY", "YYYY-MM-DD"})

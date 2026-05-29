@@ -30,6 +30,8 @@ import {
   useHolidays,
   useImportHolidaysXlsx,
   useLeaveTypes,
+  usePatchApprovedLeave,
+  usePatchHoliday,
   usePatchLeaveType,
 } from "./hooks";
 import type {
@@ -372,6 +374,33 @@ function LeaveTypeRow({ row }: { row: LeaveType }) {
       handleApi(err, setDelError, "Delete failed");
     }
   };
+
+  const [editOpen, setEditOpen] = useState(false);
+  const [editName, setEditName] = useState(row.name);
+  const [editPaid, setEditPaid] = useState(row.is_paid);
+  const [editError, setEditError] = useState<string | null>(null);
+  const openEdit = () => {
+    setEditName(row.name);
+    setEditPaid(row.is_paid);
+    setEditError(null);
+    setEditOpen(true);
+  };
+  const canSaveEdit = editName.trim() !== "";
+  const onSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setEditError(null);
+    if (!canSaveEdit) {
+      setEditError("Name is required.");
+      return;
+    }
+    try {
+      await patch.mutateAsync({ name: editName.trim(), is_paid: editPaid });
+      setEditOpen(false);
+    } catch (err) {
+      handleApi(err, setEditError, "Save failed");
+    }
+  };
+
   return (
     <tr style={{ borderTop: "1px solid var(--border)" }}>
       <td style={{ ...td, fontFamily: "var(--font-mono)", fontSize: 12 }}>
@@ -399,21 +428,43 @@ function LeaveTypeRow({ row }: { row: LeaveType }) {
         </button>
       </td>
       <td style={{ ...td, textAlign: "right" }}>
-        <button
-          type="button"
-          onClick={askDelete}
-          disabled={del.isPending}
+        <div
           style={{
-            ...btnGhost,
             display: "inline-flex",
-            alignItems: "center",
             gap: 6,
-            color: "var(--danger-text)",
+            alignItems: "center",
           }}
-          aria-label={`Delete leave type ${row.name}`}
         >
-          <Icon name="trash" size={12} /> Delete
-        </button>
+          <button
+            type="button"
+            onClick={openEdit}
+            disabled={patch.isPending}
+            style={{
+              ...btnGhost,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+            aria-label={`Edit leave type ${row.name}`}
+          >
+            <Icon name="edit" size={12} /> Edit
+          </button>
+          <button
+            type="button"
+            onClick={askDelete}
+            disabled={del.isPending}
+            style={{
+              ...btnGhost,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              color: "var(--danger-text)",
+            }}
+            aria-label={`Delete leave type ${row.name}`}
+          >
+            <Icon name="trash" size={12} /> Delete
+          </button>
+        </div>
         {confirmOpen && (
           <ModalShell onClose={() => setConfirmOpen(false)}>
             <div
@@ -484,6 +535,96 @@ function LeaveTypeRow({ row }: { row: LeaveType }) {
                   {del.isPending ? "Deleting…" : "Delete"}
                 </button>
               </div>
+            </div>
+          </ModalShell>
+        )}
+        {editOpen && (
+          <ModalShell onClose={() => setEditOpen(false)}>
+            <div
+              role="dialog"
+              aria-labelledby="lt-edit-title"
+              style={{ ...modalPanel, width: 460, textAlign: "left" }}
+            >
+              <header style={modalHeader}>
+                <h2 id="lt-edit-title" style={{ margin: 0, fontSize: 18 }}>
+                  Edit leave type
+                </h2>
+                <button
+                  className="icon-btn"
+                  type="button"
+                  onClick={() => setEditOpen(false)}
+                  aria-label="Close"
+                >
+                  <Icon name="x" size={14} />
+                </button>
+              </header>
+              <form
+                onSubmit={onSaveEdit}
+                style={{ display: "flex", flexDirection: "column", gap: 14 }}
+              >
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 12,
+                  }}
+                >
+                  <Field label="Code">
+                    <input
+                      type="text"
+                      value={row.code}
+                      disabled
+                      title="Code can't be changed after creation."
+                      style={{ ...inputStyle, opacity: 0.7 }}
+                    />
+                  </Field>
+                  <Field label="Paid?">
+                    <select
+                      value={editPaid ? "yes" : "no"}
+                      onChange={(e) => setEditPaid(e.target.value === "yes")}
+                      style={inputStyle}
+                    >
+                      <option value="yes">Paid</option>
+                      <option value="no">Unpaid</option>
+                    </select>
+                  </Field>
+                </div>
+                <Field label="Name" required>
+                  <input
+                    type="text"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    required
+                    maxLength={80}
+                    style={inputStyle}
+                  />
+                </Field>
+                {editError && <div style={errorBox}>{editError}</div>}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    gap: 8,
+                    marginTop: 4,
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => setEditOpen(false)}
+                    disabled={patch.isPending}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!canSaveEdit || patch.isPending}
+                    style={{ ...btnPrimary, opacity: canSaveEdit ? 1 : 0.5 }}
+                  >
+                    {patch.isPending ? "Saving…" : "Save changes"}
+                  </button>
+                </div>
+              </form>
             </div>
           </ModalShell>
         )}
@@ -876,6 +1017,7 @@ function HolidaysTab() {
 
 function HolidayRow({ row }: { row: Holiday }) {
   const del = useDeleteHoliday();
+  const patch = usePatchHoliday(row.id);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [delError, setDelError] = useState<string | null>(null);
 
@@ -888,6 +1030,33 @@ function HolidayRow({ row }: { row: Holiday }) {
       handleApi(err, setDelError, "Delete failed");
     }
   };
+
+  const [editOpen, setEditOpen] = useState(false);
+  const [editDate, setEditDate] = useState(row.date);
+  const [editName, setEditName] = useState(row.name);
+  const [editError, setEditError] = useState<string | null>(null);
+  const openEdit = () => {
+    setEditDate(row.date);
+    setEditName(row.name);
+    setEditError(null);
+    setEditOpen(true);
+  };
+  const canSaveEdit = editDate !== "" && editName.trim() !== "";
+  const onSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setEditError(null);
+    if (!canSaveEdit) {
+      setEditError("Choose a date and enter a holiday name.");
+      return;
+    }
+    try {
+      await patch.mutateAsync({ date: editDate, name: editName.trim() });
+      setEditOpen(false);
+    } catch (err) {
+      handleApi(err, setEditError, "Save failed");
+    }
+  };
+
   // Build a UTC date so the rendered weekday isn't browser-tz dependent.
   const d = new Date(row.date + "T00:00:00Z");
   const weekday = d.toLocaleDateString(undefined, {
@@ -900,6 +1069,21 @@ function HolidayRow({ row }: { row: Holiday }) {
       <td style={td}>{weekday}</td>
       <td style={td}>{row.name}</td>
       <td style={{ ...td, textAlign: "right" }}>
+        <button
+          type="button"
+          onClick={openEdit}
+          disabled={patch.isPending}
+          style={{
+            ...btnGhost,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            marginInlineEnd: 6,
+          }}
+          aria-label={`Edit holiday ${row.name}`}
+        >
+          <Icon name="edit" size={12} /> Edit
+        </button>
         <button
           type="button"
           onClick={() => {
@@ -982,6 +1166,77 @@ function HolidayRow({ row }: { row: Holiday }) {
                   {del.isPending ? "Deleting…" : "Delete"}
                 </button>
               </div>
+            </div>
+          </ModalShell>
+        )}
+        {editOpen && (
+          <ModalShell onClose={() => setEditOpen(false)}>
+            <div
+              role="dialog"
+              aria-labelledby="holiday-edit-title"
+              style={{ ...modalPanel, width: 460, textAlign: "left" }}
+            >
+              <header style={modalHeader}>
+                <h2 id="holiday-edit-title" style={{ margin: 0, fontSize: 18 }}>
+                  Edit holiday
+                </h2>
+                <button
+                  className="icon-btn"
+                  type="button"
+                  onClick={() => setEditOpen(false)}
+                  aria-label="Close"
+                >
+                  <Icon name="x" size={14} />
+                </button>
+              </header>
+              <form
+                onSubmit={onSaveEdit}
+                style={{ display: "flex", flexDirection: "column", gap: 14 }}
+              >
+                <Field label="Date" required>
+                  <DatePicker
+                    value={editDate}
+                    onChange={setEditDate}
+                    ariaLabel="Holiday date"
+                    triggerStyle={{ width: "100%" }}
+                  />
+                </Field>
+                <Field label="Name" required>
+                  <input
+                    type="text"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    required
+                    maxLength={120}
+                    style={inputStyle}
+                  />
+                </Field>
+                {editError && <div style={errorBox}>{editError}</div>}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    gap: 8,
+                    marginTop: 4,
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => setEditOpen(false)}
+                    disabled={patch.isPending}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!canSaveEdit || patch.isPending}
+                    style={{ ...btnPrimary, opacity: canSaveEdit ? 1 : 0.5 }}
+                  >
+                    {patch.isPending ? "Saving…" : "Save changes"}
+                  </button>
+                </div>
+              </form>
             </div>
           </ModalShell>
         )}
@@ -1223,6 +1478,8 @@ function ApprovedLeavesTab() {
                     ? `${emp.employee_code} — ${emp.full_name}`
                     : `#${r.employee_id}`
                 }
+                typeOptions={typeOptions}
+                employeeOptions={employeeOptions}
               />
             );
           })}
@@ -1246,11 +1503,16 @@ function ApprovedLeavesTab() {
 function ApprovedLeaveRow({
   row,
   employeeLabel,
+  typeOptions,
+  employeeOptions,
 }: {
   row: ApprovedLeave;
   employeeLabel: string;
+  typeOptions: LeaveType[];
+  employeeOptions: Employee[];
 }) {
   const del = useDeleteApprovedLeave();
+  const patch = usePatchApprovedLeave(row.id);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [delError, setDelError] = useState<string | null>(null);
 
@@ -1264,6 +1526,65 @@ function ApprovedLeaveRow({
     }
   };
 
+  const [editOpen, setEditOpen] = useState(false);
+  const [eEmployee, setEEmployee] = useState(String(row.employee_id));
+  const [eType, setEType] = useState(String(row.leave_type_id));
+  const [eStart, setEStart] = useState(row.start_date);
+  const [eEnd, setEEnd] = useState(row.end_date);
+  const [eNotes, setENotes] = useState(row.notes ?? "");
+  const [editError, setEditError] = useState<string | null>(null);
+  const openEdit = () => {
+    setEEmployee(String(row.employee_id));
+    setEType(String(row.leave_type_id));
+    setEStart(row.start_date);
+    setEEnd(row.end_date);
+    setENotes(row.notes ?? "");
+    setEditError(null);
+    setEditOpen(true);
+  };
+  const canSaveEdit =
+    eEmployee !== "" &&
+    eType !== "" &&
+    eStart !== "" &&
+    eEnd !== "" &&
+    eEnd >= eStart;
+  const onSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setEditError(null);
+    if (!eEmployee) {
+      setEditError("Select an employee.");
+      return;
+    }
+    if (!eType) {
+      setEditError("Select a leave type.");
+      return;
+    }
+    if (!eStart) {
+      setEditError("Choose a start date.");
+      return;
+    }
+    if (!eEnd) {
+      setEditError("Choose an end date.");
+      return;
+    }
+    if (eEnd < eStart) {
+      setEditError("End date can’t be before the start date.");
+      return;
+    }
+    try {
+      await patch.mutateAsync({
+        employee_id: Number.parseInt(eEmployee, 10),
+        leave_type_id: Number.parseInt(eType, 10),
+        start_date: eStart,
+        end_date: eEnd,
+        notes: eNotes.trim() || null,
+      });
+      setEditOpen(false);
+    } catch (err) {
+      handleApi(err, setEditError, "Save failed");
+    }
+  };
+
   return (
     <tr style={{ borderTop: "1px solid var(--border)" }}>
       <td style={td}>{employeeLabel}</td>
@@ -1274,6 +1595,21 @@ function ApprovedLeaveRow({
         {row.notes ?? "—"}
       </td>
       <td style={{ ...td, textAlign: "right" }}>
+        <button
+          type="button"
+          onClick={openEdit}
+          disabled={patch.isPending}
+          style={{
+            ...btnGhost,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            marginInlineEnd: 6,
+          }}
+          aria-label={`Edit approved leave for ${employeeLabel}`}
+        >
+          <Icon name="edit" size={12} /> Edit
+        </button>
         <button
           type="button"
           onClick={() => {
@@ -1356,6 +1692,116 @@ function ApprovedLeaveRow({
                   {del.isPending ? "Deleting…" : "Delete"}
                 </button>
               </div>
+            </div>
+          </ModalShell>
+        )}
+        {editOpen && (
+          <ModalShell onClose={() => setEditOpen(false)}>
+            <div
+              role="dialog"
+              aria-labelledby="leave-edit-title"
+              style={{ ...modalPanel, width: 640, textAlign: "left" }}
+            >
+              <header style={modalHeader}>
+                <h2 id="leave-edit-title" style={{ margin: 0, fontSize: 18 }}>
+                  Edit approved leave
+                </h2>
+                <button
+                  className="icon-btn"
+                  type="button"
+                  onClick={() => setEditOpen(false)}
+                  aria-label="Close"
+                >
+                  <Icon name="x" size={14} />
+                </button>
+              </header>
+              <form
+                onSubmit={onSaveEdit}
+                style={{ display: "flex", flexDirection: "column", gap: 14 }}
+              >
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 12,
+                  }}
+                >
+                  <Field label="Employee" required>
+                    <EmployeeSearchSelect
+                      options={employeeOptions}
+                      value={eEmployee}
+                      onChange={setEEmployee}
+                      placeholder="Search by code or name…"
+                    />
+                  </Field>
+                  <Field label="Leave type" required>
+                    <select
+                      value={eType}
+                      onChange={(e) => setEType(e.target.value)}
+                      required
+                      style={inputStyle}
+                    >
+                      <option value="">Select…</option>
+                      {typeOptions.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Start" required>
+                    <DatePicker
+                      value={eStart}
+                      onChange={setEStart}
+                      ariaLabel="Start date"
+                      triggerStyle={{ width: "100%" }}
+                    />
+                  </Field>
+                  <Field label="End" required>
+                    <DatePicker
+                      value={eEnd}
+                      onChange={setEEnd}
+                      min={eStart}
+                      ariaLabel="End date"
+                      triggerStyle={{ width: "100%" }}
+                    />
+                  </Field>
+                </div>
+                <Field label="Notes">
+                  <input
+                    type="text"
+                    value={eNotes}
+                    onChange={(e) => setENotes(e.target.value)}
+                    maxLength={500}
+                    style={inputStyle}
+                  />
+                </Field>
+                {editError && <div style={errorBox}>{editError}</div>}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    gap: 8,
+                    marginTop: 4,
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => setEditOpen(false)}
+                    disabled={patch.isPending}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!canSaveEdit || patch.isPending}
+                    style={{ ...btnPrimary, opacity: canSaveEdit ? 1 : 0.5 }}
+                  >
+                    {patch.isPending ? "Saving…" : "Save changes"}
+                  </button>
+                </div>
+              </form>
             </div>
           </ModalShell>
         )}

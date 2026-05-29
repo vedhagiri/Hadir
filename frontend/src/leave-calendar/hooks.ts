@@ -7,9 +7,11 @@ import { api } from "../api/client";
 import type {
   ApprovedLeave,
   ApprovedLeaveCreateInput,
+  ApprovedLeavePatchInput,
   Holiday,
   HolidayCreateInput,
   HolidayImportResponse,
+  HolidayPatchInput,
   LeaveType,
   LeaveTypeCreateInput,
   LeaveTypePatchInput,
@@ -87,6 +89,16 @@ export function useCreateHoliday() {
   });
 }
 
+export function usePatchHoliday(id: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: HolidayPatchInput) =>
+      api<Holiday>(`/api/holidays/${id}`, { method: "PATCH", body: input }),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: HOLIDAYS_KEY, exact: false }),
+  });
+}
+
 export function useDeleteHoliday() {
   const qc = useQueryClient();
   return useMutation({
@@ -134,6 +146,18 @@ export function useCreateApprovedLeave() {
       }),
     onSuccess: () =>
       qc.invalidateQueries({ queryKey: APPROVED_LEAVES_KEY }),
+  });
+}
+
+export function usePatchApprovedLeave(id: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: ApprovedLeavePatchInput) =>
+      api<ApprovedLeave>(`/api/approved-leaves/${id}`, {
+        method: "PATCH",
+        body: input,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: APPROVED_LEAVES_KEY }),
   });
 }
 

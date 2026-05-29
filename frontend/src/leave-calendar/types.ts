@@ -35,6 +35,11 @@ export interface HolidayCreateInput {
   name: string;
 }
 
+export interface HolidayPatchInput {
+  date?: string;
+  name?: string;
+}
+
 export interface HolidayImportSkipped {
   date: string;
   submitted_name: string;
@@ -67,6 +72,14 @@ export interface ApprovedLeaveCreateInput {
   leave_type_id: number;
   start_date: string;
   end_date: string;
+  notes?: string | null;
+}
+
+export interface ApprovedLeavePatchInput {
+  employee_id?: number;
+  leave_type_id?: number;
+  start_date?: string;
+  end_date?: string;
   notes?: string | null;
 }
 

@@ -38,11 +38,13 @@ from maugood.db import (
 )
 from maugood.leave_calendar.schemas import (
     ApprovedLeaveCreateRequest,
+    ApprovedLeavePatchRequest,
     ApprovedLeaveResponse,
     HolidayBulkCreateRequest,
     HolidayCreateRequest,
     HolidayImportResponse,
     HolidayImportSkipped,
+    HolidayPatchRequest,
     HolidayResponse,
     LeaveTypeCreateRequest,
     LeaveTypePatchRequest,
@@ -500,6 +502,105 @@ def delete_holiday(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.patch("/api/holidays/{holiday_id}", response_model=HolidayResponse)
+def patch_holiday(
+    holiday_id: int,
+    payload: HolidayPatchRequest,
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
+) -> HolidayResponse:
+    scope = TenantScope(tenant_id=user.tenant_id)
+    engine = get_engine()
+    with engine.begin() as conn:
+        before = conn.execute(
+            select(
+                holidays_table.c.id,
+                holidays_table.c.date,
+                holidays_table.c.name,
+                holidays_table.c.description,
+            ).where(
+                holidays_table.c.id == holiday_id,
+                holidays_table.c.tenant_id == scope.tenant_id,
+            )
+        ).first()
+        if before is None:
+            raise HTTPException(status_code=404, detail="holiday not found")
+
+        values: dict[str, Any] = {}
+        new_date = payload.date if payload.date is not None else before.date
+        if payload.date is not None and payload.date != before.date:
+            # Refuse moving onto a date that already has a holiday.
+            dup = conn.execute(
+                select(holidays_table.c.name).where(
+                    holidays_table.c.tenant_id == scope.tenant_id,
+                    holidays_table.c.date == payload.date,
+                    holidays_table.c.id != holiday_id,
+                )
+            ).first()
+            if dup is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"A holiday is already configured for "
+                        f"{payload.date.isoformat()} ('{dup.name}'). "
+                        f"Pick a different date."
+                    ),
+                )
+            values["date"] = payload.date
+        if payload.name is not None:
+            new_name = payload.name.strip()
+            if not new_name:
+                raise HTTPException(status_code=400, detail="Name is required.")
+            values["name"] = new_name
+        if payload.description is not None:
+            values["description"] = payload.description.strip() or None
+
+        if values:
+            try:
+                conn.execute(
+                    update(holidays_table)
+                    .where(
+                        holidays_table.c.id == holiday_id,
+                        holidays_table.c.tenant_id == scope.tenant_id,
+                    )
+                    .values(**values)
+                )
+            except IntegrityError as exc:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"A holiday is already configured for "
+                        f"{new_date.isoformat()}."
+                    ),
+                ) from exc
+            write_audit(
+                conn,
+                tenant_id=scope.tenant_id,
+                actor_user_id=user.id,
+                action="holiday.updated",
+                entity_type="holiday",
+                entity_id=str(holiday_id),
+                before={
+                    "date": before.date.isoformat(),
+                    "name": str(before.name),
+                },
+                after={
+                    k: (v.isoformat() if hasattr(v, "isoformat") else v)
+                    for k, v in values.items()
+                },
+            )
+        row = conn.execute(
+            select(
+                holidays_table.c.id,
+                holidays_table.c.tenant_id,
+                holidays_table.c.date,
+                holidays_table.c.name,
+                holidays_table.c.active,
+            ).where(holidays_table.c.id == holiday_id)
+        ).first()
+    assert row is not None
+    return _to_holiday_response(row)
+
+
 @router.post("/api/holidays/import", response_model=HolidayImportResponse)
 async def import_holidays_xlsx(
     user: Annotated[CurrentUser, ADMIN_OR_HR],
@@ -950,6 +1051,177 @@ def delete_approved_leave(
             },
         )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.patch(
+    "/api/approved-leaves/{leave_id}", response_model=ApprovedLeaveResponse
+)
+def patch_approved_leave(
+    leave_id: int,
+    payload: ApprovedLeavePatchRequest,
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
+) -> ApprovedLeaveResponse:
+    scope = TenantScope(tenant_id=user.tenant_id)
+    engine = get_engine()
+    with engine.begin() as conn:
+        before = conn.execute(
+            select(
+                approved_leaves.c.employee_id,
+                approved_leaves.c.leave_type_id,
+                approved_leaves.c.start_date,
+                approved_leaves.c.end_date,
+                approved_leaves.c.notes,
+            ).where(
+                approved_leaves.c.id == leave_id,
+                approved_leaves.c.tenant_id == scope.tenant_id,
+            )
+        ).first()
+        if before is None:
+            raise HTTPException(
+                status_code=404, detail="approved_leave not found"
+            )
+
+        emp_id = (
+            payload.employee_id
+            if payload.employee_id is not None
+            else int(before.employee_id)
+        )
+        lt_id = (
+            payload.leave_type_id
+            if payload.leave_type_id is not None
+            else int(before.leave_type_id)
+        )
+        start = (
+            payload.start_date
+            if payload.start_date is not None
+            else before.start_date
+        )
+        end = (
+            payload.end_date
+            if payload.end_date is not None
+            else before.end_date
+        )
+
+        if start > end:
+            raise HTTPException(
+                status_code=400,
+                detail="start_date must be on or before end_date",
+            )
+
+        ok_emp = conn.execute(
+            select(employees.c.id).where(
+                employees.c.id == emp_id,
+                employees.c.tenant_id == scope.tenant_id,
+            )
+        ).first()
+        if ok_emp is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"No employee with ID {emp_id} exists for this tenant. "
+                    f"Pick the correct employee from the list."
+                ),
+            )
+        ok_lt = conn.execute(
+            select(leave_types.c.id).where(
+                leave_types.c.id == lt_id,
+                leave_types.c.tenant_id == scope.tenant_id,
+            )
+        ).first()
+        if ok_lt is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Pick a leave type — the selected entry does not "
+                    "belong to this tenant."
+                ),
+            )
+
+        # Overlap check excluding this row.
+        overlap = conn.execute(
+            select(
+                approved_leaves.c.start_date,
+                approved_leaves.c.end_date,
+            ).where(
+                approved_leaves.c.tenant_id == scope.tenant_id,
+                approved_leaves.c.employee_id == emp_id,
+                approved_leaves.c.id != leave_id,
+                approved_leaves.c.start_date <= end,
+                approved_leaves.c.end_date >= start,
+            )
+        ).first()
+        if overlap is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"This employee already has approved leave from "
+                    f"{overlap.start_date.isoformat()} to "
+                    f"{overlap.end_date.isoformat()}. Overlapping leave is "
+                    f"not allowed — edit or remove the existing entry first."
+                ),
+            )
+
+        conn.execute(
+            update(approved_leaves)
+            .where(
+                approved_leaves.c.id == leave_id,
+                approved_leaves.c.tenant_id == scope.tenant_id,
+            )
+            .values(
+                employee_id=emp_id,
+                leave_type_id=lt_id,
+                start_date=start,
+                end_date=end,
+                notes=payload.notes,
+            )
+        )
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="approved_leave.updated",
+            entity_type="approved_leave",
+            entity_id=str(leave_id),
+            before={
+                "employee_id": int(before.employee_id),
+                "leave_type_id": int(before.leave_type_id),
+                "start_date": before.start_date.isoformat(),
+                "end_date": before.end_date.isoformat(),
+            },
+            after={
+                "employee_id": emp_id,
+                "leave_type_id": lt_id,
+                "start_date": start.isoformat(),
+                "end_date": end.isoformat(),
+            },
+        )
+        row = conn.execute(
+            select(
+                approved_leaves.c.id,
+                approved_leaves.c.tenant_id,
+                approved_leaves.c.employee_id,
+                approved_leaves.c.leave_type_id,
+                leave_types.c.code.label("leave_type_code"),
+                leave_types.c.name.label("leave_type_name"),
+                approved_leaves.c.start_date,
+                approved_leaves.c.end_date,
+                approved_leaves.c.notes,
+                approved_leaves.c.approved_by_user_id,
+                approved_leaves.c.approved_at,
+            )
+            .select_from(
+                approved_leaves.join(
+                    leave_types,
+                    and_(
+                        leave_types.c.id == approved_leaves.c.leave_type_id,
+                        leave_types.c.tenant_id == approved_leaves.c.tenant_id,
+                    ),
+                )
+            )
+            .where(approved_leaves.c.id == leave_id)
+        ).first()
+    assert row is not None
+    return _to_approved_leave(row)
 
 
 # ---------------------------------------------------------------------------
