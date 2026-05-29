@@ -22,7 +22,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 from sqlalchemy import and_, delete, func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 
@@ -94,7 +94,7 @@ def list_leave_types(
                 leave_types.c.active,
             )
             .where(leave_types.c.tenant_id == scope.tenant_id)
-            .order_by(leave_types.c.id.asc())
+            .order_by(leave_types.c.id.desc())
         ).all()
     return [_to_leave_type_response(r) for r in rows]
 
@@ -669,6 +669,41 @@ async def import_holidays_xlsx(
     )
 
 
+@router.get("/api/holidays/import-template")
+def holiday_import_template(
+    user: Annotated[CurrentUser, ADMIN_OR_HR],
+) -> Response:
+    """Stream a sample holiday-import .xlsx — a header row
+    (``date`` / ``name`` / ``description``) plus two example rows the
+    operator edits and uploads back through the import flow. No DB
+    writes; purely a static reference template."""
+
+    wb = Workbook()
+    ws = wb.active
+    assert ws is not None  # fresh workbook always has an active sheet
+    ws.title = "Holidays"
+    ws.append(["date", "name", "description"])
+    ws.append(["2026-01-01", "New Year's Day", "Public holiday"])
+    ws.append(["2026-11-18", "National Day", ""])
+    ws.column_dimensions["A"].width = 14
+    ws.column_dimensions["B"].width = 28
+    ws.column_dimensions["C"].width = 32
+    buf = BytesIO()
+    wb.save(buf)
+    wb.close()
+    return Response(
+        content=buf.getvalue(),
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        headers={
+            "Content-Disposition": (
+                'attachment; filename="holidays-import-template.xlsx"'
+            )
+        },
+    )
+
+
 # ---------------------------------------------------------------------------
 # Approved leaves
 # ---------------------------------------------------------------------------
@@ -731,7 +766,7 @@ def list_approved_leaves(
             )
         )
         .where(approved_leaves.c.tenant_id == scope.tenant_id)
-        .order_by(approved_leaves.c.start_date.desc())
+        .order_by(approved_leaves.c.id.desc())
     )
     if employee_id is not None:
         stmt = stmt.where(approved_leaves.c.employee_id == employee_id)

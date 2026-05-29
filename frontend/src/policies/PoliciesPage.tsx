@@ -1371,6 +1371,18 @@ function PolicyForm({
     cfg0.inner_type ?? "Fixed",
   );
 
+  // Client-side validation for the fields the server requires but that
+  // can't be enforced by native ``required`` (the date-range pickers are
+  // custom components). Without this, an empty Ramadan/Custom range
+  // submits and returns an opaque server error.
+  const [errors, setErrors] = useState<{
+    name?: string;
+    rangeStart?: string;
+    rangeEnd?: string;
+  }>({});
+  const clearError = (key: "name" | "rangeStart" | "rangeEnd") =>
+    setErrors((prev) => (prev[key] ? { ...prev, [key]: undefined } : prev));
+
   const onTypeChange = (next: PolicyType) => {
     setType(next);
     if (next === "Ramadan" && !rangeStart) {
@@ -1387,8 +1399,55 @@ function PolicyForm({
     type === "Ramadan" ||
     (type === "Custom" && innerType === "Fixed");
 
+  // Live validity of every required field — drives the submit button's
+  // disabled state so "Create policy" only enables once the form can
+  // actually be saved. Mirrors the on-submit validation below.
+  const isValid = (() => {
+    if (!name.trim()) return false;
+    if (!activeFrom) return false;
+    if (isFixedShape) {
+      if (!start || !end) return false;
+    } else {
+      if (!inStart || !inEnd || !outStart || !outEnd) return false;
+    }
+    if (!requiredHours || requiredHours < 1) return false;
+    if (type === "Ramadan" || type === "Custom") {
+      if (!rangeStart || !rangeEnd) return false;
+      if (rangeEnd < rangeStart) return false;
+    }
+    return true;
+  })();
+
+  // Live range-order error so the user sees *why* the button is disabled
+  // when both dates are filled but out of order (not just on submit).
+  const rangeEndError =
+    errors.rangeEnd ??
+    ((type === "Ramadan" || type === "Custom") &&
+    rangeStart &&
+    rangeEnd &&
+    rangeEnd < rangeStart
+      ? "Range end must be on or after range start."
+      : undefined);
+
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Validate required fields the browser can't catch on its own.
+    const nextErrors: typeof errors = {};
+    if (!name.trim()) nextErrors.name = "Policy name is required.";
+    if (type === "Ramadan" || type === "Custom") {
+      if (!rangeStart) nextErrors.rangeStart = "Range start is required.";
+      if (!rangeEnd) nextErrors.rangeEnd = "Range end is required.";
+      if (rangeStart && rangeEnd && rangeEnd < rangeStart) {
+        nextErrors.rangeEnd = "Range end must be on or after range start.";
+      }
+    }
+    if (Object.keys(nextErrors).length > 0) {
+      setErrors(nextErrors);
+      return;
+    }
+    setErrors({});
+
     const fixedFields = {
       start,
       end,
@@ -1455,17 +1514,26 @@ function PolicyForm({
           gap: 10,
         }}
       >
-        <FormField label="Name">
+        <FormField label="Name" required error={errors.name}>
           <input
             type="text"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => {
+              setName(e.target.value);
+              clearError("name");
+            }}
             required
             maxLength={120}
-            style={inputStyle}
+            aria-invalid={!!errors.name}
+            style={{
+              ...inputStyle,
+              borderColor: errors.name
+                ? "var(--danger-text, #dc2626)"
+                : "var(--border)",
+            }}
           />
         </FormField>
-        <FormField label="Type">
+        <FormField label="Type" required>
           <select
             value={type}
             onChange={(e) => onTypeChange(e.target.value as PolicyType)}
@@ -1487,7 +1555,7 @@ function PolicyForm({
             <option value="Custom">Custom</option>
           </select>
         </FormField>
-        <FormField label="Active from">
+        <FormField label="Active from" required>
           <DatePicker
             value={activeFrom}
             onChange={setActiveFrom}
@@ -1506,25 +1574,31 @@ function PolicyForm({
             gap: 10,
           }}
         >
-          <FormField label="Range start">
+          <FormField label="Range start" required error={errors.rangeStart}>
             <DatePicker
               value={rangeStart}
-              onChange={setRangeStart}
+              onChange={(v) => {
+                setRangeStart(v);
+                clearError("rangeStart");
+              }}
               ariaLabel="Range start"
               triggerStyle={{ width: "100%" }}
             />
           </FormField>
-          <FormField label="Range end">
+          <FormField label="Range end" required error={rangeEndError}>
             <DatePicker
               value={rangeEnd}
-              onChange={setRangeEnd}
+              onChange={(v) => {
+                setRangeEnd(v);
+                clearError("rangeEnd");
+              }}
               min={rangeStart}
               ariaLabel="Range end"
               triggerStyle={{ width: "100%" }}
             />
           </FormField>
           {type === "Custom" && (
-            <FormField label="Custom inner type">
+            <FormField label="Custom inner type" required>
               <select
                 value={innerType}
                 onChange={(e) =>
@@ -1548,7 +1622,7 @@ function PolicyForm({
             gap: 10,
           }}
         >
-          <FormField label="Start">
+          <FormField label="Start" required>
             <input
               type="time"
               value={start}
@@ -1557,7 +1631,7 @@ function PolicyForm({
               style={inputStyle}
             />
           </FormField>
-          <FormField label="End">
+          <FormField label="End" required>
             <input
               type="time"
               value={end}
@@ -1578,7 +1652,7 @@ function PolicyForm({
               style={inputStyle}
             />
           </FormField>
-          <FormField label="Required hours">
+          <FormField label="Required hours" required>
             <input
               type="number"
               min={1}
@@ -1587,6 +1661,7 @@ function PolicyForm({
               onChange={(e) =>
                 setRequiredHours(Number.parseInt(e.target.value, 10) || 1)
               }
+              required
               style={inputStyle}
             />
           </FormField>
@@ -1599,7 +1674,7 @@ function PolicyForm({
             gap: 10,
           }}
         >
-          <FormField label="In window start">
+          <FormField label="In window start" required>
             <input
               type="time"
               value={inStart}
@@ -1608,7 +1683,7 @@ function PolicyForm({
               style={inputStyle}
             />
           </FormField>
-          <FormField label="In window end">
+          <FormField label="In window end" required>
             <input
               type="time"
               value={inEnd}
@@ -1617,7 +1692,7 @@ function PolicyForm({
               style={inputStyle}
             />
           </FormField>
-          <FormField label="Out window start">
+          <FormField label="Out window start" required>
             <input
               type="time"
               value={outStart}
@@ -1626,7 +1701,7 @@ function PolicyForm({
               style={inputStyle}
             />
           </FormField>
-          <FormField label="Out window end">
+          <FormField label="Out window end" required>
             <input
               type="time"
               value={outEnd}
@@ -1635,7 +1710,7 @@ function PolicyForm({
               style={inputStyle}
             />
           </FormField>
-          <FormField label="Required hours">
+          <FormField label="Required hours" required>
             <input
               type="number"
               min={1}
@@ -1644,6 +1719,7 @@ function PolicyForm({
               onChange={(e) =>
                 setRequiredHours(Number.parseInt(e.target.value, 10) || 1)
               }
+              required
               style={inputStyle}
             />
           </FormField>
@@ -1651,11 +1727,23 @@ function PolicyForm({
       )}
 
       <div
-        style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginTop: 4,
+        }}
       >
+        <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
+          <span style={{ color: "var(--danger-text, #dc2626)" }}>*</span>{" "}
+          Required field
+        </span>
         <button
           type="submit"
-          disabled={busy}
+          disabled={busy || !isValid}
+          title={
+            !isValid ? "Fill in all required fields to continue" : undefined
+          }
           className="btn btn-primary"
         >
           {busy
@@ -1669,9 +1757,13 @@ function PolicyForm({
 
 function FormField({
   label,
+  required,
+  error,
   children,
 }: {
   label: string;
+  required?: boolean;
+  error?: string | undefined;
   children: React.ReactNode;
 }) {
   return (
@@ -1685,8 +1777,25 @@ function FormField({
         }}
       >
         {label}
+        {required && (
+          <span
+            aria-hidden
+            title="Required"
+            style={{ color: "var(--danger-text, #dc2626)", marginInlineStart: 3 }}
+          >
+            *
+          </span>
+        )}
       </span>
       {children}
+      {error && (
+        <span
+          role="alert"
+          style={{ fontSize: 11, color: "var(--danger-text, #dc2626)" }}
+        >
+          {error}
+        </span>
+      )}
     </label>
   );
 }

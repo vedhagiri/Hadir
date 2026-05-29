@@ -16,6 +16,8 @@ import { createPortal } from "react-dom";
 import { ApiError } from "../api/client";
 import type { Employee } from "../features/employees/types";
 import { DatePicker } from "../components/DatePicker";
+import { ModalShell } from "../components/DrawerShell";
+import { Icon } from "../shell/Icon";
 import { useEmployeeList } from "../features/employees/hooks";
 import {
   useApprovedLeaves,
@@ -145,19 +147,30 @@ function LeaveTypesTab() {
     );
   const rows = list.data ?? [];
 
+  const canSubmit = code.trim() !== "" && name.trim() !== "";
+
+  const closeForm = () => {
+    setShowForm(false);
+    setError(null);
+    setCode("");
+    setName("");
+    setIsPaid(true);
+  };
+
   const onCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (!canSubmit) {
+      setError("Fill in both Code and Name.");
+      return;
+    }
     try {
       await create.mutateAsync({
         code: code.trim(),
         name: name.trim(),
         is_paid: isPaid,
       });
-      setCode("");
-      setName("");
-      setIsPaid(true);
-      setShowForm(false);
+      closeForm();
     } catch (err) {
       handleApi(err, setError, "Save failed");
     }
@@ -185,55 +198,122 @@ function LeaveTypesTab() {
         >
           Leave types
         </h3>
-        <button
-          type="button"
-          onClick={() => setShowForm((v) => !v)}
-          style={btnPrimary}
-        >
-          {showForm ? "Cancel" : "+ New leave type"}
+        <button type="button" onClick={() => setShowForm(true)} style={btnPrimary}>
+          + New leave type
         </button>
       </div>
       {showForm && (
-        <form onSubmit={onCreate} style={formStyle}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr 1fr", gap: 10 }}>
-            <Field label="Code">
-              <input
-                type="text"
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                required
-                maxLength={32}
-                style={inputStyle}
-              />
-            </Field>
-            <Field label="Name">
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-                maxLength={80}
-                style={inputStyle}
-              />
-            </Field>
-            <Field label="Paid?">
-              <select
-                value={isPaid ? "yes" : "no"}
-                onChange={(e) => setIsPaid(e.target.value === "yes")}
-                style={inputStyle}
+        <ModalShell onClose={closeForm}>
+          <div
+            role="dialog"
+            aria-labelledby="new-leave-type-title"
+            style={{
+              position: "fixed",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%, -50%)",
+              width: 480,
+              maxWidth: "90vw",
+              background: "var(--bg)",
+              border: "1px solid var(--border-strong)",
+              borderRadius: "var(--radius)",
+              padding: 20,
+              zIndex: 60,
+              boxShadow: "var(--shadow-lg)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 14,
+            }}
+          >
+            <header
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                justifyContent: "space-between",
+              }}
+            >
+              <h2 id="new-leave-type-title" style={{ margin: 0, fontSize: 18 }}>
+                New leave type
+              </h2>
+              <button
+                className="icon-btn"
+                type="button"
+                onClick={closeForm}
+                aria-label="Close"
               >
-                <option value="yes">Paid</option>
-                <option value="no">Unpaid</option>
-              </select>
-            </Field>
+                <Icon name="x" size={14} />
+              </button>
+            </header>
+            <form
+              onSubmit={onCreate}
+              style={{ display: "flex", flexDirection: "column", gap: 14 }}
+            >
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 12,
+                }}
+              >
+                <Field label="Code" required>
+                  <input
+                    type="text"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    required
+                    maxLength={32}
+                    style={inputStyle}
+                  />
+                </Field>
+                <Field label="Paid?">
+                  <select
+                    value={isPaid ? "yes" : "no"}
+                    onChange={(e) => setIsPaid(e.target.value === "yes")}
+                    style={inputStyle}
+                  >
+                    <option value="yes">Paid</option>
+                    <option value="no">Unpaid</option>
+                  </select>
+                </Field>
+              </div>
+              <Field label="Name" required>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                  maxLength={80}
+                  style={inputStyle}
+                />
+              </Field>
+              {error && <div style={errorBox}>{error}</div>}
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  gap: 8,
+                  marginTop: 4,
+                }}
+              >
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={closeForm}
+                  disabled={create.isPending}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!canSubmit || create.isPending}
+                  style={{ ...btnPrimary, opacity: canSubmit ? 1 : 0.5 }}
+                >
+                  {create.isPending ? "Saving…" : "Create"}
+                </button>
+              </div>
+            </form>
           </div>
-          {error && <div style={errorBox}>{error}</div>}
-          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
-            <button type="submit" disabled={create.isPending} style={btnPrimary}>
-              {create.isPending ? "Saving…" : "Create"}
-            </button>
-          </div>
-        </form>
+        </ModalShell>
       )}
       <table style={tableStyle}>
         <thead>
@@ -266,6 +346,7 @@ function LeaveTypesTab() {
 function LeaveTypeRow({ row }: { row: LeaveType }) {
   const patch = usePatchLeaveType(row.id);
   const del = useDeleteLeaveType();
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [delError, setDelError] = useState<string | null>(null);
   const onToggle = async (field: "is_paid" | "active") => {
     try {
@@ -274,16 +355,19 @@ function LeaveTypeRow({ row }: { row: LeaveType }) {
       // surfaced lazily in the toggle below
     }
   };
+  const askDelete = () => {
+    setDelError(null);
+    setConfirmOpen(true);
+  };
   // BUG-043 — leave types had no delete. Confirm then DELETE; on 409
   // (still referenced by approved_leaves) we surface the backend's
-  // friendly "deactivate instead" message inline.
-  const onDelete = async () => {
-    if (!confirm(`Delete leave type "${row.name}"? This cannot be undone.`)) {
-      return;
-    }
+  // friendly "deactivate instead" message inside the modal so the
+  // operator can fall back to the inactive toggle without losing it.
+  const onConfirmDelete = async () => {
     setDelError(null);
     try {
       await del.mutateAsync(row.id);
+      setConfirmOpen(false);
     } catch (err) {
       handleApi(err, setDelError, "Delete failed");
     }
@@ -293,14 +377,7 @@ function LeaveTypeRow({ row }: { row: LeaveType }) {
       <td style={{ ...td, fontFamily: "var(--font-mono)", fontSize: 12 }}>
         {row.code}
       </td>
-      <td style={td}>
-        {row.name}
-        {delError && (
-          <div style={{ marginTop: 4, color: "var(--danger-text)", fontSize: 11 }}>
-            {delError}
-          </div>
-        )}
-      </td>
+      <td style={td}>{row.name}</td>
       <td style={td}>
         <button
           type="button"
@@ -324,13 +401,92 @@ function LeaveTypeRow({ row }: { row: LeaveType }) {
       <td style={{ ...td, textAlign: "right" }}>
         <button
           type="button"
-          onClick={() => void onDelete()}
+          onClick={askDelete}
           disabled={del.isPending}
-          style={btnGhost}
+          style={{
+            ...btnGhost,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            color: "var(--danger-text)",
+          }}
           aria-label={`Delete leave type ${row.name}`}
         >
-          {del.isPending ? "Deleting…" : "Delete"}
+          <Icon name="trash" size={12} /> Delete
         </button>
+        {confirmOpen && (
+          <ModalShell onClose={() => setConfirmOpen(false)}>
+            <div
+              role="dialog"
+              aria-labelledby="lt-delete-title"
+              style={{
+                position: "fixed",
+                top: "50%",
+                left: "50%",
+                transform: "translate(-50%, -50%)",
+                width: 420,
+                maxWidth: "90vw",
+                background: "var(--bg)",
+                border: "1px solid var(--border-strong)",
+                borderRadius: "var(--radius)",
+                padding: 20,
+                zIndex: 60,
+                boxShadow: "var(--shadow-lg)",
+                textAlign: "left",
+              }}
+            >
+              <h2 id="lt-delete-title" style={{ margin: "0 0 8px 0", fontSize: 16 }}>
+                Delete leave type{" "}
+                <span className="mono">{row.code}</span>?
+              </h2>
+              <p style={{ fontSize: 13, color: "var(--text-secondary)", margin: 0 }}>
+                “{row.name}” will be removed. This cannot be undone. If the
+                type is still used by approved leaves, deactivate it instead.
+              </p>
+              {delError && (
+                <div
+                  style={{
+                    color: "var(--danger-text)",
+                    fontSize: 12,
+                    margin: "10px 0 0 0",
+                  }}
+                >
+                  {delError}
+                </div>
+              )}
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  marginTop: 16,
+                  justifyContent: "flex-end",
+                }}
+              >
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => setConfirmOpen(false)}
+                  disabled={del.isPending}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => void onConfirmDelete()}
+                  disabled={del.isPending}
+                  style={{
+                    background: "var(--danger-bg)",
+                    color: "var(--danger-text)",
+                    borderColor: "var(--danger-border)",
+                  }}
+                >
+                  {del.isPending ? "Deleting…" : "Delete"}
+                </button>
+              </div>
+            </div>
+          </ModalShell>
+        )}
       </td>
     </tr>
   );
@@ -343,14 +499,16 @@ function LeaveTypeRow({ row }: { row: LeaveType }) {
 function HolidaysTab() {
   const today = new Date();
   const [year, setYear] = useState<number>(today.getFullYear());
+  const [yearText, setYearText] = useState<string>(String(today.getFullYear()));
   const list = useHolidays(year);
   const create = useCreateHoliday();
-  const del = useDeleteHoliday();
   const importer = useImportHolidaysXlsx();
   const [error, setError] = useState<string | null>(null);
 
   const [date, setDate] = useState("");
   const [name, setName] = useState("");
+  const [showAdd, setShowAdd] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   // BUG-025 — surface the imported / skipped counts so the operator
   // sees whether a same-date file actually inserted anything. Must be
   // declared BEFORE the early-return guards below — otherwise the
@@ -365,14 +523,27 @@ function HolidaysTab() {
       <p style={{ color: "var(--danger-text)" }}>Couldn’t load holidays.</p>
     );
   const rows = list.data ?? [];
+  const thisYear = today.getFullYear();
+  const yearOptions = Array.from({ length: 9 }, (_, i) => thisYear - 3 + i);
+  const canAddHoliday = date !== "" && name.trim() !== "";
+
+  const closeAdd = () => {
+    setShowAdd(false);
+    setError(null);
+    setDate("");
+    setName("");
+  };
 
   const onAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (!canAddHoliday) {
+      setError("Choose a date and enter a holiday name.");
+      return;
+    }
     try {
       await create.mutateAsync({ date, name: name.trim() });
-      setDate("");
-      setName("");
+      closeAdd();
     } catch (err) {
       handleApi(err, setError, "Save failed");
     }
@@ -408,32 +579,74 @@ function HolidaysTab() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <label style={{ fontSize: 12 }}>
-          Year{" "}
-          <input
-            type="number"
-            value={year}
-            onChange={(e) =>
-              setYear(Number.parseInt(e.target.value, 10) || today.getFullYear())
-            }
-            min={2020}
-            max={2100}
-            style={{ ...inputStyle, width: 80 }}
-          />
-        </label>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
         <label
           style={{
-            ...btnPrimary,
             display: "inline-flex",
             alignItems: "center",
-            gap: 6,
-            cursor: "pointer",
+            gap: 8,
+            fontSize: 12,
+            color: "var(--text-secondary)",
           }}
         >
-          Import .xlsx
-          <input type="file" accept=".xlsx" hidden onChange={onImport} />
+          <span style={{ fontWeight: 600 }}>Year</span>
+          <input
+            type="number"
+            value={yearText}
+            list="holiday-year-options"
+            min={2000}
+            max={2100}
+            aria-label="Filter holidays by year"
+            placeholder="e.g. 2026"
+            onChange={(e) => {
+              const raw = e.target.value;
+              setYearText(raw);
+              const n = Number.parseInt(raw, 10);
+              if (Number.isInteger(n) && n >= 2000 && n <= 2100) {
+                setYear(n);
+              }
+            }}
+            onBlur={() => setYearText(String(year))}
+            style={{ ...inputStyle, width: 120 }}
+          />
+          <datalist id="holiday-year-options">
+            {yearOptions.map((y) => (
+              <option key={y} value={y} />
+            ))}
+          </datalist>
         </label>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              setError(null);
+              setImportSummary(null);
+              setShowImport(true);
+            }}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+          >
+            <Icon name="upload" size={13} /> Import .xlsx
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setError(null);
+              setShowAdd(true);
+            }}
+            style={btnPrimary}
+          >
+            + Add holiday
+          </button>
+        </div>
       </div>
       {/* BUG-025 — explicit import summary banner, replaces the old
           silent same-date no-op. */}
@@ -452,39 +665,6 @@ function HolidaysTab() {
         </div>
       )}
 
-      {/* BUG-022 / BUG-045 — Add button alignment. Place the button in
-          its own row, right-aligned, instead of wrapping it in a
-          <Field label=" ">. The phantom-label was pushing the button
-          below the inputs and made the form look uneven. */}
-      <form onSubmit={onAdd} style={formStyle}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 10 }}>
-          <Field label="Date">
-            <DatePicker
-              value={date}
-              onChange={setDate}
-              ariaLabel="Holiday date"
-              triggerStyle={{ width: "100%" }}
-            />
-          </Field>
-          <Field label="Name">
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              maxLength={120}
-              style={inputStyle}
-            />
-          </Field>
-        </div>
-        {error && <div style={errorBox}>{error}</div>}
-        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
-          <button type="submit" disabled={create.isPending} style={btnPrimary}>
-            {create.isPending ? "Saving…" : "+ Add holiday"}
-          </button>
-        </div>
-      </form>
-
       <table style={tableStyle}>
         <thead>
           <tr style={{ background: "var(--bg)" }}>
@@ -496,11 +676,7 @@ function HolidaysTab() {
         </thead>
         <tbody>
           {rows.map((r) => (
-            <HolidayRow
-              key={r.id}
-              row={r}
-              onDelete={() => void del.mutateAsync(r.id)}
-            />
+            <HolidayRow key={r.id} row={r} />
           ))}
           {rows.length === 0 && (
             <tr>
@@ -514,18 +690,204 @@ function HolidaysTab() {
           )}
         </tbody>
       </table>
+
+      {showAdd && (
+        <ModalShell onClose={closeAdd}>
+          <div
+            role="dialog"
+            aria-labelledby="new-holiday-title"
+            style={modalPanel}
+          >
+            <header style={modalHeader}>
+              <h2 id="new-holiday-title" style={{ margin: 0, fontSize: 18 }}>
+                New holiday
+              </h2>
+              <button
+                className="icon-btn"
+                type="button"
+                onClick={closeAdd}
+                aria-label="Close"
+              >
+                <Icon name="x" size={14} />
+              </button>
+            </header>
+            <form
+              onSubmit={onAdd}
+              style={{ display: "flex", flexDirection: "column", gap: 14 }}
+            >
+              <Field label="Date" required>
+                <DatePicker
+                  value={date}
+                  onChange={setDate}
+                  ariaLabel="Holiday date"
+                  triggerStyle={{ width: "100%" }}
+                />
+              </Field>
+              <Field label="Name" required>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                  maxLength={120}
+                  style={inputStyle}
+                />
+              </Field>
+              {error && <div style={errorBox}>{error}</div>}
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  gap: 8,
+                  marginTop: 4,
+                }}
+              >
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={closeAdd}
+                  disabled={create.isPending}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!canAddHoliday || create.isPending}
+                  style={{ ...btnPrimary, opacity: canAddHoliday ? 1 : 0.5 }}
+                >
+                  {create.isPending ? "Saving…" : "+ Add holiday"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </ModalShell>
+      )}
+
+      {showImport && (
+        <ModalShell onClose={() => setShowImport(false)}>
+          <div
+            role="dialog"
+            aria-labelledby="import-holidays-title"
+            style={modalPanel}
+          >
+            <header style={modalHeader}>
+              <h2
+                id="import-holidays-title"
+                style={{ margin: 0, fontSize: 18 }}
+              >
+                Import holidays
+              </h2>
+              <button
+                className="icon-btn"
+                type="button"
+                onClick={() => setShowImport(false)}
+                aria-label="Close"
+              >
+                <Icon name="x" size={14} />
+              </button>
+            </header>
+            <p
+              style={{
+                margin: 0,
+                fontSize: 13,
+                color: "var(--text-secondary)",
+                lineHeight: 1.5,
+              }}
+            >
+              Upload an <strong>.xlsx</strong> with a header row and the
+              columns <span className="mono">date</span> (YYYY-MM-DD),{" "}
+              <span className="mono">name</span>, and optional{" "}
+              <span className="mono">description</span>. Existing dates are
+              skipped, not overwritten.
+            </p>
+            <a
+              href="/api/holidays/import-template"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 13,
+                color: "var(--accent-strong, var(--accent))",
+                textDecoration: "none",
+              }}
+            >
+              <Icon name="download" size={13} /> Download reference template
+            </a>
+            <label
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
+                padding: "22px 16px",
+                border: "1.5px dashed var(--border-strong)",
+                borderRadius: "var(--radius)",
+                cursor: importer.isPending ? "wait" : "pointer",
+                color: "var(--text-secondary)",
+                fontSize: 13,
+                textAlign: "center",
+              }}
+            >
+              <Icon name="upload" size={18} />
+              {importer.isPending
+                ? "Importing…"
+                : "Click to choose an .xlsx file"}
+              <input
+                type="file"
+                accept=".xlsx"
+                hidden
+                disabled={importer.isPending}
+                onChange={onImport}
+              />
+            </label>
+            {importSummary && (
+              <div
+                style={{
+                  padding: "8px 12px",
+                  border: "1px solid #0b6e4f55",
+                  background: "#0b6e4f0d",
+                  color: "#0b6e4f",
+                  borderRadius: 8,
+                  fontSize: 12.5,
+                }}
+              >
+                {importSummary}
+              </div>
+            )}
+            {error && <div style={errorBox}>{error}</div>}
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setShowImport(false)}
+                disabled={importer.isPending}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </ModalShell>
+      )}
     </div>
   );
 }
 
 
-function HolidayRow({
-  row,
-  onDelete,
-}: {
-  row: Holiday;
-  onDelete: () => void;
-}) {
+function HolidayRow({ row }: { row: Holiday }) {
+  const del = useDeleteHoliday();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [delError, setDelError] = useState<string | null>(null);
+
+  const onConfirmDelete = async () => {
+    setDelError(null);
+    try {
+      await del.mutateAsync(row.id);
+      setConfirmOpen(false);
+    } catch (err) {
+      handleApi(err, setDelError, "Delete failed");
+    }
+  };
   // Build a UTC date so the rendered weekday isn't browser-tz dependent.
   const d = new Date(row.date + "T00:00:00Z");
   const weekday = d.toLocaleDateString(undefined, {
@@ -541,12 +903,88 @@ function HolidayRow({
         <button
           type="button"
           onClick={() => {
-            if (confirm(`Delete holiday "${row.name}"?`)) onDelete();
+            setDelError(null);
+            setConfirmOpen(true);
           }}
-          style={btnGhost}
+          disabled={del.isPending}
+          style={{
+            ...btnGhost,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            color: "var(--danger-text)",
+          }}
+          aria-label={`Delete holiday ${row.name}`}
         >
-          Delete
+          <Icon name="trash" size={12} /> Delete
         </button>
+        {confirmOpen && (
+          <ModalShell onClose={() => setConfirmOpen(false)}>
+            <div
+              role="dialog"
+              aria-labelledby="holiday-delete-title"
+              style={{ ...modalPanel, width: 420, gap: 0, textAlign: "left" }}
+            >
+              <h2
+                id="holiday-delete-title"
+                style={{ margin: "0 0 8px 0", fontSize: 16 }}
+              >
+                Delete holiday?
+              </h2>
+              <p
+                style={{
+                  fontSize: 13,
+                  color: "var(--text-secondary)",
+                  margin: 0,
+                }}
+              >
+                “{row.name}” on {row.date} will be removed. This cannot be
+                undone.
+              </p>
+              {delError && (
+                <div
+                  style={{
+                    color: "var(--danger-text)",
+                    fontSize: 12,
+                    margin: "10px 0 0 0",
+                  }}
+                >
+                  {delError}
+                </div>
+              )}
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  marginTop: 16,
+                  justifyContent: "flex-end",
+                }}
+              >
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => setConfirmOpen(false)}
+                  disabled={del.isPending}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => void onConfirmDelete()}
+                  disabled={del.isPending}
+                  style={{
+                    background: "var(--danger-bg)",
+                    color: "var(--danger-text)",
+                    borderColor: "var(--danger-border)",
+                  }}
+                >
+                  {del.isPending ? "Deleting…" : "Delete"}
+                </button>
+              </div>
+            </div>
+          </ModalShell>
+        )}
       </td>
     </tr>
   );
@@ -567,7 +1005,6 @@ function ApprovedLeavesTab() {
     page_size: 200,
   });
   const create = useCreateApprovedLeave();
-  const del = useDeleteApprovedLeave();
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -592,9 +1029,46 @@ function ApprovedLeavesTab() {
     employeeOptions.map((e) => [e.id, e] as const),
   );
 
+  const canSubmit =
+    employeeId !== "" &&
+    leaveTypeId !== "" &&
+    startDate !== "" &&
+    endDate !== "" &&
+    endDate >= startDate;
+
+  const closeForm = () => {
+    setShowForm(false);
+    setError(null);
+    setEmployeeId("");
+    setLeaveTypeId("");
+    setStartDate("");
+    setEndDate("");
+    setNotes("");
+  };
+
   const onCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (!employeeId) {
+      setError("Select an employee.");
+      return;
+    }
+    if (!leaveTypeId) {
+      setError("Select a leave type.");
+      return;
+    }
+    if (!startDate) {
+      setError("Choose a start date.");
+      return;
+    }
+    if (!endDate) {
+      setError("Choose an end date.");
+      return;
+    }
+    if (endDate < startDate) {
+      setError("End date can’t be before the start date.");
+      return;
+    }
     try {
       await create.mutateAsync({
         employee_id: Number.parseInt(employeeId, 10),
@@ -603,12 +1077,7 @@ function ApprovedLeavesTab() {
         end_date: endDate,
         notes: notes.trim() || null,
       });
-      setEmployeeId("");
-      setLeaveTypeId("");
-      setStartDate("");
-      setEndDate("");
-      setNotes("");
-      setShowForm(false);
+      closeForm();
     } catch (err) {
       handleApi(err, setError, "Save failed");
     }
@@ -616,81 +1085,120 @@ function ApprovedLeavesTab() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div>
-        <button
-          type="button"
-          onClick={() => setShowForm((v) => !v)}
-          style={btnPrimary}
-        >
-          {showForm ? "Cancel" : "+ New approved leave"}
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <button type="button" onClick={() => setShowForm(true)} style={btnPrimary}>
+          + New approved leave
         </button>
       </div>
       {showForm && (
-        <form onSubmit={onCreate} style={formStyle}>
+        <ModalShell onClose={closeForm}>
           <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr 1fr 1fr",
-              gap: 10,
-            }}
+            role="dialog"
+            aria-labelledby="new-leave-title"
+            style={{ ...modalPanel, width: 640 }}
           >
-            <Field label="Employee">
-              <EmployeeSearchSelect
-                options={employeeOptions}
-                value={employeeId}
-                onChange={setEmployeeId}
-                placeholder="Search by code or name…"
-              />
-            </Field>
-            <Field label="Leave type">
-              <select
-                value={leaveTypeId}
-                onChange={(e) => setLeaveTypeId(e.target.value)}
-                required
-                style={inputStyle}
+            <header style={modalHeader}>
+              <h2 id="new-leave-title" style={{ margin: 0, fontSize: 18 }}>
+                New approved leave
+              </h2>
+              <button
+                className="icon-btn"
+                type="button"
+                onClick={closeForm}
+                aria-label="Close"
               >
-                <option value="">Select…</option>
-                {typeOptions.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Start">
-              <DatePicker
-                value={startDate}
-                onChange={setStartDate}
-                ariaLabel="Start date"
-                triggerStyle={{ width: "100%" }}
-              />
-            </Field>
-            <Field label="End">
-              <DatePicker
-                value={endDate}
-                onChange={setEndDate}
-                min={startDate}
-                ariaLabel="End date"
-                triggerStyle={{ width: "100%" }}
-              />
-            </Field>
+                <Icon name="x" size={14} />
+              </button>
+            </header>
+            <form
+              onSubmit={onCreate}
+              style={{ display: "flex", flexDirection: "column", gap: 14 }}
+            >
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 12,
+                }}
+              >
+                <Field label="Employee" required>
+                  <EmployeeSearchSelect
+                    options={employeeOptions}
+                    value={employeeId}
+                    onChange={setEmployeeId}
+                    placeholder="Search by code or name…"
+                  />
+                </Field>
+                <Field label="Leave type" required>
+                  <select
+                    value={leaveTypeId}
+                    onChange={(e) => setLeaveTypeId(e.target.value)}
+                    required
+                    style={inputStyle}
+                  >
+                    <option value="">Select…</option>
+                    {typeOptions.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Start" required>
+                  <DatePicker
+                    value={startDate}
+                    onChange={setStartDate}
+                    ariaLabel="Start date"
+                    triggerStyle={{ width: "100%" }}
+                  />
+                </Field>
+                <Field label="End" required>
+                  <DatePicker
+                    value={endDate}
+                    onChange={setEndDate}
+                    min={startDate}
+                    ariaLabel="End date"
+                    triggerStyle={{ width: "100%" }}
+                  />
+                </Field>
+              </div>
+              <Field label="Notes">
+                <input
+                  type="text"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  maxLength={500}
+                  style={inputStyle}
+                />
+              </Field>
+              {error && <div style={errorBox}>{error}</div>}
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  gap: 8,
+                  marginTop: 4,
+                }}
+              >
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={closeForm}
+                  disabled={create.isPending}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!canSubmit || create.isPending}
+                  style={{ ...btnPrimary, opacity: canSubmit ? 1 : 0.5 }}
+                >
+                  {create.isPending ? "Saving…" : "Create"}
+                </button>
+              </div>
+            </form>
           </div>
-          <Field label="Notes">
-            <input
-              type="text"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              maxLength={500}
-              style={inputStyle}
-            />
-          </Field>
-          {error && <div style={errorBox}>{error}</div>}
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <button type="submit" disabled={create.isPending} style={btnPrimary}>
-              {create.isPending ? "Saving…" : "Create"}
-            </button>
-          </div>
-        </form>
+        </ModalShell>
       )}
       <table style={tableStyle}>
         <thead>
@@ -715,7 +1223,6 @@ function ApprovedLeavesTab() {
                     ? `${emp.employee_code} — ${emp.full_name}`
                     : `#${r.employee_id}`
                 }
-                onDelete={() => void del.mutateAsync(r.id)}
               />
             );
           })}
@@ -739,12 +1246,24 @@ function ApprovedLeavesTab() {
 function ApprovedLeaveRow({
   row,
   employeeLabel,
-  onDelete,
 }: {
   row: ApprovedLeave;
   employeeLabel: string;
-  onDelete: () => void;
 }) {
+  const del = useDeleteApprovedLeave();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [delError, setDelError] = useState<string | null>(null);
+
+  const onConfirmDelete = async () => {
+    setDelError(null);
+    try {
+      await del.mutateAsync(row.id);
+      setConfirmOpen(false);
+    } catch (err) {
+      handleApi(err, setDelError, "Delete failed");
+    }
+  };
+
   return (
     <tr style={{ borderTop: "1px solid var(--border)" }}>
       <td style={td}>{employeeLabel}</td>
@@ -758,12 +1277,88 @@ function ApprovedLeaveRow({
         <button
           type="button"
           onClick={() => {
-            if (confirm("Delete this approved leave?")) onDelete();
+            setDelError(null);
+            setConfirmOpen(true);
           }}
-          style={btnGhost}
+          disabled={del.isPending}
+          style={{
+            ...btnGhost,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            color: "var(--danger-text)",
+          }}
+          aria-label={`Delete approved leave for ${employeeLabel}`}
         >
-          Delete
+          <Icon name="trash" size={12} /> Delete
         </button>
+        {confirmOpen && (
+          <ModalShell onClose={() => setConfirmOpen(false)}>
+            <div
+              role="dialog"
+              aria-labelledby="leave-delete-title"
+              style={{ ...modalPanel, width: 420, gap: 0, textAlign: "left" }}
+            >
+              <h2
+                id="leave-delete-title"
+                style={{ margin: "0 0 8px 0", fontSize: 16 }}
+              >
+                Delete approved leave?
+              </h2>
+              <p
+                style={{
+                  fontSize: 13,
+                  color: "var(--text-secondary)",
+                  margin: 0,
+                }}
+              >
+                {row.leave_type_name} for {employeeLabel} ({row.start_date} →{" "}
+                {row.end_date}) will be removed. This cannot be undone.
+              </p>
+              {delError && (
+                <div
+                  style={{
+                    color: "var(--danger-text)",
+                    fontSize: 12,
+                    margin: "10px 0 0 0",
+                  }}
+                >
+                  {delError}
+                </div>
+              )}
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  marginTop: 16,
+                  justifyContent: "flex-end",
+                }}
+              >
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => setConfirmOpen(false)}
+                  disabled={del.isPending}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => void onConfirmDelete()}
+                  disabled={del.isPending}
+                  style={{
+                    background: "var(--danger-bg)",
+                    color: "var(--danger-text)",
+                    borderColor: "var(--danger-border)",
+                  }}
+                >
+                  {del.isPending ? "Deleting…" : "Delete"}
+                </button>
+              </div>
+            </div>
+          </ModalShell>
+        )}
       </td>
     </tr>
   );
@@ -775,14 +1370,26 @@ function ApprovedLeaveRow({
 
 function Field({
   label,
+  required,
   children,
 }: {
   label: string;
+  required?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <span style={labelStyle}>{label}</span>
+      <span style={labelStyle}>
+        {label}
+        {required && (
+          <span
+            aria-hidden="true"
+            style={{ color: "var(--danger-text)", marginInlineStart: 4 }}
+          >
+            *
+          </span>
+        )}
+      </span>
       {children}
     </label>
   );
@@ -1056,16 +1663,6 @@ const btnGhost = {
   fontSize: 12.5,
 } as const;
 
-const formStyle = {
-  background: "var(--bg-elev)",
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius-md)",
-  padding: 14,
-  display: "flex" as const,
-  flexDirection: "column" as const,
-  gap: 8,
-};
-
 const tableStyle = {
   width: "100%",
   borderCollapse: "collapse" as const,
@@ -1095,6 +1692,30 @@ const errorBox = {
   borderRadius: "var(--radius-sm)",
   fontSize: 12.5,
 } as const;
+
+const modalPanel: React.CSSProperties = {
+  position: "fixed",
+  top: "50%",
+  left: "50%",
+  transform: "translate(-50%, -50%)",
+  width: 480,
+  maxWidth: "90vw",
+  background: "var(--bg)",
+  border: "1px solid var(--border-strong)",
+  borderRadius: "var(--radius)",
+  padding: 20,
+  zIndex: 60,
+  boxShadow: "var(--shadow-lg)",
+  display: "flex",
+  flexDirection: "column",
+  gap: 14,
+};
+
+const modalHeader: React.CSSProperties = {
+  display: "flex",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
+};
 
 function chipStyle(active: boolean): React.CSSProperties {
   return {

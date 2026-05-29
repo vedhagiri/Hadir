@@ -25,9 +25,21 @@ from maugood.auth.sessions import (
     touch_session,
 )
 from maugood.config import get_settings
-from maugood.db import departments, get_engine, roles, user_departments, user_roles, users
+from maugood.db import (
+    _TENANT_SCHEMA_RE,
+    departments,
+    get_engine,
+    roles,
+    user_departments,
+    user_roles,
+    users,
+)
 
 COOKIE_NAME = "maugood_session"  # settings.session_cookie_name default — see set_cookie()
+# Tenant routing cookie. Mirrors ``TENANT_COOKIE_NAME`` in
+# ``maugood.auth.router`` and the middleware's ``tenant_cookie_name``;
+# defined locally to avoid a circular import (router imports from here).
+TENANT_COOKIE_NAME = "maugood_tenant"
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,6 +177,7 @@ def current_user(
     request: Request,
     response: Response,
     maugood_session: str | None = Cookie(default=None, alias="maugood_session"),
+    maugood_tenant: str | None = Cookie(default=None, alias="maugood_tenant"),
 ) -> CurrentUser:
     """Resolve the logged-in user from the session cookie.
 
@@ -300,6 +313,32 @@ def current_user(
         secure=settings.session_cookie_secure,
         path="/",
     )
+
+    # Slide the ``maugood_tenant`` routing cookie in lockstep with the
+    # session cookie. Login sets it with the SAME Max-Age as the session,
+    # but without this re-issue it kept its original login+idle expiry and
+    # was never refreshed — so one idle window after login the browser
+    # stopped sending it, ``TenantScopeMiddleware`` fell back to the
+    # ``main`` schema, the (still-valid) session in the tenant schema
+    # became unfindable, and every request 401'd as "invalid session"
+    # regardless of activity or "Stay signed in". Re-issuing it here (the
+    # common path for /me, /refresh, and every authed route) keeps routing
+    # alive as long as the session is. Only re-set when the request
+    # actually carried a tenant cookie — the single-mode ``main`` default
+    # has no tenant cookie and must stay untouched. Prefer the schema the
+    # middleware resolved (already validated) over the raw cookie value.
+    if maugood_tenant:
+        tenant_schema = getattr(request.state, "tenant_schema", None) or maugood_tenant
+        if _TENANT_SCHEMA_RE.match(tenant_schema):
+            response.set_cookie(
+                key=TENANT_COOKIE_NAME,
+                value=tenant_schema,
+                max_age=settings.session_idle_minutes * 60,
+                httponly=True,
+                samesite="lax",
+                secure=settings.session_cookie_secure,
+                path="/",
+            )
 
     # Make tenant resolvable by downstream deps (maugood.tenants.scope).
     request.state.tenant_id = session_row.tenant_id

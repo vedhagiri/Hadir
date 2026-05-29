@@ -74,20 +74,36 @@ export function SessionExpiryWatcher() {
     me?.session_idle_minutes,
   );
 
-  // Drive the countdown off a single interval keyed only on the target.
-  // ``phase`` is intentionally NOT a dependency: each tick re-derives
-  // phase from the remaining-time math, so including it in the deps
-  // would tear down the interval mid-countdown the moment phase first
-  // transitions (idle → warning), and the early-return guard from the
-  // old implementation prevented the interval from being re-created.
-  useEffect(() => {
-    if (!expiresAt) {
-      setPhase("idle");
-      return;
-    }
+  // The popup target moves forward every time the user clicks "Stay
+  // signed in" — the backend bumps ``refresh_anchor_at``, which flows
+  // back into ``me.session_started_at``, which shifts ``expiresAt``.
+  //
+  // The previous implementation keyed the countdown ``useEffect`` on
+  // ``[expiresAt]``, tearing the interval down and recreating it on
+  // every target change. That re-creation is the fragile bit: the
+  // 30-second ``/api/auth/me`` poll churns the ``me`` object
+  // constantly, so the effect's teardown/re-run can race with a poll
+  // and — on the *second* cycle after a refresh — leave the countdown
+  // without a live interval. The warning then never re-arms and the
+  // session silently runs out (the reported bug).
+  //
+  // Fix: run exactly ONE interval for the component's lifetime
+  // (mount-once, empty deps) and read the *current* target from a ref
+  // each tick. The ref is refreshed on every render, so the warning
+  // re-arms automatically on every refresh cycle without depending on
+  // an effect re-run firing at the right moment.
+  const targetRef = useRef<string | null>(expiresAt);
+  targetRef.current = expiresAt;
 
+  useEffect(() => {
     const tick = () => {
-      const left = diffSeconds(expiresAt);
+      const target = targetRef.current;
+      if (!target) {
+        setPhase("idle");
+        setRemaining(0);
+        return;
+      }
+      const left = diffSeconds(target);
       setRemaining(left);
       if (left <= 0) {
         // Don't flip to "expired" while a refresh request is already
@@ -110,10 +126,11 @@ export function SessionExpiryWatcher() {
     tick();
     const id = window.setInterval(tick, COUNTDOWN_INTERVAL_MS);
     return () => window.clearInterval(id);
-  }, [expiresAt]);
+  }, []);
 
   // If a refresh succeeds, ``me`` updates with a fresh
-  // ``session_expires_at`` and the effect above resets the timer.
+  // ``session_started_at``; ``targetRef`` picks it up on the next render
+  // and the next tick re-arms the warning for the new cycle.
 
   const handleStay = () => {
     refresh.mutate(undefined, {
