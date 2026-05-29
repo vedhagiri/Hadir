@@ -190,6 +190,20 @@ export function EmployeeReportPage() {
       totalMinutes += it.total_minutes ?? 0;
       otMinutes += it.overtime_minutes;
     }
+    // Weekend work is recorded as overtime by the engine (the whole
+    // day is OT). It's not part of the working-days / present / absent
+    // counts, but its hours are real — fold them into Total Hours + OT
+    // only while "Show weekends" is on, so the tiles reconcile with
+    // whatever rows are actually visible in the breakdown below.
+    let weekendMinutes = 0;
+    let weekendOtMinutes = 0;
+    for (const d of allDates) {
+      if (!isWeekend(d)) continue;
+      const it = itemByDate.get(d);
+      if (!it || !it.in_time) continue;
+      weekendMinutes += it.total_minutes ?? 0;
+      weekendOtMinutes += it.overtime_minutes;
+    }
     const presentPct =
       workingDates.length > 0
         ? Math.round((present / workingDates.length) * 100)
@@ -201,11 +215,13 @@ export function EmployeeReportPage() {
       late,
       absent,
       leave,
-      totalMinutes,
-      otMinutes,
+      totalMinutes: totalMinutes + (showWeekends ? weekendMinutes : 0),
+      otMinutes: otMinutes + (showWeekends ? weekendOtMinutes : 0),
+      weekendMinutes,
+      weekendOtMinutes,
       presentPct,
     };
-  }, [items, start, end]);
+  }, [items, start, end, showWeekends]);
 
   const visibleDates = useMemo(() => {
     const allDates = rowsBetween(start, end);
