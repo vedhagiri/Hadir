@@ -1507,14 +1507,9 @@ function PolicyForm({
         gap: 10,
       }}
     >
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "2fr 1fr 1fr",
-          gap: 10,
-        }}
-      >
-        <FormField label="Name" required error={errors.name}>
+      <SectionCaption>Identity</SectionCaption>
+      <div style={grid2}>
+        <FormField label="Name" required error={errors.name} span>
           <input
             type="text"
             value={name}
@@ -1567,61 +1562,53 @@ function PolicyForm({
 
       {/* Date-range picker — Ramadan + Custom only */}
       {(type === "Ramadan" || type === "Custom") && (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr 1fr",
-            gap: 10,
-          }}
-        >
-          <FormField label="Range start" required error={errors.rangeStart}>
-            <DatePicker
-              value={rangeStart}
-              onChange={(v) => {
-                setRangeStart(v);
-                clearError("rangeStart");
-              }}
-              ariaLabel="Range start"
-              triggerStyle={{ width: "100%" }}
-            />
-          </FormField>
-          <FormField label="Range end" required error={rangeEndError}>
-            <DatePicker
-              value={rangeEnd}
-              onChange={(v) => {
-                setRangeEnd(v);
-                clearError("rangeEnd");
-              }}
-              min={rangeStart}
-              ariaLabel="Range end"
-              triggerStyle={{ width: "100%" }}
-            />
-          </FormField>
-          {type === "Custom" && (
-            <FormField label="Custom inner type" required>
-              <select
-                value={innerType}
-                onChange={(e) =>
-                  setInnerType(e.target.value as "Fixed" | "Flex")
-                }
-                style={inputStyle}
-              >
-                <option value="Fixed">Fixed (start/end + grace)</option>
-                <option value="Flex">Flex (in/out windows)</option>
-              </select>
+        <>
+          <SectionCaption>Date range</SectionCaption>
+          <div style={grid2}>
+            <FormField label="Range start" required error={errors.rangeStart}>
+              <DatePicker
+                value={rangeStart}
+                onChange={(v) => {
+                  setRangeStart(v);
+                  clearError("rangeStart");
+                }}
+                ariaLabel="Range start"
+                triggerStyle={{ width: "100%" }}
+              />
             </FormField>
-          )}
-        </div>
+            <FormField label="Range end" required error={rangeEndError}>
+              <DatePicker
+                value={rangeEnd}
+                onChange={(v) => {
+                  setRangeEnd(v);
+                  clearError("rangeEnd");
+                }}
+                min={rangeStart}
+                ariaLabel="Range end"
+                triggerStyle={{ width: "100%" }}
+              />
+            </FormField>
+            {type === "Custom" && (
+              <FormField label="Custom inner type" required span>
+                <select
+                  value={innerType}
+                  onChange={(e) =>
+                    setInnerType(e.target.value as "Fixed" | "Flex")
+                  }
+                  style={inputStyle}
+                >
+                  <option value="Fixed">Fixed (start/end + grace)</option>
+                  <option value="Flex">Flex (in/out windows)</option>
+                </select>
+              </FormField>
+            )}
+          </div>
+        </>
       )}
 
+      <SectionCaption>Shift window</SectionCaption>
       {isFixedShape ? (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr 1fr 1fr",
-            gap: 10,
-          }}
-        >
+        <div style={grid2}>
           <FormField label="Start" required>
             <input
               type="time"
@@ -1667,13 +1654,7 @@ function PolicyForm({
           </FormField>
         </div>
       ) : (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr",
-            gap: 10,
-          }}
-        >
+        <div style={grid2}>
           <FormField label="In window start" required>
             <input
               type="time"
@@ -1710,7 +1691,7 @@ function PolicyForm({
               style={inputStyle}
             />
           </FormField>
-          <FormField label="Required hours" required>
+          <FormField label="Required hours" required span>
             <input
               type="number"
               min={1}
@@ -1729,15 +1710,11 @@ function PolicyForm({
       <div
         style={{
           display: "flex",
-          justifyContent: "space-between",
+          justifyContent: "flex-end",
           alignItems: "center",
           marginTop: 4,
         }}
       >
-        <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
-          <span style={{ color: "var(--danger-text, #dc2626)" }}>*</span>{" "}
-          Required field
-        </span>
         <button
           type="submit"
           disabled={busy || !isValid}
@@ -1759,15 +1736,24 @@ function FormField({
   label,
   required,
   error,
+  span,
   children,
 }: {
   label: string;
   required?: boolean;
   error?: string | undefined;
+  span?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+    <label
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+        ...(span ? { gridColumn: "1 / -1" } : {}),
+      }}
+    >
       <span
         style={{
           fontSize: 11,
@@ -1810,3 +1796,28 @@ const inputStyle = {
   fontFamily: "var(--font-sans)",
   outline: "none",
 } as const;
+
+const grid2 = {
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr",
+  gap: 12,
+} as const;
+
+function SectionCaption({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        fontSize: 10.5,
+        textTransform: "uppercase",
+        letterSpacing: "0.06em",
+        color: "var(--text-tertiary)",
+        fontWeight: 700,
+        marginTop: 6,
+        paddingBottom: 4,
+        borderBottom: "1px solid var(--border)",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
