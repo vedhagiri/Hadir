@@ -79,6 +79,8 @@ export const NAV: Record<Role, NavItem[]> = {
     // { id: "mgr-assign", label: "Manager assignments", icon: "users" },
     { section: "Me" },
     { id: "my-attendance", label: "My Attendance", icon: "calendar" },
+        { id: "my-profile", label: "Profile & Photo", icon: "user" },
+
     { section: "System" },
     { id: "settings", label: "Settings", icon: "settings" },
     { section: "Help" },
@@ -93,6 +95,8 @@ export const NAV: Record<Role, NavItem[]> = {
     { id: "approvals", label: "Approvals", icon: "inbox" },
     { section: "Me" },
     { id: "my-attendance", label: "My Attendance", icon: "calendar" },
+    { id: "my-profile", label: "Profile & Photo", icon: "user" },
+
   ],
   Employee: [
     { section: "Me" },
