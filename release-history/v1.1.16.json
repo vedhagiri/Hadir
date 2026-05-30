@@ -1,0 +1,18 @@
+{
+  "version": "1.1.16",
+  "label": "v1.1.16",
+  "git_url": "https://github.com/vedhagiri/Hadir.git",
+  "branch": "release/staging-testing",
+  "commit_id": "b51ba3b31bc73c7f52cb2bea6f1642169ad37a71",
+  "commit_short": "b51ba3b",
+  "built_at_utc": "2026-05-30T07:15:57Z",
+  "built_at_local": "2026-05-30 12:45:57 IST",
+  "machine": {
+    "hostname": "inaisys-02",
+    "os": "Linux",
+    "kernel": "Linux 6.17.0-29-generic x86_64",
+    "user": "hari-inaisys",
+    "python_version": "3.12.3",
+    "node_version": "24.15.0"
+  }
+}
