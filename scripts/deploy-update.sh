@@ -75,7 +75,11 @@
 #      backend/logs/, backups/, etc). The DB data dir (./data/) is
 #      excluded, so existing data is NEVER touched by the code update.
 #   6. Build only the services the plan flagged for rebuild.
-#   7. Up only the services the plan flagged for restart.
+#   7. Up only the services the plan flagged for restart. On the
+#      dev/quick-start stack, if the frontend was restarted, re-run
+#      ``npm install`` inside its container so a release that added an
+#      npm dependency lands in the named node_modules volume (otherwise
+#      Vite throws "Failed to resolve import"). No-op on HTTPS-local.
 #   8. Backend entrypoint runs Alembic migrations on boot — every
 #      tenant schema upgrades automatically. Migrations are additive;
 #      data is never cleared.
@@ -603,6 +607,53 @@ else
     echo
     echo ">> No services to restart — install code on disk reflects the"
     echo "   new release, but no container needed a bounce."
+fi
+
+# ---------------------------------------------------------------------------
+# 4b. Refresh frontend node_modules on the dev / quick-start stack.
+#
+# The docker-compose.yml frontend service mounts node_modules as a NAMED
+# volume (frontend_node_modules:/app/node_modules) so it survives rebuilds.
+# That volume is sticky: a release that adds a new npm dependency (e.g.
+# react-icons) rebuilds the image, but the running container keeps shadowing
+# /app/node_modules with the OLD volume — so Vite throws
+# "Failed to resolve import ...". Re-run npm install inside the container so
+# the new package.json deps land in the volume, then bounce the dev server.
+#
+# Not needed on the HTTPS-local stack: there the frontend is built into the
+# nginx image at build time, with no runtime node_modules volume.
+# ---------------------------------------------------------------------------
+
+if [[ ${HTTPS_LOCAL} -eq 0 && " ${RESTART_LIST} " == *" frontend "* ]]; then
+    echo
+    echo ">> Refreshing frontend node_modules (named-volume deps may be stale)"
+    if [[ ${DRY_RUN} -eq 1 ]]; then
+        echo "[dry-run] docker compose -f ${COMPOSE_FILE_REL} exec -T frontend npm install"
+        echo "[dry-run] docker compose -f ${COMPOSE_FILE_REL} restart frontend"
+    else
+        (
+            cd "${INSTALL_DIR}"
+            # Wait for the freshly-started frontend container to accept exec.
+            for _ in 1 2 3 4 5; do
+                if docker compose -f "${COMPOSE_FILE_REL}" exec -T frontend true \
+                    >/dev/null 2>&1; then
+                    break
+                fi
+                sleep 2
+            done
+            if docker compose -f "${COMPOSE_FILE_REL}" exec -T frontend \
+                npm install 2>&1 | tail -6; then
+                docker compose -f "${COMPOSE_FILE_REL}" restart frontend \
+                    2>&1 | tail -3 || true
+                echo "   ✓ frontend deps refreshed + dev server restarted"
+            else
+                echo "   ! npm install in the frontend container failed — if the UI"
+                echo "     shows a 'Failed to resolve import' overlay, run manually:"
+                echo "       docker compose -f ${COMPOSE_FILE_REL} exec frontend npm install"
+                echo "       docker compose -f ${COMPOSE_FILE_REL} restart frontend"
+            fi
+        )
+    fi
 fi
 
 # ---------------------------------------------------------------------------
