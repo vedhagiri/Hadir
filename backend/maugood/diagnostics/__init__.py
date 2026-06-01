@@ -29,6 +29,7 @@ Why anomaly-triggered:
 from maugood.diagnostics.recorder import (
     clear,
     is_enabled,
+    record_camera_read_timeout,
     record_detection_slow,
     record_ffmpeg_restart,
     record_frame_slow,
@@ -43,6 +44,7 @@ from maugood.diagnostics.recorder import (
 __all__ = [
     "clear",
     "is_enabled",
+    "record_camera_read_timeout",
     "record_detection_slow",
     "record_ffmpeg_restart",
     "record_frame_slow",

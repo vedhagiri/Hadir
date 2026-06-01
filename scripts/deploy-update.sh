@@ -51,6 +51,13 @@
 #   --skip-db-backup         Escape hatch — skip the mandatory pg_dump.
 #                            STRONGLY discouraged; only for a DB that lives
 #                            outside this stack. Disables --auto-rollback.
+#   --allow-dev-fernet       Escape hatch — allow updating when
+#                            MAUGOOD_FERNET_KEY is missing or still the dev
+#                            default. Only safe on a FRESH install with no
+#                            encrypted data (cameras / photos / attachments)
+#                            yet. Default refuses, because the backend
+#                            silently falls back to the dev key and then
+#                            CANNOT decrypt existing camera URLs or photos.
 #   --yes                    Don't prompt for confirmation. For automation.
 #
 # What it does, in order:
@@ -113,6 +120,7 @@ ASSUME_YES=0
 QUICK_START=0          # NEW: --quick-start flag
 AUTO_ROLLBACK=0        # NEW: restore the DB dump automatically if health fails
 SKIP_DB_BACKUP=0       # ESCAPE HATCH: skip the mandatory pg_dump (NOT recommended)
+ALLOW_DEV_FERNET=0     # ESCAPE HATCH: allow a missing/dev MAUGOOD_FERNET_KEY
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -126,6 +134,7 @@ while [[ $# -gt 0 ]]; do
         --force-skip-versions)  FORCE_SKIP=1; shift ;;
         --auto-rollback)        AUTO_ROLLBACK=1; shift ;;
         --skip-db-backup)       SKIP_DB_BACKUP=1; shift ;;
+        --allow-dev-fernet)     ALLOW_DEV_FERNET=1; shift ;;
         --yes|-y)               ASSUME_YES=1; shift ;;
         -h|--help)
             sed -n '3,90p' "$0"
@@ -168,6 +177,43 @@ PLANNER="${SCRIPT_DIR}/_update_planner.py"
 if [[ ${BACKUP_ONLY} -eq 0 && ! -f "${PLANNER}" ]]; then
     echo "error: planner module missing at '${PLANNER}'" >&2
     exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Fernet-key guard.
+#
+# MAUGOOD_FERNET_KEY encrypts RTSP camera URLs, employee photos, and request
+# attachments. The backend SILENTLY falls back to "dev-fernet-key-change-me"
+# when the var is missing — and then every decrypt of existing data fails
+# with InvalidToken (HTTP 500 on the cameras list, photo views, etc.).
+#
+# We read the key from the install's .env (the source the backend's env_file
+# loads) and refuse to proceed if it's absent or still the dev default,
+# UNLESS --allow-dev-fernet is given (fresh install with no encrypted data).
+# The value is captured here so step 9 can verify it didn't drift after the
+# backend container was recreated.
+# ---------------------------------------------------------------------------
+
+DEV_FERNET="dev-fernet-key-change-me"
+FERNET_BEFORE=""
+if [[ -f "${INSTALL_DIR}/.env" ]]; then
+    FERNET_BEFORE="$(grep -E '^MAUGOOD_FERNET_KEY=' "${INSTALL_DIR}/.env" \
+        | head -1 | cut -d= -f2- | tr -d '"'"'"' \t\r' || true)"
+fi
+
+if [[ ${BACKUP_ONLY} -eq 0 && ${ALLOW_DEV_FERNET} -eq 0 ]]; then
+    if [[ -z "${FERNET_BEFORE}" || "${FERNET_BEFORE}" == "${DEV_FERNET}" ]]; then
+        echo "error: MAUGOOD_FERNET_KEY is missing or still the dev default in" >&2
+        echo "       ${INSTALL_DIR}/.env" >&2
+        echo "" >&2
+        echo "  Without a real key the backend cannot decrypt existing camera" >&2
+        echo "  URLs, employee photos, or attachments — you'd get HTTP 500s." >&2
+        echo "  Set MAUGOOD_FERNET_KEY in .env to the SAME key that encrypted" >&2
+        echo "  your data (check a pre-update backup tarball if unsure), then" >&2
+        echo "  re-run. For a brand-new install with no encrypted data yet," >&2
+        echo "  pass --allow-dev-fernet to bypass this guard." >&2
+        exit 1
+    fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -698,6 +744,39 @@ if [[ ${DRY_RUN} -eq 0 ]]; then
         echo "${TGT_V}" > "${INSTALL_DIR}/VERSION" 2>/dev/null || true
         echo "v${TGT_V} updated $(date -u +%Y-%m-%dT%H:%M:%SZ) from v${CUR_V}" \
             >> "${INSTALL_DIR}/.version-history.log"
+
+        # -----------------------------------------------------------------
+        # Verify the Fernet key the backend ACTUALLY sees still matches what
+        # it was before the update. .env is excluded from the rsync, so it
+        # should — but a changed compose env-wiring or an accidentally
+        # recreated .env would silently swap the key and break every
+        # decrypt. Catch it now, while the pre-update .env is still in the
+        # backup tarball and recoverable.
+        # -----------------------------------------------------------------
+        FERNET_AFTER="$(cd "${INSTALL_DIR}" && docker compose -f "${COMPOSE_FILE_REL}" \
+            exec -T backend printenv MAUGOOD_FERNET_KEY 2>/dev/null | tr -d '\r\n' || true)"
+        if [[ -n "${FERNET_BEFORE}" && -n "${FERNET_AFTER}" \
+              && "${FERNET_AFTER}" != "${FERNET_BEFORE}" ]]; then
+            echo
+            echo "================================================================"
+            echo " ⚠  WARNING: MAUGOOD_FERNET_KEY CHANGED during this update"
+            echo "================================================================"
+            echo " The backend is now running a DIFFERENT encryption key than"
+            echo " before. Existing camera URLs, employee photos, and request"
+            echo " attachments WILL fail to decrypt (HTTP 500) until the key is"
+            echo " restored to its previous value."
+            echo
+            echo " Recover the old key from the pre-update backup and re-apply:"
+            echo "   tar -xzf ${BACKUP_DIR}.tar.gz -C ${INSTALL_DIR}/backups"
+            echo "   grep MAUGOOD_FERNET_KEY ${BACKUP_DIR}/.env"
+            echo "   # put that value into ${INSTALL_DIR}/.env, then:"
+            echo "   docker compose -f ${COMPOSE_FILE_REL} up -d --force-recreate backend"
+            echo "================================================================"
+        elif [[ "${FERNET_AFTER}" == "${DEV_FERNET}" ]]; then
+            echo
+            echo " ⚠  WARNING: backend is running the DEV Fernet key —"
+            echo "    existing encrypted data (cameras/photos) will not decrypt."
+        fi
     else
         # ---------------------------------------------------------------
         # Health check FAILED. A failed Alembic migration on backend boot

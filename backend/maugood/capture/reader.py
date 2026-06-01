@@ -97,34 +97,89 @@ VideoCaptureFactory = Callable[[str], FrameSource]
 
 
 def default_capture_factory(url: str) -> FrameSource:
-    """Production: open an OpenCV VideoCapture with sensible timeouts."""
+    """Production: open an OpenCV VideoCapture with sensible timeouts.
+
+    NOTE: the FFmpeg options set here only bound *post-connect* socket
+    I/O (a camera that connects then stops sending). They do NOT bound
+    the initial TCP connect — a powered-off LAN camera SYN-times-out at
+    the OS default (~30 s) regardless. The connect phase is bounded
+    separately by ``CaptureWorker._preflight_connect`` before this
+    factory is ever called. See ``Settings.rtsp_*_timeout_sec``.
+    """
 
     import os  # noqa: PLC0415
 
     import cv2  # noqa: PLC0415
 
-    # Force TCP transport for RTSP streams before opening the capture.
-    # OpenCV's default is UDP. A single dropped UDP packet corrupts every
-    # H.264 P-frame that references the affected macroblock until the next
-    # I-frame — visible as green/gray shifting blocks in the live preview.
-    # OPENCV_FFMPEG_CAPTURE_OPTIONS is read by the FFMPEG backend at
-    # VideoCapture construction time; setting it after open has no effect.
+    read_us = int(max(1.0, get_settings().rtsp_read_timeout_sec) * 1_000_000)
+
+    # Force TCP transport + a socket-I/O timeout for RTSP streams before
+    # opening the capture. OpenCV's default transport is UDP (a single
+    # dropped packet corrupts every H.264 P-frame until the next I-frame
+    # — visible as green/gray shifting blocks). ``timeout``/``stimeout``
+    # (microseconds) bound a mid-stream read stall; both names are set
+    # because FFmpeg renamed ``stimeout`` → ``timeout`` for the rtsp
+    # demuxer across versions. OPENCV_FFMPEG_CAPTURE_OPTIONS is read by
+    # the FFMPEG backend at VideoCapture construction time; setting it
+    # after open has no effect. Options are joined with ``|``.
     if url.lower().startswith(("rtsp://", "rtsps://")):
-        current = os.environ.get("OPENCV_FFMPEG_CAPTURE_OPTIONS", "")
-        if "rtsp_transport" not in current:
-            os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
-                current + (";rtsp_transport;tcp" if current else "rtsp_transport;tcp")
-            )
+        opts = [
+            "rtsp_transport;tcp",
+            f"timeout;{read_us}",
+            f"stimeout;{read_us}",
+        ]
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "|".join(opts)
 
     cap = cv2.VideoCapture(url)
+    read_ms = int(read_us / 1000)
     if hasattr(cv2, "CAP_PROP_OPEN_TIMEOUT_MSEC"):
-        cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000)
+        cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, read_ms)
     if hasattr(cv2, "CAP_PROP_READ_TIMEOUT_MSEC"):
-        cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000)
+        cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, read_ms)
     # Low buffer keeps us close to live — any backed-up frames are stale.
     if hasattr(cv2, "CAP_PROP_BUFFERSIZE"):
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     return cap  # type: ignore[return-value]
+
+
+def _preflight_tcp_reachable(
+    url: str, timeout_s: float
+) -> "tuple[bool, str, float]":
+    """Cheap TCP connect probe to bound the connect phase.
+
+    Returns ``(reachable, reason, elapsed_ms)``. ``reason`` is a
+    host-safe short string (never the URL/credentials). A powered-off
+    camera fails here in ``timeout_s`` instead of blocking OpenCV for
+    the ~30 s OS SYN timeout. Only the host+port are used — userinfo is
+    discarded by ``urlsplit``.
+    """
+
+    import socket  # noqa: PLC0415
+    import time as _time  # noqa: PLC0415
+    from urllib.parse import urlsplit  # noqa: PLC0415
+
+    parts = urlsplit(url)
+    host = parts.hostname
+    port = parts.port or 554
+    t0 = _time.monotonic()
+    if not host:
+        return False, "unparseable RTSP host", 0.0
+    try:
+        with socket.create_connection((host, port), timeout=timeout_s):
+            pass
+        return True, "ok", (_time.monotonic() - t0) * 1000.0
+    except socket.timeout:
+        return (
+            False,
+            f"connect timed out after {timeout_s:.0f}s",
+            (_time.monotonic() - t0) * 1000.0,
+        )
+    except OSError as exc:
+        return (
+            False,
+            f"connect failed: {type(exc).__name__}",
+            (_time.monotonic() - t0) * 1000.0,
+        )
 
 
 # --- Worker config ---------------------------------------------------------
@@ -634,6 +689,11 @@ class CaptureWorker:
             collections.deque(maxlen=2000)
         )
         self._error_count_5min: int = 0
+        # Consecutive failed connect attempts (reset to 0 on the first
+        # successful open). Surfaced in the ``camera_read_timeout``
+        # diagnostic + the worker status detail so an operator can see
+        # how long a camera has been offline.
+        self._reconnect_attempts: int = 0
         # Cache for the attendance-stage lookup so polling doesn't
         # re-run the join on every get_stats call.
         self._att_cache_ts: float = 0.0
@@ -1684,6 +1744,48 @@ class CaptureWorker:
         while not self._stop.is_set():
             cap: Optional[FrameSource] = None
             try:
+                # Connect-phase guard (dead-camera timeout fix). Bound
+                # the TCP connect with a cheap socket pre-flight so a
+                # powered-off camera fails in ~5 s instead of blocking
+                # OpenCV for the ~30 s OS SYN timeout. Skipped when a
+                # custom capture_factory is injected (tests) — only the
+                # real default factory opens a real RTSP socket.
+                if self._capture_factory is default_capture_factory:
+                    timeout_s = get_settings().rtsp_connect_timeout_sec
+                    reachable, reason, elapsed_ms = _preflight_tcp_reachable(
+                        self._rtsp_url_plain, timeout_s
+                    )
+                    if not reachable:
+                        self._reconnect_attempts += 1
+                        self._set_status("reconnecting", error=reason)
+                        self._record_unreachable(reason)
+                        self._record_error("rtsp", reason)
+                        logger.info(
+                            "camera %s: offline (%s) — attempt %d, "
+                            "retry in %.0fs",
+                            self.camera_name,
+                            reason,
+                            self._reconnect_attempts,
+                            backoff,
+                        )
+                        try:
+                            from maugood.diagnostics import (  # noqa: PLC0415
+                                record_camera_read_timeout,
+                            )
+                            record_camera_read_timeout(
+                                tenant_id=self._scope.tenant_id,
+                                camera_id=self.camera_id,
+                                camera_name=self.camera_name,
+                                timeout_ms=elapsed_ms,
+                                reason=reason,
+                                reconnect_attempts=self._reconnect_attempts,
+                            )
+                        except Exception:  # noqa: BLE001
+                            pass
+                        self._sleep_interruptible(backoff)
+                        backoff = self._bump_backoff(backoff)
+                        continue
+
                 cap = self._capture_factory(self._rtsp_url_plain)
                 if not cap.isOpened():
                     self._set_status("reconnecting", error="could not open stream")
@@ -1707,6 +1809,7 @@ class CaptureWorker:
                     continue
 
                 self._set_status("running", error=None)
+                self._reconnect_attempts = 0
                 backoff = self._config.reconnect_backoff_initial_s
 
                 last_fps_ts = time.time()

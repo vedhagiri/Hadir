@@ -55,6 +55,7 @@ import { PipelineMonitor } from "./pages/PipelineMonitor/PipelineMonitor";
 import { SystemSettingsPage } from "./pages/SystemSettings/SystemSettingsPage";
 // TEMP-DIAGNOSTIC-2026-05-20 — Frame Diagnostics tab.
 import { FrameDiagnosticsPage } from "./pages/FrameDiagnostics/FrameDiagnosticsPage";
+import { LiveCaptureDiagnosticsPage } from "./pages/LiveCaptureDiagnostics/LiveCaptureDiagnosticsPage";
 import { LeaveCalendarPage } from "./leave-calendar/LeaveCalendarPage";
 import { ManagerAssignmentsPage } from "./manager-assignments/ManagerAssignmentsPage";
 import { Placeholder } from "./pages/Placeholder";
@@ -149,6 +150,7 @@ export function App() {
         <Route path="system-settings" element={<SystemSettingsPage />} />
         {/* TEMP-DIAGNOSTIC-2026-05-20 */}
         <Route path="frame-diagnostics" element={<FrameDiagnosticsPage />} />
+        <Route path="live-diagnostics" element={<LiveCaptureDiagnosticsPage />} />
         <Route path="audit" element={<AuditLogPage />} />
         <Route path="daily-attendance" element={<DailyAttendancePage />} />
         <Route path="team-attendance" element={<DailyAttendancePage />} />

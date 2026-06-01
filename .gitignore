@@ -34,6 +34,8 @@ dist/
 build/
 # Update-applier snapshots (scripts/deploy-update.sh)
 backups/
+# Table-level backup artifacts (scripts/db_backup.py)
+db_backups/
 
 # Node / Vite
 node_modules/

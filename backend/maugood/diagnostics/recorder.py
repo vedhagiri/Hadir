@@ -34,6 +34,7 @@ _KIND_COOLDOWNS_S: dict[str, float] = {
     "detection_slow": 2.0,
     "segmenter_thrashing": 30.0,
     "reader_read_failed": 5.0,
+    "camera_read_timeout": 5.0,
 }
 
 
@@ -50,6 +51,8 @@ class FrameDiagnosticEvent:
       * ``detection_slow`` — analyzer ``detect()`` call exceeded budget
       * ``analyzer_starved`` — analyzer saw no new frame seq since
         last tick (reader stalled)
+      * ``camera_read_timeout`` — RTSP connect pre-flight failed; the
+        camera is offline and the worker is in its reconnect loop
 
     ``metrics`` is free-form per-kind. Document the keys in the call
     site so the UI knows what to render.
@@ -250,6 +253,39 @@ def record_rtsp_reconnect(
         kind="rtsp_reconnect",
         reason=reason,
         metrics={"backoff_s": round(backoff_s, 2)},
+    ))
+
+
+def record_camera_read_timeout(
+    *,
+    tenant_id: int | None,
+    camera_id: int | None,
+    camera_name: str | None,
+    timeout_ms: float,
+    reason: str,
+    reconnect_attempts: int,
+) -> None:
+    """RTSP connect pre-flight failed — the camera is unreachable.
+
+    Carries the operator-facing diagnostics the dead-camera fix
+    requires: camera name (on the event), how long the probe took
+    (``timeout_ms``), why it failed (``reason``), and how many
+    consecutive reconnect attempts have piled up.
+    """
+
+    if not _enabled:
+        return
+    _maybe_append(FrameDiagnosticEvent(
+        ts=time.time(),
+        tenant_id=tenant_id,
+        camera_id=camera_id,
+        camera_name=camera_name,
+        kind="camera_read_timeout",
+        reason=reason,
+        metrics={
+            "timeout_ms": round(timeout_ms, 1),
+            "reconnect_attempts": reconnect_attempts,
+        },
     ))
 
 

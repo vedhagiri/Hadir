@@ -105,6 +105,21 @@ class Settings(BaseSettings):
     #                    viable.
     clip_saving_mode: str = "stream_copy"
 
+    # --- RTSP capture resilience (dead-camera timeout fix) -----------------
+    # An unreachable camera must never block its worker (or the host)
+    # for the OS TCP-SYN default of ~30 s. Two independent guards, both
+    # capped in the operator-requested 3-5 s range:
+    #   * ``rtsp_connect_timeout_sec`` bounds the TCP *connect* phase via
+    #     a cheap socket pre-flight before OpenCV opens the stream. This
+    #     is the load-bearing fix — FFmpeg's own socket-I/O timeouts do
+    #     NOT bound the initial connect (a powered-off LAN camera SYN-
+    #     times-out at ~30 s otherwise).
+    #   * ``rtsp_read_timeout_sec`` bounds post-connect read stalls
+    #     (camera connects, then stops sending frames) via the FFmpeg
+    #     ``timeout``/``stimeout`` capture options + CAP_PROP read timeout.
+    rtsp_connect_timeout_sec: float = 5.0
+    rtsp_read_timeout_sec: float = 5.0
+
     # --- Attendance (P10) --------------------------------------------------
     # IANA timezone used to convert detection timestamps to wall-clock
     # local time for comparison against a shift policy's ``start``/``end``

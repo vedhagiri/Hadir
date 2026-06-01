@@ -210,11 +210,23 @@ class RtspSegmenter:
         * ``-strftime 1`` — evaluate ``%Y%m%d_%H%M%S`` in the output
           filename → easy to map segment file to wall-clock time.
         """
+        # Bound the segmenter's own socket I/O so a dead camera can't
+        # leave its ffmpeg subprocess hanging on a silent connection.
+        # ``-rw_timeout`` (microseconds, applied before ``-i``) covers
+        # read/write stalls. The subprocess is already isolated from the
+        # backend event loop, so this is defence-in-depth — the load-
+        # bearing connect-phase bound lives in the reader's pre-flight
+        # (``CaptureWorker._preflight_connect``). Sourced from the same
+        # ``rtsp_read_timeout_sec`` setting as the OpenCV reader path.
+        from maugood.config import get_settings  # noqa: PLC0415
+
+        rw_us = int(max(1.0, get_settings().rtsp_read_timeout_sec) * 1_000_000)
         return [
             "ffmpeg",
             "-hide_banner",
             "-loglevel", "error",
             "-rtsp_transport", "tcp",
+            "-rw_timeout", str(rw_us),
             "-fflags", "+nobuffer",
             "-i", self._rtsp_url_plain,
             "-c", "copy",
