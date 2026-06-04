@@ -172,6 +172,40 @@ class StageQueue(Generic[T]):
             )
             return False
 
+    def drain(self) -> int:
+        """Drain every waiting job from the queue, returning the count
+        cleared. In-flight jobs (currently being handled by a worker)
+        are NOT affected — they run to completion.
+
+        Used by the Admin "Clear Queues" feature when a backlog needs
+        to be discarded without restarting workers. The queue's
+        internal lock keeps concurrent submits + worker.get safe.
+        """
+
+        cleared = 0
+        # ``queue.Queue.get_nowait`` is the documented way to pull
+        # without blocking. We loop until ``Empty`` rather than touching
+        # the private ``.queue`` deque, so the standard
+        # ``unfinished_tasks`` accounting stays correct.
+        while True:
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                break
+            self._queue.task_done()
+            cleared += 1
+        return cleared
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def queue_depth(self) -> int:
+        """Snapshot of the current queue depth — what a fresh ``drain``
+        would clear right now (excluding in-flight jobs)."""
+
+        return self._queue.qsize()
+
     # -- worker loop --------------------------------------------------
 
     def _worker_loop(self, slot: WorkerSlot) -> None:

@@ -18,6 +18,7 @@ import { useRestartAllAndRecover } from "../../features/operations/hooks";
 import type { RestartAllAndRecoverResult } from "../../features/operations/types";
 import { Icon } from "../../shell/Icon";
 import type { IconName } from "../../shell/Icon";
+import { ClearQueuesAction } from "./ClearQueuesAction";
 import { ResourcesPanel } from "./ResourcesPanel";
 
 const POLL_INTERVAL_MS = 3000;
@@ -199,7 +200,11 @@ export function PipelineMonitor() {
           </p>
         </div>
         {isAdmin && (
-          <div className="page-actions">
+          <div
+            className="page-actions"
+            style={{ display: "inline-flex", gap: 8, alignItems: "center" }}
+          >
+            <ClearQueuesAction />
             <RestartAllWorkersAction />
           </div>
         )}

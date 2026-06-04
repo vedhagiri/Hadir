@@ -164,6 +164,22 @@ class ClipWorker:
         """Return the number of clips waiting in the queue."""
         return self._queue.qsize()
 
+    def drain_queue(self) -> int:
+        """Drain every queued clip (in-flight finalize is unaffected).
+        Returns the count discarded. Used by the Admin Clear Queues
+        feature when an operator wants to reset a backlogged camera
+        without restarting the worker."""
+
+        cleared = 0
+        while True:
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                break
+            self._queue.task_done()
+            cleared += 1
+        return cleared
+
     def finalize_timing_stats(self) -> dict:
         """P29 — per-worker rolling 60s finalize-duration stats.
 

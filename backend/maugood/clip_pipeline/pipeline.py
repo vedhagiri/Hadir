@@ -223,6 +223,60 @@ class ClipPipeline:
             self._started = False
             logger.info("clip_pipeline stopped")
 
+    # ---- queue management (Admin Clear Queues feature) ---------------
+
+    def queue_depths(self) -> dict[str, int]:
+        """Snapshot of every in-memory queue's current depth.
+
+        Keys are stable identifiers used by the Clear Queues UI:
+        ``crop_uc1`` / ``crop_uc2`` / ``crop_uc3`` / ``match``. Disabled
+        UCs are omitted (no stage exists). Process-wide — the queue
+        itself isn't tenant-scoped; the per-tenant DB cleanup happens
+        separately in the router.
+        """
+
+        out: dict[str, int] = {}
+        with self._lock:
+            for uc, stage in self._cropping_by_uc.items():
+                out[f"crop_{uc}"] = stage.queue_depth()
+            if self._matching is not None:
+                out["match"] = self._matching.queue_depth()
+        return out
+
+    def clear_queue(self, queue_name: str) -> int:
+        """Drain one named in-memory queue. Returns the count cleared.
+
+        Names: ``crop_uc1``, ``crop_uc2``, ``crop_uc3``, ``match``.
+        Returns 0 for an unknown name rather than raising — the router
+        validates input before calling and an unknown name reaching
+        here would indicate a wiring bug, not user input.
+        """
+
+        with self._lock:
+            if queue_name.startswith("crop_"):
+                uc = queue_name[len("crop_"):]
+                stage = self._cropping_by_uc.get(uc)
+                if stage is None:
+                    return 0
+                return stage.drain()
+            if queue_name == "match":
+                if self._matching is None:
+                    return 0
+                return self._matching.drain()
+        return 0
+
+    def clear_all_queues(self) -> dict[str, int]:
+        """Drain every in-memory queue. Returns per-queue cleared
+        counts so the router can surface what was discarded."""
+
+        out: dict[str, int] = {}
+        with self._lock:
+            for uc, stage in self._cropping_by_uc.items():
+                out[f"crop_{uc}"] = stage.drain()
+            if self._matching is not None:
+                out["match"] = self._matching.drain()
+        return out
+
     # ---- public API --------------------------------------------------
 
     def submit_batch(

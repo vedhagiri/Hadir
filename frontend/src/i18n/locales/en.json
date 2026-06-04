@@ -3691,6 +3691,53 @@
       "clip_save": "Clip Save"
     }
   },
+  "queueClear": {
+    "button": "Clear queues",
+    "queueName": {
+      "crop_uc1": "UC1 Face Cropping",
+      "crop_uc2": "UC2 Face Cropping",
+      "crop_uc3": "UC3 Face Cropping",
+      "match": "Face Matching",
+      "clip_save": "Clip Saving (per camera)"
+    },
+    "scope": {
+      "process_wide": "Process-wide",
+      "tenant_scoped": "Tenant-scoped"
+    },
+    "modal": {
+      "title": "Clear pipeline queues",
+      "subtitle": "Discard the queued backlog without restarting workers. Running jobs are not affected.",
+      "closeAria": "Close clear-queues dialog",
+      "caveatTitle": "Heads up.",
+      "caveatBody": "The clip-pipeline and matching queues are process-wide and not tenant-scoped — clearing them discards every tenant's queued jobs. Clip-save queues are per-camera and stay tenant-scoped.",
+      "loading": "Loading current queue depths…",
+      "dbPending": "{{count}} pending DB rows for this tenant will also be marked cancelled when you clear (excluding Face Matching, which has no DB-side row of its own).",
+      "col": {
+        "queue": "Queue",
+        "depth": "Queued",
+        "scope": "Scope",
+        "action": ""
+      }
+    },
+    "action": {
+      "clear": "Clear",
+      "confirm": "Discard {{count}}",
+      "clearing": "Clearing…",
+      "cancel": "Cancel",
+      "close": "Close",
+      "clearAll": "Clear all queues",
+      "clearAllConfirm": "Yes, discard all {{count}}",
+      "clearAllConfirmHint": "This will discard every queued job across every tenant on this host."
+    },
+    "toast": {
+      "title_zero": "No queued jobs to clear",
+      "title_one": "Cleared 1 queued job",
+      "title_other": "Cleared {{count}} queued jobs",
+      "dbCancelled_zero": "No pending DB rows updated.",
+      "dbCancelled_one": "Also marked 1 pending DB row as cancelled.",
+      "dbCancelled_other": "Also marked {{count}} pending DB rows as cancelled."
+    }
+  },
   "auditLog": {
     "title": "Audit Log",
     "sub": "{{total}} entries · append-only at the database grant level",

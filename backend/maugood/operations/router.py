@@ -807,6 +807,249 @@ def patch_camera_metadata(
 # ``person_clips`` + ``clip_processing_results``.
 
 
+# ---------------------------------------------------------------------------
+# Queue management — Admin Clear Queues feature
+# ---------------------------------------------------------------------------
+#
+# Targets every operator-visible queue in one place:
+#
+#   - crop_uc1 / crop_uc2 / crop_uc3   — ClipPipeline in-memory stage queues
+#   - match                            — ClipPipeline matching stage queue
+#   - clip_save                        — per-camera ClipWorker queues
+#                                        (tenant-scoped via CaptureManager)
+#
+# **Process-wide caveat (documented at the route)**: the three clip-
+# pipeline stages and the matching stage are process-global — they
+# don't know about tenants. An Admin clearing them discards every
+# tenant's in-memory backlog at once. The DB-side companion cleanup
+# (clip_processing_results.status='pending' → 'cancelled') IS tenant
+# scoped so each tenant's audit trail records what was cancelled.
+# In multi-tenant production this trade-off is the cost of the
+# feature; the operator UI surfaces the caveat in plain language.
+
+
+_QUEUE_DISPLAY: dict[str, str] = {
+    "crop_uc1": "UC1 Face Cropping",
+    "crop_uc2": "UC2 Face Cropping",
+    "crop_uc3": "UC3 Face Cropping",
+    "match": "Face Matching",
+    "clip_save": "Clip Saving",
+}
+
+_VALID_QUEUE_KEYS = frozenset(_QUEUE_DISPLAY.keys()) | {"all"}
+
+
+class QueueRowOut(BaseModel):
+    key: str
+    display: str
+    depth: int
+    scope: Literal["process_wide", "tenant_scoped"]
+    in_flight: int = 0
+
+
+class QueueSnapshotOut(BaseModel):
+    queues: list[QueueRowOut]
+    db_pending: int
+    generated_at: str
+
+
+class ClearQueueBody(BaseModel):
+    queue: str = Field(..., min_length=1, max_length=24)
+
+
+class ClearQueueOut(BaseModel):
+    cleared: dict[str, int]
+    cleared_total: int
+    db_cancelled: int
+
+
+def _read_queue_snapshot(scope: TenantScope) -> QueueSnapshotOut:
+    """Build the queue depths payload. Pulls live numbers from
+    ``clip_pipeline`` (process-wide stage queues) + ``capture_manager``
+    (per-camera clip-save) + a tenant-scoped SQL aggregate for
+    pending ``clip_processing_results`` rows.
+    """
+
+    from maugood.clip_pipeline import clip_pipeline  # noqa: PLC0415
+
+    stage_depths = clip_pipeline.queue_depths()
+    clip_save_depth = capture_manager.clip_save_queue_depth_for_tenant(
+        scope.tenant_id
+    )
+
+    with get_engine().begin() as conn:
+        db_pending = int(
+            conn.execute(
+                select(func.count())
+                .select_from(clip_processing_results)
+                .where(
+                    clip_processing_results.c.tenant_id == scope.tenant_id,
+                    clip_processing_results.c.status == "pending",
+                )
+            ).scalar_one()
+        )
+
+    rows: list[QueueRowOut] = []
+    for key in ("crop_uc1", "crop_uc2", "crop_uc3", "match"):
+        rows.append(
+            QueueRowOut(
+                key=key,
+                display=_QUEUE_DISPLAY[key],
+                depth=int(stage_depths.get(key, 0)),
+                scope="process_wide",
+            )
+        )
+    rows.append(
+        QueueRowOut(
+            key="clip_save",
+            display=_QUEUE_DISPLAY["clip_save"],
+            depth=clip_save_depth,
+            scope="tenant_scoped",
+        )
+    )
+
+    return QueueSnapshotOut(
+        queues=rows,
+        db_pending=db_pending,
+        generated_at=datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),
+    )
+
+
+@router.get("/operations/queues/snapshot", response_model=QueueSnapshotOut)
+def get_queues_snapshot(
+    user: Annotated[CurrentUser, ADMIN],
+) -> QueueSnapshotOut:
+    """Live queue depths used by the Clear Queues modal.
+
+    Returns one row per queue (in-memory stage queues are
+    process-wide; clip-save is tenant-scoped) plus a count of pending
+    ``clip_processing_results`` DB rows for this tenant.
+
+    Read-only — no audit row.
+    """
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    return _read_queue_snapshot(scope)
+
+
+@router.post("/operations/queues/clear", response_model=ClearQueueOut)
+def clear_queues(
+    body: ClearQueueBody,
+    user: Annotated[CurrentUser, ADMIN],
+) -> ClearQueueOut:
+    """Drain one queue (or every queue) and cancel the matching
+    pending ``clip_processing_results`` rows for this tenant.
+
+    Body: ``{queue: "crop_uc1" | "crop_uc2" | "crop_uc3" | "match" |
+    "clip_save" | "all"}``. An unknown key returns 400.
+
+    **Active/running workers are NOT affected** — only the queued
+    backlog is dropped. The clip-pipeline + matching queues are
+    process-wide; the operator UI shows that caveat.
+
+    Audited as ``queue.cleared`` with the per-queue cleared counts
+    + DB cancellation count.
+    """
+
+    from maugood.clip_pipeline import clip_pipeline  # noqa: PLC0415
+
+    queue_key = body.queue.strip()
+    if queue_key not in _VALID_QUEUE_KEYS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "unknown queue: must be one of "
+                + ", ".join(sorted(_VALID_QUEUE_KEYS))
+            ),
+        )
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+
+    # 1. In-memory drain. clip_pipeline drops are process-wide; the
+    #    clip_save drain is tenant-scoped via CaptureManager.
+    cleared: dict[str, int] = {}
+    if queue_key == "all":
+        cleared.update(clip_pipeline.clear_all_queues())
+        cleared["clip_save"] = (
+            capture_manager.drain_clip_save_queues_for_tenant(scope.tenant_id)
+        )
+    elif queue_key == "clip_save":
+        cleared["clip_save"] = (
+            capture_manager.drain_clip_save_queues_for_tenant(scope.tenant_id)
+        )
+    else:
+        # crop_uc1 / crop_uc2 / crop_uc3 / match
+        cleared[queue_key] = clip_pipeline.clear_queue(queue_key)
+
+    cleared_total = sum(int(v) for v in cleared.values())
+
+    # 2. DB-side: mark the tenant's pending clip_processing_results
+    #    rows as 'cancelled' so a recovery sweep doesn't pick them up
+    #    later. Scoped per-tenant by the WHERE clause.
+    db_cancelled = 0
+    with get_engine().begin() as conn:
+        # Match the UC filter to the queue chosen. ``all`` and
+        # ``clip_save`` cancel every pending row for the tenant; the
+        # per-UC keys cancel only rows for that UC; ``match`` doesn't
+        # have a separate use_case marker in the DB so it has no DB
+        # cancellation — matching is the second stage of every UC and
+        # its DB row reflects the originating UC.
+        if queue_key == "match":
+            pass  # in-memory drain only
+        elif queue_key in ("all", "clip_save"):
+            res = conn.execute(
+                clip_processing_results.update()
+                .where(
+                    clip_processing_results.c.tenant_id == scope.tenant_id,
+                    clip_processing_results.c.status == "pending",
+                )
+                .values(status="cancelled", error="cleared by admin")
+            )
+            db_cancelled = int(res.rowcount or 0)
+        elif queue_key.startswith("crop_"):
+            uc = queue_key[len("crop_"):]
+            res = conn.execute(
+                clip_processing_results.update()
+                .where(
+                    clip_processing_results.c.tenant_id == scope.tenant_id,
+                    clip_processing_results.c.status == "pending",
+                    clip_processing_results.c.use_case == uc,
+                )
+                .values(status="cancelled", error="cleared by admin")
+            )
+            db_cancelled = int(res.rowcount or 0)
+
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="queue.cleared",
+            entity_type="queue",
+            entity_id=queue_key,
+            after={
+                "queue": queue_key,
+                "cleared": cleared,
+                "cleared_total": cleared_total,
+                "db_cancelled": db_cancelled,
+            },
+        )
+
+    logger.info(
+        "queue.cleared by user=%s tenant=%s queue=%s cleared=%s db_cancelled=%d",
+        user.id,
+        scope.tenant_id,
+        queue_key,
+        cleared,
+        db_cancelled,
+    )
+
+    return ClearQueueOut(
+        cleared=cleared,
+        cleared_total=cleared_total,
+        db_cancelled=db_cancelled,
+    )
+
+
 class PipelineRtspWorkerOut(BaseModel):
     camera_id: int
     camera_name: str

@@ -460,6 +460,55 @@ class CaptureManager:
             return None
         return worker.get_full_stats()
 
+    def clip_save_queue_depth_for_tenant(self, tenant_id: int) -> int:
+        """Total ``ClipWorker`` queued-clip count across this tenant's
+        live workers. Used by the Clear Queues feature's snapshot.
+        """
+
+        with self._lock:
+            workers = [
+                w
+                for (t, _c), w in self._workers.items()
+                if t == tenant_id and w.is_alive()
+            ]
+        total = 0
+        for w in workers:
+            try:
+                clip = getattr(w, "_clip_worker", None)
+                if clip is not None:
+                    total += int(clip.queue_size())
+            except Exception:  # noqa: BLE001
+                pass
+        return total
+
+    def drain_clip_save_queues_for_tenant(self, tenant_id: int) -> int:
+        """Drain every ``ClipWorker`` queue across this tenant's live
+        workers. Returns the total count discarded. In-flight finalize
+        calls are NOT interrupted.
+        """
+
+        with self._lock:
+            workers = [
+                w
+                for (t, _c), w in self._workers.items()
+                if t == tenant_id and w.is_alive()
+            ]
+        total = 0
+        for w in workers:
+            try:
+                clip = getattr(w, "_clip_worker", None)
+                if clip is not None:
+                    total += int(clip.drain_queue())
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "drain_clip_save_queues_for_tenant failed for "
+                    "tenant=%s camera=%s",
+                    tenant_id,
+                    w.camera_id,
+                    exc_info=True,
+                )
+        return total
+
     def get_resource_stats_for_tenant(
         self, tenant_id: int
     ) -> list[dict[str, Any]]:
