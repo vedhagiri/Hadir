@@ -18,6 +18,7 @@ import { useRestartAllAndRecover } from "../../features/operations/hooks";
 import type { RestartAllAndRecoverResult } from "../../features/operations/types";
 import { Icon } from "../../shell/Icon";
 import type { IconName } from "../../shell/Icon";
+import { ResourcesPanel } from "./ResourcesPanel";
 
 const POLL_INTERVAL_MS = 3000;
 
@@ -27,7 +28,8 @@ type StageKey =
   | "rtsp"
   | "recording"
   | "identify"
-  | "queues";
+  | "queues"
+  | "resources";
 
 interface RtspWorker {
   camera_id: number;
@@ -113,6 +115,10 @@ const TABS: { key: StageKey; labelKey: string; icon: IconName }[] = [
   { key: "recording", labelKey: "pipelineMonitor.tabs.recording", icon: "videocam" },
   { key: "identify", labelKey: "pipelineMonitor.tabs.identify", icon: "user" },
   { key: "queues", labelKey: "pipelineMonitor.tabs.queues", icon: "activity" },
+  // P29 — Resources tab. Live host CPU/mem/disk/net + per-camera
+  // resource share + per-stage breakdown. Admin-only by the same
+  // ``isAdmin`` gate the rest of the page uses.
+  { key: "resources", labelKey: "pipelineMonitor.tabs.resources", icon: "activity" },
 ];
 
 function fmtUptime(sec: number): string {
@@ -335,6 +341,7 @@ export function PipelineMonitor() {
           {data && tab === "identify" && <IdentifyPanel data={data.identify} />}
           {tab === "queues" && <QueuePipelinePanel />}
           {tab === "workers" && <WorkersTablePanel />}
+          {tab === "resources" && <ResourcesPanel isAdmin={isAdmin} />}
         </div>
       </div>
     </>

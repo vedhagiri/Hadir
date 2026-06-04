@@ -114,6 +114,37 @@ class TimedLock:
         total_held = sum(h for _, h in relevant)
         return min(100.0, total_held / 60.0 * 100)
 
+    def timing_stats_60s(self) -> dict:
+        """P29 — return ``{calls_60s, avg_held_ms, p95_held_ms,
+        contention_pct}`` from the rolling held-time deque. Consumed by
+        ``/api/operations/resources/stages`` for the Detection stage's
+        avg_processing_ms (lock-hold time is the closest proxy to
+        per-detect duration we have without adding a separate deque)."""
+
+        cutoff = time.time() - 60
+        relevant = [(t, h) for (t, h) in self._held_times if t >= cutoff]
+        if not relevant:
+            return {
+                "calls_60s": 0,
+                "avg_held_ms": None,
+                "p95_held_ms": None,
+                "contention_pct": 0.0,
+            }
+        held_ms = [h * 1000.0 for (_, h) in relevant]
+        avg = sum(held_ms) / len(held_ms)
+        sorted_ms = sorted(held_ms)
+        p95_idx = max(
+            0, min(len(sorted_ms) - 1, int(round(0.95 * (len(sorted_ms) - 1))))
+        )
+        return {
+            "calls_60s": len(held_ms),
+            "avg_held_ms": round(avg, 2),
+            "p95_held_ms": round(sorted_ms[p95_idx], 2),
+            "contention_pct": round(
+                min(100.0, sum(h for _, h in relevant) / 60.0 * 100), 1
+            ),
+        }
+
 
 # Module-level lock — every ``detect`` call across every camera worker
 # serialises through here. On CPU this is faster than parallel calls

@@ -699,6 +699,30 @@ class CaptureWorker:
         self._matches_window: "collections.deque[float]" = (
             collections.deque(maxlen=2000)
         )
+        # P29 — reader-side rolling counters for the Resources tab.
+        # ``_reader_frames_window`` ticks once per successful read so
+        # ``frame_drops_60s`` can be derived as
+        # reader_frames - analyzed - motion_skipped (a drop is a frame
+        # the analyzer never consumed because skip-to-latest moved past
+        # it under load).
+        self._reader_frames_window: "collections.deque[float]" = (
+            collections.deque(maxlen=10000)
+        )
+        # ``_reconnects_window`` ticks once per RTSP reconnect attempt.
+        # Bounded small — even a thrashing camera shouldn't blow past
+        # 600 reconnects in 60 s.
+        self._reconnects_window: "collections.deque[float]" = (
+            collections.deque(maxlen=600)
+        )
+        # ``_bytes_received_samples`` is a rolling 60 s window of
+        # ``(timestamp, cumulative_socket_bytes)`` from the socket
+        # sampler. The 60 s throughput is the delta between the
+        # oldest-in-window sample and the newest. Sized at 60 so the
+        # deque holds about one minute of 1 Hz sampling.
+        self._bytes_received_samples: "collections.deque[tuple[float, int]]" = (
+            collections.deque(maxlen=60)
+        )
+        self._bytes_received_total: Optional[int] = None
         self._error_count_5min: int = 0
         # Consecutive failed connect attempts (reset to 0 on the first
         # successful open). Surfaced in the ``camera_read_timeout``
@@ -1768,6 +1792,7 @@ class CaptureWorker:
                     )
                     if not reachable:
                         self._reconnect_attempts += 1
+                        self._reconnects_window.append(time.time())  # P29
                         self._set_status("reconnecting", error=reason)
                         self._record_unreachable(reason)
                         self._record_error("rtsp", reason)
@@ -1846,6 +1871,7 @@ class CaptureWorker:
                         self._record_error(
                             "rtsp", "read failed — reconnecting"
                         )
+                        self._reconnects_window.append(time.time())  # P29
                         # TEMP-DIAGNOSTIC-2026-05-20
                         try:
                             from maugood.diagnostics import (  # noqa: PLC0415
@@ -1877,6 +1903,12 @@ class CaptureWorker:
                     self._last_frame_at = time.time()
                     frames_this_sec += 1
                     frame_count_minute += 1
+                    # P29: rolling 60s window of reader-side frames. Used
+                    # by /api/operations/resources/cameras to derive
+                    # frame_drops_60s = reader - analyzer - motion_skipped
+                    # (frames the analyzer never got to because skip-to-
+                    # latest moved past them under load).
+                    self._reader_frames_window.append(self._last_frame_at)
 
                     # P26: prom counter — opaque tenant + camera ids only.
                     try:
@@ -2939,4 +2971,163 @@ class CaptureWorker:
             "errors_5min": self._error_count_5min,
             "recent_errors": list(self._recent_errors),
             "metadata": metadata,
+        }
+
+    # ------------------------------------------------------------------
+    # P29 — Resource-monitoring surface
+
+    def get_socket_endpoint(self) -> Optional[tuple[str, int]]:
+        """Return ``(host, port)`` for this worker's RTSP socket. Used
+        by the observability socket sampler to match TCP_INFO rows back
+        to a camera. Returns None when the URL doesn't parse.
+        """
+
+        from maugood.observability.socket_sampler import (  # noqa: PLC0415
+            rtsp_endpoint,
+        )
+
+        return rtsp_endpoint(self._rtsp_url_plain)
+
+    def set_socket_bytes_cumulative(
+        self, cumulative_bytes: Optional[int], ts: float
+    ) -> None:
+        """Called by the observability socket-sampler tick. ``None``
+        means the sampler couldn't read this camera's socket (ss
+        missing, parse failed, etc.) — we clear the rolling window so
+        subsequent reads degrade-to-None gracefully rather than report
+        stale rates.
+        """
+
+        if cumulative_bytes is None:
+            self._bytes_received_total = None
+            self._bytes_received_samples.clear()
+            return
+        self._bytes_received_total = int(cumulative_bytes)
+        self._bytes_received_samples.append((ts, int(cumulative_bytes)))
+
+    def get_resource_stats(self) -> dict[str, Any]:
+        """Compact per-camera resource payload for
+        ``/api/operations/resources/cameras``.
+
+        Distinct from ``get_full_stats`` so the Resources tab can poll
+        a smaller payload at 5 s without dragging the full 4-stage
+        tree through. Calling code should NOT depend on the legacy
+        shape — this is the v1.x surface.
+
+        ``cpu_share_estimate_pct`` and ``memory_share_estimate_mb`` are
+        **estimates** derived from analyzer-fps × heuristic-per-frame
+        cost. Documented in the response docstring.
+
+        ``bytes_received_60s`` is the delta between the oldest and
+        newest socket samples in the rolling window. ``None`` when no
+        samples have arrived yet OR the sampler explicitly reported
+        unavailable.
+        """
+
+        now = time.time()
+        cutoff_60s = now - 60
+
+        reader_frames_60s = self._trim_window(
+            self._reader_frames_window, cutoff=cutoff_60s
+        )
+        analyzed_60s = self._trim_window(
+            self._frames_analyzed_window, cutoff=cutoff_60s
+        )
+        motion_60s = self._trim_window(
+            self._frames_motion_skipped_window, cutoff=cutoff_60s
+        )
+        # Frame drops = frames the reader produced that the analyzer
+        # neither consumed nor cheaply motion-skipped. Floored at 0
+        # because race conditions in the deque-trim windows can
+        # transiently produce negatives.
+        frame_drops_60s = max(
+            0, reader_frames_60s - analyzed_60s - motion_60s
+        )
+
+        # Reconnects in the last 60 s.
+        while self._reconnects_window and self._reconnects_window[0] < cutoff_60s:
+            self._reconnects_window.popleft()
+        rtsp_reconnects_60s = len(self._reconnects_window)
+
+        # Bytes-received delta over the last 60 s. We use the
+        # oldest-in-window and newest samples; the difference is bytes
+        # received within the window.
+        bytes_received_60s: Optional[int] = None
+        while (
+            self._bytes_received_samples
+            and self._bytes_received_samples[0][0] < cutoff_60s
+        ):
+            self._bytes_received_samples.popleft()
+        if len(self._bytes_received_samples) >= 2:
+            oldest = self._bytes_received_samples[0][1]
+            newest = self._bytes_received_samples[-1][1]
+            bytes_received_60s = max(0, newest - oldest)
+        elif (
+            len(self._bytes_received_samples) == 1
+            and self._bytes_received_total is not None
+        ):
+            # One sample only — no delta yet. Hide value (None) rather
+            # than report 0, which would mislead.
+            bytes_received_60s = None
+        # bytes_received_60s stays None if the sampler hasn't fed us
+        # anything (degrades gracefully when `ss` is missing).
+
+        # CPU share estimate. Bounded heuristic — assumes each
+        # analyzer cycle costs ~100 ms of one core. Honest signal for
+        # "this camera is busier than that one"; not a substitute for
+        # real per-thread CPU.
+        cpu_share_estimate_pct: Optional[float] = None
+        if analyzed_60s > 0:
+            est_ms = analyzed_60s * 100.0
+            cpu_share_estimate_pct = round(
+                min(100.0, est_ms / (60.0 * 1000.0) * 100.0), 1
+            )
+        # Memory share estimate. Bounded heuristic: typical 1080p
+        # frame buffer + analyzer state. Real measurement at
+        # thread-granularity is too noisy at sub-second windows.
+        memory_share_estimate_mb: Optional[float] = None
+        # Use the detected resolution if we have it; fall back to a
+        # canonical 1080p estimate (1920×1080×3 bytes ≈ 6 MB) plus a
+        # ~20 MB per-worker overhead.
+        with self._metadata_lock:
+            w = self._detected_metadata.get("resolution_w")
+            h = self._detected_metadata.get("resolution_h")
+        if w and h:
+            try:
+                frame_mb = (int(w) * int(h) * 3) / (1024 * 1024)
+                memory_share_estimate_mb = round(20.0 + frame_mb * 2, 1)
+            except Exception:  # noqa: BLE001
+                pass
+        if memory_share_estimate_mb is None:
+            memory_share_estimate_mb = 26.0  # 20 + 6 MB H1080 fallback
+
+        # Clip recording state — pulled from the worker's recording
+        # snapshot (lighter than get_full_stats).
+        try:
+            rec = self.get_recording_state()
+            clip_recording_active = bool(rec.get("recording_active"))
+            clip_queue_size = int(rec.get("clip_worker_queue_size") or 0)
+        except Exception:  # noqa: BLE001
+            clip_recording_active = False
+            clip_queue_size = 0
+
+        with self._stats_lock:
+            base = dict(self._stats)
+
+        return {
+            "tenant_id": self._scope.tenant_id,
+            "camera_id": self.camera_id,
+            "camera_name": self.camera_name,
+            "cpu_share_estimate_pct": cpu_share_estimate_pct,
+            "memory_share_estimate_mb": memory_share_estimate_mb,
+            "fps_reader": float(base.get("fps_reader", 0.0) or 0.0),
+            "fps_analyzer": float(base.get("fps_analyzer", 0.0) or 0.0),
+            "reader_frames_60s": reader_frames_60s,
+            "frames_analyzed_60s": analyzed_60s,
+            "frames_motion_skipped_60s": motion_60s,
+            "frame_drops_60s": frame_drops_60s,
+            "rtsp_reconnects_60s": rtsp_reconnects_60s,
+            "bytes_received_60s": bytes_received_60s,
+            "clip_recording_active": clip_recording_active,
+            "clip_queue_size": clip_queue_size,
         }

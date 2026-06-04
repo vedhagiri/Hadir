@@ -40,6 +40,7 @@ path stored on the row.
 
 from __future__ import annotations
 
+import collections
 import logging
 import queue
 import subprocess
@@ -127,6 +128,13 @@ class ClipWorker:
         self._lifetime_failed = 0
         self._currently_processing = False
         self._current_clip_id: Optional[int] = None
+        # P29 — rolling 60s window of clip-finalize durations in ms.
+        # Pushed by ``_run`` around every finalize call. Bounded small
+        # — one finalize per ~30s typical = ~120 per hour worst case.
+        self._finalize_durations_ms: "collections.deque[tuple[float, float]]" = (
+            collections.deque(maxlen=300)
+        )
+        self._errors_5min_count: int = 0
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -155,6 +163,38 @@ class ClipWorker:
     def queue_size(self) -> int:
         """Return the number of clips waiting in the queue."""
         return self._queue.qsize()
+
+    def finalize_timing_stats(self) -> dict:
+        """P29 — per-worker rolling 60s finalize-duration stats.
+
+        Returns ``{calls_60s, avg_processing_ms, p95_processing_ms,
+        errors_5min}``. Consumed by /api/operations/resources/stages.
+        """
+
+        cutoff = time.time() - 60.0
+        while (
+            self._finalize_durations_ms
+            and self._finalize_durations_ms[0][0] < cutoff
+        ):
+            self._finalize_durations_ms.popleft()
+        durations = [d for _, d in self._finalize_durations_ms]
+        if not durations:
+            return {
+                "calls_60s": 0,
+                "avg_processing_ms": None,
+                "p95_processing_ms": None,
+                "errors_5min": int(self._errors_5min_count),
+            }
+        sorted_d = sorted(durations)
+        p95_idx = max(
+            0, min(len(sorted_d) - 1, int(round(0.95 * (len(sorted_d) - 1))))
+        )
+        return {
+            "calls_60s": len(durations),
+            "avg_processing_ms": round(sum(durations) / len(durations), 2),
+            "p95_processing_ms": round(sorted_d[p95_idx], 2),
+            "errors_5min": int(self._errors_5min_count),
+        }
 
     def is_processing(self) -> bool:
         """True while ``_finalize_clip`` is running on a clip. Surfaced
@@ -211,6 +251,7 @@ class ClipWorker:
                 except queue.Empty:
                     continue
                 self._currently_processing = True
+                _t_start = time.perf_counter()
                 try:
                     # Option B — when the reader submits a stream-copy
                     # job (mode='stream_copy', segmenter populated) we
@@ -223,12 +264,18 @@ class ClipWorker:
                     self._lifetime_processed += 1
                 except Exception as exc:  # noqa: BLE001
                     self._lifetime_failed += 1
+                    self._errors_5min_count += 1
                     logger.error(
                         "clip finalization failed: camera=%s reason=%s",
                         self._camera_id,
                         type(exc).__name__,
                     )
                 finally:
+                    # P29 — stamp duration regardless of success/failure;
+                    # the Resources tab wants timing even on a hot
+                    # crash loop so the operator sees latency spiking.
+                    dur_ms = (time.perf_counter() - _t_start) * 1000.0
+                    self._finalize_durations_ms.append((time.time(), dur_ms))
                     self._currently_processing = False
                     self._current_clip_id = None
 
@@ -665,10 +712,13 @@ class ClipWorker:
                     from maugood.clip_pipeline import (  # noqa: PLC0415
                         clip_pipeline,
                     )
+                    from maugood.clip_pipeline.pipeline import (  # noqa: PLC0415
+                        enabled_use_cases_for,
+                    )
                     clip_pipeline.submit_batch(
                         scope=self._scope,
                         clip_ids=[int(clip_id)],
-                        use_cases=["uc1", "uc2", "uc3"],
+                        use_cases=list(enabled_use_cases_for(self._scope)),
                         skip_existing=True,
                         submitted_by_user_id=None,
                         submitted_by_email="clip_worker@auto-submit",
@@ -888,10 +938,13 @@ class ClipWorker:
                     from maugood.clip_pipeline import (  # noqa: PLC0415
                         clip_pipeline,
                     )
+                    from maugood.clip_pipeline.pipeline import (  # noqa: PLC0415
+                        enabled_use_cases_for,
+                    )
                     clip_pipeline.submit_batch(
                         scope=self._scope,
                         clip_ids=[int(clip_id)],
-                        use_cases=["uc1", "uc2", "uc3"],
+                        use_cases=list(enabled_use_cases_for(self._scope)),
                         skip_existing=True,
                         submitted_by_user_id=None,
                         submitted_by_email="clip_worker@auto-submit",

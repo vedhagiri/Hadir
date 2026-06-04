@@ -576,6 +576,7 @@
   },
   "cameras": {
     "label": "Camera",
+    "matchingNeedsDetection": "Turn on Face detection first — matching only runs when detection is on.",
     "addTitle": "Add camera",
     "editTitle": "Edit",
     "fields": {
@@ -588,6 +589,7 @@
       "workerEnabled": "Capture worker",
       "displayEnabled": "Live preview",
       "detectionEnabled": "Face detection",
+      "matchingEnabled": "Face matching",
       "clipRecordingEnabled": "Clip Saving",
       "clipDetectionSource": "Clip detection source",
       "captureSettings": "Capture settings",
@@ -606,6 +608,7 @@
       "workerEnabled": "When off, this camera stops detecting faces. No attendance impact for absent employees.",
       "displayEnabled": "When off, the worker keeps recording but this camera doesn't appear in Live Capture viewer.",
       "detectionEnabled": "When off, frames flow to the live preview but the analyzer skips detection — saves CPU when you only want monitoring without face capture.",
+      "matchingEnabled": "When off, faces are detected but not recognised against enrolled employees. Only runs while Face detection is on.",
       "clipRecordingEnabled": "When off, detection keeps running but no clip segments are written to disk.",
       "maxFacesPerEvent": "1 to 50",
       "maxEventDurationSec": "5 to 600 seconds",
@@ -675,6 +678,7 @@
       "colWorker": "Worker",
       "colDisplay": "Display",
       "colDetection": "Detection",
+      "colMatching": "Matching",
       "colClipSaving": "Clip Saving",
       "colActions": "Actions",
       "loading": "Loading…",
@@ -683,6 +687,7 @@
       "switchWorkerTitle": "Click to toggle worker on/off",
       "switchDisplayTitle": "Click to toggle display on/off",
       "switchDetectionTitle": "Click to toggle face detection on/off (worker keeps streaming)",
+      "switchMatchingTitle": "Click to toggle face matching (recognition) on/off",
       "switchClipTitle": "Click to toggle clip saving on/off (detection keeps running)"
     },
     "bulk": {
@@ -694,6 +699,7 @@
       "worker": "Worker",
       "display": "Display",
       "detection": "Detection",
+      "matching": "Matching",
       "clipSaving": "Clip Saving",
       "enable": "Enable",
       "disable": "Disable",
@@ -798,6 +804,23 @@
       "statusOff": "Off",
       "toastOn": "Live identification enabled — applying within 2 seconds.",
       "toastOff": "Live identification disabled — applying within 2 seconds."
+    },
+    "clipPipeline": {
+      "title": "Clip processing",
+      "subtitle": "Use-case processors that run face recognition against saved clips on demand. Turn each one on or off independently.",
+      "offHint": "Turning a use case off stops all processing for it — saved clips for that path are no longer analysed until you turn it back on.",
+      "uc1": {
+        "label": "UC1 — YOLO person + face",
+        "hint": "Detects people first with YOLO, then locates faces inside each body box. Best for crowded or wide-angle scenes."
+      },
+      "uc2": {
+        "label": "UC2 — InsightFace + crop storage",
+        "hint": "Runs InsightFace detection and stores the cropped faces for later review and matching."
+      },
+      "uc3": {
+        "label": "UC3 — InsightFace direct match",
+        "hint": "Runs InsightFace detection and matches faces against enrolled employees directly, without storing crops."
+      }
     },
     "detection": {
       "title": "Detection",
@@ -3423,7 +3446,8 @@
       "rtsp": "RTSP Feed",
       "recording": "Clip Recording",
       "identify": "Identify Event",
-      "queues": "Queue Pipeline"
+      "queues": "Queue Pipeline",
+      "resources": "Resources"
     },
     "status": {
       "starting": "Starting",
@@ -3578,6 +3602,93 @@
       "uc1": "Body detection first, then face inside each box.",
       "uc2": "Stores face crops with pose-aware quality scoring.",
       "uc3": "Skip crop storage. Just match and report."
+    }
+  },
+  "resources": {
+    "loading": "Loading resource metrics…",
+    "systemOverview": "System Overview",
+    "hostWideNote": "Host-wide — shared across all tenants on this server",
+    "threadsTitle": "Backend threads — what's running",
+    "threadsNote": "Grouped by what each thread does. CPU is process-lifetime seconds.",
+    "threadCategoriesNote": "across {{count}} categories",
+    "threadExpandAria": "Show individual threads in category {{category}}",
+    "threadCategory": {
+      "camera_readers": "Camera readers — RTSP read loop (one per camera)",
+      "camera_analyzers": "Camera analyzers — detect + match (one per camera)",
+      "clip_writers": "Clip writers — ffmpeg encode (one per camera)",
+      "rtsp_segmenters": "RTSP segmenters — stream-copy chunking",
+      "face_matching": "Face matching — UC1/UC2/UC3 reprocess",
+      "clip_pipeline": "Clip pipeline workers — crop/match/identify",
+      "face_crops": "Face crop batch",
+      "attendance": "Attendance recompute scheduler",
+      "enrollment": "Photo enrollment backfill",
+      "notifications": "Notification worker",
+      "scheduled_reports": "Scheduled reports runner",
+      "retention": "Retention sweep",
+      "schedulers": "Background schedulers (APScheduler)",
+      "main": "FastAPI main thread",
+      "request_handlers": "Request handler pool (uvicorn / anyio)",
+      "other": "Other / unclassified"
+    },
+    "threadCol": {
+      "name": "Thread name",
+      "daemon": "Daemon",
+      "cpuUser": "CPU user",
+      "cpuSys": "CPU sys"
+    },
+    "cpu": "CPU",
+    "memory": "Memory",
+    "disk": "Disk",
+    "diskIo": "Disk I/O",
+    "network": "Network",
+    "swap": "Swap",
+    "cpuCoreCount_one": "{{count}} core",
+    "cpuCoreCount_other": "{{count}} cores",
+    "memSub": "{{used}} / {{total}} MB",
+    "diskSub": "{{used}} / {{total}} GB",
+    "diskIoSub": "R {{read}} · W {{write}} MB/s",
+    "networkSub": "↓ {{recv}} · ↑ {{sent}} MB/s",
+    "swapSub": "{{used}} / {{total}} MB",
+    "swapDisabled": "Not configured",
+    "sampling": "Sampling…",
+    "backendCpu": "Backend CPU",
+    "backendMem": "Backend memory",
+    "backendThreads": "Backend threads",
+    "faceCrops": "Face crops on disk",
+    "gpuUtil": "GPU util",
+    "gpuMem": "GPU memory",
+    "perCamera": "Per-camera resource share",
+    "perCameraNote": "Tenant-scoped — only your cameras",
+    "noWorkers": "No running workers yet. Cameras with worker_enabled=true and a reachable RTSP feed appear here.",
+    "perStage": "Pipeline stage breakdown",
+    "perStageNote": "Detection + matching + attendance are host-wide; RTSP reader + clip save are per-camera.",
+    "col": {
+      "camera": "Camera",
+      "cpuShare": "CPU share (est.)",
+      "memShare": "Memory (est.)",
+      "fpsIn": "FPS in",
+      "fpsOut": "FPS out",
+      "drops": "Drops/60s",
+      "reconnects": "Reconnects/60s",
+      "bytes": "Bandwidth (last 60s)",
+      "clipQueue": "Clip queue",
+      "stage": "Stage",
+      "scope": "Scope",
+      "avgMs": "Avg time",
+      "queue": "Queue",
+      "tput": "Throughput",
+      "errors5min": "Errors (5 min)"
+    },
+    "scope": {
+      "per_camera": "Per camera",
+      "shared_backend_process": "Shared (process-wide)"
+    },
+    "stageName": {
+      "rtsp_reader": "RTSP Reader",
+      "detection": "Person + Face Detection",
+      "matching": "Face Matching",
+      "attendance": "Attendance Compute",
+      "clip_save": "Clip Save"
     }
   },
   "auditLog": {

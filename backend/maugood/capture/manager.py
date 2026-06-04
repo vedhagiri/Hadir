@@ -460,6 +460,38 @@ class CaptureManager:
             return None
         return worker.get_full_stats()
 
+    def get_resource_stats_for_tenant(
+        self, tenant_id: int
+    ) -> list[dict[str, Any]]:
+        """P29 — per-camera resource payload for every live worker on
+        ``tenant_id``. Used by ``/api/operations/resources/cameras``.
+
+        Defence in depth on tenant isolation: even though we hold the
+        manager lock during the snapshot, the comprehension filters
+        on ``t == tenant_id`` so a future change to ``_workers`` keying
+        can't quietly leak across tenants.
+        """
+
+        with self._lock:
+            workers = [
+                w
+                for (t, _c), w in self._workers.items()
+                if t == tenant_id and w.is_alive()
+            ]
+        out: list[dict[str, Any]] = []
+        for w in workers:
+            try:
+                out.append(w.get_resource_stats())
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "get_resource_stats failed for tenant=%s camera=%s",
+                    tenant_id,
+                    w.camera_id,
+                    exc_info=True,
+                )
+        out.sort(key=lambda r: (str(r.get("camera_name", "")), r.get("camera_id", 0)))
+        return out
+
     def get_worker(
         self, tenant_id: int, camera_id: int
     ) -> Optional["CaptureWorker"]:
@@ -537,6 +569,7 @@ class CaptureManager:
                             cameras_table.c.worker_enabled,
                             cameras_table.c.detection_enabled,
                             cameras_table.c.clip_recording_enabled,
+                            cameras_table.c.live_matching_enabled,
                             cameras_table.c.clip_detection_source,
                             cameras_table.c.capture_config,
                         ).where(
@@ -573,12 +606,12 @@ class CaptureManager:
 
         # Reuse the existing tenant_settings detection / tracker
         # / clip-encoding config so a restart doesn't drop the
-        # tenant's choices.
+        # tenant's choices. ``live_matching_enabled`` is per-camera
+        # (migration 0072) — read off the camera row below.
         (
             tracker_cfg,
             detection_cfg,
             encoding_cfg,
-            live_matching_enabled,
         ) = self._read_tenant_configs(
             tenant_id=tenant_id, schema=schema
         )
@@ -597,7 +630,9 @@ class CaptureManager:
                 getattr(cam_row, "clip_detection_source", "body") or "body"
             ),
             clip_encoding_config=encoding_cfg,
-            live_matching_enabled=live_matching_enabled,
+            live_matching_enabled=bool(
+                getattr(cam_row, "live_matching_enabled", False)
+            ),
             schema=schema,
         )
 
@@ -697,12 +732,15 @@ class CaptureManager:
 
     def _read_tenant_configs(
         self, *, tenant_id: int, schema: str
-    ) -> tuple[Optional[dict], Optional[dict], Optional[dict], bool]:
+    ) -> tuple[Optional[dict], Optional[dict], Optional[dict]]:
         """Read the tenant's ``tracker_config``, ``detection_config``,
-        ``clip_encoding_config``, and ``live_matching_enabled``
-        (migration 0059) for a fresh worker spawn. Returns conservative
-        defaults on failure (``None`` configs + live matching ON) so
-        the worker uses its built-in defaults."""
+        and ``clip_encoding_config`` for a fresh worker spawn. Returns
+        ``None`` configs on failure so the worker uses its built-in
+        defaults.
+
+        NB: ``live_matching_enabled`` is **per-camera** (migration 0072);
+        a restart reads it off the camera row, not from
+        ``tenant_settings`` here."""
 
         try:
             from maugood.db import tenant_context  # noqa: PLC0415
@@ -715,11 +753,10 @@ class CaptureManager:
                             ts_table.c.tracker_config,
                             ts_table.c.detection_config,
                             ts_table.c.clip_encoding_config,
-                            ts_table.c.live_matching_enabled,
                         ).where(ts_table.c.tenant_id == tenant_id)
                     ).first()
             if row is None:
-                return None, None, None, False
+                return None, None, None
             return (
                 dict(row.tracker_config) if row.tracker_config else None,
                 dict(row.detection_config) if row.detection_config else None,
@@ -728,12 +765,9 @@ class CaptureManager:
                     if row.clip_encoding_config
                     else None
                 ),
-                bool(
-                    getattr(row, "live_matching_enabled", False)
-                ),
             )
         except Exception:  # noqa: BLE001
-            return None, None, None, False
+            return None, None, None
 
     def get_live_person_counts(
         self, *, tenant_id: int
@@ -934,13 +968,13 @@ class CaptureManager:
 
         # P28.5c: tenant-level detection + tracker settings shared
         # across this tenant's workers. Migration 0052 adds the clip
-        # encoding config to the same loader; migration 0059 adds the
-        # live-matching toggle.
+        # encoding config to the same loader. Migration 0072 moved the
+        # live-matching toggle to the camera row (sourced per-camera
+        # below from ``row.live_matching_enabled``).
         (
             detection_config,
             tracker_config,
             encoding_config,
-            live_matching_enabled,
         ) = self._load_tenant_capture_settings(
             engine, tenant_id=tenant_id, schema=schema
         )
@@ -991,7 +1025,9 @@ class CaptureManager:
                     getattr(row, "clip_detection_source", "body") or "body"
                 ),
                 clip_encoding_config=encoding_config,
-                live_matching_enabled=live_matching_enabled,
+                live_matching_enabled=bool(
+                    getattr(row, "live_matching_enabled", False)
+                ),
                 schema=schema,
             )
             plain_url = ""  # noqa: F841
@@ -1038,6 +1074,11 @@ class CaptureManager:
             cameras_table.c.rtsp_url_encrypted,
             cameras_table.c.detection_enabled,
             cameras_table.c.clip_recording_enabled,
+            # Migration 0072 — per-camera live-matching gate. The
+            # analyzer auto-gates on detection_enabled AND
+            # live_matching_enabled; the manager simply threads the
+            # camera-row value into the worker (no tenant-wide source).
+            cameras_table.c.live_matching_enabled,
             cameras_table.c.clip_detection_source,
             cameras_table.c.capture_config,
         ).where(
@@ -1274,13 +1315,13 @@ class CaptureManager:
                 continue
 
             # P28.5c: tenant-level detection + tracker settings.
-            # Migration 0052 adds the clip encoding config to the load;
-            # migration 0059 adds the live-matching toggle.
+            # Migration 0052 adds the clip encoding config to the load.
+            # Migration 0072 moved the live-matching toggle to the camera
+            # row — sourced per-row below from ``row.live_matching_enabled``.
             (
                 tenant_detection,
                 tenant_tracker,
                 tenant_encoding,
-                tenant_live_matching_enabled,
             ) = self._load_tenant_capture_settings(
                 get_engine(), tenant_id=tenant_id, schema=schema
             )
@@ -1310,7 +1351,8 @@ class CaptureManager:
                         getattr(row, "clip_detection_source", "body") or "body"
                     ),
                     tenant_encoding,
-                    tenant_live_matching_enabled,
+                    # Migration 0072 — per-camera live-matching gate.
+                    bool(getattr(row, "live_matching_enabled", False)),
                     schema,
                 )
 
@@ -1450,10 +1492,12 @@ class CaptureManager:
                         },
                     )
 
-                # Migration 0059: live_matching_enabled drift. When the
-                # tenant Admin flips the toggle the change takes effect
-                # on the next analyzer cycle — the analyzer thread
-                # branches on this flag every cycle. No worker restart.
+                # Migration 0072: per-camera live_matching_enabled drift.
+                # When the Admin flips the toggle on the camera row the
+                # change takes effect on the next analyzer cycle — the
+                # analyzer thread branches on this flag every cycle. No
+                # worker restart. ``desired_live_matching_enabled`` is the
+                # camera-row value (not the legacy tenant-wide flag).
                 current_live_matching = existing.is_live_matching_enabled()
                 if current_live_matching != desired_live_matching_enabled:
                     existing.update_live_matching_enabled(
@@ -1556,7 +1600,51 @@ class CaptureManager:
                 )
                 report["errors"] += 1
 
+        # P29 — sample per-camera RTSP socket bytes via ``ss -tnpi``.
+        # The sampler is best-effort: any failure leaves the workers'
+        # bytes counters as None, which the Resources tab UI hides.
+        try:
+            self._sample_socket_bytes()
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "reconcile: socket sampler raised — ignoring", exc_info=True
+            )
+
         return report
+
+    def _sample_socket_bytes(self) -> None:
+        """One ``ss -tnpi`` sample → push cumulative bytes into each
+        live worker's rolling window. P29 hook.
+        """
+
+        from maugood.observability.socket_sampler import (  # noqa: PLC0415
+            sample_and_update,
+        )
+
+        with self._lock:
+            workers = list(self._workers.items())
+
+        endpoints: dict[tuple[int, int], tuple[str, int]] = {}
+        worker_map: dict[tuple[int, int], CaptureWorker] = {}
+        for key, worker in workers:
+            try:
+                ep = worker.get_socket_endpoint()
+            except Exception:  # noqa: BLE001
+                ep = None
+            if ep is None:
+                continue
+            endpoints[key] = ep
+            worker_map[key] = worker
+
+        def _update(
+            key: tuple[int, int], cumulative: Optional[int], ts: float
+        ) -> None:
+            worker = worker_map.get(key)
+            if worker is None:
+                return
+            worker.set_socket_bytes_cumulative(cumulative, ts)
+
+        sample_and_update(endpoints, update_fn=_update)
 
     # ------------------------------------------------------------------
     # P28.5c: tenant-level detection + tracker config loader
@@ -1596,15 +1684,19 @@ class CaptureManager:
         *,
         tenant_id: int,
         schema: Optional[str],
-    ) -> tuple[dict, dict, dict, bool]:
+    ) -> tuple[dict, dict, dict]:
         """Return ``(detection_config, tracker_config,
-        clip_encoding_config, live_matching_enabled)`` for one tenant.
+        clip_encoding_config)`` for one tenant.
 
-        All four fall back to module-level defaults (and ``True`` for
-        the live-matching toggle) when the row is missing or a key is
-        absent — defence in depth on top of the migration's
-        server_default. The reconcile tick calls this every pass;
-        cheap raw SELECT, no model state involved.
+        All three fall back to module-level defaults when the row is
+        missing or a key is absent — defence in depth on top of the
+        migration's server_default. The reconcile tick calls this every
+        pass; cheap raw SELECT, no model state involved.
+
+        NB: ``live_matching_enabled`` is **per-camera** (migration 0072);
+        it is read off the camera row by ``_select_active_cameras``, not
+        from ``tenant_settings`` here. The legacy tenant-wide column is
+        no longer consulted to drive workers.
         """
 
         from sqlalchemy import select  # noqa: PLC0415
@@ -1615,7 +1707,6 @@ class CaptureManager:
             tenant_settings.c.detection_config,
             tenant_settings.c.tracker_config,
             tenant_settings.c.clip_encoding_config,
-            tenant_settings.c.live_matching_enabled,
         ).where(tenant_settings.c.tenant_id == tenant_id)
 
         try:
@@ -1639,13 +1730,11 @@ class CaptureManager:
                 dict(self._DEFAULT_DETECTION_CONFIG),
                 dict(self._DEFAULT_TRACKER_CONFIG),
                 dict(self._DEFAULT_CLIP_ENCODING_CONFIG),
-                False,
             )
 
         detection = dict(self._DEFAULT_DETECTION_CONFIG)
         tracker = dict(self._DEFAULT_TRACKER_CONFIG)
         encoding = dict(self._DEFAULT_CLIP_ENCODING_CONFIG)
-        live_matching = False
         if row is not None:
             if isinstance(row.detection_config, dict):
                 detection.update(row.detection_config)
@@ -1655,10 +1744,7 @@ class CaptureManager:
                 getattr(row, "clip_encoding_config", None), dict
             ):
                 encoding.update(row.clip_encoding_config)
-            live_matching = bool(
-                getattr(row, "live_matching_enabled", False)
-            )
-        return detection, tracker, encoding, live_matching
+        return detection, tracker, encoding
 
     # ------------------------------------------------------------------
 

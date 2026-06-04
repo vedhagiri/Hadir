@@ -28,6 +28,7 @@ RUN apt-get update \
         shared-mime-info \
         fonts-liberation \
         ffmpeg \
+        iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml ./

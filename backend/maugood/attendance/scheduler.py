@@ -374,9 +374,16 @@ def recompute_today_all_tenants() -> int:
     Returns the total rows upserted across all tenants. A single
     tenant blowing up doesn't abort the others — each call is in
     its own try/except.
+
+    P29: stamps ``_last_run_at`` + ``_last_run_duration_ms`` +
+    ``_last_run_rows`` on the module so the Resources tab can show
+    "Attendance Compute" stage timing.
     """
 
+    import time as _time  # noqa: PLC0415
+
     total = 0
+    _t_start = _time.perf_counter()
     for scope in _active_tenants():
         try:
             total += recompute_today(scope)
@@ -386,7 +393,55 @@ def recompute_today_all_tenants() -> int:
                 scope.tenant_id,
                 type(exc).__name__,
             )
+    _record_run_for_observability(
+        rows=total, duration_ms=(_time.perf_counter() - _t_start) * 1000.0
+    )
     return total
+
+
+# ---------------------------------------------------------------------------
+# P29 — Resources tab observability hook
+# ---------------------------------------------------------------------------
+
+
+_last_run_at: float = 0.0
+_last_run_duration_ms: float = 0.0
+_last_run_rows: int = 0
+
+
+def _record_run_for_observability(*, rows: int, duration_ms: float) -> None:
+    """Stamp module-level state after a scheduler-driven run.
+
+    Module-level rather than instance-level because callers can also
+    invoke ``recompute_today_all_tenants`` from tests or scripts that
+    don't go through ``AttendanceScheduler``; we want every path to
+    surface in the Resources tab uniformly.
+    """
+
+    import time as _time  # noqa: PLC0415
+
+    global _last_run_at, _last_run_duration_ms, _last_run_rows
+    _last_run_at = _time.time()
+    _last_run_duration_ms = float(duration_ms)
+    _last_run_rows = int(rows)
+
+
+def last_run_stats() -> dict:
+    """Read-only snapshot of the last all-tenants recompute run.
+
+    Consumed by ``/api/operations/resources/stages``. Module-global
+    so per-tenant calls (Resources tab is tenant-scoped at the
+    endpoint) see the same number — attendance recompute is a
+    process-wide scheduler job, not a per-tenant one.
+    """
+
+    return {
+        "last_run_at": _last_run_at if _last_run_at > 0 else None,
+        "last_run_duration_ms": (
+            round(_last_run_duration_ms, 2) if _last_run_at > 0 else None
+        ),
+        "last_run_rows": _last_run_rows if _last_run_at > 0 else None,
+    }
 
 
 class AttendanceScheduler:

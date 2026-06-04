@@ -35,9 +35,11 @@ P28.7 — the matcher classifies each match by the matched employee's
 
 from __future__ import annotations
 
+import collections
 import heapq
 import logging
 import threading
+import time
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Literal, Optional
@@ -108,6 +110,13 @@ class MatcherCache:
         # tenant_id → {employee_id → _EmployeeLifecycle}.
         self._lifecycle: dict[int, dict[int, _EmployeeLifecycle]] = {}
         self._loaded: set[int] = set()
+        # P29: rolling 60s window of match-call durations in
+        # milliseconds. Cheap to maintain (one append per match call).
+        # Consumed by /api/operations/resources/stages for the
+        # "Matching" stage's avg_processing_ms.
+        self._match_durations_ms: "collections.deque[tuple[float, float]]" = (
+            collections.deque(maxlen=600)
+        )
 
     # ------------------------------------------------------------------
 
@@ -161,6 +170,32 @@ class MatcherCache:
             self._per_tenant.pop(tenant_id, None)
             self._lifecycle.pop(tenant_id, None)
             self._loaded.discard(tenant_id)
+
+    def match_timing_stats(self) -> dict:
+        """P29 — return ``{calls_60s, avg_processing_ms, p95_processing_ms}``
+        derived from the rolling timing deque. Process-wide (the matcher
+        cache is a singleton); the Resources tab labels this stage
+        ``shared_backend_process`` accordingly.
+        """
+
+        cutoff = time.time() - 60.0
+        while self._match_durations_ms and self._match_durations_ms[0][0] < cutoff:
+            self._match_durations_ms.popleft()
+        if not self._match_durations_ms:
+            return {
+                "calls_60s": 0,
+                "avg_processing_ms": None,
+                "p95_processing_ms": None,
+            }
+        durations = [d for _, d in self._match_durations_ms]
+        avg = sum(durations) / len(durations)
+        sorted_d = sorted(durations)
+        p95_idx = max(0, min(len(sorted_d) - 1, int(round(0.95 * (len(sorted_d) - 1)))))
+        return {
+            "calls_60s": len(durations),
+            "avg_processing_ms": round(avg, 2),
+            "p95_processing_ms": round(sorted_d[p95_idx], 2),
+        }
 
     def cache_stats(self, tenant_id: int) -> dict:
         """Return the enrolled-employee + vector counts for this tenant.
@@ -375,6 +410,27 @@ class MatcherCache:
         probe = np.asarray(probe, dtype=np.float32).reshape(-1)
         if probe.shape[0] == 0:
             return None
+
+        # P29 — timing for /api/operations/resources/stages. perf_counter
+        # is cheap (~0.1 µs); we record one sample per match call.
+        _t_start = time.perf_counter()
+        try:
+            return self._match_inner(scope, probe, threshold=threshold, top_k=top_k)
+        finally:
+            dur_ms = (time.perf_counter() - _t_start) * 1000.0
+            self._match_durations_ms.append((time.time(), dur_ms))
+
+    def _match_inner(
+        self,
+        scope: TenantScope,
+        probe: np.ndarray,
+        *,
+        threshold: Optional[float] = None,
+        top_k: int = 1,
+    ) -> Optional[Match]:
+        """Inner match implementation. Called only from ``match`` so the
+        timing wrapper applies. Body is the pre-P29 ``match`` logic
+        moved verbatim — behaviour unchanged."""
 
         threshold = (
             threshold

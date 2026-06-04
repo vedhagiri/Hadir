@@ -308,6 +308,10 @@ def create_app() -> FastAPI:
     app.include_router(notifications_router)
     app.include_router(live_capture_router)
     app.include_router(operations_router)
+    # P29 — Resources tab endpoints under /api/operations/resources/*.
+    from maugood.observability import router as observability_router  # noqa: PLC0415
+
+    app.include_router(observability_router)
     # TEMP-DIAGNOSTIC-2026-05-20 — Frame Diagnostics tab.
     app.include_router(diagnostics_router)
     app.include_router(person_clips_router)
