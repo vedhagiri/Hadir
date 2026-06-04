@@ -12,6 +12,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../api/client";
 import type { Employee } from "../features/employees/types";
@@ -45,6 +46,7 @@ type Tab = "types" | "holidays" | "leaves";
 
 
 export function LeaveCalendarPage() {
+  const { t } = useTranslation();
   const [tab, setTab] = useState<Tab>("types");
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -57,11 +59,10 @@ export function LeaveCalendarPage() {
             fontWeight: 400,
           }}
         >
-          Leave &amp; Calendar
+          {t("leaveCalendar.title")}
         </h1>
         <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 13 }}>
-          Configure leave types, the holiday calendar, and the approved-leave
-          ledger.
+          {t("leaveCalendar.subtitle")}
         </p>
       </header>
 
@@ -71,13 +72,13 @@ export function LeaveCalendarPage() {
 
       <div style={{ display: "flex", gap: 4 }}>
         <TabButton tab={tab} value="types" onClick={setTab}>
-          Leave types
+          {t("leaveCalendar.tabs.types")}
         </TabButton>
         <TabButton tab={tab} value="holidays" onClick={setTab}>
-          Holidays
+          {t("leaveCalendar.tabs.holidays")}
         </TabButton>
         <TabButton tab={tab} value="leaves" onClick={setTab}>
-          Approved leaves
+          {t("leaveCalendar.tabs.leaves")}
         </TabButton>
       </div>
 
@@ -133,6 +134,7 @@ function TabButton({
 
 
 function LeaveTypesTab() {
+  const { t } = useTranslation();
   const list = useLeaveTypes();
   const create = useCreateLeaveType();
   const [showForm, setShowForm] = useState(false);
@@ -142,10 +144,10 @@ function LeaveTypesTab() {
   const [name, setName] = useState("");
   const [isPaid, setIsPaid] = useState(true);
 
-  if (list.isLoading) return <p>Loading leave types…</p>;
+  if (list.isLoading) return <p>{t("leaveCalendar.loadingTypes")}</p>;
   if (list.error)
     return (
-      <p style={{ color: "var(--danger-text)" }}>Couldn’t load leave types.</p>
+      <p style={{ color: "var(--danger-text)" }}>{t("leaveCalendar.loadFailedTypes")}</p>
     );
   const rows = list.data ?? [];
 
@@ -163,7 +165,7 @@ function LeaveTypesTab() {
     e.preventDefault();
     setError(null);
     if (!canSubmit) {
-      setError("Fill in both Code and Name.");
+      setError(t("leaveCalendar.errors.fillCodeName"));
       return;
     }
     try {
@@ -174,7 +176,7 @@ function LeaveTypesTab() {
       });
       closeForm();
     } catch (err) {
-      handleApi(err, setError, "Save failed");
+      handleApi(err, setError, t("leaveCalendar.errors.saveFailed"));
     }
   };
 
@@ -198,10 +200,10 @@ function LeaveTypesTab() {
             color: "var(--text)",
           }}
         >
-          Leave types
+          {t("leaveCalendar.tabs.types")}
         </h3>
         <button type="button" onClick={() => setShowForm(true)} style={btnPrimary}>
-          + New leave type
+          {t("leaveCalendar.newType")}
         </button>
       </div>
       {showForm && (
@@ -235,13 +237,13 @@ function LeaveTypesTab() {
               }}
             >
               <h2 id="new-leave-type-title" style={{ margin: 0, fontSize: 18 }}>
-                New leave type
+                {t("leaveCalendar.newType")}
               </h2>
               <button
                 className="icon-btn"
                 type="button"
                 onClick={closeForm}
-                aria-label="Close"
+                aria-label={t("leaveCalendar.actions.close")}
               >
                 <Icon name="x" size={14} />
               </button>
@@ -257,7 +259,7 @@ function LeaveTypesTab() {
                   gap: 12,
                 }}
               >
-                <Field label="Code" required>
+                <Field label={t("leaveCalendar.fields.code")} required>
                   <input
                     type="text"
                     value={code}
@@ -267,18 +269,18 @@ function LeaveTypesTab() {
                     style={inputStyle}
                   />
                 </Field>
-                <Field label="Paid?">
+                <Field label={t("leaveCalendar.fields.paidQ")}>
                   <select
                     value={isPaid ? "yes" : "no"}
                     onChange={(e) => setIsPaid(e.target.value === "yes")}
                     style={inputStyle}
                   >
-                    <option value="yes">Paid</option>
-                    <option value="no">Unpaid</option>
+                    <option value="yes">{t("leaveCalendar.fields.paid")}</option>
+                    <option value="no">{t("leaveCalendar.fields.unpaid")}</option>
                   </select>
                 </Field>
               </div>
-              <Field label="Name" required>
+              <Field label={t("leaveCalendar.fields.name")} required>
                 <input
                   type="text"
                   value={name}
@@ -303,14 +305,14 @@ function LeaveTypesTab() {
                   onClick={closeForm}
                   disabled={create.isPending}
                 >
-                  Cancel
+                  {t("leaveCalendar.actions.cancel")}
                 </button>
                 <button
                   type="submit"
                   disabled={!canSubmit || create.isPending}
                   style={{ ...btnPrimary, opacity: canSubmit ? 1 : 0.5 }}
                 >
-                  {create.isPending ? "Saving…" : "Create"}
+                  {create.isPending ? t("leaveCalendar.actions.saving") : t("leaveCalendar.actions.create")}
                 </button>
               </div>
             </form>
@@ -320,10 +322,10 @@ function LeaveTypesTab() {
       <table style={tableStyle}>
         <thead>
           <tr style={{ background: "var(--bg)" }}>
-            <th style={th}>Code</th>
-            <th style={th}>Name</th>
-            <th style={th}>Paid</th>
-            <th style={th}>Active</th>
+            <th style={th}>{t("leaveCalendar.cols.code")}</th>
+            <th style={th}>{t("leaveCalendar.cols.name")}</th>
+            <th style={th}>{t("leaveCalendar.cols.paid")}</th>
+            <th style={th}>{t("leaveCalendar.cols.active")}</th>
             <th style={th}></th>
           </tr>
         </thead>
@@ -334,7 +336,7 @@ function LeaveTypesTab() {
           {rows.length === 0 && (
             <tr>
               <td colSpan={5} style={{ ...td, color: "var(--text-tertiary)", textAlign: "center" }}>
-                None yet.
+                {t("leaveCalendar.empty")}
               </td>
             </tr>
           )}
@@ -346,6 +348,7 @@ function LeaveTypesTab() {
 
 
 function LeaveTypeRow({ row }: { row: LeaveType }) {
+  const { t } = useTranslation();
   const patch = usePatchLeaveType(row.id);
   const del = useDeleteLeaveType();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -371,7 +374,7 @@ function LeaveTypeRow({ row }: { row: LeaveType }) {
       await del.mutateAsync(row.id);
       setConfirmOpen(false);
     } catch (err) {
-      handleApi(err, setDelError, "Delete failed");
+      handleApi(err, setDelError, t("leaveCalendar.errors.deleteFailed"));
     }
   };
 
@@ -390,14 +393,14 @@ function LeaveTypeRow({ row }: { row: LeaveType }) {
     e.preventDefault();
     setEditError(null);
     if (!canSaveEdit) {
-      setEditError("Name is required.");
+      setEditError(t("leaveCalendar.errors.nameRequired"));
       return;
     }
     try {
       await patch.mutateAsync({ name: editName.trim(), is_paid: editPaid });
       setEditOpen(false);
     } catch (err) {
-      handleApi(err, setEditError, "Save failed");
+      handleApi(err, setEditError, t("leaveCalendar.errors.saveFailed"));
     }
   };
 
@@ -414,7 +417,7 @@ function LeaveTypeRow({ row }: { row: LeaveType }) {
           disabled={patch.isPending}
           style={chipStyle(row.is_paid)}
         >
-          {row.is_paid ? "Paid" : "Unpaid"}
+          {row.is_paid ? t("leaveCalendar.fields.paid") : t("leaveCalendar.fields.unpaid")}
         </button>
       </td>
       <td style={td}>
@@ -424,7 +427,7 @@ function LeaveTypeRow({ row }: { row: LeaveType }) {
           disabled={patch.isPending}
           style={chipStyle(row.active)}
         >
-          {row.active ? "active" : "inactive"}
+          {row.active ? t("leaveCalendar.fields.activeLower") : t("leaveCalendar.fields.inactiveLower")}
         </button>
       </td>
       <td style={{ ...td, textAlign: "right" }}>
@@ -445,9 +448,9 @@ function LeaveTypeRow({ row }: { row: LeaveType }) {
               alignItems: "center",
               gap: 6,
             }}
-            aria-label={`Edit leave type ${row.name}`}
+            aria-label={t("leaveCalendar.actions.editTypeAria", { name: row.name })}
           >
-            <Icon name="edit" size={12} /> Edit
+            <Icon name="edit" size={12} /> {t("leaveCalendar.actions.edit")}
           </button>
           <button
             type="button"
@@ -460,9 +463,9 @@ function LeaveTypeRow({ row }: { row: LeaveType }) {
               gap: 6,
               color: "var(--danger-text)",
             }}
-            aria-label={`Delete leave type ${row.name}`}
+            aria-label={t("leaveCalendar.actions.deleteTypeAria", { name: row.name })}
           >
-            <Icon name="trash" size={12} /> Delete
+            <Icon name="trash" size={12} /> {t("leaveCalendar.actions.delete")}
           </button>
         </div>
         {confirmOpen && (
@@ -487,12 +490,11 @@ function LeaveTypeRow({ row }: { row: LeaveType }) {
               }}
             >
               <h2 id="lt-delete-title" style={{ margin: "0 0 8px 0", fontSize: 16 }}>
-                Delete leave type{" "}
+                {t("leaveCalendar.deleteTypeTitle")}{" "}
                 <span className="mono">{row.code}</span>?
               </h2>
               <p style={{ fontSize: 13, color: "var(--text-secondary)", margin: 0 }}>
-                “{row.name}” will be removed. This cannot be undone. If the
-                type is still used by approved leaves, deactivate it instead.
+                {t("leaveCalendar.deleteTypeBody", { name: row.name })}
               </p>
               {delError && (
                 <div
@@ -519,7 +521,7 @@ function LeaveTypeRow({ row }: { row: LeaveType }) {
                   onClick={() => setConfirmOpen(false)}
                   disabled={del.isPending}
                 >
-                  Cancel
+                  {t("leaveCalendar.actions.cancel")}
                 </button>
                 <button
                   type="button"
@@ -532,7 +534,7 @@ function LeaveTypeRow({ row }: { row: LeaveType }) {
                     borderColor: "var(--danger-border)",
                   }}
                 >
-                  {del.isPending ? "Deleting…" : "Delete"}
+                  {del.isPending ? t("leaveCalendar.actions.deleting") : t("leaveCalendar.actions.delete")}
                 </button>
               </div>
             </div>
@@ -547,13 +549,13 @@ function LeaveTypeRow({ row }: { row: LeaveType }) {
             >
               <header style={modalHeader}>
                 <h2 id="lt-edit-title" style={{ margin: 0, fontSize: 18 }}>
-                  Edit leave type
+                  {t("leaveCalendar.editType")}
                 </h2>
                 <button
                   className="icon-btn"
                   type="button"
                   onClick={() => setEditOpen(false)}
-                  aria-label="Close"
+                  aria-label={t("leaveCalendar.actions.close")}
                 >
                   <Icon name="x" size={14} />
                 </button>
@@ -569,27 +571,27 @@ function LeaveTypeRow({ row }: { row: LeaveType }) {
                     gap: 12,
                   }}
                 >
-                  <Field label="Code">
+                  <Field label={t("leaveCalendar.fields.code")}>
                     <input
                       type="text"
                       value={row.code}
                       disabled
-                      title="Code can't be changed after creation."
+                      title={t("leaveCalendar.codeLocked")}
                       style={{ ...inputStyle, opacity: 0.7 }}
                     />
                   </Field>
-                  <Field label="Paid?">
+                  <Field label={t("leaveCalendar.fields.paidQ")}>
                     <select
                       value={editPaid ? "yes" : "no"}
                       onChange={(e) => setEditPaid(e.target.value === "yes")}
                       style={inputStyle}
                     >
-                      <option value="yes">Paid</option>
-                      <option value="no">Unpaid</option>
+                      <option value="yes">{t("leaveCalendar.fields.paid")}</option>
+                      <option value="no">{t("leaveCalendar.fields.unpaid")}</option>
                     </select>
                   </Field>
                 </div>
-                <Field label="Name" required>
+                <Field label={t("leaveCalendar.fields.name")} required>
                   <input
                     type="text"
                     value={editName}
@@ -614,14 +616,14 @@ function LeaveTypeRow({ row }: { row: LeaveType }) {
                     onClick={() => setEditOpen(false)}
                     disabled={patch.isPending}
                   >
-                    Cancel
+                    {t("leaveCalendar.actions.cancel")}
                   </button>
                   <button
                     type="submit"
                     disabled={!canSaveEdit || patch.isPending}
                     style={{ ...btnPrimary, opacity: canSaveEdit ? 1 : 0.5 }}
                   >
-                    {patch.isPending ? "Saving…" : "Save changes"}
+                    {patch.isPending ? t("leaveCalendar.actions.saving") : t("leaveCalendar.actions.saveChanges")}
                   </button>
                 </div>
               </form>
@@ -638,6 +640,7 @@ function LeaveTypeRow({ row }: { row: LeaveType }) {
 
 
 function HolidaysTab() {
+  const { t } = useTranslation();
   const today = new Date();
   const [year, setYear] = useState<number>(today.getFullYear());
   const [yearText, setYearText] = useState<string>(String(today.getFullYear()));
@@ -658,10 +661,10 @@ function HolidaysTab() {
   // whole page.
   const [importSummary, setImportSummary] = useState<string | null>(null);
 
-  if (list.isLoading) return <p>Loading holidays…</p>;
+  if (list.isLoading) return <p>{t("leaveCalendar.loadingHolidays")}</p>;
   if (list.error)
     return (
-      <p style={{ color: "var(--danger-text)" }}>Couldn’t load holidays.</p>
+      <p style={{ color: "var(--danger-text)" }}>{t("leaveCalendar.loadFailedHolidays")}</p>
     );
   const rows = list.data ?? [];
   const thisYear = today.getFullYear();
@@ -679,14 +682,14 @@ function HolidaysTab() {
     e.preventDefault();
     setError(null);
     if (!canAddHoliday) {
-      setError("Choose a date and enter a holiday name.");
+      setError(t("leaveCalendar.errors.chooseDateName"));
       return;
     }
     try {
       await create.mutateAsync({ date, name: name.trim() });
       closeAdd();
     } catch (err) {
-      handleApi(err, setError, "Save failed");
+      handleApi(err, setError, t("leaveCalendar.errors.saveFailed"));
     }
   };
 
@@ -699,22 +702,20 @@ function HolidaysTab() {
     try {
       const res = await importer.mutateAsync(f);
       const parts: string[] = [];
-      parts.push(
-        `${res.imported_count} imported`,
-      );
+      parts.push(t("leaveCalendar.import.imported", { count: res.imported_count }));
       if (res.skipped_count > 0) {
         const dates = res.skipped
           .slice(0, 3)
           .map((s) => s.date)
           .join(", ");
-        const more = res.skipped_count > 3 ? `, +${res.skipped_count - 3} more` : "";
+        const more = res.skipped_count > 3 ? t("leaveCalendar.import.more", { count: res.skipped_count - 3 }) : "";
         parts.push(
-          `${res.skipped_count} skipped (already exist: ${dates}${more})`,
+          t("leaveCalendar.import.skipped", { count: res.skipped_count, dates: `${dates}${more}` }),
         );
       }
       setImportSummary(parts.join(" · "));
     } catch (err) {
-      handleApi(err, setError, "Import failed");
+      handleApi(err, setError, t("leaveCalendar.errors.importFailed"));
     }
   };
 
@@ -738,15 +739,15 @@ function HolidaysTab() {
             color: "var(--text-secondary)",
           }}
         >
-          <span style={{ fontWeight: 600 }}>Year</span>
+          <span style={{ fontWeight: 600 }}>{t("leaveCalendar.year")}</span>
           <input
             type="number"
             value={yearText}
             list="holiday-year-options"
             min={2000}
             max={2100}
-            aria-label="Filter holidays by year"
-            placeholder="e.g. 2026"
+            aria-label={t("leaveCalendar.filterYearAria")}
+            placeholder={t("leaveCalendar.yearPlaceholder")}
             onChange={(e) => {
               const raw = e.target.value;
               setYearText(raw);
@@ -775,7 +776,7 @@ function HolidaysTab() {
             }}
             style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
           >
-            <Icon name="upload" size={13} /> Import .xlsx
+            <Icon name="upload" size={13} /> {t("leaveCalendar.import.button")}
           </button>
           <button
             type="button"
@@ -785,7 +786,7 @@ function HolidaysTab() {
             }}
             style={btnPrimary}
           >
-            + Add holiday
+            {t("leaveCalendar.addHoliday")}
           </button>
         </div>
       </div>
@@ -809,9 +810,9 @@ function HolidaysTab() {
       <table style={tableStyle}>
         <thead>
           <tr style={{ background: "var(--bg)" }}>
-            <th style={th}>Date</th>
-            <th style={th}>Day</th>
-            <th style={th}>Name</th>
+            <th style={th}>{t("leaveCalendar.cols.date")}</th>
+            <th style={th}>{t("leaveCalendar.cols.day")}</th>
+            <th style={th}>{t("leaveCalendar.cols.name")}</th>
             <th style={th}></th>
           </tr>
         </thead>
@@ -825,7 +826,7 @@ function HolidaysTab() {
                 colSpan={4}
                 style={{ ...td, color: "var(--text-tertiary)", textAlign: "center" }}
               >
-                None yet.
+                {t("leaveCalendar.empty")}
               </td>
             </tr>
           )}
@@ -841,13 +842,13 @@ function HolidaysTab() {
           >
             <header style={modalHeader}>
               <h2 id="new-holiday-title" style={{ margin: 0, fontSize: 18 }}>
-                New holiday
+                {t("leaveCalendar.newHoliday")}
               </h2>
               <button
                 className="icon-btn"
                 type="button"
                 onClick={closeAdd}
-                aria-label="Close"
+                aria-label={t("leaveCalendar.actions.close")}
               >
                 <Icon name="x" size={14} />
               </button>
@@ -856,15 +857,15 @@ function HolidaysTab() {
               onSubmit={onAdd}
               style={{ display: "flex", flexDirection: "column", gap: 14 }}
             >
-              <Field label="Date" required>
+              <Field label={t("leaveCalendar.fields.date")} required>
                 <DatePicker
                   value={date}
                   onChange={setDate}
-                  ariaLabel="Holiday date"
+                  ariaLabel={t("leaveCalendar.fields.holidayDateAria")}
                   triggerStyle={{ width: "100%" }}
                 />
               </Field>
-              <Field label="Name" required>
+              <Field label={t("leaveCalendar.fields.name")} required>
                 <input
                   type="text"
                   value={name}
@@ -889,14 +890,14 @@ function HolidaysTab() {
                   onClick={closeAdd}
                   disabled={create.isPending}
                 >
-                  Cancel
+                  {t("leaveCalendar.actions.cancel")}
                 </button>
                 <button
                   type="submit"
                   disabled={!canAddHoliday || create.isPending}
                   style={{ ...btnPrimary, opacity: canAddHoliday ? 1 : 0.5 }}
                 >
-                  {create.isPending ? "Saving…" : "+ Add holiday"}
+                  {create.isPending ? t("leaveCalendar.actions.saving") : t("leaveCalendar.addHoliday")}
                 </button>
               </div>
             </form>
@@ -916,13 +917,13 @@ function HolidaysTab() {
                 id="import-holidays-title"
                 style={{ margin: 0, fontSize: 18 }}
               >
-                Import holidays
+                {t("leaveCalendar.import.title")}
               </h2>
               <button
                 className="icon-btn"
                 type="button"
                 onClick={() => setShowImport(false)}
-                aria-label="Close"
+                aria-label={t("leaveCalendar.actions.close")}
               >
                 <Icon name="x" size={14} />
               </button>
@@ -935,11 +936,14 @@ function HolidaysTab() {
                 lineHeight: 1.5,
               }}
             >
-              Upload an <strong>.xlsx</strong> with a header row and the
-              columns <span className="mono">date</span> (YYYY-MM-DD),{" "}
-              <span className="mono">name</span>, and optional{" "}
-              <span className="mono">description</span>. Existing dates are
-              skipped, not overwritten.
+              {t("leaveCalendar.import.instructionsLead")}{" "}
+              <strong>.xlsx</strong>{" "}
+              {t("leaveCalendar.import.instructionsCols")}{" "}
+              <span className="mono">date</span> (YYYY-MM-DD),{" "}
+              <span className="mono">name</span>,{" "}
+              {t("leaveCalendar.import.instructionsOptional")}{" "}
+              <span className="mono">description</span>.{" "}
+              {t("leaveCalendar.import.instructionsSkip")}
             </p>
             <a
               href="/api/holidays/import-template"
@@ -952,7 +956,7 @@ function HolidaysTab() {
                 textDecoration: "none",
               }}
             >
-              <Icon name="download" size={13} /> Download reference template
+              <Icon name="download" size={13} /> {t("leaveCalendar.import.template")}
             </a>
             <label
               style={{
@@ -972,8 +976,8 @@ function HolidaysTab() {
             >
               <Icon name="upload" size={18} />
               {importer.isPending
-                ? "Importing…"
-                : "Click to choose an .xlsx file"}
+                ? t("leaveCalendar.import.importing")
+                : t("leaveCalendar.import.choosePrompt")}
               <input
                 type="file"
                 accept=".xlsx"
@@ -1004,7 +1008,7 @@ function HolidaysTab() {
                 onClick={() => setShowImport(false)}
                 disabled={importer.isPending}
               >
-                Done
+                {t("leaveCalendar.actions.done")}
               </button>
             </div>
           </div>
@@ -1016,6 +1020,7 @@ function HolidaysTab() {
 
 
 function HolidayRow({ row }: { row: Holiday }) {
+  const { t } = useTranslation();
   const del = useDeleteHoliday();
   const patch = usePatchHoliday(row.id);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -1027,7 +1032,7 @@ function HolidayRow({ row }: { row: Holiday }) {
       await del.mutateAsync(row.id);
       setConfirmOpen(false);
     } catch (err) {
-      handleApi(err, setDelError, "Delete failed");
+      handleApi(err, setDelError, t("leaveCalendar.errors.deleteFailed"));
     }
   };
 
@@ -1046,14 +1051,14 @@ function HolidayRow({ row }: { row: Holiday }) {
     e.preventDefault();
     setEditError(null);
     if (!canSaveEdit) {
-      setEditError("Choose a date and enter a holiday name.");
+      setEditError(t("leaveCalendar.errors.chooseDateName"));
       return;
     }
     try {
       await patch.mutateAsync({ date: editDate, name: editName.trim() });
       setEditOpen(false);
     } catch (err) {
-      handleApi(err, setEditError, "Save failed");
+      handleApi(err, setEditError, t("leaveCalendar.errors.saveFailed"));
     }
   };
 
@@ -1080,9 +1085,9 @@ function HolidayRow({ row }: { row: Holiday }) {
             gap: 6,
             marginInlineEnd: 6,
           }}
-          aria-label={`Edit holiday ${row.name}`}
+          aria-label={t("leaveCalendar.actions.editHolidayAria", { name: row.name })}
         >
-          <Icon name="edit" size={12} /> Edit
+          <Icon name="edit" size={12} /> {t("leaveCalendar.actions.edit")}
         </button>
         <button
           type="button"
@@ -1098,9 +1103,9 @@ function HolidayRow({ row }: { row: Holiday }) {
             gap: 6,
             color: "var(--danger-text)",
           }}
-          aria-label={`Delete holiday ${row.name}`}
+          aria-label={t("leaveCalendar.actions.deleteHolidayAria", { name: row.name })}
         >
-          <Icon name="trash" size={12} /> Delete
+          <Icon name="trash" size={12} /> {t("leaveCalendar.actions.delete")}
         </button>
         {confirmOpen && (
           <ModalShell onClose={() => setConfirmOpen(false)}>
@@ -1113,7 +1118,7 @@ function HolidayRow({ row }: { row: Holiday }) {
                 id="holiday-delete-title"
                 style={{ margin: "0 0 8px 0", fontSize: 16 }}
               >
-                Delete holiday?
+                {t("leaveCalendar.deleteHolidayTitle")}
               </h2>
               <p
                 style={{
@@ -1122,8 +1127,7 @@ function HolidayRow({ row }: { row: Holiday }) {
                   margin: 0,
                 }}
               >
-                “{row.name}” on {row.date} will be removed. This cannot be
-                undone.
+                {t("leaveCalendar.deleteHolidayBody", { name: row.name, date: row.date })}
               </p>
               {delError && (
                 <div
@@ -1150,7 +1154,7 @@ function HolidayRow({ row }: { row: Holiday }) {
                   onClick={() => setConfirmOpen(false)}
                   disabled={del.isPending}
                 >
-                  Cancel
+                  {t("leaveCalendar.actions.cancel")}
                 </button>
                 <button
                   type="button"
@@ -1163,7 +1167,7 @@ function HolidayRow({ row }: { row: Holiday }) {
                     borderColor: "var(--danger-border)",
                   }}
                 >
-                  {del.isPending ? "Deleting…" : "Delete"}
+                  {del.isPending ? t("leaveCalendar.actions.deleting") : t("leaveCalendar.actions.delete")}
                 </button>
               </div>
             </div>
@@ -1178,13 +1182,13 @@ function HolidayRow({ row }: { row: Holiday }) {
             >
               <header style={modalHeader}>
                 <h2 id="holiday-edit-title" style={{ margin: 0, fontSize: 18 }}>
-                  Edit holiday
+                  {t("leaveCalendar.editHoliday")}
                 </h2>
                 <button
                   className="icon-btn"
                   type="button"
                   onClick={() => setEditOpen(false)}
-                  aria-label="Close"
+                  aria-label={t("leaveCalendar.actions.close")}
                 >
                   <Icon name="x" size={14} />
                 </button>
@@ -1193,15 +1197,15 @@ function HolidayRow({ row }: { row: Holiday }) {
                 onSubmit={onSaveEdit}
                 style={{ display: "flex", flexDirection: "column", gap: 14 }}
               >
-                <Field label="Date" required>
+                <Field label={t("leaveCalendar.fields.date")} required>
                   <DatePicker
                     value={editDate}
                     onChange={setEditDate}
-                    ariaLabel="Holiday date"
+                    ariaLabel={t("leaveCalendar.fields.holidayDateAria")}
                     triggerStyle={{ width: "100%" }}
                   />
                 </Field>
-                <Field label="Name" required>
+                <Field label={t("leaveCalendar.fields.name")} required>
                   <input
                     type="text"
                     value={editName}
@@ -1226,14 +1230,14 @@ function HolidayRow({ row }: { row: Holiday }) {
                     onClick={() => setEditOpen(false)}
                     disabled={patch.isPending}
                   >
-                    Cancel
+                    {t("leaveCalendar.actions.cancel")}
                   </button>
                   <button
                     type="submit"
                     disabled={!canSaveEdit || patch.isPending}
                     style={{ ...btnPrimary, opacity: canSaveEdit ? 1 : 0.5 }}
                   >
-                    {patch.isPending ? "Saving…" : "Save changes"}
+                    {patch.isPending ? t("leaveCalendar.actions.saving") : t("leaveCalendar.actions.saveChanges")}
                   </button>
                 </div>
               </form>
@@ -1250,6 +1254,7 @@ function HolidayRow({ row }: { row: Holiday }) {
 
 
 function ApprovedLeavesTab() {
+  const { t } = useTranslation();
   const leaves = useApprovedLeaves();
   const types = useLeaveTypes();
   const employees = useEmployeeList({
@@ -1270,10 +1275,10 @@ function ApprovedLeavesTab() {
   const [notes, setNotes] = useState("");
 
   if (leaves.isLoading || types.isLoading || employees.isLoading)
-    return <p>Loading leaves…</p>;
+    return <p>{t("leaveCalendar.loadingLeaves")}</p>;
   if (leaves.error)
     return (
-      <p style={{ color: "var(--danger-text)" }}>Couldn’t load leaves.</p>
+      <p style={{ color: "var(--danger-text)" }}>{t("leaveCalendar.loadFailedLeaves")}</p>
     );
   const rows = leaves.data ?? [];
   const typeOptions = (types.data ?? []).filter((t) => t.active);
@@ -1305,23 +1310,23 @@ function ApprovedLeavesTab() {
     e.preventDefault();
     setError(null);
     if (!employeeId) {
-      setError("Select an employee.");
+      setError(t("leaveCalendar.errors.selectEmployee"));
       return;
     }
     if (!leaveTypeId) {
-      setError("Select a leave type.");
+      setError(t("leaveCalendar.errors.selectLeaveType"));
       return;
     }
     if (!startDate) {
-      setError("Choose a start date.");
+      setError(t("leaveCalendar.errors.chooseStart"));
       return;
     }
     if (!endDate) {
-      setError("Choose an end date.");
+      setError(t("leaveCalendar.errors.chooseEnd"));
       return;
     }
     if (endDate < startDate) {
-      setError("End date can’t be before the start date.");
+      setError(t("leaveCalendar.errors.endBeforeStart"));
       return;
     }
     try {
@@ -1334,7 +1339,7 @@ function ApprovedLeavesTab() {
       });
       closeForm();
     } catch (err) {
-      handleApi(err, setError, "Save failed");
+      handleApi(err, setError, t("leaveCalendar.errors.saveFailed"));
     }
   };
 
@@ -1342,7 +1347,7 @@ function ApprovedLeavesTab() {
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <button type="button" onClick={() => setShowForm(true)} style={btnPrimary}>
-          + New approved leave
+          {t("leaveCalendar.newLeave")}
         </button>
       </div>
       {showForm && (
@@ -1354,13 +1359,13 @@ function ApprovedLeavesTab() {
           >
             <header style={modalHeader}>
               <h2 id="new-leave-title" style={{ margin: 0, fontSize: 18 }}>
-                New approved leave
+                {t("leaveCalendar.newLeave")}
               </h2>
               <button
                 className="icon-btn"
                 type="button"
                 onClick={closeForm}
-                aria-label="Close"
+                aria-label={t("leaveCalendar.actions.close")}
               >
                 <Icon name="x" size={14} />
               </button>
@@ -1376,48 +1381,48 @@ function ApprovedLeavesTab() {
                   gap: 12,
                 }}
               >
-                <Field label="Employee" required>
+                <Field label={t("leaveCalendar.fields.employee")} required>
                   <EmployeeSearchSelect
                     options={employeeOptions}
                     value={employeeId}
                     onChange={setEmployeeId}
-                    placeholder="Search by code or name…"
+                    placeholder={t("leaveCalendar.fields.employeeSearchPlaceholder")}
                   />
                 </Field>
-                <Field label="Leave type" required>
+                <Field label={t("leaveCalendar.fields.leaveType")} required>
                   <select
                     value={leaveTypeId}
                     onChange={(e) => setLeaveTypeId(e.target.value)}
                     required
                     style={inputStyle}
                   >
-                    <option value="">Select…</option>
-                    {typeOptions.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
+                    <option value="">{t("leaveCalendar.fields.selectPlaceholder")}</option>
+                    {typeOptions.map((opt) => (
+                      <option key={opt.id} value={opt.id}>
+                        {opt.name}
                       </option>
                     ))}
                   </select>
                 </Field>
-                <Field label="Start" required>
+                <Field label={t("leaveCalendar.fields.start")} required>
                   <DatePicker
                     value={startDate}
                     onChange={setStartDate}
-                    ariaLabel="Start date"
+                    ariaLabel={t("leaveCalendar.fields.startDateAria")}
                     triggerStyle={{ width: "100%" }}
                   />
                 </Field>
-                <Field label="End" required>
+                <Field label={t("leaveCalendar.fields.end")} required>
                   <DatePicker
                     value={endDate}
                     onChange={setEndDate}
                     min={startDate}
-                    ariaLabel="End date"
+                    ariaLabel={t("leaveCalendar.fields.endDateAria")}
                     triggerStyle={{ width: "100%" }}
                   />
                 </Field>
               </div>
-              <Field label="Notes">
+              <Field label={t("leaveCalendar.fields.notes")}>
                 <input
                   type="text"
                   value={notes}
@@ -1441,14 +1446,14 @@ function ApprovedLeavesTab() {
                   onClick={closeForm}
                   disabled={create.isPending}
                 >
-                  Cancel
+                  {t("leaveCalendar.actions.cancel")}
                 </button>
                 <button
                   type="submit"
                   disabled={!canSubmit || create.isPending}
                   style={{ ...btnPrimary, opacity: canSubmit ? 1 : 0.5 }}
                 >
-                  {create.isPending ? "Saving…" : "Create"}
+                  {create.isPending ? t("leaveCalendar.actions.saving") : t("leaveCalendar.actions.create")}
                 </button>
               </div>
             </form>
@@ -1458,11 +1463,11 @@ function ApprovedLeavesTab() {
       <table style={tableStyle}>
         <thead>
           <tr style={{ background: "var(--bg)" }}>
-            <th style={th}>Employee</th>
-            <th style={th}>Type</th>
-            <th style={th}>Start</th>
-            <th style={th}>End</th>
-            <th style={th}>Notes</th>
+            <th style={th}>{t("leaveCalendar.cols.employee")}</th>
+            <th style={th}>{t("leaveCalendar.cols.type")}</th>
+            <th style={th}>{t("leaveCalendar.cols.start")}</th>
+            <th style={th}>{t("leaveCalendar.cols.end")}</th>
+            <th style={th}>{t("leaveCalendar.cols.notes")}</th>
             <th style={th}></th>
           </tr>
         </thead>
@@ -1489,7 +1494,7 @@ function ApprovedLeavesTab() {
                 colSpan={6}
                 style={{ ...td, color: "var(--text-tertiary)", textAlign: "center" }}
               >
-                None yet.
+                {t("leaveCalendar.empty")}
               </td>
             </tr>
           )}
@@ -1511,6 +1516,7 @@ function ApprovedLeaveRow({
   typeOptions: LeaveType[];
   employeeOptions: Employee[];
 }) {
+  const { t } = useTranslation();
   const del = useDeleteApprovedLeave();
   const patch = usePatchApprovedLeave(row.id);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -1522,7 +1528,7 @@ function ApprovedLeaveRow({
       await del.mutateAsync(row.id);
       setConfirmOpen(false);
     } catch (err) {
-      handleApi(err, setDelError, "Delete failed");
+      handleApi(err, setDelError, t("leaveCalendar.errors.deleteFailed"));
     }
   };
 
@@ -1552,23 +1558,23 @@ function ApprovedLeaveRow({
     e.preventDefault();
     setEditError(null);
     if (!eEmployee) {
-      setEditError("Select an employee.");
+      setEditError(t("leaveCalendar.errors.selectEmployee"));
       return;
     }
     if (!eType) {
-      setEditError("Select a leave type.");
+      setEditError(t("leaveCalendar.errors.selectLeaveType"));
       return;
     }
     if (!eStart) {
-      setEditError("Choose a start date.");
+      setEditError(t("leaveCalendar.errors.chooseStart"));
       return;
     }
     if (!eEnd) {
-      setEditError("Choose an end date.");
+      setEditError(t("leaveCalendar.errors.chooseEnd"));
       return;
     }
     if (eEnd < eStart) {
-      setEditError("End date can’t be before the start date.");
+      setEditError(t("leaveCalendar.errors.endBeforeStart"));
       return;
     }
     try {
@@ -1581,7 +1587,7 @@ function ApprovedLeaveRow({
       });
       setEditOpen(false);
     } catch (err) {
-      handleApi(err, setEditError, "Save failed");
+      handleApi(err, setEditError, t("leaveCalendar.errors.saveFailed"));
     }
   };
 
@@ -1606,9 +1612,9 @@ function ApprovedLeaveRow({
             gap: 6,
             marginInlineEnd: 6,
           }}
-          aria-label={`Edit approved leave for ${employeeLabel}`}
+          aria-label={t("leaveCalendar.actions.editLeaveAria", { name: employeeLabel })}
         >
-          <Icon name="edit" size={12} /> Edit
+          <Icon name="edit" size={12} /> {t("leaveCalendar.actions.edit")}
         </button>
         <button
           type="button"
@@ -1624,9 +1630,9 @@ function ApprovedLeaveRow({
             gap: 6,
             color: "var(--danger-text)",
           }}
-          aria-label={`Delete approved leave for ${employeeLabel}`}
+          aria-label={t("leaveCalendar.actions.deleteLeaveAria", { name: employeeLabel })}
         >
-          <Icon name="trash" size={12} /> Delete
+          <Icon name="trash" size={12} /> {t("leaveCalendar.actions.delete")}
         </button>
         {confirmOpen && (
           <ModalShell onClose={() => setConfirmOpen(false)}>
@@ -1639,7 +1645,7 @@ function ApprovedLeaveRow({
                 id="leave-delete-title"
                 style={{ margin: "0 0 8px 0", fontSize: 16 }}
               >
-                Delete approved leave?
+                {t("leaveCalendar.deleteLeaveTitle")}
               </h2>
               <p
                 style={{
@@ -1648,8 +1654,12 @@ function ApprovedLeaveRow({
                   margin: 0,
                 }}
               >
-                {row.leave_type_name} for {employeeLabel} ({row.start_date} →{" "}
-                {row.end_date}) will be removed. This cannot be undone.
+                {t("leaveCalendar.deleteLeaveBody", {
+                  type: row.leave_type_name,
+                  name: employeeLabel,
+                  start: row.start_date,
+                  end: row.end_date,
+                })}
               </p>
               {delError && (
                 <div
@@ -1676,7 +1686,7 @@ function ApprovedLeaveRow({
                   onClick={() => setConfirmOpen(false)}
                   disabled={del.isPending}
                 >
-                  Cancel
+                  {t("leaveCalendar.actions.cancel")}
                 </button>
                 <button
                   type="button"
@@ -1689,7 +1699,7 @@ function ApprovedLeaveRow({
                     borderColor: "var(--danger-border)",
                   }}
                 >
-                  {del.isPending ? "Deleting…" : "Delete"}
+                  {del.isPending ? t("leaveCalendar.actions.deleting") : t("leaveCalendar.actions.delete")}
                 </button>
               </div>
             </div>
@@ -1704,13 +1714,13 @@ function ApprovedLeaveRow({
             >
               <header style={modalHeader}>
                 <h2 id="leave-edit-title" style={{ margin: 0, fontSize: 18 }}>
-                  Edit approved leave
+                  {t("leaveCalendar.editLeave")}
                 </h2>
                 <button
                   className="icon-btn"
                   type="button"
                   onClick={() => setEditOpen(false)}
-                  aria-label="Close"
+                  aria-label={t("leaveCalendar.actions.close")}
                 >
                   <Icon name="x" size={14} />
                 </button>
@@ -1726,48 +1736,48 @@ function ApprovedLeaveRow({
                     gap: 12,
                   }}
                 >
-                  <Field label="Employee" required>
+                  <Field label={t("leaveCalendar.fields.employee")} required>
                     <EmployeeSearchSelect
                       options={employeeOptions}
                       value={eEmployee}
                       onChange={setEEmployee}
-                      placeholder="Search by code or name…"
+                      placeholder={t("leaveCalendar.fields.employeeSearchPlaceholder")}
                     />
                   </Field>
-                  <Field label="Leave type" required>
+                  <Field label={t("leaveCalendar.fields.leaveType")} required>
                     <select
                       value={eType}
                       onChange={(e) => setEType(e.target.value)}
                       required
                       style={inputStyle}
                     >
-                      <option value="">Select…</option>
-                      {typeOptions.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.name}
+                      <option value="">{t("leaveCalendar.fields.selectPlaceholder")}</option>
+                      {typeOptions.map((opt) => (
+                        <option key={opt.id} value={opt.id}>
+                          {opt.name}
                         </option>
                       ))}
                     </select>
                   </Field>
-                  <Field label="Start" required>
+                  <Field label={t("leaveCalendar.fields.start")} required>
                     <DatePicker
                       value={eStart}
                       onChange={setEStart}
-                      ariaLabel="Start date"
+                      ariaLabel={t("leaveCalendar.fields.startDateAria")}
                       triggerStyle={{ width: "100%" }}
                     />
                   </Field>
-                  <Field label="End" required>
+                  <Field label={t("leaveCalendar.fields.end")} required>
                     <DatePicker
                       value={eEnd}
                       onChange={setEEnd}
                       min={eStart}
-                      ariaLabel="End date"
+                      ariaLabel={t("leaveCalendar.fields.endDateAria")}
                       triggerStyle={{ width: "100%" }}
                     />
                   </Field>
                 </div>
-                <Field label="Notes">
+                <Field label={t("leaveCalendar.fields.notes")}>
                   <input
                     type="text"
                     value={eNotes}
@@ -1791,14 +1801,14 @@ function ApprovedLeaveRow({
                     onClick={() => setEditOpen(false)}
                     disabled={patch.isPending}
                   >
-                    Cancel
+                    {t("leaveCalendar.actions.cancel")}
                   </button>
                   <button
                     type="submit"
                     disabled={!canSaveEdit || patch.isPending}
                     style={{ ...btnPrimary, opacity: canSaveEdit ? 1 : 0.5 }}
                   >
-                    {patch.isPending ? "Saving…" : "Save changes"}
+                    {patch.isPending ? t("leaveCalendar.actions.saving") : t("leaveCalendar.actions.saveChanges")}
                   </button>
                 </div>
               </form>
@@ -1853,6 +1863,7 @@ function EmployeeSearchSelect({
   onChange: (v: string) => void;
   placeholder?: string;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -1938,7 +1949,7 @@ function EmployeeSearchSelect({
           setOpen(true);
           setQuery("");
         }}
-        placeholder={placeholder ?? "Search…"}
+        placeholder={placeholder ?? t("leaveCalendar.searchPlaceholder")}
         autoComplete="off"
         style={inputStyle}
         aria-haspopup="listbox"
@@ -1952,7 +1963,7 @@ function EmployeeSearchSelect({
             setQuery("");
             setOpen(true);
           }}
-          aria-label="Clear selection"
+          aria-label={t("leaveCalendar.clearSelectionAria")}
           style={{
             position: "absolute",
             insetInlineEnd: 6,
@@ -2004,7 +2015,7 @@ function EmployeeSearchSelect({
                   fontSize: 12.5,
                 }}
               >
-                No matches.
+                {t("leaveCalendar.noMatches")}
               </div>
             ) : (
               filtered.map((e) => {

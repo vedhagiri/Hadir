@@ -15,6 +15,8 @@
 // picker since their data shape is per-event-on-day.
 
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useQueries } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
@@ -120,13 +122,15 @@ function presetRange(preset: Exclude<PresetKey, "custom">): { start: string; end
   }
 }
 
-const PRESET_LABELS: { key: PresetKey; label: string }[] = [
-  { key: "today", label: "Today" },
-  { key: "this-week", label: "This week" },
-  { key: "last-3", label: "Last 3 days" },
-  { key: "last-7", label: "Last 7 days" },
-  { key: "custom", label: "Custom range" },
-];
+function getPresetLabels(t: TFunction<"translation", undefined>): { key: PresetKey; label: string }[] {
+  return [
+    { key: "today", label: t("reports.presets.today") },
+    { key: "this-week", label: t("reports.presets.thisWeek") },
+    { key: "last-3", label: t("reports.presets.last3") },
+    { key: "last-7", label: t("reports.presets.last7") },
+    { key: "custom", label: t("reports.presets.custom") },
+  ];
+}
 
 // Display-side hour formatting uses ``formatMinutes`` from
 // attendance/timeFormat for consistent ``8h 45m`` rendering. Date +
@@ -164,6 +168,7 @@ function rowsToCsv(headers: string[], rows: (string | number | null)[][]): strin
 // ---------------------------------------------------------------------------
 
 export function ReportsPage() {
+  const { t } = useTranslation();
   const dt = useTenantDateTime();
   const [activeReport, setActiveReport] = useState<ReportKey>("attendance");
   // Attendance uses a date range (start..end); Event Log + Department
@@ -200,21 +205,18 @@ export function ReportsPage() {
     <>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Reports</h1>
-          <p className="page-sub">
-            Preview data live, run on-demand, or schedule delivery to HR &
-            managers
-          </p>
+          <h1 className="page-title">{t("reports.title")}</h1>
+          <p className="page-sub">{t("reports.sub")}</p>
         </div>
         <div className="page-actions" style={{ display: "flex", gap: 8 }}>
           {canRematch && activeReport === "attendance" && (
             <button
               className="btn"
               onClick={() => setRematchOpen(true)}
-              title="Replay past camera events through the current reference photos. Re-runnable any number of times — refreshes Camera events + attendance for the affected days, and reflects on every employee's profile."
+              title={t("reports.rematchTitle")}
             >
               <Icon name="refresh" size={12} />
-              Re-match detections
+              {t("reports.rematchBtn")}
             </button>
           )}
         </div>
@@ -233,25 +235,25 @@ export function ReportsPage() {
           active={activeReport === "attendance"}
           onClick={() => setActiveReport("attendance")}
           icon="fileText"
-          title="Attendance"
-          subtitle="one row per person per day · worked hours vs policy · pick a date range"
-          meta="9 columns · xlsx / pdf"
+          title={t("reports.cards.attendance.title")}
+          subtitle={t("reports.cards.attendance.sub")}
+          meta={t("reports.cards.attendance.meta")}
         />
         <ReportTypeCard
           active={activeReport === "event-log"}
           onClick={() => setActiveReport("event-log")}
           icon="activity"
-          title="Event Log"
-          subtitle="one row per detected face appearance"
-          meta="6 columns · xlsx / pdf"
+          title={t("reports.cards.eventLog.title")}
+          subtitle={t("reports.cards.eventLog.sub")}
+          meta={t("reports.cards.eventLog.meta")}
         />
         <ReportTypeCard
           active={activeReport === "department-summary"}
           onClick={() => setActiveReport("department-summary")}
           icon="users"
-          title="Department Summary"
-          subtitle="aggregated present / late / absent per department per day"
-          meta="8 columns · xlsx / pdf"
+          title={t("reports.cards.deptSummary.title")}
+          subtitle={t("reports.cards.deptSummary.sub")}
+          meta={t("reports.cards.deptSummary.meta")}
         />
       </div>
 
@@ -308,6 +310,7 @@ export function ReportsPage() {
                   setDownloading,
                   setInfo,
                   setError,
+                  t,
                 });
               },
             });
@@ -330,6 +333,7 @@ export function ReportsPage() {
                   setDownloading,
                   setInfo,
                   setError,
+                  t,
                 }),
             });
           }}
@@ -350,6 +354,7 @@ export function ReportsPage() {
                   setDownloading,
                   setInfo,
                   setError,
+                  t,
                 }),
             });
           }}
@@ -370,6 +375,7 @@ export function ReportsPage() {
             setDownloading,
             setInfo,
             setError,
+            t,
           });
           setPdfModalOpen(false);
         }}
@@ -479,7 +485,9 @@ function AttendancePreview({
   downloading: "xlsx" | "pdf" | null;
   onDownload: (format: "xlsx" | "pdf") => void;
 }) {
+  const { t } = useTranslation();
   const dt = useTenantDateTime();
+  const PRESET_LABELS = getPresetLabels(t);
   const [preset, setPreset] = useState<PresetKey>("today");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
@@ -546,7 +554,7 @@ function AttendancePreview({
       <select
         value={preset}
         onChange={(e) => setPreset(e.target.value as PresetKey)}
-        aria-label="Date range preset"
+        aria-label={t("reports.attendance.rangePresetAria")}
         style={presetSelectStyle}
       >
         {PRESET_LABELS.map(({ key, label }) => (
@@ -564,7 +572,7 @@ function AttendancePreview({
               if (end < next) setEnd(next);
             }}
             max={todayIso()}
-            ariaLabel="From date"
+            ariaLabel={t("reports.attendance.fromDateAria")}
           />
           <span
             style={{
@@ -580,7 +588,7 @@ function AttendancePreview({
             onChange={setEnd}
             min={start}
             max={todayIso()}
-            ariaLabel="To date"
+            ariaLabel={t("reports.attendance.toDateAria")}
           />
         </>
       )}
@@ -591,9 +599,9 @@ function AttendancePreview({
             color: "var(--warning-text, var(--warning))",
             fontFamily: "var(--font-mono)",
           }}
-          title={`Preview limited to the most recent ${PREVIEW_DAYS_CAP} days. The downloaded report covers the full range.`}
+          title={t("reports.attendance.previewCapTitle", { n: PREVIEW_DAYS_CAP })}
         >
-          preview · {PREVIEW_DAYS_CAP}d cap
+          {t("reports.attendance.previewCapLabel", { n: PREVIEW_DAYS_CAP })}
         </span>
       )}
     </div>
@@ -601,7 +609,7 @@ function AttendancePreview({
 
   return (
     <PreviewCard
-      title="Attendance"
+      title={t("reports.cards.attendance.title")}
       date={start}
       setDate={setStart}
       endDate={end}
@@ -624,21 +632,21 @@ function AttendancePreview({
       downloadingPdf={downloading === "pdf"}
       onDownloadPdf={() => onDownload("pdf")}
       columns={[
-        "#",
-        "Employee ID",
-        "Name",
-        "Department",
-        "Date",
-        "Status",
-        "In",
-        "Out",
-        "Hours",
-        "OT",
+        t("reports.attendance.colNum"),
+        t("reports.attendance.colEmployeeId"),
+        t("reports.attendance.colName"),
+        t("reports.attendance.colDept"),
+        t("reports.attendance.colDate"),
+        t("reports.attendance.colStatus"),
+        t("reports.attendance.colIn"),
+        t("reports.attendance.colOut"),
+        t("reports.attendance.colHours"),
+        t("reports.attendance.colOt"),
       ]}
     >
       {previewItems.length === 0 ? (
         <EmptyTableRow colSpan={10}>
-          No attendance rows for {start}.
+          {t("reports.attendance.empty", { date: start })}
         </EmptyTableRow>
       ) : (
         previewItems.map((it, idx) => (
@@ -669,29 +677,32 @@ function AttendancePreview({
 }
 
 function DailyStatusPill({ item }: { item: AttendanceItem }) {
+  const { t } = useTranslation();
   if (item.absent && item.leave_type_id !== null) {
-    return <span className="pill pill-info">On leave</span>;
+    return <span className="pill pill-info">{t("reports.status.onLeave")}</span>;
   }
   if (item.is_holiday && !item.in_time) {
     return (
       <span className="pill pill-info">
-        Holiday{item.holiday_name ? ` — ${item.holiday_name}` : ""}
+        {item.holiday_name
+          ? t("reports.status.holidayNamed", { name: item.holiday_name })
+          : t("reports.status.holiday")}
       </span>
     );
   }
   if (item.is_weekend && !item.in_time) {
-    return <span className="pill pill-neutral">Weekend</span>;
+    return <span className="pill pill-neutral">{t("reports.status.weekend")}</span>;
   }
   if (item.pending) {
-    return <span className="pill pill-info">Waiting for login</span>;
+    return <span className="pill pill-info">{t("reports.status.waitingLogin")}</span>;
   }
   if (!item.in_time) {
-    return <span className="pill pill-danger">Absent</span>;
+    return <span className="pill pill-danger">{t("reports.status.absent")}</span>;
   }
   if (item.late) {
-    return <span className="pill pill-warning">Late</span>;
+    return <span className="pill pill-warning">{t("reports.status.late")}</span>;
   }
-  return <span className="pill pill-success">Present</span>;
+  return <span className="pill pill-success">{t("reports.status.present")}</span>;
 }
 
 async function downloadAttendance({
@@ -702,6 +713,7 @@ async function downloadAttendance({
   setDownloading,
   setInfo,
   setError,
+  t,
 }: {
   format: "xlsx" | "pdf";
   start: string;
@@ -710,9 +722,10 @@ async function downloadAttendance({
   setDownloading: (v: "xlsx" | "pdf" | null) => void;
   setInfo: (v: string | null) => void;
   setError: (v: string | null) => void;
+  t: TFunction<"translation", undefined>;
 }): Promise<void> {
   if (start > end) {
-    setError("Start date must be on or before end date.");
+    setError(t("reports.attendance.startBeforeEnd"));
     return;
   }
   setDownloading(format);
@@ -734,21 +747,18 @@ async function downloadAttendance({
       body: JSON.stringify(body),
     });
     if (!resp.ok) {
-      setError(`Download failed (${resp.status}).`);
+      setError(t("reports.attendance.downloadFailed", { status: resp.status }));
       return;
     }
     const blob = await resp.blob();
-    // Single-day range collapses the filename to ``attendance_{date}``
-    // for backwards compatibility; otherwise the operator gets the
-    // full ``attendance_{start}_to_{end}`` shape.
     const stem =
       start === end
         ? `attendance_${start}`
         : `attendance_${start}_to_${end}`;
     downloadBlob(blob, `${stem}.${format}`);
-    setInfo(`Downloaded ${stem}.${format}.`);
+    setInfo(t("reports.attendance.downloaded", { filename: `${stem}.${format}` }));
   } catch {
-    setError("Network error.");
+    setError(t("reports.attendance.networkError"));
   } finally {
     setDownloading(null);
   }
@@ -820,12 +830,11 @@ function EventLogPreview({
   downloading: "xlsx" | "pdf" | null;
   onDownload: () => void;
 }) {
+  const { t } = useTranslation();
   const dt = useTenantDateTime();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
 
-  // Reset to page 1 when the date or page-size changes — otherwise
-  // a smaller dataset can leave us on an out-of-range page.
   useEffect(() => {
     setPage(1);
   }, [date, pageSize]);
@@ -837,43 +846,36 @@ function EventLogPreview({
   const rangeEnd = Math.min(total, page * pageSize);
 
   const columns = [
-    "#",
-    "Photo",
-    "Event ID",
-    "Timestamp",
-    "Camera",
-    "Employee",
-    "Confidence",
-    "Type",
+    t("reports.eventLog.colNum"),
+    t("reports.eventLog.colPhoto"),
+    t("reports.eventLog.colEventId"),
+    t("reports.eventLog.colTimestamp"),
+    t("reports.eventLog.colCamera"),
+    t("reports.eventLog.colEmployee"),
+    t("reports.eventLog.colConfidence"),
+    t("reports.eventLog.colType"),
   ];
 
   return (
     <div className="card">
       <div className="card-head">
         <div>
-          <h3 className="card-title">Preview · Event Log</h3>
+          <h3 className="card-title">{t("reports.eventLog.cardTitle")}</h3>
           <div className="text-xs text-dim" style={{ marginTop: 2 }}>
             {total === 0
-              ? `No events for ${date}`
-              : `Showing ${rangeStart}–${rangeEnd} of ${total} · date ${date}`}
+              ? t("reports.eventLog.noEvents", { date })
+              : t("reports.eventLog.showing", { from: rangeStart, to: rangeEnd, total, date })}
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {/* Download CSV sits on the leading edge of the filter row,
-              matching the Attendance / Department Summary cards.
-              The footer keeps only the pager. */}
           <button
             className="btn btn-sm"
             onClick={onDownload}
             disabled={downloading !== null || total === 0}
-            title={
-              total === 0
-                ? "No events to export — adjust the filter"
-                : undefined
-            }
+            title={total === 0 ? t("reports.eventLog.noExportTitle") : undefined}
           >
             <Icon name="download" size={11} />
-            {downloading === "xlsx" ? "Downloading…" : "Download CSV"}
+            {downloading === "xlsx" ? t("reports.eventLog.downloading") : t("reports.eventLog.downloadCsv")}
           </button>
           <span
             aria-hidden
@@ -888,7 +890,7 @@ function EventLogPreview({
             value={date}
             onChange={setDate}
             max={todayIso()}
-            ariaLabel="Event log date"
+            ariaLabel={t("reports.eventLog.dateAria")}
           />
         </div>
       </div>
@@ -908,7 +910,7 @@ function EventLogPreview({
         <tbody>
           {evts.loading && (
             <EmptyTableRow colSpan={columns.length}>
-              Loading preview…
+              {t("reports.eventLog.loadingPreview")}
             </EmptyTableRow>
           )}
           {evts.error && (
@@ -918,13 +920,13 @@ function EventLogPreview({
                 className="text-sm"
                 style={{ padding: 16, color: "var(--danger-text)" }}
               >
-                Could not load the preview.
+                {t("reports.eventLog.loadFailed")}
               </td>
             </tr>
           )}
           {!evts.loading && !evts.error && items.length === 0 && (
             <EmptyTableRow colSpan={columns.length}>
-              No detection events for {date}.
+              {t("reports.eventLog.emptyDate", { date })}
             </EmptyTableRow>
           )}
           {!evts.loading &&
@@ -990,7 +992,7 @@ function EventLogPreview({
                       )}
                     </>
                   ) : (
-                    <span className="text-xs text-dim">Unidentified</span>
+                    <span className="text-xs text-dim">{t("reports.eventLog.unidentified")}</span>
                   )}
                 </td>
                 <td className="mono text-sm">
@@ -1036,14 +1038,14 @@ async function downloadEventLog({
   setDownloading,
   setInfo,
   setError,
+  t,
 }: {
   date: string;
-  // Migration 0068 — caller passes the tenant formatter so CSV
-  // timestamps render in the operator-configured tz + format.
   dt: import("../../util/datetime").TenantDateTime;
   setDownloading: (v: "xlsx" | "pdf" | null) => void;
   setInfo: (v: string | null) => void;
   setError: (v: string | null) => void;
+  t: TFunction<"translation", undefined>;
 }): Promise<void> {
   setDownloading("xlsx");
   setError(null);
@@ -1080,7 +1082,7 @@ async function downloadEventLog({
       new Blob([csv], { type: "text/csv;charset=utf-8" }),
       `event_log_${date}.csv`,
     );
-    setInfo(`Downloaded event_log_${date}.csv (${all.length} rows).`);
+    setInfo(t("reports.eventLog.downloadedInfo", { date, n: all.length }));
   } catch (e) {
     setError((e as Error).message);
   } finally {
@@ -1194,12 +1196,12 @@ function DepartmentSummaryPreview({
   downloading: "xlsx" | "pdf" | null;
   onDownload: () => void;
 }) {
+  const { t } = useTranslation();
   const { rows, loading, error } = useDepartmentSummary(date);
-  // Show every department, not just a preview slice.
   const previewRows = rows;
   return (
     <PreviewCard
-      title="Department Summary"
+      title={t("reports.cards.deptSummary.title")}
       date={date}
       setDate={setDate}
       previewCount={previewRows.length}
@@ -1209,21 +1211,21 @@ function DepartmentSummaryPreview({
       downloadXlsx={onDownload}
       downloadingXlsx={downloading === "xlsx"}
       downloadingPdf={false}
-      downloadXlsxLabel="Download CSV"
+      downloadXlsxLabel={t("reports.deptSummary.downloadCsv")}
       columns={[
-        "#",
-        "Department",
-        "Total employees",
-        "Present",
-        "Late",
-        "Absent",
-        "On-leave",
-        "Avg hours",
+        t("reports.deptSummary.colNum"),
+        t("reports.deptSummary.colDept"),
+        t("reports.deptSummary.colTotal"),
+        t("reports.deptSummary.colPresent"),
+        t("reports.deptSummary.colLate"),
+        t("reports.deptSummary.colAbsent"),
+        t("reports.deptSummary.colOnLeave"),
+        t("reports.deptSummary.colAvgHours"),
       ]}
     >
       {previewRows.length === 0 ? (
         <EmptyTableRow colSpan={8}>
-          No departments configured yet.
+          {t("reports.deptSummary.empty")}
         </EmptyTableRow>
       ) : (
         previewRows.map((r, idx) => {
@@ -1258,11 +1260,13 @@ async function downloadDepartmentSummary({
   setDownloading,
   setInfo,
   setError,
+  t,
 }: {
   date: string;
   setDownloading: (v: "xlsx" | "pdf" | null) => void;
   setInfo: (v: string | null) => void;
   setError: (v: string | null) => void;
+  t: TFunction<"translation", undefined>;
 }): Promise<void> {
   setDownloading("xlsx");
   setError(null);
@@ -1326,7 +1330,7 @@ async function downloadDepartmentSummary({
       new Blob([csv], { type: "text/csv;charset=utf-8" }),
       `department_summary_${date}.csv`,
     );
-    setInfo(`Downloaded department_summary_${date}.csv.`);
+    setInfo(t("reports.deptSummary.downloadedInfo", { date }));
   } catch (e) {
     setError((e as Error).message);
   } finally {
@@ -1355,7 +1359,7 @@ function PreviewCard({
   downloadingPdf,
   onDownloadPdf,
   runAndDownload,
-  downloadXlsxLabel = "Download XLSX",
+  downloadXlsxLabel,
   columns,
   children,
 }: {
@@ -1393,20 +1397,21 @@ function PreviewCard({
   columns: string[];
   children: ReactNode;
 }) {
+  const { t } = useTranslation();
   const hasRange = endDate !== undefined && setEndDate !== undefined;
 
-  // Subtitle shows range whenever endDate is supplied, regardless of
-  // whether the built-in date inputs or a filterSlot owns the controls.
   const subtitle =
     endDate !== undefined
-      ? `Preview of ${date} · range ${date} → ${endDate}`
-      : `Preview · date ${date}`;
+      ? t("reports.preview.subtitleRange", { date, end: endDate })
+      : t("reports.preview.subtitleSingle", { date });
+
+  const xlsxLabel = downloadXlsxLabel ?? t("reports.preview.downloading");
 
   return (
     <div className="card">
       <div className="card-head">
         <div>
-          <h3 className="card-title">Preview · {title}</h3>
+          <h3 className="card-title">{t("reports.preview.cardTitle", { title })}</h3>
           <div className="text-xs text-dim" style={{ marginTop: 2 }}>
             {subtitle}
           </div>
@@ -1420,33 +1425,21 @@ function PreviewCard({
             <button
               className="btn btn-sm"
               onClick={onDownloadPdf}
-              disabled={
-                downloadingXlsx || downloadingPdf || totalCount === 0
-              }
-              title={
-                totalCount === 0
-                  ? "No data to export — adjust the filters"
-                  : undefined
-              }
+              disabled={downloadingXlsx || downloadingPdf || totalCount === 0}
+              title={totalCount === 0 ? t("reports.preview.noDataTitle") : undefined}
             >
               <Icon name="fileText" size={11} />
-              {downloadingPdf ? "Generating PDF…" : "Download PDF"}
+              {downloadingPdf ? t("reports.preview.generatingPdf") : t("reports.preview.downloadPdf")}
             </button>
           )}
           <button
             className="btn btn-sm"
             onClick={downloadXlsx}
-            disabled={
-              downloadingXlsx || downloadingPdf || totalCount === 0
-            }
-            title={
-              totalCount === 0
-                ? "No data to export — adjust the filters"
-                : undefined
-            }
+            disabled={downloadingXlsx || downloadingPdf || totalCount === 0}
+            title={totalCount === 0 ? t("reports.preview.noDataTitle") : undefined}
           >
             <Icon name="download" size={11} />
-            {downloadingXlsx ? "Downloading…" : downloadXlsxLabel}
+            {downloadingXlsx ? t("reports.preview.downloading") : xlsxLabel}
           </button>
           {/* Vertical separator between download actions and filters. */}
           <span
@@ -1464,7 +1457,7 @@ function PreviewCard({
                 value={date}
                 onChange={setDate}
                 max={todayIso()}
-                ariaLabel={hasRange ? "Start date" : "Date"}
+                ariaLabel={hasRange ? t("reports.preview.startDateAria") : t("reports.preview.dateAria")}
               />
               {hasRange && (
                 <>
@@ -1482,7 +1475,7 @@ function PreviewCard({
                     onChange={setEndDate!}
                     min={date}
                     max={todayIso()}
-                    ariaLabel="End date"
+                    ariaLabel={t("reports.preview.endDateAria")}
                   />
                 </>
               )}
@@ -1495,7 +1488,7 @@ function PreviewCard({
               disabled={downloadingXlsx || downloadingPdf}
             >
               <Icon name="download" size={11} />
-              {downloadingXlsx ? "Downloading…" : "Run & download"}
+              {downloadingXlsx ? t("reports.preview.downloading") : t("reports.preview.runAndDownload")}
             </button>
           )}
         </div>
@@ -1515,7 +1508,7 @@ function PreviewCard({
         </thead>
         <tbody>
           {isLoading && (
-            <EmptyTableRow colSpan={columns.length}>Loading preview…</EmptyTableRow>
+            <EmptyTableRow colSpan={columns.length}>{t("reports.preview.loadingPreview")}</EmptyTableRow>
           )}
           {isError && (
             <tr>
@@ -1524,7 +1517,7 @@ function PreviewCard({
                 className="text-sm"
                 style={{ padding: 16, color: "var(--danger-text)" }}
               >
-                Could not load the preview.
+                {t("reports.preview.loadFailed")}
               </td>
             </tr>
           )}
@@ -1547,16 +1540,11 @@ function PreviewCard({
         {pagerSlot ?? (
           <span>
             {totalCount === 0 ? (
-              // BUG-029 — explicit "no data" message instead of just
-              // disabling the download button silently.
               <strong style={{ color: "var(--danger-text)" }}>
-                No data to export. Adjust the filters above and try again.
+                {t("reports.preview.noData")}
               </strong>
             ) : (
-              <>
-                {previewCount} preview row{previewCount === 1 ? "" : "s"} ·
-                full dataset would be ~{totalCount} rows
-              </>
+              t("reports.preview.footerRows", { count: previewCount, total: totalCount })
             )}
           </span>
         )}
@@ -1583,9 +1571,8 @@ function Pager({
   setPage: (next: number) => void;
   setPageSize: (next: number) => void;
 }) {
+  const { t } = useTranslation();
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  // Clamp to a valid range — guards against a frame where ``page``
-  // hasn't been reset yet after the dataset shrank (e.g. date change).
   const safePage = Math.min(Math.max(page, 1), totalPages);
   const rangeStart = total === 0 ? 0 : (safePage - 1) * pageSize + 1;
   const rangeEnd = Math.min(total, safePage * pageSize);
@@ -1593,7 +1580,9 @@ function Pager({
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <span>
-          {total === 0 ? "0 rows" : `${rangeStart}–${rangeEnd} of ${total}`}
+          {total === 0
+            ? t("reports.pager.zeroRows")
+            : t("reports.pager.range", { from: rangeStart, to: rangeEnd, total })}
         </span>
         <label
           style={{
@@ -1604,7 +1593,7 @@ function Pager({
             color: "var(--text-tertiary)",
           }}
         >
-          Page size
+          {t("reports.pager.pageSize")}
           <select
             value={pageSize}
             onChange={(e) => setPageSize(Number(e.target.value))}
@@ -1631,7 +1620,7 @@ function Pager({
           className="btn btn-sm"
           onClick={() => setPage(1)}
           disabled={page <= 1}
-          aria-label="First page"
+          aria-label={t("reports.pager.firstPage")}
         >
           «
         </button>
@@ -1639,29 +1628,29 @@ function Pager({
           className="btn btn-sm"
           onClick={() => setPage(Math.max(1, page - 1))}
           disabled={page <= 1}
-          aria-label="Previous page"
+          aria-label={t("reports.pager.prevPage")}
         >
-          ‹ Prev
+          {t("reports.pager.prev")}
         </button>
         <span
           className="mono text-xs"
           style={{ minWidth: 80, textAlign: "center" }}
         >
-          Page {page} / {totalPages}
+          {t("reports.pager.pageOf", { page: safePage, total: totalPages })}
         </span>
         <button
           className="btn btn-sm"
           onClick={() => setPage(Math.min(totalPages, page + 1))}
           disabled={page >= totalPages}
-          aria-label="Next page"
+          aria-label={t("reports.pager.nextPage")}
         >
-          Next ›
+          {t("reports.pager.next")}
         </button>
         <button
           className="btn btn-sm"
           onClick={() => setPage(totalPages)}
           disabled={page >= totalPages}
-          aria-label="Last page"
+          aria-label={t("reports.pager.lastPage")}
         >
           »
         </button>

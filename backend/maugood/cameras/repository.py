@@ -14,6 +14,7 @@ and the per-camera ``capture_config`` JSONB knob bag was added. The
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
@@ -23,6 +24,14 @@ from sqlalchemy.engine import Connection
 
 from maugood.cameras.rtsp import rtsp_host
 from maugood.db import cameras
+
+logger = logging.getLogger(__name__)
+
+# Placeholder host surfaced when a stored RTSP ciphertext can't be
+# decrypted (e.g. Fernet-key mismatch / corrupt token). It is NOT a
+# valid host — it signals the bad row to the operator without taking
+# down the whole list/create surface for the tenant.
+_UNDECRYPTABLE_HOST = "(undecryptable)"
 from maugood.tenants.scope import TenantScope
 
 
@@ -100,15 +109,32 @@ class CameraRow:
 
 
 def _decrypt_and_parse_host(token: str) -> str:
-    """Decrypt-to-parse: brief in-memory plaintext, discarded immediately."""
+    """Decrypt-to-parse: brief in-memory plaintext, discarded immediately.
+
+    **Defensive**: a single row whose ciphertext can't be decrypted
+    (Fernet-key mismatch / corrupt token) or whose plaintext won't parse
+    must NOT take down the whole list/create surface for the tenant.
+    On failure we log (without the token or any plaintext) and return a
+    non-sensitive placeholder host. This mirrors the capture boot path,
+    which bypasses this repo precisely so one bad row can't fail the
+    listing (see backend/CLAUDE.md §"Live Capture viewer").
+    """
 
     # Local import so the repository module stays cheap to load in tests
     # that don't touch Fernet.
     from maugood.cameras.rtsp import decrypt_url
 
-    plain = decrypt_url(token)
+    try:
+        plain = decrypt_url(token)
+    except Exception:  # noqa: BLE001 — RuntimeError(InvalidToken) etc.
+        logger.warning("camera row has an undecryptable RTSP URL — "
+                       "surfacing placeholder host (check MAUGOOD_FERNET_KEY)")
+        return _UNDECRYPTABLE_HOST
     try:
         return rtsp_host(plain)
+    except Exception:  # noqa: BLE001 — ValueError from a malformed plaintext
+        logger.warning("camera row RTSP URL decrypted but did not parse")
+        return _UNDECRYPTABLE_HOST
     finally:
         # Python strings are immutable; there's no secure zero, but at
         # least we drop the reference so it's eligible for GC.

@@ -6,6 +6,7 @@
 // refresh triggers a fresh fetch.
 
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { ModalShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
@@ -17,6 +18,7 @@ interface Props {
 }
 
 export function PreviewModal({ camera, onClose }: Props) {
+  const { t } = useTranslation();
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,25 +32,23 @@ export function PreviewModal({ camera, onClose }: Props) {
       });
       if (!resp.ok) {
         if (resp.status === 504) {
-          setError("Preview timed out. The camera may be offline or unreachable.");
+          setError(t("cameras.previewModal.errorTimeout"));
         } else {
-          setError(`Preview failed (${resp.status}).`);
+          setError(t("cameras.previewModal.errorStatus", { status: resp.status }));
         }
         return;
       }
       const blob = await resp.blob();
       setImgUrl((prev) => {
-        // Free the previous blob URL to keep the browser from pinning
-        // old frames in memory across refreshes.
         if (prev) URL.revokeObjectURL(prev);
         return URL.createObjectURL(blob);
       });
     } catch {
-      setError("Preview failed. Try again.");
+      setError(t("cameras.previewModal.errorGeneric"));
     } finally {
       setLoading(false);
     }
-  }, [camera.id]);
+  }, [camera.id, t]);
 
   useEffect(() => {
     void load();
@@ -87,12 +87,12 @@ export function PreviewModal({ camera, onClose }: Props) {
       >
         <div className="card-head">
           <div>
-            <h3 className="card-title">Preview · {camera.name}</h3>
+            <h3 className="card-title">{t("cameras.previewModal.title", { name: camera.name })}</h3>
             <p className="card-sub">
-              <span className="mono">{camera.rtsp_host}</span> · on-demand single frame
+              <span className="mono">{camera.rtsp_host}</span> · {t("cameras.previewModal.sub")}
             </p>
           </div>
-          <button className="icon-btn" onClick={onClose} aria-label="Close">
+          <button className="icon-btn" onClick={onClose} aria-label={t("cameras.previewModal.closeAria")}>
             <Icon name="x" size={14} />
           </button>
         </div>
@@ -105,7 +105,7 @@ export function PreviewModal({ camera, onClose }: Props) {
             minHeight: 240,
           }}
         >
-          {loading && <span className="text-sm text-dim">Connecting to stream…</span>}
+          {loading && <span className="text-sm text-dim">{t("cameras.previewModal.connecting")}</span>}
           {error && !loading && (
             <div
               role="alert"
@@ -136,11 +136,11 @@ export function PreviewModal({ camera, onClose }: Props) {
         </div>
         <div className="drawer-foot">
           <button className="btn" onClick={onClose} disabled={loading}>
-            Close
+            {t("cameras.previewModal.close")}
           </button>
           <button className="btn btn-primary" onClick={load} disabled={loading}>
             <Icon name="activity" size={12} />
-            {loading ? "Fetching…" : "Refresh"}
+            {loading ? t("cameras.previewModal.fetching") : t("cameras.previewModal.refresh")}
           </button>
         </div>
       </div>

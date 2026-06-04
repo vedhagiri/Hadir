@@ -12,6 +12,8 @@
 // would leave the operator without a tidy summary).
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 import { extractApiError } from "../../api/client";
 import { Icon } from "../../shell/Icon";
@@ -30,19 +32,17 @@ function fmtBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-function describeFilter(filter: ClipCleanupFilter): string {
+function describeFilter(filter: ClipCleanupFilter, t: TFunction): string {
   if (filter.older_than_hours !== undefined) {
-    const h = filter.older_than_hours;
-    return `older than ${h} hour${h === 1 ? "" : "s"}`;
+    return t("clipCleanupModal.filterHours", { count: filter.older_than_hours }) as string;
   }
   if (filter.older_than_days !== undefined) {
-    const d = filter.older_than_days;
-    return `older than ${d} day${d === 1 ? "" : "s"}`;
+    return t("clipCleanupModal.filterDays", { count: filter.older_than_days }) as string;
   }
   if (filter.start_date && filter.end_date) {
-    return `from ${filter.start_date} to ${filter.end_date}`;
+    return t("clipCleanupModal.filterRange", { start: filter.start_date, end: filter.end_date }) as string;
   }
-  return "matching the selected filter";
+  return t("clipCleanupModal.filterMatch") as string;
 }
 
 interface RunProgress {
@@ -69,6 +69,7 @@ interface Props {
 }
 
 export function ClipCleanupModal({ filter, onClose }: Props) {
+  const { t } = useTranslation();
   const preview = useClipCleanupPreview();
   const runCleanup = useRunClipCleanup();
 
@@ -156,7 +157,7 @@ export function ClipCleanupModal({ filter, onClose }: Props) {
       }
       setPhase("done");
     } catch (err) {
-      setRunError(extractApiError(err, "Cleanup failed"));
+      setRunError(extractApiError(err, t("clipCleanupModal.cleanupFailed") as string));
       setPhase("error");
     }
   };
@@ -170,7 +171,7 @@ export function ClipCleanupModal({ filter, onClose }: Props) {
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Clip cleanup confirmation"
+      aria-label={t("clipCleanupModal.aria") as string}
       style={{
         position: "fixed",
         inset: 0,
@@ -199,7 +200,7 @@ export function ClipCleanupModal({ filter, onClose }: Props) {
         <div className="card-head">
           <div className="card-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Icon name="trash" size={16} />
-            Clip Video Cleanup
+            {t("clipCleanupModal.title") as string}
           </div>
         </div>
 
@@ -214,14 +215,18 @@ export function ClipCleanupModal({ filter, onClose }: Props) {
               background: "var(--bg-sunken)",
             }}
           >
-            Clips {describeFilter(filter)}
-            {filter.camera_id !== undefined ? " (selected camera only)" : " across all cameras"}
-            .
+            {t("clipCleanupModal.recap", {
+              filter: describeFilter(filter, t),
+              scope:
+                filter.camera_id !== undefined
+                  ? t("clipCleanupModal.scopeCamera")
+                  : t("clipCleanupModal.scopeAll"),
+            }) as string}
           </div>
 
           {phase === "loading_preview" && (
             <div style={{ padding: "16px 0", textAlign: "center", color: "var(--text-tertiary)", fontSize: 13 }}>
-              Calculating impact…
+              {t("clipCleanupModal.calculating") as string}
             </div>
           )}
 
@@ -236,7 +241,7 @@ export function ClipCleanupModal({ filter, onClose }: Props) {
                 fontSize: 13,
               }}
             >
-              {runError ?? extractApiError(preview.error, "Failed to load preview")}
+              {runError ?? extractApiError(preview.error, t("clipCleanupModal.loadPreviewFailed") as string)}
             </div>
           )}
 
@@ -261,7 +266,7 @@ export function ClipCleanupModal({ filter, onClose }: Props) {
                 fontSize: 13,
               }}
             >
-              No clips match the selected filter. Nothing to delete.
+              {t("clipCleanupModal.nothingToDelete") as string}
             </div>
           )}
 
@@ -274,7 +279,7 @@ export function ClipCleanupModal({ filter, onClose }: Props) {
             {phase === "preview_ready" && (
               <>
                 <button type="button" className="btn btn-sm" onClick={onClose}>
-                  Cancel
+                  {t("common.cancel") as string}
                 </button>
                 <button
                   type="button"
@@ -283,20 +288,19 @@ export function ClipCleanupModal({ filter, onClose }: Props) {
                   disabled={previewData?.clip_count === 0}
                 >
                   <Icon name="trash" size={13} />
-                  Delete {previewData?.clip_count.toLocaleString()} clip
-                  {previewData?.clip_count === 1 ? "" : "s"}
+                  {t("clipCleanupModal.deleteClips", { count: previewData?.clip_count ?? 0 }) as string}
                 </button>
               </>
             )}
             {phase === "running" && (
               <button type="button" className="btn btn-sm" disabled>
                 <Icon name="refresh" size={13} />
-                Working…
+                {t("clipCleanupModal.working") as string}
               </button>
             )}
             {(phase === "done" || phase === "error") && (
               <button type="button" className="btn btn-primary" onClick={onClose}>
-                Close
+                {t("common.close") as string}
               </button>
             )}
           </div>
@@ -307,15 +311,17 @@ export function ClipCleanupModal({ filter, onClose }: Props) {
 }
 
 function PreviewBody({ data }: { data: ClipCleanupPreviewResponse }) {
+  const { t, i18n } = useTranslation();
+  const locale = i18n.language;
   return (
     <>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <div className="stat">
-          <div className="stat-label">Clips</div>
+          <div className="stat-label">{t("clipCleanupModal.colClips") as string}</div>
           <div className="stat-value">{data.clip_count.toLocaleString()}</div>
         </div>
         <div className="stat">
-          <div className="stat-label">Will reclaim</div>
+          <div className="stat-label">{t("clipCleanupModal.willReclaim") as string}</div>
           <div className="stat-value">{fmtBytes(data.total_bytes)}</div>
         </div>
       </div>
@@ -323,11 +329,11 @@ function PreviewBody({ data }: { data: ClipCleanupPreviewResponse }) {
       {(data.oldest_clip_at || data.newest_clip_at) && (
         <div style={{ fontSize: 11.5, color: "var(--text-tertiary)" }}>
           {data.oldest_clip_at && (
-            <>Oldest: {new Date(data.oldest_clip_at).toLocaleString()}</>
+            <>{t("clipCleanupModal.oldest", { date: new Date(data.oldest_clip_at).toLocaleString(locale) }) as string}</>
           )}
           {data.oldest_clip_at && data.newest_clip_at && " · "}
           {data.newest_clip_at && (
-            <>Newest: {new Date(data.newest_clip_at).toLocaleString()}</>
+            <>{t("clipCleanupModal.newest", { date: new Date(data.newest_clip_at).toLocaleString(locale) }) as string}</>
           )}
         </div>
       )}
@@ -335,7 +341,7 @@ function PreviewBody({ data }: { data: ClipCleanupPreviewResponse }) {
       {data.by_camera.length > 0 && (
         <div>
           <div style={{ fontSize: 11, color: "var(--text-secondary)", fontWeight: 500, marginBottom: 6 }}>
-            BY CAMERA
+            {t("clipCleanupModal.byCamera") as string}
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             {data.by_camera.map((row) => (
@@ -363,9 +369,8 @@ function PreviewBody({ data }: { data: ClipCleanupPreviewResponse }) {
           lineHeight: 1.5,
         }}
       >
-        <strong>This will not affect</strong> extracted face crops,
-        mapped employee images, attendance evidence, or reference photos.
-        Only the raw video files are reclaimed.
+        <strong>{t("clipCleanupModal.notAffectLead") as string}</strong>
+        {t("clipCleanupModal.notAffectRest") as string}
       </div>
     </>
   );
@@ -380,18 +385,19 @@ function RunningBody({
   expected: number;
   progressPct: number;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <div className="stat">
-          <div className="stat-label">Deleted so far</div>
+          <div className="stat-label">{t("clipCleanupModal.deletedSoFar") as string}</div>
           <div className="stat-value">{progress.deleted.toLocaleString()}</div>
           <div className="stat-delta delta-flat">
-            of {expected.toLocaleString()}
+            {t("clipCleanupModal.ofCount", { count: expected }) as string}
           </div>
         </div>
         <div className="stat">
-          <div className="stat-label">Reclaimed</div>
+          <div className="stat-label">{t("clipCleanupModal.reclaimed") as string}</div>
           <div className="stat-value">{fmtBytes(progress.bytes)}</div>
         </div>
       </div>
@@ -417,33 +423,34 @@ function RunningBody({
         />
       </div>
       <div style={{ fontSize: 11.5, color: "var(--text-tertiary)", textAlign: "center" }}>
-        Batch {progress.batches}
+        {t("clipCleanupModal.batch", { count: progress.batches }) as string}
       </div>
     </>
   );
 }
 
 function DoneBody({ progress }: { progress: RunProgress }) {
+  const { t } = useTranslation();
   return (
     <>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <div className="stat">
-          <div className="stat-label">Deleted</div>
+          <div className="stat-label">{t("clipCleanupModal.deleted") as string}</div>
           <div className="stat-value">{progress.deleted.toLocaleString()}</div>
         </div>
         <div className="stat">
-          <div className="stat-label">Reclaimed</div>
+          <div className="stat-label">{t("clipCleanupModal.reclaimed") as string}</div>
           <div className="stat-value">{fmtBytes(progress.bytes)}</div>
         </div>
       </div>
       <div style={{ fontSize: 11.5, color: "var(--text-tertiary)", display: "flex", gap: 14, flexWrap: "wrap" }}>
-        <span>Files unlinked: {progress.unlinked.toLocaleString()}</span>
+        <span>{t("clipCleanupModal.filesUnlinked", { count: progress.unlinked }) as string}</span>
         {progress.missing > 0 && (
-          <span>Already missing: {progress.missing.toLocaleString()}</span>
+          <span>{t("clipCleanupModal.alreadyMissing", { count: progress.missing }) as string}</span>
         )}
         {progress.failed > 0 && (
           <span style={{ color: "var(--danger-text)" }}>
-            Failed to delete: {progress.failed.toLocaleString()}
+            {t("clipCleanupModal.failedToDelete", { count: progress.failed }) as string}
           </span>
         )}
       </div>

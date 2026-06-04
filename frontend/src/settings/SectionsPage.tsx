@@ -41,15 +41,15 @@ export function SectionsPage() {
   const [managing, setManaging] = useState<Section | null>(null);
 
   const onDelete = (s: Section) => {
-    if (!confirm(`Delete section "${s.name}"? Employees assigned to it must be reassigned first.`)) return;
+    if (!confirm(t("sectionsPage.confirmDelete", { name: s.name }))) return;
     del.mutate(s.id, {
-      onSuccess: () => toast.success("Section deleted."),
+      onSuccess: () => toast.success(t("sectionsPage.toastDeleted")),
       onError: (err) => {
         const detail =
           err instanceof ApiError
             ? (err.body as { detail?: { message?: string } })?.detail?.message
             : null;
-        toast.error(detail ?? "Delete failed.");
+        toast.error(detail ?? t("sectionsPage.toastDeleteFailed"));
       },
     });
   };
@@ -58,10 +58,9 @@ export function SectionsPage() {
     <>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Sections</h1>
+          <h1 className="page-title">{t("sectionsPage.title")}</h1>
           <p className="page-sub">
-            Finest tier · Division → Department → Section. Section managers
-            see only employees assigned to that specific section.
+            {t("sectionsPage.subtitle")}
           </p>
         </div>
         <div className="page-actions">
@@ -71,9 +70,9 @@ export function SectionsPage() {
               setFilterDept(e.target.value === "" ? "" : Number(e.target.value))
             }
             style={pickerStyle}
-            aria-label="Filter by department"
+            aria-label={t("sectionsPage.filterByDepartment")}
           >
-            <option value="">All departments</option>
+            <option value="">{t("sectionsPage.allDepartments")}</option>
             {departments.data?.items.map((d) => (
               <option key={d.id} value={d.id}>
                 {d.code} · {d.name}
@@ -86,12 +85,12 @@ export function SectionsPage() {
             disabled={!departments.data || departments.data.items.length === 0}
             title={
               !departments.data || departments.data.items.length === 0
-                ? "Create at least one department first"
+                ? t("sectionsPage.needDepartmentFirst")
                 : ""
             }
           >
             <Icon name="plus" size={11} />
-            Add section
+            {t("sectionsPage.addSection")}
           </button>
         </div>
       </div>
@@ -102,12 +101,12 @@ export function SectionsPage() {
         <table className="table">
           <thead>
             <tr>
-              <th style={{ width: 140 }}>Code</th>
-              <th>Name</th>
-              <th style={{ width: 220 }}>Department</th>
-              <th style={{ width: 120 }}>Employees</th>
-              <th style={{ minWidth: 220 }}>Managers</th>
-              <th style={{ width: 240, textAlign: "right" }}>Actions</th>
+              <th style={{ width: 140 }}>{t("sectionsPage.col.code")}</th>
+              <th>{t("sectionsPage.col.name")}</th>
+              <th style={{ width: 220 }}>{t("sectionsPage.col.department")}</th>
+              <th style={{ width: 120 }}>{t("sectionsPage.col.employees")}</th>
+              <th style={{ minWidth: 220 }}>{t("sectionsPage.col.managers")}</th>
+              <th style={{ width: 240, textAlign: "right" }}>{t("sectionsPage.col.actions")}</th>
             </tr>
           </thead>
           <tbody>
@@ -122,8 +121,8 @@ export function SectionsPage() {
               <tr>
                 <td colSpan={6} className="text-sm text-dim" style={{ padding: 16 }}>
                   {filterDept === ""
-                    ? "No sections yet. Click \"Add section\" to create one."
-                    : "No sections in this department yet."}
+                    ? t("sectionsPage.emptyAll")
+                    : t("sectionsPage.emptyDept")}
                 </td>
               </tr>
             )}
@@ -145,10 +144,10 @@ export function SectionsPage() {
                     <button
                       className="btn btn-sm"
                       onClick={() => setManaging(s)}
-                      title="Assign or remove section managers"
+                      title={t("sectionsPage.managersBtnTitle")}
                     >
                       <Icon name="users" size={11} />
-                      Managers
+                      {t("sectionsPage.managersBtn")}
                     </button>
                     <button className="btn btn-sm" onClick={() => setEditing(s)}>
                       <Icon name="settings" size={11} />
@@ -180,7 +179,7 @@ export function SectionsPage() {
           onSubmit={(data) => {
             create.mutate(data, {
               onSuccess: () => {
-                toast.success("Section created.");
+                toast.success(t("sectionsPage.toastCreated"));
                 setShowAdd(false);
               },
               onError: (err) => {
@@ -188,7 +187,7 @@ export function SectionsPage() {
                   err instanceof ApiError
                     ? (err.body as { detail?: { message?: string } })?.detail?.message
                     : null;
-                toast.error(detail ?? "Create failed.");
+                toast.error(detail ?? t("sectionsPage.toastCreateFailed"));
               },
             });
           }}
@@ -206,10 +205,10 @@ export function SectionsPage() {
               { id: editing.id, name: data.name },
               {
                 onSuccess: () => {
-                  toast.success("Section updated.");
+                  toast.success(t("sectionsPage.toastUpdated"));
                   setEditing(null);
                 },
-                onError: () => toast.error("Update failed."),
+                onError: () => toast.error(t("sectionsPage.toastUpdateFailed")),
               },
             );
           }}
@@ -246,6 +245,7 @@ function SectionFormModal({
   onSubmit: (data: { code: string; name: string; department_id: number }) => void;
   submitting: boolean;
 }) {
+  const { t } = useTranslation();
   const [code, setCode] = useState(initial?.code ?? "");
   const [name, setName] = useState(initial?.name ?? "");
   const [departmentId, setDepartmentId] = useState<number | "">(
@@ -288,19 +288,19 @@ function SectionFormModal({
           }}
         >
           <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>
-            {isEdit ? "Edit section" : "Add section"}
+            {isEdit ? t("sectionsPage.editTitle") : t("sectionsPage.addTitle")}
           </h2>
           <button
             type="button"
             className="icon-btn"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t("sectionsPage.close")}
           >
             <Icon name="x" size={14} />
           </button>
         </div>
 
-        <Field label="Department" hint="The parent department this section belongs to. Cannot be changed after create — delete + recreate to move.">
+        <Field label={t("sectionsPage.field.department")} hint={t("sectionsPage.field.departmentHint")}>
           <select
             value={departmentId}
             onChange={(e) =>
@@ -310,7 +310,7 @@ function SectionFormModal({
             style={inputStyle}
             required
           >
-            <option value="">— Pick a department —</option>
+            <option value="">{t("sectionsPage.pickDepartment")}</option>
             {departments.map((d) => (
               <option key={d.id} value={d.id}>
                 {d.code} · {d.name}
@@ -318,23 +318,23 @@ function SectionFormModal({
             ))}
           </select>
         </Field>
-        <Field label="Code" hint="Uppercase letters, digits, underscore (1-16 chars). Unique within its parent department.">
+        <Field label={t("sectionsPage.field.code")} hint={t("sectionsPage.field.codeHint")}>
           <input
             value={code}
             onChange={(e) => setCode(e.target.value.toUpperCase())}
             disabled={isEdit}
-            placeholder="QA"
+            placeholder={t("sectionsPage.field.codePlaceholder")}
             style={inputStyle}
             required
             maxLength={16}
             pattern="[A-Z0-9_]{1,16}"
           />
         </Field>
-        <Field label="Name">
+        <Field label={t("sectionsPage.field.name")}>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Quality Assurance"
+            placeholder={t("sectionsPage.field.namePlaceholder")}
             style={inputStyle}
             required
             maxLength={120}
@@ -343,11 +343,11 @@ function SectionFormModal({
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
           <button type="button" className="btn btn-sm" onClick={onClose}>
-            Cancel
+            {t("sectionsPage.cancel")}
           </button>
           <button type="submit" className="btn btn-sm btn-primary" disabled={submitting}>
             <Icon name="check" size={11} />
-            {submitting ? "Saving…" : isEdit ? "Save" : "Create"}
+            {submitting ? t("sectionsPage.saving") : isEdit ? t("sectionsPage.save") : t("sectionsPage.create")}
           </button>
         </div>
       </form>
@@ -361,17 +361,18 @@ function SectionFormModal({
 // ---------------------------------------------------------------------------
 
 function SectionManagerChips({ sectionId }: { sectionId: number }) {
+  const { t } = useTranslation();
   const list = useSectionManagers(sectionId);
-  if (list.isLoading) return <span className="text-xs text-dim">Loading…</span>;
+  if (list.isLoading) return <span className="text-xs text-dim">{t("sectionsPage.loading")}</span>;
   if (list.isError)
     return (
       <span className="text-xs" style={{ color: "var(--danger-text)" }}>
-        Failed to load
+        {t("sectionsPage.chipsLoadFailed")}
       </span>
     );
   const items = list.data?.items ?? [];
   if (items.length === 0)
-    return <span className="text-xs text-dim">— No managers assigned —</span>;
+    return <span className="text-xs text-dim">{t("sectionsPage.noManagersInline")}</span>;
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
       {items.map((m) => (
@@ -406,6 +407,7 @@ function SectionManagersModal({
   section: Section;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const assigned = useSectionManagers(section.id);
   const assign = useAssignSectionManager();
   const remove = useRemoveSectionManager();
@@ -432,7 +434,7 @@ function SectionManagersModal({
       { sectionId: section.id, userId: Number(pickedId) },
       {
         onSuccess: () => {
-          toast.success("Manager assigned to section.");
+          toast.success(t("sectionsPage.toastManagerAssigned"));
           setPickedId("");
         },
         onError: (err) => {
@@ -440,7 +442,7 @@ function SectionManagersModal({
             err instanceof ApiError
               ? (err.body as { detail?: { message?: string } })?.detail?.message
               : null;
-          toast.error(detail ?? "Assignment failed.");
+          toast.error(detail ?? t("sectionsPage.toastAssignFailed"));
         },
       },
     );
@@ -450,8 +452,8 @@ function SectionManagersModal({
     remove.mutate(
       { sectionId: section.id, userId: m.user_id },
       {
-        onSuccess: () => toast.success(`${m.full_name} removed.`),
-        onError: () => toast.error("Remove failed."),
+        onSuccess: () => toast.success(t("sectionsPage.toastManagerRemoved", { name: m.full_name })),
+        onError: () => toast.error(t("sectionsPage.toastRemoveFailed")),
       },
     );
   };
@@ -484,23 +486,20 @@ function SectionManagersModal({
               className="text-xs text-dim"
               style={{ margin: "4px 0 0", maxWidth: 440 }}
             >
-              Section managers see only employees assigned to this specific
-              section — narrower than department-tier visibility. Use this
-              when one team-lead inside a department should see only their
-              own team.
+              {t("sectionsPage.managers.scopeHint")}
             </p>
           </div>
           <button
             type="button"
             className="icon-btn"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t("sectionsPage.close")}
           >
             <Icon name="x" size={14} />
           </button>
         </div>
 
-        <div style={sectionLabel}>Add a manager</div>
+        <div style={sectionLabel}>{t("sectionsPage.managers.addLabel")}</div>
         <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
           <select
             value={pickedId}
@@ -512,10 +511,10 @@ function SectionManagersModal({
           >
             <option value="">
               {candidates.isLoading
-                ? "Loading managers…"
+                ? t("sectionsPage.managers.loadingCandidates")
                 : available.length === 0
-                  ? "All managers are already assigned"
-                  : "— Pick a Manager-role user —"}
+                  ? t("sectionsPage.managers.allAssigned")
+                  : t("sectionsPage.managers.pickPlaceholder")}
             </option>
             {available.map((u) => (
               <option key={u.id} value={u.id}>
@@ -530,14 +529,14 @@ function SectionManagersModal({
             disabled={pickedId === "" || assign.isPending}
           >
             <Icon name="check" size={11} />
-            {assign.isPending ? "Assigning…" : "Assign"}
+            {assign.isPending ? t("sectionsPage.managers.assigning") : t("sectionsPage.managers.assignBtn")}
           </button>
         </div>
 
-        <div style={sectionLabel}>Currently assigned</div>
-        {assigned.isLoading && <div className="text-sm text-dim">Loading…</div>}
+        <div style={sectionLabel}>{t("sectionsPage.managers.currentlyAssigned")}</div>
+        {assigned.isLoading && <div className="text-sm text-dim">{t("sectionsPage.loading")}</div>}
         {!assigned.isLoading && (assigned.data?.items.length ?? 0) === 0 && (
-          <div className="text-sm text-dim">No managers assigned. Pick one above.</div>
+          <div className="text-sm text-dim">{t("sectionsPage.managers.emptyAssigned")}</div>
         )}
         {assigned.data?.items.map((m) => (
           <div
@@ -572,10 +571,10 @@ function SectionManagersModal({
               className="btn btn-sm"
               onClick={() => onRemove(m)}
               disabled={remove.isPending}
-              title="Remove from this section"
+              title={t("sectionsPage.managers.removeBtnTitle")}
             >
               <Icon name="x" size={11} />
-              Remove
+              {t("sectionsPage.managers.removeBtn")}
             </button>
           </div>
         ))}

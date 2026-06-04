@@ -25,9 +25,11 @@ Lifecycle:
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import re
+import shutil
 import subprocess
 import collections
 import threading
@@ -38,6 +40,79 @@ from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+# Strip credentials from any rtsp(s) URL before it can reach a log line,
+# the diagnostics ring, or an exception message. ffmpeg echoes the full
+# input URL (incl. ``user:pass@``) on its stderr; logging it verbatim
+# leaked plaintext RTSP credentials (Issue #3). The reader path already
+# redacts — this closes the segmenter path. Matches the whole userinfo
+# segment between ``://`` and the LAST ``@`` before the host, so a
+# password containing ``@`` (e.g. ``admin:F@ncee@9020@host``) is fully
+# masked — the earlier ``[^/\s@]+`` form stopped at the first ``@`` and
+# leaked the rest. ``[^/\s]*`` is greedy and can't cross ``/`` (path) or
+# whitespace, so it stays inside the authority component.
+_RTSP_CRED_RE = re.compile(r"(rtsps?://)[^/\s]*@", re.IGNORECASE)
+
+
+def _scrub_rtsp_creds(text: str) -> str:
+    """Replace ``rtsp://user:pass@host`` with ``rtsp://***@host``.
+
+    Defensive: never raises (returns the input unchanged on any error)
+    so the redaction can sit on the hot logging path safely.
+    """
+
+    if not text:
+        return text
+    try:
+        return _RTSP_CRED_RE.sub(r"\1***@", text)
+    except Exception:  # noqa: BLE001
+        return "<redaction-error>"
+
+
+@functools.lru_cache(maxsize=1)
+def _ffmpeg_socket_timeout_flag() -> Optional[str]:
+    """Return the ffmpeg input flag THIS build accepts for an RTSP
+    socket read/write timeout (microseconds), or ``None`` if the build
+    supports none of them.
+
+    Why this exists: ffmpeg renamed the socket-timeout option across
+    versions — recent builds expose ``-rw_timeout`` (generic avio) and
+    ``-timeout`` (rtsp demuxer); older builds (≤4.x) only have
+    ``-stimeout``. Hardcoding ``-rw_timeout`` meant a deployed image
+    whose ffmpeg lacked it aborted *every* segmenter spawn with
+    ``Option rw_timeout not found`` (rc=8) before opening the stream —
+    so no segments were ever written and every clip finalize failed.
+    Probing the actual binary once (cached) makes stream-copy work on
+    whatever ffmpeg the image ships, and degrades to "no flag" rather
+    than crashing if none is found (the load-bearing connect-phase
+    bound already lives in the reader's pre-flight, so omitting the
+    segmenter's own timeout is safe defence-in-depth, not a regression).
+    """
+
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return None
+    help_text = ""
+    # ``-h full`` lists every option incl. protocol/demuxer AVOptions.
+    # Combine stdout+stderr; never raise — probing must not break boot.
+    try:
+        proc = subprocess.run(
+            [ffmpeg, "-hide_banner", "-h", "full"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        help_text = (proc.stdout or "") + (proc.stderr or "")
+    except Exception:  # noqa: BLE001
+        return None
+    # Preference order: the modern generic flag first, then the rtsp
+    # demuxer flag, then the legacy one. Match on the bare token so a
+    # word-boundary check isn't fooled by substrings.
+    for flag in ("rw_timeout", "timeout", "stimeout"):
+        if re.search(rf"(?<![\w-])-{flag}\b", help_text):
+            return f"-{flag}"
+    return None
 
 
 # ----- Configuration knobs --------------------------------------------------
@@ -62,6 +137,29 @@ SEGMENT_SECONDS = int(os.environ.get("MAUGOOD_RTSP_SEGMENT_SECONDS", "10"))
 RETENTION_SECONDS = int(os.environ.get("MAUGOOD_RTSP_SEGMENT_RETENTION_S", "600"))
 RESTART_BACKOFF_INITIAL_S = 1.0
 RESTART_BACKOFF_MAX_S = 30.0
+
+# A spawned ffmpeg that streamed at least this long is treated as a
+# genuinely-working process that hit a transient blip → its respawn
+# backoff resets to INITIAL (quick recovery). A *fast-fail* (dead
+# camera: ffmpeg spawns successfully then exits in ~1-2 s with "No route
+# to host") runs for far less than this, so the backoff keeps GROWING
+# instead of resetting — this is what prevents the ~1-2 s respawn storm
+# that previously flooded logs + churned CPU on offline cameras.
+_HEALTHY_RUN_S = max(30.0, float(SEGMENT_SECONDS) * 2.0)
+
+
+def _next_backoff(ran_for: float, current_backoff: float) -> float:
+    """Decide the respawn backoff after an ffmpeg run of ``ran_for`` s.
+
+    * ran_for >= ``_HEALTHY_RUN_S`` → genuine streaming, transient exit:
+      reset to ``RESTART_BACKOFF_INITIAL_S``.
+    * otherwise (fast-fail / dead camera) → exponential growth capped at
+      ``RESTART_BACKOFF_MAX_S``.
+    """
+
+    if ran_for >= _HEALTHY_RUN_S:
+        return RESTART_BACKOFF_INITIAL_S
+    return min(current_backoff * 2.0, RESTART_BACKOFF_MAX_S)
 
 # Janitor scans every N seconds for expired segments.
 JANITOR_INTERVAL_S = 30.0
@@ -221,12 +319,20 @@ class RtspSegmenter:
         from maugood.config import get_settings  # noqa: PLC0415
 
         rw_us = int(max(1.0, get_settings().rtsp_read_timeout_sec) * 1_000_000)
+        # Use whichever socket-timeout flag THIS ffmpeg build accepts
+        # (rw_timeout / timeout / stimeout). If the build supports none,
+        # omit it — the segmenter still runs and the connect-phase bound
+        # in the reader pre-flight still protects against dead cameras.
+        # Hardcoding a flag a given build rejects aborts every spawn
+        # (rc=8 "Option not found") and breaks all clip recording.
+        timeout_flag = _ffmpeg_socket_timeout_flag()
+        timeout_args = [timeout_flag, str(rw_us)] if timeout_flag else []
         return [
             "ffmpeg",
             "-hide_banner",
             "-loglevel", "error",
             "-rtsp_transport", "tcp",
-            "-rw_timeout", str(rw_us),
+            *timeout_args,
             "-fflags", "+nobuffer",
             "-i", self._rtsp_url_plain,
             "-c", "copy",
@@ -275,7 +381,13 @@ class RtspSegmenter:
                 backoff = min(backoff * 2, RESTART_BACKOFF_MAX_S)
                 continue
             self._proc = proc
-            backoff = RESTART_BACKOFF_INITIAL_S
+            spawn_ts = time.time()
+            # NOTE: backoff is intentionally NOT reset here. Resetting on
+            # every successful spawn was the restart-storm bug — a dead
+            # camera's ffmpeg spawns fine then exits in ~1-2 s, so the
+            # reset undid the exponential growth and we respawned every
+            # ~1-2 s forever. We now reset only after a *healthy run*
+            # (see ``_next_backoff`` below).
             # Block until the subprocess exits OR stop is signalled.
             # We poll every 0.5 s so a stop signal doesn't wait for
             # the subprocess to finish.
@@ -290,6 +402,10 @@ class RtspSegmenter:
                             )[-500:]
                     except Exception:  # noqa: BLE001
                         pass
+                    # Issue #3 — scrub RTSP credentials before this text
+                    # touches the log line OR the diagnostics ring (the
+                    # ``short_reason`` below is derived from it).
+                    stderr_tail = _scrub_rtsp_creds(stderr_tail)
                     logger.warning(
                         "rtsp segmenter: ffmpeg exit camera=%s rc=%s stderr=%r",
                         self._camera_id, rc, stderr_tail,
@@ -346,10 +462,13 @@ class RtspSegmenter:
             self._proc = None
             if self._stop.is_set():
                 break
-            # Backoff before respawn so a flapping camera doesn't hammer
-            # the log.
+            # Backoff before respawn. A healthy run resets to INITIAL
+            # (quick recovery from a transient blip); a fast-fail keeps
+            # the backoff growing toward MAX so an offline camera settles
+            # into a 30 s respawn cadence instead of a 1-2 s storm.
+            ran_for = time.time() - spawn_ts
+            backoff = _next_backoff(ran_for, backoff)
             self._sleep_interruptible(backoff)
-            backoff = min(backoff * 2, RESTART_BACKOFF_MAX_S)
 
     def _sleep_interruptible(self, seconds: float) -> None:
         """Sleep that wakes immediately when stop is signalled."""

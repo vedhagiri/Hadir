@@ -94,3 +94,8 @@ prototype-reference/backend/saved_crops/
 docs/scripts/import/
 
 Testing Reports
+.claude
+.claude/
+maugood_diagnostics
+clip_diag.sh
+_clipdiag_extract

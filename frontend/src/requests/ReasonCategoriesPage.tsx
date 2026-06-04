@@ -3,6 +3,7 @@
 // (Exception / Leave) so the operator can extend each list separately.
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../api/client";
 import { SettingsTabs } from "../settings/SettingsTabs";
@@ -16,6 +17,7 @@ import {
 import type { ReasonCategory, RequestType } from "./types";
 
 export function ReasonCategoriesPage() {
+  const { t } = useTranslation();
   const all = useReasonCategoriesAll(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,13 +40,10 @@ export function ReasonCategoriesPage() {
             fontWeight: 400,
           }}
         >
-          Request reasons
+          {t("reasonCategories.title")}
         </h1>
         <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 13 }}>
-          The dropdown options employees see when filing an exception or
-          leave request. Seeded from BRD §FR-REQ-008 — extend the list
-          when HR asks. Existing requests keep their original code on the
-          row, so deletions never break history.
+          {t("reasonCategories.subtitle")}
         </p>
       </header>
 
@@ -65,21 +64,21 @@ export function ReasonCategoriesPage() {
       )}
 
       {all.isLoading ? (
-        <p>Loading…</p>
+        <p>{t("reasonCategories.loading")}</p>
       ) : all.error ? (
         <p style={{ color: "var(--danger-text)" }}>
-          Couldn’t load reason categories.
+          {t("reasonCategories.loadFailed")}
         </p>
       ) : (
         <>
           <CategoryTable
-            title="Exception reasons"
+            title={t("reasonCategories.exceptionTitle")}
             requestType="exception"
             rows={exceptionRows}
             onError={setError}
           />
           <CategoryTable
-            title="Leave reasons"
+            title={t("reasonCategories.leaveTitle")}
             requestType="leave"
             rows={leaveRows}
             onError={setError}
@@ -101,6 +100,7 @@ function CategoryTable({
   rows: ReasonCategory[];
   onError: (msg: string | null) => void;
 }) {
+  const { t } = useTranslation();
   const create = useCreateReasonCategory();
   const patch = usePatchReasonCategory();
   const del = useDeleteReasonCategory();
@@ -122,7 +122,7 @@ function CategoryTable({
       setName("");
       setShowCreate(false);
     } catch (err) {
-      onError(err instanceof ApiError ? err.message : "Save failed.");
+      onError(err instanceof ApiError ? err.message : t("reasonCategories.saveFailed"));
     }
   };
 
@@ -140,7 +140,8 @@ function CategoryTable({
           className="btn btn-sm"
           onClick={() => setShowCreate((s) => !s)}
         >
-          <Icon name="plus" size={12} /> {showCreate ? "Close" : "Add"}
+          <Icon name="plus" size={12} />{" "}
+          {showCreate ? t("reasonCategories.closeBtn") : t("reasonCategories.addBtn")}
         </button>
       </div>
       {showCreate && (
@@ -157,20 +158,20 @@ function CategoryTable({
             alignItems: "end",
           }}
         >
-          <Field label="Code">
+          <Field label={t("reasonCategories.fieldCode")}>
             <input
               className="input mono"
               value={code}
               onChange={(e) => setCode(e.target.value)}
-              placeholder="Doctor"
+              placeholder={t("reasonCategories.codePlaceholder")}
             />
           </Field>
-          <Field label="Display name">
+          <Field label={t("reasonCategories.fieldName")}>
             <input
               className="input"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Doctor's appointment"
+              placeholder={t("reasonCategories.namePlaceholder")}
             />
           </Field>
           <button
@@ -178,7 +179,7 @@ function CategoryTable({
             className="btn btn-primary btn-sm"
             disabled={create.isPending}
           >
-            {create.isPending ? "Saving…" : "Save"}
+            {create.isPending ? t("reasonCategories.saving") : t("reasonCategories.save")}
           </button>
         </form>
       )}
@@ -186,10 +187,10 @@ function CategoryTable({
         <table className="table">
           <thead>
             <tr>
-              <th style={{ width: 80 }}>Order</th>
-              <th>Code</th>
-              <th>Name</th>
-              <th>Status</th>
+              <th style={{ width: 80 }}>{t("reasonCategories.colOrder")}</th>
+              <th>{t("reasonCategories.colCode")}</th>
+              <th>{t("reasonCategories.colName")}</th>
+              <th>{t("reasonCategories.colStatus")}</th>
               <th />
             </tr>
           </thead>
@@ -197,7 +198,7 @@ function CategoryTable({
             {rows.length === 0 ? (
               <tr>
                 <td colSpan={5} className="text-sm text-dim">
-                  No categories yet.
+                  {t("reasonCategories.empty")}
                 </td>
               </tr>
             ) : (
@@ -210,7 +211,7 @@ function CategoryTable({
                     <span
                       className={`pill ${r.active ? "pill-success" : "pill-neutral"}`}
                     >
-                      {r.active ? "active" : "inactive"}
+                      {r.active ? t("reasonCategories.statusActive") : t("reasonCategories.statusInactive")}
                     </span>
                   </td>
                   <td style={{ textAlign: "right" }}>
@@ -224,14 +225,14 @@ function CategoryTable({
                       }
                       disabled={patch.isPending}
                     >
-                      {r.active ? "Hide" : "Activate"}
+                      {r.active ? t("reasonCategories.hide") : t("reasonCategories.activate")}
                     </button>{" "}
                     <button
                       className="btn btn-sm"
                       onClick={() => {
                         if (
                           window.confirm(
-                            `Delete '${r.code}'? Existing requests keep their original code, but new submissions won't see it.`,
+                            t("reasonCategories.confirmDelete", { code: r.code }),
                           )
                         ) {
                           del.mutate(r.id);
@@ -240,7 +241,7 @@ function CategoryTable({
                       style={{ color: "var(--danger-text)" }}
                       disabled={del.isPending}
                     >
-                      Delete
+                      {t("reasonCategories.delete")}
                     </button>
                   </td>
                 </tr>

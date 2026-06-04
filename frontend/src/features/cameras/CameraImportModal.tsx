@@ -10,6 +10,7 @@
 // the backend owns all validation so the preview and commit agree.
 
 import { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { extractApiError } from "../../api/client";
 import { ModalShell } from "../../components/DrawerShell";
@@ -50,6 +51,7 @@ const ACTION_PILL: Record<CameraImportAction, string> = {
 };
 
 export function CameraImportModal({ onClose }: Props) {
+  const { t } = useTranslation();
   const [step, setStep] = useState<Step>("select");
   const [file, setFile] = useState<File | null>(null);
   const [onExisting, setOnExisting] = useState<OnExisting>("update");
@@ -151,31 +153,22 @@ export function CameraImportModal({ onClose }: Props) {
             <div>
               <h3 className="card-title">
                 {step === "preview"
-                  ? "Review and confirm import"
+                  ? t("cameras.importModal.titlePreview")
                   : step === "result"
-                    ? "Import complete"
-                    : "Import cameras"}
+                    ? t("cameras.importModal.titleResult")
+                    : t("cameras.importModal.titleSelect")}
               </h3>
               <p className="card-sub">
-                {step === "select" && (
-                  <>
-                    Upload a camera export (<span className="mono">.json</span>).
-                    New cameras are created; rows that match an existing
-                    camera code are handled by the option below; duplicate
-                    RTSP streams are skipped.
-                  </>
-                )}
+                {step === "select" && t("cameras.importModal.subSelect")}
                 {step === "preview" && preview && (
-                  <>
-                    {preview.summary.create} to create, {preview.summary.update}{" "}
-                    to update, {preview.summary.skip} skipped,{" "}
-                    {preview.summary.error} error(s). Nothing is written until
-                    you confirm.
-                  </>
+                  t("cameras.importModal.subPreview", {
+                    create: preview.summary.create,
+                    update: preview.summary.update,
+                    skip: preview.summary.skip,
+                    error: preview.summary.error,
+                  })
                 )}
-                {step === "result" && (
-                  <>The import has finished. Review the counts below.</>
-                )}
+                {step === "result" && t("cameras.importModal.subResult")}
               </p>
             </div>
             <button
@@ -220,7 +213,7 @@ export function CameraImportModal({ onClose }: Props) {
                     <Icon name="upload" size={20} />
                   </div>
                   <div>
-                    Drop a .json export here, or{" "}
+                    {t("cameras.importModal.dropZone")}{" "}
                     <label
                       style={{
                         textDecoration: "underline",
@@ -228,7 +221,7 @@ export function CameraImportModal({ onClose }: Props) {
                         color: "var(--text)",
                       }}
                     >
-                      choose a file
+                      {t("cameras.importModal.chooseFile")}
                       <input
                         type="file"
                         accept=".json,application/json"
@@ -257,19 +250,19 @@ export function CameraImportModal({ onClose }: Props) {
                       marginBottom: 6,
                     }}
                   >
-                    When a camera code already exists
+                    {t("cameras.importModal.existingLabel")}
                   </div>
                   <div style={{ display: "flex", gap: 8 }}>
                     <ModeButton
                       active={onExisting === "update"}
-                      label="Update existing"
-                      hint="Overwrite the matching camera"
+                      label={t("cameras.importModal.modeUpdate")}
+                      hint={t("cameras.importModal.modeUpdateHint")}
                       onClick={() => setOnExisting("update")}
                     />
                     <ModeButton
                       active={onExisting === "skip"}
-                      label="Skip existing"
-                      hint="Leave the matching camera untouched"
+                      label={t("cameras.importModal.modeSkip")}
+                      hint={t("cameras.importModal.modeSkipHint")}
                       onClick={() => setOnExisting("skip")}
                     />
                   </div>
@@ -289,7 +282,7 @@ export function CameraImportModal({ onClose }: Props) {
                     {parseError ??
                       extractApiError(
                         previewMutation.error,
-                        "Could not preview the import.",
+                        t("cameras.importModal.previewError"),
                       )}
                   </div>
                 )}
@@ -298,7 +291,7 @@ export function CameraImportModal({ onClose }: Props) {
                   style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}
                 >
                   <button className="btn" onClick={onClose} disabled={busy}>
-                    Cancel
+                    {t("common.cancel")}
                   </button>
                   <button
                     className="btn btn-primary"
@@ -306,7 +299,7 @@ export function CameraImportModal({ onClose }: Props) {
                     disabled={!file || busy}
                   >
                     <Icon name="eye" size={12} />
-                    {previewMutation.isPending ? "Parsing…" : "Preview rows"}
+                    {previewMutation.isPending ? t("cameras.importModal.parsing") : t("cameras.importModal.previewRows")}
                   </button>
                 </div>
               </>
@@ -342,12 +335,12 @@ export function CameraImportModal({ onClose }: Props) {
                   <table className="table" style={{ minWidth: 820 }}>
                     <thead>
                       <tr>
-                        <th style={{ width: 50 }}>#</th>
-                        <th style={{ width: 90 }}>Action</th>
-                        <th>Code</th>
-                        <th>Name</th>
-                        <th>Host</th>
-                        <th>Details</th>
+                        <th style={{ width: 50 }}>{t("cameras.importModal.colNum")}</th>
+                        <th style={{ width: 90 }}>{t("cameras.importModal.colAction")}</th>
+                        <th>{t("cameras.importModal.colCode")}</th>
+                        <th>{t("cameras.importModal.colName")}</th>
+                        <th>{t("cameras.importModal.colHost")}</th>
+                        <th>{t("cameras.importModal.colDetails")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -389,7 +382,7 @@ export function CameraImportModal({ onClose }: Props) {
                   >
                     {extractApiError(
                       importMutation.error,
-                      "Could not apply the import.",
+                      t("cameras.importModal.importError"),
                     )}
                   </div>
                 )}
@@ -403,11 +396,11 @@ export function CameraImportModal({ onClose }: Props) {
                 >
                   <button className="btn" onClick={back} disabled={busy}>
                     <Icon name="chevronLeft" size={11} />
-                    Back
+                    {t("cameras.importModal.back")}
                   </button>
                   <div style={{ display: "flex", gap: 8 }}>
                     <button className="btn" onClick={onClose} disabled={busy}>
-                      Cancel
+                      {t("common.cancel")}
                     </button>
                     <button
                       className="btn btn-primary"
@@ -416,8 +409,8 @@ export function CameraImportModal({ onClose }: Props) {
                     >
                       <Icon name="upload" size={12} />
                       {importMutation.isPending
-                        ? "Importing…"
-                        : `Confirm import (${applyCount})`}
+                        ? t("cameras.importModal.importing")
+                        : t("cameras.importModal.confirmImport", { n: applyCount })}
                     </button>
                   </div>
                 </div>
@@ -428,20 +421,20 @@ export function CameraImportModal({ onClose }: Props) {
               <>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <span className="pill pill-success">
-                    created {result.created}
+                    {t("cameras.importModal.pillCreated", { n: result.created })}
                   </span>
                   <span className="pill pill-info">
-                    updated {result.updated}
+                    {t("cameras.importModal.pillUpdated", { n: result.updated })}
                   </span>
                   <span className="pill pill-neutral">
-                    skipped {result.skipped}
+                    {t("cameras.importModal.pillSkipped", { n: result.skipped })}
                   </span>
                   <span
                     className={`pill ${
                       result.errors > 0 ? "pill-warning" : "pill-neutral"
                     }`}
                   >
-                    errors {result.errors}
+                    {t("cameras.importModal.pillErrors", { n: result.errors })}
                   </span>
                 </div>
 
@@ -459,10 +452,10 @@ export function CameraImportModal({ onClose }: Props) {
                     <table className="table" style={{ minWidth: 620 }}>
                       <thead>
                         <tr>
-                          <th style={{ width: 50 }}>#</th>
-                          <th style={{ width: 90 }}>Action</th>
-                          <th>Code</th>
-                          <th>Details</th>
+                          <th style={{ width: 50 }}>{t("cameras.importModal.colNum")}</th>
+                          <th style={{ width: 90 }}>{t("cameras.importModal.colAction")}</th>
+                          <th>{t("cameras.importModal.colCode")}</th>
+                          <th>{t("cameras.importModal.colDetails")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -506,7 +499,7 @@ export function CameraImportModal({ onClose }: Props) {
                 >
                   <button className="btn btn-primary" onClick={onClose}>
                     <Icon name="check" size={12} />
-                    Done
+                    {t("common.done")}
                   </button>
                 </div>
               </>

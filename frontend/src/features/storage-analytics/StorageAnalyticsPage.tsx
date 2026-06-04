@@ -5,6 +5,7 @@
 // and .seg classes throughout — no custom CSS beyond inline layout tweaks.
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { Icon } from "../../shell/Icon";
 import { useCameras } from "../cameras/hooks";
@@ -42,13 +43,13 @@ function pct(num: number, total: number): number {
   return total === 0 ? 0 : Math.round((num / total) * 100);
 }
 
-function fmtDate(iso: string): string {
+function fmtDate(iso: string, today: string, yesterday: string, locale: string): string {
   const d = new Date(iso + "T00:00:00");
   const now = new Date();
   const diff = Math.round((now.getTime() - d.getTime()) / 86400000);
-  if (diff === 0) return "Today";
-  if (diff === 1) return "Yesterday";
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  if (diff === 0) return today;
+  if (diff === 1) return yesterday;
+  return d.toLocaleDateString(locale, { month: "short", day: "numeric" });
 }
 
 // ── SVG donut ring ────────────────────────────────────────────────────────────
@@ -147,23 +148,24 @@ function EmptyState({ message }: { message: string }) {
 // ── By Camera table ───────────────────────────────────────────────────────────
 
 function CameraTable({ rows }: { rows: CameraStorageRow[] }) {
+  const { t } = useTranslation();
   const maxBytes = rows.reduce((m, r) => Math.max(m, r.total_bytes), 1);
 
   if (rows.length === 0) {
-    return <EmptyState message="No camera data for this period." />;
+    return <EmptyState message={t("storageAnalytics.emptyCamera")} />;
   }
 
   return (
     <table className="table">
       <thead>
         <tr>
-          <th>Camera</th>
-          <th style={{ textAlign: "end" }}>Clips</th>
-          <th style={{ minWidth: 160 }}>Storage Used</th>
-          <th style={{ textAlign: "end" }}>Matched</th>
-          <th style={{ textAlign: "end" }}>Unmatched</th>
-          <th style={{ textAlign: "end" }}>Match Rate</th>
-          <th style={{ textAlign: "end" }}>Avg Duration</th>
+          <th>{t("storageAnalytics.col.camera")}</th>
+          <th style={{ textAlign: "end" }}>{t("storageAnalytics.col.clips")}</th>
+          <th style={{ minWidth: 160 }}>{t("storageAnalytics.col.storageUsed")}</th>
+          <th style={{ textAlign: "end" }}>{t("storageAnalytics.col.matched")}</th>
+          <th style={{ textAlign: "end" }}>{t("storageAnalytics.col.unmatched")}</th>
+          <th style={{ textAlign: "end" }}>{t("storageAnalytics.col.matchRate")}</th>
+          <th style={{ textAlign: "end" }}>{t("storageAnalytics.col.avgDuration")}</th>
         </tr>
       </thead>
       <tbody>
@@ -203,31 +205,35 @@ function CameraTable({ rows }: { rows: CameraStorageRow[] }) {
 // ── By Day table ──────────────────────────────────────────────────────────────
 
 function DailyTable({ rows }: { rows: DailyStorageRow[] }) {
+  const { t, i18n } = useTranslation();
   const maxBytes = rows.reduce((m, r) => Math.max(m, r.total_bytes), 1);
   const maxClips = rows.reduce((m, r) => Math.max(m, r.clip_count), 1);
   const sorted = [...rows].reverse();
+  const today = t("storageAnalytics.today");
+  const yesterday = t("storageAnalytics.yesterday");
+  const locale = i18n.language;
 
   if (sorted.length === 0) {
-    return <EmptyState message="No daily data for this period." />;
+    return <EmptyState message={t("storageAnalytics.emptyDaily")} />;
   }
 
   return (
     <table className="table">
       <thead>
         <tr>
-          <th>Date</th>
-          <th style={{ minWidth: 140 }}>Clips</th>
-          <th style={{ minWidth: 160 }}>Storage Added</th>
-          <th style={{ textAlign: "end" }}>New Crops</th>
-          <th style={{ textAlign: "end" }}>Matched</th>
-          <th style={{ textAlign: "end" }}>Match Rate</th>
+          <th>{t("storageAnalytics.col.date")}</th>
+          <th style={{ minWidth: 140 }}>{t("storageAnalytics.col.clips")}</th>
+          <th style={{ minWidth: 160 }}>{t("storageAnalytics.col.storageAdded")}</th>
+          <th style={{ textAlign: "end" }}>{t("storageAnalytics.col.newCrops")}</th>
+          <th style={{ textAlign: "end" }}>{t("storageAnalytics.col.matched")}</th>
+          <th style={{ textAlign: "end" }}>{t("storageAnalytics.col.matchRate")}</th>
         </tr>
       </thead>
       <tbody>
         {sorted.map((row) => (
           <tr key={row.date}>
             <td>
-              <div style={{ fontWeight: 500, fontSize: 13 }}>{fmtDate(row.date)}</div>
+              <div style={{ fontWeight: 500, fontSize: 13 }}>{fmtDate(row.date, today, yesterday, locale)}</div>
               <div style={{ fontSize: 11, color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
                 {row.date}
               </div>
@@ -298,6 +304,7 @@ const DAYS_OPTIONS: { value: DaysWindow; label: string }[] = [
 type TabId = "by-camera" | "by-day";
 
 export function StorageAnalyticsPage() {
+  const { t } = useTranslation();
   const [days, setDays] = useState<DaysWindow>(30);
   const [cameraId, setCameraId] = useState<number | null>(null);
   const [tab, setTab] = useState<TabId>("by-camera");
@@ -319,11 +326,11 @@ export function StorageAnalyticsPage() {
     ov && ov.total_clips > 0 ? Math.round(ov.total_bytes / ov.total_clips) : 0;
 
   const processingSegments: BarSegment[] = [
-    { count: ov?.completed_clips ?? 0, color: "var(--success)", label: "Completed" },
-    { count: ov?.processing_clips ?? 0, color: "var(--warning)", label: "Processing" },
-    { count: ov?.pending_clips ?? 0, color: "var(--text-quaternary)", label: "Pending" },
-    { count: ov?.recording_clips ?? 0, color: "var(--danger)", label: "Recording" },
-    { count: ov?.failed_clips ?? 0, color: "var(--danger-text)", label: "Failed" },
+    { count: ov?.completed_clips ?? 0, color: "var(--success)", label: t("storageAnalytics.proc.completed") },
+    { count: ov?.processing_clips ?? 0, color: "var(--warning)", label: t("storageAnalytics.proc.processing") },
+    { count: ov?.pending_clips ?? 0, color: "var(--text-quaternary)", label: t("storageAnalytics.proc.pending") },
+    { count: ov?.recording_clips ?? 0, color: "var(--danger)", label: t("storageAnalytics.proc.recording") },
+    { count: ov?.failed_clips ?? 0, color: "var(--danger-text)", label: t("storageAnalytics.proc.failed") },
   ];
 
   return (
@@ -331,9 +338,9 @@ export function StorageAnalyticsPage() {
       {/* ── Page header ── */}
       <div className="page-header">
         <div>
-          <h1 className="page-title">Storage Analytics</h1>
+          <h1 className="page-title">{t("storageAnalytics.title")}</h1>
           <p className="page-sub">
-            Clip counts, face crops, match rates and storage breakdown
+            {t("storageAnalytics.subtitle")}
           </p>
         </div>
         <div className="page-actions">
@@ -342,10 +349,10 @@ export function StorageAnalyticsPage() {
             className="btn btn-sm"
             onClick={() => void analytics.refetch()}
             disabled={analytics.isFetching}
-            aria-label="Refresh analytics"
+            aria-label={t("storageAnalytics.refreshAria")}
           >
             <Icon name="refresh" size={13} />
-            {analytics.isFetching ? "Loading…" : "Refresh"}
+            {analytics.isFetching ? t("storageAnalytics.loading") : t("storageAnalytics.refresh")}
           </button>
         </div>
       </div>
@@ -354,9 +361,9 @@ export function StorageAnalyticsPage() {
       <div className="filter-bar">
         <div className="filter-group">
           <span style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 500 }}>
-            Window
+            {t("storageAnalytics.window")}
           </span>
-          <div className="seg" role="group" aria-label="Days window">
+          <div className="seg" role="group" aria-label={t("storageAnalytics.daysWindowAria")}>
             {DAYS_OPTIONS.map(({ value, label }) => (
               <button
                 key={value}
@@ -386,9 +393,9 @@ export function StorageAnalyticsPage() {
               background: "var(--bg-elev)",
               color: "var(--text)",
             }}
-            aria-label="Filter by camera"
+            aria-label={t("storageAnalytics.filterByCamera")}
           >
-            <option value="">All cameras</option>
+            <option value="">{t("storageAnalytics.allCameras")}</option>
             {cameras.data?.items.map((cam) => (
               <option key={cam.id} value={cam.id}>
                 {cam.name}
@@ -402,16 +409,16 @@ export function StorageAnalyticsPage() {
         {analytics.isError && (
           <span className="pill pill-danger">
             <span className="pill-dot" />
-            Failed to load
+            {t("storageAnalytics.failed")}
           </span>
         )}
         {analytics.isFetching && !analytics.isError && (
-          <span className="pill pill-neutral">Loading…</span>
+          <span className="pill pill-neutral">{t("storageAnalytics.loading")}</span>
         )}
         {analytics.data && !analytics.isFetching && (
           <span className="pill pill-neutral" style={{ fontFamily: "var(--font-mono)", fontSize: 10.5 }}>
-            {days}d window
-            {cameraId !== null ? " · 1 camera" : ""}
+            {t("storageAnalytics.daysWindow", { days })}
+            {cameraId !== null ? ` · ${t("storageAnalytics.oneCamera")}` : ""}
           </span>
         )}
       </div>
@@ -427,18 +434,18 @@ export function StorageAnalyticsPage() {
       >
         {/* Total clips */}
         <div className="stat">
-          <div className="stat-label">Total Clips</div>
+          <div className="stat-label">{t("storageAnalytics.stat.totalClips")}</div>
           <div className="stat-value">
             {ov ? ov.total_clips.toLocaleString() : "—"}
           </div>
           <div className="stat-delta delta-flat">
-            {ov ? `avg ${fmtDuration(ov.avg_clip_duration_sec)}` : ""}
+            {ov ? t("storageAnalytics.stat.avgDuration", { duration: fmtDuration(ov.avg_clip_duration_sec) }) : ""}
           </div>
         </div>
 
         {/* Storage used */}
         <div className="stat">
-          <div className="stat-label">Storage Used</div>
+          <div className="stat-label">{t("storageAnalytics.stat.storageUsed")}</div>
           <div className="stat-value" style={{ display: "flex", alignItems: "baseline", gap: 3 }}>
             {totalClipsCompact ? (
               <>
@@ -452,26 +459,26 @@ export function StorageAnalyticsPage() {
             )}
           </div>
           <div className="stat-delta delta-flat">
-            {avgBytesPerClip > 0 ? `${fmtBytes(avgBytesPerClip)} / clip` : ""}
+            {avgBytesPerClip > 0 ? t("storageAnalytics.stat.perClip", { size: fmtBytes(avgBytesPerClip) }) : ""}
           </div>
         </div>
 
         {/* Face crops */}
         <div className="stat">
-          <div className="stat-label">Face Crops</div>
+          <div className="stat-label">{t("storageAnalytics.stat.faceCrops")}</div>
           <div className="stat-value">
             {ov ? ov.total_face_crops.toLocaleString() : "—"}
           </div>
           <div className="stat-delta delta-flat">
             {ov
-              ? `${ov.matched_face_crops.toLocaleString()} matched`
+              ? t("storageAnalytics.stat.matchedCount", { count: ov.matched_face_crops })
               : ""}
           </div>
         </div>
 
         {/* Unmatched */}
         <div className="stat">
-          <div className="stat-label">Unmatched</div>
+          <div className="stat-label">{t("storageAnalytics.stat.unmatched")}</div>
           <div
             className="stat-value"
             style={{ color: ov && ov.unmatched_face_crops > 0 ? "var(--danger-text)" : undefined }}
@@ -480,7 +487,7 @@ export function StorageAnalyticsPage() {
           </div>
           <div className="stat-delta delta-flat">
             {ov && ov.total_face_crops > 0
-              ? `${pct(ov.unmatched_face_crops, ov.total_face_crops)}% of crops`
+              ? t("storageAnalytics.stat.pctOfCrops", { pct: pct(ov.unmatched_face_crops, ov.total_face_crops) })
               : ""}
           </div>
         </div>
@@ -488,7 +495,7 @@ export function StorageAnalyticsPage() {
         {/* Match rate + donut */}
         <div className="stat" style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ flex: 1 }}>
-            <div className="stat-label">Match Rate</div>
+            <div className="stat-label">{t("storageAnalytics.stat.matchRate")}</div>
             <div
               className="stat-value"
               style={{ color: ov && ov.total_face_crops > 0 ? matchColor : undefined }}
@@ -498,7 +505,7 @@ export function StorageAnalyticsPage() {
             <div className="stat-delta delta-flat">
               {ov && ov.total_face_crops > 0
                 ? `${ov.matched_face_crops.toLocaleString()} / ${ov.total_face_crops.toLocaleString()}`
-                : "no crops yet"}
+                : t("storageAnalytics.stat.noCropsYet")}
             </div>
           </div>
           {ov && ov.total_face_crops > 0 && (
@@ -514,34 +521,34 @@ export function StorageAnalyticsPage() {
       {ov && ov.total_clips > 0 && (
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="card-head">
-            <div className="card-title">Processing Status</div>
+            <div className="card-title">{t("storageAnalytics.processingStatus")}</div>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               {ov.completed_clips > 0 && (
                 <span className="pill pill-success">
                   <span className="pill-dot" />
-                  {ov.completed_clips.toLocaleString()} completed
+                  {t("storageAnalytics.pill.completed", { count: ov.completed_clips })}
                 </span>
               )}
               {ov.processing_clips > 0 && (
                 <span className="pill pill-warning">
                   <span className="pill-dot" />
-                  {ov.processing_clips.toLocaleString()} processing
+                  {t("storageAnalytics.pill.processing", { count: ov.processing_clips })}
                 </span>
               )}
               {ov.pending_clips > 0 && (
                 <span className="pill pill-neutral">
-                  {ov.pending_clips.toLocaleString()} pending
+                  {t("storageAnalytics.pill.pending", { count: ov.pending_clips })}
                 </span>
               )}
               {ov.recording_clips > 0 && (
                 <span className="pill pill-danger">
                   <span className="pill-dot" />
-                  {ov.recording_clips.toLocaleString()} recording
+                  {t("storageAnalytics.pill.recording", { count: ov.recording_clips })}
                 </span>
               )}
               {ov.failed_clips > 0 && (
                 <span className="pill pill-danger">
-                  {ov.failed_clips.toLocaleString()} failed
+                  {t("storageAnalytics.pill.failed", { count: ov.failed_clips })}
                 </span>
               )}
             </div>
@@ -581,8 +588,8 @@ export function StorageAnalyticsPage() {
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="card-head">
             <div>
-              <div className="card-title">Storage by Camera</div>
-              <div className="card-sub">{analytics.data.by_camera.length} camera{analytics.data.by_camera.length !== 1 ? "s" : ""}</div>
+              <div className="card-title">{t("storageAnalytics.storageByCamera")}</div>
+              <div className="card-sub">{t("storageAnalytics.cameraCount", { count: analytics.data.by_camera.length })}</div>
             </div>
           </div>
           <div className="card-body">
@@ -603,7 +610,7 @@ export function StorageAnalyticsPage() {
                       {row.camera_name}
                     </span>
                     <span style={{ fontSize: 11.5, color: "var(--text-tertiary)", whiteSpace: "nowrap", fontFamily: "var(--font-mono)" }}>
-                      {fmtBytes(row.total_bytes)} · {row.clip_count.toLocaleString()} clips
+                      {fmtBytes(row.total_bytes)} · {t("storageAnalytics.clipsCount", { count: row.clip_count })}
                     </span>
                   </div>
                   <MiniBar value={row.total_bytes} max={maxB} color="var(--accent)" />
@@ -622,7 +629,7 @@ export function StorageAnalyticsPage() {
           onClick={() => setTab("by-camera")}
           aria-pressed={tab === "by-camera"}
         >
-          By Camera
+          {t("storageAnalytics.tab.byCamera")}
           {analytics.data ? ` (${analytics.data.by_camera.length})` : ""}
         </button>
         <button
@@ -631,7 +638,7 @@ export function StorageAnalyticsPage() {
           onClick={() => setTab("by-day")}
           aria-pressed={tab === "by-day"}
         >
-          By Day
+          {t("storageAnalytics.tab.byDay")}
           {analytics.data ? ` (${analytics.data.daily.length})` : ""}
         </button>
       </div>
@@ -647,7 +654,7 @@ export function StorageAnalyticsPage() {
               fontSize: 13,
             }}
           >
-            Loading analytics…
+            {t("storageAnalytics.loadingAnalytics")}
           </div>
         )}
         {!analytics.isLoading && tab === "by-camera" && (

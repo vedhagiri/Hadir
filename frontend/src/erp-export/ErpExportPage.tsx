@@ -7,6 +7,7 @@
 // schema before pointing the ERP at the directory.
 
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../api/client";
 import { describeCron } from "../scheduled-reports/cronPreview";
@@ -19,6 +20,7 @@ import {
 import type { ErpFormat } from "./types";
 
 export function ErpExportPage() {
+  const { t } = useTranslation();
   const cfg = useErpExportConfig();
   const patch = usePatchErpExportConfig();
 
@@ -51,9 +53,9 @@ export function ErpExportPage() {
         schedule_cron: scheduleCron,
         window_days: windowDays,
       });
-      setInfo("Saved.");
+      setInfo(t("erpExport.saved"));
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Save failed.");
+      setError(err instanceof ApiError ? err.message : t("erpExport.saveFailed"));
     }
   };
 
@@ -74,7 +76,7 @@ export function ErpExportPage() {
           .then((b) => b.detail)
           .catch(() => null);
         setError(
-          detail ?? `Run failed (${resp.status}). Check the audit log.`,
+          detail ?? t("erpExport.runFailed", { status: resp.status }),
         );
         return;
       }
@@ -92,23 +94,23 @@ export function ErpExportPage() {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      setInfo(`Wrote ${filename} to the tenant drop directory.`);
+      setInfo(t("erpExport.runWrote", { filename }));
       cfg.refetch();
     } catch {
-      setError("Network error running the export.");
+      setError(t("erpExport.networkError"));
     } finally {
       setRunning(false);
     }
   };
 
-  if (cfg.isLoading) return <p>Loading ERP export settings…</p>;
+  if (cfg.isLoading) return <p>{t("erpExport.loading")}</p>;
   if (cfg.error)
     return (
       <p style={{ color: "var(--danger-text)" }}>
-        Couldn’t load ERP export settings.
+        {t("erpExport.loadFailed")}
       </p>
     );
-  if (!cfg.data) return <p>Sign in to manage ERP export.</p>;
+  if (!cfg.data) return <p>{t("erpExport.signInRequired")}</p>;
 
   const cronLabel = describeCron(scheduleCron || "");
 
@@ -124,15 +126,14 @@ export function ErpExportPage() {
             fontWeight: 400,
           }}
         >
-          ERP file-drop export
+          {t("erpExport.title")}
         </h1>
         <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 13 }}>
-          Maugood writes a daily attendance file the client ERP polls.
-          Output always lives under{" "}
-          <span className="mono">{cfg.data.tenant_root}</span> — paths
-          that escape that root are rejected on save. See{" "}
+          {t("erpExport.subtitleMain")}{" "}
+          <span className="mono">{cfg.data.tenant_root}</span>{" "}
+          {t("erpExport.subtitlePaths")}{" "}
           <span className="mono">docs/erp-file-drop-schema.md</span>{" "}
-          for the column reference you can hand to the ERP team.
+          {t("erpExport.subtitleSchema")}
         </p>
       </header>
 
@@ -160,10 +161,10 @@ export function ErpExportPage() {
             checked={enabled}
             onChange={(e) => setEnabled(e.target.checked)}
           />
-          Run scheduled exports
+          {t("erpExport.enabledLabel")}
         </label>
 
-        <Field label="Format">
+        <Field label={t("erpExport.fieldFormat")}>
           <div style={{ display: "flex", gap: 6 }}>
             {(["csv", "json"] as ErpFormat[]).map((f) => (
               <label
@@ -186,11 +187,11 @@ export function ErpExportPage() {
         </Field>
 
         <Field
-          label="Output path (relative to tenant root)"
+          label={t("erpExport.fieldOutputPath")}
           hint={
             outputPath
-              ? `Files will land in ${cfg.data.tenant_root}/${outputPath.replace(/^\/+/, "")}`
-              : `Files will land directly under ${cfg.data.tenant_root}`
+              ? t("erpExport.hintPathWithSub", { root: cfg.data.tenant_root, path: outputPath.replace(/^\/+/, "") })
+              : t("erpExport.hintPathRoot", { root: cfg.data.tenant_root })
           }
         >
           <input
@@ -205,11 +206,11 @@ export function ErpExportPage() {
           style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}
         >
           <Field
-            label="Cron schedule"
+            label={t("erpExport.fieldCron")}
             hint={
               scheduleCron && cronLabel !== scheduleCron
                 ? cronLabel
-                : "Leave empty to disable automatic runs."
+                : t("erpExport.hintCronEmpty")
             }
           >
             <input
@@ -219,7 +220,7 @@ export function ErpExportPage() {
               placeholder="0 1 * * *"
             />
           </Field>
-          <Field label="Window (days)">
+          <Field label={t("erpExport.fieldWindowDays")}>
             <input
               className="input"
               type="number"
@@ -265,7 +266,7 @@ export function ErpExportPage() {
             className="btn btn-primary"
             disabled={patch.isPending}
           >
-            {patch.isPending ? "Saving…" : "Save changes"}
+            {patch.isPending ? t("erpExport.saving") : t("erpExport.saveChanges")}
           </button>
           <button
             type="button"
@@ -274,7 +275,7 @@ export function ErpExportPage() {
             disabled={running}
           >
             <Icon name="download" size={12} />{" "}
-            {running ? "Running…" : "Run now"}
+            {running ? t("erpExport.running") : t("erpExport.runNow")}
           </button>
         </div>
       </form>
@@ -288,7 +289,7 @@ export function ErpExportPage() {
           maxWidth: 720,
         }}
       >
-        <h2 style={{ fontSize: 16, margin: "0 0 8px 0" }}>Last run</h2>
+        <h2 style={{ fontSize: 16, margin: "0 0 8px 0" }}>{t("erpExport.lastRunTitle")}</h2>
         {cfg.data.last_run_at ? (
           <div
             style={{
@@ -299,34 +300,33 @@ export function ErpExportPage() {
             }}
           >
             <Fact
-              label="When"
+              label={t("erpExport.factWhen")}
               value={new Date(cfg.data.last_run_at).toLocaleString()}
             />
-            <Fact label="Status" value={cfg.data.last_run_status ?? "—"} />
+            <Fact label={t("erpExport.factStatus")} value={cfg.data.last_run_status ?? "—"} />
             <Fact
-              label="File"
+              label={t("erpExport.factFile")}
               value={cfg.data.last_run_path ?? "—"}
               mono
               full
             />
             {cfg.data.last_run_error && (
               <Fact
-                label="Error"
+                label={t("erpExport.factError")}
                 value={cfg.data.last_run_error}
                 full
               />
             )}
             {cfg.data.next_run_at && (
               <Fact
-                label="Next run"
+                label={t("erpExport.factNextRun")}
                 value={new Date(cfg.data.next_run_at).toLocaleString()}
               />
             )}
           </div>
         ) : (
           <p style={{ color: "var(--text-secondary)", margin: 0 }}>
-            No runs yet. Hit "Run now" to verify the schema before the
-            cron picks it up.
+            {t("erpExport.noRuns")}
           </p>
         )}
       </section>

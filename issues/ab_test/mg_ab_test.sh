@@ -18,8 +18,12 @@ fi
 : > "$LOG"
 log(){ echo "[$(date -u +%H:%M:%S)] $*" | tee -a "$LOG"; }
 
+# Credentials come from the environment — never hardcode them (Issue #4).
+# Export before running, e.g.:
+#   export MG_EMAIL=you@example.com MG_PASSWORD='...' MG_TENANT=your-slug
+: "${MG_EMAIL:?set MG_EMAIL}" "${MG_PASSWORD:?set MG_PASSWORD}" "${MG_TENANT:?set MG_TENANT}"
 auth(){ curl -s -m10 -c "$J" -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' \
-  -d '{"email":"harikrishnan@inaisys.co","password":"Hari@123","tenant_slug":"inaisys"}' >/dev/null; }
+  -d "$(printf '{"email":"%s","password":"%s","tenant_slug":"%s"}' "$MG_EMAIL" "$MG_PASSWORD" "$MG_TENANT")" >/dev/null; }
 
 auth
 curl -s -m10 -b "$J" -X POST "$BASE/api/diagnostics/clear" >/dev/null

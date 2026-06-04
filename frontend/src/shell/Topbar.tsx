@@ -41,12 +41,22 @@ interface Props {
 export function Topbar({ pageId, role, me }: Props) {
   const navigate = useNavigate();
   const logout = useLogout();
+  const { t } = useTranslation();
   const crumbs = CRUMBS[pageId] ?? ["Maugood", pageId];
 
   const onLogout = () => {
     logout.mutate(undefined, {
       onSettled: () => navigate("/login", { replace: true }),
     });
+  };
+
+  // Per-token translation — the raw English token is the i18n key under
+  // ``nav.breadcrumbs``. Missing keys fall through to the raw token so
+  // any new CRUMB entry still renders something readable.
+  const translateCrumb = (token: string): string => {
+    const key = `nav.breadcrumbs.${token}`;
+    const out = t(key);
+    return out === key ? token : out;
   };
 
   return (
@@ -63,7 +73,7 @@ export function Topbar({ pageId, role, me }: Props) {
                 <Icon name="chevronRight" size={11} />
               </span>
             )}
-            {c}
+            {translateCrumb(c)}
           </span>
         ))}
       </div>

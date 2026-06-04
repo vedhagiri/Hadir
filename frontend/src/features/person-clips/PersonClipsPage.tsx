@@ -6840,8 +6840,11 @@ function UseCaseResultSection({
   // unknowns don't show up in the drilldown.
   focusEmployeeId?: number | null;
 }) {
+  const { t } = useTranslation();
   const meta = UC_META[useCase];
   if (!meta) return null;
+  const ucLabel = t(`personClips.uc.${useCase}.label`) as string;
+  const ucMode = t(`personClips.uc.${useCase}.mode`) as string;
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   // Per-section grid pagination — 24 tiles/page lands at 4 cols × 6
   // rows in the default ``minmax(110px, 1fr)`` auto-fill grid, which
@@ -6967,10 +6970,10 @@ function UseCaseResultSection({
         </div>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>
-            {meta.label}
+            {ucLabel}
           </div>
           <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-            {meta.mode}
+            {ucMode}
           </div>
         </div>
         <span
@@ -6983,7 +6986,7 @@ function UseCaseResultSection({
             borderRadius: 999,
           }}
         >
-          {sp.label}
+          {t(`personClips.clipStatus.${status}`, { defaultValue: sp.label }) as string}
         </span>
       </div>
 
@@ -6991,7 +6994,7 @@ function UseCaseResultSection({
       {result && (status === "processing" || status === "pending") && (
         <div style={{ padding: "12px 16px" }}>
           <PhaseBar
-            label="Face extraction"
+            label={t("personClips.phase.extraction") as string}
             durationMs={extractMs}
             totalMs={totalMs}
             isActive={status === "processing" && extractMs == null}
@@ -6999,7 +7002,7 @@ function UseCaseResultSection({
             color={meta.accent}
           />
           <PhaseBar
-            label="Face matching"
+            label={t("personClips.phase.matching") as string}
             durationMs={matchMs}
             totalMs={totalMs}
             isActive={status === "processing" && extractMs != null}
@@ -7021,7 +7024,7 @@ function UseCaseResultSection({
           }}
         >
           <Kpi
-            label="Faces saved"
+            label={t("personClips.kpi.facesSaved") as string}
             // When the drawer is focused on a single employee, this
             // KPI reflects only their saved crops — clip-wide totals
             // would be misleading next to the filtered grid below.
@@ -7031,18 +7034,18 @@ function UseCaseResultSection({
                 : result.face_crop_count,
             )}
           />
-          <Kpi label="Matched" value={String(matchedCount)} accent="#15803d" />
-          <Kpi label="Unknown" value={String(unknownCount)} />
+          <Kpi label={t("personClips.kpi.matched") as string} value={String(matchedCount)} accent="#15803d" />
+          <Kpi label={t("personClips.kpi.unknown") as string} value={String(unknownCount)} />
           <Kpi
-            label="Extract"
+            label={t("personClips.kpi.extract") as string}
             value={extractMs != null ? fmtMs(extractMs) : "—"}
           />
           <Kpi
-            label="Match"
+            label={t("personClips.kpi.match") as string}
             value={matchMs != null ? fmtMs(matchMs) : "—"}
           />
           <Kpi
-            label="Total"
+            label={t("personClips.kpi.total") as string}
             value={totalMs != null ? fmtMs(totalMs) : "—"}
           />
         </div>
@@ -7058,7 +7061,7 @@ function UseCaseResultSection({
             textAlign: "center",
           }}
         >
-          Loading face crops…
+          {t("personClips.detail.loadingCrops") as string}
         </div>
       )}
       {!loading && result && ordered.length === 0 && (
@@ -7070,7 +7073,7 @@ function UseCaseResultSection({
             textAlign: "center",
           }}
         >
-          No face crops saved for this run.
+          {t("personClips.detail.noCropsSaved") as string}
         </div>
       )}
       {!loading && !result && (
@@ -7082,8 +7085,7 @@ function UseCaseResultSection({
             textAlign: "center",
           }}
         >
-          Not yet processed for {meta.label}. Right-click the clip card
-          or use Reprocess to run.
+          {t("personClips.detail.notProcessed", { label: ucLabel }) as string}
         </div>
       )}
 
@@ -7118,8 +7120,8 @@ function UseCaseResultSection({
           crops={lightboxCrops}
           startIndex={lightboxIndex}
           onClose={() => setLightboxIndex(null)}
-          ucLabel={meta.label}
-          ucMode={meta.mode}
+          ucLabel={ucLabel}
+          ucMode={ucMode}
           ucAccent={meta.accent}
         />
       )}
@@ -7196,6 +7198,7 @@ export function ClipDetailDrawer({
   onClose: () => void;
   focusEmployeeId?: number | null | undefined;
 }) {
+  const { t } = useTranslation();
   const [showReprocessForm, setShowReprocessForm] = useState(false);
   // Empty by default; seeded from the actual processing-results when
   // the form opens (see ``openReprocessForm`` below).
@@ -7352,12 +7355,14 @@ export function ClipDetailDrawer({
         {/* Header */}
         <div className="drawer-head">
           <div>
-            <div style={{ fontSize: 15, fontWeight: 600 }}>Clip #{clip.id}</div>
+            <div style={{ fontSize: 15, fontWeight: 600 }}>
+              {t("personClips.detail.clipTitle", { id: clip.id }) as string}
+            </div>
             <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 2 }}>
               {clip.camera_name} · {fmtTimestamp(clip.clip_start)}
             </div>
           </div>
-          <button className="icon-btn" aria-label="Close drawer" onClick={onClose}>
+          <button className="icon-btn" aria-label={t("personClips.detail.closeDrawer") as string} onClick={onClose}>
             <Icon name="x" size={14} />
           </button>
         </div>
@@ -7396,8 +7401,8 @@ export function ClipDetailDrawer({
               fmtDuration(clip.duration_seconds),
               fmtFileSize(clip.filesize_bytes),
               res,
-              fps !== null ? `${fps.toFixed(1)} fps` : null,
-              `${clip.frame_count} frames`,
+              fps !== null ? `${fps.toFixed(1)} ${t("personClips.detail.fps")}` : null,
+              `${clip.frame_count} ${t("personClips.detail.frames")}`,
             ]
               .filter((v): v is string => v !== null)
               .map((v) => (
@@ -7435,7 +7440,7 @@ export function ClipDetailDrawer({
                   marginBottom: 8,
                 }}
               >
-                Select use cases
+                {t("personClips.detail.selectUseCases") as string}
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
                 {(["uc1", "uc2", "uc3"] as const).map((uc) => (
@@ -7461,19 +7466,19 @@ export function ClipDetailDrawer({
                     />
                     <span style={{ fontWeight: 600 }}>{uc.toUpperCase()}</span>
                     <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>
-                      {uc === "uc1" ? "YOLO+Face" : uc === "uc2" ? "InsightFace+crops" : "InsightFace"}
+                      {t(`personClips.detail.ucShort.${uc}`) as string}
                     </span>
                   </label>
                 ))}
               </div>
               {selectedUcs.size === 0 && (
                 <div style={{ fontSize: 11, color: "var(--danger-text)", marginBottom: 8 }}>
-                  Select at least one use case.
+                  {t("personClips.detail.selectAtLeastOne") as string}
                 </div>
               )}
               {reprocess.data?.running && (
                 <div style={{ fontSize: 11, color: "var(--accent)", marginBottom: 8 }}>
-                  A reprocess is already running for this clip.
+                  {t("personClips.detail.reprocessRunning") as string}
                 </div>
               )}
               <div style={{ display: "flex", gap: 8 }}>
@@ -7483,7 +7488,7 @@ export function ClipDetailDrawer({
                   onClick={() => setShowReprocessForm(false)}
                   disabled={reprocess.isPending}
                 >
-                  Cancel
+                  {t("common.cancel") as string}
                 </button>
                 <button
                   type="button"
@@ -7491,7 +7496,7 @@ export function ClipDetailDrawer({
                   onClick={handleRunReprocess}
                   disabled={reprocess.isPending || selectedUcs.size === 0}
                 >
-                  {reprocess.isPending ? "Starting…" : "Run"}
+                  {(reprocess.isPending ? t("personClips.detail.starting") : t("personClips.detail.run")) as string}
                 </button>
               </div>
             </div>
@@ -7513,10 +7518,10 @@ export function ClipDetailDrawer({
                 marginBottom: 10,
               }}
             >
-              Use Case Results
+              {t("personClips.detail.useCaseResults") as string}
             </div>
             {processingResults.isLoading && (
-              <div className="text-sm text-dim">Loading…</div>
+              <div className="text-sm text-dim">{t("common.loading") as string}</div>
             )}
             <UseCaseResultSection
               useCase="uc1"
@@ -7548,7 +7553,7 @@ export function ClipDetailDrawer({
         {/* Footer */}
         <div className="drawer-foot">
           <button type="button" className="btn" onClick={onClose}>
-            Close
+            {t("common.close") as string}
           </button>
           {!showReprocessForm && (
             <button
@@ -7557,7 +7562,7 @@ export function ClipDetailDrawer({
               style={{ display: "flex", alignItems: "center", gap: 6 }}
               onClick={openReprocessForm}
             >
-              <Icon name="refresh" size={12} /> Reprocess clip
+              <Icon name="refresh" size={12} /> {t("personClips.detail.reprocessClip") as string}
             </button>
           )}
         </div>

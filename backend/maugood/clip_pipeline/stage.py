@@ -57,6 +57,11 @@ class WorkerSlot:
     # Wall-clock when the current job was picked up. Lets the UI show
     # "running for 12 s" live without a separate query.
     current_job_started_at: Optional[float] = None
+    # Tenant that owns the in-flight job. Used purely for tenant-scoped
+    # redaction in ``status_snapshot`` — a tenant Admin must not see the
+    # clip-id of another tenant's in-flight job (Issue #2, cross-tenant
+    # leak via the process-global stage singletons). None when idle.
+    current_job_tenant_id: int | None = None
 
 
 @dataclass
@@ -181,6 +186,9 @@ class StageQueue(Generic[T]):
                 slot.busy = True
                 slot.current_job = _describe_job(job)
                 slot.current_job_started_at = start_ts
+                slot.current_job_tenant_id = getattr(
+                    getattr(job, "scope", None), "tenant_id", None
+                )
             try:
                 self._handler(job)
                 duration_ms = (time.time() - start_ts) * 1000.0
@@ -208,6 +216,7 @@ class StageQueue(Generic[T]):
                     slot.busy = False
                     slot.current_job = ""
                     slot.current_job_started_at = None
+                    slot.current_job_tenant_id = None
                 self._queue.task_done()
 
     # -- observability ------------------------------------------------
@@ -220,6 +229,10 @@ class StageQueue(Generic[T]):
                     "name": s.name,
                     "busy": s.busy,
                     "current_job": s.current_job,
+                    # Tenant of the in-flight job — consumed by
+                    # ``status_snapshot`` to redact cross-tenant detail,
+                    # then stripped before the API response.
+                    "current_job_tenant_id": s.current_job_tenant_id,
                     "running_for_s": (
                         round(now - s.current_job_started_at, 2)
                         if s.busy and s.current_job_started_at is not None

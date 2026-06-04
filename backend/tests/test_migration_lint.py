@@ -46,6 +46,17 @@ _WHITELIST: frozenset[str] = frozenset(
         # the global tenants registry must be referenced cross-schema
         # from every per-tenant table.
         "0037_person_clips.py",
+        # 0048 adds clip_processing_results with the same FK target to
+        # public.tenants.id as 0037 — the sanctioned cross-schema
+        # reference to the global registry, not an authoring shortcut.
+        "0048_person_clips_pipeline_metadata.py",
+        # 0063 / 0064 resolve the current schema's tenant_id by reading
+        # the global registry (`SELECT id FROM public.tenants WHERE
+        # schema_name = :schema`) to seed escalation reason-categories.
+        # The lookup of the global table is legitimate; the rest of each
+        # migration is properly {schema}-parameterised.
+        "0063_escalation_requests.py",
+        "0064_escalation_categories_extra.py",
     }
 )
 

@@ -116,6 +116,30 @@ def _summary_to_dict(summary) -> dict:
     }
 
 
+def _scope_worker_views(workers: list[dict], viewer_tenant_id: int) -> list[dict]:
+    """Tenant-scope the per-worker view for ``status_snapshot`` (Issue #2).
+
+    The stage workers are process-global and may be mid-flight on a job
+    belonging to ANY tenant. For a tenant-scoped Pipeline Monitor request
+    we must not expose another tenant's job identifier (``current_job``
+    carries a concrete ``clip #<id>``). For each worker:
+
+      * if it's busy on another tenant's job → redact ``current_job`` to
+        ``""`` (utilisation/health stay visible, the clip-id does not);
+      * always strip the internal ``current_job_tenant_id`` key so it
+        never reaches the API response.
+    """
+
+    scoped: list[dict] = []
+    for w in workers:
+        owner = w.get("current_job_tenant_id")
+        out = {k: v for k, v in w.items() if k != "current_job_tenant_id"}
+        if owner is not None and owner != viewer_tenant_id:
+            out["current_job"] = ""
+        scoped.append(out)
+    return scoped
+
+
 class ClipPipeline:
     """Process-wide singleton — see module docstring."""
 
@@ -317,7 +341,7 @@ class ClipPipeline:
                 "in_flight": s.in_flight if s else 0,
                 "lifetime_processed": s.lifetime_processed if s else 0,
                 "lifetime_failed": s.lifetime_failed if s else 0,
-                "workers": s.workers if s else [],
+                "workers": _scope_worker_views(s.workers, tenant_id) if s else [],
             }
             cropping_by_uc[uc] = block
             agg_q += block["queue_depth"]
@@ -346,7 +370,10 @@ class ClipPipeline:
                 "lifetime_failed": (
                     match_stats.lifetime_failed if match_stats else 0
                 ),
-                "workers": match_stats.workers if match_stats else [],
+                "workers": (
+                    _scope_worker_views(match_stats.workers, tenant_id)
+                    if match_stats else []
+                ),
             },
             "batches": self._tracker.snapshot(tenant_id),
             "config": {

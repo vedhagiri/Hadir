@@ -15,6 +15,7 @@
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 
 import { api } from "../../api/client";
 
@@ -61,20 +62,6 @@ interface EventRow {
   metrics: FpsDropMetrics;
 }
 
-const CATEGORY_LABEL: Record<string, string> = {
-  delivery_pacing: "Stream delivery",
-  clip_encode: "Clip encoding",
-  preview_encode: "Preview encoding",
-  detection: "Detection",
-  decode: "Decode / read",
-  queue_backlog: "Queue backlog",
-  cpu_saturation: "CPU saturation",
-  memory_pressure: "Memory pressure",
-  rtsp_reconnect: "RTSP reconnect",
-  contention: "CPU contention",
-  unknown: "Unknown",
-};
-
 const CATEGORY_COLOUR: Record<string, string> = {
   delivery_pacing: "#0369a1",
   clip_encode: "#b45309",
@@ -113,6 +100,13 @@ function pct(v: number | null | undefined): string {
 
 export function LiveCaptureDiagnosticsPage() {
   const qc = useQueryClient();
+  const { t } = useTranslation();
+
+  const categoryLabel = (cat: string): string => {
+    const key = `liveDiagnostics.categories.${cat}`;
+    const out = t(key);
+    return out === key ? cat : out;
+  };
 
   const state = useQuery<State>({
     queryKey: ["lc-diagnostics", "state"],
@@ -168,12 +162,9 @@ export function LiveCaptureDiagnosticsPage() {
 
   return (
     <div style={{ padding: "24px", maxWidth: 980 }}>
-      <h1 style={{ marginBottom: 4 }}>Live Capture Diagnostics</h1>
+      <h1 style={{ marginBottom: 4 }}>{t("liveDiagnostics.title")}</h1>
       <p style={{ color: "var(--muted-text, #64748b)", marginTop: 0 }}>
-        Records an event <strong>only when the delivered feed FPS drops
-        below the camera's healthy rate</strong> (≈ 92% of native, e.g.
-        &lt; 23 fps for a 25 fps camera). A healthy feed logs nothing.
-        Each drop captures the full cause snapshot below.
+        {t("liveDiagnostics.subtitle")}
       </p>
 
       {/* Controls */}
@@ -196,7 +187,9 @@ export function LiveCaptureDiagnosticsPage() {
             color: enabled ? "#047857" : "#64748b",
           }}
         >
-          {enabled ? "● Monitoring" : "○ Not monitoring"}
+          {enabled
+            ? t("liveDiagnostics.statusOn")
+            : t("liveDiagnostics.statusOff")}
         </span>
         {enabled ? (
           <button
@@ -204,7 +197,7 @@ export function LiveCaptureDiagnosticsPage() {
             onClick={() => stop.mutate()}
             disabled={stop.isPending}
           >
-            Stop monitoring
+            {t("liveDiagnostics.stop")}
           </button>
         ) : (
           <button
@@ -212,7 +205,7 @@ export function LiveCaptureDiagnosticsPage() {
             onClick={() => start.mutate()}
             disabled={start.isPending}
           >
-            Start monitoring
+            {t("liveDiagnostics.start")}
           </button>
         )}
         <button
@@ -220,22 +213,24 @@ export function LiveCaptureDiagnosticsPage() {
           onClick={() => clearLogs.mutate()}
           disabled={clearLogs.isPending}
         >
-          Clear log
+          {t("liveDiagnostics.clear")}
         </button>
         {state.data && (
           <span style={{ color: "#64748b", fontSize: 13 }}>
-            Session: {fmtDuration(state.data.session_started_ago_s)} ·{" "}
-            {rows.length} FPS-drop event{rows.length === 1 ? "" : "s"}
+            {t("liveDiagnostics.session", {
+              duration: fmtDuration(state.data.session_started_ago_s),
+              count: rows.length,
+            })}
           </span>
         )}
         {cameraOptions.length > 1 && (
           <select
             value={cameraFilter}
             onChange={(e) => setCameraFilter(e.target.value)}
-            style={{ marginLeft: "auto" }}
-            aria-label="Filter by camera"
+            style={{ marginInlineStart: "auto" }}
+            aria-label={t("liveDiagnostics.filterByCamera")}
           >
-            <option value="">All cameras</option>
+            <option value="">{t("liveDiagnostics.allCameras")}</option>
             {cameraOptions.map(([id, name]) => (
               <option key={id} value={id}>
                 {name} (CAM-{id})
@@ -247,16 +242,13 @@ export function LiveCaptureDiagnosticsPage() {
 
       {!enabled && (
         <p style={{ color: "#b45309" }}>
-          Monitoring is off — click <strong>Start monitoring</strong>, then
-          open the Live Capture page and watch the camera for a few minutes
-          during real activity. Drops are recorded here as they happen.
+          {t("liveDiagnostics.hintOff")}
         </p>
       )}
 
       {enabled && rows.length === 0 && (
         <p style={{ color: "#047857" }}>
-          ✓ No FPS drops recorded yet — the feed is delivering at or above
-          threshold. Keep the camera in view; any drop will appear here.
+          {t("liveDiagnostics.hintEmpty")}
         </p>
       )}
 
@@ -297,32 +289,37 @@ export function LiveCaptureDiagnosticsPage() {
                     borderRadius: 999,
                   }}
                 >
-                  {CATEGORY_LABEL[cat] ?? cat}
+                  {categoryLabel(cat)}
                 </span>
               </div>
 
               <div style={{ color: "#475569", margin: "2px 0 8px" }}>
-                Camera: <strong>{e.camera_name ?? "?"}</strong> (CAM-
+                {t("liveDiagnostics.camera")}:{" "}
+                <strong>{e.camera_name ?? "?"}</strong> (CAM-
                 {e.camera_id})
               </div>
 
               <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>
-                FPS dropped: {(m.previous_fps ?? 0).toFixed(0)} →{" "}
+                {t("liveDiagnostics.fpsDropped")}:{" "}
+                {(m.previous_fps ?? 0).toFixed(0)} →{" "}
                 {(m.current_fps ?? 0).toFixed(0)}
                 <span
                   style={{ fontSize: 12, fontWeight: 400, color: "#94a3b8" }}
                 >
-                  {"  "}(threshold {(m.threshold ?? 0).toFixed(0)} fps · slot{" "}
-                  {m.slot ?? "?"})
+                  {"  "}
+                  {t("liveDiagnostics.thresholdSlot", {
+                    threshold: (m.threshold ?? 0).toFixed(0),
+                    slot: m.slot ?? "?",
+                  })}
                 </span>
               </div>
 
               {m.causes && m.causes.length > 0 && (
                 <div style={{ marginBottom: 10 }}>
                   <div style={{ fontWeight: 600, color: "#334155" }}>
-                    Possible cause:
+                    {t("liveDiagnostics.possibleCause")}:
                   </div>
-                  <ul style={{ margin: "4px 0 0", paddingLeft: 20 }}>
+                  <ul style={{ margin: "4px 0 0", paddingInlineStart: 20 }}>
                     {m.causes.map((c, j) => (
                       <li key={j} style={{ color: "#475569" }}>
                         {c}
@@ -344,17 +341,17 @@ export function LiveCaptureDiagnosticsPage() {
                   paddingTop: 8,
                 }}
               >
-                <span>Reader FPS: <b>{(m.fps_reader ?? 0).toFixed(0)}</b></span>
-                <span>Analyzer FPS: <b>{(m.fps_analyzer ?? 0).toFixed(1)}</b></span>
-                <span>Live persons: <b>{m.live_person_count ?? 0}</b></span>
-                <span>CPU: <b>{pct(m.cpu_percent)}</b></span>
-                <span>Memory: <b>{pct(m.memory_percent)}</b></span>
-                <span>Queue depth: <b>{m.queue_depth ?? 0}</b></span>
-                <span>Reconnects (window): <b>{m.reconnect_delta ?? 0}</b></span>
-                <span>Read: <b>{ms(m.t_read_ms)}</b></span>
-                <span>Preview: <b>{ms(m.t_preview_ms)}</b></span>
-                <span>Clip: <b>{ms(m.t_clip_ms)}</b></span>
-                <span>Detection: <b>{ms(m.t_detection_ms)}</b></span>
+                <span>{t("liveDiagnostics.readerFps")}: <b>{(m.fps_reader ?? 0).toFixed(0)}</b></span>
+                <span>{t("liveDiagnostics.analyzerFps")}: <b>{(m.fps_analyzer ?? 0).toFixed(1)}</b></span>
+                <span>{t("liveDiagnostics.livePersons")}: <b>{m.live_person_count ?? 0}</b></span>
+                <span>{t("liveDiagnostics.cpu")}: <b>{pct(m.cpu_percent)}</b></span>
+                <span>{t("liveDiagnostics.memory")}: <b>{pct(m.memory_percent)}</b></span>
+                <span>{t("liveDiagnostics.queueDepth")}: <b>{m.queue_depth ?? 0}</b></span>
+                <span>{t("liveDiagnostics.reconnects")}: <b>{m.reconnect_delta ?? 0}</b></span>
+                <span>{t("liveDiagnostics.read")}: <b>{ms(m.t_read_ms)}</b></span>
+                <span>{t("liveDiagnostics.preview")}: <b>{ms(m.t_preview_ms)}</b></span>
+                <span>{t("liveDiagnostics.clip")}: <b>{ms(m.t_clip_ms)}</b></span>
+                <span>{t("liveDiagnostics.detection")}: <b>{ms(m.t_detection_ms)}</b></span>
               </div>
             </div>
           );

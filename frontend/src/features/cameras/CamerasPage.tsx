@@ -5,6 +5,7 @@
 // The RTSP URL never appears in the UI — we show ``rtsp_host`` only.
 
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { extractApiError } from "../../api/client";
 import { ModalShell } from "../../components/DrawerShell";
@@ -24,6 +25,7 @@ import type { WorkerStats } from "../operations/types";
 import type { Camera } from "./types";
 
 export function CamerasPage() {
+  const { t } = useTranslation();
   const list = useCameras();
   const workers = useWorkers();
   const del = useDeleteCamera();
@@ -129,12 +131,12 @@ export function CamerasPage() {
     <>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Cameras</h1>
+          <h1 className="page-title">{t("cameras.page.title")}</h1>
           <p className="page-sub">
             {list.data
-              ? `${list.data.items.length} camera${list.data.items.length === 1 ? "" : "s"}`
+              ? t("cameras.page.sub", { count: list.data.items.length })
               : "—"}
-            {" · on-demand preview only·"}
+            {" "}{t("cameras.page.subSuffix")}
           </p>
         </div>
         <div className="page-actions">
@@ -144,24 +146,24 @@ export function CamerasPage() {
             disabled={exporting || items.length === 0}
             title={
               selected.size > 0
-                ? `Export ${selected.size} selected camera(s) to JSON`
-                : "Export all cameras to JSON"
+                ? t("cameras.page.exportTitleSelected", { n: selected.size })
+                : t("cameras.page.exportTitleAll")
             }
           >
             <Icon name="download" size={12} />
             {exporting
-              ? "Exporting…"
+              ? t("cameras.page.exporting")
               : selected.size > 0
-                ? `Export selected (${selected.size})`
-                : "Export all"}
+                ? t("cameras.page.exportSelected", { n: selected.size })
+                : t("cameras.page.exportAll")}
           </button>
           <button className="btn" onClick={() => setShowImport(true)}>
             <Icon name="upload" size={12} />
-            Import
+            {t("cameras.page.import")}
           </button>
           <button className="btn btn-primary" onClick={openAdd}>
             <Icon name="plus" size={12} />
-            Add camera
+            {t("cameras.page.addCamera")}
           </button>
         </div>
       </div>
@@ -184,9 +186,9 @@ export function CamerasPage() {
 
       <div className="card">
         <div className="card-head">
-          <h3 className="card-title">All cameras</h3>
+          <h3 className="card-title">{t("cameras.page.allCameras")}</h3>
           <div className="text-xs text-dim">
-            RTSP credentials are encrypted at rest and never shown in the UI.
+            {t("cameras.page.rtspNotice")}
           </div>
         </div>
         <table className="table">
@@ -197,31 +199,31 @@ export function CamerasPage() {
                   type="checkbox"
                   checked={allSelected}
                   onChange={toggleAll}
-                  aria-label="Select all cameras"
-                  title="Select all"
+                  aria-label={t("cameras.page.selectAllAria")}
+                  title={t("cameras.page.selectAllTitle")}
                   disabled={items.length === 0}
                 />
               </th>
-              <th style={{ width: 96 }}>ID</th>
-              <th style={{ width: 52 }}>Logo</th>
-              <th>Name</th>
-              <th>Zone</th>
-              <th>Location</th>
-              <th>Host</th>
-              <th style={{ width: 90 }}>Status</th>
-              <th style={{ width: 110 }}>Events 24h</th>
-              <th>Worker</th>
-              <th>Display</th>
-              <th>Detection</th>
-              <th>Clip Saving</th>
-              <th style={{ textAlign: "right" }}>Actions</th>
+              <th style={{ width: 96 }}>{t("cameras.page.colId")}</th>
+              <th style={{ width: 52 }}>{t("cameras.page.colLogo")}</th>
+              <th>{t("cameras.page.colName")}</th>
+              <th>{t("cameras.page.colZone")}</th>
+              <th>{t("cameras.page.colLocation")}</th>
+              <th>{t("cameras.page.colHost")}</th>
+              <th style={{ width: 90 }}>{t("cameras.page.colStatus")}</th>
+              <th style={{ width: 110 }}>{t("cameras.page.colEvents24h")}</th>
+              <th>{t("cameras.page.colWorker")}</th>
+              <th>{t("cameras.page.colDisplay")}</th>
+              <th>{t("cameras.page.colDetection")}</th>
+              <th>{t("cameras.page.colClipSaving")}</th>
+              <th style={{ textAlign: "right" }}>{t("cameras.page.colActions")}</th>
             </tr>
           </thead>
           <tbody>
             {list.isLoading && (
               <tr>
                 <td colSpan={14} className="text-sm text-dim" style={{ padding: 16 }}>
-                  Loading…
+                  {t("cameras.page.loading")}
                 </td>
               </tr>
             )}
@@ -232,7 +234,7 @@ export function CamerasPage() {
                   className="text-sm"
                   style={{ padding: 16, color: "var(--danger-text)" }}
                 >
-                  Could not load cameras.
+                  {t("cameras.page.loadError")}
                 </td>
               </tr>
             )}
@@ -252,7 +254,7 @@ export function CamerasPage() {
                     type="checkbox"
                     checked={selected.has(cam.id)}
                     onChange={() => toggleOne(cam.id)}
-                    aria-label={`Select ${cam.name}`}
+                    aria-label={t("cameras.page.selectCameraAria", { name: cam.name })}
                   />
                 </td>
                 <td className="mono text-sm" style={{ fontWeight: 600 }}>
@@ -288,28 +290,28 @@ export function CamerasPage() {
                   <Switch
                     checked={cam.worker_enabled}
                     onChange={() => toggleWorkerEnabled(cam)}
-                    title="Click to toggle worker on/off"
+                    title={t("cameras.page.switchWorkerTitle")}
                   />
                 </td>
                 <td>
                   <Switch
                     checked={cam.display_enabled}
                     onChange={() => toggleDisplayEnabled(cam)}
-                    title="Click to toggle display on/off"
+                    title={t("cameras.page.switchDisplayTitle")}
                   />
                 </td>
                 <td>
                   <Switch
                     checked={cam.detection_enabled}
                     onChange={() => toggleDetectionEnabled(cam)}
-                    title="Click to toggle face detection on/off (worker keeps streaming)"
+                    title={t("cameras.page.switchDetectionTitle")}
                   />
                 </td>
                 <td>
                   <Switch
                     checked={cam.clip_recording_enabled}
                     onChange={() => toggleClipRecordingEnabled(cam)}
-                    title="Click to toggle clip saving on/off (detection keeps running)"
+                    title={t("cameras.page.switchClipTitle")}
                   />
                 </td>
                 <td style={{ textAlign: "right" }}>
@@ -325,7 +327,7 @@ export function CamerasPage() {
             {list.data && list.data.items.length === 0 && !list.isLoading && (
               <tr>
                 <td colSpan={14} className="text-sm text-dim" style={{ padding: 16 }}>
-                  No cameras yet. Add one to see its preview frame.
+                  {t("cameras.page.empty")}
                 </td>
               </tr>
             )}
@@ -436,27 +438,24 @@ function StatusDot({
   camera: Camera;
   worker: WorkerStats | undefined;
 }) {
-  // Worker disabled → grey, regardless of any stale row state.
+  const { t } = useTranslation();
+
   if (!camera.worker_enabled) {
     return (
       <Pill
         color="var(--text-tertiary)"
-        label="Off"
-        title="Worker is disabled"
+        label={t("cameras.status.off")}
+        title={t("cameras.status.offTitle")}
       />
     );
   }
 
-  // Worker enabled but the operations endpoint hasn't seen one yet.
-  // Either the reconcile tick (every 2 s) hasn't fired, or the
-  // workers query is still loading. Treat as starting rather than
-  // failed.
   if (!worker) {
     return (
       <Pill
         color="var(--warning)"
-        label="Starting"
-        title="Worker enabled — waiting for capture manager"
+        label={t("cameras.status.starting")}
+        title={t("cameras.status.startingTitle")}
       />
     );
   }
@@ -468,11 +467,11 @@ function StatusDot({
         return (
           <Pill
             color="var(--success)"
-            label="Online"
+            label={t("cameras.status.online")}
             title={
               worker.fps_reader
-                ? `Reading ${worker.fps_reader} fps`
-                : "Worker running"
+                ? t("cameras.status.readingFps", { fps: worker.fps_reader })
+                : t("cameras.status.workerRunning")
             }
           />
         );
@@ -481,16 +480,16 @@ function StatusDot({
         return (
           <Pill
             color="var(--warning)"
-            label="Degraded"
-            title={worker.stages.rtsp.detail || "RTSP intermittent"}
+            label={t("cameras.status.degraded")}
+            title={worker.stages.rtsp.detail || t("cameras.status.rtspIntermittent")}
           />
         );
       }
       return (
         <Pill
           color="var(--danger)"
-          label="Offline"
-          title={worker.stages.rtsp.detail || "RTSP not reading"}
+          label={t("cameras.status.offline")}
+          title={worker.stages.rtsp.detail || t("cameras.status.rtspNotReading")}
         />
       );
     }
@@ -498,24 +497,24 @@ function StatusDot({
       return (
         <Pill
           color="var(--warning)"
-          label="Starting"
-          title="Worker is starting"
+          label={t("cameras.status.starting")}
+          title={t("cameras.status.startingTitle")}
         />
       );
     case "reconnecting":
       return (
         <Pill
           color="var(--warning)"
-          label="Reconnecting"
-          title={worker.stages.rtsp.detail || "Trying to reconnect"}
+          label={t("cameras.status.reconnecting")}
+          title={worker.stages.rtsp.detail || t("cameras.status.tryingToReconnect")}
         />
       );
     case "failed":
       return (
         <Pill
           color="var(--danger)"
-          label="Failed"
-          title={worker.stages.rtsp.detail || "Worker failed"}
+          label={t("cameras.status.failed")}
+          title={worker.stages.rtsp.detail || t("cameras.status.workerFailed")}
         />
       );
     case "stopped":
@@ -523,8 +522,8 @@ function StatusDot({
       return (
         <Pill
           color="var(--danger)"
-          label="Offline"
-          title={worker.stages.rtsp.detail || "Worker stopped"}
+          label={t("cameras.status.offline")}
+          title={worker.stages.rtsp.detail || t("cameras.status.workerStopped")}
         />
       );
   }
@@ -583,6 +582,7 @@ function RowActionsMenu({
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
@@ -623,8 +623,8 @@ function RowActionsMenu({
         }}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="Row actions"
-        title="Row actions"
+        aria-label={t("cameras.rowActions.aria")}
+        title={t("cameras.rowActions.aria")}
       >
         <Icon name="moreVertical" size={14} />
       </button>
@@ -645,11 +645,11 @@ function RowActionsMenu({
             padding: 4,
           }}
         >
-          <MenuItem icon="activity" label="Preview" onClick={pick(onPreview)} />
-          <MenuItem icon="settings" label="Edit" onClick={pick(onEdit)} />
+          <MenuItem icon="activity" label={t("cameras.rowActions.preview")} onClick={pick(onPreview)} />
+          <MenuItem icon="settings" label={t("cameras.rowActions.edit")} onClick={pick(onEdit)} />
           <MenuItem
             icon="trash"
-            label="Delete"
+            label={t("cameras.rowActions.delete")}
             onClick={pick(onDelete)}
             danger
           />
@@ -718,6 +718,7 @@ function DeleteConfirmModal({
   onConfirm: () => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <ModalShell onClose={onClose}>
       <div
@@ -765,17 +766,14 @@ function DeleteConfirmModal({
               <Icon name="trash" size={14} />
             </div>
             <div style={{ fontSize: 15, fontWeight: 600 }}>
-              Delete camera
+              {t("cameras.deleteModal.title")}
             </div>
           </div>
           <div
             className="text-sm text-dim"
             style={{ marginBottom: 16, lineHeight: 1.5 }}
           >
-            Permanently delete <strong style={{ color: "var(--text)" }}>{camera.name}</strong>?
-            The capture worker for this camera will stop and its
-            recording history stays in place. This action is audited
-            but cannot be reversed.
+            {t("cameras.deleteModal.body", { name: camera.name })}
           </div>
           <div
             style={{
@@ -790,7 +788,7 @@ function DeleteConfirmModal({
               onClick={onClose}
               disabled={busy}
             >
-              Cancel
+              {t("common.cancel")}
             </button>
             <button
               type="button"
@@ -799,7 +797,7 @@ function DeleteConfirmModal({
               onClick={onConfirm}
               disabled={busy}
             >
-              {busy ? "Deleting…" : "Delete camera"}
+              {busy ? t("cameras.deleteModal.deleting") : t("cameras.deleteModal.confirm")}
             </button>
           </div>
         </div>

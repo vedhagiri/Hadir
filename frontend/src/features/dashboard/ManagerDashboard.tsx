@@ -4,6 +4,7 @@
 // require_department + P10 router). Frontend never widens.
 
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 
 import { useMe } from "../../auth/AuthProvider";
 import { useAttendance } from "../attendance/hooks";
@@ -17,6 +18,7 @@ function todayIso(): string {
 }
 
 export function ManagerDashboard() {
+  const { t } = useTranslation();
   const me = useMe();
   // Backend auto-scopes: passing no department_id makes the union of
   // the manager's assigned departments. Trying to widen to a
@@ -44,10 +46,12 @@ export function ManagerDashboard() {
       <div className="page-header">
         <div>
           <h1 className="page-title">
-            {me.data ? `Team today, ${firstName(me.data.full_name)}` : "Team"}
+            {me.data
+              ? t("dashboard.manager.greeting", { name: firstName(me.data.full_name) })
+              : t("dashboard.manager.title")}
           </h1>
           <p className="page-sub">
-            Manager · scoped to your assigned department(s)
+            {t("dashboard.manager.subtitle")}
           </p>
         </div>
       </div>
@@ -62,51 +66,50 @@ export function ManagerDashboard() {
             color: "var(--warning-text)",
           }}
         >
-          You are not a member of any department yet. Ask an Admin to
-          assign you, then refresh this page.
+          {t("dashboard.manager.noDepartments")}
         </div>
       )}
 
       <div className="grid grid-4" style={{ marginBottom: 16 }}>
-        <StatCard label="Team records" value={String(summary.total)} icon="users" />
-        <StatCard label="On time" value={String(summary.onTime)} icon="check" />
-        <StatCard label="Late" value={String(summary.late)} icon="clock" />
-        <StatCard label="Absent" value={String(summary.absent)} icon="user" />
+        <StatCard label={t("dashboard.manager.stats.records")} value={String(summary.total)} icon="users" />
+        <StatCard label={t("dashboard.manager.stats.onTime")} value={String(summary.onTime)} icon="check" />
+        <StatCard label={t("dashboard.manager.stats.late")} value={String(summary.late)} icon="clock" />
+        <StatCard label={t("dashboard.manager.stats.absent")} value={String(summary.absent)} icon="user" />
       </div>
 
       <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", marginBottom: 16 }}>
         <StatusBreakdown
-          title="Status breakdown · today"
+          title={t("dashboard.manager.breakdownTitle")}
           caption={today.data?.date ?? ""}
           slices={[
-            { label: "On time", value: summary.onTime, tone: "success" },
-            { label: "Late", value: summary.late, tone: "warning" },
-            { label: "Absent", value: summary.absent, tone: "danger" },
-            { label: "Overtime", value: summary.overtime, tone: "accent" },
+            { label: t("dashboard.manager.stats.onTime"), value: summary.onTime, tone: "success" },
+            { label: t("dashboard.manager.stats.late"), value: summary.late, tone: "warning" },
+            { label: t("dashboard.manager.stats.absent"), value: summary.absent, tone: "danger" },
+            { label: t("dashboard.manager.stats.overtime"), value: summary.overtime, tone: "accent" },
           ]}
         />
 
         <div className="card">
           <div className="card-head">
-            <h3 className="card-title">Team roster · today</h3>
+            <h3 className="card-title">{t("dashboard.manager.rosterTitle")}</h3>
             <span className="text-xs text-dim">
-              {today.data ? `${today.data.items.length} record(s)` : ""}
+              {today.data ? t("dashboard.manager.recordCount", { count: today.data.items.length }) : ""}
             </span>
           </div>
           <table className="table">
             <thead>
               <tr>
-                <th>Employee</th>
-                <th>In</th>
-                <th>Out</th>
-                <th>Flags</th>
+                <th>{t("dashboard.manager.cols.employee")}</th>
+                <th>{t("dashboard.manager.cols.in")}</th>
+                <th>{t("dashboard.manager.cols.out")}</th>
+                <th>{t("dashboard.manager.cols.flags")}</th>
               </tr>
             </thead>
             <tbody>
               {today.isLoading && (
                 <tr>
                   <td colSpan={4} className="text-sm text-dim" style={{ padding: 12 }}>
-                    Loading…
+                    {t("dashboard.common.loading")}
                   </td>
                 </tr>
               )}
@@ -126,8 +129,7 @@ export function ManagerDashboard() {
               {today.data && today.data.items.length === 0 && !today.isLoading && (
                 <tr>
                   <td colSpan={4} className="text-sm text-dim" style={{ padding: 12 }}>
-                    No records yet. Daily Attendance will fill in as
-                    detections come through.
+                    {t("dashboard.manager.empty")}
                   </td>
                 </tr>
               )}

@@ -1,6 +1,7 @@
 // Settings → Report Schedules. Admin-managed list; HR can read.
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../api/client";
 import { SettingsTabs } from "../settings/SettingsTabs";
@@ -21,6 +22,7 @@ import type {
 } from "./types";
 
 export function SchedulesPage() {
+  const { t } = useTranslation();
   const schedules = useReportSchedules();
   const create = useCreateSchedule();
   const patch = usePatchSchedule();
@@ -39,11 +41,17 @@ export function SchedulesPage() {
       const run = await runNow.mutateAsync(s.id);
       setInfo(
         run.status === "succeeded"
-          ? `Sent · ${run.recipients_delivered_to.length} recipient(s) · delivery=${run.delivery_mode}`
-          : `Run ${run.status}: ${run.error_message ?? "see report-runs log"}`,
+          ? t("schedules.runSent", {
+              count: run.recipients_delivered_to.length,
+              delivery: run.delivery_mode,
+            })
+          : t("schedules.runStatus", {
+              status: run.status,
+              detail: run.error_message ?? t("schedules.seeRunsLog"),
+            }),
       );
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Run failed.");
+      setError(err instanceof ApiError ? err.message : t("schedules.errRun"));
     }
   };
 
@@ -52,11 +60,7 @@ export function SchedulesPage() {
   };
 
   const onDelete = (s: ReportSchedule) => {
-    if (
-      window.confirm(
-        `Delete schedule '${s.name}'? Past runs stay in the audit log; future deliveries stop.`,
-      )
-    ) {
+    if (window.confirm(t("schedules.confirmDelete", { name: s.name }))) {
       remove.mutate(s.id);
     }
   };
@@ -80,7 +84,7 @@ export function SchedulesPage() {
               fontWeight: 400,
             }}
           >
-            Report schedules
+            {t("schedules.title")}
           </h1>
           <p
             style={{
@@ -89,17 +93,15 @@ export function SchedulesPage() {
               fontSize: 13,
             }}
           >
-            Recurring attendance reports — Excel or PDF — emailed to
-            the recipient list. Configure email credentials in the
-            Email tab first. Files larger than the cap auto-fall back
-            to a signed-URL link valid for 7 days.
+            {t("schedules.subtitle")}
           </p>
         </div>
         <button
           className="btn btn-primary"
           onClick={() => setShowCreate((s) => !s)}
         >
-          <Icon name="plus" size={12} /> {showCreate ? "Close" : "New schedule"}
+          <Icon name="plus" size={12} />{" "}
+          {showCreate ? t("schedules.close") : t("schedules.newSchedule")}
         </button>
       </header>
 
@@ -142,12 +144,12 @@ export function SchedulesPage() {
         <table className="table">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Format</th>
-              <th>Schedule</th>
-              <th>Recipients</th>
-              <th>Last run</th>
-              <th>Next run</th>
+              <th>{t("schedules.col.name")}</th>
+              <th>{t("schedules.col.format")}</th>
+              <th>{t("schedules.col.schedule")}</th>
+              <th>{t("schedules.col.recipients")}</th>
+              <th>{t("schedules.col.lastRun")}</th>
+              <th>{t("schedules.col.nextRun")}</th>
               <th />
             </tr>
           </thead>
@@ -155,13 +157,13 @@ export function SchedulesPage() {
             {schedules.isLoading ? (
               <tr>
                 <td colSpan={7} className="text-sm text-dim">
-                  Loading…
+                  {t("schedules.loading")}
                 </td>
               </tr>
             ) : (schedules.data ?? []).length === 0 ? (
               <tr>
                 <td colSpan={7} className="text-sm text-dim">
-                  No schedules yet.
+                  {t("schedules.emptySchedules")}
                 </td>
               </tr>
             ) : (
@@ -172,7 +174,7 @@ export function SchedulesPage() {
                       {s.name}
                     </div>
                     <div className="text-xs text-dim">
-                      window {s.filter_config.window_days}d
+                      {t("schedules.windowDays", { days: s.filter_config.window_days })}
                     </div>
                   </td>
                   <td>
@@ -200,7 +202,7 @@ export function SchedulesPage() {
                         <span
                           className={`pill ${s.last_run_status === "succeeded" ? "pill-success" : "pill-warning"}`}
                         >
-                          {s.last_run_status}
+                          {t(`schedules.status.${s.last_run_status}`, s.last_run_status ?? "")}
                         </span>
                       </>
                     ) : (
@@ -218,14 +220,14 @@ export function SchedulesPage() {
                       onClick={() => void onRunNow(s)}
                       disabled={runNow.isPending}
                     >
-                      Run now
+                      {t("schedules.runNow")}
                     </button>{" "}
                     <button
                       className="btn btn-sm"
                       onClick={() => onToggleActive(s)}
                       disabled={patch.isPending}
                     >
-                      {s.active ? "Pause" : "Resume"}
+                      {s.active ? t("schedules.pause") : t("schedules.resume")}
                     </button>{" "}
                     <button
                       className="btn btn-sm"
@@ -233,7 +235,7 @@ export function SchedulesPage() {
                       disabled={remove.isPending}
                       style={{ color: "var(--danger-text)" }}
                     >
-                      Delete
+                      {t("schedules.delete")}
                     </button>
                   </td>
                 </tr>
@@ -244,25 +246,25 @@ export function SchedulesPage() {
       </div>
 
       <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <h2 style={{ fontSize: 16, margin: 0 }}>Recent runs</h2>
+        <h2 style={{ fontSize: 16, margin: 0 }}>{t("schedules.recentRunsTitle")}</h2>
         <div className="card">
           <table className="table">
             <thead>
               <tr>
-                <th>Run</th>
-                <th>Schedule</th>
-                <th>Status</th>
-                <th>Delivery</th>
-                <th>Size</th>
-                <th>Started</th>
-                <th>Finished</th>
+                <th>{t("schedules.runs.run")}</th>
+                <th>{t("schedules.runs.schedule")}</th>
+                <th>{t("schedules.runs.status")}</th>
+                <th>{t("schedules.runs.delivery")}</th>
+                <th>{t("schedules.runs.size")}</th>
+                <th>{t("schedules.runs.started")}</th>
+                <th>{t("schedules.runs.finished")}</th>
               </tr>
             </thead>
             <tbody>
               {(recentRuns.data ?? []).length === 0 ? (
                 <tr>
                   <td colSpan={7} className="text-sm text-dim">
-                    No runs yet.
+                    {t("schedules.emptyRuns")}
                   </td>
                 </tr>
               ) : (
@@ -276,7 +278,7 @@ export function SchedulesPage() {
                       <span
                         className={`pill ${r.status === "succeeded" ? "pill-success" : r.status === "failed" ? "pill-danger" : "pill-warning"}`}
                       >
-                        {r.status}
+                        {t(`schedules.status.${r.status}`, r.status)}
                       </span>
                     </td>
                     <td className="text-xs">{r.delivery_mode ?? "—"}</td>
@@ -313,6 +315,7 @@ function CreateForm({
   onCreate: (input: ReportScheduleCreateInput) => Promise<unknown>;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [name, setName] = useState("");
   const [format, setFormat] = useState<ReportFormat>("pdf");
   const [windowDays, setWindowDays] = useState(7);
@@ -330,7 +333,7 @@ function CreateForm({
       .map((s) => s.trim())
       .filter(Boolean);
     if (recipients.length === 0) {
-      setError("Pick at least one recipient.");
+      setError(t("schedules.errRecipientsRequired"));
       return;
     }
     try {
@@ -346,7 +349,7 @@ function CreateForm({
       setRecipientsText("");
       onClose();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Save failed.");
+      setError(err instanceof ApiError ? err.message : t("schedules.errSave"));
     }
   };
 
@@ -364,15 +367,15 @@ function CreateForm({
         alignItems: "end",
       }}
     >
-      <Field label="Name">
+      <Field label={t("schedules.field.name")}>
         <input
           className="input"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Weekly attendance"
+          placeholder={t("schedules.field.namePlaceholder")}
         />
       </Field>
-      <Field label="Format">
+      <Field label={t("schedules.field.format")}>
         <select
           className="input"
           value={format}
@@ -382,7 +385,7 @@ function CreateForm({
           <option value="xlsx">Excel</option>
         </select>
       </Field>
-      <Field label="Window (days)">
+      <Field label={t("schedules.field.windowDays")}>
         <input
           className="input"
           type="number"
@@ -393,7 +396,7 @@ function CreateForm({
         />
       </Field>
       <Field
-        label="Cron expression"
+        label={t("schedules.field.cron")}
         {...(cronLabel === cronExpr ? {} : { hint: cronLabel })}
       >
         <input
@@ -404,13 +407,13 @@ function CreateForm({
         />
       </Field>
       <div style={{ gridColumn: "1 / -1" }}>
-        <Field label="Recipients (comma or newline separated)">
+        <Field label={t("schedules.field.recipients")}>
           <textarea
             className="input"
             rows={2}
             value={recipientsText}
             onChange={(e) => setRecipientsText(e.target.value)}
-            placeholder="hr@company.com, manager@company.com"
+            placeholder={t("schedules.field.recipientsPlaceholder")}
             style={{ resize: "vertical" }}
           />
         </Field>
@@ -428,10 +431,10 @@ function CreateForm({
       )}
       <div style={{ gridColumn: "1 / -1", display: "flex", gap: 8 }}>
         <button type="button" className="btn" onClick={onClose}>
-          Cancel
+          {t("schedules.cancel")}
         </button>
         <button type="submit" className="btn btn-primary">
-          Save schedule
+          {t("schedules.saveSchedule")}
         </button>
       </div>
     </form>

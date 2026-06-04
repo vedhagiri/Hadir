@@ -9,12 +9,14 @@
 // from pilot P7).
 
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../api/client";
 import { SettingsTabs } from "../settings/SettingsTabs";
 import { useMyOidcConfig, usePutMyOidcConfig } from "./hooks";
 
 export function AuthenticationPage() {
+  const { t } = useTranslation();
   const cfg = useMyOidcConfig();
   const put = usePutMyOidcConfig();
 
@@ -35,14 +37,14 @@ export function AuthenticationPage() {
     }
   }, [cfg.data]);
 
-  if (cfg.isLoading) return <p>Loading authentication settings…</p>;
+  if (cfg.isLoading) return <p>{t("authPage.loading")}</p>;
   if (cfg.error)
     return (
       <p style={{ color: "var(--danger-text)" }}>
-        Couldn’t load authentication settings.
+        {t("authPage.loadFailed")}
       </p>
     );
-  if (!cfg.data) return <p>Sign in to manage authentication settings.</p>;
+  if (!cfg.data) return <p>{t("authPage.signInRequired")}</p>;
 
   const onSave = async () => {
     setServerError(null);
@@ -65,10 +67,10 @@ export function AuthenticationPage() {
         setServerError(
           typeof body?.detail === "string"
             ? body.detail
-            : `Save failed (${err.status}).`,
+            : t("authPage.errSaveStatus", { status: err.status }),
         );
       } else {
-        setServerError("Save failed.");
+        setServerError(t("authPage.errSave"));
       }
     }
   };
@@ -85,12 +87,10 @@ export function AuthenticationPage() {
             fontWeight: 400,
           }}
         >
-          Authentication
+          {t("authPage.title")}
         </h1>
         <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 13 }}>
-          Sign in with Microsoft (Entra ID OIDC). Users must already exist in
-          Maugood — Maugood does not auto-provision from claims, and roles are
-          managed only inside Maugood (BRD FR-AUTH-006).
+          {t("authPage.subtitle")}
         </p>
       </header>
 
@@ -111,8 +111,8 @@ export function AuthenticationPage() {
         }}
       >
         <Field
-          label="Entra tenant ID"
-          hint="GUID or verified domain. From Microsoft Entra admin centre → Identity → Overview."
+          label={t("authPage.fields.entraTenantId")}
+          hint={t("authPage.fields.entraTenantHint")}
         >
           <input
             type="text"
@@ -122,7 +122,7 @@ export function AuthenticationPage() {
             style={inputStyle}
           />
         </Field>
-        <Field label="Client ID" hint="The application id of your Entra app registration.">
+        <Field label={t("authPage.fields.clientId")} hint={t("authPage.fields.clientIdHint")}>
           <input
             type="text"
             value={clientId}
@@ -132,11 +132,11 @@ export function AuthenticationPage() {
           />
         </Field>
         <Field
-          label="Client secret"
+          label={t("authPage.fields.clientSecret")}
           hint={
             cfg.data.has_secret
-              ? "Stored. Type a new secret only to rotate it."
-              : "Required to enable OIDC."
+              ? t("authPage.fields.clientSecretStored")
+              : t("authPage.fields.clientSecretRequired")
           }
         >
           <input
@@ -155,12 +155,10 @@ export function AuthenticationPage() {
             checked={enabled}
             onChange={(e) => setEnabled(e.target.checked)}
           />
-          <span>Enable OIDC for this tenant</span>
+          <span>{t("authPage.enableToggle")}</span>
         </label>
         <p style={{ fontSize: 12, color: "var(--text-tertiary)", margin: 0 }}>
-          When enabled, the login page shows &ldquo;Sign in with Microsoft&rdquo; as
-          the primary action. Local password sign-in remains as a break-glass
-          fallback labelled &ldquo;Use local account&rdquo;.
+          {t("authPage.enableHint")}
         </p>
 
         {serverError && (
@@ -194,7 +192,7 @@ export function AuthenticationPage() {
               fontSize: 13,
             }}
           >
-            {put.isPending ? "Saving…" : "Save changes"}
+            {put.isPending ? t("authPage.saving") : t("authPage.saveChanges")}
           </button>
         </div>
       </form>

@@ -9,6 +9,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { api } from "../../api/client";
 import { AnomalyInfoBanner } from "../../components/AnomalyNote";
@@ -184,20 +185,23 @@ function fmtBytes(bytes: number): string {
 // "Processing" wins over "Processed" when at least one UC is still in
 // flight (e.g. UC1 completed, UC2 still cropping) so the operator sees
 // the live state, not the partial result.
-function processingStatusLabel(c: PersonClipOut): string {
+// Returns the i18n key suffix under ``clipAnalytics.status.*`` for the
+// clip's current state; the caller translates it (this helper is pure
+// and has no ``t`` in scope).
+function processingStatusKey(c: PersonClipOut): string {
   switch (c.recording_status) {
     case "recording":
-      return "Recording";
+      return "recording";
     case "finalizing":
-      return "Finalizing";
+      return "finalizing";
     case "failed":
-      return "Failed";
+      return "failed";
     case "abandoned":
-      return "Abandoned";
+      return "abandoned";
     case "completed":
     default:
-      if ((c.processing_use_cases ?? []).length > 0) return "Processing";
-      return c.processed_use_cases.length > 0 ? "Processed" : "Saved";
+      if ((c.processing_use_cases ?? []).length > 0) return "processing";
+      return c.processed_use_cases.length > 0 ? "processed" : "saved";
   }
 }
 
@@ -218,6 +222,7 @@ function ucState(code: string, c: PersonClipOut): UcCellState {
 }
 
 function UcPill({ code, state }: { code: string; state: UcCellState }) {
+  const { t } = useTranslation();
   const palette: Record<UcCellState, {
     bg: string;
     fg: string;
@@ -230,27 +235,27 @@ function UcPill({ code, state }: { code: string; state: UcCellState }) {
       fg: "#047857",
       border: "rgba(16,185,129,0.35)",
       glyph: "✓",
-      title: "Matched / processed",
+      title: t("clipAnalytics.uc.matchedProcessed"),
     },
     processing: {
       bg: "rgba(245,158,11,0.14)",
       fg: "#b45309",
       border: "rgba(245,158,11,0.4)",
       glyph: "⟳",
-      title: "Processing in progress",
+      title: t("clipAnalytics.uc.processingInProgress"),
     },
     pending: {
       bg: "var(--bg-sunken)",
       fg: "var(--text-tertiary)",
       border: "var(--border)",
       glyph: "—",
-      title: "Not processed yet",
+      title: t("clipAnalytics.uc.notProcessedYet"),
     },
   };
   const p = palette[state];
   return (
     <span
-      title={`${code.toUpperCase()} — ${p.title}`}
+      title={t("clipAnalytics.uc.pillTitle", { uc: code.toUpperCase(), label: p.title })}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -284,6 +289,7 @@ function UcPill({ code, state }: { code: string; state: UcCellState }) {
 }
 
 function ProcessedUcCell({ clip }: { clip: PersonClipOut }) {
+  const { t } = useTranslation();
   if (clip.recording_status !== "completed") {
     return (
       <span style={{ color: "var(--text-tertiary)", fontSize: 12 }}>—</span>
@@ -304,7 +310,7 @@ function ProcessedUcCell({ clip }: { clip: PersonClipOut }) {
     >
       <div
         style={{ display: "flex", gap: 4, flexWrap: "wrap" }}
-        aria-label="Use-case processing status"
+        aria-label={t("clipAnalytics.uc.statusAria")}
       >
         {ALL_USE_CASES.map((uc) => (
           <UcPill key={uc} code={uc} state={ucState(uc, clip)} />
@@ -317,9 +323,7 @@ function ProcessedUcCell({ clip }: { clip: PersonClipOut }) {
           fontVariantNumeric: "tabular-nums",
         }}
       >
-        <strong style={{ color: "var(--text)" }}>{processedCount}</strong>
-        {" / "}
-        {total} processed
+        {t("clipAnalytics.uc.processedCount", { count: processedCount, total })}
       </div>
     </div>
   );
@@ -342,6 +346,7 @@ function ProcessedUcCell({ clip }: { clip: PersonClipOut }) {
 // The summary line under the pills carries the head-count (when
 // matched) or a plain "No matches found" note (when unmatched).
 function MatchResultCell({ clip }: { clip: PersonClipOut }) {
+  const { t } = useTranslation();
   if (clip.recording_status !== "completed") {
     return (
       <span style={{ color: "var(--text-tertiary)", fontSize: 12 }}>—</span>
@@ -362,7 +367,7 @@ function MatchResultCell({ clip }: { clip: PersonClipOut }) {
           fontStyle: "italic",
         }}
       >
-        Pending — UCs not run yet
+        {t("clipAnalytics.match.pendingNotRun")}
       </span>
     );
   }
@@ -387,7 +392,7 @@ function MatchResultCell({ clip }: { clip: PersonClipOut }) {
     >
       {matchedUcs.length > 0 && (
         <MatchRow
-          label="Matched"
+          label={t("clipAnalytics.match.matched")}
           ucs={matchedUcs}
           tone="success"
           glyph="✓"
@@ -395,7 +400,7 @@ function MatchResultCell({ clip }: { clip: PersonClipOut }) {
       )}
       {unmatchedUcs.length > 0 && (
         <MatchRow
-          label="Unmatched"
+          label={t("clipAnalytics.match.unmatched")}
           ucs={unmatchedUcs}
           tone="danger"
           glyph="✗"
@@ -403,7 +408,7 @@ function MatchResultCell({ clip }: { clip: PersonClipOut }) {
       )}
       {processing.length > 0 && (
         <MatchRow
-          label="Processing"
+          label={t("clipAnalytics.match.processing")}
           ucs={processing}
           tone="warning"
           glyph="⟳"
@@ -411,7 +416,7 @@ function MatchResultCell({ clip }: { clip: PersonClipOut }) {
       )}
       {pendingUcs.length > 0 && (
         <MatchRow
-          label="Pending"
+          label={t("clipAnalytics.match.pending")}
           ucs={pendingUcs}
           tone="neutral"
           glyph="—"
@@ -427,8 +432,8 @@ function MatchResultCell({ clip }: { clip: PersonClipOut }) {
           }}
         >
           {hasMatch
-            ? `${matchedCount} employee${matchedCount === 1 ? "" : "s"} matched`
-            : "No employees matched"}
+            ? t("clipAnalytics.match.employeesMatched", { count: matchedCount })
+            : t("clipAnalytics.match.noneMatched")}
         </div>
       )}
     </div>
@@ -549,6 +554,7 @@ function ProcessingHealthPanel({
   retryDone: { clips_found: number; queued_jobs: number } | null;
   onRetryFailed: () => void;
 }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
 
   // Aggregate across all tenants visible to this user. In practice a
@@ -566,13 +572,14 @@ function ProcessingHealthPanel({
   const hasIssues = totalSaved > 0 || totalStuck > 0 || totalMissing > 0;
 
   function fmtRelative(iso: string | null): string {
-    if (!iso) return "never";
+    if (!iso) return t("clipAnalytics.health.never");
     const d = new Date(iso);
     if (!Number.isFinite(d.getTime())) return iso;
     const diffS = Math.round((Date.now() - d.getTime()) / 1000);
-    if (diffS < 60) return `${diffS}s ago`;
-    if (diffS < 3600) return `${Math.round(diffS / 60)}m ago`;
-    return `${Math.round(diffS / 3600)}h ago`;
+    if (diffS < 60) return t("clipAnalytics.health.secAgo", { n: diffS });
+    if (diffS < 3600)
+      return t("clipAnalytics.health.minAgo", { n: Math.round(diffS / 60) });
+    return t("clipAnalytics.health.hrAgo", { n: Math.round(diffS / 3600) });
   }
 
   return (
@@ -603,14 +610,14 @@ function ProcessingHealthPanel({
           textAlign: "start",
         }}
         aria-expanded={expanded}
-        aria-label="Toggle processing health panel"
+        aria-label={t("clipAnalytics.health.toggleAria")}
       >
         <Icon
           name={expanded ? "chevronDown" : "chevronRight"}
           size={12}
         />
         <span style={{ fontWeight: 600, fontSize: 13, color: "var(--text)" }}>
-          Processing Health
+          {t("clipAnalytics.health.title")}
         </span>
         {hasIssues ? (
           <span
@@ -625,9 +632,9 @@ function ProcessingHealthPanel({
             }}
           >
             {[
-              totalSaved > 0 && `${totalSaved} unprocessed`,
-              totalStuck > 0 && `${totalStuck} stuck`,
-              totalMissing > 0 && `${totalMissing} missing files`,
+              totalSaved > 0 && t("clipAnalytics.health.badge.unprocessed", { count: totalSaved }),
+              totalStuck > 0 && t("clipAnalytics.health.badge.stuck", { count: totalStuck }),
+              totalMissing > 0 && t("clipAnalytics.health.badge.missingFiles", { count: totalMissing }),
             ]
               .filter(Boolean)
               .join(" · ")}
@@ -644,7 +651,7 @@ function ProcessingHealthPanel({
               fontWeight: 600,
             }}
           >
-            All clear
+            {t("clipAnalytics.health.allClear")}
           </span>
         )}
         <span
@@ -654,7 +661,7 @@ function ProcessingHealthPanel({
             color: "var(--text-tertiary)",
           }}
         >
-          Last sweep: {fmtRelative(lastRanAt)}
+          {t("clipAnalytics.health.lastSweep", { rel: fmtRelative(lastRanAt) })}
         </span>
       </button>
 
@@ -682,25 +689,22 @@ function ProcessingHealthPanel({
             {(
               [
                 {
-                  label: "Unprocessed saved",
+                  label: t("clipAnalytics.health.tiles.unprocessedSaved"),
                   value: totalSaved,
                   tone: totalSaved > 0 ? "warn" : "ok",
-                  title:
-                    "Clips in completed state with no processing results — the reconcile sweep will re-submit these automatically every 5 minutes",
+                  title: t("clipAnalytics.health.titles.unprocessed"),
                 },
                 {
-                  label: "Stuck processing",
+                  label: t("clipAnalytics.health.tiles.stuckProcessing"),
                   value: totalStuck,
                   tone: totalStuck > 0 ? "warn" : "ok",
-                  title:
-                    "clip_processing_results rows stuck at processing for >20 minutes — the sweep triggers recovery automatically",
+                  title: t("clipAnalytics.health.titles.stuck"),
                 },
                 {
-                  label: "Missing files",
+                  label: t("clipAnalytics.health.tiles.missingFiles"),
                   value: totalMissing,
                   tone: totalMissing > 0 ? "danger" : "ok",
-                  title:
-                    "Clips whose file is gone from disk — these cannot be recovered; CPR rows are marked failed",
+                  title: t("clipAnalytics.health.titles.missing"),
                 },
               ] as const
             ).map(({ label, value, tone, title }) => (
@@ -754,13 +758,17 @@ function ProcessingHealthPanel({
           {/* Per-tenant breakdown when multiple tenants */}
           {tenants.length > 1 && (
             <div style={{ marginTop: 12, fontSize: 11, color: "var(--text-secondary)" }}>
-              {tenants.map(([schema, t]) => (
+              {tenants.map(([schema, tn]) => (
                 <div key={schema} style={{ marginBottom: 4 }}>
                   <strong style={{ color: "var(--text)" }}>{schema}</strong>
                   {" — "}
-                  submitted {t.saved_submitted} · stuck {t.stuck_found} · missing {t.missing_files}
+                  {t("clipAnalytics.health.tenant", {
+                    submitted: tn.saved_submitted,
+                    stuck: tn.stuck_found,
+                    missing: tn.missing_files,
+                  })}
                   <span style={{ marginInlineStart: 8, color: "var(--text-tertiary)" }}>
-                    ({fmtRelative(t.ran_at)})
+                    ({fmtRelative(tn.ran_at)})
                   </span>
                 </div>
               ))}
@@ -781,19 +789,19 @@ function ProcessingHealthPanel({
               className="btn btn-sm"
               onClick={onReconcileNow}
               disabled={reconcileLoading}
-              title="Trigger an immediate reconcile sweep — finds and re-submits all unprocessed saved clips, recovers stuck processing rows, and spot-checks file integrity"
+              title={t("clipAnalytics.health.reconcileTitle")}
             >
               <Icon name="refresh" size={11} />
-              {reconcileLoading ? "Running sweep…" : "Run Reconcile Now"}
+              {reconcileLoading ? t("clipAnalytics.health.reconcileRunning") : t("clipAnalytics.health.reconcileNow")}
             </button>
             <button
               className="btn btn-sm"
               onClick={onRetryFailed}
               disabled={retryLoading}
-              title="Find clips with failed processing results and re-queue them"
+              title={t("clipAnalytics.health.retryTitle")}
             >
               <Icon name="activity" size={11} />
-              {retryLoading ? "Retrying…" : "Retry Failed Clips"}
+              {retryLoading ? t("clipAnalytics.health.retrying") : t("clipAnalytics.health.retryFailed")}
             </button>
             {retryDone !== null && (
               <span
@@ -804,12 +812,12 @@ function ProcessingHealthPanel({
                 }}
               >
                 {retryDone.clips_found === 0
-                  ? "No failed clips found"
-                  : `${retryDone.clips_found} clip${retryDone.clips_found === 1 ? "" : "s"} found · ${retryDone.queued_jobs} queued`}
+                  ? t("clipAnalytics.health.noFailedClips")
+                  : t("clipAnalytics.health.clipsFoundQueued", { found: retryDone.clips_found, queued: retryDone.queued_jobs })}
               </span>
             )}
             <span style={{ fontSize: 11, color: "var(--text-tertiary)", marginInlineStart: 4 }}>
-              The reconcile sweep runs automatically every 5 minutes.
+              {t("clipAnalytics.health.autoSweep")}
             </span>
           </div>
         </div>
@@ -819,6 +827,7 @@ function ProcessingHealthPanel({
 }
 
 export function ClipAnalyticsPage() {
+  const { t } = useTranslation();
   // ---- server-driven filters ----
   const [page, setPage] = useState(1);
   const [cameraId, setCameraId] = useState<number | null>(null);
@@ -1069,16 +1078,15 @@ export function ClipAnalyticsPage() {
       />
       <div className="page-header">
         <div>
-          <h1 className="page-title">Clip Analytics</h1>
+          <h1 className="page-title">{t("clipAnalytics.title")}</h1>
           <p className="page-sub">
             {list.data
-              ? `${total} ${total === 1 ? "clip" : "clips"}`
+              ? t("clipAnalytics.clipCount", { count: total })
               : "—"}
             {" · "}
             <span className="text-dim">
-              Face matching and use-case processing are manual — open a
-              clip's ⋮ menu and choose
-              <strong> Identify Event</strong>.
+              {t("clipAnalytics.subtitleLead")}{" "}
+              <strong>{t("clipAnalytics.identifyEvent")}</strong>.
             </span>
           </p>
         </div>
@@ -1093,12 +1101,12 @@ export function ClipAnalyticsPage() {
             disabled={batchRunning}
             title={
               batchRunning
-                ? "A batch is already running — wait for it to finish"
-                : "Run Identify Event across every saved clip"
+                ? t("clipAnalytics.batch.titleRunning")
+                : t("clipAnalytics.batch.titleIdle")
             }
           >
             <Icon name="sparkles" size={12} />
-            {batchRunning ? "Identify Event running…" : "Identify Event"}
+            {batchRunning ? t("clipAnalytics.batch.running") : t("clipAnalytics.identifyEvent")}
           </button>
           {/* Batch Process Status — only renders while a queue
               pipeline batch is in flight. Clicking opens a modal with
@@ -1109,8 +1117,8 @@ export function ClipAnalyticsPage() {
             <button
               className="btn"
               onClick={() => setStatusOpen(true)}
-              title="View live progress of the running batch"
-              aria-label="Open Batch Process Status modal"
+              title={t("clipAnalytics.batchStatus.title")}
+              aria-label={t("clipAnalytics.batchStatus.aria")}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -1131,7 +1139,7 @@ export function ClipAnalyticsPage() {
                 }}
               />
               <Icon name="activity" size={12} />
-              Batch Process Status
+              {t("clipAnalytics.batchStatus.label")}
               {activeBatches.length > 1 && (
                 <span
                   className="mono"
@@ -1169,8 +1177,8 @@ export function ClipAnalyticsPage() {
             aria-disabled={selected.size === 0 || total === 0}
             title={
               selected.size === 0
-                ? "Tick at least one row to enable delete"
-                : `Delete the ${selected.size} ticked clip${selected.size === 1 ? "" : "s"}`
+                ? t("clipAnalytics.bulkDelete.titleNone")
+                : t("clipAnalytics.bulkDelete.tickedTitle", { count: selected.size })
             }
             style={
               selected.size === 0 || total === 0
@@ -1188,8 +1196,8 @@ export function ClipAnalyticsPage() {
           >
             <Icon name="trash" size={12} />
             {selected.size === 0
-              ? "Delete selected"
-              : `Delete ${selected.size} selected`}
+              ? t("clipAnalytics.bulkDelete.labelNone")
+              : t("clipAnalytics.bulkDelete.labelN", { count: selected.size })}
           </button>
         </div>
       </div>
@@ -1279,7 +1287,7 @@ export function ClipAnalyticsPage() {
                   type="checkbox"
                   checked={allOnPageSelected}
                   onChange={toggleSelectAllOnPage}
-                  aria-label="Select all clips on this page"
+                  aria-label={t("clipAnalytics.selectAll")}
                 />
               </th>
               <th
@@ -1289,7 +1297,7 @@ export function ClipAnalyticsPage() {
                   boxShadow: "inset 0 -1px 0 var(--border)",
                 }}
               >
-                ID
+                {t("clipAnalytics.cols.id")}
               </th>
               <th
                 style={{
@@ -1297,7 +1305,7 @@ export function ClipAnalyticsPage() {
                   boxShadow: "inset 0 -1px 0 var(--border)",
                 }}
               >
-                Camera
+                {t("clipAnalytics.cols.camera")}
               </th>
               <th
                 style={{
@@ -1305,16 +1313,7 @@ export function ClipAnalyticsPage() {
                   boxShadow: "inset 0 -1px 0 var(--border)",
                 }}
               >
-                Clip Name
-              </th>
-              <th
-                style={{
-                  width: 160,
-                  background: "var(--bg-elev)",
-                  boxShadow: "inset 0 -1px 0 var(--border)",
-                }}
-              >
-                Start Time
+                {t("clipAnalytics.cols.clipName")}
               </th>
               <th
                 style={{
@@ -1323,7 +1322,16 @@ export function ClipAnalyticsPage() {
                   boxShadow: "inset 0 -1px 0 var(--border)",
                 }}
               >
-                End Time
+                {t("clipAnalytics.cols.startTime")}
+              </th>
+              <th
+                style={{
+                  width: 160,
+                  background: "var(--bg-elev)",
+                  boxShadow: "inset 0 -1px 0 var(--border)",
+                }}
+              >
+                {t("clipAnalytics.cols.endTime")}
               </th>
               <th
                 style={{
@@ -1332,7 +1340,7 @@ export function ClipAnalyticsPage() {
                   boxShadow: "inset 0 -1px 0 var(--border)",
                 }}
               >
-                Duration
+                {t("clipAnalytics.cols.duration")}
               </th>
               <th
                 style={{
@@ -1341,7 +1349,7 @@ export function ClipAnalyticsPage() {
                   boxShadow: "inset 0 -1px 0 var(--border)",
                 }}
               >
-                File Size
+                {t("clipAnalytics.cols.fileSize")}
               </th>
               <th
                 style={{
@@ -1350,7 +1358,7 @@ export function ClipAnalyticsPage() {
                   boxShadow: "inset 0 -1px 0 var(--border)",
                 }}
               >
-                Processing Status
+                {t("clipAnalytics.cols.processingStatus")}
               </th>
               <th
                 style={{
@@ -1359,7 +1367,7 @@ export function ClipAnalyticsPage() {
                   boxShadow: "inset 0 -1px 0 var(--border)",
                 }}
               >
-                Processed UCs
+                {t("clipAnalytics.cols.processedUcs")}
               </th>
               {showMatchResult && (
                 <th
@@ -1368,9 +1376,9 @@ export function ClipAnalyticsPage() {
                     background: "var(--bg-elev)",
                     boxShadow: "inset 0 -1px 0 var(--border)",
                   }}
-                  title="Toggle with Ctrl + M"
+                  title={t("clipAnalytics.cols.matchResultTitle")}
                 >
-                  Match Result
+                  {t("clipAnalytics.cols.matchResult")}
                 </th>
               )}
               <th
@@ -1381,7 +1389,7 @@ export function ClipAnalyticsPage() {
                   boxShadow: "inset 0 -1px 0 var(--border)",
                 }}
               >
-                Actions
+                {t("clipAnalytics.cols.actions")}
               </th>
             </tr>
             {/* Row 2 — per-column filter inputs */}
@@ -1400,11 +1408,11 @@ export function ClipAnalyticsPage() {
               >
                 <input
                   type="search"
-                  placeholder="ID"
+                  placeholder={t("clipAnalytics.filters.idPlaceholder")}
                   value={clipIdQ}
                   onChange={(e) => setClipIdQ(e.target.value)}
                   style={filterControlStyle}
-                  aria-label="Filter by clip ID"
+                  aria-label={t("clipAnalytics.filters.byId")}
                 />
               </th>
               <th
@@ -1421,9 +1429,9 @@ export function ClipAnalyticsPage() {
                     )
                   }
                   style={filterControlStyle}
-                  aria-label="Filter by camera"
+                  aria-label={t("clipAnalytics.filters.byCamera")}
                 >
-                  <option value="">All cameras</option>
+                  <option value="">{t("clipAnalytics.filters.allCameras")}</option>
                   {(camerasQuery.data?.items ?? []).map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
@@ -1439,11 +1447,11 @@ export function ClipAnalyticsPage() {
               >
                 <input
                   type="search"
-                  placeholder="Search clip name"
+                  placeholder={t("clipAnalytics.filters.namePlaceholder")}
                   value={clipNameQ}
                   onChange={(e) => setClipNameQ(e.target.value)}
                   style={filterControlStyle}
-                  aria-label="Filter by clip name"
+                  aria-label={t("clipAnalytics.filters.byName")}
                 />
               </th>
               <th
@@ -1457,7 +1465,7 @@ export function ClipAnalyticsPage() {
                   value={startDate}
                   onChange={(e) => setStartDate(e.target.value)}
                   style={filterControlStyle}
-                  aria-label="Filter by start date"
+                  aria-label={t("clipAnalytics.filters.byStartDate")}
                 />
               </th>
               <th
@@ -1471,7 +1479,7 @@ export function ClipAnalyticsPage() {
                   value={endDate}
                   onChange={(e) => setEndDate(e.target.value)}
                   style={filterControlStyle}
-                  aria-label="Filter by end date"
+                  aria-label={t("clipAnalytics.filters.byEndDate")}
                 />
               </th>
               <th
@@ -1498,14 +1506,14 @@ export function ClipAnalyticsPage() {
                     setProcessingFilter(e.target.value as ProcessingFilter)
                   }
                   style={filterControlStyle}
-                  aria-label="Filter by processing status"
+                  aria-label={t("clipAnalytics.filters.byStatus")}
                 >
-                  <option value="all">All</option>
-                  <option value="recording">Recording</option>
-                  <option value="encoding">Finalizing</option>
-                  <option value="processing">Processing</option>
-                  <option value="saved">Saved</option>
-                  <option value="processed">Processed</option>
+                  <option value="all">{t("clipAnalytics.status.all")}</option>
+                  <option value="recording">{t("clipAnalytics.status.recording")}</option>
+                  <option value="encoding">{t("clipAnalytics.status.finalizing")}</option>
+                  <option value="processing">{t("clipAnalytics.status.processing")}</option>
+                  <option value="saved">{t("clipAnalytics.status.saved")}</option>
+                  <option value="processed">{t("clipAnalytics.status.processed")}</option>
                 </select>
               </th>
               <th
@@ -1520,13 +1528,13 @@ export function ClipAnalyticsPage() {
                     setProcessedUcFilter(e.target.value as ProcessedUcFilter)
                   }
                   style={filterControlStyle}
-                  aria-label="Filter by processed use cases"
+                  aria-label={t("clipAnalytics.filters.byProcessedUcs")}
                 >
-                  <option value="any">Any</option>
+                  <option value="any">{t("clipAnalytics.ucFilter.any")}</option>
                   <option value="uc1">UC1</option>
                   <option value="uc2">UC2</option>
                   <option value="uc3">UC3</option>
-                  <option value="not_processed">Not Processed</option>
+                  <option value="not_processed">{t("clipAnalytics.ucFilter.notProcessed")}</option>
                 </select>
               </th>
               {showMatchResult && (
@@ -1553,7 +1561,7 @@ export function ClipAnalyticsPage() {
                   className="text-sm text-dim"
                   style={{ padding: 16 }}
                 >
-                  Loading…
+                  {t("clipAnalytics.loading")}
                 </td>
               </tr>
             )}
@@ -1564,7 +1572,7 @@ export function ClipAnalyticsPage() {
                   className="text-sm"
                   style={{ padding: 16, color: "var(--danger-text)" }}
                 >
-                  Could not load clips.
+                  {t("clipAnalytics.loadError")}
                 </td>
               </tr>
             )}
@@ -1575,9 +1583,7 @@ export function ClipAnalyticsPage() {
                   className="text-sm text-dim"
                   style={{ padding: 16 }}
                 >
-                  No clips matching the current filter. Toggle Recording
-                  on a camera and walk past it — a row will appear here
-                  once a person is detected and the clip lands on disk.
+                  {t("clipAnalytics.empty")}
                 </td>
               </tr>
             )}
@@ -1597,8 +1603,8 @@ export function ClipAnalyticsPage() {
                   }
                   title={
                     playable
-                      ? "Click to view full details"
-                      : `Details unavailable while clip is ${c.recording_status}`
+                      ? t("clipAnalytics.row.clickDetails")
+                      : t("clipAnalytics.row.detailsUnavailable", { status: c.recording_status })
                   }
                   style={{
                     cursor: playable ? "pointer" : "not-allowed",
@@ -1612,7 +1618,7 @@ export function ClipAnalyticsPage() {
                       type="checkbox"
                       checked={isSelected}
                       onChange={() => toggleOne(c.id)}
-                      aria-label="Select clip"
+                      aria-label={t("clipAnalytics.selectClip")}
                     />
                   </td>
                   <td className="mono text-sm" style={{ color: "var(--text-secondary)" }}>
@@ -1658,7 +1664,7 @@ export function ClipAnalyticsPage() {
                   </td>
                   <td onClick={(e) => e.stopPropagation()}>
                     <StatusPill
-                      status={processingStatusLabel(c)}
+                      statusKey={processingStatusKey(c)}
                       onClick={() => setLiveTarget(c)}
                     />
                   </td>
@@ -1729,11 +1735,15 @@ export function ClipAnalyticsPage() {
             }}
           >
             <span className="text-dim">
-              Page {page} of {totalPages} · {total.toLocaleString()} total
+              {t("clipAnalytics.pager.pageOf", {
+                page,
+                total: totalPages,
+                totalCount: total.toLocaleString(),
+              })}
               {selected.size > 0 && (
                 <>
                   {" · "}
-                  <strong>{selected.size}</strong> selected
+                  {t("clipAnalytics.pager.selected", { count: selected.size })}
                 </>
               )}
             </span>
@@ -1744,14 +1754,14 @@ export function ClipAnalyticsPage() {
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
               >
                 <Icon name="chevronLeft" size={11} />
-                Previous
+                {t("common.previous")}
               </button>
               <button
                 className="btn btn-sm"
                 disabled={page >= totalPages || list.isFetching}
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               >
-                Next
+                {t("common.next")}
                 <Icon name="chevronRight" size={11} />
               </button>
             </div>
@@ -1856,6 +1866,7 @@ function BulkDeleteClipsModal({
   onDone: () => void;
   mutation: ReturnType<typeof useBulkDeletePersonClips>;
 }) {
+  const { t } = useTranslation();
   const [error, setError] = useState<string | null>(null);
   const [resolvingIds, setResolvingIds] = useState(false);
 
@@ -1877,7 +1888,7 @@ function BulkDeleteClipsModal({
         setResolvingIds(false);
       }
       if (ids.length === 0) {
-        setError("No clips to delete.");
+        setError(t("clipAnalytics.bulkModal.errNone"));
         return;
       }
       await mutation.mutateAsync(ids);
@@ -1885,15 +1896,15 @@ function BulkDeleteClipsModal({
     } catch (e) {
       setResolvingIds(false);
       const message =
-        e instanceof Error ? e.message : "Could not delete clips";
+        e instanceof Error ? e.message : t("clipAnalytics.bulkModal.errCouldNot");
       setError(message);
     }
   };
 
   const headline =
     scope === "selected"
-      ? `Delete ${selectedIds.length} selected clip${selectedIds.length === 1 ? "" : "s"}?`
-      : "Delete all clips matching the active filter?";
+      ? t("clipAnalytics.bulkModal.headlineSelected", { count: selectedIds.length })
+      : t("clipAnalytics.bulkModal.headlineAll");
 
   const overCap = scope === "selected" && selectedIds.length > BULK_DELETE_CAP;
   const busy = mutation.isPending || resolvingIds;
@@ -1913,7 +1924,7 @@ function BulkDeleteClipsModal({
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Bulk delete clips"
+          aria-label={t("clipAnalytics.bulkModal.aria")}
           style={{
             background: "var(--bg-elev)",
             border: "1px solid var(--border)",
@@ -1928,8 +1939,7 @@ function BulkDeleteClipsModal({
             {headline}
           </div>
           <div className="text-sm" style={{ color: "var(--text)" }}>
-            Files on disk and any processing results will be removed.
-            This cannot be undone.
+            {t("clipAnalytics.bulkModal.body")}
           </div>
           {scope === "all" && (
             <div
@@ -1942,8 +1952,7 @@ function BulkDeleteClipsModal({
                 marginTop: 10,
               }}
             >
-              Capped at {BULK_DELETE_CAP} clips per request. If more
-              match the filter, run the action again.
+              {t("clipAnalytics.bulkModal.capped", { cap: BULK_DELETE_CAP })}
             </div>
           )}
           {overCap && (
@@ -1957,8 +1966,7 @@ function BulkDeleteClipsModal({
                 marginTop: 10,
               }}
             >
-              Only the first {BULK_DELETE_CAP} of {selectedIds.length}{" "}
-              selected will be deleted in this request.
+              {t("clipAnalytics.bulkModal.overCap", { cap: BULK_DELETE_CAP, n: selectedIds.length })}
             </div>
           )}
           {error && (
@@ -1990,7 +1998,7 @@ function BulkDeleteClipsModal({
               onClick={onClose}
               disabled={busy}
             >
-              Cancel
+              {t("common.cancel")}
             </button>
             <button
               type="button"
@@ -1999,7 +2007,7 @@ function BulkDeleteClipsModal({
               onClick={() => void onConfirm()}
               disabled={busy}
             >
-              {busy ? "Deleting…" : "Delete"}
+              {busy ? t("clipAnalytics.deleteModal.deleting") : t("common.delete")}
             </button>
           </div>
         </div>
@@ -2068,6 +2076,7 @@ function RowMenu({
   // the entry only appears when there is something to retry.
   onRetry?: (() => void) | undefined;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
@@ -2096,7 +2105,7 @@ function RowMenu({
       <button
         type="button"
         className="icon-btn"
-        aria-label="Row actions"
+        aria-label={t("clipAnalytics.rowMenu.actions")}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
@@ -2128,7 +2137,7 @@ function RowMenu({
         >
           {onViewDetails && (
             <MenuItem
-              label="View Details"
+              label={t("clipAnalytics.rowMenu.viewDetails")}
               iconName="eye"
               onClick={() => {
                 setOpen(false);
@@ -2137,7 +2146,7 @@ function RowMenu({
             />
           )}
           <MenuItem
-            label="Edit"
+            label={t("common.edit")}
             iconName="edit"
             onClick={() => {
               setOpen(false);
@@ -2145,7 +2154,7 @@ function RowMenu({
             }}
           />
           <MenuItem
-            label="Identify Event"
+            label={t("clipAnalytics.identifyEvent")}
             iconName="user"
             onClick={() => {
               setOpen(false);
@@ -2154,7 +2163,7 @@ function RowMenu({
           />
           {onRetry && (
             <MenuItem
-              label="Retry Failed UCs"
+              label={t("clipAnalytics.rowMenu.retryFailed")}
               iconName="refresh"
               onClick={() => {
                 setOpen(false);
@@ -2163,7 +2172,7 @@ function RowMenu({
             />
           )}
           <MenuItem
-            label="Delete"
+            label={t("common.delete")}
             iconName="trash"
             danger
             onClick={() => {
@@ -2290,6 +2299,7 @@ const UC_TILES: readonly UseCaseTile[] = [
 type BatchMode = "skip_existing" | "all";
 
 function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation();
   // New pipeline path — submit-all resolves clips server-side, applies
   // overwrite cleanup (when not skip_existing), and returns a batch_id
   // we poll for live per-UC progress.
@@ -2359,7 +2369,7 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
   const fireReprocess = async () => {
     setError(null);
     if (dateFrom && dateTo && dateFrom > dateTo) {
-      setError("Date range is inverted — From must be on or before To.");
+      setError(t("clipAnalytics.batchModal.errDateInverted"));
       return;
     }
     try {
@@ -2379,13 +2389,13 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
       qc.invalidateQueries({ queryKey: ["clip-analytics", "list"] });
       qc.invalidateQueries({ queryKey: ["clip-pipeline", "status"] });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not start.");
+      setError(e instanceof Error ? e.message : t("clipAnalytics.batchModal.errCouldNotStart"));
     }
   };
 
   const onStart = async () => {
     if (selected.size === 0) {
-      setError("Pick at least one use case.");
+      setError(t("clipAnalytics.modal.errPickOne"));
       return;
     }
     // Overwrite mode requires an explicit second confirm — re-running
@@ -2419,7 +2429,7 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Identify Event — all clips"
+          aria-label={t("clipAnalytics.batchModal.aria")}
           style={{
             background: "var(--bg-elev)",
             border: "1px solid var(--border)",
@@ -2476,10 +2486,10 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
                     opacity: 0.85,
                   }}
                 >
-                  Clip Analytics · Batch
+                  {t("clipAnalytics.batchModal.eyebrow")}
                 </div>
                 <div style={{ fontSize: 18, fontWeight: 700, marginTop: 2 }}>
-                  Identify Event — overall process
+                  {t("clipAnalytics.batchModal.title")}
                 </div>
               </div>
               {/* Header close button — always enabled. Closing does
@@ -2489,8 +2499,8 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
               <button
                 type="button"
                 onClick={onClose}
-                aria-label="Close"
-                title="Close (processing continues in the background)"
+                aria-label={t("common.close")}
+                title={t("clipAnalytics.batchModal.closeTitle")}
                 style={{
                   appearance: "none",
                   width: 32,
@@ -2523,19 +2533,9 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
                 opacity: 0.92,
               }}
             >
-              {batchId ? (
-                <>
-                  Processing continues in the background after you close.
-                  Reopen progress any time from{" "}
-                  <strong>Batch Process Status</strong> near the page header.
-                </>
-              ) : (
-                <>
-                  Run the chosen use cases across{" "}
-                  <strong>every saved clip</strong> in this tenant. Pick what
-                  to do with clips that have already been processed.
-                </>
-              )}
+              {batchId
+                ? t("clipAnalytics.batchModal.introRunning")
+                : t("clipAnalytics.batchModal.introIdle")}
             </div>
           </div>
 
@@ -2563,11 +2563,11 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
                 marginBottom: 10,
               }}
             >
-              Use cases to run
+              {t("clipAnalytics.batchModal.useCasesToRun")}
             </div>
             <div
               role="group"
-              aria-label="Use cases"
+              aria-label={t("clipAnalytics.pick.useCasesGroup")}
               style={{
                 display: "grid",
                 gridTemplateColumns: "repeat(3, 1fr)",
@@ -2615,7 +2615,7 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
                 name={filterOpen ? "chevronDown" : "chevronRight"}
                 size={12}
               />
-              Date / Time filter
+              {t("clipAnalytics.batchModal.dateTimeFilter")}
               {hasFilter && (
                 <span
                   className="mono"
@@ -2628,7 +2628,7 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
                     fontSize: 10.5,
                   }}
                 >
-                  active
+                  {t("clipAnalytics.batchModal.active")}
                 </span>
               )}
             </button>
@@ -2646,26 +2646,26 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
                 }}
               >
                 <FilterField
-                  label="Date from"
+                  label={t("clipAnalytics.batchModal.dateFrom")}
                   inputType="date"
                   value={dateFrom}
                   onChange={setDateFrom}
                 />
                 <FilterField
-                  label="Date to"
+                  label={t("clipAnalytics.batchModal.dateTo")}
                   inputType="date"
                   value={dateTo}
                   onChange={setDateTo}
                   min={dateFrom || undefined}
                 />
                 <FilterField
-                  label="Time from"
+                  label={t("clipAnalytics.batchModal.timeFrom")}
                   inputType="time"
                   value={timeFrom}
                   onChange={setTimeFrom}
                 />
                 <FilterField
-                  label="Time to"
+                  label={t("clipAnalytics.batchModal.timeTo")}
                   inputType="time"
                   value={timeTo}
                   onChange={setTimeTo}
@@ -2678,16 +2678,11 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
                     margin: 0,
                   }}
                 >
-                  Filters apply to each clip's start time in the tenant's
-                  local timezone. Leave any field blank to skip that
-                  bound.
+                  {t("clipAnalytics.batchModal.filterHelp")}
                   {overnight && (
                     <>
                       {" "}
-                      <strong>Overnight window:</strong> Time from {timeFrom}
-                      {" → "}Time to {timeTo} accepts clips that start after{" "}
-                      {timeFrom} <em>or</em> before {timeTo} on each day in
-                      the range.
+                      {t("clipAnalytics.batchModal.overnight", { from: timeFrom, to: timeTo })}
                     </>
                   )}
                 </div>
@@ -2709,7 +2704,7 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
                         setTimeTo("");
                       }}
                     >
-                      Clear filter
+                      {t("clipAnalytics.batchModal.clearFilter")}
                     </button>
                   </div>
                 )}
@@ -2729,29 +2724,29 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
                 marginBottom: 10,
               }}
             >
-              Mode
+              {t("clipAnalytics.batchModal.mode")}
             </div>
             <div style={{ display: "grid", gap: 8 }}>
               <ModeRow
                 value="skip_existing"
                 active={mode === "skip_existing"}
                 onPick={() => pickMode("skip_existing")}
-                title="Skip already processed"
-                subtitle="Only run clips that don't yet have a result for the chosen use cases. Safe default — won't redo work."
+                title={t("clipAnalytics.batchModal.skipTitle")}
+                subtitle={t("clipAnalytics.batchModal.skipSubtitle")}
               />
               <ModeRow
                 value="all"
                 active={mode === "all"}
                 onPick={() => pickMode("all")}
-                title="Reprocess everything (overwrite)"
-                subtitle="Run every clip in this tenant. Existing results for the chosen use cases will be overwritten."
+                title={t("clipAnalytics.batchModal.allTitle")}
+                subtitle={t("clipAnalytics.batchModal.allSubtitle")}
                 tone="warn"
               />
             </div>
             {awaitingOverwriteConfirm && mode === "all" && (
               <div
                 role="alertdialog"
-                aria-label="Confirm overwrite"
+                aria-label={t("clipAnalytics.batchModal.confirmOverwriteAria")}
                 style={{
                   marginTop: 12,
                   padding: "12px 14px",
@@ -2783,19 +2778,13 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
                     !
                   </span>
                   <strong style={{ color: "var(--danger-text)" }}>
-                    Overwrite confirmation required
+                    {t("clipAnalytics.batchModal.overwriteRequired")}
                   </strong>
                 </div>
                 <p style={{ margin: "0 0 8px 0" }}>
-                  Every clip in this tenant that already has a result
-                  for{" "}
-                  <strong>
-                    {Array.from(selected)
-                      .map((u) => u.toUpperCase())
-                      .join(" / ")}
-                  </strong>{" "}
-                  will be reprocessed. Existing face crops + match
-                  details will be replaced.
+                  {t("clipAnalytics.batchModal.blastRadius", {
+                    ucs: Array.from(selected).map((u) => u.toUpperCase()).join(" / "),
+                  })}
                 </p>
 
                 {/* Already-processed counts so the operator sees the
@@ -2809,7 +2798,7 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
                       fontStyle: "italic",
                     }}
                   >
-                    Counting already-processed clips…
+                    {t("clipAnalytics.batchModal.counting")}
                   </div>
                 )}
                 {processedCounts.data && (
@@ -2832,7 +2821,7 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
                         marginBottom: 6,
                       }}
                     >
-                      Already processed · will be overwritten
+                      {t("clipAnalytics.batchModal.alreadyOverwritten")}
                     </div>
                     <ul
                       style={{
@@ -2855,7 +2844,7 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
                                 fontWeight: 600,
                               }}
                             >
-                              {n.toLocaleString()} clip{n === 1 ? "" : "s"}
+                              {t("clipAnalytics.batchModal.ucClips", { count: n })}
                             </span>
                           </li>
                         );
@@ -2868,24 +2857,16 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
                         color: "var(--text-secondary)",
                       }}
                     >
-                      <strong>
-                        {processedCounts.data.any_uc.toLocaleString()}
-                      </strong>{" "}
-                      distinct clip
-                      {processedCounts.data.any_uc === 1 ? "" : "s"} touched
-                      out of{" "}
-                      <strong>
-                        {processedCounts.data.total_completed_clips.toLocaleString()}
-                      </strong>{" "}
-                      total clips in this tenant.
+                      {t("clipAnalytics.batchModal.touchedSummary", {
+                        touched: processedCounts.data.any_uc.toLocaleString(),
+                        total: processedCounts.data.total_completed_clips.toLocaleString(),
+                      })}
                     </div>
                   </div>
                 )}
 
                 <p style={{ margin: 0, color: "var(--text-secondary)" }}>
-                  Click <strong>Confirm overwrite</strong> below to proceed,
-                  or pick <strong>Skip already processed</strong> mode to
-                  avoid touching finished work.
+                  {t("clipAnalytics.batchModal.confirmHint")}
                 </p>
               </div>
             )}
@@ -2914,10 +2895,14 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
             leftSlot={
               <div className="text-xs" style={{ color: "var(--text-secondary)" }}>
                 {selected.size === 0
-                  ? "No use cases selected"
-                  : `${selected.size} use case${selected.size === 1 ? "" : "s"} · ${
-                      mode === "skip_existing" ? "skip existing" : "overwrite"
-                    }${hasFilter ? " · filtered" : ""}`}
+                  ? t("clipAnalytics.pick.noneSelected")
+                  : `${t("clipAnalytics.batchModal.footerSummary", {
+                      count: selected.size,
+                      mode:
+                        mode === "skip_existing"
+                          ? t("clipAnalytics.banner.skipExisting")
+                          : t("clipAnalytics.banner.overwrite"),
+                    })}${hasFilter ? ` · ${t("clipAnalytics.batchModal.filtered")}` : ""}`}
               </div>
             }
           >
@@ -2936,7 +2921,11 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
               }}
               disabled={submitAll.isPending}
             >
-              {awaitingOverwriteConfirm ? "Back" : batchId ? "Close" : "Cancel"}
+              {awaitingOverwriteConfirm
+                ? t("clipAnalytics.batchModal.back")
+                : batchId
+                  ? t("common.close")
+                  : t("common.cancel")}
             </button>
             <button
               type="button"
@@ -2952,14 +2941,14 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
               }
             >
               {submitAll.isPending
-                ? "Submitting…"
+                ? t("clipAnalytics.batchModal.submitting")
                 : inflight
-                  ? "Running — see progress above"
+                  ? t("clipAnalytics.batchModal.runningSeeProgress")
                   : mode === "all"
                     ? awaitingOverwriteConfirm
-                      ? "Confirm overwrite"
-                      : "Reprocess everything"
-                    : "Start processing"}
+                      ? t("clipAnalytics.batchModal.confirmOverwrite")
+                      : t("clipAnalytics.batchModal.reprocessEverything")
+                    : t("clipAnalytics.batchModal.startProcessing")}
             </button>
           </ModalFooter>
         </div>
@@ -2987,6 +2976,7 @@ function BatchLiveProgressPanel({
 }: {
   batch: import("../person-clips/hooks").ClipPipelineBatch;
 }) {
+  const { t } = useTranslation();
   const done = batch.completed_at !== null;
   const finished =
     batch.completed_jobs + batch.skipped_jobs + batch.failed_jobs;
@@ -2997,7 +2987,7 @@ function BatchLiveProgressPanel({
   return (
     <div
       role="region"
-      aria-label="Batch progress"
+      aria-label={t("clipAnalytics.batchProgress.aria")}
       style={{
         marginTop: 12,
         padding: "12px 14px",
@@ -3039,7 +3029,7 @@ function BatchLiveProgressPanel({
               animation: done ? undefined : "pipeline-pulse 1.6s infinite",
             }}
           />
-          {done ? "Batch complete" : "Batch running"}
+          {done ? t("clipAnalytics.batchProgress.complete") : t("clipAnalytics.batchProgress.running")}
           <span
             className="text-xs"
             style={{
@@ -3088,26 +3078,26 @@ function BatchLiveProgressPanel({
           gap: 6,
         }}
       >
-        <BatchStat label="Selected" value={batch.total_jobs} />
+        <BatchStat label={t("clipAnalytics.stat.selected")} value={batch.total_jobs} />
         <BatchStat
-          label="Completed"
+          label={t("clipAnalytics.stat.completed")}
           value={batch.completed_jobs}
           color="var(--success-text)"
         />
         <BatchStat
-          label="Skipped"
+          label={t("clipAnalytics.stat.skipped")}
           value={batch.skipped_jobs}
           color="var(--text-secondary)"
         />
         <BatchStat
-          label="Failed"
+          label={t("clipAnalytics.stat.failed")}
           value={batch.failed_jobs}
           color={
             batch.failed_jobs > 0 ? "var(--danger-text)" : undefined
           }
         />
         <BatchStat
-          label="Remaining"
+          label={t("clipAnalytics.stat.remaining")}
           value={batch.remaining_jobs}
           color="var(--accent, #6366f1)"
         />
@@ -3128,21 +3118,21 @@ function BatchLiveProgressPanel({
             <strong style={{ color: "var(--text)" }}>
               {batch.queued_jobs}
             </strong>{" "}
-            in queue
+            {t("clipAnalytics.batchProgress.inQueue")}
           </span>
           <span>·</span>
           <span>
             <strong style={{ color: "var(--text)" }}>
               {batch.cropping_now}
             </strong>{" "}
-            cropping
+            {t("clipAnalytics.batchProgress.cropping")}
           </span>
           <span>·</span>
           <span>
             <strong style={{ color: "var(--text)" }}>
               {batch.matching_now}
             </strong>{" "}
-            matching
+            {t("clipAnalytics.batchProgress.matching")}
           </span>
         </div>
       )}
@@ -3224,12 +3214,12 @@ function BatchLiveProgressPanel({
                 </span>
                 {s.skipped > 0 && (
                   <span style={{ color: "var(--text-secondary)" }}>
-                    · skip {s.skipped}
+                    · {t("clipAnalytics.batchProgress.skip")} {s.skipped}
                   </span>
                 )}
                 {s.failed > 0 && (
                   <span style={{ color: "var(--danger-text)" }}>
-                    · fail {s.failed}
+                    · {t("clipAnalytics.batchProgress.fail")} {s.failed}
                   </span>
                 )}
               </div>
@@ -3246,12 +3236,12 @@ function BatchLiveProgressPanel({
             fontWeight: 600,
           }}
         >
-          Done · {batch.completed_jobs} completed
+          {t("clipAnalytics.batchProgress.doneCompleted", { count: batch.completed_jobs })}
           {batch.skipped_jobs > 0
-            ? ` · ${batch.skipped_jobs} skipped`
+            ? ` · ${t("clipAnalytics.batchProgress.skippedN", { count: batch.skipped_jobs })}`
             : ""}
           {batch.failed_jobs > 0
-            ? ` · ${batch.failed_jobs} failed`
+            ? ` · ${t("clipAnalytics.batchProgress.failedN", { count: batch.failed_jobs })}`
             : ""}
         </div>
       )}
@@ -3385,6 +3375,7 @@ function BatchProcessStatusModal({
   batches: ClipPipelineBatch[];
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const active = batches.filter((b) => b.completed_at === null);
   const done = batches.filter((b) => b.completed_at !== null);
   const totals = batches.reduce(
@@ -3427,7 +3418,7 @@ function BatchProcessStatusModal({
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Batch Process Status"
+          aria-label={t("clipAnalytics.batchStatus.label")}
           style={{
             background: "var(--bg-elev)",
             border: "1px solid var(--border)",
@@ -3474,17 +3465,17 @@ function BatchProcessStatusModal({
                   color: "var(--text-secondary)",
                 }}
               >
-                Clip Analytics · Pipeline
+                {t("clipAnalytics.batchStatus.eyebrow")}
               </div>
               <div style={{ fontSize: 17, fontWeight: 700, marginTop: 2 }}>
-                Batch Process Status
+                {t("clipAnalytics.batchStatus.label")}
               </div>
             </div>
             <button
               type="button"
               className="btn"
               onClick={onClose}
-              aria-label="Close"
+              aria-label={t("common.close")}
             >
               <Icon name="x" size={12} />
             </button>
@@ -3499,26 +3490,26 @@ function BatchProcessStatusModal({
               gap: 8,
             }}
           >
-            <BatchStat label="Selected" value={totals.total} />
+            <BatchStat label={t("clipAnalytics.stat.selected")} value={totals.total} />
             <BatchStat
-              label="Completed"
+              label={t("clipAnalytics.stat.completed")}
               value={totals.completed}
               color="var(--success-text)"
             />
             <BatchStat
-              label="Skipped"
+              label={t("clipAnalytics.stat.skipped")}
               value={totals.skipped}
               color="var(--text-secondary)"
             />
             <BatchStat
-              label="Failed"
+              label={t("clipAnalytics.stat.failed")}
               value={totals.failed}
               color={
                 totals.failed > 0 ? "var(--danger-text)" : undefined
               }
             />
             <BatchStat
-              label="Remaining"
+              label={t("clipAnalytics.stat.remaining")}
               value={totals.remaining}
               color="var(--accent, #6366f1)"
             />
@@ -3540,21 +3531,21 @@ function BatchProcessStatusModal({
                 <strong style={{ color: "var(--text)" }}>
                   {active.length}
                 </strong>{" "}
-                active batch{active.length === 1 ? "" : "es"}
+                {t("clipAnalytics.batchStatus.activeBatches", { count: active.length })}
               </span>
               <span>·</span>
               <span>
                 <strong style={{ color: "var(--text)" }}>
                   {totals.cropping_now}
                 </strong>{" "}
-                cropping now
+                {t("clipAnalytics.batchStatus.croppingNow")}
               </span>
               <span>·</span>
               <span>
                 <strong style={{ color: "var(--text)" }}>
                   {totals.matching_now}
                 </strong>{" "}
-                matching now
+                {t("clipAnalytics.batchStatus.matchingNow")}
               </span>
             </div>
           )}
@@ -3573,7 +3564,7 @@ function BatchProcessStatusModal({
                 className="text-sm text-dim"
                 style={{ textAlign: "center", padding: 24 }}
               >
-                No batches in flight.
+                {t("clipAnalytics.batchStatus.noBatches")}
               </div>
             ) : (
               <>
@@ -3594,7 +3585,7 @@ function BatchProcessStatusModal({
                       marginTop: active.length > 0 ? 6 : 0,
                     }}
                   >
-                    Recently completed
+                    {t("clipAnalytics.batchStatus.recentlyCompleted")}
                   </div>
                 )}
                 {done.map((b) => (
@@ -3614,6 +3605,7 @@ function BatchProcessStatusModal({
 
 
 function BatchHeading({ batch }: { batch: ClipPipelineBatch }) {
+  const { t } = useTranslation();
   const dt = useTenantDateTime();
   const submittedAt = new Date(batch.submitted_at);
   const submittedLabel = isNaN(submittedAt.getTime())
@@ -3629,7 +3621,7 @@ function BatchHeading({ batch }: { batch: ClipPipelineBatch }) {
         marginBottom: 6,
       }}
     >
-      <strong style={{ fontSize: 13 }}>Batch #{batch.batch_id}</strong>
+      <strong style={{ fontSize: 13 }}>{t("clipAnalytics.batchStatus.batchN", { id: batch.batch_id })}</strong>
       <span
         className="text-xs text-dim"
         style={{ fontFamily: "var(--font-mono)" }}
@@ -3639,7 +3631,7 @@ function BatchHeading({ batch }: { batch: ClipPipelineBatch }) {
       <span className="text-xs text-dim">
         {batch.use_cases.map((u) => u.toUpperCase()).join(" · ")}
         {" · "}
-        {batch.skip_existing ? "skip existing" : "overwrite"}
+        {batch.skip_existing ? t("clipAnalytics.banner.skipExisting") : t("clipAnalytics.banner.overwrite")}
       </span>
     </div>
   );
@@ -3749,6 +3741,7 @@ function PipelineBatchBanner({
   onOpen: () => void;
   onDismiss: () => void;
 }) {
+  const { t } = useTranslation();
   // Aggregate counters across every visible active batch.
   const agg = batches.reduce(
     (acc, b) => {
@@ -3779,9 +3772,11 @@ function PipelineBatchBanner({
   const headline =
     batches.length === 1 && batches[0]
       ? `${batches[0].use_cases.map((u) => u.toUpperCase()).join(" · ")} · ${
-          batches[0].skip_existing ? "skip existing" : "overwrite"
+          batches[0].skip_existing
+            ? t("clipAnalytics.banner.skipExisting")
+            : t("clipAnalytics.banner.overwrite")
         }`
-      : `${batches.length} active batches`;
+      : t("clipAnalytics.banner.activeBatches", { count: batches.length });
 
   return (
     <div
@@ -3808,12 +3803,12 @@ function PipelineBatchBanner({
         }}
       >
         <Icon name="sparkles" size={14} />
-        <strong>Identify Event running</strong>
+        <strong>{t("clipAnalytics.banner.running")}</strong>
         <span
           className="mono"
           style={{ color: "var(--text-secondary)", fontSize: 12 }}
         >
-          {finished} / {agg.total} jobs
+          {t("clipAnalytics.banner.jobs", { done: finished, total: agg.total })}
         </span>
         <span style={{ flex: 1 }} />
         <span className="text-xs text-dim">{headline}</span>
@@ -3821,7 +3816,7 @@ function PipelineBatchBanner({
           type="button"
           className="btn btn-sm"
           onClick={onOpen}
-          title="Open Batch Process Status for full per-UC progress"
+          title={t("clipAnalytics.banner.detailsTitle")}
           style={{
             display: "inline-flex",
             alignItems: "center",
@@ -3829,13 +3824,13 @@ function PipelineBatchBanner({
           }}
         >
           <Icon name="activity" size={11} />
-          Details
+          {t("clipAnalytics.banner.details")}
         </button>
         <button
           type="button"
           onClick={onDismiss}
-          aria-label="Dismiss progress banner"
-          title="Dismiss — processing continues in the background"
+          aria-label={t("clipAnalytics.banner.dismissAria")}
+          title={t("clipAnalytics.banner.dismissTitle")}
           style={{
             appearance: "none",
             width: 26,
@@ -3873,24 +3868,23 @@ function PipelineBatchBanner({
       </div>
       <div className="text-xs text-dim" style={{ display: "flex", gap: 12 }}>
         <span>
-          Completed: <strong>{agg.completed}</strong>
+          {t("clipAnalytics.banner.completed")}: <strong>{agg.completed}</strong>
         </span>
         <span>·</span>
         <span>
-          Skipped: <strong>{agg.skipped}</strong>
+          {t("clipAnalytics.banner.skipped")}: <strong>{agg.skipped}</strong>
         </span>
         {agg.failed > 0 && (
           <>
             <span>·</span>
             <span style={{ color: "var(--danger-text)" }}>
-              Failed: <strong>{agg.failed}</strong>
+              {t("clipAnalytics.banner.failed")}: <strong>{agg.failed}</strong>
             </span>
           </>
         )}
         <span>·</span>
         <span>
-          <strong>{agg.cropping}</strong> cropping ·{" "}
-          <strong>{agg.matching}</strong> matching
+          {t("clipAnalytics.banner.croppingMatching", { cropping: agg.cropping, matching: agg.matching })}
         </span>
       </div>
     </div>
@@ -3906,6 +3900,7 @@ function IdentifyEventModal({
   clip: PersonClipOut;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const reprocess = useSingleClipReprocess(clip.id);
   const qc = useQueryClient();
   const alreadyProcessed = new Set<UseCaseCode>(
@@ -3941,14 +3936,14 @@ function IdentifyEventModal({
       onClose();
     } catch (e) {
       const message =
-        e instanceof Error ? e.message : "Could not start processing";
+        e instanceof Error ? e.message : t("clipAnalytics.modal.errCouldNotStart");
       setError(message);
     }
   };
 
   const onProcessClick = () => {
     if (selected.size === 0) {
-      setError("Pick at least one use case.");
+      setError(t("clipAnalytics.modal.errPickOne"));
       return;
     }
     if (conflicts.length > 0) {
@@ -3976,7 +3971,7 @@ function IdentifyEventModal({
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Identify event"
+          aria-label={t("clipAnalytics.modal.identifyAria")}
           style={{
             background: "var(--bg-elev)",
             border: "1px solid var(--border)",
@@ -4010,7 +4005,7 @@ function IdentifyEventModal({
                 if (fresh.length === 0) {
                   setStep("pick");
                   setError(
-                    "Nothing left after skipping already-processed use cases.",
+                    t("clipAnalytics.modal.errNothingLeft"),
                   );
                   return;
                 }
@@ -4046,9 +4041,10 @@ function PickStep({
   busy: boolean;
   error: string | null;
 }) {
+  const { t } = useTranslation();
   return (
     <>
-      <ModalHeader clip={clip} title="Identify Event" />
+      <ModalHeader clip={clip} title={t("clipAnalytics.identifyEvent")} />
 
       <div style={{ padding: "18px 22px 6px" }}>
         <div
@@ -4061,12 +4057,12 @@ function PickStep({
             marginBottom: 10,
           }}
         >
-          Choose use cases to run
+          {t("clipAnalytics.pick.chooseUseCases")}
         </div>
 
         <div
           role="group"
-          aria-label="Use cases"
+          aria-label={t("clipAnalytics.pick.useCasesGroup")}
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(3, 1fr)",
@@ -4105,13 +4101,13 @@ function PickStep({
         leftSlot={
           <div className="text-xs" style={{ color: "var(--text-secondary)" }}>
             {selected.size === 0
-              ? "No use cases selected"
-              : `${selected.size} use case${selected.size === 1 ? "" : "s"} selected`}
+              ? t("clipAnalytics.pick.noneSelected")
+              : t("clipAnalytics.pick.nSelected", { count: selected.size })}
             {alreadyProcessed.size > 0 && (
               <>
                 {" · "}
                 <span style={{ color: "var(--success-text)" }}>
-                  {alreadyProcessed.size} already processed
+                  {t("clipAnalytics.pick.alreadyProcessed", { count: alreadyProcessed.size })}
                 </span>
               </>
             )}
@@ -4124,7 +4120,7 @@ function PickStep({
           onClick={onCancel}
           disabled={busy}
         >
-          Cancel
+          {t("common.cancel")}
         </button>
         <button
           type="button"
@@ -4132,7 +4128,7 @@ function PickStep({
           onClick={onProcess}
           disabled={busy || selected.size === 0}
         >
-          {busy ? "Starting…" : "Process"}
+          {busy ? t("clipAnalytics.pick.starting") : t("clipAnalytics.pick.process")}
         </button>
       </ModalFooter>
     </>
@@ -4156,12 +4152,13 @@ function OverwriteConfirmStep({
   busy: boolean;
   error: string | null;
 }) {
+  const { t } = useTranslation();
   const conflictList = conflicts.map((u) => u.toUpperCase());
   return (
     <>
       <ModalHeader
         clip={clip}
-        title="Already processed"
+        title={t("clipAnalytics.overwrite.title")}
         tone="warning"
         iconName="info"
       />
@@ -4203,19 +4200,9 @@ function OverwriteConfirmStep({
             color: "var(--text)",
           }}
         >
-          {conflicts.length === 1 ? (
-            <>
-              <strong>{conflictList[0]}</strong> has already been processed
-              for this clip. Do you want to overwrite the existing result, or
-              skip it and only run the new use cases?
-            </>
-          ) : (
-            <>
-              <strong>{conflictList.join(", ")}</strong> have already been
-              processed for this clip. Do you want to overwrite the existing
-              results, or skip them and only run the new use cases?
-            </>
-          )}
+          {conflicts.length === 1
+            ? t("clipAnalytics.overwrite.single", { uc: conflictList[0] })
+            : t("clipAnalytics.overwrite.multi", { ucs: conflictList.join(", ") })}
         </div>
 
         {error && (
@@ -4242,7 +4229,7 @@ function OverwriteConfirmStep({
           onClick={onCancel}
           disabled={busy}
         >
-          Cancel
+          {t("common.cancel")}
         </button>
         <button
           type="button"
@@ -4250,7 +4237,7 @@ function OverwriteConfirmStep({
           onClick={onSkipExisting}
           disabled={busy}
         >
-          Skip Existing
+          {t("clipAnalytics.overwrite.skipExisting")}
         </button>
         <button
           type="button"
@@ -4260,10 +4247,10 @@ function OverwriteConfirmStep({
           disabled={busy}
         >
           {busy
-            ? "Starting…"
+            ? t("clipAnalytics.pick.starting")
             : conflicts.length === 1
-              ? "Reprocess Use Case"
-              : "Reprocess Use Cases"}
+              ? t("clipAnalytics.overwrite.reprocessOne")
+              : t("clipAnalytics.overwrite.reprocessMany")}
         </button>
       </ModalFooter>
     </>
@@ -4283,6 +4270,7 @@ function ModalHeader({
   tone?: "default" | "warning";
   iconName?: IconName;
 }) {
+  const { t } = useTranslation();
   const accentBg =
     tone === "warning"
       ? "linear-gradient(135deg, #f59e0b 0%, #ea580c 100%)"
@@ -4322,7 +4310,7 @@ function ModalHeader({
               opacity: 0.85,
             }}
           >
-            Clip Analytics
+            {t("clipAnalytics.title")}
           </div>
           <div style={{ fontSize: 18, fontWeight: 700, marginTop: 2 }}>
             {title}
@@ -4338,7 +4326,7 @@ function ModalHeader({
           gap: 8,
         }}
       >
-        <SummaryChip iconName="camera" label={clip.camera_name || "Unknown"} />
+        <SummaryChip iconName="camera" label={clip.camera_name || t("clipAnalytics.unknown")} />
         <SummaryChip iconName="fileText" mono label={clip.clip_name || `clip-${clip.id}`} />
         <SummaryChip
           iconName="clock"
@@ -4399,6 +4387,7 @@ function UseCaseCard({
   already: boolean;
   onToggle: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <button
       type="button"
@@ -4443,7 +4432,7 @@ function UseCaseCard({
           }}
         >
           <Icon name="check" size={10} />
-          Processed
+          {t("clipAnalytics.card.processedBadge")}
         </span>
       )}
 
@@ -4489,12 +4478,15 @@ function UseCaseCard({
           className="text-xs"
           style={{ marginTop: 4, color: "var(--text-secondary)", lineHeight: 1.5 }}
         >
-          {tile.subtitle}
+          {t(`clipAnalytics.tiles.${tile.code}.subtitle`, { defaultValue: tile.subtitle })}
         </div>
       </div>
 
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        <SpeedChip label={tile.speedLabel} tone={tile.speedTone} />
+        <SpeedChip
+          label={t(`clipAnalytics.tiles.${tile.code}.speed`, { defaultValue: tile.speedLabel })}
+          tone={tile.speedTone}
+        />
         <span
           style={{
             display: "inline-block",
@@ -4506,7 +4498,7 @@ function UseCaseCard({
             border: "1px solid var(--border)",
           }}
         >
-          {tile.accuracyLabel}
+          {t(`clipAnalytics.tiles.${tile.code}.accuracy`, { defaultValue: tile.accuracyLabel })}
         </span>
       </div>
 
@@ -4595,6 +4587,7 @@ function DeleteClipModal({
   clip: PersonClipOut;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const del = useDeletePersonClip();
   const [error, setError] = useState<string | null>(null);
 
@@ -4605,7 +4598,7 @@ function DeleteClipModal({
   const onConfirm = async () => {
     if (blockedByLifecycle) {
       setError(
-        "Cannot delete a clip that is still recording or being encoded.",
+        t("clipAnalytics.deleteModal.errBlocked"),
       );
       return;
     }
@@ -4614,7 +4607,7 @@ function DeleteClipModal({
       await del.mutateAsync(clip.id);
       onClose();
     } catch (e) {
-      const message = e instanceof Error ? e.message : "Could not delete clip";
+      const message = e instanceof Error ? e.message : t("clipAnalytics.deleteModal.errCouldNot");
       setError(message);
     }
   };
@@ -4646,7 +4639,7 @@ function DeleteClipModal({
           }}
         >
           <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>
-            Delete clip?
+            {t("clipAnalytics.deleteModal.title")}
           </div>
           <div className="text-sm" style={{ color: "var(--text-secondary)" }}>
             {clip.camera_name} · {clip.clip_name}
@@ -4655,8 +4648,7 @@ function DeleteClipModal({
             className="text-sm"
             style={{ marginTop: 10, color: "var(--text)" }}
           >
-            The MP4 + any processing results will be removed. This cannot be
-            undone.
+            {t("clipAnalytics.deleteModal.body")}
           </div>
           {blockedByLifecycle && (
             <div
@@ -4669,8 +4661,7 @@ function DeleteClipModal({
                 marginTop: 10,
               }}
             >
-              The clip is still {clip.recording_status}. Wait for finalizing
-              to finish before deleting.
+              {t("clipAnalytics.deleteModal.blocked", { status: clip.recording_status })}
             </div>
           )}
           {error && (
@@ -4702,7 +4693,7 @@ function DeleteClipModal({
               onClick={onClose}
               disabled={del.isPending}
             >
-              Cancel
+              {t("common.cancel")}
             </button>
             <button
               type="button"
@@ -4711,7 +4702,7 @@ function DeleteClipModal({
               onClick={() => void onConfirm()}
               disabled={del.isPending || blockedByLifecycle}
             >
-              {del.isPending ? "Deleting…" : "Delete"}
+              {del.isPending ? t("clipAnalytics.deleteModal.deleting") : t("common.delete")}
             </button>
           </div>
         </div>
@@ -4743,6 +4734,7 @@ function LiveProcessingModal({
   clip: PersonClipOut;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const qc = useQueryClient();
 
   // Poll the parent clip row every 2 s so the recording_status +
@@ -4812,7 +4804,7 @@ function LiveProcessingModal({
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Live processing details"
+          aria-label={t("clipAnalytics.live.aria")}
           style={{
             background: "var(--bg-elev)",
             border: "1px solid var(--border)",
@@ -4865,16 +4857,16 @@ function LiveProcessingModal({
                   }}
                 >
                   {isInFlight && <LiveDot />}
-                  Clip Analytics · Live processing
+                  {t("clipAnalytics.live.eyebrow")}
                 </div>
                 <div style={{ fontSize: 18, fontWeight: 700, marginTop: 2 }}>
-                  {overallStage.label}
+                  {t(`clipAnalytics.live.stage.${overallStage.labelKey}`)}
                 </div>
               </div>
               <button
                 type="button"
                 onClick={onClose}
-                aria-label="Close"
+                aria-label={t("common.close")}
                 style={{
                   background: "rgba(255,255,255,0.18)",
                   border: "1px solid rgba(255,255,255,0.25)",
@@ -4915,7 +4907,7 @@ function LiveProcessingModal({
           {/* Body — scroll within the modal so the header stays pinned. */}
           <div style={{ overflow: "auto", padding: "16px 22px 22px" }}>
             {/* Overall pipeline */}
-            <SectionLabelLive>Pipeline</SectionLabelLive>
+            <SectionLabelLive>{t("clipAnalytics.live.pipeline")}</SectionLabelLive>
             <StageTrack stage={overallStage.state} live={live} />
             <div
               style={{
@@ -4926,26 +4918,26 @@ function LiveProcessingModal({
               }}
             >
               <LiveKpi
-                label="Total elapsed"
+                label={t("clipAnalytics.live.totalElapsed")}
                 value={totalElapsed != null ? fmtElapsedMs(totalElapsed) : "—"}
               />
               <LiveKpi
-                label="Recording status"
+                label={t("clipAnalytics.live.recordingStatus")}
                 value={live.recording_status}
               />
               <LiveKpi
-                label="Matching status"
+                label={t("clipAnalytics.live.matchingStatus")}
                 value={live.matched_status}
               />
               <LiveKpi
-                label="Match progress"
+                label={t("clipAnalytics.live.matchProgress")}
                 value={`${live.face_matching_progress ?? 0}%`}
               />
             </div>
 
             {/* Per-UC tracks */}
             <SectionLabelLive style={{ marginTop: 18 }}>
-              Per use case
+              {t("clipAnalytics.live.perUseCase")}
             </SectionLabelLive>
             <div
               style={{
@@ -4963,7 +4955,7 @@ function LiveProcessingModal({
             {hasAnyMatchDetails(ucResults) && (
               <>
                 <SectionLabelLive style={{ marginTop: 18 }}>
-                  Detected persons
+                  {t("clipAnalytics.live.detectedPersons")}
                 </SectionLabelLive>
                 <MatchConfidenceList ucResults={ucResults} />
               </>
@@ -4979,9 +4971,9 @@ function LiveProcessingModal({
               return (
                 <>
                   <SectionLabelLive style={{ marginTop: 18 }}>
-                    Face crops (latest)
+                    {t("clipAnalytics.live.faceCropsLatest")}
                   </SectionLabelLive>
-                  <AnomalyInfoBanner message="If the camera misses certain events due to camera positioning, capture limitations, lighting, or brightness conditions, those cases should be treated as possible anomalies." />
+                  <AnomalyInfoBanner message={t("clipAnalytics.live.anomalyNote")} />
                   <LiveCropsStrip clipId={clip.id} crops={allCrops} />
                 </>
               );
@@ -5000,7 +4992,7 @@ function LiveProcessingModal({
                   fontSize: 12.5,
                 }}
               >
-                <strong>Errors:</strong>{" "}
+                <strong>{t("clipAnalytics.live.errors")}</strong>{" "}
                 {ucResults
                   .filter((r) => r.status === "failed" && r.error)
                   .map((r) => `${r.use_case.toUpperCase()}: ${r.error}`)
@@ -5027,21 +5019,20 @@ type OverallStageState =
 function computeOverallStage(
   clip: PersonClipOut,
   ucs: ClipProcessingResult[],
-): { state: OverallStageState; label: string } {
+  // Pure helper (no ``t`` in scope) — returns an i18n key suffix under
+  // ``clipAnalytics.live.stage.*``; the caller translates it.
+): { state: OverallStageState; labelKey: string } {
   if (clip.recording_status === "failed" || clip.recording_status === "abandoned") {
-    return { state: "failed", label: "Recording failed" };
+    return { state: "failed", labelKey: "recordingFailed" };
   }
   if (ucs.some((r) => r.status === "failed")) {
-    return { state: "failed", label: "Processing failed on one or more use cases" };
+    return { state: "failed", labelKey: "processingFailed" };
   }
   if (clip.recording_status === "recording") {
-    return { state: "recording", label: "Recording from camera" };
+    return { state: "recording", labelKey: "recordingFromCamera" };
   }
   if (clip.recording_status === "finalizing") {
-    return {
-      state: "encoding",
-      label: "Finalizing MP4 — concat-copying segments",
-    };
+    return { state: "encoding", labelKey: "finalizingMp4" };
   }
   // Recording is completed. Inspect the UC pipeline.
   const anyProcessing = ucs.some((r) => r.status === "processing");
@@ -5052,19 +5043,19 @@ function computeOverallStage(
       (r) => r.status === "processing" && (r.face_extract_duration_ms ?? 0) === 0,
     );
     if (extracting) {
-      return { state: "extracting", label: "Face crop extraction" };
+      return { state: "extracting", labelKey: "faceExtraction" };
     }
-    return { state: "matching", label: "Face matching" };
+    return { state: "matching", labelKey: "faceMatching" };
   }
   const anyPending = ucs.some((r) => r.status === "pending");
   if (anyPending) {
-    return { state: "extracting", label: "Queued for face extraction" };
+    return { state: "extracting", labelKey: "queuedExtraction" };
   }
   if (ucs.length > 0 && ucs.every((r) => r.status === "completed")) {
-    return { state: "completed", label: "Processing complete" };
+    return { state: "completed", labelKey: "processingComplete" };
   }
   // Saved but no UC has been run yet.
-  return { state: "completed", label: "Saved — no use case processed yet" };
+  return { state: "completed", labelKey: "savedNoUc" };
 }
 
 function computeTotalElapsedMs(
@@ -5148,15 +5139,16 @@ function StageTrack({
   stage: OverallStageState;
   live: PersonClipOut;
 }) {
+  const { t } = useTranslation();
   // Stage order for the track. Recording is excluded from the
   // "post-record" track since the clip can only enter processing
   // after recording is complete.
   const stages: { key: OverallStageState; label: string; icon: IconName }[] = [
-    { key: "recording", label: "Recording", icon: "videocam" },
-    { key: "encoding", label: "Finalizing", icon: "activity" },
-    { key: "extracting", label: "Face extraction", icon: "user" },
-    { key: "matching", label: "Face matching", icon: "shield" },
-    { key: "completed", label: "Completed", icon: "check" },
+    { key: "recording", label: t("clipAnalytics.live.track.recording"), icon: "videocam" },
+    { key: "encoding", label: t("clipAnalytics.live.track.finalizing"), icon: "activity" },
+    { key: "extracting", label: t("clipAnalytics.live.track.extraction"), icon: "user" },
+    { key: "matching", label: t("clipAnalytics.live.track.matching"), icon: "shield" },
+    { key: "completed", label: t("clipAnalytics.live.track.completed"), icon: "check" },
   ];
   const reachedIndex = stages.findIndex((s) => s.key === stage);
   const isFailed = stage === "failed";
@@ -5314,14 +5306,15 @@ function UcLiveCard({
   result: ClipProcessingResult | null;
   cropsCount: number;
 }) {
+  const { t } = useTranslation();
   const meta = UC_LIVE_META[ucCode];
   const status = result?.status ?? "idle";
   const statusTone: Record<string, { bg: string; fg: string; label: string }> = {
-    pending: { bg: "var(--warning-soft)", fg: "var(--warning-text)", label: "Pending" },
-    processing: { bg: "rgba(99,102,241,0.12)", fg: "#4338ca", label: "Processing" },
-    completed: { bg: "var(--success-soft)", fg: "var(--success-text)", label: "Completed" },
-    failed: { bg: "var(--danger-soft)", fg: "var(--danger-text)", label: "Failed" },
-    idle: { bg: "var(--bg-sunken)", fg: "var(--text-secondary)", label: "Not run" },
+    pending: { bg: "var(--warning-soft)", fg: "var(--warning-text)", label: t("clipAnalytics.live.ucStatus.pending") },
+    processing: { bg: "rgba(99,102,241,0.12)", fg: "#4338ca", label: t("clipAnalytics.live.ucStatus.processing") },
+    completed: { bg: "var(--success-soft)", fg: "var(--success-text)", label: t("clipAnalytics.live.ucStatus.completed") },
+    failed: { bg: "var(--danger-soft)", fg: "var(--danger-text)", label: t("clipAnalytics.live.ucStatus.failed") },
+    idle: { bg: "var(--bg-sunken)", fg: "var(--text-secondary)", label: t("clipAnalytics.live.ucStatus.idle") },
   };
   const sp = statusTone[status] ?? statusTone.idle!;
   const isLive = status === "processing" || status === "pending";
@@ -5400,24 +5393,24 @@ function UcLiveCard({
           background: "var(--border)",
         }}
       >
-        <UcStat label="Extract" value={fmtMaybeMs(result?.face_extract_duration_ms)} />
-        <UcStat label="Match" value={fmtMaybeMs(result?.match_duration_ms)} />
+        <UcStat label={t("clipAnalytics.live.ucStat.extract")} value={fmtMaybeMs(result?.face_extract_duration_ms)} />
+        <UcStat label={t("clipAnalytics.live.ucStat.match")} value={fmtMaybeMs(result?.match_duration_ms)} />
         <UcStat
-          label="Total"
+          label={t("clipAnalytics.live.ucStat.total")}
           value={
             status === "processing" && liveElapsedMs != null
               ? `${fmtElapsedMs(liveElapsedMs)}…`
               : fmtMaybeMs(result?.duration_ms)
           }
         />
-        <UcStat label="Crops" value={String(cropsCount)} />
+        <UcStat label={t("clipAnalytics.live.ucStat.crops")} value={String(cropsCount)} />
         <UcStat
-          label="Matched"
+          label={t("clipAnalytics.live.ucStat.matched")}
           value={String(result?.matched_employees.length ?? 0)}
           accent="var(--success-text)"
         />
         <UcStat
-          label="Unknown"
+          label={t("clipAnalytics.live.ucStat.unknown")}
           value={String(result?.unknown_count ?? 0)}
         />
       </div>
@@ -5497,6 +5490,7 @@ function UcStat({
 }
 
 function MatchConfidenceList({ ucResults }: { ucResults: ClipProcessingResult[] }) {
+  const { t } = useTranslation();
   // Roll up best confidence per (employee, uc) across all results.
   type Entry = { name: string; employeeId: number | null; confidence: number; uc: string };
   const entries: Entry[] = [];
@@ -5509,7 +5503,7 @@ function MatchConfidenceList({ ucResults }: { ucResults: ClipProcessingResult[] 
     }>) {
       if (typeof md.confidence !== "number") continue;
       entries.push({
-        name: md.employee_name ?? `Employee #${md.employee_id ?? "?"}`,
+        name: md.employee_name ?? t("clipAnalytics.live.employeeN", { id: md.employee_id ?? "?" }),
         employeeId: typeof md.employee_id === "number" ? md.employee_id : null,
         confidence: md.confidence,
         uc: r.use_case,
@@ -5521,7 +5515,7 @@ function MatchConfidenceList({ ucResults }: { ucResults: ClipProcessingResult[] 
   if (entries.length === 0) {
     return (
       <div className="text-sm text-dim" style={{ padding: "8px 0" }}>
-        No match details yet.
+        {t("clipAnalytics.live.noMatchDetails")}
       </div>
     );
   }
@@ -5563,6 +5557,7 @@ function LiveCropsStrip({
   clipId: number;
   crops: FaceCropOut[];
 }) {
+  const { t } = useTranslation();
   // Most recent first; cap to 20 for the modal strip.
   const sorted = [...crops]
     .sort((a, b) => b.id - a.id)
@@ -5570,7 +5565,7 @@ function LiveCropsStrip({
   if (sorted.length === 0) {
     return (
       <div className="text-sm text-dim" style={{ padding: "8px 0" }}>
-        No crops captured yet.
+        {t("clipAnalytics.live.noCrops")}
       </div>
     );
   }
@@ -5588,7 +5583,7 @@ function LiveCropsStrip({
           title={
             c.employee_name
               ? `${c.employee_name} · Q${c.quality_score.toFixed(2)}`
-              : `Unknown · Q${c.quality_score.toFixed(2)}`
+              : `${t("clipAnalytics.unknown")} · Q${c.quality_score.toFixed(2)}`
           }
           style={{
             position: "relative",
@@ -5670,22 +5665,28 @@ if (typeof document !== "undefined") {
 // ---------------------------------------------------------------------------
 
 function StatusPill({
-  status,
+  statusKey,
   onClick,
 }: {
-  status: string;
+  // Stable key (recording/finalizing/failed/abandoned/processing/
+  // processed/saved) — drives BOTH the colour switch and the i18n
+  // lookup. Keying off the translated label would break colours in
+  // non-English locales.
+  statusKey: string;
   onClick?: () => void;
 }) {
+  const { t } = useTranslation();
+  const status = t(`clipAnalytics.status.${statusKey}`);
   const tone: { bg: string; fg: string } = (() => {
-    switch (status) {
-      case "Processed":
+    switch (statusKey) {
+      case "processed":
         // A clip that has at least one UC run — bright accent so it
         // stands out from the merely-Saved population.
         return {
           bg: "rgba(59,130,246,0.12)",
           fg: "#1d4ed8",
         };
-      case "Processing":
+      case "processing":
         // Live pipeline state — purple tone so it visually
         // distinguishes itself from both the terminal Processed
         // (blue) and the static Saved (green).
@@ -5693,14 +5694,14 @@ function StatusPill({
           bg: "rgba(139,92,246,0.14)",
           fg: "#6d28d9",
         };
-      case "Saved":
+      case "saved":
         return { bg: "var(--success-soft)", fg: "var(--success-text)" };
-      case "Recording":
+      case "recording":
         return { bg: "var(--danger-soft)", fg: "var(--danger-text)" };
-      case "Finalizing":
+      case "finalizing":
         return { bg: "var(--warning-soft)", fg: "var(--warning-text)" };
-      case "Failed":
-      case "Abandoned":
+      case "failed":
+      case "abandoned":
         return { bg: "var(--danger-soft)", fg: "var(--danger-text)" };
       default:
         return {
@@ -5717,7 +5718,7 @@ function StatusPill({
       <button
         type="button"
         onClick={onClick}
-        title="Open live processing details"
+        title={t("clipAnalytics.statusPill.openLive")}
         style={{
           display: "inline-flex",
           alignItems: "center",

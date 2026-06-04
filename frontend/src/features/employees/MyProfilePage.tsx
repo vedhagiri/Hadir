@@ -148,10 +148,10 @@ function ProfileCard({ employee: e }: { employee: Employee }) {
             "detail" in (err.body as Record<string, unknown>)
             ? String(
                 (err.body as { detail: unknown }).detail ??
-                  `Save failed (${err.status})`,
+                  (t("myProfile.errSaveStatus", { status: err.status }) as string),
               )
-            : `Save failed (${err.status})`
-          : "Could not save profile.";
+            : (t("myProfile.errSaveStatus", { status: err.status }) as string)
+          : (t("myProfile.errSaveGeneric") as string);
       setProfileError(detail);
     } finally {
       setSavingProfile(false);
@@ -181,7 +181,7 @@ function ProfileCard({ employee: e }: { employee: Employee }) {
               setProfileError(null);
             }}
           >
-            <Icon name="edit" size={11} /> Edit
+            <Icon name="edit" size={11} /> {t("myProfile.edit") as string}
           </button>
         ) : (
           <div style={{ display: "flex", gap: 8 }}>
@@ -194,7 +194,7 @@ function ProfileCard({ employee: e }: { employee: Employee }) {
               }}
               disabled={savingProfile}
             >
-              Cancel
+              {t("myProfile.cancel") as string}
             </button>
             <button
               type="button"
@@ -202,7 +202,9 @@ function ProfileCard({ employee: e }: { employee: Employee }) {
               onClick={onSaveProfile}
               disabled={savingProfile}
             >
-              {savingProfile ? "Saving…" : "Save"}
+              {savingProfile
+                ? (t("myProfile.saving") as string)
+                : (t("myProfile.save") as string)}
             </button>
           </div>
         )}
@@ -294,8 +296,7 @@ function ProfileCard({ employee: e }: { employee: Employee }) {
               marginTop: 10,
             }}
           >
-            Other fields (name, email, department) are managed by HR /
-            Admin. Ask them to update those if you need a change.
+            {t("myProfile.editHint") as string}
           </div>
         </div>
       )}
@@ -494,7 +495,7 @@ function PhotosCard({
               background: "var(--bg-elev)",
               color: "var(--text)",
             }}
-            aria-label="Angle"
+            aria-label={t("myProfile.angleAria") as string}
           >
             {ANGLES.map((a) => (
               <option key={a} value={a}>
@@ -701,7 +702,7 @@ function PhotoTile({
             className="btn btn-sm btn-danger"
             onClick={onDelete}
             disabled={deleting}
-            aria-label="Delete photo"
+            aria-label={t("myProfile.deletePhotoAria") as string}
             title={t("myProfile.deleteBtn", {
               defaultValue: "Delete",
             }) as string}

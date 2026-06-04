@@ -4,6 +4,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 
 import { api } from "../../api/client";
@@ -90,14 +91,17 @@ interface EmployeeGroup {
 // ─── Small shared components ──────────────────────────────────────────────────
 
 function AnglePill({ angle }: { angle: PhotoAngle | null }) {
+  const { t } = useTranslation();
   if (!angle) return null;
-  if (angle === "front") return <span className="pill pill-success">{angle}</span>;
-  if (angle === "other") return <span className="pill">{angle}</span>;
-  return <span className="pill pill-neutral">{angle}</span>;
+  const label = t(`employees.photos.angles.${angle}`, { defaultValue: angle });
+  if (angle === "front") return <span className="pill pill-success">{label}</span>;
+  if (angle === "other") return <span className="pill">{label}</span>;
+  return <span className="pill pill-neutral">{label}</span>;
 }
 
 // One file thumbnail — manages its own blob URL lifecycle.
 function FileThumbnail({ file, onRemove }: { file: File; onRemove: () => void }) {
+  const { t } = useTranslation();
   const [url, setUrl] = useState<string | null>(null);
   const { code, angle, error } = parseFilename(file.name);
 
@@ -132,7 +136,7 @@ function FileThumbnail({ file, onRemove }: { file: File; onRemove: () => void })
         <button
           className="photo-remove"
           onClick={onRemove}
-          aria-label={`Remove ${file.name}`}
+          aria-label={t("bulkPhotoUpload.removeFileAria", { name: file.name })}
           style={{ top: 5, insetInlineEnd: 5 }}
         >
           <Icon name="x" size={9} />
@@ -156,7 +160,7 @@ function FileThumbnail({ file, onRemove }: { file: File; onRemove: () => void })
         </p>
         {error ? (
           <span className="pill pill-danger" style={{ fontSize: 9, padding: "0 5px" }}>
-            invalid
+            {t("bulkPhotoUpload.invalidPill")}
           </span>
         ) : (
           <div style={{ display: "flex", gap: 3, alignItems: "center", flexWrap: "wrap" }}>
@@ -193,6 +197,7 @@ function UploadPhase({
   onClear: () => void;
   onReview: () => void;
 }) {
+  const { t } = useTranslation();
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -226,7 +231,7 @@ function UploadPhase({
       <div
         role="button"
         tabIndex={0}
-        aria-label="Drop employee photos here or click to choose files"
+        aria-label={t("bulkPhotoUpload.dropAria")}
         onClick={() => inputRef.current?.click()}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") inputRef.current?.click();
@@ -285,11 +290,11 @@ function UploadPhase({
             fontFamily: "var(--font-display)",
           }}
         >
-          {dragging ? "Release to add photos" : "Drop employee photos here"}
+          {dragging ? t("bulkPhotoUpload.release") : t("bulkPhotoUpload.dropHere")}
         </h2>
 
         <p style={{ margin: "0 0 10px", fontSize: 13, color: "var(--text-secondary)" }}>
-          Filename format:{" "}
+          {t("bulkPhotoUpload.filenameFormat")}:{" "}
           <code
             style={{
               fontFamily: "var(--font-mono)",
@@ -303,12 +308,12 @@ function UploadPhase({
             OM0097_front.jpg
           </code>
           <span style={{ color: "var(--text-tertiary)", marginInlineStart: 6 }}>
-            · front · left · right · other
+            {t("bulkPhotoUpload.anglesList")}
           </span>
         </p>
 
         <p style={{ margin: "0 0 24px", fontSize: 12, color: "var(--text-tertiary)" }}>
-          JPEG · PNG · WebP supported
+          {t("bulkPhotoUpload.formatsSupported")}
         </p>
 
         <button
@@ -317,9 +322,9 @@ function UploadPhase({
             e.stopPropagation();
             inputRef.current?.click();
           }}
-          aria-label="Choose photo files"
+          aria-label={t("bulkPhotoUpload.chooseFilesAria")}
         >
-          Choose Files
+          {t("bulkPhotoUpload.chooseFiles")}
         </button>
       </div>
 
@@ -329,18 +334,18 @@ function UploadPhase({
           <div className="card-head">
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <p className="card-title">
-                {files.length} photo{files.length !== 1 ? "s" : ""} selected
+                {t("bulkPhotoUpload.photosSelected", { count: files.length })}
               </p>
               <span className="pill">{totalMB} MB</span>
               {invalidCount > 0 && (
                 <span className="pill pill-warning">
-                  {invalidCount} invalid name{invalidCount !== 1 ? "s" : ""}
+                  {t("bulkPhotoUpload.invalidNames", { count: invalidCount })}
                 </span>
               )}
             </div>
             <div style={{ display: "flex", gap: 6 }}>
               <button className="btn btn-ghost btn-sm" onClick={onClear}>
-                Clear all
+                {t("bulkPhotoUpload.clearAll")}
               </button>
               <button
                 className="btn btn-sm"
@@ -348,12 +353,12 @@ function UploadPhase({
                   e.stopPropagation();
                   inputRef.current?.click();
                 }}
-                aria-label="Add more files"
+                aria-label={t("bulkPhotoUpload.addMoreAria")}
               >
-                + Add more
+                {t("bulkPhotoUpload.addMore")}
               </button>
               <button className="btn btn-sm btn-primary" onClick={onReview}>
-                Review →
+                {t("bulkPhotoUpload.reviewBtn")}
               </button>
             </div>
           </div>
@@ -408,6 +413,7 @@ function ReviewPhase({
   onBack: () => void;
   isUploading: boolean;
 }) {
+  const { t } = useTranslation();
   const matched = groups.filter((g) => g.employee !== null);
   const unmatched = groups.filter((g) => g.employee === null);
 
@@ -444,7 +450,7 @@ function ReviewPhase({
                   letterSpacing: ".06em",
                 }}
               >
-                Ready to upload
+                {t("bulkPhotoUpload.review.readyLabel")}
               </div>
               <div
                 style={{
@@ -469,9 +475,8 @@ function ReviewPhase({
                   {selectedCount}
                 </span>
                 <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-                  photo{selectedCount !== 1 ? "s" : ""} for{" "}
-                  {readyEmployeeCount} employee
-                  {readyEmployeeCount !== 1 ? "s" : ""}
+                  {t("bulkPhotoUpload.review.photoCount", { count: selectedCount })}{" "}
+                  {t("bulkPhotoUpload.review.employeeCount", { count: readyEmployeeCount })}
                 </span>
               </div>
             </div>
@@ -481,7 +486,7 @@ function ReviewPhase({
                 onClick={onBack}
                 disabled={isUploading}
               >
-                ← Back
+                {t("bulkPhotoUpload.review.back")}
               </button>
               <button
                 className="btn btn-primary"
@@ -492,8 +497,8 @@ function ReviewPhase({
                 aria-busy={isUploading}
               >
                 {isUploading
-                  ? "Uploading…"
-                  : `Upload ${selectedCount} photo${selectedCount !== 1 ? "s" : ""}`}
+                  ? t("bulkPhotoUpload.review.uploading")
+                  : t("bulkPhotoUpload.review.uploadBtn", { count: selectedCount })}
               </button>
             </div>
           </div>
@@ -509,30 +514,10 @@ function ReviewPhase({
               borderTop: "1px solid var(--border)",
             }}
           >
-            <SummaryChip
-              icon="✓"
-              label={`selected${selectedCount !== 1 ? "" : ""}`}
-              value={selectedCount}
-              tone="success"
-            />
-            <SummaryChip
-              icon="⊘"
-              label="removed"
-              value={removedCount}
-              tone="neutral"
-            />
-            <SummaryChip
-              icon="⚠"
-              label="needs review"
-              value={unmatchedFileCount}
-              tone="warning"
-            />
-            <SummaryChip
-              icon="✗"
-              label="invalid"
-              value={parseErrors.length}
-              tone="danger"
-            />
+            <SummaryChip icon="✓" label={t("bulkPhotoUpload.review.chipSelected")} value={selectedCount} tone="success" />
+            <SummaryChip icon="⊘" label={t("bulkPhotoUpload.review.chipRemoved")} value={removedCount} tone="neutral" />
+            <SummaryChip icon="⚠" label={t("bulkPhotoUpload.review.chipNeedsReview")} value={unmatchedFileCount} tone="warning" />
+            <SummaryChip icon="✗" label={t("bulkPhotoUpload.review.chipInvalid")} value={parseErrors.length} tone="danger" />
           </div>
         </div>
       </div>
@@ -541,7 +526,7 @@ function ReviewPhase({
       {isLoadingEmployees && (
         <div className="empty" style={{ paddingTop: 60 }}>
           <Icon name="activity" size={24} />
-          <p style={{ marginTop: 10 }}>Looking up employees…</p>
+          <p style={{ marginTop: 10 }}>{t("bulkPhotoUpload.review.lookingUp")}</p>
         </div>
       )}
 
@@ -549,11 +534,10 @@ function ReviewPhase({
       {!isLoadingEmployees && matched.length > 0 && (
         <section style={{ marginBottom: 28 }}>
           <SectionTitle
-            pill="✓ Matched"
+            pill={t("bulkPhotoUpload.review.matchedPill")}
             tone="success"
-            count={matched.length}
-            label="employee"
-            sub="Click any photo to remove it from this upload. Use Remove all / Restore all to toggle a whole employee."
+            countLabel={t("bulkPhotoUpload.review.matchedCount", { count: matched.length })}
+            sub={t("bulkPhotoUpload.review.matchedSub")}
           />
           <div
             style={{
@@ -580,11 +564,10 @@ function ReviewPhase({
       {!isLoadingEmployees && unmatched.length > 0 && (
         <section style={{ marginBottom: 28 }}>
           <SectionTitle
-            pill="⚠ Needs review"
+            pill={t("bulkPhotoUpload.review.needsReviewPill")}
             tone="warning"
-            count={unmatched.length}
-            label="code"
-            sub="No employee found for these filenames. Enter the correct code to remap, or leave them — they will NOT be uploaded as-is."
+            countLabel={t("bulkPhotoUpload.review.needsReviewCount", { count: unmatched.length })}
+            sub={t("bulkPhotoUpload.review.needsReviewSub")}
           />
           <div
             style={{
@@ -610,19 +593,18 @@ function ReviewPhase({
       {!isLoadingEmployees && parseErrors.length > 0 && (
         <section style={{ marginBottom: 28 }}>
           <SectionTitle
-            pill="✗ Invalid filenames"
+            pill={t("bulkPhotoUpload.review.invalidPill")}
             tone="danger"
-            count={parseErrors.length}
-            label="file"
-            sub="These filenames don't match the {CODE}_{angle}.jpg convention and will be skipped."
+            countLabel={t("bulkPhotoUpload.review.invalidCount", { count: parseErrors.length })}
+            sub={t("bulkPhotoUpload.review.invalidSub")}
           />
           <div className="card">
             <div className="card-body" style={{ padding: 0 }}>
               <table className="table table-compact" style={{ width: "100%" }}>
                 <thead>
                   <tr>
-                    <th>Filename</th>
-                    <th>Problem</th>
+                    <th>{t("bulkPhotoUpload.review.colFilename")}</th>
+                    <th>{t("bulkPhotoUpload.review.colProblem")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -665,7 +647,7 @@ function ReviewPhase({
                 color: "var(--text-secondary)",
               }}
             >
-              No files to review. Go back and add some photos.
+              {t("bulkPhotoUpload.review.noFiles")}
             </p>
           </div>
         )}
@@ -744,14 +726,12 @@ function SummaryChip({
 function SectionTitle({
   pill,
   tone,
-  count,
-  label,
+  countLabel,
   sub,
 }: {
   pill: string;
   tone: "success" | "warning" | "danger";
-  count: number;
-  label: string;
+  countLabel: string;
   sub: string;
 }) {
   return (
@@ -765,11 +745,8 @@ function SectionTitle({
         }}
       >
         <span className={`pill pill-${tone}`}>{pill}</span>
-        <span
-          style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}
-        >
-          {count} {label}
-          {count !== 1 ? "s" : ""}
+        <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}>
+          {countLabel}
         </span>
       </div>
       <p style={{ margin: 0, fontSize: 12, color: "var(--text-tertiary)" }}>
@@ -792,6 +769,7 @@ function MatchedEmployeeCard({
   onSetGroupDeselected: (filenames: string[], remove: boolean) => void;
   onUndoRemap: (filename: string, parsedCode: string) => void;
 }) {
+  const { t } = useTranslation();
   const emp = group.employee!;
   const avatarText = initials(emp.full_name);
   const selected = group.files.filter((pf) => !deselected.has(pf.file.name));
@@ -841,7 +819,9 @@ function MatchedEmployeeCard({
           className={`pill ${emp.status === "active" ? "pill-success" : "pill-warning"}`}
           style={{ flexShrink: 0, fontSize: 10 }}
         >
-          {emp.status}
+          {emp.status === "active"
+            ? t("bulkPhotoUpload.review.statusActive")
+            : t("bulkPhotoUpload.review.statusInactive")}
         </span>
       </div>
 
@@ -865,11 +845,11 @@ function MatchedEmployeeCard({
               fontWeight: 600,
             }}
           >
-            ✓ {selected.length} selected
+            {t("bulkPhotoUpload.review.selectedCount", { n: selected.length })}
           </span>
           {removed > 0 && (
             <span style={{ color: "var(--text-tertiary)" }}>
-              · ⊘ {removed} removed
+              {t("bulkPhotoUpload.review.removedCount", { n: removed })}
             </span>
           )}
           <div
@@ -885,7 +865,7 @@ function MatchedEmployeeCard({
                 onClick={() => onSetGroupDeselected(filenames, false)}
                 style={{ fontSize: 11, padding: "2px 8px" }}
               >
-                Restore all
+                {t("bulkPhotoUpload.review.restoreAll")}
               </button>
             )}
             {selected.length > 0 && (
@@ -894,7 +874,7 @@ function MatchedEmployeeCard({
                 onClick={() => onSetGroupDeselected(filenames, true)}
                 style={{ fontSize: 11, padding: "2px 8px" }}
               >
-                Remove all
+                {t("bulkPhotoUpload.review.removeAll")}
               </button>
             )}
           </div>
@@ -951,13 +931,16 @@ function ReviewPhotoThumb({
   remappedFrom: string | null;
   onUndoRemap: (() => void) | null;
 }) {
+  const { t } = useTranslation();
   return (
     <div style={{ width: "100%" }}>
       <button
         type="button"
         onClick={onToggle}
         aria-pressed={isSelected}
-        aria-label={`${isSelected ? "Remove" : "Restore"} ${pf.file.name}`}
+        aria-label={isSelected
+          ? t("bulkPhotoUpload.review.removeAria", { name: pf.file.name })
+          : t("bulkPhotoUpload.review.restoreAria", { name: pf.file.name })}
         style={{
           position: "relative",
           padding: 0,
@@ -990,8 +973,8 @@ function ReviewPhotoThumb({
         {/* Remapped badge — top-start */}
         {remappedFrom && (
           <div
-            title={`Remapped from ${remappedFrom}`}
-            aria-label={`Remapped from ${remappedFrom}`}
+            title={t("bulkPhotoUpload.review.remappedTitle", { code: remappedFrom })}
+            aria-label={t("bulkPhotoUpload.review.remappedTitle", { code: remappedFrom })}
             style={{
               position: "absolute",
               top: 6,
@@ -1058,7 +1041,7 @@ function ReviewPhotoThumb({
               textTransform: "uppercase",
             }}
           >
-            Removed
+            {t("bulkPhotoUpload.review.removedLabel")}
           </div>
         )}
         {pf.parsedAngle && isSelected && (
@@ -1090,8 +1073,8 @@ function ReviewPhotoThumb({
         <button
           type="button"
           onClick={onUndoRemap}
-          aria-label={`Undo remap, send back to needs-review (was ${remappedFrom})`}
-          title="Undo remap — sends this photo back to Needs review"
+          aria-label={t("bulkPhotoUpload.review.undoRemapAria", { code: remappedFrom })}
+          title={t("bulkPhotoUpload.review.undoRemapTitle")}
           style={{
             marginTop: 3,
             background: "transparent",
@@ -1108,9 +1091,9 @@ function ReviewPhotoThumb({
         >
           <span aria-hidden="true">↻</span>
           <span style={{ fontFamily: "var(--font-mono)" }}>
-            was {remappedFrom}
+            {t("bulkPhotoUpload.review.wasCode", { code: remappedFrom })}
           </span>
-          <span style={{ textDecoration: "underline" }}>· undo</span>
+          <span style={{ textDecoration: "underline" }}>{t("bulkPhotoUpload.review.undoLabel")}</span>
         </button>
       )}
     </div>
@@ -1128,6 +1111,7 @@ function UnmatchedCard({
   employeeMap: Map<string, Employee>;
   onApplyRemap: (filename: string, newCode: string) => void;
 }) {
+  const { t } = useTranslation();
   const existingRemap = remaps.get(group.files[0]?.file.name ?? "") ?? "";
   const [val, setVal] = useState(existingRemap || group.code);
 
@@ -1151,14 +1135,14 @@ function UnmatchedCard({
     status = matchedEmployee
       ? {
           tone: "success",
-          text: `✓ ${matchedEmployee.full_name} · ${matchedEmployee.department.name}`,
+          text: t("bulkPhotoUpload.review.remapFound", { name: matchedEmployee.full_name, dept: matchedEmployee.department.name }),
         }
       : {
           tone: "danger",
-          text: `✗ No employee found with code "${upper}"`,
+          text: t("bulkPhotoUpload.review.remapNotFound", { code: upper }),
         };
   } else if (noChange && !isEmpty) {
-    status = { tone: "muted", text: "Enter a different code to remap" };
+    status = { tone: "muted", text: t("bulkPhotoUpload.review.remapSameCode") };
   }
 
   return (
@@ -1200,7 +1184,7 @@ function UnmatchedCard({
                 color: "var(--text)",
               }}
             >
-              Code not found
+              {t("bulkPhotoUpload.review.codeNotFound")}
             </div>
             <div
               style={{
@@ -1212,8 +1196,7 @@ function UnmatchedCard({
                 whiteSpace: "nowrap",
               }}
             >
-              {group.code} · {group.files.length} file
-              {group.files.length !== 1 ? "s" : ""}
+              {group.code} · {t("bulkPhotoUpload.review.fileCount", { count: group.files.length })}
             </div>
           </div>
         </div>
@@ -1267,7 +1250,7 @@ function UnmatchedCard({
             letterSpacing: ".04em",
           }}
         >
-          Remap to employee code
+          {t("bulkPhotoUpload.review.remapLabel")}
         </label>
         <div style={{ display: "flex", gap: 6 }}>
           <input
@@ -1275,8 +1258,8 @@ function UnmatchedCard({
             value={val}
             onChange={(e) => setVal(e.target.value.toUpperCase())}
             onKeyDown={(e) => e.key === "Enter" && apply()}
-            placeholder="Enter correct code"
-            aria-label={`Correct employee code for ${group.code}`}
+            placeholder={t("bulkPhotoUpload.review.remapPlaceholder")}
+            aria-label={t("bulkPhotoUpload.review.remapCodeAria", { code: group.code })}
             aria-invalid={
               !isEmpty && !noChange && matchedEmployee === null
             }
@@ -1304,13 +1287,13 @@ function UnmatchedCard({
             disabled={!canApply}
             title={
               canApply
-                ? "Apply remap"
+                ? t("bulkPhotoUpload.review.remapApplyTitle")
                 : noChange
-                  ? "Enter a different code"
-                  : "No employee with that code — fix it before applying"
+                  ? t("bulkPhotoUpload.review.remapEnterDifferent")
+                  : t("bulkPhotoUpload.review.remapNoEmployee")
             }
           >
-            Apply
+            {t("bulkPhotoUpload.review.remapApply")}
           </button>
         </div>
         {status && (
@@ -1347,6 +1330,7 @@ function ResultsPhase({
   employeeMap: Map<string, Employee>;
   onReset: () => void;
 }) {
+  const { t } = useTranslation();
   const [tab, setTab] = useState<"accepted" | "rejected">(
     result.accepted.length > 0 ? "accepted" : "rejected",
   );
@@ -1385,7 +1369,7 @@ function ResultsPhase({
       {/* Stats */}
       <div className="grid grid-2" style={{ gap: 14, marginBottom: 20 }}>
         <div className="stat">
-          <div className="stat-label">Photos uploaded</div>
+          <div className="stat-label">{t("bulkPhotoUpload.results.statUploaded")}</div>
           <div
             className="stat-value"
             style={{
@@ -1397,12 +1381,12 @@ function ResultsPhase({
           </div>
           {result.accepted.length > 0 && (
             <div className="stat-delta delta-up">
-              <span className="pill pill-success">Success</span>
+              <span className="pill pill-success">{t("bulkPhotoUpload.results.pillSuccess")}</span>
             </div>
           )}
         </div>
         <div className="stat">
-          <div className="stat-label">Rejected</div>
+          <div className="stat-label">{t("bulkPhotoUpload.results.statRejected")}</div>
           <div
             className="stat-value"
             style={{
@@ -1413,7 +1397,7 @@ function ResultsPhase({
           </div>
           {hasRejected && (
             <div className="stat-delta delta-down">
-              <span className="pill pill-danger">Failed</span>
+              <span className="pill pill-danger">{t("bulkPhotoUpload.results.pillFailed")}</span>
             </div>
           )}
         </div>
@@ -1446,13 +1430,9 @@ function ResultsPhase({
         <span style={{ fontSize: 16 }}>
           {allOk ? "✓" : allFail ? "✗" : "⚠"}
         </span>
-        {allOk &&
-          `All ${result.accepted.length} photo${result.accepted.length !== 1 ? "s" : ""} uploaded successfully.`}
-        {!allOk &&
-          !allFail &&
-          `${result.accepted.length} photo${result.accepted.length !== 1 ? "s" : ""} uploaded; ${result.rejected.length} rejected — see the Rejected tab for details.`}
-        {allFail &&
-          "No photos were accepted. Check the Rejected tab for reasons."}
+        {allOk && t("bulkPhotoUpload.results.allOk", { count: result.accepted.length })}
+        {!allOk && !allFail && t("bulkPhotoUpload.results.partial", { count: result.accepted.length, rejected: result.rejected.length })}
+        {allFail && t("bulkPhotoUpload.results.allFail")}
       </div>
 
       {/* Uploaded-employees quick links */}
@@ -1460,12 +1440,10 @@ function ResultsPhase({
         <div className="card" style={{ marginBottom: 22 }}>
           <div className="card-head" style={{ padding: "10px 14px" }}>
             <p className="card-title">
-              View uploaded employees ({uploadedEmployees.length})
+              {t("bulkPhotoUpload.results.viewUploaded", { n: uploadedEmployees.length })}
             </p>
-            <span
-              style={{ fontSize: 11, color: "var(--text-tertiary)" }}
-            >
-              Click to open the profile and verify reference photos
+            <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
+              {t("bulkPhotoUpload.results.viewHint")}
             </span>
           </div>
           <div className="card-body">
@@ -1525,7 +1503,7 @@ function ResultsPhase({
                           fontFamily: "var(--font-mono)",
                         }}
                       >
-                        {u.code} · {u.count} photo{u.count !== 1 ? "s" : ""}
+                        {u.code} · {t("bulkPhotoUpload.results.employeePhotoCount", { count: u.count })}
                       </span>
                     </div>
                   </>
@@ -1547,8 +1525,8 @@ function ResultsPhase({
                     key={u.code}
                     to={`/employees?employee=${u.employee.id}`}
                     style={baseStyle}
-                    aria-label={`View ${u.employee.full_name}'s profile`}
-                    title={`Open ${u.employee.full_name} profile`}
+                    aria-label={t("bulkPhotoUpload.results.viewBtnAria", { name: u.employee.full_name })}
+                    title={t("bulkPhotoUpload.results.viewBtnTitle")}
                   >
                     {inner}
                     <Icon name="chevronRight" size={11} />
@@ -1561,7 +1539,7 @@ function ResultsPhase({
                       opacity: 0.6,
                       cursor: "default",
                     }}
-                    title="Employee record not in current page cache"
+                    title={t("bulkPhotoUpload.results.notCached")}
                   >
                     {inner}
                   </span>
@@ -1579,7 +1557,7 @@ function ResultsPhase({
           onClick={() => setTab("accepted")}
           aria-selected={tab === "accepted"}
         >
-          Accepted ({result.accepted.length})
+          {t("bulkPhotoUpload.results.tabAccepted", { n: result.accepted.length })}
         </button>
         <button
           className={`tab${tab === "rejected" ? " active" : ""}`}
@@ -1587,23 +1565,23 @@ function ResultsPhase({
           aria-selected={tab === "rejected"}
           style={hasRejected ? { color: "var(--danger-text)" } : undefined}
         >
-          Rejected ({result.rejected.length})
+          {t("bulkPhotoUpload.results.tabRejected", { n: result.rejected.length })}
         </button>
       </div>
 
       <div className="card">
         {tab === "accepted" ? (
           result.accepted.length === 0 ? (
-            <div className="empty">No photos were accepted.</div>
+            <div className="empty">{t("bulkPhotoUpload.results.noAccepted")}</div>
           ) : (
             <div className="card-body" style={{ padding: 0 }}>
               <table className="table" style={{ width: "100%" }}>
                 <thead>
                   <tr>
-                    <th>Filename</th>
-                    <th>Employee</th>
-                    <th>Angle</th>
-                    <th>Photo ID</th>
+                    <th>{t("bulkPhotoUpload.results.colFilename")}</th>
+                    <th>{t("bulkPhotoUpload.results.colEmployee")}</th>
+                    <th>{t("bulkPhotoUpload.results.colAngle")}</th>
+                    <th>{t("bulkPhotoUpload.results.colPhotoId")}</th>
                     <th style={{ width: 1 }}></th>
                   </tr>
                 </thead>
@@ -1672,8 +1650,8 @@ function ResultsPhase({
                             <Link
                               to={`/employees?employee=${emp.id}`}
                               className="btn btn-ghost btn-sm"
-                              aria-label={`View ${emp.full_name} profile`}
-                              title="Open employee profile"
+                              aria-label={t("bulkPhotoUpload.results.viewBtnAria", { name: emp.full_name })}
+                              title={t("bulkPhotoUpload.results.viewBtnTitle")}
                               style={{
                                 display: "inline-flex",
                                 alignItems: "center",
@@ -1683,7 +1661,7 @@ function ResultsPhase({
                                 textDecoration: "none",
                               }}
                             >
-                              View
+                              {t("bulkPhotoUpload.results.viewBtn")}
                               <Icon name="chevronRight" size={10} />
                             </Link>
                           ) : null}
@@ -1696,14 +1674,14 @@ function ResultsPhase({
             </div>
           )
         ) : result.rejected.length === 0 ? (
-          <div className="empty">No rejections — all photos were accepted!</div>
+          <div className="empty">{t("bulkPhotoUpload.results.noRejected")}</div>
         ) : (
           <div className="card-body" style={{ padding: 0 }}>
             <table className="table" style={{ width: "100%" }}>
               <thead>
                 <tr>
-                  <th>Filename</th>
-                  <th>Reason</th>
+                  <th>{t("bulkPhotoUpload.results.colFilename")}</th>
+                  <th>{t("bulkPhotoUpload.review.colProblem")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1736,7 +1714,7 @@ function ResultsPhase({
         }}
       >
         <button className="btn btn-primary" onClick={onReset}>
-          Upload More Photos
+          {t("bulkPhotoUpload.results.uploadMore")}
         </button>
         {uploadedEmployees.length === 1 && uploadedEmployees[0]?.employee ? (
           <Link
@@ -1744,11 +1722,11 @@ function ResultsPhase({
             className="btn"
             style={{ textDecoration: "none" }}
           >
-            View {uploadedEmployees[0].employee.full_name}
+            {t("bulkPhotoUpload.results.viewEmployee", { name: uploadedEmployees[0].employee.full_name })}
           </Link>
         ) : (
           <Link to="/employees" className="btn" style={{ textDecoration: "none" }}>
-            Back to Employees
+            {t("bulkPhotoUpload.results.backToEmployees")}
           </Link>
         )}
       </div>
@@ -1758,13 +1736,17 @@ function ResultsPhase({
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-const STEPS = [
-  { key: "upload" as const, label: "Select", sub: "Choose files" },
-  { key: "review" as const, label: "Review", sub: "Map to employees" },
-  { key: "results" as const, label: "Done", sub: "Upload complete" },
-];
+type StepKey = "upload" | "review" | "results";
+
+const STEP_KEYS: readonly StepKey[] = ["upload", "review", "results"];
 
 export function BulkPhotoUploadPage() {
+  const { t } = useTranslation();
+  const STEPS = STEP_KEYS.map((key) => ({
+    key,
+    label: t(`bulkPhotoUpload.steps.${key}.label`) as string,
+    sub: t(`bulkPhotoUpload.steps.${key}.sub`) as string,
+  }));
   const [phase, setPhase] = useState<Phase>("upload");
   const [rawFiles, setRawFiles] = useState<File[]>([]);
   const [parsedFiles, setParsedFiles] = useState<ParsedFile[]>([]);
@@ -1980,9 +1962,9 @@ export function BulkPhotoUploadPage() {
       {/* ── Page header ── */}
       <div className="page-header">
         <div>
-          <h1 className="page-title">Bulk Photo Upload</h1>
+          <h1 className="page-title">{t("bulkPhotoUpload.title")}</h1>
           <p className="page-sub">
-            Upload employee photos in bulk — auto-mapped from filenames like{" "}
+            {t("bulkPhotoUpload.subtitlePrefix")}{" "}
             <code style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
               OM0097_front.jpg
             </code>
@@ -2024,8 +2006,8 @@ export function BulkPhotoUploadPage() {
             fontWeight: 500,
           }}
         >
-          Upload failed:{" "}
-          {upload.error instanceof Error ? upload.error.message : "Unknown error"}
+          {t("bulkPhotoUpload.uploadFailed")}:{" "}
+          {upload.error instanceof Error ? upload.error.message : t("bulkPhotoUpload.unknownError")}
         </div>
       )}
 

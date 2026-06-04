@@ -9,6 +9,7 @@
 // the router, not here).
 
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { AnomalyInfoBanner } from "../../components/AnomalyNote";
 
@@ -28,6 +29,7 @@ import type { AttendanceItem } from "./types";
 type ScopeMode = "company" | "department" | "team" | "individual";
 
 export function DailyAttendancePage() {
+  const { t } = useTranslation();
   const me = useMe();
   const role = me.data ? primaryRole(me.data.roles) : "Employee";
   const isAdminLike = role === "Admin" || role === "HR";
@@ -112,7 +114,7 @@ export function DailyAttendancePage() {
   // Every report download is gated through the confidentiality modal.
   const { gate: gateDownload, modal: confidentialModal } =
     useConfidentialDownload();
-  const reportName = `Daily attendance — ${date}`;
+  const reportName = t("dailyAttendance.reportName", { date });
   const requestXlsx = () =>
     gateDownload({
       format: "xlsx",
@@ -213,13 +215,16 @@ export function DailyAttendancePage() {
     regenerate.mutate(date, {
       onSuccess: (resp) => {
         setRegenInfo(
-          `Regenerated ${resp.rows_upserted} row${
-            resp.rows_upserted === 1 ? "" : "s"
-          } for ${resp.date}.`,
+          t("dailyAttendance.regenSuccess", {
+            count: resp.rows_upserted,
+            date: resp.date,
+          }),
         );
       },
       onError: (err) => {
-        setRegenInfo(`Regenerate failed: ${(err as Error).message}`);
+        setRegenInfo(
+          t("dailyAttendance.regenFailed", { message: (err as Error).message }),
+        );
       },
     });
   };
@@ -245,7 +250,7 @@ export function DailyAttendancePage() {
       body: JSON.stringify(body),
     });
     if (!resp.ok) {
-      setRegenInfo(`Download failed (${resp.status}).`);
+      setRegenInfo(t("dailyAttendance.downloadFailed", { status: resp.status }));
       return;
     }
     const blob = await resp.blob();
@@ -308,10 +313,9 @@ export function DailyAttendancePage() {
       >
       <div className="page-header">
         <div>
-          <h1 className="page-title">Daily attendance</h1>
+          <h1 className="page-title">{t("dailyAttendance.title")}</h1>
           <p className="page-sub">
-            Generate today's attendance from camera events · download XLSX ·
-            filter by person, team or department
+            {t("dailyAttendance.subtitle")}
           </p>
         </div>
         <div className="page-actions">
@@ -321,12 +325,14 @@ export function DailyAttendancePage() {
             disabled={regenerate.isPending || !isAdminLike}
             title={
               isAdminLike
-                ? "Recompute today's attendance from current detection events"
-                : "Admin/HR only"
+                ? t("dailyAttendance.regenTooltipAllowed")
+                : t("dailyAttendance.regenTooltipDenied")
             }
           >
             <span aria-hidden style={{ marginInlineEnd: 4 }}>↻</span>
-            {regenerate.isPending ? "Regenerating…" : "Regenerate from events"}
+            {regenerate.isPending
+              ? t("dailyAttendance.regenerating")
+              : t("dailyAttendance.regenerate")}
           </button>
           <button
             className="btn btn-primary"
@@ -334,7 +340,7 @@ export function DailyAttendancePage() {
             disabled={!list.data}
           >
             <span aria-hidden style={{ marginInlineEnd: 4 }}>⬇</span>
-            Download XLSX
+            {t("dailyAttendance.downloadXlsx")}
           </button>
         </div>
       </div>
@@ -376,13 +382,13 @@ export function DailyAttendancePage() {
               textTransform: "uppercase",
             }}
           >
-            Date
+            {t("dailyAttendance.date")}
           </span>
           <DatePicker
             value={date}
             onChange={setDate}
             max={todayIso()}
-            ariaLabel="Attendance date"
+            ariaLabel={t("dailyAttendance.dateAria")}
           />
         </div>
 
@@ -405,8 +411,8 @@ export function DailyAttendancePage() {
             type="search"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search name or ID…"
-            aria-label="Search by employee name or code"
+            placeholder={t("dailyAttendance.searchPlaceholder")}
+            aria-label={t("dailyAttendance.searchAria")}
             style={{
               flex: 1,
               border: "none",
@@ -422,7 +428,7 @@ export function DailyAttendancePage() {
             <button
               type="button"
               onClick={() => setSearchQuery("")}
-              aria-label="Clear search"
+              aria-label={t("dailyAttendance.clearSearchAria")}
               style={{
                 background: "transparent",
                 border: "none",
@@ -438,34 +444,34 @@ export function DailyAttendancePage() {
           )}
         </div>
 
-        <div className="seg" role="tablist" aria-label="Attendance scope">
+        <div className="seg" role="tablist" aria-label={t("dailyAttendance.scopeAria")}>
           <SegBtn
             active={scopeMode === "company"}
             onClick={() => setScopeMode("company")}
             icon="◳"
           >
-            Company
+            {t("dailyAttendance.scope.company")}
           </SegBtn>
           <SegBtn
             active={scopeMode === "department"}
             onClick={() => setScopeMode("department")}
             icon="▦"
           >
-            Department
+            {t("dailyAttendance.scope.department")}
           </SegBtn>
           <SegBtn
             active={scopeMode === "team"}
             onClick={() => setScopeMode("team")}
             icon="◇"
           >
-            Team
+            {t("dailyAttendance.scope.team")}
           </SegBtn>
           <SegBtn
             active={scopeMode === "individual"}
             onClick={() => setScopeMode("individual")}
             icon="◯"
           >
-            Individual
+            {t("dailyAttendance.scope.individual")}
           </SegBtn>
         </div>
 
@@ -479,7 +485,7 @@ export function DailyAttendancePage() {
             }
             style={selectStyle}
           >
-            <option value="">All departments</option>
+            <option value="">{t("dailyAttendance.allDepartments")}</option>
             {(departmentsQuery.data?.items ?? []).map((d) => (
               <option key={d.id} value={d.id}>
                 {d.name}
@@ -498,7 +504,7 @@ export function DailyAttendancePage() {
             }
             style={{ ...selectStyle, minWidth: 220 }}
           >
-            <option value="">Select employee…</option>
+            <option value="">{t("dailyAttendance.selectEmployee")}</option>
             {(employeesQuery.data?.items ?? []).map((emp) => (
               <option key={emp.id} value={emp.id}>
                 {emp.full_name} · {emp.employee_code}
@@ -510,18 +516,18 @@ export function DailyAttendancePage() {
         {scopeMode === "team" && isManager && (
           <span
             className="text-xs text-dim"
-            title="Showing every employee on your team (auto-narrowed by the server)."
+            title={t("dailyAttendance.teamHintManagerTitle")}
           >
-            Showing your team members
+            {t("dailyAttendance.teamHintManager")}
           </span>
         )}
         {scopeMode === "team" && !isManager && (
           <span
             className="text-xs text-dim"
             style={{ fontStyle: "italic" }}
-            title="Team scope is only meaningful when viewing as a Manager."
+            title={t("dailyAttendance.teamHintOtherTitle")}
           >
-            Team scope applies to Manager accounts only
+            {t("dailyAttendance.teamHintOther")}
           </span>
         )}
 
@@ -532,7 +538,7 @@ export function DailyAttendancePage() {
           style={{ whiteSpace: "nowrap" }}
         >
           {list.data
-            ? `${stats.total} employee${stats.total === 1 ? "" : "s"} in scope`
+            ? t("dailyAttendance.inScope", { count: stats.total })
             : "—"}
         </span>
       </div>
@@ -546,17 +552,17 @@ export function DailyAttendancePage() {
           marginBottom: 16,
         }}
       >
-        <StatTile label="In scope" value={stats.total} />
-        <StatTile label="Present" value={stats.present} tone="success" />
-        <StatTile label="Late" value={stats.late} tone="warning" />
-        <StatTile label="Absent" value={stats.absent} tone="danger" />
+        <StatTile label={t("dailyAttendance.stat.inScope")} value={stats.total} />
+        <StatTile label={t("dailyAttendance.stat.present")} value={stats.present} tone="success" />
+        <StatTile label={t("dailyAttendance.stat.late")} value={stats.late} tone="warning" />
+        <StatTile label={t("dailyAttendance.stat.absent")} value={stats.absent} tone="danger" />
         {stats.pending > 0 && (
-          <StatTile label="Waiting" value={stats.pending} tone="info" />
+          <StatTile label={t("dailyAttendance.stat.waiting")} value={stats.pending} tone="info" />
         )}
         {stats.offDay > 0 && (
-          <StatTile label="Off day" value={stats.offDay} />
+          <StatTile label={t("dailyAttendance.stat.offDay")} value={stats.offDay} />
         )}
-        <StatTile label="On leave" value={stats.onLeave} tone="info" />
+        <StatTile label={t("dailyAttendance.stat.onLeave")} value={stats.onLeave} tone="info" />
       </div>
 
       </div>{/* /top sticky wrapper — page-header + filter + stats end here */}
@@ -583,7 +589,7 @@ export function DailyAttendancePage() {
         >
           <div>
             <h3 className="card-title">
-              Attendance for {list.data?.date ?? date}
+              {t("dailyAttendance.cardTitle", { date: list.data?.date ?? date })}
               {searchQuery && (
                 <span
                   style={{
@@ -593,7 +599,7 @@ export function DailyAttendancePage() {
                     fontWeight: 400,
                   }}
                 >
-                  · {filteredItems.length} match{filteredItems.length === 1 ? "" : "es"} for "{searchQuery}"
+                  · {t("dailyAttendance.matchFor", { count: filteredItems.length, query: searchQuery })}
                 </span>
               )}
             </h3>
@@ -605,7 +611,7 @@ export function DailyAttendancePage() {
               disabled={!list.data || pdfBusy}
             >
               <span aria-hidden style={{ marginInlineEnd: 4 }}>📄</span>
-              PDF
+              {t("dailyAttendance.pdf")}
             </button>
             <button
               className="btn btn-sm"
@@ -613,7 +619,7 @@ export function DailyAttendancePage() {
               disabled={!list.data}
             >
               <span aria-hidden style={{ marginInlineEnd: 4 }}>⬇</span>
-              XLSX
+              {t("dailyAttendance.xlsx")}
             </button>
           </div>
         </div>
@@ -626,7 +632,7 @@ export function DailyAttendancePage() {
             background: "var(--bg-elev, #fff)",
           }}
         >
-          <AnomalyInfoBanner message="If the camera misses certain events due to camera positioning, capture limitations, lighting, or brightness conditions, those cases should be treated as possible anomalies." />
+          <AnomalyInfoBanner message={t("dailyAttendance.anomalyNote")} />
         </div>
 
         <table className="table">
@@ -639,11 +645,11 @@ export function DailyAttendancePage() {
                   the card-head + anomaly so a long header doesn't
                   overlap them on the way out. */}
               {([
-                "Employee", "Department", "Status",
-                "In", "Out", "Hours", "OT", "Flags",
-              ] as const).map((label) => (
+                "employee", "department", "status",
+                "in", "out", "hours", "ot", "flags",
+              ] as const).map((key) => (
                 <th
-                  key={label}
+                  key={key}
                   style={{
                     position: "sticky",
                     top: theadTop,
@@ -651,7 +657,7 @@ export function DailyAttendancePage() {
                     background: "var(--bg-elev, #fff)",
                   }}
                 >
-                  {label}
+                  {t(`dailyAttendance.col.${key}`)}
                 </th>
               ))}
             </tr>
@@ -664,7 +670,7 @@ export function DailyAttendancePage() {
                   className="text-sm text-dim"
                   style={{ padding: 16 }}
                 >
-                  Loading…
+                  {t("dailyAttendance.loading")}
                 </td>
               </tr>
             )}
@@ -675,7 +681,7 @@ export function DailyAttendancePage() {
                   className="text-sm"
                   style={{ padding: 16, color: "var(--danger-text)" }}
                 >
-                  Could not load attendance.
+                  {t("dailyAttendance.loadFailed")}
                 </td>
               </tr>
             )}
@@ -717,7 +723,7 @@ export function DailyAttendancePage() {
                               textDecoration: "none",
                             }}
                           >
-                            archived
+                            {t("dailyAttendance.archived")}
                           </span>
                         )}
                       </div>
@@ -749,8 +755,9 @@ export function DailyAttendancePage() {
                   className="text-sm text-dim"
                   style={{ padding: 16 }}
                 >
-                  No records yet for this date. Hit{" "}
-                  <em>Regenerate from events</em> after detections come in.
+                  {t("dailyAttendance.emptyDate.prefix")}{" "}
+                  <em>{t("dailyAttendance.regenerate")}</em>
+                  {t("dailyAttendance.emptyDate.suffix")}
                 </td>
               </tr>
             )}
@@ -764,8 +771,7 @@ export function DailyAttendancePage() {
                     className="text-sm text-dim"
                     style={{ padding: 16 }}
                   >
-                    No employees match "{searchQuery}". Try a different name or
-                    code, or{" "}
+                    {t("dailyAttendance.emptySearch.prefix", { query: searchQuery })}{" "}
                     <button
                       type="button"
                       onClick={() => setSearchQuery("")}
@@ -779,7 +785,7 @@ export function DailyAttendancePage() {
                         textDecoration: "underline",
                       }}
                     >
-                      clear the search
+                      {t("dailyAttendance.emptySearch.clear")}
                     </button>
                     .
                   </td>
@@ -882,43 +888,47 @@ function StatTile({
 }
 
 function StatusPill({ item }: { item: AttendanceItem }) {
+  const { t } = useTranslation();
   // Order matters: leave / holiday / weekend take priority over
   // workday verdicts so a row on a non-working day never reads as
   // "Absent" or falls through to "Present" with no in_time.
   if (item.absent && item.leave_type_id !== null) {
-    return <span className="pill pill-info">On leave</span>;
+    return <span className="pill pill-info">{t("dailyAttendance.pill.onLeave")}</span>;
   }
   if (item.is_holiday && !item.in_time) {
     return (
       <span className="pill pill-info">
-        Holiday{item.holiday_name ? ` — ${item.holiday_name}` : ""}
+        {item.holiday_name
+          ? t("dailyAttendance.pill.holidayNamed", { name: item.holiday_name })
+          : t("dailyAttendance.pill.holiday")}
       </span>
     );
   }
   if (item.is_weekend && !item.in_time) {
-    return <span className="pill pill-neutral">Weekend</span>;
+    return <span className="pill pill-neutral">{t("dailyAttendance.pill.weekend")}</span>;
   }
   if (item.pending) {
-    return <span className="pill pill-info">Waiting for login</span>;
+    return <span className="pill pill-info">{t("dailyAttendance.pill.waitingLogin")}</span>;
   }
   // No in_time on a workday → Absent, regardless of the engine's
   // ``absent`` flag. Operators read "Present" as "checked in
   // today"; rows without a recorded check-in shouldn't be Present.
   if (!item.in_time) {
-    return <span className="pill pill-danger">Absent</span>;
+    return <span className="pill pill-danger">{t("dailyAttendance.pill.absent")}</span>;
   }
   if (item.late) {
-    return <span className="pill pill-warning">Late</span>;
+    return <span className="pill pill-warning">{t("dailyAttendance.pill.late")}</span>;
   }
-  return <span className="pill pill-success">Present</span>;
+  return <span className="pill pill-success">{t("dailyAttendance.pill.present")}</span>;
 }
 
 function FlagText({ item }: { item: AttendanceItem }) {
+  const { t } = useTranslation();
   const parts: string[] = [];
-  if (item.early_out) parts.push("Early out");
-  if (item.short_hours) parts.push("Short hours");
+  if (item.early_out) parts.push(t("dailyAttendance.flag.earlyOut"));
+  if (item.short_hours) parts.push(t("dailyAttendance.flag.shortHours"));
   if (item.overtime_minutes > 0) {
-    parts.push(`OT ${formatMinutes(item.overtime_minutes)}`);
+    parts.push(t("dailyAttendance.flag.ot", { value: formatMinutes(item.overtime_minutes) }));
   }
   if (parts.length === 0) {
     return <span className="text-xs text-dim">—</span>;
@@ -1008,30 +1018,31 @@ const selectStyle = {
 // Re-export FlagPills for any consumer that imports it from here
 // (the AttendanceDrawer used to use it).
 export function FlagPills({ item }: { item: AttendanceItem }) {
+  const { t } = useTranslation();
   if (item.absent && item.leave_type_id !== null) {
-    return <span className="pill pill-info">on leave</span>;
+    return <span className="pill pill-info">{t("dailyAttendance.pillLower.onLeave")}</span>;
   }
   if (item.pending) {
-    return <span className="pill pill-info">waiting</span>;
+    return <span className="pill pill-info">{t("dailyAttendance.pillLower.waiting")}</span>;
   }
   if (item.absent) {
-    return <span className="pill pill-danger">absent</span>;
+    return <span className="pill pill-danger">{t("dailyAttendance.pillLower.absent")}</span>;
   }
   return (
     <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-      {item.late && <span className="pill pill-warning">late</span>}
-      {item.early_out && <span className="pill pill-warning">early</span>}
-      {item.short_hours && <span className="pill pill-info">short</span>}
+      {item.late && <span className="pill pill-warning">{t("dailyAttendance.pillLower.late")}</span>}
+      {item.early_out && <span className="pill pill-warning">{t("dailyAttendance.pillLower.early")}</span>}
+      {item.short_hours && <span className="pill pill-info">{t("dailyAttendance.pillLower.short")}</span>}
       {item.overtime_minutes > 0 && (
         <span className="pill pill-accent">
-          OT {formatMinutes(item.overtime_minutes)}
+          {t("dailyAttendance.flag.ot", { value: formatMinutes(item.overtime_minutes) })}
         </span>
       )}
       {!item.late &&
         !item.early_out &&
         !item.short_hours &&
         item.overtime_minutes === 0 && (
-          <span className="pill pill-success">on time</span>
+          <span className="pill pill-success">{t("dailyAttendance.pillLower.onTime")}</span>
         )}
     </div>
   );

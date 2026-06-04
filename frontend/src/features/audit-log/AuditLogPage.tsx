@@ -3,6 +3,7 @@
 // from the app role anyway; this is belt-and-braces.)
 
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { Icon } from "../../shell/Icon";
 import { useTenantDateTime } from "../../util/datetime";
@@ -12,6 +13,7 @@ import type { AuditFilters } from "./types";
 const PAGE_SIZE = 100;
 
 export function AuditLogPage() {
+  const { t } = useTranslation();
   const [filters, setFilters] = useState<AuditFilters>({
     actor_user_id: null,
     action: null,
@@ -46,22 +48,22 @@ export function AuditLogPage() {
     <>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Audit Log</h1>
+          <h1 className="page-title">{t("auditLog.title")}</h1>
           <p className="page-sub">
             {audit.data
-              ? `${audit.data.total} entries · append-only at the database grant level`
-              : "—"}
+              ? t("auditLog.sub", { total: audit.data.total })
+              : t("auditLog.subEmpty")}
           </p>
         </div>
       </div>
 
       <div className="card">
         <div className="card-head">
-          <h3 className="card-title">Entries</h3>
+          <h3 className="card-title">{t("auditLog.cardTitle")}</h3>
           <div className="flex gap-2" style={{ alignItems: "center", flexWrap: "wrap" }}>
             <input
               type="number"
-              placeholder="Actor user id"
+              placeholder={t("auditLog.actorPlaceholder")}
               value={filters.actor_user_id ?? ""}
               onChange={(e) =>
                 update({
@@ -76,7 +78,7 @@ export function AuditLogPage() {
               onChange={(e) => update({ action: e.target.value || null })}
               style={selectStyle}
             >
-              <option value="">All actions</option>
+              <option value="">{t("auditLog.allActions")}</option>
               {audit.data?.distinct_actions.map((a) => (
                 <option key={a} value={a}>
                   {a}
@@ -88,10 +90,10 @@ export function AuditLogPage() {
               onChange={(e) => update({ entity_type: e.target.value || null })}
               style={selectStyle}
             >
-              <option value="">All entity types</option>
-              {audit.data?.distinct_entity_types.map((t) => (
-                <option key={t} value={t}>
-                  {t}
+              <option value="">{t("auditLog.allEntityTypes")}</option>
+              {audit.data?.distinct_entity_types.map((et) => (
+                <option key={et} value={et}>
+                  {et}
                 </option>
               ))}
             </select>
@@ -100,14 +102,14 @@ export function AuditLogPage() {
               value={filters.start ?? ""}
               onChange={(e) => update({ start: e.target.value || null })}
               style={selectStyle}
-              title="From"
+              title={t("auditLog.fromTitle")}
             />
             <input
               type="datetime-local"
               value={filters.end ?? ""}
               onChange={(e) => update({ end: e.target.value || null })}
               style={selectStyle}
-              title="To"
+              title={t("auditLog.toTitle")}
             />
           </div>
         </div>
@@ -116,18 +118,18 @@ export function AuditLogPage() {
           <thead>
             <tr>
               <th style={{ width: 38 }}></th>
-              <th style={{ width: 64 }}>ID</th>
-              <th>Time</th>
-              <th>Actor</th>
-              <th>Action</th>
-              <th>Entity</th>
+              <th style={{ width: 64 }}>{t("auditLog.colId")}</th>
+              <th>{t("auditLog.colTime")}</th>
+              <th>{t("auditLog.colActor")}</th>
+              <th>{t("auditLog.colAction")}</th>
+              <th>{t("auditLog.colEntity")}</th>
             </tr>
           </thead>
           <tbody>
             {audit.isLoading && (
               <tr>
                 <td colSpan={6} className="text-sm text-dim" style={{ padding: 16 }}>
-                  Loading…
+                  {t("auditLog.loading")}
                 </td>
               </tr>
             )}
@@ -159,7 +161,7 @@ export function AuditLogPage() {
                           </div>
                         </>
                       ) : (
-                        <span className="text-dim">system</span>
+                        <span className="text-dim">{t("auditLog.system")}</span>
                       )}
                     </td>
                     <td className="text-sm">
@@ -184,8 +186,8 @@ export function AuditLogPage() {
                             padding: 12,
                           }}
                         >
-                          <JsonBlock label="before" data={row.before} />
-                          <JsonBlock label="after" data={row.after} />
+                          <JsonBlock label={t("auditLog.before")} data={row.before} />
+                          <JsonBlock label={t("auditLog.after")} data={row.after} />
                         </div>
                       </td>
                     </tr>
@@ -196,7 +198,7 @@ export function AuditLogPage() {
             {audit.data && audit.data.items.length === 0 && !audit.isLoading && (
               <tr>
                 <td colSpan={6} className="text-sm text-dim" style={{ padding: 16 }}>
-                  No entries match. Try widening filters.
+                  {t("auditLog.empty")}
                 </td>
               </tr>
             )}
@@ -214,7 +216,7 @@ export function AuditLogPage() {
           }}
         >
           <span className="text-dim">
-            Page {filters.page} of {totalPages}
+            {t("auditLog.page", { page: filters.page, total: totalPages })}
           </span>
           <div style={{ display: "flex", gap: 6 }}>
             <button
@@ -225,7 +227,7 @@ export function AuditLogPage() {
               }
             >
               <Icon name="chevronLeft" size={11} />
-              Prev
+              {t("auditLog.prev")}
             </button>
             <button
               className="btn btn-sm"
@@ -234,7 +236,7 @@ export function AuditLogPage() {
                 setFilters((prev) => ({ ...prev, page: prev.page + 1 }))
               }
             >
-              Next
+              {t("auditLog.next")}
               <Icon name="chevronRight" size={11} />
             </button>
           </div>

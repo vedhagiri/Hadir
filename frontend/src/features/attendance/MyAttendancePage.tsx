@@ -9,6 +9,7 @@
 // EmployeeDashboard so the Employee role's dashboard is this page.
 
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 
 import { extractApiError } from "../../api/client";
@@ -25,6 +26,7 @@ import { formatMinutes } from "./timeFormat";
 import type { AttendanceItem } from "./types";
 
 export function MyAttendancePage() {
+  const { t } = useTranslation();
   const me = useMe();
   const [month, setMonth] = useState<string>(currentMonth());
   const [drawerDate, setDrawerDate] = useState<string | null>(null);
@@ -54,14 +56,16 @@ export function MyAttendancePage() {
           setRegenInfo({
             tone: "ok",
             text: resp.upserted
-              ? `Refreshed today's attendance from camera events (${resp.date}).`
-              : `No policy resolves for ${resp.date} — nothing to refresh.`,
+              ? t("myAttendance.regenRefreshed", { date: resp.date })
+              : t("myAttendance.regenNoPolicy", { date: resp.date }),
           });
         },
         onError: (err) => {
           setRegenInfo({
             tone: "err",
-            text: `Regenerate failed: ${extractApiError(err, "request failed")}`,
+            text: t("myAttendance.regenFailed", {
+              message: extractApiError(err, t("myAttendance.requestFailed")),
+            }),
           });
         },
       },
@@ -84,9 +88,9 @@ export function MyAttendancePage() {
   const headerSub = useMemo(() => {
     const policyName = todayDay?.policy_name;
     return policyName
-      ? `Today's attendance · Policy ${policyName}`
-      : "Today's attendance";
-  }, [todayDay?.policy_name]);
+      ? t("myAttendance.headerSubWithPolicy", { policy: policyName })
+      : t("myAttendance.headerSub");
+  }, [todayDay?.policy_name, t]);
 
   return (
     <>
@@ -95,15 +99,15 @@ export function MyAttendancePage() {
         <div>
           <h1 className="page-title">
             {me.data?.full_name
-              ? `Hello, ${firstName(me.data.full_name)}`
-              : "My attendance"}
+              ? t("myAttendance.greeting", { name: firstName(me.data.full_name) })
+              : t("myAttendance.title")}
           </h1>
           <p className="page-sub">{headerSub}</p>
         </div>
         <div className="page-actions">
           <Link className="btn" to="/my-profile">
             <Icon name="upload" size={12} />
-            Update photo
+            {t("myAttendance.updatePhoto")}
           </Link>
           {employeeId !== null && (
             <button
@@ -111,10 +115,12 @@ export function MyAttendancePage() {
               className="btn"
               onClick={triggerRegen}
               disabled={regen.isPending}
-              title="Recompute today's attendance from current camera events"
+              title={t("myAttendance.regenTooltip")}
             >
               <span aria-hidden style={{ marginInlineEnd: 4 }}>↻</span>
-              {regen.isPending ? "Regenerating…" : "Regenerate from events"}
+              {regen.isPending
+                ? t("myAttendance.regenerating")
+                : t("myAttendance.regenerate")}
             </button>
           )}
           <button
@@ -123,7 +129,7 @@ export function MyAttendancePage() {
             onClick={() => setRequestOpen(true)}
           >
             <Icon name="plus" size={12} />
-            Submit request
+            {t("myAttendance.submitRequest")}
           </button>
         </div>
       </div>
@@ -185,11 +191,10 @@ export function MyAttendancePage() {
         >
           <div>
             <h3 style={{ fontSize: 13.5, fontWeight: 600, margin: 0 }}>
-              Attendance calendar · {monthLabel}
+              {t("myAttendance.calendar.title", { month: monthLabel })}
             </h3>
             <p className="text-xs text-dim" style={{ marginTop: 2 }}>
-              Click any day to see evidence, hours and flags · color by
-              status
+              {t("myAttendance.calendar.hint")}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -197,7 +202,7 @@ export function MyAttendancePage() {
               type="button"
               className="icon-btn"
               onClick={() => setMonth(shiftMonth(month, -1))}
-              aria-label="Previous month"
+              aria-label={t("myAttendance.calendar.prevMonth")}
             >
               <Icon name="chevronLeft" size={13} />
             </button>
@@ -206,13 +211,13 @@ export function MyAttendancePage() {
               className="btn btn-sm"
               onClick={() => setMonth(currentMonth())}
             >
-              Today
+              {t("myAttendance.calendar.today")}
             </button>
             <button
               type="button"
               className="icon-btn"
               onClick={() => setMonth(shiftMonth(month, 1))}
-              aria-label="Next month"
+              aria-label={t("myAttendance.calendar.nextMonth")}
             >
               <Icon name="chevronRight" size={13} />
             </button>
@@ -221,21 +226,20 @@ export function MyAttendancePage() {
         {employeeId === null && myEmployee.isLoading && (
           <div className="card" style={{ padding: 16 }}>
             <div className="text-sm text-dim">
-              Linking your account to an employee record…
+              {t("myAttendance.linkingAccount")}
             </div>
           </div>
         )}
         {employeeId === null && !myEmployee.isLoading && (
           <div className="card" style={{ padding: 16 }}>
             <div className="text-sm text-dim">
-              No employee record is linked to this account. Ask an HR
-              admin to add you as an employee using the same email.
+              {t("myAttendance.noEmployeeLinked")}
             </div>
           </div>
         )}
         {employeeId !== null && person.isLoading && (
           <div className="card" style={{ padding: 16 }}>
-            <div className="text-sm text-dim">Loading calendar…</div>
+            <div className="text-sm text-dim">{t("myAttendance.loadingCalendar")}</div>
           </div>
         )}
         {employeeId !== null && person.isError && (
@@ -244,7 +248,7 @@ export function MyAttendancePage() {
               className="text-sm"
               style={{ color: "var(--danger-text)" }}
             >
-              Couldn't load this month. Try again.
+              {t("myAttendance.calendarLoadFailed")}
             </div>
           </div>
         )}
@@ -261,16 +265,16 @@ export function MyAttendancePage() {
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="card-head">
           <div>
-            <h3 className="card-title">Rolling 14 days</h3>
-            <p className="card-sub">In / out plotted against policy</p>
+            <h3 className="card-title">{t("myAttendance.rolling.title")}</h3>
+            <p className="card-sub">{t("myAttendance.rolling.subtitle")}</p>
           </div>
         </div>
         <div className="card-body" style={{ paddingTop: 0 }}>
           {recent.isLoading && (
-            <div className="text-sm text-dim">Loading…</div>
+            <div className="text-sm text-dim">{t("myAttendance.loading")}</div>
           )}
           {!recent.isLoading && recentSorted.length === 0 && (
-            <div className="text-sm text-dim">No attendance yet.</div>
+            <div className="text-sm text-dim">{t("myAttendance.rolling.empty")}</div>
           )}
           {recentSorted.map((it) => (
             <Rolling14Row
@@ -322,6 +326,7 @@ function TodayCard({
   day: PersonDay | null;
   loading: boolean;
 }) {
+  const { t } = useTranslation();
   const today = todayIso();
   const date = new Date(`${today}T00:00:00`);
   const headerDate = date.toLocaleDateString(undefined, {
@@ -346,19 +351,19 @@ function TodayCard({
     <div className="card">
       <div className="card-head">
         <div>
-          <h3 className="card-title">Today · {headerDate}</h3>
+          <h3 className="card-title">{t("myAttendance.today.header", { date: headerDate })}</h3>
           <p className="card-sub">
             {day?.in_time
               ? onSite
-                ? "On site since clock-in"
-                : "Clocked out for the day"
-              : "No events captured yet"}
+                ? t("myAttendance.today.onSite")
+                : t("myAttendance.today.clockedOut")
+              : t("myAttendance.today.noEvents")}
           </p>
         </div>
         {day && <StatusPill status={day.status} />}
       </div>
       <div className="card-body">
-        {loading && <div className="text-sm text-dim">Loading…</div>}
+        {loading && <div className="text-sm text-dim">{t("myAttendance.loading")}</div>}
         {!loading && (
           <>
             <div
@@ -366,17 +371,23 @@ function TodayCard({
               style={{ gap: 10, marginBottom: 14 }}
             >
               <Tile
-                label="In time"
+                label={t("myAttendance.today.inTime")}
                 value={day?.in_time?.slice(0, 8) ?? "—"}
-                sub={day?.in_time ? "Earliest detection" : "Not detected"}
+                sub={day?.in_time ? t("myAttendance.today.earliestDetection") : t("myAttendance.today.notDetected")}
               />
               <Tile
-                label="Out time"
+                label={t("myAttendance.today.outTime")}
                 value={day?.out_time?.slice(0, 8) ?? "—"}
-                sub={onSite ? "Still on site" : day?.out_time ? "Latest detection" : "—"}
+                sub={
+                  onSite
+                    ? t("myAttendance.today.stillOnSite")
+                    : day?.out_time
+                      ? t("myAttendance.today.latestDetection")
+                      : "—"
+                }
               />
-              <Tile label="Total" value={totalLabel} sub="hrs · since in" />
-              <Tile label="Overtime" value={otLabel} sub="today" />
+              <Tile label={t("myAttendance.today.total")} value={totalLabel} sub={t("myAttendance.today.hoursSinceIn")} />
+              <Tile label={t("myAttendance.today.overtime")} value={otLabel} sub={t("myAttendance.today.todaySub")} />
             </div>
             <div
               style={{
@@ -388,7 +399,7 @@ function TodayCard({
                 fontWeight: 500,
               }}
             >
-              Day timeline
+              {t("myAttendance.today.dayTimeline")}
             </div>
             <DayRuler day={day} />
             <div
@@ -401,7 +412,7 @@ function TodayCard({
               }}
             >
               <LegendDot
-                label="Policy window"
+                label={t("myAttendance.today.policyWindow")}
                 style={{
                   width: 12,
                   height: 4,
@@ -410,7 +421,7 @@ function TodayCard({
                 }}
               />
               <LegendDot
-                label="On site"
+                label={t("myAttendance.today.onSiteLegend")}
                 style={{
                   width: 12,
                   height: 4,
@@ -437,6 +448,7 @@ function AtAGlanceCard({
   days: PersonDay[];
   monthLabel: string;
 }) {
+  const { t } = useTranslation();
   const counts = useMemo(() => countStatuses(days), [days]);
   const overtimeMinutes = useMemo(
     () => days.reduce((s, d) => s + (d.overtime_minutes ?? 0), 0),
@@ -444,11 +456,11 @@ function AtAGlanceCard({
   );
 
   const parts = [
-    { label: "Present", value: counts.present, color: "var(--accent)" },
-    { label: "Late", value: counts.late, color: "var(--warning)" },
-    { label: "Leave", value: counts.leave, color: "var(--info)" },
+    { label: t("myAttendance.glance.present"), value: counts.present, color: "var(--accent)" },
+    { label: t("myAttendance.glance.late"), value: counts.late, color: "var(--warning)" },
+    { label: t("myAttendance.glance.leave"), value: counts.leave, color: "var(--info)" },
     {
-      label: "Holiday",
+      label: t("myAttendance.glance.holiday"),
       value: counts.holiday,
       color: "var(--text-quaternary)",
     },
@@ -458,14 +470,14 @@ function AtAGlanceCard({
   return (
     <div className="card">
       <div className="card-head">
-        <h3 className="card-title">This month · at a glance</h3>
+        <h3 className="card-title">{t("myAttendance.glance.title")}</h3>
         <span className="text-xs text-dim mono">{monthLabel}</span>
       </div>
       <div
         className="card-body"
         style={{ display: "flex", gap: 14, alignItems: "center" }}
       >
-        <Donut parts={parts} total={total} size={120} />
+        <Donut parts={parts} total={total} size={120} totalLabel={t("myAttendance.glance.totalLabel")} />
         <div
           style={{
             flex: 1,
@@ -475,22 +487,22 @@ function AtAGlanceCard({
           }}
         >
           <Counter
-            label="Days present"
+            label={t("myAttendance.glance.daysPresent")}
             value={String(counts.present)}
             kind="accent"
           />
           <Counter
-            label="Late arrivals"
+            label={t("myAttendance.glance.lateArrivals")}
             value={String(counts.late)}
             kind="warning"
           />
           <Counter
-            label="Leave taken"
+            label={t("myAttendance.glance.leaveTaken")}
             value={String(counts.leave)}
             kind="info"
           />
           <Counter
-            label="Overtime"
+            label={t("myAttendance.glance.overtime")}
             value={overtimeMinutes > 0 ? formatMinutes(overtimeMinutes) : "0m"}
             kind="success"
           />
@@ -525,10 +537,12 @@ function Donut({
   parts,
   total,
   size,
+  totalLabel,
 }: {
   parts: { label: string; value: number; color: string }[];
   total: number;
   size: number;
+  totalLabel: string;
 }) {
   const r = size / 2 - 10;
   const c = 2 * Math.PI * r;
@@ -540,7 +554,7 @@ function Donut({
       height={size}
       viewBox={`0 0 ${size} ${size}`}
       role="img"
-      aria-label="Month status breakdown"
+      aria-label={totalLabel}
     >
       <circle
         cx={size / 2}
@@ -590,7 +604,7 @@ function Donut({
         fontFamily="var(--font-mono)"
         style={{ textTransform: "uppercase", letterSpacing: "0.05em" }}
       >
-        total
+        {totalLabel}
       </text>
     </svg>
   );
@@ -607,6 +621,7 @@ function Rolling14Row({
   item: AttendanceItem;
   onClick: () => void;
 }) {
+  const { t } = useTranslation();
   const date = new Date(`${item.date}T00:00:00`);
   const inH = item.in_time ? parseHourFloat(item.in_time) : null;
   const outH = item.out_time ? parseHourFloat(item.out_time) : null;
@@ -646,16 +661,16 @@ function Rolling14Row({
         >
           <div className="flex items-center gap-2" style={{ fontSize: 12 }}>
             <RecordStatusPill item={item} />
-            {item.late && <span className="pill pill-warning">Late</span>}
+            {item.late && <span className="pill pill-warning">{t("myAttendance.rolling.late")}</span>}
             {item.early_out && (
-              <span className="pill pill-warning">Early out</span>
+              <span className="pill pill-warning">{t("myAttendance.rolling.earlyOut")}</span>
             )}
             {item.short_hours && (
-              <span className="pill pill-warning">Short</span>
+              <span className="pill pill-warning">{t("myAttendance.rolling.short")}</span>
             )}
             {item.overtime_minutes > 0 && (
               <span className="pill pill-accent">
-                +{formatMinutes(item.overtime_minutes)} OT
+                {t("myAttendance.rolling.otSuffix", { value: formatMinutes(item.overtime_minutes) })}
               </span>
             )}
           </div>
@@ -672,11 +687,12 @@ function Rolling14Row({
 }
 
 function RecordStatusPill({ item }: { item: AttendanceItem }) {
-  if (item.absent) return <span className="pill pill-danger">Absent</span>;
-  if (item.late) return <span className="pill pill-warning">Late</span>;
+  const { t } = useTranslation();
+  if (item.absent) return <span className="pill pill-danger">{t("myAttendance.statusPill.absent")}</span>;
+  if (item.late) return <span className="pill pill-warning">{t("myAttendance.statusPill.late")}</span>;
   if (item.in_time)
-    return <span className="pill pill-success">Present</span>;
-  return <span className="pill pill-neutral">No record</span>;
+    return <span className="pill pill-success">{t("myAttendance.statusPill.present")}</span>;
+  return <span className="pill pill-neutral">{t("myAttendance.statusPill.noRecord")}</span>;
 }
 
 // ----------------------------------------------------------------------
@@ -752,12 +768,13 @@ function DayRulerInline({
 // ----------------------------------------------------------------------
 
 function CalendarLegend() {
+  const { t } = useTranslation();
   const items: { key: string; label: string; bg: string }[] = [
-    { key: "present", label: "Present", bg: "var(--bg-elev)" },
-    { key: "late", label: "Late", bg: "var(--warning-soft)" },
-    { key: "leave", label: "Leave", bg: "var(--warning-soft)" },
-    { key: "holiday", label: "Holiday", bg: "var(--accent-soft)" },
-    { key: "weekend", label: "Weekend", bg: "var(--info-soft)" },
+    { key: "present", label: t("myAttendance.statusPill.present"), bg: "var(--bg-elev)" },
+    { key: "late", label: t("myAttendance.statusPill.late"), bg: "var(--warning-soft)" },
+    { key: "leave", label: t("myAttendance.glance.leave"), bg: "var(--warning-soft)" },
+    { key: "holiday", label: t("myAttendance.glance.holiday"), bg: "var(--accent-soft)" },
+    { key: "weekend", label: t("myAttendance.statusPill.weekend"), bg: "var(--info-soft)" },
   ];
   return (
     <div
@@ -788,23 +805,24 @@ function CalendarLegend() {
 }
 
 function StatusPill({ status }: { status: CalendarStatus }) {
+  const { t } = useTranslation();
   const map: Record<
     CalendarStatus,
     { tone: string; label: string }
   > = {
-    present: { tone: "success", label: "Present" },
-    escalation_present: { tone: "accent", label: "Present via Escalation" },
-    late: { tone: "warning", label: "Late" },
-    absent: { tone: "danger", label: "Absent" },
+    present: { tone: "success", label: t("myAttendance.statusPill.present") },
+    escalation_present: { tone: "accent", label: t("myAttendance.statusPill.escalation") },
+    late: { tone: "warning", label: t("myAttendance.statusPill.late") },
+    absent: { tone: "danger", label: t("myAttendance.statusPill.absent") },
     // Today-only: shift window still open + no in_time yet. Distinct
     // from absent so the operator doesn't flag staff who can still
     // arrive on time.
-    waiting: { tone: "accent", label: "Waiting" },
-    leave: { tone: "info", label: "Leave" },
-    holiday: { tone: "neutral", label: "Holiday" },
-    weekend: { tone: "neutral", label: "Weekend" },
-    future: { tone: "neutral", label: "Upcoming" },
-    no_record: { tone: "neutral", label: "No record" },
+    waiting: { tone: "accent", label: t("myAttendance.statusPill.waiting") },
+    leave: { tone: "info", label: t("myAttendance.statusPill.leave") },
+    holiday: { tone: "neutral", label: t("myAttendance.statusPill.holiday") },
+    weekend: { tone: "neutral", label: t("myAttendance.statusPill.weekend") },
+    future: { tone: "neutral", label: t("myAttendance.statusPill.upcoming") },
+    no_record: { tone: "neutral", label: t("myAttendance.statusPill.noRecord") },
   };
   const m = map[status] ?? { tone: "neutral", label: status };
   return <span className={`pill pill-${m.tone}`}>{m.label}</span>;

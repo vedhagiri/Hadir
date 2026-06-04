@@ -379,7 +379,11 @@ def match_only_from_saved_crops(
             unknown_count += 1
             continue
         eid = int(mm.employee_id)
-        conf = float(getattr(mm, "confidence", 0.0))
+        # ``Match`` exposes ``score`` (mean-of-top-k cosine), not
+        # ``confidence`` — ``getattr(mm, "confidence")`` always hit the
+        # 0.0 default, so this boot-recovery path stored
+        # match_confidence=0.0. Same fix as the main path above (~line 261).
+        conf = float(getattr(mm, "score", 0.0))
         matched_ids.add(eid)
         if eid not in seen_employees or conf > seen_employees[eid]:
             seen_employees[eid] = conf

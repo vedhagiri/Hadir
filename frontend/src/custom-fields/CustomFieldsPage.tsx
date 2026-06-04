@@ -10,6 +10,7 @@
 // as the P8 manager-assignments page.
 
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { ModalShell } from "../components/DrawerShell";
 import { SettingsTabs } from "../settings/SettingsTabs";
@@ -29,6 +30,7 @@ import type {
 import { CUSTOM_FIELD_TYPES } from "./types";
 
 export function CustomFieldsPage() {
+  const { t } = useTranslation();
   const fields = useCustomFields();
   const create = useCreateCustomField();
   const reorder = useReorderCustomFields();
@@ -78,7 +80,7 @@ export function CustomFieldsPage() {
             fontWeight: 400,
           }}
         >
-          Custom fields
+          {t("customFields.title")}
         </h1>
         <p
           style={{
@@ -87,10 +89,9 @@ export function CustomFieldsPage() {
             fontSize: 13,
           }}
         >
-          Add extra columns to every employee record. Field codes match the
-          column headers in employee Excel imports and exports — so a code
-          like <span className="mono">badge_number</span> imports cleanly
-          when the spreadsheet has a "Badge Number" column.
+          {t("customFields.subtitlePrefix")}{" "}
+          <span className="mono">badge_number</span>{" "}
+          {t("customFields.subtitleSuffix")}
         </p>
       </header>
 
@@ -100,10 +101,10 @@ export function CustomFieldsPage() {
       />
 
       {fields.isLoading ? (
-        <p>Loading fields…</p>
+        <p>{t("customFields.loading")}</p>
       ) : fields.error ? (
         <p style={{ color: "var(--danger-text)" }}>
-          Couldn’t load custom fields.
+          {t("customFields.loadFailed")}
         </p>
       ) : orderedFields.length === 0 ? (
         <div
@@ -116,7 +117,7 @@ export function CustomFieldsPage() {
             fontSize: 13,
           }}
         >
-          No custom fields yet. Add one above.
+          {t("customFields.empty")}
         </div>
       ) : (
         <div
@@ -172,6 +173,7 @@ function CreateForm({
   onCreate: (input: CustomFieldCreateInput) => Promise<unknown>;
   creating: boolean;
 }) {
+  const { t } = useTranslation();
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [type, setType] = useState<CustomFieldType>("text");
@@ -193,11 +195,11 @@ function CreateForm({
     setError(null);
     const trimmedCode = code.trim();
     if (!name.trim() || !trimmedCode) {
-      setError("Name and code are required.");
+      setError(t("customFields.errNameCodeRequired"));
       return;
     }
     if (!/^[a-z][a-z0-9_]*$/.test(trimmedCode)) {
-      setError("Code must be lowercase with underscores (e.g. badge_number).");
+      setError(t("customFields.errCodeFormat"));
       return;
     }
     let options: string[] | undefined;
@@ -207,7 +209,7 @@ function CreateForm({
         .map((s) => s.trim())
         .filter(Boolean);
       if (options.length === 0) {
-        setError("Select fields need at least one option.");
+        setError(t("customFields.errOptionsRequired"));
         return;
       }
     }
@@ -221,7 +223,7 @@ function CreateForm({
       });
       reset();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save field");
+      setError(err instanceof Error ? err.message : t("customFields.errSaveGeneric"));
     }
   };
 
@@ -239,15 +241,15 @@ function CreateForm({
         alignItems: "end",
       }}
     >
-      <Field label="Name">
+      <Field label={t("customFields.field.name")}>
         <input
           className="input"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Badge Number"
+          placeholder={t("customFields.field.namePlaceholder")}
         />
       </Field>
-      <Field label="Code (Excel header)">
+      <Field label={t("customFields.field.code")}>
         <input
           className="input mono"
           value={code}
@@ -255,15 +257,15 @@ function CreateForm({
           placeholder="badge_number"
         />
       </Field>
-      <Field label="Type">
+      <Field label={t("customFields.field.type")}>
         <select
           className="input"
           value={type}
           onChange={(e) => setType(e.target.value as CustomFieldType)}
         >
-          {CUSTOM_FIELD_TYPES.map((t) => (
-            <option key={t} value={t}>
-              {t}
+          {CUSTOM_FIELD_TYPES.map((opt) => (
+            <option key={opt} value={opt}>
+              {t(`customFields.types.${opt}`)}
             </option>
           ))}
         </select>
@@ -282,23 +284,23 @@ function CreateForm({
           checked={required}
           onChange={(e) => setRequired(e.target.checked)}
         />
-        Required
+        {t("customFields.required")}
       </label>
       <button
         type="submit"
         className="btn btn-primary btn-sm"
         disabled={creating}
       >
-        {creating ? "Saving…" : "Add field"}
+        {creating ? t("customFields.saving") : t("customFields.addField")}
       </button>
       {type === "select" && (
         <div style={{ gridColumn: "1 / -1" }}>
-          <Field label="Options (comma or newline separated)">
+          <Field label={t("customFields.field.options")}>
             <textarea
               className="input"
               value={optionsText}
               onChange={(e) => setOptionsText(e.target.value)}
-              placeholder="Permanent, Contract, Intern"
+              placeholder={t("customFields.field.optionsPlaceholder")}
               rows={2}
             />
           </Field>
@@ -350,6 +352,7 @@ function FieldRow({
   onDragLeave,
   onDrop,
 }: FieldRowProps) {
+  const { t } = useTranslation();
   return (
     <div
       draggable={!isEditing}
@@ -373,7 +376,7 @@ function FieldRow({
         }}
       >
         <span
-          title="Drag to reorder"
+          title={t("customFields.dragHandle")}
           style={{
             cursor: "grab",
             color: "var(--text-tertiary)",
@@ -388,23 +391,23 @@ function FieldRow({
           <div className="text-xs text-dim mono">{field.code}</div>
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          <span className="pill pill-neutral">{field.type}</span>
+          <span className="pill pill-neutral">{t(`customFields.types.${field.type}`)}</span>
           {field.required && (
-            <span className="pill pill-warning">required</span>
+            <span className="pill pill-warning">{t("customFields.requiredPill")}</span>
           )}
         </div>
         <div className="text-xs text-dim">
           {field.type === "select" && field.options
-            ? `${field.options.length} options`
+            ? t("customFields.optionCount", { count: field.options.length })
             : ""}
         </div>
         {!isEditing ? (
           <button className="btn btn-sm" onClick={onStartEdit}>
-            Edit
+            {t("customFields.edit")}
           </button>
         ) : (
           <button className="btn btn-sm" onClick={onCancelEdit}>
-            Cancel
+            {t("customFields.cancel")}
           </button>
         )}
         <button
@@ -412,7 +415,7 @@ function FieldRow({
           onClick={onAskDelete}
           style={{ color: "var(--danger-text)" }}
         >
-          <Icon name="trash" size={12} /> Delete
+          <Icon name="trash" size={12} /> {t("customFields.delete")}
         </button>
       </div>
 
@@ -430,6 +433,7 @@ function EditForm({
   field: CustomField;
   onAfterSave: () => void;
 }) {
+  const { t } = useTranslation();
   const patch = usePatchCustomField(field.id);
   const [name, setName] = useState(field.name);
   const [required, setRequired] = useState(field.required);
@@ -454,7 +458,7 @@ function EditForm({
         .map((s) => s.trim())
         .filter(Boolean);
       if (opts.length === 0) {
-        setError("Select fields need at least one option.");
+        setError(t("customFields.errOptionsRequired"));
         return;
       }
       const sameLength =
@@ -472,7 +476,7 @@ function EditForm({
       await patch.mutateAsync(body);
       onAfterSave();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save changes");
+      setError(err instanceof Error ? err.message : t("customFields.errSaveChanges"));
     }
   };
 
@@ -489,7 +493,7 @@ function EditForm({
         gap: 8,
       }}
     >
-      <Field label="Name">
+      <Field label={t("customFields.field.name")}>
         <input
           className="input"
           value={name}
@@ -504,10 +508,10 @@ function EditForm({
           checked={required}
           onChange={(e) => setRequired(e.target.checked)}
         />
-        Required
+        {t("customFields.required")}
       </label>
       {field.type === "select" && (
-        <Field label="Options (one per line)">
+        <Field label={t("customFields.field.optionsOnePerLine")}>
           <textarea
             className="input"
             value={optionsText}
@@ -527,7 +531,7 @@ function EditForm({
           className="btn btn-primary btn-sm"
           disabled={patch.isPending}
         >
-          {patch.isPending ? "Saving…" : "Save"}
+          {patch.isPending ? t("customFields.saving") : t("customFields.save")}
         </button>
       </div>
     </form>
@@ -545,6 +549,7 @@ function DeleteConfirmModal({
   field: CustomField;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const del = useDeleteCustomField();
   const [error, setError] = useState<string | null>(null);
 
@@ -553,7 +558,7 @@ function DeleteConfirmModal({
       await del.mutateAsync(field.id);
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not delete field");
+      setError(err instanceof Error ? err.message : t("customFields.errDelete"));
     }
   };
 
@@ -580,11 +585,10 @@ function DeleteConfirmModal({
           id="cf-delete-title"
           style={{ margin: "0 0 8px 0", fontSize: 16 }}
         >
-          Delete <span className="mono">{field.code}</span>?
+          {t("customFields.deleteTitle")} <span className="mono">{field.code}</span>?
         </h2>
         <p style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-          This removes the field for every employee. All values stored in
-          this field will be permanently deleted. This cannot be undone.
+          {t("customFields.deleteBody")}
         </p>
         {error && (
           <div
@@ -606,7 +610,7 @@ function DeleteConfirmModal({
           }}
         >
           <button className="btn btn-sm" onClick={onClose}>
-            Cancel
+            {t("customFields.cancel")}
           </button>
           <button
             className="btn btn-sm"
@@ -618,7 +622,7 @@ function DeleteConfirmModal({
             onClick={confirm}
             disabled={del.isPending}
           >
-            {del.isPending ? "Deleting…" : "Delete field & values"}
+            {del.isPending ? t("customFields.deleting") : t("customFields.deleteCta")}
           </button>
         </div>
       </div>

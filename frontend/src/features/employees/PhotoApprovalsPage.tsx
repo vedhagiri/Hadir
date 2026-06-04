@@ -75,20 +75,12 @@ export function PhotoApprovalsPage() {
       qc.invalidateQueries({ queryKey: ["employees", "photo-approvals"] });
       toast.success(
         variables.action === "approve"
-          ? (t("photoApprovals.approved", {
-              defaultValue: "Photo approved",
-            }) as string)
-          : (t("photoApprovals.rejected", {
-              defaultValue: "Photo rejected",
-            }) as string),
+          ? (t("photoApprovals.approved") as string)
+          : (t("photoApprovals.rejected") as string),
       );
     },
     onError: () => {
-      toast.error(
-        t("photoApprovals.actionFailed", {
-          defaultValue: "Action failed",
-        }) as string,
-      );
+      toast.error(t("photoApprovals.actionFailed") as string);
     },
   });
 
@@ -100,18 +92,10 @@ export function PhotoApprovalsPage() {
       <div className="page-header">
         <div>
           <h1 className="page-title">
-            {t("photoApprovals.title", {
-              defaultValue: "Photo approvals",
-            }) as string}
+            {t("photoApprovals.title") as string}
           </h1>
           <p className="page-sub">
-            {t("photoApprovals.subtitle", {
-              count: pendingItems.length,
-              defaultValue:
-                pendingItems.length === 1
-                  ? "1 photo waiting for review"
-                  : `${pendingItems.length} photos waiting for review`,
-            }) as string}
+            {t("photoApprovals.subtitle", { count: pendingItems.length }) as string}
           </p>
         </div>
       </div>
@@ -119,9 +103,7 @@ export function PhotoApprovalsPage() {
       {/* Tab strip */}
       <div
         role="tablist"
-        aria-label={t("photoApprovals.tabsLabel", {
-          defaultValue: "Photo approval queue",
-        }) as string}
+        aria-label={t("photoApprovals.tabsLabel") as string}
         style={{
           display: "flex",
           gap: 4,
@@ -134,16 +116,14 @@ export function PhotoApprovalsPage() {
           count={pendingItems.length}
           onClick={() => setTab("pending")}
         >
-          {t("photoApprovals.tab.pending", { defaultValue: "Pending" }) as string}
+          {t("photoApprovals.tab.pending") as string}
         </TabButton>
         <TabButton
           active={tab === "approved"}
           count={approved.data ? approvedItems.length : null}
           onClick={() => setTab("approved")}
         >
-          {t("photoApprovals.tab.approved", {
-            defaultValue: "Approved",
-          }) as string}
+          {t("photoApprovals.tab.approved") as string}
         </TabButton>
       </div>
 
@@ -252,9 +232,7 @@ function PendingPanel({
         className="text-sm"
         style={{ padding: 16, color: "var(--danger-text)" }}
       >
-        {t("photoApprovals.loadFailed", {
-          defaultValue: "Could not load the queue.",
-        }) as string}
+        {t("photoApprovals.loadFailed") as string}
       </div>
     );
   }
@@ -264,9 +242,7 @@ function PendingPanel({
         className="text-sm text-dim"
         style={{ padding: 24, textAlign: "center" }}
       >
-        {t("photoApprovals.empty", {
-          defaultValue: "No photos awaiting approval.",
-        }) as string}
+        {t("photoApprovals.empty") as string}
       </div>
     );
   }
@@ -315,9 +291,7 @@ function ApprovedPanel({
         className="text-sm"
         style={{ padding: 16, color: "var(--danger-text)" }}
       >
-        {t("photoApprovals.loadFailed", {
-          defaultValue: "Could not load the queue.",
-        }) as string}
+        {t("photoApprovals.loadFailed") as string}
       </div>
     );
   }
@@ -327,9 +301,7 @@ function ApprovedPanel({
         className="text-sm text-dim"
         style={{ padding: 24, textAlign: "center" }}
       >
-        {t("photoApprovals.approvedEmpty", {
-          defaultValue: "No approved photos yet.",
-        }) as string}
+        {t("photoApprovals.approvedEmpty") as string}
       </div>
     );
   }
@@ -397,9 +369,7 @@ function PendingTile({
             fontSize: 10.5,
           }}
         >
-          {t("photoApprovals.pendingPill", {
-            defaultValue: "Pending",
-          }) as string}
+          {t("photoApprovals.pendingPill") as string}
         </span>
       </div>
       <div style={{ padding: "10px 12px" }}>
@@ -408,9 +378,7 @@ function PendingTile({
         </div>
         <div className="mono text-xs text-dim" style={{ marginTop: 2 }}>
           {p.employee_code} ·{" "}
-          {t(`employees.photos.angle.${p.angle}`, {
-            defaultValue: p.angle[0]!.toUpperCase() + p.angle.slice(1),
-          }) as string}
+          {t(`employees.photos.angles.${p.angle}`) as string}
         </div>
         {p.uploaded_by_email && (
           <div
@@ -436,9 +404,7 @@ function PendingTile({
             style={{ flex: 1 }}
           >
             <Icon name="check" size={11} />{" "}
-            {t("photoApprovals.approve", {
-              defaultValue: "Approve",
-            }) as string}
+            {t("photoApprovals.approve") as string}
           </button>
           <button
             type="button"
@@ -448,9 +414,7 @@ function PendingTile({
             style={{ flex: 1 }}
           >
             <Icon name="x" size={11} />{" "}
-            {t("photoApprovals.reject", {
-              defaultValue: "Reject",
-            }) as string}
+            {t("photoApprovals.reject") as string}
           </button>
         </div>
       </div>
@@ -506,9 +470,7 @@ function ApprovedTile({ p }: { p: ApprovedPhoto }) {
             fontSize: 10.5,
           }}
         >
-          {t("photoApprovals.approvedPill", {
-            defaultValue: "Approved",
-          }) as string}
+          {t("photoApprovals.approvedPill") as string}
         </span>
       </div>
       <div style={{ padding: "10px 12px" }}>
@@ -517,9 +479,7 @@ function ApprovedTile({ p }: { p: ApprovedPhoto }) {
         </div>
         <div className="mono text-xs text-dim" style={{ marginTop: 2 }}>
           {p.employee_code} ·{" "}
-          {t(`employees.photos.angle.${p.angle}`, {
-            defaultValue: p.angle[0]!.toUpperCase() + p.angle.slice(1),
-          }) as string}
+          {t(`employees.photos.angles.${p.angle}`) as string}
         </div>
         {p.approved_by_email && (
           <div
@@ -543,10 +503,7 @@ function ApprovedTile({ p }: { p: ApprovedPhoto }) {
                 letterSpacing: "0.04em",
               }}
             >
-              {p.approved_by_role ??
-                (t("photoApprovals.unknownRole", {
-                  defaultValue: "User",
-                }) as string)}
+              {p.approved_by_role ?? (t("photoApprovals.unknownRole") as string)}
             </span>
             <span
               className="text-xs text-dim"
@@ -571,9 +528,7 @@ function ApprovedTile({ p }: { p: ApprovedPhoto }) {
           >
             <Icon name="check" size={10} />
             <span style={{ marginInlineStart: 4 }}>
-              {t("photoApprovals.approvedAt", {
-                defaultValue: "Approved",
-              }) as string}{" "}
+              {t("photoApprovals.approvedAt") as string}{" "}
               {new Date(p.approved_at).toLocaleString()}
             </span>
           </div>

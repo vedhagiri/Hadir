@@ -4,6 +4,7 @@
 // can show "*** stored" and let the operator opt in to a rotation.
 
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../api/client";
 import { SettingsTabs } from "../settings/SettingsTabs";
@@ -15,6 +16,7 @@ import {
 import type { EmailConfigUpdate, EmailProvider } from "./types";
 
 export function EmailConfigPage() {
+  const { t } = useTranslation();
   const cfg = useEmailConfig();
   const patch = usePatchEmailConfig();
   const test = useSendTestEmail();
@@ -73,9 +75,11 @@ export function EmailConfigPage() {
       await patch.mutateAsync(payload);
       setSmtpPassword("");
       setGraphClientSecret("");
-      setInfo("Saved.");
+      setInfo(t("emailConfig.msg.saved") as string);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Save failed.");
+      setError(
+        err instanceof ApiError ? err.message : (t("emailConfig.msg.saveFailed") as string),
+      );
     }
   };
 
@@ -83,25 +87,27 @@ export function EmailConfigPage() {
     setError(null);
     setInfo(null);
     if (!testTo.trim()) {
-      setError("Type an email address to test against.");
+      setError(t("emailConfig.msg.testAddressRequired") as string);
       return;
     }
     try {
       await test.mutateAsync(testTo.trim());
-      setInfo(`Test email sent to ${testTo.trim()}.`);
+      setInfo(t("emailConfig.msg.testSent", { to: testTo.trim() }) as string);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Test send failed.");
+      setError(
+        err instanceof ApiError ? err.message : (t("emailConfig.msg.testFailed") as string),
+      );
     }
   };
 
-  if (cfg.isLoading) return <p>Loading email settings…</p>;
+  if (cfg.isLoading) return <p>{t("emailConfig.loading") as string}</p>;
   if (cfg.error)
     return (
       <p style={{ color: "var(--danger-text)" }}>
-        Couldn’t load email settings.
+        {t("emailConfig.loadError") as string}
       </p>
     );
-  if (!cfg.data) return <p>Sign in to configure email.</p>;
+  if (!cfg.data) return <p>{t("emailConfig.signInPrompt") as string}</p>;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -115,13 +121,10 @@ export function EmailConfigPage() {
             fontWeight: 400,
           }}
         >
-          Email
+          {t("emailConfig.title") as string}
         </h1>
         <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 13 }}>
-          Outbound credentials for scheduled reports + override
-          notifications. Secrets are write-only — the field shows{" "}
-          <span className="mono">***</span> when one is stored. Type a
-          fresh value to rotate.
+          {t("emailConfig.subtitle") as string}
         </p>
       </header>
 
@@ -141,7 +144,7 @@ export function EmailConfigPage() {
           maxWidth: 700,
         }}
       >
-        <Field label="Provider">
+        <Field label={t("emailConfig.field.provider") as string}>
           <div style={{ display: "flex", gap: 8 }}>
             {(["smtp", "microsoft_graph"] as EmailProvider[]).map((p) => (
               <label
@@ -172,7 +175,7 @@ export function EmailConfigPage() {
                 gap: 8,
               }}
             >
-              <Field label="Host">
+              <Field label={t("emailConfig.field.host") as string}>
                 <input
                   className="input"
                   value={smtpHost}
@@ -180,7 +183,7 @@ export function EmailConfigPage() {
                   placeholder="smtp.example.com"
                 />
               </Field>
-              <Field label="Port">
+              <Field label={t("emailConfig.field.port") as string}>
                 <input
                   className="input"
                   type="number"
@@ -189,7 +192,7 @@ export function EmailConfigPage() {
                 />
               </Field>
             </div>
-            <Field label="Username">
+            <Field label={t("emailConfig.field.username") as string}>
               <input
                 className="input"
                 value={smtpUsername}
@@ -198,11 +201,11 @@ export function EmailConfigPage() {
               />
             </Field>
             <Field
-              label="Password"
+              label={t("emailConfig.field.password") as string}
               hint={
-                cfg.data.has_smtp_password
-                  ? "Stored. Type a new value to rotate."
-                  : "Required if your SMTP server requires authentication."
+                (cfg.data.has_smtp_password
+                  ? t("emailConfig.hint.secretStored")
+                  : t("emailConfig.hint.passwordRequired")) as string
               }
             >
               <input
@@ -227,19 +230,19 @@ export function EmailConfigPage() {
                 checked={smtpUseTls}
                 onChange={(e) => setSmtpUseTls(e.target.checked)}
               />
-              Use TLS (STARTTLS)
+              {t("emailConfig.field.useTls") as string}
             </label>
           </>
         ) : (
           <>
-            <Field label="Entra tenant id">
+            <Field label={t("emailConfig.field.entraTenantId") as string}>
               <input
                 className="input"
                 value={graphTenant}
                 onChange={(e) => setGraphTenant(e.target.value)}
               />
             </Field>
-            <Field label="Client id">
+            <Field label={t("emailConfig.field.clientId") as string}>
               <input
                 className="input"
                 value={graphClientId}
@@ -248,11 +251,11 @@ export function EmailConfigPage() {
               />
             </Field>
             <Field
-              label="Client secret"
+              label={t("emailConfig.field.clientSecret") as string}
               hint={
-                cfg.data.has_graph_client_secret
-                  ? "Stored. Type a new value to rotate."
-                  : "Application secret from your Entra app registration."
+                (cfg.data.has_graph_client_secret
+                  ? t("emailConfig.hint.secretStored")
+                  : t("emailConfig.hint.clientSecret")) as string
               }
             >
               <input
@@ -274,7 +277,7 @@ export function EmailConfigPage() {
             gap: 8,
           }}
         >
-          <Field label="From address">
+          <Field label={t("emailConfig.field.fromAddress") as string}>
             <input
               className="input"
               value={fromAddress}
@@ -282,7 +285,7 @@ export function EmailConfigPage() {
               placeholder="reports@your-domain.com"
             />
           </Field>
-          <Field label="From name">
+          <Field label={t("emailConfig.field.fromName") as string}>
             <input
               className="input"
               value={fromName}
@@ -305,7 +308,7 @@ export function EmailConfigPage() {
             checked={enabled}
             onChange={(e) => setEnabled(e.target.checked)}
           />
-          Enable email delivery for scheduled reports + notifications
+          {t("emailConfig.field.enable") as string}
         </label>
 
         {error && (
@@ -342,7 +345,7 @@ export function EmailConfigPage() {
             className="btn btn-primary"
             disabled={patch.isPending}
           >
-            {patch.isPending ? "Saving…" : "Save changes"}
+            {(patch.isPending ? t("common.saving") : t("emailConfig.save")) as string}
           </button>
         </div>
       </form>
@@ -359,10 +362,9 @@ export function EmailConfigPage() {
           gap: 8,
         }}
       >
-        <h2 style={{ margin: 0, fontSize: 16 }}>Send test email</h2>
+        <h2 style={{ margin: 0, fontSize: 16 }}>{t("emailConfig.test.title") as string}</h2>
         <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 12.5 }}>
-          Uses the saved configuration. Useful to verify SMTP / Graph
-          credentials before scheduling a real report.
+          {t("emailConfig.test.desc") as string}
         </p>
         <div style={{ display: "flex", gap: 8 }}>
           <input
@@ -378,7 +380,7 @@ export function EmailConfigPage() {
             onClick={() => void onTest()}
             disabled={test.isPending}
           >
-            {test.isPending ? "Sending…" : "Send test"}
+            {(test.isPending ? t("emailConfig.test.sending") : t("emailConfig.test.send")) as string}
           </button>
         </div>
       </section>

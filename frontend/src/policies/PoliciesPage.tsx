@@ -15,6 +15,8 @@
 // from this page in a follow-up — for now it surfaces the count.
 
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 import { ApiError } from "../api/client";
 import { DatePicker } from "../components/DatePicker";
@@ -42,6 +44,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 export function PoliciesPage() {
+  const { t } = useTranslation();
   const policies = usePolicies();
   const assignments = useAssignments();
   const create = useCreatePolicy();
@@ -113,14 +116,14 @@ export function PoliciesPage() {
       await setDefault.mutateAsync(policyId);
       const name =
         policyList.find((p) => p.id === policyId)?.name ?? "policy";
-      toast.success(`"${name}" is now the default shift policy.`);
+      toast.success(t("policies.toast.isNowDefault", { name }));
     } catch (err) {
       const msg =
         err instanceof ApiError
           ? typeof (err.body as { detail?: unknown })?.detail === "string"
             ? String((err.body as { detail?: unknown }).detail)
-            : `Could not set default (${err.status}).`
-          : "Could not set default.";
+            : t("policies.toast.setDefaultFailed", { status: err.status })
+          : t("policies.toast.setDefaultFailedGeneric");
       setError(msg);
       toast.error(msg);
     }
@@ -139,19 +142,19 @@ export function PoliciesPage() {
       const created = await create.mutateAsync(input);
       setDrawerOpen(false);
       setSelectedId(created.id);
-      toast.success(`"${created.name}" created.`);
+      toast.success(t("policies.toast.created", { name: created.name }));
     } catch (err) {
       if (err instanceof ApiError) {
         const body = err.body as { detail?: unknown } | null;
         const msg =
           typeof body?.detail === "string"
             ? body.detail
-            : `Save failed (${err.status}).`;
+            : t("policies.toast.saveFailedStatus", { status: err.status });
         setError(msg);
         toast.error(msg);
       } else {
-        setError("Save failed.");
-        toast.error("Save failed.");
+        setError(t("policies.toast.saveFailed"));
+        toast.error(t("policies.toast.saveFailed"));
       }
     }
   };
@@ -169,15 +172,15 @@ export function PoliciesPage() {
       await del.mutateAsync({ policyId: p.id, hard });
       toast.success(
         hard
-          ? `"${p.name}" permanently deleted.`
-          : `"${p.name}" archived.`,
+          ? t("policies.toast.permanentlyDeleted", { name: p.name })
+          : t("policies.toast.archived", { name: p.name }),
       );
       setDeleting(null);
       return { ok: true };
     } catch (err) {
       if (err instanceof ApiError) {
         const body = err.body as { detail?: unknown } | null;
-        let reason = `Delete failed (${err.status}).`;
+        let reason = t("policies.toast.deleteFailed", { status: err.status });
         if (err.status === 409 && body?.detail && typeof body.detail === "object") {
           const detail = body.detail as {
             message?: string;
@@ -192,7 +195,7 @@ export function PoliciesPage() {
         toast.error(reason);
         return { ok: false, reason };
       }
-      const fallback = "Delete failed.";
+      const fallback = t("policies.toast.deleteFailedGeneric");
       toast.error(fallback);
       return { ok: false, reason: fallback };
     }
@@ -202,40 +205,34 @@ export function PoliciesPage() {
     <>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Shift policies</h1>
-          <p className="page-sub">
-            Fixed, Flex, Ramadan and custom · assign per dept,
-            employee, or globally
-          </p>
+          <h1 className="page-title">{t("policies.title")}</h1>
+          <p className="page-sub">{t("policies.sub")}</p>
         </div>
         <div className="page-actions">
-          {/* Three-step import — opens a modal with drag-and-drop,
-              template download, preview table, per-row error list,
-              and a Confirm step. Same UX as the employee import. */}
           <button
             className="btn"
             onClick={() => setImportOpen(true)}
-            title="Import shift policies from an .xlsx file"
+            title={t("policies.importTitle")}
           >
             <Icon name="upload" size={12} />
-            Import
+            {t("policies.import")}
           </button>
           <button
             className="btn btn-primary"
             onClick={() => setDrawerOpen(true)}
           >
             <Icon name="plus" size={12} />
-            New policy
+            {t("policies.newPolicy")}
           </button>
         </div>
       </div>
 
       {policies.isLoading && (
-        <p className="text-sm text-dim">Loading shift policies…</p>
+        <p className="text-sm text-dim">{t("policies.loading")}</p>
       )}
       {policies.isError && (
         <p style={{ color: "var(--danger-text)" }}>
-          Could not load shift policies.
+          {t("policies.loadError")}
         </p>
       )}
 
@@ -251,7 +248,7 @@ export function PoliciesPage() {
           {/* Left — list */}
           <div className="card">
             <div className="card-head">
-              <h3 className="card-title">Policies</h3>
+              <h3 className="card-title">{t("policies.listTitle")}</h3>
               <span className="text-xs text-dim">{policyList.length}</span>
             </div>
             <div style={{ padding: 4 }}>
@@ -260,7 +257,7 @@ export function PoliciesPage() {
                   className="text-sm text-dim"
                   style={{ padding: 16, textAlign: "center" }}
                 >
-                  No policies yet. Create one to get started.
+                  {t("policies.empty")}
                 </div>
               )}
               {policyList.map((p) => {
@@ -268,7 +265,7 @@ export function PoliciesPage() {
                 const isActive = p.active_until === null;
                 const isDefault = p.id === defaultPolicyId;
                 const rowAssignments = assignmentsByPolicy[p.id] ?? [];
-                const subtitle = renderSubtitle(p, rowAssignments);
+                const subtitle = renderSubtitle(p, rowAssignments, t);
                 return (
                   <button
                     key={p.id}
@@ -309,7 +306,7 @@ export function PoliciesPage() {
                         {isDefault && (
                           <span
                             className="pill pill-accent"
-                            title="Tenant-wide default policy"
+                            title={t("policies.defaultTitle")}
                             style={{
                               fontSize: 9.5,
                               padding: "1px 6px",
@@ -318,7 +315,7 @@ export function PoliciesPage() {
                               fontWeight: 700,
                             }}
                           >
-                            Default
+                            {t("policies.default")}
                           </span>
                         )}
                       </div>
@@ -353,7 +350,7 @@ export function PoliciesPage() {
                             : "var(--text-tertiary)",
                         }}
                       />
-                      {isActive ? "Active" : "Off"}
+                      {isActive ? t("policies.active") : t("policies.off")}
                     </span>
                   </button>
                 );
@@ -368,7 +365,7 @@ export function PoliciesPage() {
                 className="text-sm text-dim"
                 style={{ padding: 32, textAlign: "center" }}
               >
-                Select a policy to view its shift window and flag rules.
+                {t("policies.selectPrompt")}
               </div>
             ) : (
               <PolicyDetail
@@ -401,7 +398,7 @@ export function PoliciesPage() {
               className="card"
               role="dialog"
               aria-modal="true"
-              aria-label="New shift policy"
+              aria-label={t("policies.newModal.ariaLabel")}
               style={{
                 width: "min(620px, 96vw)",
                 maxHeight: "86vh",
@@ -410,16 +407,16 @@ export function PoliciesPage() {
             >
               <div className="card-head">
                 <div>
-                  <div className="mono text-xs text-dim">Shift policy</div>
+                  <div className="mono text-xs text-dim">{t("policies.newModal.label")}</div>
                   <h3 className="card-title" style={{ marginTop: 2 }}>
-                    New policy
+                    {t("policies.newModal.title")}
                   </h3>
                 </div>
                 <button
                   className="icon-btn"
                   onClick={() => setDrawerOpen(false)}
-                  aria-label="Close"
-                  title="Close"
+                  aria-label={t("common.close")}
+                  title={t("common.close")}
                   disabled={create.isPending}
                 >
                   <Icon name="x" size={14} />
@@ -489,6 +486,7 @@ function DeletePolicyModal({
     hard: boolean,
   ) => Promise<{ ok: true } | { ok: false; reason: string }>;
 }) {
+  const { t } = useTranslation();
   const [hardError, setHardError] = useState<string | null>(null);
   const [pending, setPending] = useState<"soft" | "hard" | null>(null);
 
@@ -518,7 +516,7 @@ function DeletePolicyModal({
           className="card"
           role="dialog"
           aria-modal="true"
-          aria-label={`Delete shift policy ${policy.name}`}
+          aria-label={t("policies.deleteModal.ariaLabel", { name: policy.name })}
           style={{
             width: "min(540px, 96vw)",
             maxHeight: "86vh",
@@ -527,16 +525,16 @@ function DeletePolicyModal({
         >
           <div className="card-head">
             <div>
-              <div className="mono text-xs text-dim">Shift policy</div>
+              <div className="mono text-xs text-dim">{t("policies.deleteModal.label")}</div>
               <h3 className="card-title" style={{ marginTop: 2 }}>
-                Delete · {policy.name}
+                {t("policies.deleteModal.title", { name: policy.name })}
               </h3>
             </div>
             <button
               className="icon-btn"
               onClick={onClose}
-              aria-label="Close"
-              title="Close"
+              aria-label={t("common.close")}
+              title={t("common.close")}
               disabled={busy}
             >
               <Icon name="x" size={14} />
@@ -547,16 +545,14 @@ function DeletePolicyModal({
               className="text-sm text-dim"
               style={{ margin: 0, lineHeight: 1.5 }}
             >
-              Choose how to remove this policy. Soft delete is reversible
-              by clearing <span className="mono">active_until</span> back
-              to <span className="mono">NULL</span>; permanent delete is
-              not.
+              {t("policies.deleteModal.body")}
             </p>
 
             <DeleteOption
-              title="Soft delete (archive)"
-              description="Hide the policy from new attendance computation. Existing attendance rows keep their original policy reference, audit trail stays intact."
-              actionLabel="Soft delete"
+              title={t("policies.deleteModal.softTitle")}
+              description={t("policies.deleteModal.softDesc")}
+              actionLabel={t("policies.deleteModal.softAction")}
+              workingLabel={t("policies.deleteModal.working")}
               actionClass="btn"
               busy={pending === "soft"}
               disabled={busy}
@@ -564,9 +560,10 @@ function DeletePolicyModal({
             />
 
             <DeleteOption
-              title="Permanent delete"
-              description="Drop the row entirely. Policy assignments are cascade-deleted automatically. Refused if any attendance record still references this policy — soft delete instead."
-              actionLabel="Permanent delete"
+              title={t("policies.deleteModal.hardTitle")}
+              description={t("policies.deleteModal.hardDesc")}
+              actionLabel={t("policies.deleteModal.hardAction")}
+              workingLabel={t("policies.deleteModal.working")}
               actionClass="btn btn-danger"
               busy={pending === "hard"}
               disabled={busy}
@@ -585,6 +582,7 @@ function DeleteOption({
   title,
   description,
   actionLabel,
+  workingLabel,
   actionClass,
   busy,
   disabled,
@@ -595,6 +593,7 @@ function DeleteOption({
   title: string;
   description: string;
   actionLabel: string;
+  workingLabel: string;
   actionClass: string;
   busy: boolean;
   disabled: boolean;
@@ -642,7 +641,7 @@ function DeleteOption({
           onClick={onClick}
           disabled={disabled || busy}
         >
-          {busy ? "Working…" : actionLabel}
+          {busy ? workingLabel : actionLabel}
         </button>
       </div>
     </div>
@@ -666,6 +665,7 @@ function PolicyEditDrawer({
   policy: PolicyResponse;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const patch = usePatchPolicy(policy.id);
   const [error, setError] = useState<string | null>(null);
 
@@ -685,7 +685,7 @@ function PolicyEditDrawer({
         config: input.config,
         active_from: input.active_from,
       });
-      toast.success(`"${updated.name}" updated.`);
+      toast.success(t("policies.toast.updated", { name: updated.name }));
       onClose();
     } catch (err) {
       if (err instanceof ApiError) {
@@ -693,12 +693,12 @@ function PolicyEditDrawer({
         const msg =
           typeof body?.detail === "string"
             ? body.detail
-            : `Save failed (${err.status}).`;
+            : t("policies.toast.saveFailedStatus", { status: err.status });
         setError(msg);
         toast.error(msg);
       } else {
-        setError("Save failed.");
-        toast.error("Save failed.");
+        setError(t("policies.toast.saveFailed"));
+        toast.error(t("policies.toast.saveFailed"));
       }
     }
   };
@@ -719,7 +719,7 @@ function PolicyEditDrawer({
           className="card"
           role="dialog"
           aria-modal="true"
-          aria-label={`Edit shift policy ${policy.name}`}
+          aria-label={t("policies.editModal.ariaLabel", { name: policy.name })}
           style={{
             width: "min(620px, 96vw)",
             maxHeight: "86vh",
@@ -728,19 +728,19 @@ function PolicyEditDrawer({
         >
           <div className="card-head">
             <div>
-              <div className="mono text-xs text-dim">Shift policy</div>
+              <div className="mono text-xs text-dim">{t("policies.editModal.label")}</div>
               <h3
                 className="card-title"
                 style={{ marginTop: 2 }}
               >
-                Edit · {policy.name}
+                {t("policies.editModal.title", { name: policy.name })}
               </h3>
             </div>
             <button
               className="icon-btn"
               onClick={onClose}
-              aria-label="Close"
-              title="Close"
+              aria-label={t("common.close")}
+              title={t("common.close")}
               disabled={patch.isPending}
             >
               <Icon name="x" size={14} />
@@ -796,6 +796,7 @@ function PolicyDetail({
   onDelete: () => void;
   onEdit: () => void;
 }) {
+  const { t } = useTranslation();
   const cfg = policy.config;
   const requiredHours = cfg.required_hours ?? 8;
   const isActive = policy.active_until === null;
@@ -832,7 +833,7 @@ function PolicyDetail({
             {isDefault && (
               <span
                 className="pill pill-accent"
-                title="Tenant-wide default policy — applies when no department / employee override matches."
+                title={t("policies.detail.defaultPillTitle")}
                 style={{
                   fontSize: 10.5,
                   padding: "2px 8px",
@@ -841,10 +842,10 @@ function PolicyDetail({
                   fontWeight: 700,
                 }}
               >
-                Default
+                {t("policies.default")}
               </span>
             )}
-            {!isActive && <span className="pill pill-neutral">Off</span>}
+            {!isActive && <span className="pill pill-neutral">{t("policies.off")}</span>}
           </div>
         </div>
         {!isDefault && isActive && (
@@ -852,24 +853,24 @@ function PolicyDetail({
             className="btn btn-sm"
             onClick={onSetDefault}
             disabled={settingDefault}
-            title="Make this policy the tenant-wide default. Replaces any existing default."
+            title={t("policies.detail.setAsDefaultTitle")}
           >
             <Icon name="check" size={11} />{" "}
-            {settingDefault ? "Setting…" : "Set as default"}
+            {settingDefault ? t("policies.detail.settingDefault") : t("policies.detail.setAsDefault")}
           </button>
         )}
         <button
           className="btn btn-sm"
           onClick={onEdit}
-          title="Edit this shift policy"
+          title={t("policies.detail.editTitle")}
         >
-          <Icon name="edit" size={11} /> Edit
+          <Icon name="edit" size={11} /> {t("policies.detail.edit")}
         </button>
         <button
           className="icon-btn"
-          aria-label="Delete policy"
+          aria-label={t("policies.detail.deleteAria")}
           onClick={onDelete}
-          title="Delete policy"
+          title={t("policies.detail.deleteTitle")}
         >
           <Icon name="trash" size={13} />
         </button>
@@ -878,17 +879,17 @@ function PolicyDetail({
         className="text-sm text-dim"
         style={{ marginTop: 0, marginBottom: 16 }}
       >
-        Must complete {requiredHours} hours
+        {t("policies.detail.mustComplete", { n: requiredHours })}
         {assignments.length > 0 && (
           <>
             {" · "}
-            {assignments.length} assigned
+            {t("policies.detail.assigned", { n: assignments.length })}
           </>
         )}
       </p>
 
       {/* SHIFT WINDOW — visual timeline ribbon */}
-      <SectionLabel>Shift window</SectionLabel>
+      <SectionLabel>{t("policies.detail.shiftWindow")}</SectionLabel>
       <ShiftWindowRibbon policy={policy} />
 
       {/* IN/OUT + REQUIRED + OVERTIME */}
@@ -901,30 +902,22 @@ function PolicyDetail({
         }}
       >
         <DetailField
-          label="In time"
+          label={t("policies.detail.inTime")}
           value={
             isFlexShape
               ? `${cfg.in_window_start ?? "—"} – ${cfg.in_window_end ?? "—"}`
               : (cfg.start ?? "—")
           }
-          hint={
-            isFlexShape
-              ? "Flex range · earliest – latest acceptable"
-              : undefined
-          }
+          hint={isFlexShape ? t("policies.detail.flexHint") : undefined}
         />
         <DetailField
-          label="Out time"
+          label={t("policies.detail.outTime")}
           value={
             isFlexShape
               ? `${cfg.out_window_start ?? "—"} – ${cfg.out_window_end ?? "—"}`
               : (cfg.end ?? "—")
           }
-          hint={
-            isFlexShape
-              ? "Flex range · earliest – latest acceptable"
-              : undefined
-          }
+          hint={isFlexShape ? t("policies.detail.flexHint") : undefined}
         />
       </div>
       <div
@@ -936,9 +929,9 @@ function PolicyDetail({
           marginBottom: 16,
         }}
       >
-        <DetailField label="Required hours" value={String(requiredHours)} />
+        <DetailField label={t("policies.detail.requiredHours")} value={String(requiredHours)} />
         <DetailField
-          label="Overtime threshold"
+          label={t("policies.detail.overtimeThreshold")}
           value={
             cfg.grace_minutes !== undefined
               ? `+${cfg.grace_minutes}m`
@@ -948,13 +941,14 @@ function PolicyDetail({
       </div>
 
       {/* FLAG RULES */}
-      <SectionLabel>Flag rules</SectionLabel>
+      <SectionLabel>{t("policies.detail.flagRules")}</SectionLabel>
       <FlagRulesList />
     </>
   );
 }
 
 function ShiftWindowRibbon({ policy }: { policy: PolicyResponse }) {
+  const { t } = useTranslation();
   // Render a 06:00 → 18:00 timeline with tinted bands marking the
   // policy's effective window. For Fixed/Ramadan/Custom-Fixed the
   // band is start..end. For Flex it's the union of arrive (in_window)
@@ -997,7 +991,7 @@ function ShiftWindowRibbon({ policy }: { policy: PolicyResponse }) {
     const outE = minutesOf(cfg.out_window_end);
     if (inS !== null && inE !== null) {
       bands.push({
-        label: "arrive",
+        label: t("policies.detail.bandArrive"),
         start: inS,
         end: inE,
         fill: "var(--info-soft)",
@@ -1005,7 +999,7 @@ function ShiftWindowRibbon({ policy }: { policy: PolicyResponse }) {
     }
     if (inE !== null && outS !== null && inE < outS) {
       bands.push({
-        label: `${cfg.required_hours ?? 8}h work`,
+        label: t("policies.detail.bandWork", { n: cfg.required_hours ?? 8 }),
         start: inE,
         end: outS,
         fill: "var(--accent-soft)",
@@ -1014,7 +1008,7 @@ function ShiftWindowRibbon({ policy }: { policy: PolicyResponse }) {
     }
     if (outS !== null && outE !== null) {
       bands.push({
-        label: "depart",
+        label: t("policies.detail.bandDepart"),
         start: outS,
         end: outE,
         fill: "var(--info-soft)",
@@ -1025,7 +1019,7 @@ function ShiftWindowRibbon({ policy }: { policy: PolicyResponse }) {
     const e = minutesOf(cfg.end);
     if (s !== null && e !== null) {
       bands.push({
-        label: `${cfg.required_hours ?? 8}h shift`,
+        label: t("policies.detail.bandShift", { n: cfg.required_hours ?? 8 }),
         start: s,
         end: e,
         fill: "var(--accent-soft)",
@@ -1126,30 +1120,27 @@ function ShiftWindowRibbon({ policy }: { policy: PolicyResponse }) {
 }
 
 function FlagRulesList() {
-  // The four engine flags (P10 / P11). They're not per-policy
-  // configurable today — surfaced as read-only "always on"
-  // indicators that match the prototype's reference. Future work
-  // could wire per-policy overrides via a proper toggle.
+  const { t } = useTranslation();
   const rows = [
     {
-      label: "Late in",
-      when: "In > start time",
-      action: 'Flag "Late Nm" · notify manager',
+      label: t("policies.flags.lateIn.label"),
+      when: t("policies.flags.lateIn.when"),
+      action: t("policies.flags.lateIn.action"),
     },
     {
-      label: "Early out",
-      when: "Out < end time",
-      action: 'Flag "Early Nm" · notify manager',
+      label: t("policies.flags.earlyOut.label"),
+      when: t("policies.flags.earlyOut.when"),
+      action: t("policies.flags.earlyOut.action"),
     },
     {
-      label: "Overtime",
-      when: "Total > required + threshold",
-      action: "Store OT · notify HR",
+      label: t("policies.flags.overtime.label"),
+      when: t("policies.flags.overtime.when"),
+      action: t("policies.flags.overtime.action"),
     },
     {
-      label: "Absent",
-      when: "No detection & not on leave/holiday",
-      action: 'Flag "Absent" · include in daily report',
+      label: t("policies.flags.absent.label"),
+      when: t("policies.flags.absent.when"),
+      action: t("policies.flags.absent.action"),
     },
   ];
   return (
@@ -1196,7 +1187,7 @@ function FlagRulesList() {
                 background: "var(--success)",
               }}
             />
-            On
+            {t("policies.detail.flagOn")}
           </span>
         </div>
       ))}
@@ -1211,13 +1202,13 @@ function FlagRulesList() {
 function renderSubtitle(
   p: PolicyResponse,
   assignments: AssignmentResponse[],
+  t: TFunction,
 ): string {
   const range = renderTimeRange(p);
   const count = assignments.length;
-  const noun = count === 1 ? "assignment" : "assignments";
   const bits: string[] = [p.type];
   if (range) bits.push(range);
-  bits.push(`${count} ${noun}`);
+  bits.push(t("policies.assignment", { count }));
   return bits.join(" · ");
 }
 
@@ -1335,14 +1326,10 @@ function PolicyForm({
     active_from: string;
   }) => Promise<void>;
   busy: boolean;
-  // When set the form opens in edit mode: every field seeded from the
-  // existing policy, type field locked (the server's PolicyPatchInput
-  // does not allow type changes), and the submit button label is
-  // ``submitLabel`` (defaults to "Save changes" when ``initial`` is
-  // present, "Create policy" otherwise).
   initial?: PolicyResponse | null | undefined;
   submitLabel?: string | undefined;
 }) {
+  const { t } = useTranslation();
   const isEdit = !!initial;
   const cfg0 = initial?.config ?? {};
   const [name, setName] = useState(initial?.name ?? "");
@@ -1426,7 +1413,7 @@ function PolicyForm({
     rangeStart &&
     rangeEnd &&
     rangeEnd < rangeStart
-      ? "Range end must be on or after range start."
+      ? t("policies.form.errorRangeEndOrder")
       : undefined);
 
   const submit = (e: React.FormEvent) => {
@@ -1434,12 +1421,12 @@ function PolicyForm({
 
     // Validate required fields the browser can't catch on its own.
     const nextErrors: typeof errors = {};
-    if (!name.trim()) nextErrors.name = "Policy name is required.";
+    if (!name.trim()) nextErrors.name = t("policies.form.errorNameRequired");
     if (type === "Ramadan" || type === "Custom") {
-      if (!rangeStart) nextErrors.rangeStart = "Range start is required.";
-      if (!rangeEnd) nextErrors.rangeEnd = "Range end is required.";
+      if (!rangeStart) nextErrors.rangeStart = t("policies.form.errorRangeStartRequired");
+      if (!rangeEnd) nextErrors.rangeEnd = t("policies.form.errorRangeEndRequired");
       if (rangeStart && rangeEnd && rangeEnd < rangeStart) {
-        nextErrors.rangeEnd = "Range end must be on or after range start.";
+        nextErrors.rangeEnd = t("policies.form.errorRangeEndOrder");
       }
     }
     if (Object.keys(nextErrors).length > 0) {
@@ -1507,9 +1494,9 @@ function PolicyForm({
         gap: 10,
       }}
     >
-      <SectionCaption>Identity</SectionCaption>
+      <SectionCaption>{t("policies.form.sectionIdentity")}</SectionCaption>
       <div style={grid2}>
-        <FormField label="Name" required error={errors.name} span>
+        <FormField label={t("policies.form.fieldName")} required error={errors.name} span>
           <input
             type="text"
             value={name}
@@ -1528,16 +1515,12 @@ function PolicyForm({
             }}
           />
         </FormField>
-        <FormField label="Type" required>
+        <FormField label={t("policies.form.fieldType")} required>
           <select
             value={type}
             onChange={(e) => onTypeChange(e.target.value as PolicyType)}
             disabled={isEdit}
-            title={
-              isEdit
-                ? "Policy type cannot be changed after creation — delete and re-create to switch types."
-                : undefined
-            }
+            title={isEdit ? t("policies.form.typeLockedTitle") : undefined}
             style={{
               ...inputStyle,
               cursor: isEdit ? "not-allowed" : "pointer",
@@ -1550,11 +1533,11 @@ function PolicyForm({
             <option value="Custom">Custom</option>
           </select>
         </FormField>
-        <FormField label="Active from" required>
+        <FormField label={t("policies.form.fieldActiveFrom")} required>
           <DatePicker
             value={activeFrom}
             onChange={setActiveFrom}
-            ariaLabel="Active from"
+            ariaLabel={t("policies.form.fieldActiveFrom")}
             triggerStyle={{ width: "100%" }}
           />
         </FormField>
@@ -1563,20 +1546,20 @@ function PolicyForm({
       {/* Date-range picker — Ramadan + Custom only */}
       {(type === "Ramadan" || type === "Custom") && (
         <>
-          <SectionCaption>Date range</SectionCaption>
+          <SectionCaption>{t("policies.form.sectionDateRange")}</SectionCaption>
           <div style={grid2}>
-            <FormField label="Range start" required error={errors.rangeStart}>
+            <FormField label={t("policies.form.fieldRangeStart")} required error={errors.rangeStart}>
               <DatePicker
                 value={rangeStart}
                 onChange={(v) => {
                   setRangeStart(v);
                   clearError("rangeStart");
                 }}
-                ariaLabel="Range start"
+                ariaLabel={t("policies.form.fieldRangeStart")}
                 triggerStyle={{ width: "100%" }}
               />
             </FormField>
-            <FormField label="Range end" required error={rangeEndError}>
+            <FormField label={t("policies.form.fieldRangeEnd")} required error={rangeEndError}>
               <DatePicker
                 value={rangeEnd}
                 onChange={(v) => {
@@ -1584,12 +1567,12 @@ function PolicyForm({
                   clearError("rangeEnd");
                 }}
                 min={rangeStart}
-                ariaLabel="Range end"
+                ariaLabel={t("policies.form.fieldRangeEnd")}
                 triggerStyle={{ width: "100%" }}
               />
             </FormField>
             {type === "Custom" && (
-              <FormField label="Custom inner type" required span>
+              <FormField label={t("policies.form.fieldInnerType")} required span>
                 <select
                   value={innerType}
                   onChange={(e) =>
@@ -1597,8 +1580,8 @@ function PolicyForm({
                   }
                   style={inputStyle}
                 >
-                  <option value="Fixed">Fixed (start/end + grace)</option>
-                  <option value="Flex">Flex (in/out windows)</option>
+                  <option value="Fixed">{t("policies.form.innerFixed")}</option>
+                  <option value="Flex">{t("policies.form.innerFlex")}</option>
                 </select>
               </FormField>
             )}
@@ -1606,10 +1589,10 @@ function PolicyForm({
         </>
       )}
 
-      <SectionCaption>Shift window</SectionCaption>
+      <SectionCaption>{t("policies.form.sectionShiftWindow")}</SectionCaption>
       {isFixedShape ? (
         <div style={grid2}>
-          <FormField label="Start" required>
+          <FormField label={t("policies.form.fieldStart")} required>
             <input
               type="time"
               value={start}
@@ -1618,7 +1601,7 @@ function PolicyForm({
               style={inputStyle}
             />
           </FormField>
-          <FormField label="End" required>
+          <FormField label={t("policies.form.fieldEnd")} required>
             <input
               type="time"
               value={end}
@@ -1627,7 +1610,7 @@ function PolicyForm({
               style={inputStyle}
             />
           </FormField>
-          <FormField label="Grace (min)">
+          <FormField label={t("policies.form.fieldGrace")}>
             <input
               type="number"
               min={0}
@@ -1639,7 +1622,7 @@ function PolicyForm({
               style={inputStyle}
             />
           </FormField>
-          <FormField label="Required hours" required>
+          <FormField label={t("policies.form.fieldRequiredHours")} required>
             <input
               type="number"
               min={1}
@@ -1655,7 +1638,7 @@ function PolicyForm({
         </div>
       ) : (
         <div style={grid2}>
-          <FormField label="In window start" required>
+          <FormField label={t("policies.form.fieldInWindowStart")} required>
             <input
               type="time"
               value={inStart}
@@ -1664,7 +1647,7 @@ function PolicyForm({
               style={inputStyle}
             />
           </FormField>
-          <FormField label="In window end" required>
+          <FormField label={t("policies.form.fieldInWindowEnd")} required>
             <input
               type="time"
               value={inEnd}
@@ -1673,7 +1656,7 @@ function PolicyForm({
               style={inputStyle}
             />
           </FormField>
-          <FormField label="Out window start" required>
+          <FormField label={t("policies.form.fieldOutWindowStart")} required>
             <input
               type="time"
               value={outStart}
@@ -1682,7 +1665,7 @@ function PolicyForm({
               style={inputStyle}
             />
           </FormField>
-          <FormField label="Out window end" required>
+          <FormField label={t("policies.form.fieldOutWindowEnd")} required>
             <input
               type="time"
               value={outEnd}
@@ -1691,7 +1674,7 @@ function PolicyForm({
               style={inputStyle}
             />
           </FormField>
-          <FormField label="Required hours" required span>
+          <FormField label={t("policies.form.fieldRequiredHours")} required span>
             <input
               type="number"
               min={1}
@@ -1718,14 +1701,12 @@ function PolicyForm({
         <button
           type="submit"
           disabled={busy || !isValid}
-          title={
-            !isValid ? "Fill in all required fields to continue" : undefined
-          }
+          title={!isValid ? t("policies.form.submitRequired") : undefined}
           className="btn btn-primary"
         >
           {busy
-            ? "Saving…"
-            : (submitLabel ?? (isEdit ? "Save changes" : "Create policy"))}
+            ? t("policies.form.saving")
+            : (submitLabel ?? (isEdit ? t("policies.form.saveChanges") : t("policies.form.createPolicy")))}
         </button>
       </div>
     </form>

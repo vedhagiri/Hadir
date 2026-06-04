@@ -10,6 +10,7 @@
 // stateless. The file is re-uploaded on confirm — no temp storage.
 
 import { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../api/client";
 import { ModalShell } from "../components/DrawerShell";
@@ -28,6 +29,7 @@ interface Props {
 type Step = "select" | "preview" | "result";
 
 export function PolicyImportModal({ onClose }: Props) {
+  const { t } = useTranslation();
   const [step, setStep] = useState<Step>("select");
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<PolicyImportPreviewResult | null>(null);
@@ -98,10 +100,10 @@ export function PolicyImportModal({ onClose }: Props) {
             <div>
               <h3 className="card-title">
                 {step === "preview"
-                  ? "Review and confirm import"
+                  ? t("policies.importModal.titlePreview")
                   : step === "result"
-                    ? "Import complete"
-                    : "Import shift policies"}
+                    ? t("policies.importModal.titleResult")
+                    : t("policies.importModal.titleSelect")}
               </h3>
               <p className="card-sub">
                 {step === "select" && (
@@ -122,23 +124,19 @@ export function PolicyImportModal({ onClose }: Props) {
                         textDecoration: "underline",
                       }}
                     >
-                      Download sample template
+                      {t("policies.importModal.subSelectTemplate")}
                     </a>
-                    {" "}with one example row per policy type + a Field
-                    guide sheet.
+                    {" "}{t("policies.importModal.subSelectSuffix")}
                   </>
                 )}
                 {step === "preview" && preview && (
-                  <>
-                    {preview.rows.length} row(s) parsed,{" "}
-                    {preview.errors.length} error(s),{" "}
-                    {importableRows} ready to import. Rows whose name
-                    is already taken are flagged and will be skipped.
-                  </>
+                  t("policies.importModal.subPreview", {
+                    rows: preview.rows.length,
+                    errors: preview.errors.length,
+                    ready: importableRows,
+                  })
                 )}
-                {step === "result" && (
-                  <>The import has finished. Review the counts below.</>
-                )}
+                {step === "result" && t("policies.importModal.subResult")}
               </p>
             </div>
             <button
@@ -187,7 +185,7 @@ export function PolicyImportModal({ onClose }: Props) {
                     <Icon name="upload" size={20} />
                   </div>
                   <div>
-                    Drop an .xlsx here, or{" "}
+                    {t("policies.importModal.dropZone")}{" "}
                     <label
                       style={{
                         textDecoration: "underline",
@@ -195,7 +193,7 @@ export function PolicyImportModal({ onClose }: Props) {
                         color: "var(--text)",
                       }}
                     >
-                      choose a file
+                      {t("policies.importModal.chooseFile")}
                       <input
                         type="file"
                         accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -230,18 +228,14 @@ export function PolicyImportModal({ onClose }: Props) {
                     color: "var(--text-secondary)",
                   }}
                 >
-                  <span>
-                    Not sure about the format? Grab the sample workbook —
-                    one example row per policy type plus a Field guide
-                    sheet documenting every column.
-                  </span>
+                  <span>{t("policies.importModal.formatHint")}</span>
                   <a
                     className="btn btn-sm"
                     href="/api/policies/import-template"
                     style={{ flexShrink: 0 }}
                   >
                     <Icon name="download" size={11} />
-                    Download template
+                    {t("policies.importModal.downloadTemplate")}
                   </a>
                 </div>
 
@@ -256,7 +250,7 @@ export function PolicyImportModal({ onClose }: Props) {
                       fontSize: 12.5,
                     }}
                   >
-                    {importErrorMessage(previewMutation.error)}
+                    {importErrorMessage(previewMutation.error, t)}
                   </div>
                 )}
 
@@ -272,7 +266,7 @@ export function PolicyImportModal({ onClose }: Props) {
                     onClick={onClose}
                     disabled={previewMutation.isPending}
                   >
-                    Cancel
+                    {t("common.cancel")}
                   </button>
                   <button
                     className="btn btn-primary"
@@ -281,8 +275,8 @@ export function PolicyImportModal({ onClose }: Props) {
                   >
                     <Icon name="eye" size={12} />
                     {previewMutation.isPending
-                      ? "Parsing…"
-                      : "Preview rows"}
+                      ? t("policies.importModal.parsing")
+                      : t("policies.importModal.previewRows")}
                   </button>
                 </div>
               </>
@@ -292,17 +286,18 @@ export function PolicyImportModal({ onClose }: Props) {
               <>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <span className="pill pill-info">
-                    {importableRows} ready
+                    {t("policies.importModal.pillReady", { n: importableRows })}
                   </span>
                   {preview.errors.length > 0 && (
                     <span className="pill pill-warning">
-                      {preview.errors.length} error(s)
+                      {t("policies.importModal.pillErrors", { n: preview.errors.length })}
                     </span>
                   )}
                   {preview.rows.some((r) => r.will_skip) && (
                     <span className="pill pill-neutral">
-                      {preview.rows.filter((r) => r.will_skip).length}{" "}
-                      will skip (name exists)
+                      {t("policies.importModal.pillWillSkip", {
+                        n: preview.rows.filter((r) => r.will_skip).length,
+                      })}
                     </span>
                   )}
                 </div>
@@ -325,7 +320,7 @@ export function PolicyImportModal({ onClose }: Props) {
                         letterSpacing: "0.04em",
                       }}
                     >
-                      Row errors (these will be skipped)
+                      {t("policies.importModal.rowErrorsHeader")}
                     </div>
                     <div style={{ maxHeight: 120, overflowY: "auto" }}>
                       {preview.errors.map((e) => (
@@ -356,15 +351,15 @@ export function PolicyImportModal({ onClose }: Props) {
                   <table className="table" style={{ minWidth: 820 }}>
                     <thead>
                       <tr>
-                        <th style={{ width: 50 }}>Row</th>
-                        <th>Name</th>
-                        <th>Type</th>
-                        <th>Start</th>
-                        <th>End</th>
-                        <th>Grace</th>
-                        <th>Hours</th>
-                        <th>Active from</th>
-                        <th>Status</th>
+                        <th style={{ width: 50 }}>{t("policies.importModal.colRow")}</th>
+                        <th>{t("policies.importModal.colName")}</th>
+                        <th>{t("policies.importModal.colType")}</th>
+                        <th>{t("policies.importModal.colStart")}</th>
+                        <th>{t("policies.importModal.colEnd")}</th>
+                        <th>{t("policies.importModal.colGrace")}</th>
+                        <th>{t("policies.importModal.colHours")}</th>
+                        <th>{t("policies.importModal.colActiveFrom")}</th>
+                        <th>{t("policies.importModal.colStatus")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -394,14 +389,14 @@ export function PolicyImportModal({ onClose }: Props) {
                                 title={r.skip_reason ?? undefined}
                                 style={{ fontSize: 10 }}
                               >
-                                skip
+                                {t("policies.importModal.statusSkip")}
                               </span>
                             ) : (
                               <span
                                 className="pill pill-info"
                                 style={{ fontSize: 10 }}
                               >
-                                new
+                                {t("policies.importModal.statusNew")}
                               </span>
                             )}
                           </td>
@@ -414,7 +409,7 @@ export function PolicyImportModal({ onClose }: Props) {
                             className="text-sm text-dim"
                             style={{ padding: 16 }}
                           >
-                            No importable rows — check the errors above.
+                            {t("policies.importModal.noImportableRows")}
                           </td>
                         </tr>
                       )}
@@ -433,7 +428,7 @@ export function PolicyImportModal({ onClose }: Props) {
                       fontSize: 12.5,
                     }}
                   >
-                    {importErrorMessage(importMutation.error)}
+                    {importErrorMessage(importMutation.error, t)}
                   </div>
                 )}
 
@@ -450,7 +445,7 @@ export function PolicyImportModal({ onClose }: Props) {
                     disabled={importMutation.isPending}
                   >
                     <Icon name="chevronLeft" size={11} />
-                    Back
+                    {t("policies.importModal.back")}
                   </button>
                   <div style={{ display: "flex", gap: 8 }}>
                     <button
@@ -458,7 +453,7 @@ export function PolicyImportModal({ onClose }: Props) {
                       onClick={onClose}
                       disabled={importMutation.isPending}
                     >
-                      Cancel
+                      {t("common.cancel")}
                     </button>
                     <button
                       className="btn btn-primary"
@@ -469,8 +464,8 @@ export function PolicyImportModal({ onClose }: Props) {
                     >
                       <Icon name="upload" size={12} />
                       {importMutation.isPending
-                        ? "Importing…"
-                        : `Confirm import (${importableRows})`}
+                        ? t("policies.importModal.importing")
+                        : t("policies.importModal.confirmImport", { n: importableRows })}
                     </button>
                   </div>
                 </div>
@@ -481,7 +476,7 @@ export function PolicyImportModal({ onClose }: Props) {
               <>
                 <div style={{ display: "flex", gap: 8 }}>
                   <span className="pill pill-success">
-                    imported {result.imported_count}
+                    {t("policies.importModal.pillImported", { n: result.imported_count })}
                   </span>
                   <span
                     className={`pill ${
@@ -490,7 +485,7 @@ export function PolicyImportModal({ onClose }: Props) {
                         : "pill-neutral"
                     }`}
                   >
-                    skipped {result.skipped_count}
+                    {t("policies.importModal.pillSkipped", { n: result.skipped_count })}
                   </span>
                 </div>
                 {result.skipped.length > 0 && (
@@ -505,14 +500,14 @@ export function PolicyImportModal({ onClose }: Props) {
                         margin: "6px 0",
                       }}
                     >
-                      Skipped rows
+                      {t("policies.importModal.skippedRows")}
                     </div>
                     <table className="table">
                       <thead>
                         <tr>
-                          <th style={{ width: 60 }}>Row</th>
-                          <th>Name</th>
-                          <th>Reason</th>
+                          <th style={{ width: 60 }}>{t("policies.importModal.colRow")}</th>
+                          <th>{t("policies.importModal.colName")}</th>
+                          <th>{t("policies.importModal.colReason")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -537,7 +532,7 @@ export function PolicyImportModal({ onClose }: Props) {
                 >
                   <button className="btn btn-primary" onClick={onClose}>
                     <Icon name="check" size={12} />
-                    Done
+                    {t("common.done")}
                   </button>
                 </div>
               </>
@@ -550,12 +545,12 @@ export function PolicyImportModal({ onClose }: Props) {
 }
 
 
-function importErrorMessage(err: unknown): string {
+function importErrorMessage(err: unknown, t: (key: string) => string): string {
   if (err instanceof ApiError) {
     const detail = (err.body as { detail?: unknown } | null)?.detail;
     if (typeof detail === "string" && detail.length > 0) return detail;
-    if (err.status === 413) return "File is too large.";
-    if (err.status === 415) return "Only .xlsx files are accepted.";
+    if (err.status === 413) return t("policies.importModal.errTooLarge");
+    if (err.status === 415) return t("policies.importModal.errNotXlsx");
   }
-  return "Import failed. Check the file and try again.";
+  return t("policies.importModal.errGeneric");
 }

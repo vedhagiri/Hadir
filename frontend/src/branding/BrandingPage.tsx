@@ -2,6 +2,8 @@
 // renders the shared form, and applies the preview to the live document
 // so the Admin sees their shell update as they pick.
 
+import { useTranslation } from "react-i18next";
+
 import { SettingsTabs } from "../settings/SettingsTabs";
 import { BrandingForm } from "./BrandingForm";
 import {
@@ -12,17 +14,18 @@ import {
 } from "./hooks";
 
 export function BrandingPage() {
+  const { t } = useTranslation();
   const branding = useMyBranding();
   const patch = usePatchMyBranding();
   const upload = useUploadMyLogo();
   const remove = useDeleteMyLogo();
 
-  if (branding.isLoading) return <p>Loading branding…</p>;
+  if (branding.isLoading) return <p>{t("branding.loadingPage")}</p>;
   if (branding.error)
     return (
-      <p style={{ color: "var(--danger-text)" }}>Couldn’t load branding.</p>
+      <p style={{ color: "var(--danger-text)" }}>{t("branding.loadFailedPage")}</p>
     );
-  if (!branding.data) return <p>Sign in to manage branding.</p>;
+  if (!branding.data) return <p>{t("branding.signInRequired")}</p>;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -36,11 +39,10 @@ export function BrandingPage() {
             fontWeight: 400,
           }}
         >
-          Branding
+          {t("branding.title")}
         </h1>
         <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 13 }}>
-          Pick a primary colour from the curated palette, choose one of three
-          fonts, and upload a small logo. Changes apply on save.
+          {t("branding.subtitle")}
         </p>
       </header>
       <BrandingForm

@@ -5,6 +5,7 @@
 // any number of times after each new photo upload.
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { api, ApiError } from "../../api/client";
 import { DatePicker, todayIso } from "../../components/DatePicker";
@@ -23,6 +24,7 @@ interface RematchResult {
 }
 
 export function RematchModal({ onClose }: Props) {
+  const { t } = useTranslation();
   const [from, setFrom] = useState<string>(todayIso());
   const [to, setTo] = useState<string>(todayIso());
   const [onlyUnidentified, setOnlyUnidentified] = useState(true);
@@ -45,16 +47,20 @@ export function RematchModal({ onClose }: Props) {
         },
       });
       setLast(result);
-      toast.success(
-        `Scanned ${result.events_scanned} · matched ${result.matches_added}` +
-          (result.matches_changed > 0 ? ` · changed ${result.matches_changed}` : "") +
-          (recompute && result.attendance_recomputed > 0
-            ? ` · recomputed ${result.attendance_recomputed} attendance row${result.attendance_recomputed === 1 ? "" : "s"}`
-            : ""),
-      );
+      let msg = t("rematch.toastScanned", {
+        scanned: result.events_scanned,
+        matched: result.matches_added,
+      });
+      if (result.matches_changed > 0) {
+        msg += t("rematch.toastChanged", { n: result.matches_changed });
+      }
+      if (recompute && result.attendance_recomputed > 0) {
+        msg += t("rematch.toastRecomputed", { count: result.attendance_recomputed });
+      }
+      toast.success(msg);
     } catch (e) {
       const msg =
-        e instanceof ApiError ? e.message : "Network error";
+        e instanceof ApiError ? e.message : t("rematch.networkError");
       setErr(msg);
       toast.error(msg);
     } finally {
@@ -65,7 +71,7 @@ export function RematchModal({ onClose }: Props) {
   return (
     <div
       role="dialog"
-      aria-label="Re-match detections"
+      aria-label={t("rematch.ariaLabel")}
       style={{
         position: "fixed",
         inset: 0,
@@ -100,18 +106,17 @@ export function RematchModal({ onClose }: Props) {
         >
           <div>
             <div style={{ fontSize: 15, fontWeight: 600 }}>
-              Re-match detections
+              {t("rematch.title")}
             </div>
             <div className="text-xs text-dim" style={{ marginTop: 2 }}>
-              Replay past camera events against the current reference
-              photos. Re-run as many times as you need.
+              {t("rematch.sub")}
             </div>
           </div>
           <button
             type="button"
             className="icon-btn"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t("rematch.closeAria")}
           >
             <Icon name="x" size={14} />
           </button>
@@ -123,7 +128,7 @@ export function RematchModal({ onClose }: Props) {
               className="text-xs text-dim"
               style={{ display: "block", marginBottom: 6, fontWeight: 500 }}
             >
-              Date range
+              {t("rematch.dateRange")}
             </label>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <DatePicker
@@ -133,7 +138,7 @@ export function RematchModal({ onClose }: Props) {
                   if (to < next) setTo(next);
                 }}
                 max={todayIso()}
-                ariaLabel="From date"
+                ariaLabel={t("rematch.fromDateAria")}
               />
               <span
                 style={{
@@ -149,7 +154,7 @@ export function RematchModal({ onClose }: Props) {
                 onChange={setTo}
                 min={from}
                 max={todayIso()}
-                ariaLabel="To date"
+                ariaLabel={t("rematch.toDateAria")}
               />
             </div>
           </div>
@@ -164,11 +169,9 @@ export function RematchModal({ onClose }: Props) {
               style={{ marginTop: 2 }}
             />
             <span style={{ fontSize: 13 }}>
-              Only unidentified events
+              {t("rematch.onlyUnidentified")}
               <div className="text-xs text-dim" style={{ marginTop: 2 }}>
-                Skip events that already have an employee assigned. Turn
-                off to also re-evaluate identified rows (e.g. after
-                replacing a wrong reference photo).
+                {t("rematch.onlyUnidentifiedHint")}
               </div>
             </span>
           </label>
@@ -183,10 +186,9 @@ export function RematchModal({ onClose }: Props) {
               style={{ marginTop: 2 }}
             />
             <span style={{ fontSize: 13 }}>
-              Recompute attendance for affected days
+              {t("rematch.recompute")}
               <div className="text-xs text-dim" style={{ marginTop: 2 }}>
-                After matches change, regenerate the day's attendance
-                rows so newly-identified events flow into reports.
+                {t("rematch.recomputeHint")}
               </div>
             </span>
           </label>
@@ -204,15 +206,15 @@ export function RematchModal({ onClose }: Props) {
                 gap: "4px 16px",
               }}
             >
-              <span className="text-dim">Events scanned</span>
+              <span className="text-dim">{t("rematch.eventsScanned")}</span>
               <span className="mono">{last.events_scanned}</span>
-              <span className="text-dim">Matches added</span>
+              <span className="text-dim">{t("rematch.matchesAdded")}</span>
               <span className="mono" style={{ color: "var(--success)" }}>
                 {last.matches_added}
               </span>
-              <span className="text-dim">Matches changed</span>
+              <span className="text-dim">{t("rematch.matchesChanged")}</span>
               <span className="mono">{last.matches_changed}</span>
-              <span className="text-dim">Attendance rows recomputed</span>
+              <span className="text-dim">{t("rematch.attendanceRecomputed")}</span>
               <span className="mono">{last.attendance_recomputed}</span>
             </div>
           )}
@@ -243,11 +245,13 @@ export function RematchModal({ onClose }: Props) {
           }}
         >
           <span className="text-xs text-dim">
-            {from === to ? `1 day · ${from}` : `${from} → ${to}`}
+            {from === to
+              ? t("rematch.oneDay", { date: from })
+              : t("rematch.dateRangeDisplay", { from, to })}
           </span>
           <div style={{ display: "flex", gap: 8 }}>
             <button type="button" className="btn" onClick={onClose}>
-              Close
+              {t("rematch.close")}
             </button>
             <button
               type="button"
@@ -255,7 +259,7 @@ export function RematchModal({ onClose }: Props) {
               onClick={() => void runOnce()}
               disabled={running}
             >
-              {running ? "Running…" : last ? "Run again" : "Run"}
+              {running ? t("rematch.running") : last ? t("rematch.runAgain") : t("rematch.run")}
             </button>
           </div>
         </div>

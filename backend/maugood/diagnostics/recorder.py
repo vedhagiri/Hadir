@@ -119,6 +119,7 @@ def clear() -> None:
 
 def snapshot(
     *,
+    tenant_id: int | None = None,
     since_ts: float | None = None,
     camera_id: int | None = None,
     kind: str | None = None,
@@ -128,12 +129,21 @@ def snapshot(
 
     Filters are AND-composed. ``limit`` slices the most-recent N
     after filtering — handy for the UI's "last 200" view.
+
+    ``tenant_id`` is the **tenant-isolation** filter: when set, only
+    events whose ``ev.tenant_id`` matches are returned. The ring is a
+    process-global buffer fed by every tenant's capture workers, so
+    callers serving a tenant-scoped request MUST pass their caller's
+    ``tenant_id`` — otherwise one tenant's Admin sees another tenant's
+    camera names / ids / anomaly metrics (Issue #1, cross-tenant leak).
     """
 
     with _lock:
         items = list(_ring)
     out: list[dict[str, Any]] = []
     for ev in items:
+        if tenant_id is not None and ev.tenant_id != tenant_id:
+            continue
         if since_ts is not None and ev.ts < since_ts:
             continue
         if camera_id is not None and ev.camera_id != camera_id:

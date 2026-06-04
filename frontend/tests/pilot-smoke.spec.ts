@@ -60,7 +60,10 @@ test("pilot smoke: login → import → photo → seed → recompute → report"
   await page.goto("/login");
   await page.locator("input[type='email']").fill(ADMIN_EMAIL);
   await page.locator("input[type='password']").fill(ADMIN_PASSWORD);
-  await page.getByRole("button", { name: /sign in/i }).click();
+  // Exact match: the OIDC buttons ("Sign in with Microsoft/Google")
+  // also match /sign in/i and trip Playwright strict mode. The primary
+  // local-login submit button's accessible name is exactly "Sign in".
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
 
   // Reuse the browser's cookies for the API context.

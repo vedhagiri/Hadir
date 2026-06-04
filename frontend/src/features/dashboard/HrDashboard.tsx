@@ -9,7 +9,9 @@
 // employees; once the aggregate endpoint lands we swap the source.
 
 import { useMemo, useState } from "react";
+import type { TFunction } from "i18next";
 import { useQueries } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 
 import { api } from "../../api/client";
@@ -197,6 +199,7 @@ function useAttendanceSeries(anchor: string): {
 // ---------------------------------------------------------------------------
 
 export function HrDashboard() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const me = useMe();
   const departments = useDepartments();
@@ -411,7 +414,7 @@ export function HrDashboard() {
         p.config.start_date <= selectedDate &&
         selectedDate <= p.config.end_date,
     );
-    if (!r || !r.config.end_date) return "Ramadan period active";
+    if (!r || !r.config.end_date) return t("dashboard.hr.ramadan.active");
     const daysLeft = Math.max(
       0,
       Math.round(
@@ -421,20 +424,20 @@ export function HrDashboard() {
       ),
     );
     return daysLeft > 0
-      ? `Ramadan · ${daysLeft} day${daysLeft === 1 ? "" : "s"} remaining`
-      : "Ramadan ends on this date";
-  }, [policies.data, policyMix.Ramadan, selectedDate]);
+      ? t("dashboard.hr.ramadan.remaining", { count: daysLeft })
+      : t("dashboard.hr.ramadan.endsToday");
+  }, [policies.data, policyMix.Ramadan, selectedDate, t]);
 
   const dayKindLabel = useMemo(() => {
     if (!todaySummary) return null;
-    if (todaySummary.kind === "weekend") return "Weekend";
+    if (todaySummary.kind === "weekend") return t("dashboard.hr.dayKind.weekend");
     if (todaySummary.kind === "holiday") {
       return todaySummary.holidayName
-        ? `Holiday — ${todaySummary.holidayName}`
-        : "Holiday";
+        ? t("dashboard.hr.dayKind.holidayNamed", { name: todaySummary.holidayName })
+        : t("dashboard.hr.dayKind.holiday");
     }
     return null;
-  }, [todaySummary]);
+  }, [todaySummary, t]);
 
   const subtitle = useMemo(() => {
     // Use the selected date — the dashboard's frame of reference is
@@ -447,11 +450,14 @@ export function HrDashboard() {
       day: "numeric",
     });
     const parts = [day];
-    if (!isToday) parts.push("historic view");
+    if (!isToday) parts.push(t("dashboard.hr.historic"));
     if (dayKindLabel) {
       parts.push(
         todaySummary && todaySummary.otCheckIns > 0
-          ? `${dayKindLabel} · ${todaySummary.otCheckIns} OT check-in${todaySummary.otCheckIns === 1 ? "" : "s"}`
+          ? t("dashboard.hr.kindWithOt", {
+              kind: dayKindLabel,
+              count: todaySummary.otCheckIns,
+            })
           : dayKindLabel,
       );
     } else if (ramadanBanner) {
@@ -459,7 +465,9 @@ export function HrDashboard() {
     }
     if (todayPresentPct !== null) {
       parts.push(
-        `${todayPresentPct}% presence ${isToday ? "today" : "on this date"}`,
+        isToday
+          ? t("dashboard.hr.presenceToday", { pct: todayPresentPct })
+          : t("dashboard.hr.presenceOnDate", { pct: todayPresentPct }),
       );
     }
     return parts.join(" · ");
@@ -470,6 +478,7 @@ export function HrDashboard() {
     todaySummary,
     selectedDate,
     isToday,
+    t,
   ]);
 
   const dailySchedule = useMemo(
@@ -486,7 +495,7 @@ export function HrDashboard() {
     })
       .then(async (r) => {
         if (!r.ok) {
-          toast.error(`Export failed (${r.status})`);
+          toast.error(t("dashboard.hr.toasts.exportFailed", { status: r.status }));
           return;
         }
         const blob = await r.blob();
@@ -498,21 +507,23 @@ export function HrDashboard() {
         a.remove();
         URL.revokeObjectURL(a.href);
         toast.success(
-          isToday ? "Today's attendance exported" : `Exported ${selectedDate}`,
+          isToday
+            ? t("dashboard.hr.toasts.exportedToday")
+            : t("dashboard.hr.toasts.exportedDate", { date: selectedDate }),
         );
       })
-      .catch(() => toast.error("Network error"));
+      .catch(() => toast.error(t("dashboard.hr.toasts.networkError")));
   }
 
   function sendDailyReport() {
     if (!dailySchedule) {
-      toast.warning("No active daily schedule — create one in Settings");
+      toast.warning(t("dashboard.hr.toasts.noSchedule"));
       navigate("/settings/schedules");
       return;
     }
     runNow.mutate(dailySchedule.id, {
-      onSuccess: () => toast.success(`Queued: ${dailySchedule.name}`),
-      onError: () => toast.error("Could not run the schedule"),
+      onSuccess: () => toast.success(t("dashboard.hr.toasts.queued", { name: dailySchedule.name })),
+      onError: () => toast.error(t("dashboard.hr.toasts.runFailed")),
     });
   }
 
@@ -522,12 +533,12 @@ export function HrDashboard() {
     ? todaySummary.kind !== "working"
       ? [
           {
-            label: "OT check-ins",
+            label: t("dashboard.hr.slices.otCheckIns"),
             value: todaySummary.otCheckIns,
             color: "var(--accent)",
           },
           {
-            label: "Off",
+            label: t("dashboard.hr.slices.off"),
             value:
               todayItems.length - todaySummary.otCheckIns,
             color: "var(--text-tertiary)",
@@ -535,18 +546,18 @@ export function HrDashboard() {
         ]
       : [
           {
-            label: "Present",
+            label: t("dashboard.hr.slices.present"),
             value: todaySummary.present,
             color: "var(--success)",
           },
-          { label: "Late", value: todaySummary.late, color: "var(--warning)" },
+          { label: t("dashboard.hr.slices.late"), value: todaySummary.late, color: "var(--warning)" },
           {
-            label: "On leave",
+            label: t("dashboard.hr.slices.onLeave"),
             value: todaySummary.onLeave,
             color: "var(--info)",
           },
           {
-            label: "Absent",
+            label: t("dashboard.hr.slices.absent"),
             value: todaySummary.absent,
             color: "var(--danger)",
           },
@@ -559,8 +570,8 @@ export function HrDashboard() {
         <div>
           <h1 className="page-title">
             {me.data
-              ? `Good ${greeting()}, ${firstName(me.data.full_name)}`
-              : "HR Dashboard"}
+              ? t(`dashboard.hr.greeting.${greeting()}`, { name: firstName(me.data.full_name) })
+              : t("dashboard.hr.title")}
           </h1>
           <p className="page-sub">{subtitle}</p>
         </div>
@@ -572,15 +583,15 @@ export function HrDashboard() {
             value={selectedDate}
             onChange={setSelectedDate}
             max={todayIso()}
-            ariaLabel="Dashboard date"
+            ariaLabel={t("dashboard.hr.datePickerAria")}
           />
           {!isToday && (
             <button
               className="btn btn-sm"
               onClick={() => setSelectedDate(todayIso())}
-              title="Jump back to today"
+              title={t("dashboard.hr.jumpToday")}
             >
-              Today
+              {t("dashboard.hr.today")}
             </button>
           )}
           <button
@@ -588,13 +599,15 @@ export function HrDashboard() {
             onClick={() =>
               gateDownload({
                 format: "xlsx",
-                reportName: `Attendance — ${selectedDate}`,
+                reportName: t("dashboard.hr.reportName", { date: selectedDate }),
                 action: downloadSelectedXlsx,
               })
             }
           >
             <Icon name="download" size={12} />{" "}
-            {isToday ? "Export today" : `Export ${selectedDate}`}
+            {isToday
+              ? t("dashboard.hr.exportToday")
+              : t("dashboard.hr.exportDate", { date: selectedDate })}
           </button>
           <button
             className="btn btn-primary"
@@ -602,12 +615,12 @@ export function HrDashboard() {
             disabled={runNow.isPending}
             title={
               dailySchedule
-                ? `Run "${dailySchedule.name}" now`
-                : "Create an active daily schedule in Settings"
+                ? t("dashboard.hr.runNamedTitle", { name: dailySchedule.name })
+                : t("dashboard.hr.createScheduleTitle")
             }
           >
             <Icon name="send" size={12} />
-            {runNow.isPending ? "Sending…" : "Send daily report"}
+            {runNow.isPending ? t("dashboard.hr.sending") : t("dashboard.hr.sendDaily")}
           </button>
         </div>
       </div>
@@ -616,7 +629,7 @@ export function HrDashboard() {
       <div className="grid grid-4" style={{ marginBottom: 16 }}>
         <KpiCard
           icon="users"
-          label="Present today"
+          label={t("dashboard.hr.kpi.presentToday")}
           value={
             dayKindLabel
               ? dayKindLabel
@@ -626,12 +639,13 @@ export function HrDashboard() {
           }
           delta={
             dayKindLabel
-              ? `${todaySummary?.otCheckIns ?? 0} OT check-in${
-                  (todaySummary?.otCheckIns ?? 0) === 1 ? "" : "s"
-                }`
+              ? t("dashboard.hr.kpi.otCheckIns", { count: todaySummary?.otCheckIns ?? 0 })
               : deltaVsYesterday === null
                 ? undefined
-                : `${deltaVsYesterday > 0 ? "+" : ""}${deltaVsYesterday}% vs yesterday`
+                : t("dashboard.hr.kpi.vsYesterday", {
+                    sign: deltaVsYesterday > 0 ? "+" : "",
+                    pct: deltaVsYesterday,
+                  })
           }
           deltaTone={
             dayKindLabel
@@ -647,20 +661,24 @@ export function HrDashboard() {
         />
         <KpiCard
           icon="clock"
-          label="Late arrivals"
+          label={t("dashboard.hr.kpi.lateArrivals")}
           value={dayKindLabel ? "—" : String(todaySummary?.late ?? 0)}
-          delta={dayKindLabel ? "no working day" : `${todaySummary?.late ?? 0} today`}
+          delta={
+            dayKindLabel
+              ? t("dashboard.hr.kpi.noWorkingDay")
+              : t("dashboard.hr.kpi.lateToday", { count: todaySummary?.late ?? 0 })
+          }
           spark={sparkLate}
           sparkColor="var(--warning)"
         />
         <KpiCard
           icon="inbox"
-          label="Pending approvals"
+          label={t("dashboard.hr.kpi.pendingApprovals")}
           value={String(inboxSummary.data?.pending_count ?? 0)}
           delta={
             inboxSummary.data && inboxSummary.data.breached_count > 0
-              ? `${inboxSummary.data.breached_count} past SLA`
-              : "with HR / managers"
+              ? t("dashboard.hr.kpi.pastSla", { count: inboxSummary.data.breached_count })
+              : t("dashboard.hr.kpi.withHrManagers")
           }
           deltaTone={
             inboxSummary.data && inboxSummary.data.breached_count > 0
@@ -676,9 +694,9 @@ export function HrDashboard() {
         />
         <KpiCard
           icon="user"
-          label="Absent today"
+          label={t("dashboard.hr.kpi.absentToday")}
           value={dayKindLabel ? "—" : String(todaySummary?.absent ?? 0)}
-          delta={dayKindLabel ? "no working day" : "no events all day"}
+          delta={dayKindLabel ? t("dashboard.hr.kpi.noWorkingDay") : t("dashboard.hr.kpi.noEvents")}
           spark={sparkAbsent}
           sparkColor="var(--danger)"
         />
@@ -696,17 +714,17 @@ export function HrDashboard() {
         <div className="card">
           <div className="card-head">
             <div>
-              <h3 className="card-title">Company-wide presence</h3>
+              <h3 className="card-title">{t("dashboard.hr.presence.title")}</h3>
               <div className="text-xs text-dim" style={{ marginTop: 2 }}>
-                7 days ending {selectedDate} · daily presence vs target
+                {t("dashboard.hr.presence.subtitle", { date: selectedDate })}
               </div>
             </div>
             <span
               className="pill pill-info"
               style={{ fontSize: 10.5 }}
-              title="Server-side aggregation lands in M4"
+              title={t("dashboard.hr.presence.serverAggTitle")}
             >
-              Client-aggregated
+              {t("dashboard.hr.presence.clientAgg")}
             </span>
           </div>
           <div className="card-body">
@@ -726,10 +744,10 @@ export function HrDashboard() {
                 color: "var(--text-secondary)",
               }}
             >
-              <LegendDot color="var(--accent)" label="Presence %" />
+              <LegendDot color="var(--accent)" label={t("dashboard.hr.presence.presencePct")} />
               <LegendDot
                 color="var(--text-tertiary)"
-                label="Target 90%"
+                label={t("dashboard.hr.presence.target")}
                 dashed
               />
             </div>
@@ -737,7 +755,7 @@ export function HrDashboard() {
         </div>
         <div className="card">
           <div className="card-head">
-            <h3 className="card-title">Status breakdown</h3>
+            <h3 className="card-title">{t("dashboard.hr.statusBreakdown")}</h3>
             <span className="text-xs text-dim mono">
               {dayKindLabel ?? selectedDate}
             </span>
@@ -762,8 +780,8 @@ export function HrDashboard() {
                 }
                 centerLabel={
                   todaySummary && todaySummary.kind !== "working"
-                    ? "OT"
-                    : "working"
+                    ? t("dashboard.hr.donutOt")
+                    : t("dashboard.hr.donutWorking")
                 }
               />
             </div>
@@ -793,9 +811,9 @@ export function HrDashboard() {
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="card-head">
           <div>
-            <h3 className="card-title">Arrival distribution · today</h3>
+            <h3 className="card-title">{t("dashboard.hr.arrival.title")}</h3>
             <div className="text-xs text-dim" style={{ marginTop: 2 }}>
-              Check-ins bucketed by hour (local time)
+              {t("dashboard.hr.arrival.subtitle")}
             </div>
           </div>
         </div>
@@ -817,7 +835,7 @@ export function HrDashboard() {
             className="text-xs text-dim"
             style={{ marginTop: 6, fontFamily: "var(--font-mono)" }}
           >
-            Hours 06–11 highlighted; counts only rows with a check-in
+            {t("dashboard.hr.arrival.note")}
           </div>
         </div>
       </div>
@@ -834,9 +852,9 @@ export function HrDashboard() {
         <div className="card">
           <div className="card-head">
             <div>
-              <h3 className="card-title">Punctuality leaderboard</h3>
+              <h3 className="card-title">{t("dashboard.hr.punctuality.title")}</h3>
               <div className="text-xs text-dim" style={{ marginTop: 2 }}>
-                On-time % by department · today
+                {t("dashboard.hr.punctuality.subtitle")}
               </div>
             </div>
           </div>
@@ -852,7 +870,7 @@ export function HrDashboard() {
           >
             {punctualityLeaders.length === 0 && (
               <div className="text-sm text-dim">
-                No working-day rows to rank yet today.
+                {t("dashboard.hr.punctuality.empty")}
               </div>
             )}
             {punctualityLeaders.map((r, idx) => (
@@ -903,7 +921,12 @@ export function HrDashboard() {
                     className="text-xs text-dim mono"
                     style={{ marginTop: 3 }}
                   >
-                    {r.on_time} on-time · {r.late} late · {r.absent} absent · {r.total} total
+                    {t("dashboard.hr.punctuality.row", {
+                      onTime: r.on_time,
+                      late: r.late,
+                      absent: r.absent,
+                      total: r.total,
+                    })}
                   </div>
                 </div>
                 <div
@@ -930,18 +953,18 @@ export function HrDashboard() {
         <div className="card">
           <div className="card-head">
             <div>
-              <h3 className="card-title">Pending requests</h3>
+              <h3 className="card-title">{t("dashboard.hr.pending.title")}</h3>
               <div className="text-xs text-dim" style={{ marginTop: 2 }}>
                 {pendingByStage.total === 0
-                  ? "Inbox empty"
-                  : `${pendingByStage.total} awaiting decision`}
+                  ? t("dashboard.hr.pending.empty")
+                  : t("dashboard.hr.pending.awaiting", { count: pendingByStage.total })}
               </div>
             </div>
             <button
               className="btn btn-sm"
               onClick={() => navigate("/approvals")}
             >
-              See all
+              {t("dashboard.hr.pending.seeAll")}
             </button>
           </div>
           <div
@@ -958,19 +981,19 @@ export function HrDashboard() {
               <Donut
                 slices={[
                   {
-                    label: "With manager",
+                    label: t("dashboard.hr.pending.withManager"),
                     value: pendingByStage.manager,
                     color: "var(--accent)",
                   },
                   {
-                    label: "With HR",
+                    label: t("dashboard.hr.pending.withHr"),
                     value: pendingByStage.hr,
                     color: "var(--warning)",
                   },
                 ]}
                 size={130}
                 centerValue={String(pendingByStage.total)}
-                centerLabel="pending"
+                centerLabel={t("dashboard.hr.pending.donutLabel")}
               />
             </div>
             <div
@@ -984,17 +1007,17 @@ export function HrDashboard() {
             >
               <Counter
                 color="var(--accent)"
-                label="With managers"
+                label={t("dashboard.hr.pending.withManagersPlural")}
                 value={pendingByStage.manager}
               />
               <Counter
                 color="var(--warning)"
-                label="With HR"
+                label={t("dashboard.hr.pending.withHr")}
                 value={pendingByStage.hr}
               />
               <Counter
                 color="var(--danger)"
-                label="Past SLA"
+                label={t("dashboard.hr.pending.pastSla")}
                 value={pendingByStage.breached}
               />
               <div
@@ -1006,12 +1029,12 @@ export function HrDashboard() {
               />
               <Counter
                 color="var(--info)"
-                label="Leave requests"
+                label={t("dashboard.hr.pending.leaveRequests")}
                 value={pendingByType.leave}
               />
               <Counter
                 color="var(--text-secondary)"
-                label="Exceptions"
+                label={t("dashboard.hr.pending.exceptions")}
                 value={pendingByType.exception}
               />
             </div>
@@ -1023,10 +1046,10 @@ export function HrDashboard() {
             >
               <thead>
                 <tr>
-                  <th>EMPLOYEE</th>
-                  <th>TYPE</th>
-                  <th>DATE</th>
-                  <th>STAGE</th>
+                  <th>{t("dashboard.hr.pending.cols.employee")}</th>
+                  <th>{t("dashboard.hr.pending.cols.type")}</th>
+                  <th>{t("dashboard.hr.pending.cols.date")}</th>
+                  <th>{t("dashboard.hr.pending.cols.stage")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1045,7 +1068,9 @@ export function HrDashboard() {
                       </div>
                     </td>
                     <td className="text-sm">
-                      {r.type === "exception" ? "Exception" : "Leave"}
+                      {r.type === "exception"
+                        ? t("dashboard.hr.pending.exception")
+                        : t("dashboard.hr.pending.leave")}
                     </td>
                     <td className="mono text-sm">{r.target_date_start}</td>
                     <td>
@@ -1074,9 +1099,9 @@ export function HrDashboard() {
         <div className="card">
           <div className="card-head">
             <div>
-              <h3 className="card-title">Active policy mix</h3>
+              <h3 className="card-title">{t("dashboard.hr.policyMix.title")}</h3>
               <div className="text-xs text-dim" style={{ marginTop: 2 }}>
-                Policies covering today
+                {t("dashboard.hr.policyMix.subtitle")}
               </div>
             </div>
           </div>
@@ -1094,22 +1119,22 @@ export function HrDashboard() {
               <Donut
                 slices={[
                   {
-                    label: "Fixed",
+                    label: t("dashboard.hr.policyMix.fixed"),
                     value: policyMix.Fixed,
                     color: "var(--accent)",
                   },
                   {
-                    label: "Flex",
+                    label: t("dashboard.hr.policyMix.flex"),
                     value: policyMix.Flex,
                     color: "var(--info)",
                   },
                   {
-                    label: "Ramadan",
+                    label: t("dashboard.hr.policyMix.ramadan"),
                     value: policyMix.Ramadan,
                     color: "var(--warning)",
                   },
                   {
-                    label: "Custom",
+                    label: t("dashboard.hr.policyMix.custom"),
                     value: policyMix.Custom,
                     color: "var(--success)",
                   },
@@ -1118,7 +1143,7 @@ export function HrDashboard() {
                 centerValue={String(
                   Object.values(policyMix).reduce((a, b) => a + b, 0),
                 )}
-                centerLabel="policies"
+                centerLabel={t("dashboard.hr.policyMix.policies")}
               />
             </div>
             <div
@@ -1132,18 +1157,18 @@ export function HrDashboard() {
             >
               <Counter
                 color="var(--accent)"
-                label="Fixed"
+                label={t("dashboard.hr.policyMix.fixed")}
                 value={policyMix.Fixed}
               />
-              <Counter color="var(--info)" label="Flex" value={policyMix.Flex} />
+              <Counter color="var(--info)" label={t("dashboard.hr.policyMix.flex")} value={policyMix.Flex} />
               <Counter
                 color="var(--warning)"
-                label="Ramadan"
+                label={t("dashboard.hr.policyMix.ramadan")}
                 value={policyMix.Ramadan}
               />
               <Counter
                 color="var(--success)"
-                label="Custom"
+                label={t("dashboard.hr.policyMix.custom")}
                 value={policyMix.Custom}
               />
             </div>
@@ -1346,13 +1371,14 @@ function StagePill({
   status: string;
   breached: boolean;
 }) {
+  const { t } = useTranslation();
   let label = status.replace("_", " ");
   let tone = "pill-info";
   if (status === "submitted") {
-    label = "Pending manager";
+    label = t("dashboard.hr.stagePill.pendingManager");
     tone = breached ? "pill-danger" : "pill-warning";
   } else if (status === "manager_approved") {
-    label = "Pending HR";
+    label = t("dashboard.hr.stagePill.pendingHr");
     tone = breached ? "pill-danger" : "pill-warning";
   } else if (status.endsWith("approved")) {
     tone = "pill-success";
@@ -1391,35 +1417,36 @@ function ScheduledReports({
   onRun: (id: number, name: string) => void;
   runningId: number | null;
 }) {
+  const { t } = useTranslation();
   const next = rows
     .filter((r) => r.active && r.next_run_at)
     .map((r) => r.next_run_at as string)
     .sort()[0];
   const subtitle = next
-    ? `Next delivery ${formatRelative(next)}`
-    : "No upcoming deliveries";
+    ? t("dashboard.hr.schedules.nextDelivery", { when: formatRelative(next, t) })
+    : t("dashboard.hr.schedules.noUpcoming");
   return (
     <div className="card">
       <div className="card-head">
         <div>
-          <h3 className="card-title">Scheduled reports</h3>
+          <h3 className="card-title">{t("dashboard.hr.schedules.title")}</h3>
           <div className="text-xs text-dim" style={{ marginTop: 2 }}>
             {subtitle}
           </div>
         </div>
         <button className="btn btn-sm" onClick={onManage}>
-          Manage
+          {t("dashboard.hr.schedules.manage")}
         </button>
       </div>
       <div className="card-body" style={{ padding: 0 }}>
         {loading && (
           <div className="text-sm text-dim" style={{ padding: 14 }}>
-            Loading schedules…
+            {t("dashboard.hr.schedules.loading")}
           </div>
         )}
         {!loading && rows.length === 0 && (
           <div className="text-sm text-dim" style={{ padding: 14 }}>
-            No schedules yet — set one up in Settings.
+            {t("dashboard.hr.schedules.empty")}
           </div>
         )}
         {!loading &&
@@ -1487,14 +1514,14 @@ function ScheduledReports({
                   className={`pill ${s.active ? "pill-success" : "pill-neutral"}`}
                   style={{ fontSize: 10.5 }}
                 >
-                  {s.active ? "Active" : "Paused"}
+                  {s.active ? t("dashboard.hr.schedules.active") : t("dashboard.hr.schedules.paused")}
                 </span>
                 <button
                   className="btn btn-sm"
                   onClick={() => onRun(s.id, s.name)}
                   disabled={!s.active || runningId === s.id}
                 >
-                  {runningId === s.id ? "…" : "Run"}
+                  {runningId === s.id ? "…" : t("dashboard.hr.schedules.run")}
                 </button>
               </div>
             </div>
@@ -1504,16 +1531,16 @@ function ScheduledReports({
   );
 }
 
-function formatRelative(iso: string): string {
+function formatRelative(iso: string, t: TFunction<"translation", undefined>): string {
   const target = new Date(iso);
   if (isNaN(target.getTime())) return iso;
   const diffMs = target.getTime() - Date.now();
   const mins = Math.round(diffMs / 60_000);
-  if (Math.abs(mins) < 60) return `in ${mins} min`;
+  if (Math.abs(mins) < 60) return t("dashboard.hr.schedules.relMin", { count: mins });
   const hours = Math.round(mins / 60);
-  if (Math.abs(hours) < 24) return `in ${hours} h`;
+  if (Math.abs(hours) < 24) return t("dashboard.hr.schedules.relHour", { count: hours });
   const days = Math.round(hours / 24);
-  return `in ${days} day${Math.abs(days) === 1 ? "" : "s"}`;
+  return t("dashboard.hr.schedules.relDay", { count: days });
 }
 
 // ---------------------------------------------------------------------------
@@ -1535,33 +1562,36 @@ function LiveAttendance({
   isToday: boolean;
   onSeeAll: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="card">
       <div className="card-head">
         <div>
           <h3 className="card-title">
-            {isToday ? "Today's attendance · live" : `Attendance · ${date}`}
+            {isToday
+              ? t("dashboard.hr.live.titleToday")
+              : t("dashboard.hr.live.titleDate", { date })}
           </h3>
           <div className="text-xs text-dim" style={{ marginTop: 2 }}>
             {total === 0
-              ? "No rows yet"
-              : `Showing ${rows.length} of ${total}`}
+              ? t("dashboard.hr.live.empty")
+              : t("dashboard.hr.live.showing", { shown: rows.length, total })}
           </div>
         </div>
         <button className="btn btn-sm" onClick={onSeeAll}>
-          View all
+          {t("dashboard.hr.live.viewAll")}
         </button>
       </div>
       <table className="table">
         <thead>
           <tr>
-            <th>EMPLOYEE</th>
-            <th>DEPT</th>
-            <th>POLICY</th>
-            <th>IN</th>
-            <th>OUT</th>
-            <th>HOURS</th>
-            <th>STATUS</th>
+            <th>{t("dashboard.hr.live.cols.employee")}</th>
+            <th>{t("dashboard.hr.live.cols.dept")}</th>
+            <th>{t("dashboard.hr.live.cols.policy")}</th>
+            <th>{t("dashboard.hr.live.cols.in")}</th>
+            <th>{t("dashboard.hr.live.cols.out")}</th>
+            <th>{t("dashboard.hr.live.cols.hours")}</th>
+            <th>{t("dashboard.hr.live.cols.status")}</th>
           </tr>
         </thead>
         <tbody>
@@ -1572,7 +1602,7 @@ function LiveAttendance({
                 className="text-sm text-dim"
                 style={{ padding: 14, textAlign: "center" }}
               >
-                Loading…
+                {t("dashboard.common.loading")}
               </td>
             </tr>
           )}
@@ -1583,7 +1613,7 @@ function LiveAttendance({
                 className="text-sm text-dim"
                 style={{ padding: 14, textAlign: "center" }}
               >
-                No attendance rows yet today.
+                {t("dashboard.hr.live.emptyRows")}
               </td>
             </tr>
           )}
@@ -1617,22 +1647,25 @@ function LiveAttendance({
 }
 
 function AttendancePill({ it }: { it: AttendanceItem }) {
+  const { t } = useTranslation();
   const b = classify(it);
   if (b === "off") {
     if (it.is_holiday) {
       return (
         <span className="pill pill-info">
-          Holiday{it.holiday_name ? ` — ${it.holiday_name}` : ""}
+          {it.holiday_name
+            ? t("dashboard.hr.attPill.holidayNamed", { name: it.holiday_name })
+            : t("dashboard.hr.attPill.holiday")}
         </span>
       );
     }
-    return <span className="pill pill-neutral">Weekend</span>;
+    return <span className="pill pill-neutral">{t("dashboard.hr.attPill.weekend")}</span>;
   }
   if (b === "pending") {
-    return <span className="pill pill-info">Waiting for login</span>;
+    return <span className="pill pill-info">{t("dashboard.hr.attPill.waitingLogin")}</span>;
   }
-  if (b === "onLeave") return <span className="pill pill-info">On leave</span>;
-  if (b === "absent") return <span className="pill pill-danger">Absent</span>;
+  if (b === "onLeave") return <span className="pill pill-info">{t("dashboard.hr.attPill.onLeave")}</span>;
+  if (b === "absent") return <span className="pill pill-danger">{t("dashboard.hr.attPill.absent")}</span>;
   if (b === "late") return <LateBadge size="md" />;
-  return <span className="pill pill-success">Present</span>;
+  return <span className="pill pill-success">{t("dashboard.hr.attPill.present")}</span>;
 }

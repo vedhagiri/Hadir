@@ -1,10 +1,12 @@
 """FastAPI router — TEMP-DIAGNOSTIC-2026-05-20.
 
 Endpoints under ``/api/diagnostics`` for the Frame Diagnostics tab.
-Admin-only. Returns server-wide data (cross-tenant) because the
-investigation target is server-side performance — the operator
-running this needs to see all cameras' anomalies, including those
-in tenants other than their session's home tenant.
+Admin-only and **tenant-scoped**: every read is filtered to the
+caller's ``tenant_id`` so a tenant Admin only sees their own cameras'
+anomalies. The recorder ring is a process-global buffer fed by every
+tenant's workers, so the tenant filter is applied at the read boundary
+here (Issue #1 fix — previously this returned server-wide data and
+leaked other tenants' camera names/ids/metrics).
 
 Removal: this whole file goes when ``maugood/diagnostics/`` does.
 """
@@ -53,7 +55,7 @@ def get_state(_user: Annotated[CurrentUser, ADMIN]) -> StateOut:
         enabled=recorder.is_enabled(),
         session_started_at=started,
         session_started_ago_s=round(max(0.0, now - started), 1),
-        event_count=len(recorder.snapshot()),
+        event_count=len(recorder.snapshot(tenant_id=_user.tenant_id)),
     )
 
 
@@ -107,6 +109,7 @@ def list_events(
     limit: int = Query(default=500, ge=1, le=2000),
 ) -> EventsResponse:
     events = recorder.snapshot(
+        tenant_id=_user.tenant_id,
         since_ts=since_ts, camera_id=camera_id, kind=kind, limit=limit
     )
     return EventsResponse(
@@ -168,6 +171,9 @@ def system_snapshot(_user: Annotated[CurrentUser, ADMIN]) -> SystemSnapshotOut:
     except Exception:  # noqa: BLE001 — never let the snapshot bring down the tab
         stats = []
     for s in stats:
+        # Tenant-isolation: only surface the caller's own cameras.
+        if int(s.get("tenant_id") or 0) != _user.tenant_id:
+            continue
         stages = s.get("stages", {}) or {}
         cameras.append(CameraLive(
             tenant_id=int(s.get("tenant_id") or 0),

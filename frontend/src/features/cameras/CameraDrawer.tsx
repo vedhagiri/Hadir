@@ -275,8 +275,8 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
           </Field>
 
           <Field
-            label="Brand"
-            hint="Used to render a brand-coloured chip next to this camera in lists. Pick Others if your brand isn't listed — a generic camera icon is shown."
+            label={t("cameras.brand")}
+            hint={t("cameras.brandHint")}
           >
             <div
               style={{
@@ -294,7 +294,7 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
                 onChange={(e) => setBrand(e.target.value)}
                 style={{ ...inputStyle, flex: 1 }}
               >
-                <option value="">— Pick a brand —</option>
+                <option value="">{t("cameras.brandPlaceholder") as string}</option>
                 {BRAND_OPTIONS.map((b) => (
                   <option key={b} value={b}>
                     {b}

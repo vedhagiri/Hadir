@@ -80,7 +80,11 @@ def _scan_one_tenant(scope: TenantScope, *, threshold_minutes: int) -> int:
             )
             .where(
                 cameras.c.tenant_id == scope.tenant_id,
-                cameras.c.enabled.is_(True),
+                # ``cameras.enabled`` was renamed to ``worker_enabled`` in
+                # migration 0027 (worker/display split). The stale
+                # reference raised AttributeError on every scan, so the
+                # camera-unreachable watcher silently never fired.
+                cameras.c.worker_enabled.is_(True),
                 camera_health_snapshots.c.reachable.is_(False),
                 camera_health_snapshots.c.captured_at <= cutoff,
             )

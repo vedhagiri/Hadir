@@ -2,6 +2,8 @@
 // portion of design/dashboards.jsx::AdminDashboard, but only with
 // real numbers (no synthetic time series).
 
+import { useTranslation } from "react-i18next";
+
 import { useMe } from "../../auth/AuthProvider";
 import { useDetectionEvents } from "../camera-logs/hooks";
 import { useCamerasHealth, useSystemHealth } from "../system/hooks";
@@ -10,6 +12,7 @@ import { StatCard } from "./StatCard";
 import { StatusBreakdown } from "./StatusBreakdown";
 
 export function AdminDashboard() {
+  const { t } = useTranslation();
   const me = useMe();
   const health = useSystemHealth();
   const cams = useCamerasHealth();
@@ -34,49 +37,53 @@ export function AdminDashboard() {
       <div className="page-header">
         <div>
           <h1 className="page-title">
-            {me.data ? `Good day, ${firstName(me.data.full_name)}` : "Dashboard"}
+            {me.data
+              ? t("dashboard.admin.greeting", { name: firstName(me.data.full_name) })
+              : t("dashboard.admin.title")}
           </h1>
           <p className="page-sub">
-            Admin · system-wide overview · live counts from the API
+            {t("dashboard.admin.subtitle")}
           </p>
         </div>
       </div>
 
       <div className="grid grid-4" style={{ marginBottom: 16 }}>
         <StatCard
-          label="Cameras online"
+          label={t("dashboard.admin.stats.camerasOnline")}
           value={cams.data ? `${onlineCount}/${totalCams}` : "—"}
           sub={
             cams.data
-              ? `${cams.data.items.filter((c) => c.enabled).length} enabled`
+              ? t("dashboard.admin.stats.enabledCount", {
+                  count: cams.data.items.filter((c) => c.enabled).length,
+                })
               : ""
           }
           icon="camera"
         />
         <StatCard
-          label="Events today"
+          label={t("dashboard.admin.stats.eventsToday")}
           value={
             health.data ? health.data.detection_events_today.toLocaleString() : "—"
           }
-          sub="captured + identified"
+          sub={t("dashboard.admin.stats.capturedIdentified")}
           icon="activity"
         />
         <StatCard
-          label="Enrolled"
+          label={t("dashboard.admin.stats.enrolled")}
           value={
             health.data
               ? `${health.data.enrolled_employees}/${health.data.employees_active}`
               : "—"
           }
-          sub="have a face embedding"
+          sub={t("dashboard.admin.stats.haveEmbedding")}
           icon="users"
         />
         <StatCard
-          label="Attendance today"
+          label={t("dashboard.admin.stats.attendanceToday")}
           value={
             health.data ? String(health.data.attendance_records_today) : "—"
           }
-          sub="rows recomputed"
+          sub={t("dashboard.admin.stats.rowsRecomputed")}
           icon="fileText"
         />
       </div>
@@ -88,23 +95,23 @@ export function AdminDashboard() {
       <div className="grid" style={{ gridTemplateColumns: "2fr 1fr", marginBottom: 16 }}>
         <div className="card">
           <div className="card-head">
-            <h3 className="card-title">Recent detection events</h3>
-            <span className="text-xs text-dim">latest 5</span>
+            <h3 className="card-title">{t("dashboard.admin.recent.title")}</h3>
+            <span className="text-xs text-dim">{t("dashboard.admin.recent.caption")}</span>
           </div>
           <table className="table">
             <thead>
               <tr>
-                <th>Time</th>
-                <th>Camera</th>
-                <th>Identified</th>
-                <th>Confidence</th>
+                <th>{t("dashboard.admin.recent.cols.time")}</th>
+                <th>{t("dashboard.admin.recent.cols.camera")}</th>
+                <th>{t("dashboard.admin.recent.cols.identified")}</th>
+                <th>{t("dashboard.admin.recent.cols.confidence")}</th>
               </tr>
             </thead>
             <tbody>
               {recent.isLoading && (
                 <tr>
                   <td colSpan={4} className="text-sm text-dim" style={{ padding: 12 }}>
-                    Loading…
+                    {t("dashboard.common.loading")}
                   </td>
                 </tr>
               )}
@@ -118,7 +125,7 @@ export function AdminDashboard() {
                     {ev.employee_id ? (
                       ev.employee_name
                     ) : (
-                      <span className="pill pill-warning">Unidentified</span>
+                      <span className="pill pill-warning">{t("dashboard.common.unidentified")}</span>
                     )}
                   </td>
                   <td className="mono text-sm">
@@ -129,7 +136,7 @@ export function AdminDashboard() {
               {recent.data && recent.data.items.length === 0 && (
                 <tr>
                   <td colSpan={4} className="text-sm text-dim" style={{ padding: 12 }}>
-                    No events yet. Add a camera and walk past it.
+                    {t("dashboard.admin.recent.empty")}
                   </td>
                 </tr>
               )}
@@ -138,21 +145,21 @@ export function AdminDashboard() {
         </div>
 
         <StatusBreakdown
-          title="Capture pipeline"
-          caption="now"
+          title={t("dashboard.admin.capture.title")}
+          caption={t("dashboard.admin.capture.now")}
           slices={[
             {
-              label: "Capture workers",
+              label: t("dashboard.admin.capture.workers"),
               value: health.data?.capture_workers_running ?? 0,
               tone: "accent",
             },
             {
-              label: "Cameras enabled",
+              label: t("dashboard.admin.capture.camerasEnabled"),
               value: health.data?.cameras_enabled ?? 0,
               tone: "neutral",
             },
             {
-              label: "DB connections",
+              label: t("dashboard.admin.capture.dbConn"),
               value: health.data?.db_connections_active ?? 0,
               tone: "info",
             },
@@ -172,6 +179,7 @@ function firstName(full: string): string {
 // ---------------------------------------------------------------------------
 
 function StorageSection({ storage }: { storage: StorageStats }) {
+  const { t } = useTranslation();
   const tenantSubtotal =
     storage.face_crops_bytes +
     storage.attachments_bytes +
@@ -184,31 +192,34 @@ function StorageSection({ storage }: { storage: StorageStats }) {
       <DiskUsageCard storage={storage} />
       <div className="grid grid-4" style={{ marginBottom: 16 }}>
         <StatCard
-          label="Captured events"
+          label={t("dashboard.admin.storage.capturedEvents")}
           value={storage.detection_events_total.toLocaleString()}
-          sub={`${formatBytes(storage.face_crops_bytes)} on disk`}
+          sub={t("dashboard.admin.storage.onDisk", { size: formatBytes(storage.face_crops_bytes) })}
           icon="activity"
         />
         <StatCard
-          label="Attendance rows"
+          label={t("dashboard.admin.storage.attendanceRows")}
           value={storage.attendance_records_total.toLocaleString()}
-          sub="lifetime"
+          sub={t("dashboard.admin.storage.lifetime")}
           icon="fileText"
         />
         <StatCard
-          label="Database"
+          label={t("dashboard.admin.storage.database")}
           value={formatBytes(storage.db_size_bytes)}
-          sub="Postgres total"
+          sub={t("dashboard.admin.storage.postgresTotal")}
           icon="database"
         />
         <StatCard
-          label="Reports + attachments"
+          label={t("dashboard.admin.storage.reportsAttachments")}
           value={formatBytes(
             storage.reports_bytes +
               storage.attachments_bytes +
               storage.erp_exports_bytes,
           )}
-          sub={`reports ${formatBytes(storage.reports_bytes)} · attachments ${formatBytes(storage.attachments_bytes)}`}
+          sub={t("dashboard.admin.storage.reportsAttachmentsDetail", {
+            reports: formatBytes(storage.reports_bytes),
+            attachments: formatBytes(storage.attachments_bytes),
+          })}
           icon="download"
         />
       </div>
@@ -216,13 +227,14 @@ function StorageSection({ storage }: { storage: StorageStats }) {
         className="text-xs text-dim"
         style={{ marginBottom: 16, marginTop: -8 }}
       >
-        Tenant-scoped disk + DB use: {formatBytes(tenantSubtotal)}
+        {t("dashboard.admin.storage.tenantSubtotal", { size: formatBytes(tenantSubtotal) })}
       </div>
     </>
   );
 }
 
 function DiskUsageCard({ storage }: { storage: StorageStats }) {
+  const { t } = useTranslation();
   const total = storage.disk_total_bytes || 1;
   const usedPct = Math.min(100, Math.round((storage.disk_used_bytes / total) * 100));
   const tenantBytes =
@@ -257,7 +269,7 @@ function DiskUsageCard({ storage }: { storage: StorageStats }) {
               fontWeight: 500,
             }}
           >
-            Storage volume
+            {t("dashboard.admin.disk.title")}
           </div>
           <div
             style={{
@@ -267,14 +279,17 @@ function DiskUsageCard({ storage }: { storage: StorageStats }) {
               letterSpacing: "-0.01em",
             }}
           >
-            {formatBytes(storage.disk_used_bytes)} used ·{" "}
+            {t("dashboard.admin.disk.used", { size: formatBytes(storage.disk_used_bytes) })}{" "}
             <span style={{ color: "var(--text-secondary)" }}>
-              {formatBytes(storage.disk_free_bytes)} free
+              {t("dashboard.admin.disk.free", { size: formatBytes(storage.disk_free_bytes) })}
             </span>
           </div>
           <div className="text-xs text-dim" style={{ marginTop: 2 }}>
-            of {formatBytes(storage.disk_total_bytes)} total · this tenant
-            occupies {formatBytes(tenantBytes)} ({tenantPct}%)
+            {t("dashboard.admin.disk.ofTotal", {
+              total: formatBytes(storage.disk_total_bytes),
+              tenant: formatBytes(tenantBytes),
+              pct: tenantPct,
+            })}
           </div>
         </div>
         <div
@@ -304,7 +319,7 @@ function DiskUsageCard({ storage }: { storage: StorageStats }) {
           overflow: "hidden",
           border: "1px solid var(--border)",
         }}
-        aria-label={`Disk used: ${usedPct}%`}
+        aria-label={t("dashboard.admin.disk.usedAria", { pct: usedPct })}
         role="progressbar"
         aria-valuenow={usedPct}
         aria-valuemin={0}
@@ -340,9 +355,9 @@ function DiskUsageCard({ storage }: { storage: StorageStats }) {
           flexWrap: "wrap",
         }}
       >
-        <LegendDot color="var(--accent)" label="This tenant" />
-        <LegendDot color={barFill} label="Whole disk used" />
-        <LegendDot color="var(--bg-sunken)" label="Free" />
+        <LegendDot color="var(--accent)" label={t("dashboard.admin.disk.legendTenant")} />
+        <LegendDot color={barFill} label={t("dashboard.admin.disk.legendWhole")} />
+        <LegendDot color="var(--bg-sunken)" label={t("dashboard.admin.disk.legendFree")} />
       </div>
     </div>
   );

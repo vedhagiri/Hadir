@@ -16,6 +16,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 
 import { api } from "../../api/client";
 
@@ -106,6 +107,7 @@ function fmtMetricsInline(metrics: Record<string, unknown>): string {
 
 export function FrameDiagnosticsPage() {
   const qc = useQueryClient();
+  const { t } = useTranslation();
   const [kindFilter, setKindFilter] = useState<string>("");
   const [cameraFilter, setCameraFilter] = useState<string>("");
 
@@ -221,10 +223,8 @@ export function FrameDiagnosticsPage() {
         padding: "10px 14px",
         fontSize: 13,
       }}>
-        <strong>Temporary diagnostic tab.</strong> Enable "Logging" to capture
-        anomaly events from the capture pipeline. Lightweight when off
-        (no continuous logging). Remove after the investigation —
-        grep <code>TEMP-DIAGNOSTIC-2026-05-20</code>.
+        <strong>{t("frameDiagnostics.tempBadge")}</strong>{" "}
+        {t("frameDiagnostics.tempHint")}
       </div>
 
       {/* Controls */}
@@ -242,26 +242,28 @@ export function FrameDiagnosticsPage() {
             border: "none", padding: "6px 14px", borderRadius: 6,
           }}
         >
-          {state.data?.enabled ? "■ Stop Logging" : "▶ Start Logging"}
+          {state.data?.enabled
+            ? t("frameDiagnostics.stopLogging")
+            : t("frameDiagnostics.startLogging")}
         </button>
         <button
           className="btn btn-sm"
           onClick={() => clearLogs.mutate()}
           disabled={clearLogs.isPending}
-        >Clear</button>
-        <button className="btn btn-sm" onClick={exportJson}>Export JSON</button>
+        >{t("frameDiagnostics.clear")}</button>
+        <button className="btn btn-sm" onClick={exportJson}>{t("frameDiagnostics.exportJson")}</button>
         <div style={{ flex: 1 }} />
         <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
           {state.data?.enabled ? (
             <>
-              <span style={{ color: "#0b6e4f", fontWeight: 600 }}>● Running</span>
-              {" — session "}{fmtDuration(liveDuration)}{" — "}
-              {state.data.event_count} events captured
+              <span style={{ color: "#0b6e4f", fontWeight: 600 }}>{t("frameDiagnostics.running")}</span>
+              {" — "}{t("frameDiagnostics.session")}{" "}{fmtDuration(liveDuration)}{" — "}
+              {t("frameDiagnostics.eventsCaptured", { count: state.data.event_count })}
             </>
           ) : (
             <>
-              <span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>○ Stopped</span>
-              {state.data ? ` — ${state.data.event_count} events in ring` : ""}
+              <span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{t("frameDiagnostics.stopped")}</span>
+              {state.data ? ` — ${t("frameDiagnostics.eventsInRing", { count: state.data.event_count })}` : ""}
             </>
           )}
         </div>
@@ -273,12 +275,12 @@ export function FrameDiagnosticsPage() {
         borderRadius: 8, padding: 14, marginBottom: 16,
       }}>
         <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-          <Stat label="Host CPU" value={`${snap.data?.host_cpu_percent_overall ?? 0}%`}
+          <Stat label={t("frameDiagnostics.hostCpu")} value={`${snap.data?.host_cpu_percent_overall ?? 0}%`}
             warn={(snap.data?.host_cpu_percent_overall ?? 0) > 70} />
-          <Stat label="Memory" value={`${snap.data?.host_memory_used_gb ?? 0} / ${snap.data?.host_memory_total_gb ?? 0} GB`}
+          <Stat label={t("frameDiagnostics.memory")} value={`${snap.data?.host_memory_used_gb ?? 0} / ${snap.data?.host_memory_total_gb ?? 0} GB`}
             warn={(snap.data?.host_memory_percent ?? 0) > 75} />
-          <Stat label="Processes" value={String(snap.data?.process_count ?? 0)} />
-          <Stat label="Threads" value={String(snap.data?.thread_count ?? 0)} />
+          <Stat label={t("frameDiagnostics.processes")} value={String(snap.data?.process_count ?? 0)} />
+          <Stat label={t("frameDiagnostics.threads")} value={String(snap.data?.thread_count ?? 0)} />
         </div>
         {/* Per-core CPU bars */}
         {snap.data && (
@@ -303,13 +305,13 @@ export function FrameDiagnosticsPage() {
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ textAlign: "left", color: "var(--text-secondary)" }}>
-                  <th style={th}>Camera</th>
-                  <th style={th}>Tenant</th>
-                  <th style={th}>Status</th>
-                  <th style={th}>fps_reader / native</th>
-                  <th style={th}>fps_analyzer</th>
-                  <th style={th}>motion skip /60s</th>
-                  <th style={th}>RTSP / Detect / Match / Att.</th>
+                  <th style={th}>{t("frameDiagnostics.col.camera")}</th>
+                  <th style={th}>{t("frameDiagnostics.col.tenant")}</th>
+                  <th style={th}>{t("frameDiagnostics.col.status")}</th>
+                  <th style={th}>{t("frameDiagnostics.col.fpsReader")}</th>
+                  <th style={th}>{t("frameDiagnostics.col.fpsAnalyzer")}</th>
+                  <th style={th}>{t("frameDiagnostics.col.motionSkip")}</th>
+                  <th style={th}>{t("frameDiagnostics.col.stages")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -346,10 +348,10 @@ export function FrameDiagnosticsPage() {
         display: "flex", gap: 12, alignItems: "center",
         marginBottom: 12, flexWrap: "wrap",
       }}>
-        <span style={{ fontWeight: 600, fontSize: 13 }}>Anomaly kinds:</span>
+        <span style={{ fontWeight: 600, fontSize: 13 }}>{t("frameDiagnostics.anomalyKinds")}:</span>
         {Object.entries(kindCounts).length === 0 && (
           <span style={{ color: "var(--text-secondary)", fontSize: 12 }}>
-            {state.data?.enabled ? "Waiting for anomalies…" : "Logging is stopped."}
+            {state.data?.enabled ? t("frameDiagnostics.waiting") : t("frameDiagnostics.loggingStopped")}
           </span>
         )}
         {Object.entries(kindCounts).map(([k, n]) => (
@@ -367,7 +369,7 @@ export function FrameDiagnosticsPage() {
         <div style={{ flex: 1 }} />
         <select value={cameraFilter} onChange={(e) => setCameraFilter(e.target.value)}
           style={{ fontSize: 12, padding: "4px 8px", border: "1px solid var(--border)" }}>
-          <option value="">All cameras</option>
+          <option value="">{t("frameDiagnostics.allCameras")}</option>
           {cameraOptions.map(([id, label]) => (
             <option key={id} value={id}>{label}</option>
           ))}
@@ -383,19 +385,19 @@ export function FrameDiagnosticsPage() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead style={{ position: "sticky", top: 0, background: "var(--bg-elev)" }}>
               <tr style={{ textAlign: "left", color: "var(--text-secondary)" }}>
-                <th style={th}>Time</th>
-                <th style={th}>Kind</th>
-                <th style={th}>Camera</th>
-                <th style={th}>Reason</th>
-                <th style={th}>Metrics</th>
+                <th style={th}>{t("frameDiagnostics.col.time")}</th>
+                <th style={th}>{t("frameDiagnostics.col.kind")}</th>
+                <th style={th}>{t("frameDiagnostics.col.camera")}</th>
+                <th style={th}>{t("frameDiagnostics.col.reason")}</th>
+                <th style={th}>{t("frameDiagnostics.col.metrics")}</th>
               </tr>
             </thead>
             <tbody>
               {filteredEvents.length === 0 && (
                 <tr><td colSpan={5} style={{ ...td, textAlign: "center", padding: 24, color: "var(--text-secondary)" }}>
                   {state.data?.enabled
-                    ? "Logging is on. No anomalies yet — frame drops will appear here as they happen."
-                    : "Click ▶ Start Logging to begin capturing anomaly events."}
+                    ? t("frameDiagnostics.emptyOn")
+                    : t("frameDiagnostics.emptyOff")}
                 </td></tr>
               )}
               {filteredEvents.map((e, i) => (

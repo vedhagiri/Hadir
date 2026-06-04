@@ -10,6 +10,7 @@
 // (via the employee_id endpoint's 404/403 guards).
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { api } from "../../api/client";
 import { useMe } from "../../auth/AuthProvider";
@@ -112,6 +113,7 @@ function rowsToCsv(headers: string[], rows: (string | number | null)[][]): strin
 // ---------------------------------------------------------------------------
 
 export function EmployeeReportPage() {
+  const { t } = useTranslation();
   const dt = useTenantDateTime();
   const fmtShort = (iso: string | null): string => {
     if (!iso) return "—";
@@ -254,7 +256,7 @@ export function EmployeeReportPage() {
         }),
       });
       if (!resp.ok) {
-        setError(`Download failed (${resp.status}).`);
+        setError(t("employeeReport.downloadFailed", { status: resp.status }));
         return;
       }
       const blob = await resp.blob();
@@ -286,7 +288,7 @@ export function EmployeeReportPage() {
         }),
       });
       if (!resp.ok) {
-        setError(`Download failed (${resp.status}).`);
+        setError(t("employeeReport.downloadFailed", { status: resp.status }));
         return;
       }
       const blob = await resp.blob();
@@ -330,11 +332,8 @@ export function EmployeeReportPage() {
     <>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Employee report</h1>
-          <p className="page-sub">
-            Search any employee and get their complete attendance for a
-            selected range
-          </p>
+          <h1 className="page-title">{t("employeeReport.title")}</h1>
+          <p className="page-sub">{t("employeeReport.sub")}</p>
         </div>
         <div className="page-actions">
           <button
@@ -354,7 +353,7 @@ export function EmployeeReportPage() {
             }}
           >
             <Icon name="download" size={12} />
-            {downloading === "xlsx" ? "Downloading…" : "Download XLSX"}
+            {downloading === "xlsx" ? t("employeeReport.downloadingXlsx") : t("employeeReport.downloadXlsx")}
           </button>
           <button
             className="btn btn-primary"
@@ -370,7 +369,7 @@ export function EmployeeReportPage() {
             style={{ cursor: downloadDisabled ? "not-allowed" : "pointer" }}
           >
             <Icon name="fileText" size={12} />
-            {downloading === "pdf" ? "Generating…" : "PDF"}
+            {downloading === "pdf" ? t("employeeReport.generatingPdf") : t("employeeReport.downloadPdf")}
           </button>
         </div>
       </div>
@@ -421,22 +420,22 @@ export function EmployeeReportPage() {
               textTransform: "uppercase",
             }}
           >
-            Range
+            {t("employeeReport.rangeLabel")}
           </span>
           <DatePicker
             value={start}
             onChange={setStart}
             max={todayIso()}
-            ariaLabel="Start date"
+            ariaLabel={t("employeeReport.startDateAria")}
           />
           <DatePicker
             value={end}
             onChange={setEnd}
             min={start}
             max={todayIso()}
-            ariaLabel="End date"
+            ariaLabel={t("employeeReport.endDateAria")}
           />
-          <div className="seg" role="tablist" aria-label="Quick range">
+          <div className="seg" role="tablist" aria-label={t("employeeReport.quickRange")}>
             <button
               type="button"
               className="seg-btn"
@@ -482,11 +481,10 @@ export function EmployeeReportPage() {
           }}
         >
           <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>
-            Pick an employee to begin
+            {t("employeeReport.pickEmployee")}
           </div>
           <div className="text-xs">
-            The card and the day-by-day breakdown render once you select someone
-            from the search above.
+            {t("employeeReport.pickEmployeeHint")}
           </div>
         </div>
       )}
@@ -524,7 +522,7 @@ export function EmployeeReportPage() {
                   )}
                   <span> · {employee.department.name}</span>
                   {employee.reports_to_full_name && (
-                    <span> · reports to {employee.reports_to_full_name}</span>
+                    <span> · {t("employeeReport.reportsTo", { name: employee.reports_to_full_name })}</span>
                   )}
                 </div>
                 <div
@@ -541,8 +539,7 @@ export function EmployeeReportPage() {
                     </span>
                   ))}
                   <span className="pill pill-accent">
-                    {start} → {end} · {visibleDates.length} day
-                    {visibleDates.length === 1 ? "" : "s"}
+                    {t("employeeReport.rangePill", { start, end, count: visibleDates.length })}
                   </span>
                 </div>
               </div>
@@ -550,13 +547,13 @@ export function EmployeeReportPage() {
                 <button
                   type="button"
                   className="btn"
-                  title="Open the request submission flow on behalf of this employee"
+                  title={t("employeeReport.raiseRequestTitle")}
                   onClick={() => {
                     window.location.assign("/my-requests");
                   }}
                 >
                   <Icon name="plus" size={11} />
-                  Raise request
+                  {t("employeeReport.raiseRequest")}
                 </button>
               )}
             </div>
@@ -571,25 +568,25 @@ export function EmployeeReportPage() {
               marginBottom: 14,
             }}
           >
-            <StatTile label="Working days" value={stats.workingDays} />
+            <StatTile label={t("employeeReport.statWorkingDays")} value={stats.workingDays} />
             <StatTile
-              label="Present"
+              label={t("employeeReport.statPresent")}
               value={stats.present}
               tone="success"
               hint={
                 stats.workingDays > 0
-                  ? `${stats.presentPct}% of working`
+                  ? t("employeeReport.statPresentHint", { pct: stats.presentPct })
                   : undefined
               }
             />
-            <StatTile label="Late" value={stats.late} tone="warning" />
-            <StatTile label="Absent" value={stats.absent} tone="danger" />
+            <StatTile label={t("employeeReport.statLate")} value={stats.late} tone="warning" />
+            <StatTile label={t("employeeReport.statAbsent")} value={stats.absent} tone="danger" />
             <StatTile
-              label="Total hours"
+              label={t("employeeReport.statTotalHours")}
               value={stats.totalMinutes > 0 ? formatMinutes(stats.totalMinutes) : "—"}
               hint={
                 stats.otMinutes > 0
-                  ? `+${formatMinutes(stats.otMinutes)} OT`
+                  ? t("employeeReport.statOtHint", { n: formatMinutes(stats.otMinutes) })
                   : undefined
               }
               hintTone="success"
@@ -600,7 +597,7 @@ export function EmployeeReportPage() {
           <div className="card">
             <div className="card-head">
               <div>
-                <h3 className="card-title">Day-by-day breakdown</h3>
+                <h3 className="card-title">{t("employeeReport.breakdownTitle")}</h3>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <label
@@ -617,7 +614,7 @@ export function EmployeeReportPage() {
                     checked={showWeekends}
                     onChange={(e) => setShowWeekends(e.target.checked)}
                   />
-                  Show weekends
+                  {t("employeeReport.showWeekends")}
                 </label>
                 <button
                   className="btn btn-sm"
@@ -632,21 +629,21 @@ export function EmployeeReportPage() {
                   disabled={!employee}
                 >
                   <Icon name="download" size={11} />
-                  CSV
+                  {t("employeeReport.csvBtn")}
                 </button>
               </div>
             </div>
             <table className="table">
               <thead>
                 <tr>
-                  <th>Date</th>
-                  <th>Day</th>
-                  <th>Status</th>
-                  <th>In</th>
-                  <th>Out</th>
-                  <th>Hours</th>
-                  <th>Overtime</th>
-                  <th>Flags</th>
+                  <th>{t("employeeReport.colDate")}</th>
+                  <th>{t("employeeReport.colDay")}</th>
+                  <th>{t("employeeReport.colStatus")}</th>
+                  <th>{t("employeeReport.colIn")}</th>
+                  <th>{t("employeeReport.colOut")}</th>
+                  <th>{t("employeeReport.colHours")}</th>
+                  <th>{t("employeeReport.colOvertime")}</th>
+                  <th>{t("employeeReport.colFlags")}</th>
                   <th></th>
                 </tr>
               </thead>
@@ -658,7 +655,7 @@ export function EmployeeReportPage() {
                       className="text-sm text-dim"
                       style={{ padding: 16 }}
                     >
-                      Loading…
+                      {t("employeeReport.loading")}
                     </td>
                   </tr>
                 )}
@@ -669,7 +666,7 @@ export function EmployeeReportPage() {
                       className="text-sm"
                       style={{ padding: 16, color: "var(--danger-text)" }}
                     >
-                      Could not load attendance.
+                      {t("employeeReport.loadFailed")}
                     </td>
                   </tr>
                 )}
@@ -744,6 +741,7 @@ function EmployeeSearch({
   onChange: (id: number | null) => void;
   initial: Employee | null;
 }) {
+  const { t } = useTranslation();
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -790,7 +788,7 @@ function EmployeeSearch({
       <input
         type="text"
         value={open ? q : value !== null ? displayLabel : q}
-        placeholder="Search employee by ID (e.g. OM0045) or name…"
+        placeholder={t("employeeReport.search.placeholder")}
         onFocus={() => setOpen(true)}
         onChange={(e) => {
           setQ(e.target.value);
@@ -825,7 +823,7 @@ function EmployeeSearch({
               className="text-sm text-dim"
               style={{ padding: "8px 12px" }}
             >
-              Searching…
+              {t("employeeReport.search.searching")}
             </div>
           )}
           {!list.isLoading && items.length === 0 && (
@@ -833,7 +831,7 @@ function EmployeeSearch({
               className="text-sm text-dim"
               style={{ padding: "8px 12px" }}
             >
-              {q.trim() ? "No matches." : "Type to search."}
+              {q.trim() ? t("employeeReport.search.noMatches") : t("employeeReport.search.typeToSearch")}
             </div>
           )}
           {items.map((emp) => (
@@ -950,37 +948,39 @@ function DayStatusPill({
   item: AttendanceItem | null;
   isoDate: string;
 }) {
+  const { t } = useTranslation();
   if (!item) {
     if (isWeekend(isoDate))
-      return <span className="pill pill-neutral">Weekend</span>;
-    // Future date inside the range — no record yet.
+      return <span className="pill pill-neutral">{t("employeeReport.status.weekend")}</span>;
     if (isoDate > todayIso())
       return <span className="pill pill-neutral">—</span>;
-    return <span className="pill pill-neutral">No record</span>;
+    return <span className="pill pill-neutral">{t("employeeReport.status.noRecord")}</span>;
   }
   if (item.absent && item.leave_type_id !== null) {
-    return <span className="pill pill-info">On leave</span>;
+    return <span className="pill pill-info">{t("employeeReport.status.onLeave")}</span>;
   }
   if (item.is_holiday && !item.in_time) {
     return (
       <span className="pill pill-info">
-        Holiday{item.holiday_name ? ` — ${item.holiday_name}` : ""}
+        {item.holiday_name
+          ? t("employeeReport.status.holidayNamed", { name: item.holiday_name })
+          : t("employeeReport.status.holiday")}
       </span>
     );
   }
   if (item.is_weekend && !item.in_time) {
-    return <span className="pill pill-neutral">Weekend</span>;
+    return <span className="pill pill-neutral">{t("employeeReport.status.weekend")}</span>;
   }
   if (item.pending) {
-    return <span className="pill pill-info">Waiting for login</span>;
+    return <span className="pill pill-info">{t("employeeReport.status.waitingLogin")}</span>;
   }
   if (!item.in_time) {
-    return <span className="pill pill-danger">Absent</span>;
+    return <span className="pill pill-danger">{t("employeeReport.status.absent")}</span>;
   }
   if (item.late) {
-    return <span className="pill pill-warning">Late</span>;
+    return <span className="pill pill-warning">{t("employeeReport.status.late")}</span>;
   }
-  return <span className="pill pill-success">Present</span>;
+  return <span className="pill pill-success">{t("employeeReport.status.present")}</span>;
 }
 
 function statusLabel(item: AttendanceItem | null): string {

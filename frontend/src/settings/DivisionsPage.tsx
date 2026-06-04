@@ -39,15 +39,15 @@ export function DivisionsPage() {
   const [managing, setManaging] = useState<Division | null>(null);
 
   const onDelete = (d: Division) => {
-    if (!confirm(`Delete division "${d.name}"? Departments under it must be reassigned first.`)) return;
+    if (!confirm(t("divisions.confirmDelete", { name: d.name }) as string)) return;
     del.mutate(d.id, {
-      onSuccess: () => toast.success("Division deleted."),
+      onSuccess: () => toast.success(t("divisions.toast.deleted") as string),
       onError: (err) => {
         const detail =
           err instanceof ApiError
             ? (err.body as { detail?: { message?: string } })?.detail?.message
             : null;
-        toast.error(detail ?? "Delete failed.");
+        toast.error(detail ?? (t("divisions.toast.deleteFailed") as string));
       },
     });
   };
@@ -56,17 +56,13 @@ export function DivisionsPage() {
     <>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Divisions</h1>
-          <p className="page-sub">
-            Top tier of the org hierarchy · Division → Department → Section.
-            Division managers see every employee under every department in
-            their division.
-          </p>
+          <h1 className="page-title">{t("divisions.title") as string}</h1>
+          <p className="page-sub">{t("divisions.subtitle") as string}</p>
         </div>
         <div className="page-actions">
           <button className="btn btn-primary" onClick={() => setShowAdd(true)}>
             <Icon name="plus" size={11} />
-            Add division
+            {t("divisions.add") as string}
           </button>
         </div>
       </div>
@@ -77,11 +73,11 @@ export function DivisionsPage() {
         <table className="table">
           <thead>
             <tr>
-              <th style={{ width: 140 }}>Code</th>
-              <th>Name</th>
-              <th style={{ width: 130 }}>Departments</th>
-              <th style={{ minWidth: 220 }}>Managers</th>
-              <th style={{ width: 240, textAlign: "right" }}>Actions</th>
+              <th style={{ width: 140 }}>{t("divisions.col.code") as string}</th>
+              <th>{t("divisions.col.name") as string}</th>
+              <th style={{ width: 130 }}>{t("divisions.col.departments") as string}</th>
+              <th style={{ minWidth: 220 }}>{t("divisions.col.managers") as string}</th>
+              <th style={{ width: 240, textAlign: "right" }}>{t("divisions.col.actions") as string}</th>
             </tr>
           </thead>
           <tbody>
@@ -95,7 +91,7 @@ export function DivisionsPage() {
             {list.data?.items.length === 0 && (
               <tr>
                 <td colSpan={5} className="text-sm text-dim" style={{ padding: 16 }}>
-                  No divisions yet. Click "Add division" to create one.
+                  {t("divisions.empty") as string}
                 </td>
               </tr>
             )}
@@ -112,10 +108,10 @@ export function DivisionsPage() {
                     <button
                       className="btn btn-sm"
                       onClick={() => setManaging(d)}
-                      title="Assign or remove division managers"
+                      title={t("divisions.managersBtnTitle") as string}
                     >
                       <Icon name="users" size={11} />
-                      Managers
+                      {t("divisions.managersBtn") as string}
                     </button>
                     <button className="btn btn-sm" onClick={() => setEditing(d)}>
                       <Icon name="settings" size={11} />
@@ -143,7 +139,7 @@ export function DivisionsPage() {
           onSubmit={(data) => {
             create.mutate(data, {
               onSuccess: () => {
-                toast.success("Division created.");
+                toast.success(t("divisions.toast.created") as string);
                 setShowAdd(false);
               },
               onError: (err) => {
@@ -151,7 +147,7 @@ export function DivisionsPage() {
                   err instanceof ApiError
                     ? (err.body as { detail?: { message?: string } })?.detail?.message
                     : null;
-                toast.error(detail ?? "Create failed.");
+                toast.error(detail ?? (t("divisions.toast.createFailed") as string));
               },
             });
           }}
@@ -168,10 +164,10 @@ export function DivisionsPage() {
               { id: editing.id, name: data.name },
               {
                 onSuccess: () => {
-                  toast.success("Division updated.");
+                  toast.success(t("divisions.toast.updated") as string);
                   setEditing(null);
                 },
-                onError: () => toast.error("Update failed."),
+                onError: () => toast.error(t("divisions.toast.updateFailed") as string),
               },
             );
           }}
@@ -204,6 +200,7 @@ function DivisionFormModal({
   onSubmit: (data: { code: string; name: string }) => void;
   submitting: boolean;
 }) {
+  const { t } = useTranslation();
   const [code, setCode] = useState(initial?.code ?? "");
   const [name, setName] = useState(initial?.name ?? "");
   const isEdit = !!initial;
@@ -239,24 +236,27 @@ function DivisionFormModal({
           }}
         >
           <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>
-            {isEdit ? "Edit division" : "Add division"}
+            {(isEdit ? t("divisions.editTitle") : t("divisions.addTitle")) as string}
           </h2>
           <button
             type="button"
             className="icon-btn"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t("common.close") as string}
           >
             <Icon name="x" size={14} />
           </button>
         </div>
 
-        <Field label="Code" hint="Uppercase letters, digits, underscore (1-16 chars). Used in Excel imports.">
+        <Field
+          label={t("divisions.field.code") as string}
+          hint={t("divisions.hint.code") as string}
+        >
           <input
             value={code}
             onChange={(e) => setCode(e.target.value.toUpperCase())}
             disabled={isEdit}
-            placeholder="DIV-A"
+            placeholder={t("divisions.placeholder.code") as string}
             className="input"
             style={inputStyle}
             required
@@ -264,11 +264,11 @@ function DivisionFormModal({
             pattern="[A-Z0-9_]{1,16}"
           />
         </Field>
-        <Field label="Name">
+        <Field label={t("divisions.field.name") as string}>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Operations Division"
+            placeholder={t("divisions.placeholder.name") as string}
             className="input"
             style={inputStyle}
             required
@@ -278,11 +278,15 @@ function DivisionFormModal({
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
           <button type="button" className="btn btn-sm" onClick={onClose}>
-            Cancel
+            {t("common.cancel") as string}
           </button>
           <button type="submit" className="btn btn-sm btn-primary" disabled={submitting}>
             <Icon name="check" size={11} />
-            {submitting ? "Saving…" : isEdit ? "Save" : "Create"}
+            {(submitting
+              ? t("common.saving")
+              : isEdit
+                ? t("common.save")
+                : t("divisions.create")) as string}
           </button>
         </div>
       </form>
@@ -296,17 +300,19 @@ function DivisionFormModal({
 // ---------------------------------------------------------------------------
 
 function DivisionManagerChips({ divisionId }: { divisionId: number }) {
+  const { t } = useTranslation();
   const list = useDivisionManagers(divisionId);
-  if (list.isLoading) return <span className="text-xs text-dim">Loading…</span>;
+  if (list.isLoading)
+    return <span className="text-xs text-dim">{t("common.loading") as string}…</span>;
   if (list.isError)
     return (
       <span className="text-xs" style={{ color: "var(--danger-text)" }}>
-        Failed to load
+        {t("divisions.chips.failed") as string}
       </span>
     );
   const items = list.data?.items ?? [];
   if (items.length === 0)
-    return <span className="text-xs text-dim">— No managers assigned —</span>;
+    return <span className="text-xs text-dim">{t("divisions.chips.none") as string}</span>;
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
       {items.map((m) => (
@@ -341,6 +347,7 @@ function DivisionManagersModal({
   division: Division;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const assigned = useDivisionManagers(division.id);
   const assign = useAssignDivisionManager();
   const remove = useRemoveDivisionManager();
@@ -366,7 +373,7 @@ function DivisionManagersModal({
       { divisionId: division.id, userId: Number(pickedId) },
       {
         onSuccess: () => {
-          toast.success("Manager assigned to division.");
+          toast.success(t("divisions.managersModal.assignedToast") as string);
           setPickedId("");
         },
         onError: (err) => {
@@ -374,7 +381,7 @@ function DivisionManagersModal({
             err instanceof ApiError
               ? (err.body as { detail?: { message?: string } })?.detail?.message
               : null;
-          toast.error(detail ?? "Assignment failed.");
+          toast.error(detail ?? (t("divisions.managersModal.assignFailed") as string));
         },
       },
     );
@@ -384,8 +391,11 @@ function DivisionManagersModal({
     remove.mutate(
       { divisionId: division.id, userId: m.user_id },
       {
-        onSuccess: () => toast.success(`${m.full_name} removed.`),
-        onError: () => toast.error("Remove failed."),
+        onSuccess: () =>
+          toast.success(
+            t("divisions.managersModal.removedToast", { name: m.full_name }) as string,
+          ),
+        onError: () => toast.error(t("divisions.managersModal.removeFailed") as string),
       },
     );
   };
@@ -418,23 +428,20 @@ function DivisionManagersModal({
               className="text-xs text-dim"
               style={{ margin: "4px 0 0", maxWidth: 440 }}
             >
-              Managers added here can see every employee in every department
-              under this division on the dashboard, attendance, calendar,
-              approvals, and reports — automatically, regardless of
-              designation.
+              {t("divisions.managersModal.subtitle") as string}
             </p>
           </div>
           <button
             type="button"
             className="icon-btn"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t("common.close") as string}
           >
             <Icon name="x" size={14} />
           </button>
         </div>
 
-        <div style={sectionLabel}>Add a manager</div>
+        <div style={sectionLabel}>{t("divisions.managersModal.addLabel") as string}</div>
         <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
           <select
             value={pickedId}
@@ -445,11 +452,11 @@ function DivisionManagersModal({
             style={pickerStyle}
           >
             <option value="">
-              {candidates.isLoading
-                ? "Loading managers…"
+              {(candidates.isLoading
+                ? t("divisions.managersModal.loadingManagers")
                 : available.length === 0
-                  ? "All managers are already assigned"
-                  : "— Pick a Manager-role user —"}
+                  ? t("divisions.managersModal.allAssigned")
+                  : t("divisions.managersModal.pickManager")) as string}
             </option>
             {available.map((u) => (
               <option key={u.id} value={u.id}>
@@ -464,14 +471,22 @@ function DivisionManagersModal({
             disabled={pickedId === "" || assign.isPending}
           >
             <Icon name="check" size={11} />
-            {assign.isPending ? "Assigning…" : "Assign"}
+            {(assign.isPending
+              ? t("divisions.managersModal.assigning")
+              : t("divisions.managersModal.assign")) as string}
           </button>
         </div>
 
-        <div style={sectionLabel}>Currently assigned</div>
-        {assigned.isLoading && <div className="text-sm text-dim">Loading…</div>}
+        <div style={sectionLabel}>
+          {t("divisions.managersModal.currentlyAssigned") as string}
+        </div>
+        {assigned.isLoading && (
+          <div className="text-sm text-dim">{t("common.loading") as string}…</div>
+        )}
         {!assigned.isLoading && (assigned.data?.items.length ?? 0) === 0 && (
-          <div className="text-sm text-dim">No managers assigned. Pick one above.</div>
+          <div className="text-sm text-dim">
+            {t("divisions.managersModal.noneAssigned") as string}
+          </div>
         )}
         {assigned.data?.items.map((m) => (
           <div
@@ -506,10 +521,10 @@ function DivisionManagersModal({
               className="btn btn-sm"
               onClick={() => onRemove(m)}
               disabled={remove.isPending}
-              title="Remove from this division"
+              title={t("divisions.managersModal.removeTitle") as string}
             >
               <Icon name="x" size={11} />
-              Remove
+              {t("divisions.managersModal.remove") as string}
             </button>
           </div>
         ))}

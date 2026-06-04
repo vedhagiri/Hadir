@@ -10,6 +10,7 @@
 // .filter-bar). No new CSS.
 
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { extractApiError } from "../../api/client";
 import { Icon } from "../../shell/Icon";
@@ -21,27 +22,9 @@ import {
 } from "./hooks";
 import type { ClipCleanupFilter, ClipCleanupMode } from "./types";
 
-const HOUR_PRESETS: { value: number; label: string }[] = [
-  { value: 1, label: "1 hour" },
-  { value: 6, label: "6 hours" },
-  { value: 12, label: "12 hours" },
-  { value: 24, label: "24 hours" },
-];
-
-const DAY_PRESETS: { value: number; label: string }[] = [
-  { value: 7, label: "7 days" },
-  { value: 30, label: "30 days" },
-  { value: 60, label: "60 days" },
-  { value: 90, label: "90 days" },
-];
-
-const RETENTION_PRESETS: { value: number | null; label: string }[] = [
-  { value: null, label: "Off" },
-  { value: 7, label: "7d" },
-  { value: 30, label: "30d" },
-  { value: 60, label: "60d" },
-  { value: 90, label: "90d" },
-];
+const HOUR_PRESETS: number[] = [1, 6, 12, 24];
+const DAY_PRESETS: number[] = [7, 30, 60, 90];
+const RETENTION_PRESETS: (number | null)[] = [null, 7, 30, 60, 90];
 
 function todayIso(): string {
   const d = new Date();
@@ -63,6 +46,7 @@ function aWeekAgoIso(): string {
 }
 
 export function ClipCleanupCard() {
+  const { t } = useTranslation();
   const cameras = useCameras();
   const retention = useClipRetentionSetting();
   const updateRetention = useUpdateClipRetentionSetting();
@@ -109,10 +93,9 @@ export function ClipCleanupCard() {
     <div className="card" style={{ marginBottom: 16 }}>
       <div className="card-head">
         <div>
-          <div className="card-title">Clip Video Cleanup</div>
+          <div className="card-title">{t("clipCleanup.title") as string}</div>
           <div className="card-sub">
-            Reclaim raw video files. Face crops, attendance evidence and
-            reference photos are unaffected.
+            {t("clipCleanup.subtitle") as string}
           </div>
         </div>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
@@ -121,17 +104,17 @@ export function ClipCleanupCard() {
           ) : currentRetention !== null ? (
             <span
               className="pill pill-success"
-              title={`Sweep auto-deletes clips older than ${currentRetention} days every 03:00.`}
+              title={t("clipCleanup.autoTooltip", { days: currentRetention }) as string}
             >
               <span className="pill-dot" />
-              Auto · {currentRetention}d
+              {t("clipCleanup.autoBadge", { days: currentRetention }) as string}
             </span>
           ) : (
             <span
               className="pill pill-neutral"
-              title="Automatic cleanup is off. Use the form below for a one-shot reclaim."
+              title={t("clipCleanup.autoOffTooltip") as string}
             >
-              Auto · off
+              {t("clipCleanup.autoOff") as string}
             </span>
           )}
         </div>
@@ -142,16 +125,16 @@ export function ClipCleanupCard() {
         <div className="filter-bar" style={{ marginBottom: 0 }}>
           <div className="filter-group">
             <span style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 500 }}>
-              Cleanup mode
+              {t("clipCleanup.mode") as string}
             </span>
-            <div className="seg" role="group" aria-label="Cleanup mode">
+            <div className="seg" role="group" aria-label={t("clipCleanup.mode") as string}>
               <button
                 type="button"
                 className={`seg-btn${mode === "hours" ? " active" : ""}`}
                 onClick={() => setMode("hours")}
                 aria-pressed={mode === "hours"}
               >
-                Hours
+                {t("clipCleanup.modeHours") as string}
               </button>
               <button
                 type="button"
@@ -159,7 +142,7 @@ export function ClipCleanupCard() {
                 onClick={() => setMode("days")}
                 aria-pressed={mode === "days"}
               >
-                Days
+                {t("clipCleanup.modeDays") as string}
               </button>
               <button
                 type="button"
@@ -167,7 +150,7 @@ export function ClipCleanupCard() {
                 onClick={() => setMode("range")}
                 aria-pressed={mode === "range"}
               >
-                Date range
+                {t("clipCleanup.modeRange") as string}
               </button>
             </div>
           </div>
@@ -187,9 +170,9 @@ export function ClipCleanupCard() {
                 background: "var(--bg-elev)",
                 color: "var(--text)",
               }}
-              aria-label="Camera scope"
+              aria-label={t("clipCleanup.cameraScope") as string}
             >
-              <option value="">All cameras</option>
+              <option value="">{t("clipCleanup.allCameras") as string}</option>
               {cameras.data?.items.map((cam) => (
                 <option key={cam.id} value={cam.id}>
                   {cam.name}
@@ -202,42 +185,42 @@ export function ClipCleanupCard() {
         {/* Per-mode body */}
         {mode === "hours" && (
           <div>
-            <div className="seg" role="group" aria-label="Hour presets" style={{ display: "inline-flex" }}>
-              {HOUR_PRESETS.map((p) => (
+            <div className="seg" role="group" aria-label={t("clipCleanup.hourPresetsAria") as string} style={{ display: "inline-flex" }}>
+              {HOUR_PRESETS.map((value) => (
                 <button
-                  key={p.value}
+                  key={value}
                   type="button"
-                  className={`seg-btn${hours === p.value ? " active" : ""}`}
-                  onClick={() => setHours(p.value)}
-                  aria-pressed={hours === p.value}
+                  className={`seg-btn${hours === value ? " active" : ""}`}
+                  onClick={() => setHours(value)}
+                  aria-pressed={hours === value}
                 >
-                  {p.label}
+                  {t("clipCleanup.hoursPreset", { count: value }) as string}
                 </button>
               ))}
             </div>
             <div style={{ fontSize: 11.5, color: "var(--text-tertiary)", marginTop: 6 }}>
-              Delete clips older than {hours} hour{hours === 1 ? "" : "s"}.
+              {t("clipCleanup.deleteOlderHours", { count: hours }) as string}
             </div>
           </div>
         )}
 
         {mode === "days" && (
           <div>
-            <div className="seg" role="group" aria-label="Day presets" style={{ display: "inline-flex" }}>
-              {DAY_PRESETS.map((p) => (
+            <div className="seg" role="group" aria-label={t("clipCleanup.dayPresetsAria") as string} style={{ display: "inline-flex" }}>
+              {DAY_PRESETS.map((value) => (
                 <button
-                  key={p.value}
+                  key={value}
                   type="button"
-                  className={`seg-btn${days === p.value ? " active" : ""}`}
-                  onClick={() => setDays(p.value)}
-                  aria-pressed={days === p.value}
+                  className={`seg-btn${days === value ? " active" : ""}`}
+                  onClick={() => setDays(value)}
+                  aria-pressed={days === value}
                 >
-                  {p.label}
+                  {t("clipCleanup.daysPreset", { count: value }) as string}
                 </button>
               ))}
             </div>
             <div style={{ fontSize: 11.5, color: "var(--text-tertiary)", marginTop: 6 }}>
-              Delete clips older than {days} day{days === 1 ? "" : "s"}.
+              {t("clipCleanup.deleteOlderDays", { count: days }) as string}
             </div>
           </div>
         )}
@@ -246,7 +229,7 @@ export function ClipCleanupCard() {
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
             <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               <span style={{ fontSize: 11, color: "var(--text-secondary)", fontWeight: 500 }}>
-                From
+                {t("clipCleanup.from") as string}
               </span>
               <input
                 type="date"
@@ -265,7 +248,7 @@ export function ClipCleanupCard() {
             </label>
             <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               <span style={{ fontSize: 11, color: "var(--text-secondary)", fontWeight: 500 }}>
-                To
+                {t("clipCleanup.to") as string}
               </span>
               <input
                 type="date"
@@ -287,7 +270,7 @@ export function ClipCleanupCard() {
                 role="alert"
                 style={{ fontSize: 11.5, color: "var(--danger-text)" }}
               >
-                Start date must be on or before the end date.
+                {t("clipCleanup.rangeInvalid") as string}
               </span>
             )}
           </div>
@@ -308,32 +291,31 @@ export function ClipCleanupCard() {
         >
           <div>
             <div style={{ fontSize: 12.5, fontWeight: 500 }}>
-              Automatic clip retention
+              {t("clipCleanup.autoTitle") as string}
             </div>
             <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: 2 }}>
-              When enabled, the 03:00 sweep reclaims clip videos older than
-              the chosen window.
+              {t("clipCleanup.autoDesc") as string}
             </div>
             {updateRetention.isError && (
               <div
                 role="alert"
                 style={{ fontSize: 11.5, color: "var(--danger-text)", marginTop: 4 }}
               >
-                {extractApiError(updateRetention.error, "Could not save")}
+                {extractApiError(updateRetention.error, t("clipCleanup.couldNotSave") as string)}
               </div>
             )}
           </div>
-          <div className="seg" role="group" aria-label="Auto retention window" style={{ flexShrink: 0 }}>
-            {RETENTION_PRESETS.map((p) => (
+          <div className="seg" role="group" aria-label={t("clipCleanup.autoWindowAria") as string} style={{ flexShrink: 0 }}>
+            {RETENTION_PRESETS.map((value) => (
               <button
-                key={String(p.value)}
+                key={String(value)}
                 type="button"
-                className={`seg-btn${currentRetention === p.value ? " active" : ""}`}
-                onClick={() => setRetention(p.value)}
-                aria-pressed={currentRetention === p.value}
+                className={`seg-btn${currentRetention === value ? " active" : ""}`}
+                onClick={() => setRetention(value)}
+                aria-pressed={currentRetention === value}
                 disabled={updateRetention.isPending}
               >
-                {p.label}
+                {value === null ? (t("clipCleanup.retentionOff") as string) : `${value}d`}
               </button>
             ))}
           </div>
@@ -346,10 +328,10 @@ export function ClipCleanupCard() {
             className="btn btn-primary"
             onClick={handlePreview}
             disabled={rangeInvalid}
-            aria-label="Preview clip cleanup impact"
+            aria-label={t("clipCleanup.previewAria") as string}
           >
             <Icon name="trash" size={13} />
-            Preview cleanup
+            {t("clipCleanup.preview") as string}
           </button>
         </div>
       </div>

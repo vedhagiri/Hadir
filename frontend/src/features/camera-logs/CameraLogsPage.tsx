@@ -4,6 +4,7 @@
 // fly and writes a detection_event.crop_viewed audit row per fetch).
 
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { AnomalyInfoBanner } from "../../components/AnomalyNote";
 import { RelativeTime, relativeText } from "../../components/RelativeTime";
@@ -90,6 +91,7 @@ function formatRangeTooltip(group: EventGroup, dt: TenantDateTime): string {
 }
 
 export function CameraLogsPage() {
+  const { t } = useTranslation();
   const [filters, setFilters] = useState<DetectionEventFilters>({
     camera_id: null,
     employee_id: null,
@@ -144,10 +146,10 @@ export function CameraLogsPage() {
     <>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Camera Logs</h1>
+          <h1 className="page-title">{t("cameraLogs.title")}</h1>
           <p className="page-sub">
             {events.data
-              ? `${events.data.total} event${events.data.total === 1 ? "" : "s"} matching filters`
+              ? t("cameraLogs.matchingCount", { count: events.data.total })
               : "—"}
           </p>
         </div>
@@ -155,7 +157,7 @@ export function CameraLogsPage() {
 
       <div className="card">
         <div className="card-head">
-          <h3 className="card-title">Detection events</h3>
+          <h3 className="card-title">{t("cameraLogs.detectionEvents")}</h3>
           <div className="flex gap-2" style={{ alignItems: "center", flexWrap: "wrap" }}>
             <select
               value={filters.camera_id ?? ""}
@@ -166,7 +168,7 @@ export function CameraLogsPage() {
               }
               style={selectStyle}
             >
-              <option value="">All cameras</option>
+              <option value="">{t("cameraLogs.allCameras")}</option>
               {cameras.data?.items.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -191,9 +193,9 @@ export function CameraLogsPage() {
               }}
               style={selectStyle}
             >
-              <option value="">All</option>
-              <option value="identified">Identified</option>
-              <option value="unidentified">Unidentified</option>
+              <option value="">{t("cameraLogs.statusFilter.all")}</option>
+              <option value="identified">{t("cameraLogs.statusFilter.identified")}</option>
+              <option value="unidentified">{t("cameraLogs.statusFilter.unidentified")}</option>
             </select>
 
             <label
@@ -219,44 +221,44 @@ export function CameraLogsPage() {
                 checked={formerOnly}
                 onChange={(e) => setFormerOnly(e.target.checked)}
               />
-              Former employees only
+              {t("cameraLogs.formerOnly")}
             </label>
             <input
               type="datetime-local"
               value={filters.start ?? ""}
               onChange={(e) => update({ start: e.target.value || null })}
               style={selectStyle}
-              title="From"
+              title={t("cameraLogs.from")}
             />
             <input
               type="datetime-local"
               value={filters.end ?? ""}
               onChange={(e) => update({ end: e.target.value || null })}
               style={selectStyle}
-              title="To"
+              title={t("cameraLogs.to")}
             />
           </div>
         </div>
 
-        <AnomalyInfoBanner message="If the camera misses certain events due to camera positioning, capture limitations, lighting, or brightness conditions, those cases should be treated as possible anomalies." />
+        <AnomalyInfoBanner message={t("cameraLogs.anomalyNote")} />
 
         <table className="table">
           <thead>
             <tr>
-              <th style={{ width: 88 }}>Crop</th>
-              <th>Captured</th>
-              <th>Camera</th>
-              <th style={{ width: 120 }}>Status</th>
-              <th>Person</th>
-              <th style={{ width: 80 }}>Confidence</th>
-              <th>Track</th>
+              <th style={{ width: 88 }}>{t("cameraLogs.col.crop")}</th>
+              <th>{t("cameraLogs.col.captured")}</th>
+              <th>{t("cameraLogs.col.camera")}</th>
+              <th style={{ width: 120 }}>{t("cameraLogs.col.status")}</th>
+              <th>{t("cameraLogs.col.person")}</th>
+              <th style={{ width: 80 }}>{t("cameraLogs.col.confidence")}</th>
+              <th>{t("cameraLogs.col.track")}</th>
             </tr>
           </thead>
           <tbody>
             {events.isLoading && (
               <tr>
                 <td colSpan={7} className="text-sm text-dim" style={{ padding: 16 }}>
-                  Loading…
+                  {t("cameraLogs.loading")}
                 </td>
               </tr>
             )}
@@ -267,7 +269,7 @@ export function CameraLogsPage() {
                   className="text-sm"
                   style={{ padding: 16, color: "var(--danger-text)" }}
                 >
-                  Could not load events.
+                  {t("cameraLogs.loadFailed")}
                 </td>
               </tr>
             )}
@@ -288,7 +290,7 @@ export function CameraLogsPage() {
                     }}
                     title={
                       isGrouped
-                        ? `${groupSize} captures in this window — click to expand`
+                        ? t("cameraLogs.groupTooltip", { count: groupSize })
                         : undefined
                     }
                   >
@@ -309,8 +311,8 @@ export function CameraLogsPage() {
                         />
                       ) : (
                         <div
-                          title="Crop unavailable"
-                          aria-label="Crop unavailable"
+                          title={t("cameraLogs.cropUnavailable")}
+                          aria-label={t("cameraLogs.cropUnavailable")}
                           style={{
                             display: "grid",
                             placeItems: "center",
@@ -326,9 +328,7 @@ export function CameraLogsPage() {
                             padding: 4,
                           }}
                         >
-                          Crop
-                          <br />
-                          unavailable
+                          {t("cameraLogs.cropUnavailable")}
                         </div>
                       )}
                     </td>
@@ -378,11 +378,11 @@ export function CameraLogsPage() {
                     <td className="text-sm">{ev.camera_name}</td>
                     <td>
                       {ev.employee_id ? (
-                        <span className="pill pill-success">Identified</span>
+                        <span className="pill pill-success">{t("cameraLogs.pill.identified")}</span>
                       ) : ev.former_employee_match ? (
-                        <span className="pill pill-danger">Former employee</span>
+                        <span className="pill pill-danger">{t("cameraLogs.pill.former")}</span>
                       ) : (
-                        <span className="pill pill-warning">Unidentified</span>
+                        <span className="pill pill-warning">{t("cameraLogs.pill.unidentified")}</span>
                       )}
                     </td>
                     <td className="text-sm">
@@ -408,7 +408,7 @@ export function CameraLogsPage() {
                               className="pill pill-neutral"
                               style={{ fontSize: 10, marginInlineEnd: 4 }}
                             >
-                              archived
+                              {t("cameraLogs.archived")}
                             </span>
                           )}
                           <span className="mono text-xs text-dim">
@@ -419,12 +419,12 @@ export function CameraLogsPage() {
                         <span
                           title={
                             ev.former_match_employee_name
-                              ? `Former: ${ev.former_match_employee_name}`
-                              : "Former employee"
+                              ? t("cameraLogs.formerNamed", { name: ev.former_match_employee_name })
+                              : t("cameraLogs.pill.former")
                           }
                         >
                           <span style={{ fontWeight: 500, color: "var(--text-secondary)" }}>
-                            {ev.former_match_employee_name ?? "Unknown"}
+                            {ev.former_match_employee_name ?? t("cameraLogs.unknown")}
                           </span>{" "}
                           <span className="mono text-xs text-dim">
                             {ev.former_match_employee_code ?? "—"}
@@ -489,18 +489,18 @@ export function CameraLogsPage() {
                         </td>
                         <td>
                           {child.employee_id ? (
-                            <span className="pill pill-success">Identified</span>
+                            <span className="pill pill-success">{t("cameraLogs.pill.identified")}</span>
                           ) : child.former_employee_match ? (
-                            <span className="pill pill-danger">Former employee</span>
+                            <span className="pill pill-danger">{t("cameraLogs.pill.former")}</span>
                           ) : (
-                            <span className="pill pill-warning">Unidentified</span>
+                            <span className="pill pill-warning">{t("cameraLogs.pill.unidentified")}</span>
                           )}
                         </td>
                         <td className="text-sm text-dim">
                           {child.employee_id
-                            ? (child.employee_name ?? `EMP ${child.employee_id}`)
+                            ? (child.employee_name ?? t("cameraLogs.empFallback", { id: child.employee_id }))
                             : child.former_employee_match
-                              ? (child.former_match_employee_name ?? "Former employee")
+                              ? (child.former_match_employee_name ?? t("cameraLogs.pill.former"))
                               : "—"}
                         </td>
                         <td className="mono text-sm text-dim">
@@ -519,7 +519,7 @@ export function CameraLogsPage() {
             {events.data && events.data.items.length === 0 && !events.isLoading && (
               <tr>
                 <td colSpan={7} className="text-sm text-dim" style={{ padding: 16 }}>
-                  No events match. Try widening filters.
+                  {t("cameraLogs.empty")}
                 </td>
               </tr>
             )}
@@ -537,7 +537,7 @@ export function CameraLogsPage() {
           }}
         >
           <span className="text-dim">
-            Page {filters.page} of {totalPages}
+            {t("cameraLogs.pageOf", { page: filters.page, total: totalPages })}
           </span>
           <div style={{ display: "flex", gap: 6 }}>
             <button
@@ -548,7 +548,7 @@ export function CameraLogsPage() {
               }
             >
               <Icon name="chevronLeft" size={11} />
-              Prev
+              {t("cameraLogs.prev")}
             </button>
             <button
               className="btn btn-sm"
@@ -557,7 +557,7 @@ export function CameraLogsPage() {
                 setFilters((prev) => ({ ...prev, page: prev.page + 1 }))
               }
             >
-              Next
+              {t("cameraLogs.next")}
               <Icon name="chevronRight" size={11} />
             </button>
           </div>

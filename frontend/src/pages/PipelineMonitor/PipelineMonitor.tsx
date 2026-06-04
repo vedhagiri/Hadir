@@ -9,6 +9,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import type { CSSProperties } from "react";
+import { useTranslation } from "react-i18next";
 
 import { ApiError, api } from "../../api/client";
 import { useMe } from "../../auth/AuthProvider";
@@ -101,17 +102,17 @@ interface PipelineMonitorOut {
   generated_at: string;
 }
 
-const TABS: { key: StageKey; label: string; icon: IconName }[] = [
+const TABS: { key: StageKey; labelKey: string; icon: IconName }[] = [
   // "Cameras" rolls up RTSP + recording + encoding per camera so an
   // operator gets the per-device picture without switching tabs. It's
   // the default landing tab — replaces the standalone Worker Monitoring
   // page that used to live at /operations/workers.
-  { key: "cameras", label: "Cameras", icon: "camera" },
-  { key: "workers", label: "Workers", icon: "activity" },
-  { key: "rtsp", label: "RTSP Feed", icon: "camera" },
-  { key: "recording", label: "Clip Recording", icon: "videocam" },
-  { key: "identify", label: "Identify Event", icon: "user" },
-  { key: "queues", label: "Queue Pipeline", icon: "activity" },
+  { key: "cameras", labelKey: "pipelineMonitor.tabs.cameras", icon: "camera" },
+  { key: "workers", labelKey: "pipelineMonitor.tabs.workers", icon: "activity" },
+  { key: "rtsp", labelKey: "pipelineMonitor.tabs.rtsp", icon: "camera" },
+  { key: "recording", labelKey: "pipelineMonitor.tabs.recording", icon: "videocam" },
+  { key: "identify", labelKey: "pipelineMonitor.tabs.identify", icon: "user" },
+  { key: "queues", labelKey: "pipelineMonitor.tabs.queues", icon: "activity" },
 ];
 
 function fmtUptime(sec: number): string {
@@ -125,6 +126,7 @@ function fmtUptime(sec: number): string {
 }
 
 export function PipelineMonitor() {
+  const { t } = useTranslation();
   const [tab, setTab] = useState<StageKey>("cameras");
   const me = useMe();
   // Don't even fire the request until /api/auth/me has resolved and
@@ -156,32 +158,35 @@ export function PipelineMonitor() {
     const err = query.error;
     if (err instanceof ApiError) {
       if (err.status === 401) {
-        return "Your session expired. Sign in again to view Pipeline Monitor.";
+        return t("pipelineMonitor.errors.sessionExpired");
       }
       if (err.status === 403) {
-        return "Pipeline Monitor is Admin-only. Switch to your Admin role to view it.";
+        return t("pipelineMonitor.errors.adminOnly");
       }
       if (err.status >= 500) {
-        return `Pipeline Monitor temporarily unavailable (HTTP ${err.status}). Retrying…`;
+        return t("pipelineMonitor.errors.unavailable", { status: err.status });
       }
-      return `Could not load pipeline (HTTP ${err.status}).`;
+      return t("pipelineMonitor.errors.loadFailedStatus", { status: err.status });
     }
-    return "Could not load pipeline. Check your connection and try again.";
+    return t("pipelineMonitor.errors.loadFailed");
   })();
 
   return (
     <>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Pipeline Monitor</h1>
+          <h1 className="page-title">{t("pipelineMonitor.title")}</h1>
           <p className="page-sub">
-            Real-time view of every stage: RTSP feed → clip recording →
-            encoding → identify event. Refreshes every {POLL_INTERVAL_MS / 1000} s.
+            {t("pipelineMonitor.subtitle", {
+              seconds: POLL_INTERVAL_MS / 1000,
+            })}
             {data && (
               <>
                 {" "}
                 <span className="text-dim">
-                  Last update: {new Date(data.generated_at).toLocaleTimeString()}
+                  {t("pipelineMonitor.lastUpdate", {
+                    time: new Date(data.generated_at).toLocaleTimeString(),
+                  })}
                 </span>
               </>
             )}
@@ -206,7 +211,7 @@ export function PipelineMonitor() {
       >
         <SummaryCard
           icon="camera"
-          label="RTSP running"
+          label={t("pipelineMonitor.chips.rtspRunning")}
           value={data ? `${data.rtsp.running} / ${data.rtsp.workers.length}` : "—"}
           accent="#3b82f6"
           warn={!!data && data.rtsp.failed + data.rtsp.reconnecting > 0}
@@ -218,7 +223,7 @@ export function PipelineMonitor() {
         />
         <SummaryCard
           icon="videocam"
-          label="Recording active"
+          label={t("pipelineMonitor.chips.recordingActive")}
           value={
             data
               ? `${data.recording.active} / ${data.recording.enabled_cameras}`
@@ -228,10 +233,10 @@ export function PipelineMonitor() {
         />
         <SummaryCard
           icon="activity"
-          label="Encoding queue"
+          label={t("pipelineMonitor.chips.encodingQueue")}
           value={
             data
-              ? `${data.encoding.queued} queued · ${data.encoding.processing} processing`
+              ? t("pipelineMonitor.chips.encodingQueueValue", { queued: data.encoding.queued, processing: data.encoding.processing })
               : "—"
           }
           accent="#f59e0b"
@@ -244,10 +249,10 @@ export function PipelineMonitor() {
         />
         <SummaryCard
           icon="user"
-          label="Identify running"
+          label={t("pipelineMonitor.chips.identifyRunning")}
           value={
             data
-              ? `${data.identify.running} · ${data.identify.pending} pending`
+              ? t("pipelineMonitor.chips.identifyRunningValue", { running: data.identify.running, pending: data.identify.pending })
               : "—"
           }
           accent="#10b981"
@@ -264,30 +269,30 @@ export function PipelineMonitor() {
       <div className="card" style={{ overflow: "hidden" }}>
         <div
           role="tablist"
-          aria-label="Pipeline stages"
+          aria-label={t("pipelineMonitor.stagesAria")}
           style={{
             display: "flex",
             borderBottom: "1px solid var(--border)",
             background: "var(--bg-sunken)",
           }}
         >
-          {TABS.map((t) => (
+          {TABS.map((tabItem) => (
             <button
-              key={t.key}
+              key={tabItem.key}
               role="tab"
-              aria-selected={tab === t.key}
-              onClick={() => setTab(t.key)}
+              aria-selected={tab === tabItem.key}
+              onClick={() => setTab(tabItem.key)}
               style={{
                 flex: 1,
                 padding: "12px 16px",
-                background: tab === t.key ? "var(--bg-elev)" : "transparent",
+                background: tab === tabItem.key ? "var(--bg-elev)" : "transparent",
                 border: "none",
                 borderBottom:
-                  tab === t.key
+                  tab === tabItem.key
                     ? "2px solid var(--accent)"
                     : "2px solid transparent",
-                color: tab === t.key ? "var(--text)" : "var(--text-secondary)",
-                fontWeight: tab === t.key ? 600 : 500,
+                color: tab === tabItem.key ? "var(--text)" : "var(--text-secondary)",
+                fontWeight: tab === tabItem.key ? 600 : 500,
                 fontSize: 13,
                 cursor: "pointer",
                 display: "inline-flex",
@@ -297,8 +302,8 @@ export function PipelineMonitor() {
                 transition: "background 120ms ease",
               }}
             >
-              <Icon name={t.icon} size={14} />
-              {t.label}
+              <Icon name={tabItem.icon} size={14} />
+              {t(tabItem.labelKey)}
             </button>
           ))}
         </div>
@@ -306,14 +311,12 @@ export function PipelineMonitor() {
         <div style={{ padding: 16 }}>
           {(query.isLoading || (!isAdmin && me.isLoading)) && (
             <div className="text-sm text-dim" style={{ padding: 16 }}>
-              Loading pipeline state…
+              {t("pipelineMonitor.loading.main")}
             </div>
           )}
           {!me.isLoading && !isAdmin && (
             <div className="text-sm text-dim" style={{ padding: 16 }}>
-              Pipeline Monitor is available to Admin users. Your current
-              role can't view this page — switch roles from the topbar
-              if you have an Admin role available.
+              {t("pipelineMonitor.adminOnlyNotice")}
             </div>
           )}
           {errorMessage && (
@@ -474,6 +477,7 @@ function buildCameraRows(data: PipelineMonitorOut): CameraRow[] {
 }
 
 function CamerasPanel({ data }: { data: PipelineMonitorOut }) {
+  const { t } = useTranslation();
   const rows = buildCameraRows(data);
 
   const recordingActive = data.recording.active;
@@ -484,12 +488,12 @@ function CamerasPanel({ data }: { data: PipelineMonitorOut }) {
       <CountStrip
         items={[
           {
-            label: "Active cameras",
+            label: t("pipelineMonitor.cameras.cards.activeCameras"),
             value: rows.length,
             tone: rows.length > 0 ? "ok" : "neutral",
           },
           {
-            label: "RTSP running",
+            label: t("pipelineMonitor.cameras.cards.rtspRunning"),
             value: data.rtsp.running,
             tone:
               data.rtsp.failed > 0
@@ -499,12 +503,12 @@ function CamerasPanel({ data }: { data: PipelineMonitorOut }) {
                   : "ok",
           },
           {
-            label: "Clip saving",
+            label: t("pipelineMonitor.cameras.cards.clipSaving"),
             value: `${recordingActive} / ${recordingEnabled}`,
             tone: recordingActive > 0 ? "ok" : "neutral",
           },
           {
-            label: "Encoding alive",
+            label: t("pipelineMonitor.cameras.cards.encodingAlive"),
             value: `${data.encoding.alive_workers} / ${data.encoding.total_workers}`,
             tone:
               data.encoding.alive_workers === data.encoding.total_workers
@@ -524,14 +528,14 @@ function CamerasPanel({ data }: { data: PipelineMonitorOut }) {
           }}
         >
           <div className="text-sm text-dim" style={{ marginBottom: 8 }}>
-            No active camera workers. Add a camera under{" "}
+            {t("pipelineMonitor.cameras.emptyPrefix")}{" "}
             <a
               href="/cameras"
               style={{ color: "var(--accent)", textDecoration: "underline" }}
             >
-              Cameras
+              {t("pipelineMonitor.cameras.emptyLink")}
             </a>{" "}
-            and enable its worker to populate this view.
+            {t("pipelineMonitor.cameras.emptySuffix")}
           </div>
         </div>
       ) : (
@@ -553,12 +557,12 @@ function CamerasPanel({ data }: { data: PipelineMonitorOut }) {
           >
             <thead style={{ background: "var(--bg-sunken)" }}>
               <tr>
-                <th style={thStyle}>Camera</th>
-                <th style={thStyle}>Workers</th>
-                <th style={thStyle}>Worker status</th>
-                <th style={thStyle}>RTSP</th>
-                <th style={thStyle}>Clip saving</th>
-                <th style={thStyle}>Processing</th>
+                <th style={thStyle}>{t("pipelineMonitor.cameras.cols.camera")}</th>
+                <th style={thStyle}>{t("pipelineMonitor.cameras.cols.workers")}</th>
+                <th style={thStyle}>{t("pipelineMonitor.cameras.cols.workerStatus")}</th>
+                <th style={thStyle}>{t("pipelineMonitor.cameras.cols.rtsp")}</th>
+                <th style={thStyle}>{t("pipelineMonitor.cameras.cols.clipSaving")}</th>
+                <th style={thStyle}>{t("pipelineMonitor.cameras.cols.processing")}</th>
               </tr>
             </thead>
             <tbody>
@@ -574,6 +578,7 @@ function CamerasPanel({ data }: { data: PipelineMonitorOut }) {
 }
 
 function CameraRowView({ row }: { row: CameraRow }) {
+  const { t } = useTranslation();
   // "Workers per camera": each running CaptureWorker bundles a reader
   // + analyzer thread and (optionally) a ClipWorker for encoding. We
   // report a single integer — the count of live sub-workers per
@@ -594,17 +599,19 @@ function CameraRowView({ row }: { row: CameraRow }) {
 
   const clipBlurb = (() => {
     if (!row.recording) return "—";
-    if (!row.recording.recording_enabled) return "Disabled";
+    if (!row.recording.recording_enabled) return t("pipelineMonitor.cell.disabled");
     if (row.recording.recording_active) {
-      return `Recording (${Math.round(row.recording.elapsed_sec)}s)`;
+      return t("pipelineMonitor.cell.recording", {
+        seconds: Math.round(row.recording.elapsed_sec),
+      });
     }
-    return "Idle";
+    return t("pipelineMonitor.cell.idle");
   })();
 
   const processingBlurb = (() => {
     if (!row.encoding) return "—";
-    if (!row.encoding.alive) return "Worker down";
-    return `queue: ${row.encoding.queue_size}`;
+    if (!row.encoding.alive) return t("pipelineMonitor.cell.workerDown");
+    return t("pipelineMonitor.cell.queue", { n: row.encoding.queue_size });
   })();
 
   return (
@@ -624,7 +631,7 @@ function CameraRowView({ row }: { row: CameraRow }) {
         </span>
       </td>
       <td style={tdStyle}>
-        {row.rtsp ? <StatusBadge status={row.rtsp.status} /> : <em className="text-dim">none</em>}
+        {row.rtsp ? <StatusBadge status={row.rtsp.status} /> : <em className="text-dim">{t("pipelineMonitor.cell.none")}</em>}
       </td>
       <td style={tdStyle} className="mono text-sm">
         {rtspBlurb}
@@ -648,39 +655,40 @@ function CameraRowView({ row }: { row: CameraRow }) {
 // ---------------------------------------------------------------------------
 
 function RtspPanel({ data }: { data: PipelineMonitorOut["rtsp"] }) {
+  const { t } = useTranslation();
   return (
     <>
       <CountStrip
         items={[
-          { label: "Running", value: data.running, tone: "ok" },
+          { label: t("pipelineMonitor.rtsp.cards.running"), value: data.running, tone: "ok" },
           {
-            label: "Reconnecting",
+            label: t("pipelineMonitor.rtsp.cards.reconnecting"),
             value: data.reconnecting,
             tone: data.reconnecting > 0 ? "warn" : "neutral",
           },
           {
-            label: "Failed",
+            label: t("pipelineMonitor.rtsp.cards.failed"),
             value: data.failed,
             tone: data.failed > 0 ? "danger" : "neutral",
           },
-          { label: "Stopped", value: data.stopped, tone: "neutral" },
+          { label: t("pipelineMonitor.rtsp.cards.stopped"), value: data.stopped, tone: "neutral" },
         ]}
       />
       <table className="table" style={{ marginTop: 12 }}>
         <thead>
           <tr>
-            <th>Camera</th>
-            <th style={{ width: 110 }}>Status</th>
-            <th style={{ width: 100 }}>Uptime</th>
-            <th style={{ width: 110 }}>FPS (read / analyze)</th>
-            <th style={{ width: 100 }}>Errors / 5m</th>
+            <th>{t("pipelineMonitor.rtsp.cols.camera")}</th>
+            <th style={{ width: 110 }}>{t("pipelineMonitor.rtsp.cols.status")}</th>
+            <th style={{ width: 100 }}>{t("pipelineMonitor.rtsp.cols.uptime")}</th>
+            <th style={{ width: 110 }}>{t("pipelineMonitor.rtsp.cols.fps")}</th>
+            <th style={{ width: 100 }}>{t("pipelineMonitor.rtsp.cols.errors5m")}</th>
           </tr>
         </thead>
         <tbody>
           {data.workers.length === 0 && (
             <tr>
               <td colSpan={5} className="text-sm text-dim" style={{ padding: 16 }}>
-                No RTSP workers running.
+                {t("pipelineMonitor.rtsp.empty")}
               </td>
             </tr>
           )}
@@ -719,18 +727,19 @@ function RecordingPanel({
 }: {
   data: PipelineMonitorOut["recording"];
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <CountStrip
         items={[
           {
-            label: "Currently recording",
+            label: t("pipelineMonitor.recording.cards.currentlyRecording"),
             value: data.active,
             tone: data.active > 0 ? "ok" : "neutral",
           },
-          { label: "Cameras enabled", value: data.enabled_cameras, tone: "neutral" },
+          { label: t("pipelineMonitor.recording.cards.camerasEnabled"), value: data.enabled_cameras, tone: "neutral" },
           {
-            label: "Cameras idle",
+            label: t("pipelineMonitor.recording.cards.camerasIdle"),
             value: Math.max(0, data.enabled_cameras - data.active),
             tone: "neutral",
           },
@@ -739,19 +748,19 @@ function RecordingPanel({
       <table className="table" style={{ marginTop: 12 }}>
         <thead>
           <tr>
-            <th>Camera</th>
-            <th style={{ width: 110 }}>Recording</th>
-            <th style={{ width: 110 }}>Clip ID</th>
-            <th style={{ width: 90 }}>Elapsed</th>
-            <th style={{ width: 100 }}>Frames</th>
-            <th style={{ width: 90 }}>Chunks</th>
+            <th>{t("pipelineMonitor.recording.cols.camera")}</th>
+            <th style={{ width: 110 }}>{t("pipelineMonitor.recording.cols.recording")}</th>
+            <th style={{ width: 110 }}>{t("pipelineMonitor.recording.cols.clipId")}</th>
+            <th style={{ width: 90 }}>{t("pipelineMonitor.recording.cols.elapsed")}</th>
+            <th style={{ width: 100 }}>{t("pipelineMonitor.recording.cols.frames")}</th>
+            <th style={{ width: 90 }}>{t("pipelineMonitor.recording.cols.chunks")}</th>
           </tr>
         </thead>
         <tbody>
           {data.cameras.length === 0 && (
             <tr>
               <td colSpan={6} className="text-sm text-dim" style={{ padding: 16 }}>
-                No active capture workers — nothing to report on.
+                {t("pipelineMonitor.recording.empty")}
               </td>
             </tr>
           )}
@@ -761,12 +770,12 @@ function RecordingPanel({
               <td>
                 {c.recording_active ? (
                   <Pill tone="danger">
-                    <PulseDot /> Recording
+                    <PulseDot /> {t("pipelineMonitor.cell.recordingLabel")}
                   </Pill>
                 ) : c.recording_enabled ? (
-                  <Pill tone="neutral">Idle</Pill>
+                  <Pill tone="neutral">{t("pipelineMonitor.cell.idle")}</Pill>
                 ) : (
-                  <Pill tone="neutral">Disabled</Pill>
+                  <Pill tone="neutral">{t("pipelineMonitor.cell.disabled")}</Pill>
                 )}
               </td>
               <td className="mono text-sm">
@@ -823,33 +832,34 @@ const UC_META: Record<
 };
 
 function IdentifyPanel({ data }: { data: PipelineMonitorOut["identify"] }) {
+  const { t } = useTranslation();
   return (
     <>
       {/* Aggregate strip — sum across all UCs. */}
       <CountStrip
         items={[
           {
-            label: "Running now",
+            label: t("pipelineMonitor.identify.cards.runningNow"),
             value: data.running,
             tone: data.running > 0 ? "ok" : "neutral",
           },
           {
-            label: "Pending",
+            label: t("pipelineMonitor.identify.cards.pending"),
             value: data.pending,
             tone: data.pending > 0 ? "warn" : "neutral",
           },
           {
-            label: "Processing",
+            label: t("pipelineMonitor.identify.cards.processing"),
             value: data.processing,
             tone: data.processing > 0 ? "ok" : "neutral",
           },
           {
-            label: "Completed today",
+            label: t("pipelineMonitor.identify.cards.completedToday"),
             value: data.completed_today,
             tone: "ok",
           },
           {
-            label: "Failed today",
+            label: t("pipelineMonitor.identify.cards.failedToday"),
             value: data.failed_today,
             tone: data.failed_today > 0 ? "danger" : "neutral",
           },
@@ -868,7 +878,7 @@ function IdentifyPanel({ data }: { data: PipelineMonitorOut["identify"] }) {
           marginBottom: 8,
         }}
       >
-        Per use case
+        {t("pipelineMonitor.identify.perUseCase")}
       </div>
       <div
         style={{
@@ -902,13 +912,11 @@ function IdentifyPanel({ data }: { data: PipelineMonitorOut["identify"] }) {
             marginBottom: 6,
           }}
         >
-          Currently processing
+          {t("pipelineMonitor.identify.currentlyProcessing")}
         </div>
         {data.active_clip_ids.length === 0 ? (
           <div className="text-sm text-dim">
-            No Identify Event jobs running. Trigger one from the Clip
-            Analytics page (⋮ → Identify Event) and it will appear here
-            in real time.
+            {t("pipelineMonitor.identify.empty")}
           </div>
         ) : (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
@@ -951,6 +959,7 @@ function IdentifyPanel({ data }: { data: PipelineMonitorOut["identify"] }) {
 }
 
 function UseCaseStatsCard({ stats }: { stats: IdentifyUseCaseStats }) {
+  const { t } = useTranslation();
   const meta = UC_META[stats.use_case] ?? {
     title: "Unknown",
     subtitle: "",
@@ -1014,7 +1023,7 @@ function UseCaseStatsCard({ stats }: { stats: IdentifyUseCaseStats }) {
               whiteSpace: "nowrap",
             }}
           >
-            {meta.subtitle}
+            {t(`pipelineMonitor.uc.${stats.use_case}`, { defaultValue: meta.subtitle })}
           </div>
         </div>
         {activeInPipeline > 0 && (
@@ -1032,7 +1041,7 @@ function UseCaseStatsCard({ stats }: { stats: IdentifyUseCaseStats }) {
             }}
           >
             <PulseDot color="#fff" />
-            {activeInPipeline} active
+            {t("pipelineMonitor.labels.activeCount", { n: activeInPipeline })}
           </span>
         )}
       </div>
@@ -1047,22 +1056,22 @@ function UseCaseStatsCard({ stats }: { stats: IdentifyUseCaseStats }) {
         }}
       >
         <StatCell
-          label="Pending"
+          label={t("pipelineMonitor.labels.pending")}
           value={stats.pending}
           tone={stats.pending > 0 ? "warn" : "neutral"}
         />
         <StatCell
-          label="Processing"
+          label={t("pipelineMonitor.labels.processing")}
           value={stats.processing}
           tone={stats.processing > 0 ? "ok" : "neutral"}
         />
         <StatCell
-          label="Done today"
+          label={t("pipelineMonitor.labels.doneToday")}
           value={stats.completed_today}
           tone={stats.completed_today > 0 ? "ok" : "neutral"}
         />
         <StatCell
-          label="Failed today"
+          label={t("pipelineMonitor.labels.failedToday")}
           value={stats.failed_today}
           tone={stats.failed_today > 0 ? "danger" : "neutral"}
         />
@@ -1080,7 +1089,7 @@ function UseCaseStatsCard({ stats }: { stats: IdentifyUseCaseStats }) {
           justifyContent: "space-between",
         }}
       >
-        <span>Lifetime completed</span>
+        <span>{t("pipelineMonitor.labels.lifetimeCompleted")}</span>
         <span className="mono" style={{ fontWeight: 600, color: "var(--text)" }}>
           {stats.completed_total.toLocaleString()}
         </span>
@@ -1193,6 +1202,7 @@ function StatusBadge({
 }: {
   status: RtspWorker["status"];
 }) {
+  const { t } = useTranslation();
   const map: Record<RtspWorker["status"], Tone> = {
     starting: "warn",
     running: "ok",
@@ -1200,7 +1210,7 @@ function StatusBadge({
     stopped: "neutral",
     failed: "danger",
   };
-  return <Pill tone={map[status]}>{status}</Pill>;
+  return <Pill tone={map[status]}>{t(`pipelineMonitor.status.${status}`)}</Pill>;
 }
 
 function Pill({
@@ -1366,6 +1376,7 @@ interface QueueStatusOut {
 
 
 function QueuePipelinePanel() {
+  const { t } = useTranslation();
   const q = useQuery({
     queryKey: ["clip-pipeline", "status"],
     queryFn: () => api<QueueStatusOut>("/api/clip-pipeline/status"),
@@ -1376,7 +1387,7 @@ function QueuePipelinePanel() {
   if (q.isLoading) {
     return (
       <div className="text-sm text-dim" style={{ padding: 16 }}>
-        Loading queue pipeline…
+        {t("pipelineMonitor.loading.queue")}
       </div>
     );
   }
@@ -1386,7 +1397,7 @@ function QueuePipelinePanel() {
         className="text-sm"
         style={{ padding: 16, color: "var(--danger-text)" }}
       >
-        Could not load the queue pipeline. Requires Admin/HR role.
+        {t("pipelineMonitor.queue.loadError")}
       </div>
     );
   }
@@ -1421,11 +1432,14 @@ function QueuePipelinePanel() {
           }}
         />
         <span style={{ fontWeight: 600 }}>
-          {d.running ? "Pipeline running" : "Pipeline stopped"}
+          {d.running ? t("pipelineMonitor.queue.running") : t("pipelineMonitor.queue.stopped")}
         </span>
         <span style={{ color: "var(--text-secondary)" }}>
-          · Cropping workers: {d.config.cropping_workers} · Matching workers:{" "}
-          {d.config.matching_workers} · Queue cap: {d.config.queue_max_depth}
+          {t("pipelineMonitor.queue.config", {
+            cropping: d.config.cropping_workers,
+            matching: d.config.matching_workers,
+            cap: d.config.queue_max_depth,
+          })}
         </span>
       </div>
 
@@ -1438,15 +1452,15 @@ function QueuePipelinePanel() {
         }}
       >
         <StageCard
-          title="Face Cropping Queue"
-          subtitle="Decodes the clip + runs detection per UC; emits face_crops + a match job."
+          title={t("pipelineMonitor.queue.cropTitle")}
+          subtitle={t("pipelineMonitor.queue.cropSubtitle")}
           stage={d.cropping}
           accent="#6366f1"
           icon="camera"
         />
         <StageCard
-          title="Face Matching Queue"
-          subtitle="Runs matcher_cache against the just-extracted embeddings and finalises clip_processing_results."
+          title={t("pipelineMonitor.queue.matchTitle")}
+          subtitle={t("pipelineMonitor.queue.matchSubtitle")}
           stage={d.matching}
           accent="#10b981"
           icon="user"
@@ -1465,7 +1479,7 @@ function QueuePipelinePanel() {
             marginBottom: 8,
           }}
         >
-          Batch History
+          {t("pipelineMonitor.queue.batchHistory")}
         </div>
         {d.batches.length === 0 ? (
           <div
@@ -1477,9 +1491,9 @@ function QueuePipelinePanel() {
               borderRadius: 8,
             }}
           >
-            No batches submitted yet. Submit one via{" "}
-            <code>POST /api/clip-pipeline/submit</code> or from the
-            forthcoming Clip Analytics action.
+            {t("pipelineMonitor.queue.batchEmptyPrefix")}{" "}
+            <code>POST /api/clip-pipeline/submit</code>{" "}
+            {t("pipelineMonitor.queue.batchEmptySuffix")}
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -1507,6 +1521,7 @@ function StageCard({
   accent: string;
   icon: IconName;
 }) {
+  const { t } = useTranslation();
   return (
     <div
       style={{
@@ -1557,11 +1572,11 @@ function StageCard({
           background: "var(--border)",
         }}
       >
-        <MiniStat label="Queued" value={stage.queue_depth} accent={accent} />
-        <MiniStat label="Processing" value={stage.in_flight} accent={accent} />
-        <MiniStat label="Done (lifetime)" value={stage.lifetime_processed} />
+        <MiniStat label={t("pipelineMonitor.labels.queued")} value={stage.queue_depth} accent={accent} />
+        <MiniStat label={t("pipelineMonitor.labels.processing")} value={stage.in_flight} accent={accent} />
+        <MiniStat label={t("pipelineMonitor.labels.doneLifetime")} value={stage.lifetime_processed} />
         <MiniStat
-          label="Failed"
+          label={t("pipelineMonitor.labels.failed")}
           value={stage.lifetime_failed}
           accent={stage.lifetime_failed > 0 ? "var(--danger-text)" : undefined}
         />
@@ -1577,7 +1592,7 @@ function StageCard({
             marginBottom: 6,
           }}
         >
-          Active workers
+          {t("pipelineMonitor.queue.activeWorkers")}
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           {stage.workers.map((w) => (
@@ -1615,7 +1630,7 @@ function StageCard({
                 {w.busy
                   ? w.current_job +
                     (w.running_for_s != null ? ` · ${w.running_for_s.toFixed(1)}s` : "")
-                  : "idle"}
+                  : t("pipelineMonitor.labels.idleLower")}
               </span>
             </div>
           ))}
@@ -1670,6 +1685,7 @@ function MiniStat({
 
 
 function BatchCard({ batch }: { batch: QueueBatchOut }) {
+  const { t } = useTranslation();
   const pct =
     batch.total_jobs > 0
       ? Math.round(
@@ -1732,7 +1748,7 @@ function BatchCard({ batch }: { batch: QueueBatchOut }) {
             background: done ? "var(--success-soft)" : "rgba(99,102,241,0.10)",
           }}
         >
-          {done ? "Completed" : `${pct}%`}
+          {done ? t("pipelineMonitor.labels.completed") : `${pct}%`}
         </span>
       </div>
 
@@ -1765,24 +1781,24 @@ function BatchCard({ batch }: { batch: QueueBatchOut }) {
           marginBottom: 10,
         }}
       >
-        <ScoreCell label="Selected" value={batch.total_jobs} />
+        <ScoreCell label={t("pipelineMonitor.labels.selected")} value={batch.total_jobs} />
         <ScoreCell
-          label="Completed"
+          label={t("pipelineMonitor.labels.completed")}
           value={batch.completed_jobs}
           accent="var(--success-text)"
         />
         <ScoreCell
-          label="Skipped"
+          label={t("pipelineMonitor.labels.skipped")}
           value={batch.skipped_jobs}
           accent="var(--text-secondary)"
         />
         <ScoreCell
-          label="Failed"
+          label={t("pipelineMonitor.labels.failed")}
           value={batch.failed_jobs}
           accent={batch.failed_jobs > 0 ? "var(--danger-text)" : undefined}
         />
         <ScoreCell
-          label="Remaining"
+          label={t("pipelineMonitor.labels.remaining")}
           value={batch.remaining_jobs}
           accent="var(--accent, #6366f1)"
         />
@@ -1800,17 +1816,17 @@ function BatchCard({ batch }: { batch: QueueBatchOut }) {
       >
         <span>
           <strong style={{ color: "var(--text)" }}>{batch.queued_jobs}</strong>{" "}
-          waiting in queue
+          {t("pipelineMonitor.queue.waitingInQueue")}
         </span>
         <span>·</span>
         <span>
           <strong style={{ color: "var(--text)" }}>{batch.cropping_now}</strong>{" "}
-          cropping now
+          {t("pipelineMonitor.queue.croppingNow")}
         </span>
         <span>·</span>
         <span>
           <strong style={{ color: "var(--text)" }}>{batch.matching_now}</strong>{" "}
-          matching now
+          {t("pipelineMonitor.queue.matchingNow")}
         </span>
       </div>
 
@@ -2016,6 +2032,7 @@ interface WorkersSnapshot {
 
 
 function WorkersTablePanel() {
+  const { t } = useTranslation();
   const q = useQuery({
     queryKey: ["pipeline-monitor", "workers"],
     queryFn: () => api<WorkersSnapshot>("/api/pipeline-monitor/workers"),
@@ -2026,7 +2043,7 @@ function WorkersTablePanel() {
   if (q.isLoading) {
     return (
       <div className="text-sm text-dim" style={{ padding: 16 }}>
-        Loading workers…
+        {t("pipelineMonitor.loading.workers")}
       </div>
     );
   }
@@ -2036,7 +2053,7 @@ function WorkersTablePanel() {
         className="text-sm"
         style={{ padding: 16, color: "var(--danger-text)" }}
       >
-        Could not load worker snapshot. Endpoint requires Admin or HR role.
+        {t("pipelineMonitor.workers.loadError")}
       </div>
     );
   }
@@ -2058,17 +2075,17 @@ function WorkersTablePanel() {
         }}
       >
         <span style={{ fontWeight: 700 }}>
-          {d.summary.total_workers} workers
+          {t("pipelineMonitor.workers.totalWorkers", { n: d.summary.total_workers })}
         </span>
         <span>·</span>
         <span style={{ color: "var(--success-text)" }}>
-          {d.summary.running} running
+          {t("pipelineMonitor.workers.running", { n: d.summary.running })}
         </span>
         {d.summary.degraded > 0 && (
           <>
             <span>·</span>
             <span style={{ color: "var(--warning-text)" }}>
-              {d.summary.degraded} degraded
+              {t("pipelineMonitor.workers.degraded", { n: d.summary.degraded })}
             </span>
           </>
         )}
@@ -2076,20 +2093,22 @@ function WorkersTablePanel() {
           <>
             <span>·</span>
             <span style={{ color: "var(--danger-text)" }}>
-              {d.summary.stalled} stalled
+              {t("pipelineMonitor.workers.stalled", { n: d.summary.stalled })}
             </span>
           </>
         )}
         <span style={{ marginInlineStart: "auto", color: "var(--text-secondary)" }}>
-          Updated {new Date(d.generated_at).toLocaleTimeString()} ·{" "}
-          {d.took_ms.toFixed(0)} ms
+          {t("pipelineMonitor.workers.updated", {
+            time: new Date(d.generated_at).toLocaleTimeString(),
+            ms: d.took_ms.toFixed(0),
+          })}
         </span>
         <button
           type="button"
           onClick={() => void q.refetch()}
           disabled={q.isFetching}
-          title="Force an immediate refresh — bypasses the 1.5 s polling interval."
-          aria-label="Sync workers now"
+          title={t("pipelineMonitor.workers.syncTitle")}
+          aria-label={t("pipelineMonitor.workers.syncAria")}
           style={{
             display: "inline-flex",
             alignItems: "center",
@@ -2110,7 +2129,7 @@ function WorkersTablePanel() {
             size={12}
             {...(q.isFetching ? { className: "icon-spin" } : {})}
           />
-          {q.isFetching ? "Syncing…" : "Sync now"}
+          {q.isFetching ? t("pipelineMonitor.workers.syncing") : t("pipelineMonitor.workers.syncNow")}
         </button>
       </div>
 
@@ -2126,16 +2145,16 @@ function WorkersTablePanel() {
         >
           <thead style={{ background: "var(--bg-sunken)" }}>
             <tr>
-              <th style={thStyle}>Worker</th>
-              <th style={thStyle}>Status</th>
-              <th style={{ ...thStyle, textAlign: "right" }}>Active</th>
-              <th style={{ ...thStyle, textAlign: "right" }}>Queue</th>
-              <th style={{ ...thStyle, textAlign: "right" }}>Processing</th>
-              <th style={{ ...thStyle, textAlign: "right" }}>Completed</th>
-              <th style={{ ...thStyle, textAlign: "right" }}>Failed</th>
-              <th style={thStyle}>Current Task</th>
-              <th style={{ ...thStyle, textAlign: "right" }}>Speed</th>
-              <th style={thStyle}>Health</th>
+              <th style={thStyle}>{t("pipelineMonitor.labels.worker")}</th>
+              <th style={thStyle}>{t("pipelineMonitor.labels.status")}</th>
+              <th style={{ ...thStyle, textAlign: "right" }}>{t("pipelineMonitor.labels.active")}</th>
+              <th style={{ ...thStyle, textAlign: "right" }}>{t("pipelineMonitor.labels.queued")}</th>
+              <th style={{ ...thStyle, textAlign: "right" }}>{t("pipelineMonitor.labels.processing")}</th>
+              <th style={{ ...thStyle, textAlign: "right" }}>{t("pipelineMonitor.labels.completed")}</th>
+              <th style={{ ...thStyle, textAlign: "right" }}>{t("pipelineMonitor.labels.failed")}</th>
+              <th style={thStyle}>{t("pipelineMonitor.labels.currentTask")}</th>
+              <th style={{ ...thStyle, textAlign: "right" }}>{t("pipelineMonitor.labels.speed")}</th>
+              <th style={thStyle}>{t("pipelineMonitor.labels.health")}</th>
             </tr>
           </thead>
           <tbody>
@@ -2357,6 +2376,7 @@ function paletteForHealth(health: string): { bg: string; fg: string } {
 // individual rows do NOT trigger recovery (by design — they're
 // narrow operator actions).
 function RestartAllWorkersAction() {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [lastResult, setLastResult] =
     useState<RestartAllAndRecoverResult | null>(null);
@@ -2372,7 +2392,7 @@ function RestartAllWorkersAction() {
         disabled={restartAll.isPending}
       >
         <Icon name="refresh" size={12} />
-        Restart all workers
+        {t("pipelineMonitor.actions.restartAll")}
       </button>
       {open && (
         <RestartAllModal
@@ -2413,25 +2433,29 @@ function RestartAllWorkersAction() {
               alignItems: "flex-start",
             }}
           >
-            <strong>Restart complete</strong>
+            <strong>{t("pipelineMonitor.workers.restartComplete")}</strong>
             <button
               type="button"
               className="icon-btn"
-              aria-label="Dismiss"
+              aria-label={t("common.dismiss")}
               onClick={() => setLastResult(null)}
             >
               <Icon name="x" size={12} />
             </button>
           </div>
           <div style={{ marginTop: 4, color: "var(--text-secondary)" }}>
-            Capture workers: {lastResult.capture_restarted}/
-            {lastResult.capture_total} restarted
+            {t("pipelineMonitor.workers.captureRestarted", {
+              done: lastResult.capture_restarted,
+              total: lastResult.capture_total,
+            })}
           </div>
           <div style={{ color: "var(--text-secondary)" }}>
-            Recovery: {lastResult.recovery.scanned} scanned ·{" "}
-            {lastResult.recovery.class_a} status-only ·{" "}
-            {lastResult.recovery.class_b} match-only ·{" "}
-            {lastResult.recovery.class_c} full restart
+            {t("pipelineMonitor.workers.recoveryLine", {
+              scanned: lastResult.recovery.scanned,
+              a: lastResult.recovery.class_a,
+              b: lastResult.recovery.class_b,
+              c: lastResult.recovery.class_c,
+            })}
           </div>
         </div>
       )}

@@ -10,6 +10,7 @@
 // between preview and confirm.
 
 import { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../../api/client";
 import { ModalShell } from "../../components/DrawerShell";
@@ -28,6 +29,7 @@ interface Props {
 type Step = "select" | "preview" | "result";
 
 export function ImportModal({ onClose }: Props) {
+  const { t } = useTranslation();
   const [step, setStep] = useState<Step>("select");
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<ImportPreviewResult | null>(null);
@@ -95,19 +97,21 @@ export function ImportModal({ onClose }: Props) {
             <div>
               <h3 className="card-title">
                 {step === "preview"
-                  ? "Review and confirm import"
+                  ? t("importEmployees.titlePreview")
                   : step === "result"
-                    ? "Import complete"
-                    : "Import employees"}
+                    ? t("importEmployees.titleComplete")
+                    : t("importEmployees.title")}
               </h3>
               <p className="card-sub">
                 {step === "select" && (
                   <>
-                    Required columns:{" "}
+                    {t("importEmployees.subSelect.required")}{" "}
                     <span className="mono">employee_code</span>,{" "}
                     <span className="mono">full_name</span>,{" "}
-                    <span className="mono">department</span> (or{" "}
-                    <span className="mono">department_code</span>). Optional:{" "}
+                    <span className="mono">department</span> (
+                    {t("importEmployees.subSelect.or")}{" "}
+                    <span className="mono">department_code</span>).{" "}
+                    {t("importEmployees.subSelect.optional")}{" "}
                     <span className="mono">email</span>,{" "}
                     <span className="mono">designation</span>,{" "}
                     <span className="mono">phone</span>,{" "}
@@ -123,21 +127,21 @@ export function ImportModal({ onClose }: Props) {
                         textDecoration: "underline",
                       }}
                     >
-                      Download sample template
+                      {t("importEmployees.subSelect.downloadLink")}
                     </a>
-                    {" "}with three example rows + a Field guide sheet.
+                    {" "}{t("importEmployees.subSelect.withRowsAndGuide")}
                   </>
                 )}
                 {step === "preview" && preview && (
                   <>
-                    {preview.rows.length} row(s) ready,{" "}
-                    {preview.errors.length} error(s). Defaults are
-                    highlighted — joining date will fall back to today
-                    when the cell is blank.
+                    {t("importEmployees.subPreview", {
+                      rows: preview.rows.length,
+                      errors: preview.errors.length,
+                    })}
                   </>
                 )}
                 {step === "result" && (
-                  <>The import has finished. Review the counts below.</>
+                  <>{t("importEmployees.subResult")}</>
                 )}
               </p>
             </div>
@@ -147,8 +151,8 @@ export function ImportModal({ onClose }: Props) {
               disabled={
                 previewMutation.isPending || importMutation.isPending
               }
-              title="Close"
-              aria-label="Close"
+              title={t("importEmployees.close")}
+              aria-label={t("importEmployees.close")}
             >
               <Icon name="x" size={14} />
             </button>
@@ -187,7 +191,7 @@ export function ImportModal({ onClose }: Props) {
                     <Icon name="upload" size={20} />
                   </div>
                   <div>
-                    Drop an .xlsx or .csv here, or{" "}
+                    {t("importEmployees.dropPrompt")}{" "}
                     <label
                       style={{
                         textDecoration: "underline",
@@ -195,7 +199,7 @@ export function ImportModal({ onClose }: Props) {
                         color: "var(--text)",
                       }}
                     >
-                      choose a file
+                      {t("importEmployees.chooseFile")}
                       <input
                         type="file"
                         accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.csv,text/csv"
@@ -231,9 +235,7 @@ export function ImportModal({ onClose }: Props) {
                   }}
                 >
                   <span>
-                    Not sure about the format? Grab the sample workbook —
-                    three example rows plus a Field guide sheet
-                    documenting every column.
+                    {t("importEmployees.formatHint")}
                   </span>
                   <a
                     className="btn btn-sm"
@@ -241,7 +243,7 @@ export function ImportModal({ onClose }: Props) {
                     style={{ flexShrink: 0 }}
                   >
                     <Icon name="download" size={11} />
-                    Download template
+                    {t("importEmployees.downloadTemplate")}
                   </a>
                 </div>
 
@@ -256,7 +258,7 @@ export function ImportModal({ onClose }: Props) {
                       fontSize: 12.5,
                     }}
                   >
-                    {importErrorMessage(previewMutation.error)}
+                    {importErrorMessage(previewMutation.error, t)}
                   </div>
                 )}
 
@@ -272,7 +274,7 @@ export function ImportModal({ onClose }: Props) {
                     onClick={onClose}
                     disabled={previewMutation.isPending}
                   >
-                    Cancel
+                    {t("importEmployees.cancel")}
                   </button>
                   <button
                     className="btn btn-primary"
@@ -281,8 +283,8 @@ export function ImportModal({ onClose }: Props) {
                   >
                     <Icon name="eye" size={12} />
                     {previewMutation.isPending
-                      ? "Parsing…"
-                      : "Preview rows"}
+                      ? t("importEmployees.parsing")
+                      : t("importEmployees.previewRows")}
                   </button>
                 </div>
               </>
@@ -292,21 +294,18 @@ export function ImportModal({ onClose }: Props) {
               <>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <span className="pill pill-info">
-                    {preview.rows.length} ready
+                    {t("importEmployees.pillReady", { count: preview.rows.length })}
                   </span>
                   {preview.errors.length > 0 && (
                     <span className="pill pill-warning">
-                      {preview.errors.length} error(s)
+                      {t("importEmployees.pillErrors", { count: preview.errors.length })}
                     </span>
                   )}
                   {preview.rows.some((r) => r.defaulted_joining_date) && (
                     <span className="pill pill-neutral">
-                      joining_date defaulted to today on{" "}
-                      {
-                        preview.rows.filter((r) => r.defaulted_joining_date)
-                          .length
-                      }{" "}
-                      row(s)
+                      {t("importEmployees.pillDefaultedJoining", {
+                        count: preview.rows.filter((r) => r.defaulted_joining_date).length,
+                      })}
                     </span>
                   )}
                 </div>
@@ -329,7 +328,7 @@ export function ImportModal({ onClose }: Props) {
                         letterSpacing: "0.04em",
                       }}
                     >
-                      Row errors (these will be skipped)
+                      {t("importEmployees.rowErrorsHeader")}
                     </div>
                     <div style={{ maxHeight: 120, overflowY: "auto" }}>
                       {preview.errors.map((e) => (
@@ -364,17 +363,17 @@ export function ImportModal({ onClose }: Props) {
                   <table className="table" style={{ minWidth: 1080 }}>
                     <thead>
                       <tr>
-                        <th style={{ width: 50 }}>Row</th>
-                        <th>Code</th>
-                        <th>Name</th>
-                        <th>Email</th>
-                        <th>Phone</th>
-                        <th>Designation</th>
-                        <th>Department</th>
-                        <th>Division</th>
-                        <th>Section</th>
-                        <th>Joining</th>
-                        <th>Relieving</th>
+                        <th style={{ width: 50 }}>{t("importEmployees.col.row")}</th>
+                        <th>{t("importEmployees.col.code")}</th>
+                        <th>{t("importEmployees.col.name")}</th>
+                        <th>{t("importEmployees.col.email")}</th>
+                        <th>{t("importEmployees.col.phone")}</th>
+                        <th>{t("importEmployees.col.designation")}</th>
+                        <th>{t("importEmployees.col.department")}</th>
+                        <th>{t("importEmployees.col.division")}</th>
+                        <th>{t("importEmployees.col.section")}</th>
+                        <th>{t("importEmployees.col.joining")}</th>
+                        <th>{t("importEmployees.col.relieving")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -414,7 +413,7 @@ export function ImportModal({ onClose }: Props) {
                             }
                             title={
                               r.defaulted_joining_date
-                                ? "Defaulted to today"
+                                ? t("importEmployees.defaultedToToday")
                                 : undefined
                             }
                           >
@@ -433,7 +432,7 @@ export function ImportModal({ onClose }: Props) {
                             className="text-sm text-dim"
                             style={{ padding: 16 }}
                           >
-                            No importable rows — check the errors above.
+                            {t("importEmployees.noImportable")}
                           </td>
                         </tr>
                       )}
@@ -452,7 +451,7 @@ export function ImportModal({ onClose }: Props) {
                       fontSize: 12.5,
                     }}
                   >
-                    {importErrorMessage(importMutation.error)}
+                    {importErrorMessage(importMutation.error, t)}
                   </div>
                 )}
 
@@ -469,7 +468,7 @@ export function ImportModal({ onClose }: Props) {
                     disabled={importMutation.isPending}
                   >
                     <Icon name="chevronLeft" size={11} />
-                    Back
+                    {t("importEmployees.back")}
                   </button>
                   <div style={{ display: "flex", gap: 8 }}>
                     <button
@@ -477,7 +476,7 @@ export function ImportModal({ onClose }: Props) {
                       onClick={onClose}
                       disabled={importMutation.isPending}
                     >
-                      Cancel
+                      {t("importEmployees.cancel")}
                     </button>
                     <button
                       className="btn btn-primary"
@@ -488,8 +487,8 @@ export function ImportModal({ onClose }: Props) {
                     >
                       <Icon name="upload" size={12} />
                       {importMutation.isPending
-                        ? "Importing…"
-                        : `Confirm import (${preview.rows.length})`}
+                        ? t("importEmployees.importing")
+                        : t("importEmployees.confirmImport", { count: preview.rows.length })}
                     </button>
                   </div>
                 </div>
@@ -500,10 +499,10 @@ export function ImportModal({ onClose }: Props) {
               <>
                 <div style={{ display: "flex", gap: 8 }}>
                   <span className="pill pill-success">
-                    created {result.created}
+                    {t("importEmployees.resultCreated", { count: result.created })}
                   </span>
                   <span className="pill pill-info">
-                    updated {result.updated}
+                    {t("importEmployees.resultUpdated", { count: result.updated })}
                   </span>
                   <span
                     className={`pill ${
@@ -512,7 +511,7 @@ export function ImportModal({ onClose }: Props) {
                         : "pill-neutral"
                     }`}
                   >
-                    errors {result.errors.length}
+                    {t("importEmployees.resultErrors", { count: result.errors.length })}
                   </span>
                 </div>
                 {result.errors.length > 0 && (
@@ -527,13 +526,13 @@ export function ImportModal({ onClose }: Props) {
                         margin: "6px 0",
                       }}
                     >
-                      Row-level errors
+                      {t("importEmployees.rowLevelErrors")}
                     </div>
                     <table className="table">
                       <thead>
                         <tr>
-                          <th style={{ width: 80 }}>Row</th>
-                          <th>Message</th>
+                          <th style={{ width: 80 }}>{t("importEmployees.col.row")}</th>
+                          <th>{t("importEmployees.col.message")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -557,7 +556,7 @@ export function ImportModal({ onClose }: Props) {
                 >
                   <button className="btn btn-primary" onClick={onClose}>
                     <Icon name="check" size={12} />
-                    Done
+                    {t("importEmployees.done")}
                   </button>
                 </div>
               </>
@@ -569,12 +568,15 @@ export function ImportModal({ onClose }: Props) {
   );
 }
 
-function importErrorMessage(err: unknown): string {
+function importErrorMessage(
+  err: unknown,
+  t: (key: string) => string,
+): string {
   if (err instanceof ApiError) {
     const detail = (err.body as { detail?: unknown } | null)?.detail;
     if (typeof detail === "string" && detail.length > 0) return detail;
-    if (err.status === 413) return "File is too large.";
-    if (err.status === 415) return "Only .xlsx and .csv files are accepted.";
+    if (err.status === 413) return t("importEmployees.errTooLarge");
+    if (err.status === 415) return t("importEmployees.errNotXlsxCsv");
   }
-  return "Import failed. Check the file and try again.";
+  return t("importEmployees.errGeneric");
 }

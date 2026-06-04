@@ -101,9 +101,9 @@ export function DepartmentsPage() {
             <tr>
               <th style={{ width: 140 }}>{t("departments.col.code")}</th>
               <th>{t("departments.col.name")}</th>
-              <th style={{ width: 180 }}>Division</th>
+              <th style={{ width: 180 }}>{t("departments.col.division")}</th>
               <th style={{ width: 120 }}>{t("departments.col.employees")}</th>
-              <th style={{ minWidth: 220 }}>Managers</th>
+              <th style={{ minWidth: 220 }}>{t("departments.col.managers")}</th>
               <th style={{ width: 240, textAlign: "right" }}>
                 {t("departments.col.actions")}
               </th>
@@ -146,7 +146,7 @@ export function DepartmentsPage() {
                       {d.division_name}
                     </span>
                   ) : (
-                    <span className="text-xs text-dim">— None —</span>
+                    <span className="text-xs text-dim">{t("departments.divisionNone")}</span>
                   )}
                 </td>
                 <td className="mono text-sm">{d.employee_count}</td>
@@ -164,10 +164,10 @@ export function DepartmentsPage() {
                     <button
                       className="btn btn-sm"
                       onClick={() => setManagingDept(d)}
-                      title="Assign or remove department managers"
+                      title={t("departments.managersBtnTitle")}
                     >
                       <Icon name="users" size={11} />
-                      Managers
+                      {t("departments.managersBtn")}
                     </button>
                     <button
                       className="btn btn-sm"
@@ -247,20 +247,21 @@ export function DepartmentsPage() {
 // ---------------------------------------------------------------------------
 
 function ManagerChips({ departmentId }: { departmentId: number }) {
+  const { t } = useTranslation();
   const list = useDepartmentManagers(departmentId);
   if (list.isLoading) {
-    return <span className="text-xs text-dim">Loading…</span>;
+    return <span className="text-xs text-dim">{t("departments.chips.loading")}</span>;
   }
   if (list.isError) {
     return (
       <span className="text-xs" style={{ color: "var(--danger-text)" }}>
-        Failed to load
+        {t("departments.chips.loadFailed")}
       </span>
     );
   }
   const items = list.data?.items ?? [];
   if (items.length === 0) {
-    return <span className="text-xs text-dim">— No managers assigned —</span>;
+    return <span className="text-xs text-dim">{t("departments.chips.noManagers")}</span>;
   }
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
@@ -296,6 +297,7 @@ function DepartmentManagersModal({
   department: Department;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const assigned = useDepartmentManagers(department.id);
   const assign = useAssignDepartmentManager();
   const remove = useRemoveDepartmentManager();
@@ -323,7 +325,7 @@ function DepartmentManagersModal({
       { departmentId: department.id, userId: Number(pickedId) },
       {
         onSuccess: () => {
-          toast.success("Manager assigned to department.");
+          toast.success(t("departments.managersModal.assign") + ".");
           setPickedId("");
         },
         onError: (err) => {
@@ -331,7 +333,7 @@ function DepartmentManagersModal({
             err instanceof ApiError
               ? (err.body as { detail?: { message?: string } })?.detail?.message
               : null;
-          toast.error(detail ?? "Assignment failed.");
+          toast.error(detail ?? t("departments.managersModal.assign") + " failed.");
         },
       },
     );
@@ -341,8 +343,8 @@ function DepartmentManagersModal({
     remove.mutate(
       { departmentId: department.id, userId: m.user_id },
       {
-        onSuccess: () => toast.success(`${m.full_name} removed.`),
-        onError: () => toast.error("Remove failed."),
+        onSuccess: () => toast.success(`${m.full_name} ${t("departments.managersModal.remove")}.`),
+        onError: () => toast.error(t("departments.managersModal.remove") + " failed."),
       },
     );
   };
@@ -378,16 +380,14 @@ function DepartmentManagersModal({
               className="text-xs text-dim"
               style={{ margin: "4px 0 0", maxWidth: 440 }}
             >
-              Managers added here can see every employee in this department
-              on the dashboard, attendance, calendar, approvals, and reports
-              — automatically, regardless of designation.
+              {t("departments.managersModal.desc")}
             </p>
           </div>
           <button
             type="button"
             className="icon-btn"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t("common.close")}
           >
             <Icon name="x" size={14} />
           </button>
@@ -403,7 +403,7 @@ function DepartmentManagersModal({
             marginBottom: 6,
           }}
         >
-          Add a manager
+          {t("departments.managersModal.addSection")}
         </div>
         {!candidates.isLoading &&
           (candidates.data?.items.length ?? 0) === 0 && (
@@ -419,11 +419,7 @@ function DepartmentManagersModal({
                 color: "var(--text-secondary)",
               }}
             >
-              No Manager-role users in this workspace yet. Open the
-              employee on the{" "}
-              <strong>Employees</strong> page, click <strong>Edit</strong>,
-              and tick the <strong>Manager</strong> role — they'll appear in
-              this picker.
+              {t("departments.managersModal.noManagerUsers")}
             </div>
           )}
 
@@ -450,12 +446,12 @@ function DepartmentManagersModal({
           >
             <option value="">
               {candidates.isLoading
-                ? "Loading managers…"
+                ? t("departments.managersModal.loadingManagers")
                 : (candidates.data?.items.length ?? 0) === 0
-                  ? "No Manager-role users — promote someone first"
+                  ? t("departments.managersModal.noManagerUsersOption")
                   : available.length === 0
-                    ? "Every Manager is already assigned"
-                    : "— Pick a Manager-role user —"}
+                    ? t("departments.managersModal.allAssigned")
+                    : t("departments.managersModal.pickPlaceholder")}
             </option>
             {available.map((u) => (
               <option key={u.id} value={u.id}>
@@ -470,7 +466,7 @@ function DepartmentManagersModal({
             disabled={pickedId === "" || assign.isPending}
           >
             <Icon name="check" size={11} />
-            {assign.isPending ? "Assigning…" : "Assign"}
+            {assign.isPending ? t("departments.managersModal.assigning") : t("departments.managersModal.assign")}
           </button>
         </div>
 
@@ -484,15 +480,15 @@ function DepartmentManagersModal({
             marginBottom: 6,
           }}
         >
-          Currently assigned
+          {t("departments.managersModal.assignedSection")}
         </div>
         {assigned.isLoading && (
-          <div className="text-sm text-dim">Loading…</div>
+          <div className="text-sm text-dim">{t("departments.managersModal.loadingAssigned")}</div>
         )}
         {!assigned.isLoading &&
           (assigned.data?.items.length ?? 0) === 0 && (
             <div className="text-sm text-dim">
-              No managers assigned. Pick one above.
+              {t("departments.managersModal.noAssigned")}
             </div>
           )}
         {assigned.data?.items.map((m) => (
@@ -528,10 +524,10 @@ function DepartmentManagersModal({
               className="btn btn-sm"
               onClick={() => onRemove(m)}
               disabled={remove.isPending}
-              title="Remove from this department"
+              title={t("departments.managersModal.removeBtnTitle")}
             >
               <Icon name="x" size={11} />
-              Remove
+              {t("departments.managersModal.remove")}
             </button>
           </div>
         ))}
@@ -654,21 +650,19 @@ function DepartmentImportModal({
           {result && (
             <div style={{ marginTop: 12 }}>
               <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                <span className="pill pill-success">created {result.created}</span>
-                <span className="pill pill-info">updated {result.updated}</span>
-                <span
-                  className={`pill ${result.errors > 0 ? "pill-warning" : "pill-neutral"}`}
-                >
-                  errors {result.errors}
+                <span className="pill pill-success">{t("departments.importResult.created", { n: result.created })}</span>
+                <span className="pill pill-info">{t("departments.importResult.updated", { n: result.updated })}</span>
+                <span className={`pill ${result.errors > 0 ? "pill-warning" : "pill-neutral"}`}>
+                  {t("departments.importResult.errors", { n: result.errors })}
                 </span>
               </div>
               {result.errors > 0 && (
                 <table className="table">
                   <thead>
                     <tr>
-                      <th style={{ width: 60 }}>Row</th>
-                      <th style={{ width: 120 }}>Code</th>
-                      <th>Error</th>
+                      <th style={{ width: 60 }}>{t("departments.importResult.colRow")}</th>
+                      <th style={{ width: 120 }}>{t("departments.importResult.colCode")}</th>
+                      <th>{t("departments.importResult.colError")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -881,7 +875,7 @@ function DepartmentFormModal({
             className="text-xs text-dim"
             style={{ display: "block", fontWeight: 500 }}
           >
-            Division
+            {t("departments.field.division")}
             <select
               value={divisionId}
               onChange={(e) =>
@@ -900,7 +894,7 @@ function DepartmentFormModal({
                 color: "var(--text)",
               }}
             >
-              <option value="">— No division —</option>
+              <option value="">{t("departments.divisionNoneForm")}</option>
               {divisions.data?.items.map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.code} · {d.name}
@@ -911,8 +905,7 @@ function DepartmentFormModal({
               className="text-xs text-dim"
               style={{ display: "block", marginTop: 4 }}
             >
-              Optional. Division managers see every employee under their
-              division automatically.
+              {t("departments.field.divisionHint")}
             </span>
           </label>
           {error && (

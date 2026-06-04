@@ -193,7 +193,18 @@ class ReaderConfig:
     # not throttled here — its only pacing is whatever the RTSP source
     # delivers. Detection is the expensive call, so the analyzer is
     # what we cap.
-    analyzer_max_fps: float = 6.0
+    #
+    # Issue #6 (capacity): all cameras serialise through one CPU-bound
+    # ``_detect_lock`` lane (~1000 ms/s). At det_size 320 a busy frame
+    # costs ~180 ms/face, so 6 fps let a SINGLE camera with one face in
+    # frame demand ~1140 ms/s and saturate the lane. Default lowered
+    # 6 → 3 to halve per-camera lane demand; attendance is dwell-based
+    # so 3 fps is ample, and ``force_detect_every_s`` still guarantees a
+    # detect floor. NOTE: this MITIGATES, it does not remove the ceiling
+    # — busy multi-face / multi-camera sites must still be sized (limit
+    # worker_enabled cameras) or moved to GPU. Per-camera override via
+    # capture_config remains available.
+    analyzer_max_fps: float = 3.0
 
     iou_threshold: float = 0.3
     track_idle_timeout_s: float = 3.0

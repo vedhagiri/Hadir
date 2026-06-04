@@ -9,6 +9,7 @@
 // input, no font upload (BRD FR-BRD-002).
 
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { ApiError } from "../api/client";
@@ -52,6 +53,7 @@ export function BrandingForm({
   onLogoDelete,
   applyToDocument = false,
 }: Props) {
+  const { t } = useTranslation();
   const options = useBrandingOptions();
   const queryClient = useQueryClient();
   const [primaryKey, setPrimaryKey] = useState<BrandingPaletteKey>(
@@ -77,12 +79,12 @@ export function BrandingForm({
   }, [branding.primary_color_key, branding.font_key, branding.display_name]);
 
   if (options.isLoading) {
-    return <p style={{ color: "var(--text-tertiary)" }}>Loading branding options…</p>;
+    return <p style={{ color: "var(--text-tertiary)" }}>{t("branding.loadingOptions")}</p>;
   }
   if (options.error || !options.data) {
     return (
       <p style={{ color: "var(--danger-text)" }}>
-        Couldn’t load branding options. Try reloading the page.
+        {t("branding.loadFailedOptions")}
       </p>
     );
   }
@@ -103,7 +105,7 @@ export function BrandingForm({
 
   const onSave = async () => {
     if (displayNameDirty && !trimmedDisplayName) {
-      setServerError("Display name cannot be empty.");
+      setServerError(t("branding.errDisplayNameEmpty"));
       return;
     }
     setServerError(null);
@@ -131,10 +133,10 @@ export function BrandingForm({
         setServerError(
           typeof body?.detail === "string"
             ? body.detail
-            : `Save failed (${err.status}).`,
+            : t("branding.errSaveStatus", { status: err.status }),
         );
       } else {
-        setServerError("Save failed.");
+        setServerError(t("branding.errSave"));
       }
     } finally {
       setBusy(false);
@@ -149,7 +151,7 @@ export function BrandingForm({
     if (!file) return;
     setLogoError(null);
     if (file.size > 2 * 1024 * 1024) {
-      setLogoError("Logo must be 2 MB or smaller.");
+      setLogoError(t("branding.errLogoTooLarge"));
       return;
     }
     setLogoBusy(true);
@@ -166,10 +168,10 @@ export function BrandingForm({
         setLogoError(
           typeof body?.detail === "string"
             ? body.detail
-            : `Upload failed (${err.status}).`,
+            : t("branding.errUploadStatus", { status: err.status }),
         );
       } else {
-        setLogoError("Upload failed.");
+        setLogoError(t("branding.errUpload"));
       }
     } finally {
       setLogoBusy(false);
@@ -177,7 +179,7 @@ export function BrandingForm({
   };
 
   const onRemoveLogo = async () => {
-    if (!confirm("Remove the current logo?")) return;
+    if (!confirm(t("branding.confirmRemove"))) return;
     setLogoError(null);
     setLogoBusy(true);
     try {
@@ -190,10 +192,10 @@ export function BrandingForm({
         setLogoError(
           typeof body?.detail === "string"
             ? body.detail
-            : `Remove failed (${err.status}).`,
+            : t("branding.errRemoveStatus", { status: err.status }),
         );
       } else {
-        setLogoError("Remove failed.");
+        setLogoError(t("branding.errRemove"));
       }
     } finally {
       setLogoBusy(false);
@@ -202,15 +204,15 @@ export function BrandingForm({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-      <Section title="Corporate display name">
+      <Section title={t("branding.section.displayName")}>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <input
             type="text"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="e.g. Acme Corporation"
+            placeholder={t("branding.displayNamePlaceholder")}
             maxLength={200}
-            aria-label="Corporate display name"
+            aria-label={t("branding.section.displayName")}
             style={{
               padding: "8px 10px",
               fontSize: 13,
@@ -224,13 +226,12 @@ export function BrandingForm({
             }}
           />
           <span style={{ fontSize: 11.5, color: "var(--text-tertiary)" }}>
-            Shown in the brand row at the top of the sidebar. Falls
-            back to "Maugood" when blank.
+            {t("branding.displayNameHint")}
           </span>
         </div>
       </Section>
 
-      <Section title="Primary colour">
+      <Section title={t("branding.section.primaryColour")}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           {palette.map((p) => (
             <Swatch
@@ -243,7 +244,7 @@ export function BrandingForm({
         </div>
       </Section>
 
-      <Section title="Font">
+      <Section title={t("branding.section.font")}>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {fonts.map((f) => (
             <FontOption
@@ -256,11 +257,11 @@ export function BrandingForm({
         </div>
       </Section>
 
-      <Section title="Live preview">
+      <Section title={t("branding.section.livePreview")}>
         <Preview palette={selectedPalette} font={selectedFont} />
       </Section>
 
-      <Section title="Logo">
+      <Section title={t("branding.section.logo")}>
         <div style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
           <div
             style={{
@@ -277,12 +278,12 @@ export function BrandingForm({
             {branding.has_logo ? (
               <img
                 src={`${logoUrl}?v=${logoCacheBust}`}
-                alt="Tenant logo"
+                alt={t("branding.logoAlt")}
                 style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
               />
             ) : (
               <span style={{ color: "var(--text-tertiary)", fontSize: 11 }}>
-                no logo
+                {t("branding.noLogo")}
               </span>
             )}
           </div>
@@ -301,7 +302,7 @@ export function BrandingForm({
                 disabled={logoBusy}
                 style={btnPrimary}
               >
-                {branding.has_logo ? "Replace logo" : "Upload logo"}
+                {branding.has_logo ? t("branding.replaceLogo") : t("branding.uploadLogo")}
               </button>
               {branding.has_logo && (
                 <button
@@ -310,13 +311,12 @@ export function BrandingForm({
                   disabled={logoBusy}
                   style={btnSecondary}
                 >
-                  Remove
+                  {t("branding.remove")}
                 </button>
               )}
             </div>
             <span style={{ fontSize: 11.5, color: "var(--text-tertiary)" }}>
-              PNG or SVG, ≤ 2 MB. Large PNGs are auto-resized to fit
-              the brand row — upload anything you have.
+              {t("branding.logoHint")}
             </span>
             {logoError && (
               <span style={{ fontSize: 12, color: "var(--danger-text)" }}>
@@ -350,7 +350,7 @@ export function BrandingForm({
           disabled={!dirty || busy}
           style={btnPrimary}
         >
-          {busy ? "Saving…" : "Save changes"}
+          {busy ? t("branding.saving") : t("branding.saveChanges")}
         </button>
       </div>
 
@@ -418,11 +418,18 @@ function Swatch({
   selected: boolean;
   onSelect: () => void;
 }) {
+  const { t } = useTranslation();
+  // Per-colour label — the curated keys are stable identifiers, so each
+  // gets its own translation key under branding.colors.<key>; fall
+  // through to the raw key if the locale doesn't define one.
+  const colorKey = `branding.colors.${entry.key}`;
+  const translated = t(colorKey);
+  const label = translated === colorKey ? entry.key : translated;
   return (
     <button
       type="button"
       onClick={onSelect}
-      title={entry.key}
+      title={label}
       aria-pressed={selected}
       style={{
         width: 56,
@@ -459,7 +466,7 @@ function Swatch({
           fontWeight: selected ? 600 : 400,
         }}
       >
-        {entry.key}
+        {label}
       </span>
     </button>
   );
@@ -474,6 +481,10 @@ function FontOption({
   selected: boolean;
   onSelect: () => void;
 }) {
+  const { t } = useTranslation();
+  // The font NAMES are proper nouns (Inter, Lato, Plus Jakarta Sans) and
+  // stay the same in any language. Only the sample-text below is
+  // translated.
   const label =
     entry.key === "plus-jakarta-sans"
       ? "Plus Jakarta Sans"
@@ -500,7 +511,7 @@ function FontOption({
     >
       <span style={{ fontSize: 14, fontWeight: 600 }}>{label}</span>
       <span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
-        The quick brown fox jumps over the lazy dog
+        {t("branding.fontSample")}
       </span>
     </button>
   );
@@ -513,6 +524,7 @@ function Preview({
   palette: BrandingPaletteEntry;
   font: BrandingFontEntry;
 }) {
+  const { t } = useTranslation();
   return (
     <div
       style={{
@@ -536,7 +548,7 @@ function Preview({
           }}
         />
         <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>
-          Tenant Dashboard
+          {t("branding.preview.tenantDashboard")}
         </h3>
         <span
           style={{
@@ -550,12 +562,11 @@ function Preview({
             letterSpacing: "0.04em",
           }}
         >
-          live
+          {t("branding.preview.live")}
         </span>
       </div>
       <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>
-        This is how the navigation, primary buttons, and accent badges will look
-        across the tenant&apos;s workspace.
+        {t("branding.preview.body")}
       </p>
       <div style={{ display: "flex", gap: 8 }}>
         <button
@@ -572,7 +583,7 @@ function Preview({
             fontFamily: font.stack,
           }}
         >
-          Primary action
+          {t("branding.preview.primaryAction")}
         </button>
         <button
           type="button"
@@ -587,7 +598,7 @@ function Preview({
             fontFamily: font.stack,
           }}
         >
-          Secondary
+          {t("branding.preview.secondary")}
         </button>
       </div>
     </div>

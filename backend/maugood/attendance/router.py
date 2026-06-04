@@ -485,6 +485,7 @@ class RegenerateEmployeeOut(BaseModel):
 @router.post("/regenerate", response_model=RegenerateOut)
 def regenerate_attendance(
     user: Annotated[CurrentUser, Depends(current_user)],
+    scope: Annotated[TenantScope, Depends(get_tenant_scope)],
     target_date: Annotated[
         Optional[date_type], Query(alias="date")
     ] = None,
@@ -499,7 +500,9 @@ def regenerate_attendance(
     if "Admin" not in user.roles and "HR" not in user.roles:
         raise HTTPException(status_code=403, detail="forbidden")
 
-    scope = TenantScope(tenant_id=user.tenant_id)
+    # ``scope`` comes from ``get_tenant_scope`` (request's real schema).
+    # Constructing ``TenantScope(tenant_id=...)`` here would default
+    # ``tenant_schema='main'`` and mis-route in multi-mode.
     from maugood.attendance import scheduler as attendance_scheduler  # noqa: PLC0415
     from maugood.attendance.repository import (  # noqa: PLC0415
         load_tenant_settings,
@@ -535,6 +538,25 @@ def regenerate_attendance(
                     scope, employee_id=eid, the_date=the_date
                 ):
                     rows += 1
+    # Audit the operator-triggered recompute (Issue: attendance
+    # regenerate was unaudited). Lands in the active tenant schema.
+    from maugood.auth.audit import write_audit  # noqa: PLC0415
+    from maugood.db import tenant_context as _audit_tc  # noqa: PLC0415
+    with _audit_tc(scope.tenant_schema):
+        with get_engine().begin() as conn:
+            write_audit(
+                conn,
+                tenant_id=scope.tenant_id,
+                actor_user_id=user.id,
+                action="attendance.regenerated",
+                entity_type="attendance",
+                entity_id=the_date.isoformat(),
+                after={
+                    "date": the_date.isoformat(),
+                    "rows_upserted": rows,
+                    "scope": "all_active_employees",
+                },
+            )
     logger.info(
         "attendance regenerate by user %s for %s — %d rows",
         user.id,
@@ -637,6 +659,22 @@ def regenerate_attendance_employee(
             scope, employee_id=body.employee_id, the_date=the_date
         )
     )
+    from maugood.auth.audit import write_audit  # noqa: PLC0415
+    with tenant_context(scope.tenant_schema):
+        with get_engine().begin() as conn:
+            write_audit(
+                conn,
+                tenant_id=scope.tenant_id,
+                actor_user_id=user.id,
+                action="attendance.regenerated",
+                entity_type="attendance",
+                entity_id=f"{body.employee_id}:{the_date.isoformat()}",
+                after={
+                    "employee_id": body.employee_id,
+                    "date": the_date.isoformat(),
+                    "upserted": upserted,
+                },
+            )
     logger.info(
         "attendance regenerate-employee by user %s — employee=%s date=%s upserted=%s",
         user.id,
@@ -673,6 +711,7 @@ _REGENERATE_RANGE_MAX_DAYS = 92
 @router.post("/regenerate-range", response_model=RegenerateRangeOut)
 def regenerate_attendance_range(
     user: Annotated[CurrentUser, Depends(current_user)],
+    scope: Annotated[TenantScope, Depends(get_tenant_scope)],
     start: Annotated[date_type, Query(description="Inclusive start date.")],
     end: Annotated[date_type, Query(description="Inclusive end date.")],
 ) -> RegenerateRangeOut:
@@ -702,7 +741,8 @@ def regenerate_attendance_range(
             ),
         )
 
-    scope = TenantScope(tenant_id=user.tenant_id)
+    # ``scope`` from ``get_tenant_scope`` — real request schema (not a
+    # default-'main' TenantScope, which would mis-route in multi-mode).
     from maugood.attendance import repository as attendance_repo  # noqa: PLC0415
     from maugood.attendance import scheduler as attendance_scheduler  # noqa: PLC0415
     from maugood.attendance.repository import (  # noqa: PLC0415
@@ -752,6 +792,24 @@ def regenerate_attendance_range(
             total += day_rows
             current = current + timedelta(days=1)
 
+    from maugood.auth.audit import write_audit  # noqa: PLC0415
+    with tenant_context(scope.tenant_schema):
+        with get_engine().begin() as conn:
+            write_audit(
+                conn,
+                tenant_id=scope.tenant_id,
+                actor_user_id=user.id,
+                action="attendance.regenerated",
+                entity_type="attendance",
+                entity_id=f"{start.isoformat()}:{end.isoformat()}",
+                after={
+                    "start": start.isoformat(),
+                    "end": end.isoformat(),
+                    "days_processed": span_days,
+                    "total_rows_upserted": total,
+                    "scope": "date_range",
+                },
+            )
     logger.info(
         "attendance regenerate-range by user %s: %s → %s (%d days, %d rows)",
         user.id,
