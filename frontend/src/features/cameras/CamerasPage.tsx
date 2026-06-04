@@ -32,6 +32,7 @@ const BULK_FIELDS = {
   display_enabled: "display",
   detection_enabled: "detection",
   clip_recording_enabled: "clipSaving",
+  live_matching_enabled: "matching",
 } as const;
 
 export function CamerasPage() {
@@ -189,6 +190,15 @@ export function CamerasPage() {
       patch: { clip_recording_enabled: !cam.clip_recording_enabled },
     });
   };
+  const toggleMatchingEnabled = (cam: Camera) => {
+    // Auto-gate: matching only runs with detection on. Guard here too
+    // so a programmatic call can't enable it on a detection-off camera.
+    if (!cam.detection_enabled) return;
+    patch.mutate({
+      id: cam.id,
+      patch: { live_matching_enabled: !cam.live_matching_enabled },
+    });
+  };
 
   return (
     <>
@@ -320,6 +330,7 @@ export function CamerasPage() {
               <th>{t("cameras.page.colWorker")}</th>
               <th>{t("cameras.page.colDisplay")}</th>
               <th>{t("cameras.page.colDetection")}</th>
+              <th>{t("cameras.page.colMatching")}</th>
               <th>{t("cameras.page.colClipSaving")}</th>
               <th style={{ textAlign: "right" }}>{t("cameras.page.colActions")}</th>
             </tr>
@@ -327,7 +338,7 @@ export function CamerasPage() {
           <tbody>
             {list.isLoading && (
               <tr>
-                <td colSpan={14} className="text-sm text-dim" style={{ padding: 16 }}>
+                <td colSpan={15} className="text-sm text-dim" style={{ padding: 16 }}>
                   {t("cameras.page.loading")}
                 </td>
               </tr>
@@ -335,7 +346,7 @@ export function CamerasPage() {
             {list.isError && (
               <tr>
                 <td
-                  colSpan={14}
+                  colSpan={15}
                   className="text-sm"
                   style={{ padding: 16, color: "var(--danger-text)" }}
                 >
@@ -414,6 +425,18 @@ export function CamerasPage() {
                 </td>
                 <td>
                   <Switch
+                    checked={cam.live_matching_enabled && cam.detection_enabled}
+                    onChange={() => toggleMatchingEnabled(cam)}
+                    disabled={!cam.detection_enabled}
+                    title={
+                      cam.detection_enabled
+                        ? t("cameras.page.switchMatchingTitle")
+                        : t("cameras.matchingNeedsDetection")
+                    }
+                  />
+                </td>
+                <td>
+                  <Switch
                     checked={cam.clip_recording_enabled}
                     onChange={() => toggleClipRecordingEnabled(cam)}
                     title={t("cameras.page.switchClipTitle")}
@@ -431,7 +454,7 @@ export function CamerasPage() {
             })}
             {list.data && list.data.items.length === 0 && !list.isLoading && (
               <tr>
-                <td colSpan={14} className="text-sm text-dim" style={{ padding: 16 }}>
+                <td colSpan={15} className="text-sm text-dim" style={{ padding: 16 }}>
                   {t("cameras.page.empty")}
                 </td>
               </tr>
@@ -576,17 +599,21 @@ function Switch({
   checked,
   onChange,
   title,
+  disabled = false,
 }: {
   checked: boolean;
   onChange: () => void;
   title?: string;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
-      onClick={onChange}
+      aria-disabled={disabled}
+      disabled={disabled}
+      onClick={disabled ? undefined : onChange}
       title={title}
       style={{
         appearance: "none",
@@ -596,12 +623,13 @@ function Switch({
         background: checked ? "var(--success)" : "var(--border)",
         border: "none",
         position: "relative",
-        cursor: "pointer",
+        cursor: disabled ? "not-allowed" : "pointer",
         padding: 0,
         display: "inline-block",
         transition: "background 120ms ease",
         outline: "none",
         verticalAlign: "middle",
+        opacity: disabled ? 0.4 : 1,
       }}
     >
       <span

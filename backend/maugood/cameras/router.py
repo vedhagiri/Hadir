@@ -133,6 +133,7 @@ def _row_to_out(row: repo.CameraRow) -> CameraOut:
         display_enabled=row.display_enabled,
         detection_enabled=row.detection_enabled,
         clip_recording_enabled=row.clip_recording_enabled,
+        live_matching_enabled=row.live_matching_enabled,
         clip_detection_source=row.clip_detection_source,
         capture_config=CaptureConfig.model_validate(row.capture_config),
         created_at=row.created_at,
@@ -168,6 +169,7 @@ def _audit_payload(row: repo.CameraRow) -> dict:
         "display_enabled": row.display_enabled,
         "detection_enabled": row.detection_enabled,
         "clip_recording_enabled": row.clip_recording_enabled,
+        "live_matching_enabled": row.live_matching_enabled,
         "clip_detection_source": row.clip_detection_source,
         "capture_config": dict(row.capture_config),
     }
@@ -340,6 +342,9 @@ def import_cameras_endpoint(
                         clip_recording_enabled=_bool_or(
                             item.clip_recording_enabled, False
                         ),
+                        live_matching_enabled=_bool_or(
+                            item.live_matching_enabled, False
+                        ),
                         clip_detection_source=item.clip_detection_source or "body",
                         camera_code=(item.camera_code or "").strip() or None,
                         zone=item.zone,
@@ -420,6 +425,13 @@ def import_cameras_endpoint(
                     ):
                         values["clip_recording_enabled"] = bool(
                             item.clip_recording_enabled
+                        )
+                    if (
+                        "live_matching_enabled" in fs
+                        and item.live_matching_enabled is not None
+                    ):
+                        values["live_matching_enabled"] = bool(
+                            item.live_matching_enabled
                         )
                     if (
                         "clip_detection_source" in fs
@@ -538,9 +550,10 @@ def bulk_update_cameras_endpoint(
     payload: CameraBulkUpdateIn,
     user: Annotated[CurrentUser, ADMIN],
 ) -> CameraBulkUpdateResult:
-    """Flip any of the four operational toggles
+    """Flip any of the operational toggles
     (``worker_enabled`` / ``display_enabled`` / ``detection_enabled`` /
-    ``clip_recording_enabled``) across many cameras in one call.
+    ``clip_recording_enabled`` / ``live_matching_enabled``) across many
+    cameras in one call.
 
     Mirrors the single PATCH mechanics. Unknown / cross-tenant
     ``camera_id`` values fall silently into ``not_found`` — never a 403
@@ -558,6 +571,7 @@ def bulk_update_cameras_endpoint(
         "display_enabled",
         "detection_enabled",
         "clip_recording_enabled",
+        "live_matching_enabled",
     )
     toggle_values: dict[str, object] = {
         key: provided[key]
@@ -571,7 +585,8 @@ def bulk_update_cameras_endpoint(
                 "field": "toggles",
                 "message": (
                     "at least one of worker_enabled/display_enabled/"
-                    "detection_enabled/clip_recording_enabled is required"
+                    "detection_enabled/clip_recording_enabled/"
+                    "live_matching_enabled is required"
                 ),
             },
         )
@@ -658,6 +673,7 @@ def create_camera_endpoint(
                 display_enabled=payload.display_enabled,
                 detection_enabled=payload.detection_enabled,
                 clip_recording_enabled=payload.clip_recording_enabled,
+                live_matching_enabled=payload.live_matching_enabled,
                 clip_detection_source=payload.clip_detection_source,
                 camera_code=payload.camera_code,
                 zone=payload.zone,
@@ -724,6 +740,8 @@ def patch_camera_endpoint(
             values["detection_enabled"] = provided["detection_enabled"]
         if "clip_recording_enabled" in provided:
             values["clip_recording_enabled"] = provided["clip_recording_enabled"]
+        if "live_matching_enabled" in provided:
+            values["live_matching_enabled"] = provided["live_matching_enabled"]
         if (
             "clip_detection_source" in provided
             and provided["clip_detection_source"] is not None

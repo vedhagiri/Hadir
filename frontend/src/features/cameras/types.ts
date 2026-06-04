@@ -49,6 +49,10 @@ export interface Camera {
   // 'body' = YOLO person count (records even when faces aren't
   // visible), 'both' = OR of the two.
   clip_detection_source: ClipDetectionSource;
+  // Per-camera face-recognition (matching) gate. Matching only runs
+  // when detection_enabled is also true (runtime auto-gate). When
+  // false, detection still emits events but they stay unmatched.
+  live_matching_enabled: boolean;
   capture_config: CaptureConfig;
   created_at: string;
   last_seen_at: string | null;
@@ -81,6 +85,7 @@ export interface CameraCreateInput {
   detection_enabled: boolean;
   clip_recording_enabled: boolean;
   clip_detection_source: ClipDetectionSource;
+  live_matching_enabled?: boolean;
   capture_config: CaptureConfig;
   brand?: string | null;
 }
@@ -96,6 +101,7 @@ export interface CameraPatchInput {
   detection_enabled?: boolean;
   clip_recording_enabled?: boolean;
   clip_detection_source?: ClipDetectionSource;
+  live_matching_enabled?: boolean;
   capture_config?: CaptureConfig;
   brand?: string | null;
 }
@@ -175,6 +181,7 @@ export interface CameraBulkUpdateInput {
   display_enabled?: boolean;
   detection_enabled?: boolean;
   clip_recording_enabled?: boolean;
+  live_matching_enabled?: boolean;
 }
 
 export interface CameraBulkUpdateResult {

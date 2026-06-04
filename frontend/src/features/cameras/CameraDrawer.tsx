@@ -72,6 +72,9 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
   const [clipRecordingEnabled, setClipRecordingEnabled] = useState(
     initial?.clip_recording_enabled ?? true,
   );
+  const [matchingEnabled, setMatchingEnabled] = useState(
+    initial?.live_matching_enabled ?? true,
+  );
   // Migration 0053: default for new cameras is 'body' so seated /
   // back-to-camera employees still keep clips recording (YOLO finds
   // a still body just fine). Existing cameras keep whatever value
@@ -96,6 +99,7 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
     setDisplayEnabled(initial?.display_enabled ?? true);
     setDetectionEnabled(initial?.detection_enabled ?? true);
     setClipRecordingEnabled(initial?.clip_recording_enabled ?? true);
+    setMatchingEnabled(initial?.live_matching_enabled ?? true);
     setClipDetectionSource(initial?.clip_detection_source ?? "body");
     setConfig(initial?.capture_config ?? DEFAULT_CAPTURE_CONFIG);
     setRtspUrl("");
@@ -139,6 +143,7 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
           detection_enabled: detectionEnabled,
           clip_recording_enabled: clipRecordingEnabled,
           clip_detection_source: clipDetectionSource,
+          live_matching_enabled: matchingEnabled,
           capture_config: config,
           brand: brandNorm,
         };
@@ -163,6 +168,9 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
         }
         if (clipRecordingEnabled !== initial.clip_recording_enabled) {
           patchBody.clip_recording_enabled = clipRecordingEnabled;
+        }
+        if (matchingEnabled !== initial.live_matching_enabled) {
+          patchBody.live_matching_enabled = matchingEnabled;
         }
         if (
           clipDetectionSource !==
@@ -355,6 +363,17 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
               onChange={setDetectionEnabled}
               label={t("cameras.fields.detectionEnabled")}
               hint={t("cameras.hints.detectionEnabled")}
+            />
+            <ToggleRow
+              checked={matchingEnabled && detectionEnabled}
+              onChange={setMatchingEnabled}
+              disabled={!detectionEnabled}
+              label={t("cameras.fields.matchingEnabled")}
+              hint={
+                detectionEnabled
+                  ? t("cameras.hints.matchingEnabled")
+                  : t("cameras.matchingNeedsDetection")
+              }
             />
             <ToggleRow
               checked={clipRecordingEnabled}
@@ -609,11 +628,13 @@ function ToggleRow({
   onChange,
   label,
   hint,
+  disabled = false,
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
   label: string;
   hint?: string;
+  disabled?: boolean;
 }) {
   return (
     <label
@@ -621,13 +642,15 @@ function ToggleRow({
         display: "flex",
         flexDirection: "column",
         gap: 2,
-        cursor: "pointer",
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.55 : 1,
       }}
     >
       <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
         <input
           type="checkbox"
           checked={checked}
+          disabled={disabled}
           onChange={(e) => onChange(e.target.checked)}
         />
         {label}

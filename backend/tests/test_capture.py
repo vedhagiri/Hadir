@@ -237,6 +237,10 @@ def test_worker_emits_one_event_per_new_track_not_per_frame(
         # is gone; this knob is now a no-op. Left in the dict for
         # back-compat with pre-fix capture_config JSON shapes.
         capture_config={"min_face_quality_to_save": 0.0},
+        # Migration 0072: live matching is per-camera and defaults OFF.
+        # This test exercises the full face-recognition → emit path, so
+        # turn it on explicitly.
+        live_matching_enabled=True,
     )
 
     worker.start()
@@ -292,6 +296,9 @@ def test_event_crops_on_disk_are_encrypted_not_jpeg(admin_engine) -> None:
         # the quality threshold so test bboxes (small) reach the
         # face-save path.
         capture_config={"min_face_quality_to_save": 0.0},
+        # Migration 0072: live matching is per-camera and defaults OFF;
+        # this test needs the full recognition → emit path on.
+        live_matching_enabled=True,
     )
 
     worker.start()
@@ -432,6 +439,9 @@ def test_worker_writes_health_snapshot(admin_engine) -> None:
         # the quality threshold so test bboxes (small) reach the
         # face-save path.
         capture_config={"min_face_quality_to_save": 0.0},
+        # Migration 0072: live matching is per-camera and defaults OFF;
+        # this test needs the full recognition → emit path on.
+        live_matching_enabled=True,
     )
     worker.start()
     deadline = time.time() + 5.0
@@ -495,6 +505,9 @@ def test_recent_events_query_shape_matches_pilot_check(admin_engine) -> None:
         # the quality threshold so test bboxes (small) reach the
         # face-save path.
         capture_config={"min_face_quality_to_save": 0.0},
+        # Migration 0072: live matching is per-camera and defaults OFF;
+        # this test needs the full recognition → emit path on.
+        live_matching_enabled=True,
     )
     worker.start()
     deadline = time.time() + 5.0

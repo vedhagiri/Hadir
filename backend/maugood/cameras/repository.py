@@ -85,6 +85,10 @@ class CameraRow:
     detection_enabled: bool = True
     # Migration 0049 — clip-recording gate.
     clip_recording_enabled: bool = True
+    # Migration 0072 — per-camera live face-recognition/matching gate.
+    # The analyzer runs full recognition only when
+    # ``detection_enabled AND live_matching_enabled``.
+    live_matching_enabled: bool = False
     # Migration 0052 / 0053 — clip-recording trigger source (face / body / both).
     # Default is 'body' so a stationary seated person keeps the clip alive
     # via YOLO body detection regardless of face visibility / movement.
@@ -154,6 +158,9 @@ def _row_to_camera(row) -> CameraRow:
         clip_recording_enabled=bool(
             getattr(row, "clip_recording_enabled", True)
         ),
+        live_matching_enabled=bool(
+            getattr(row, "live_matching_enabled", False)
+        ),
         clip_detection_source=str(
             getattr(row, "clip_detection_source", "face") or "face"
         ),
@@ -187,6 +194,7 @@ _SELECT_COLUMNS = (
     cameras.c.display_enabled,
     cameras.c.detection_enabled,
     cameras.c.clip_recording_enabled,
+    cameras.c.live_matching_enabled,
     cameras.c.clip_detection_source,
     cameras.c.camera_code,
     cameras.c.zone,
@@ -265,6 +273,7 @@ def create_camera(
     display_enabled: bool = True,
     detection_enabled: bool = True,
     clip_recording_enabled: bool = True,
+    live_matching_enabled: bool = False,
     clip_detection_source: str = "body",
     camera_code: Optional[str] = None,
     zone: Optional[str] = None,
@@ -289,6 +298,7 @@ def create_camera(
         "display_enabled": display_enabled,
         "detection_enabled": detection_enabled,
         "clip_recording_enabled": clip_recording_enabled,
+        "live_matching_enabled": live_matching_enabled,
         "clip_detection_source": (
             clip_detection_source
             if clip_detection_source in ("face", "body", "both")

@@ -67,6 +67,7 @@ def build_export_payload(
                 display_enabled=row.display_enabled,
                 detection_enabled=row.detection_enabled,
                 clip_recording_enabled=row.clip_recording_enabled,
+                live_matching_enabled=row.live_matching_enabled,
                 clip_detection_source=row.clip_detection_source,
                 capture_config=CaptureConfig.model_validate(row.capture_config),
                 brand=row.brand,

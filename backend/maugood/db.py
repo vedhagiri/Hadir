@@ -1811,6 +1811,21 @@ cameras = Table(
     Column(
         "clip_recording_enabled", Boolean, nullable=False, server_default="true"
     ),
+    # Migration 0072 — per-camera live face-recognition/matching gate.
+    # Moves the control off the tenant-wide
+    # ``tenant_settings.live_matching_enabled`` (migration 0059) onto
+    # each camera. When False the analyzer skips face detection +
+    # embedding + matcher_cache calls for this camera (the analyzer
+    # auto-gates on ``detection_enabled AND live_matching_enabled``).
+    # server_default false is safe for out-of-band INSERTs; the API
+    # create path also defaults it False. Migration 0072 backfills
+    # existing rows from the legacy tenant-wide flag.
+    Column(
+        "live_matching_enabled",
+        Boolean,
+        nullable=False,
+        server_default="false",
+    ),
     # Migration 0052 — per-camera override of which detector drives
     # clip recording. 'face' = InsightFace face count (the pre-0052
     # default trigger). 'body' = YOLO person count. 'both' = OR of
