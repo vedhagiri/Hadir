@@ -925,3 +925,146 @@ def put_live_matching_config(
             after={"enabled": parsed.enabled},
         )
     return LiveMatchingConfigOut(enabled=parsed.enabled)
+
+
+# ---------------------------------------------------------------------------
+# Migration 0073 — Clip-pipeline use-case enable set (UI-controllable).
+# ---------------------------------------------------------------------------
+#
+# Per-tenant control over which clip-pipeline use cases (uc1/uc2/uc3)
+# run, replacing the env-only ``MAUGOOD_CLIP_PIPELINE_USE_CASES`` knob.
+# The DB value (when set) wins over env; env wins over the default
+# all-three. The GET returns the EFFECTIVE set for the caller's tenant.
+
+# Canonical UC ordering — kept local so the router doesn't import the
+# heavy clip_pipeline module just for a constant. Matches
+# ``maugood.clip_pipeline.pipeline._VALID_USE_CASES``.
+_VALID_CLIP_USE_CASES: tuple[str, ...] = ("uc1", "uc2", "uc3")
+
+
+class ClipPipelineConfigIn(BaseModel):
+    """Inbound shape for ``PUT /api/system/clip-pipeline-config``.
+
+    ``use_cases`` is the full desired enabled set. Each item must be in
+    ``{uc1, uc2, uc3}``; the validator dedupes and order-normalizes to
+    the canonical (uc1, uc2, uc3) order. An EMPTY array is allowed and
+    means "no use case runs for this tenant".
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    use_cases: list[str]
+
+    @field_validator("use_cases")
+    @classmethod
+    def _check_use_cases(cls, v: list[str]) -> list[str]:
+        seen: set[str] = set()
+        for item in v:
+            token = str(item).strip().lower()
+            if token not in _VALID_CLIP_USE_CASES:
+                raise ValueError(
+                    "use_cases items must each be one of: "
+                    + ", ".join(_VALID_CLIP_USE_CASES)
+                )
+            seen.add(token)
+        # Dedupe + order-normalize to the canonical ordering.
+        return [uc for uc in _VALID_CLIP_USE_CASES if uc in seen]
+
+
+class ClipPipelineConfigOut(BaseModel):
+    """Outbound shape — the effective enabled set."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    use_cases: list[str]
+
+
+def _load_clip_pipeline_row(scope: TenantScope):  # type: ignore[no-untyped-def]
+    """Return the per-tenant column value, or ``None`` when NULL/missing.
+
+    A non-NULL list is normalized to the canonical order. ``None``
+    signals "inherit env/default" to the caller.
+    """
+
+    engine = get_engine()
+    with engine.begin() as conn:
+        row = conn.execute(
+            select(
+                tenant_settings.c.clip_pipeline_use_cases,
+            ).where(tenant_settings.c.tenant_id == scope.tenant_id)
+        ).first()
+    if row is None or row.clip_pipeline_use_cases is None:
+        return None
+    value = row.clip_pipeline_use_cases
+    if not isinstance(value, (list, tuple)):
+        return None
+    seen = {str(t).strip().lower() for t in value}
+    return [uc for uc in _VALID_CLIP_USE_CASES if uc in seen]
+
+
+def _effective_clip_use_cases(scope: TenantScope) -> list[str]:
+    """The EFFECTIVE enabled set for the GET: DB value if set, else the
+    env/default the runtime resolver would use."""
+
+    db_value = _load_clip_pipeline_row(scope)
+    if db_value is not None:
+        return db_value
+    # Fall back to the runtime's env-derived default (same source the
+    # pipeline uses when the column is NULL).
+    from maugood.clip_pipeline.pipeline import enabled_use_cases  # noqa: PLC0415
+
+    return list(enabled_use_cases())
+
+
+@router.get(
+    "/clip-pipeline-config", response_model=ClipPipelineConfigOut
+)
+def get_clip_pipeline_config(
+    user: Annotated[CurrentUser, ADMIN],
+) -> ClipPipelineConfigOut:
+    scope = TenantScope(tenant_id=user.tenant_id)
+    return ClipPipelineConfigOut(use_cases=_effective_clip_use_cases(scope))
+
+
+@router.put(
+    "/clip-pipeline-config", response_model=ClipPipelineConfigOut
+)
+def put_clip_pipeline_config(
+    payload: dict,
+    user: Annotated[CurrentUser, ADMIN],
+) -> ClipPipelineConfigOut:
+    parsed = _validation_to_400(ClipPipelineConfigIn, payload)
+    scope = TenantScope(tenant_id=user.tenant_id)
+    # Capture the effective-before for the audit row so an auditor sees
+    # exactly what the change was relative to (env/default included).
+    before = _effective_clip_use_cases(scope)
+    new_value = parsed.use_cases
+    engine = get_engine()
+    with engine.begin() as conn:
+        _ensure_tenant_settings_row(conn, scope.tenant_id)
+        conn.execute(
+            sql_update(tenant_settings)
+            .where(tenant_settings.c.tenant_id == scope.tenant_id)
+            .values(
+                clip_pipeline_use_cases=new_value,
+                updated_at=datetime.now(tz=timezone.utc),
+            )
+        )
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="system.clip_pipeline_config.updated",
+            entity_type="tenant_settings",
+            entity_id=str(scope.tenant_id),
+            before={"use_cases": before},
+            after={"use_cases": new_value},
+        )
+    # Invalidate the runtime resolver's TTL cache so the change takes
+    # effect immediately rather than waiting out the 5s TTL.
+    from maugood.clip_pipeline.pipeline import (  # noqa: PLC0415
+        invalidate_use_cases_cache,
+    )
+
+    invalidate_use_cases_cache(scope.tenant_id)
+    return ClipPipelineConfigOut(use_cases=new_value)

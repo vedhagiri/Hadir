@@ -74,6 +74,167 @@ MATCHING_WORKERS = _env_int("MAUGOOD_CLIP_PIPELINE_MATCHING_WORKERS", 1)
 QUEUE_MAX_DEPTH = _env_int("MAUGOOD_CLIP_PIPELINE_QUEUE_MAX_DEPTH", 4096)
 
 
+# ---- clip-pipeline use-case enable set ------------------------------------
+#
+# ``MAUGOOD_CLIP_PIPELINE_USE_CASES`` (CSV, default "uc1,uc2,uc3") is the
+# env-layer source of truth for which use cases run process-wide. A
+# per-tenant override lives in ``tenant_settings.clip_pipeline_use_cases``
+# (migration 0073) and, when set (non-NULL), wins over the env default at
+# submit time via ``enabled_use_cases_for``. The canonical ordering is
+# always (uc1, uc2, uc3) regardless of input order.
+
+# Canonical valid set + ordering. Referenced by ``system/router.py``'s
+# config endpoint comment as ``pipeline._VALID_USE_CASES``.
+_VALID_USE_CASES: tuple[str, ...] = ("uc1", "uc2", "uc3")
+
+
+def _env_use_cases(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    """Parse a CSV use-case env var into a canonical tuple.
+
+    Rules (pinned by ``tests/test_clip_pipeline_use_cases.py``):
+
+    * The env var being **unset** (``None``) returns ``default`` verbatim
+      — that's how "no operator override" means "run the default set".
+    * A present value (even ``""``) is parsed: split on commas, strip +
+      lowercase each token, keep only tokens in ``{uc1, uc2, uc3}``,
+      dedupe, and return them in the canonical (uc1, uc2, uc3) order.
+    * An empty string or an all-invalid value parses to ``()`` — i.e. a
+      deliberate "run nothing", distinct from the unset/default case.
+    """
+
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    seen: set[str] = set()
+    for token in raw.split(","):
+        t = token.strip().lower()
+        if t in _VALID_USE_CASES:
+            seen.add(t)
+    return tuple(uc for uc in _VALID_USE_CASES if uc in seen)
+
+
+# Computed once at import. ``ClipPipeline.UCS`` is bound to this so the
+# stage startup spins up exactly the env-enabled cropping stages. Tests
+# reload this module to recompute it under a changed env.
+ENABLED_USE_CASES: tuple[str, ...] = _env_use_cases(
+    "MAUGOOD_CLIP_PIPELINE_USE_CASES", ("uc1", "uc2", "uc3")
+)
+
+
+def enabled_use_cases() -> tuple[str, ...]:
+    """The process-wide env/default enabled set (no DB read).
+
+    Used by callers that have no tenant scope to consult (e.g. the
+    single-clip match path in ``reprocess.py``) and as the fallback for
+    the per-tenant resolver when the DB column is NULL/unreadable.
+    """
+
+    return ENABLED_USE_CASES
+
+
+# ---- per-tenant DB-backed resolver (migration 0073) -----------------------
+#
+# Reads ``tenant_settings.clip_pipeline_use_cases`` for the scope's tenant.
+# Tenant-scoped read only — the lookup runs inside ``tenant_context`` and
+# filters on ``tenant_id`` so it can never see another tenant's row. A 5s
+# per-tenant TTL cache keeps the hot auto-submit path from hitting the DB
+# on every clip; ``invalidate_use_cases_cache`` lets the PUT endpoint make
+# a change take effect immediately.
+
+_USE_CASES_TTL_S = 5.0
+_use_cases_cache: dict[int, tuple[float, tuple[str, ...]]] = {}
+_use_cases_cache_lock = threading.Lock()
+
+
+def invalidate_use_cases_cache(tenant_id: Optional[int] = None) -> None:
+    """Drop the per-tenant resolver cache.
+
+    ``tenant_id=None`` clears every tenant's entry (used by tests and any
+    broad change); a concrete id clears just that tenant (the PUT
+    endpoint's case).
+    """
+
+    with _use_cases_cache_lock:
+        if tenant_id is None:
+            _use_cases_cache.clear()
+        else:
+            _use_cases_cache.pop(int(tenant_id), None)
+
+
+def _normalize_use_cases(value) -> tuple[str, ...]:
+    """Canonicalize a stored JSON array into a valid-only ordered tuple.
+
+    An empty (non-NULL) list normalizes to ``()`` — "none run" — which
+    the resolver treats as a real value, NOT a fall-through to env.
+    """
+
+    if not isinstance(value, (list, tuple)):
+        return ()
+    seen = {str(t).strip().lower() for t in value}
+    return tuple(uc for uc in _VALID_USE_CASES if uc in seen)
+
+
+def _read_tenant_use_cases(scope: TenantScope) -> Optional[tuple[str, ...]]:
+    """Return the per-tenant DB value, or ``None`` to signal "inherit env".
+
+    ``None`` is returned when the column is NULL, the row is missing, or
+    any read error occurs (fail-soft: the env/default is always a safe
+    fallback). A present (even empty) array returns a concrete tuple.
+    """
+
+    from maugood.db import tenant_settings  # noqa: PLC0415
+
+    engine = get_engine()
+    try:
+        with tenant_context(scope.tenant_schema):
+            with engine.begin() as conn:
+                row = conn.execute(
+                    sa_select(
+                        tenant_settings.c.clip_pipeline_use_cases
+                    ).where(tenant_settings.c.tenant_id == scope.tenant_id)
+                ).first()
+    except Exception:  # noqa: BLE001
+        return None
+    if row is None or row.clip_pipeline_use_cases is None:
+        return None
+    return _normalize_use_cases(row.clip_pipeline_use_cases)
+
+
+def enabled_use_cases_for(scope_or_tenant_id) -> tuple[str, ...]:
+    """Per-tenant effective enabled set: DB value if set, else env/default.
+
+    Accepts either a :class:`TenantScope` (the auto-submit / reconcile /
+    recovery callers) or a bare ``tenant_id`` int. A bare int has no
+    schema to scope a read under, so it cannot consult the DB and falls
+    back to the env/default set — never another tenant's value.
+
+    Cached per tenant for ``_USE_CASES_TTL_S`` seconds.
+    """
+
+    if isinstance(scope_or_tenant_id, TenantScope):
+        scope = scope_or_tenant_id
+    else:
+        # Bare tenant_id — no schema, so no tenant-scoped DB read is
+        # possible. Return the env/default (the per-tenant-isolation test
+        # pins this: a tenant whose column is NULL must not inherit
+        # another tenant's DB value).
+        return enabled_use_cases()
+
+    tid = int(scope.tenant_id)
+    now = time.time()
+    with _use_cases_cache_lock:
+        hit = _use_cases_cache.get(tid)
+        if hit is not None and (now - hit[0]) < _USE_CASES_TTL_S:
+            return hit[1]
+
+    db_value = _read_tenant_use_cases(scope)
+    result = db_value if db_value is not None else enabled_use_cases()
+
+    with _use_cases_cache_lock:
+        _use_cases_cache[tid] = (now, result)
+    return result
+
+
 def _recovery_drip_sleep_light() -> None:
     """Drip-feed for Class B (recognition-only) re-enqueues. Uses the
     interval / burst constants from ``recovery`` so a single env var
@@ -148,8 +309,13 @@ class ClipPipeline:
     # UC3 cropping). They still serialise on the InsightFace detector
     # lock under the hood, but the per-UC visibility + tracking is
     # the goal here, not raw parallelism (see the architecture
-    # confirmation conversation).
-    UCS: tuple[str, ...] = ("uc1", "uc2", "uc3")
+    # confirmation conversation). Bound to the env-derived enabled set so
+    # ``start()`` spins up exactly the enabled cropping stages; an empty
+    # set means zero cropping stages (the matching stage still runs).
+    # Per-tenant enforcement happens at submit time via
+    # ``enabled_use_cases_for`` — this constant only governs which stages
+    # exist process-wide.
+    UCS: tuple[str, ...] = ENABLED_USE_CASES
 
     def __init__(self) -> None:
         self._started = False
@@ -299,13 +465,32 @@ class ClipPipeline:
         real save.
         """
 
-        if not self._started or not self._cropping_by_uc:
+        if not self._started:
             raise RuntimeError("clip_pipeline not started")
+
+        # Chokepoint: intersect the caller's requested use cases with the
+        # tenant's effective enabled set BEFORE the batch ever fans out
+        # into jobs. The DB per-tenant value (migration 0073) wins over
+        # the env default here; a disabled UC is dropped so it runs
+        # nowhere — auto-submit, reconcile, and boot recovery all funnel
+        # through this method. An empty result is a clean no-op (the
+        # clip-save path must never error just because cropping is off).
+        enabled = enabled_use_cases_for(scope)
+        effective = [uc for uc in use_cases if uc in enabled]
+        if effective != list(use_cases):
+            logger.info(
+                "clip_pipeline submit_batch: tenant=%s requested=%s "
+                "effective=%s (gated by enabled set %s)",
+                scope.tenant_id,
+                list(use_cases),
+                effective,
+                list(enabled),
+            )
 
         batch = self._tracker.create(
             tenant_id=scope.tenant_id,
             clip_ids=clip_ids,
-            use_cases=use_cases,
+            use_cases=effective,
             skip_existing=skip_existing,
             submitted_by_user_id=submitted_by_user_id,
             submitted_by_email=submitted_by_email,
@@ -314,7 +499,7 @@ class ClipPipeline:
         # Pre-load existing (clip, uc) completion state in one query so
         # skip_existing doesn't fan out into N SELECTs.
         existing: set[tuple[int, str]] = set()
-        if skip_existing and clip_ids and use_cases:
+        if skip_existing and clip_ids and effective:
             engine = get_engine()
             with tenant_context(scope.tenant_schema):
                 with engine.begin() as conn:
@@ -325,14 +510,14 @@ class ClipPipeline:
                         ).where(
                             clip_processing_results.c.tenant_id == scope.tenant_id,
                             clip_processing_results.c.person_clip_id.in_(clip_ids),
-                            clip_processing_results.c.use_case.in_(use_cases),
+                            clip_processing_results.c.use_case.in_(effective),
                             clip_processing_results.c.status == "completed",
                         )
                     ).all()
             existing = {(int(r[0]), str(r[1])) for r in rows}
 
         for clip_id in clip_ids:
-            for uc in use_cases:
+            for uc in effective:
                 if skip_existing and (clip_id, uc) in existing:
                     self._tracker.mark_skipped(batch.batch_id, uc)
                     continue
@@ -366,7 +551,7 @@ class ClipPipeline:
             "clip_pipeline batch=%s submitted: clips=%d use_cases=%s skip_existing=%s queued=%d skipped=%d",
             batch.batch_id,
             len(clip_ids),
-            use_cases,
+            effective,
             skip_existing,
             batch.queued_jobs,
             batch.skipped_jobs,

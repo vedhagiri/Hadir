@@ -592,6 +592,17 @@ tenant_settings = Table(
         Integer,
         nullable=True,
     ),
+    # Migration 0073 — per-tenant clip-pipeline use-case enable set.
+    # JSONB, NULLABLE, no server default. NULL means "inherit the
+    # process-wide env/default" (the runtime resolver falls back to
+    # ``MAUGOOD_CLIP_PIPELINE_USE_CASES`` if set, else all-three). A
+    # non-NULL value is a JSON array of strings, each in
+    # ``{"uc1", "uc2", "uc3"}``; an empty array means "none run".
+    Column(
+        "clip_pipeline_use_cases",
+        JSONB,
+        nullable=True,
+    ),
     Column(
         "updated_at",
         DateTime(timezone=True),

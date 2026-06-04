@@ -183,10 +183,13 @@ def sweep_saved_clips(
 
         if clip_ids_to_submit:
             try:
+                from maugood.clip_pipeline.pipeline import (  # noqa: PLC0415
+                    enabled_use_cases_for,
+                )
                 pipeline.submit_batch(  # type: ignore[attr-defined]
                     scope=scope,
                     clip_ids=clip_ids_to_submit,
-                    use_cases=["uc1", "uc2", "uc3"],
+                    use_cases=list(enabled_use_cases_for(scope)),
                     skip_existing=True,
                     submitted_by_user_id=None,
                     submitted_by_email="reconcile@auto-submit",

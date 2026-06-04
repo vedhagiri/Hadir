@@ -6,10 +6,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import {
   CLIP_ENCODING_DEFAULTS,
+  CLIP_PIPELINE_DEFAULT,
   DETECTION_DEFAULTS,
   LIVE_MATCHING_DEFAULT,
   TRACKER_DEFAULTS,
   type ClipEncodingConfig,
+  type ClipPipelineConfig,
   type DetectionConfig,
   type LiveMatchingConfig,
   type TrackerConfig,
@@ -19,6 +21,7 @@ const DETECTION_KEY = ["system", "detection-config"] as const;
 const TRACKER_KEY = ["system", "tracker-config"] as const;
 const CLIP_ENCODING_KEY = ["system", "clip-encoding-config"] as const;
 const LIVE_MATCHING_KEY = ["system", "live-matching"] as const;
+const CLIP_PIPELINE_KEY = ["system", "clip-pipeline-config"] as const;
 
 export function useDetectionConfig() {
   return useQuery<DetectionConfig>({
@@ -109,6 +112,31 @@ export function usePutLiveMatchingConfig() {
       }),
     onSuccess: (data) => {
       qc.setQueryData(LIVE_MATCHING_KEY, data);
+    },
+  });
+}
+
+export function useClipPipelineConfig() {
+  return useQuery<ClipPipelineConfig>({
+    queryKey: CLIP_PIPELINE_KEY,
+    queryFn: () =>
+      api<ClipPipelineConfig>("/api/system/clip-pipeline-config"),
+    initialData: CLIP_PIPELINE_DEFAULT,
+    staleTime: 5_000,
+  });
+}
+
+export function useUpdateClipPipelineConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ClipPipelineConfig) =>
+      api<ClipPipelineConfig>("/api/system/clip-pipeline-config", {
+        method: "PUT",
+        body,
+      }),
+    onSuccess: (data) => {
+      qc.setQueryData(CLIP_PIPELINE_KEY, data);
+      void qc.invalidateQueries({ queryKey: CLIP_PIPELINE_KEY });
     },
   });
 }

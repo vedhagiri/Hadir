@@ -1591,6 +1591,21 @@ def process_single_clip(
 
     engine = get_engine()
 
+    # Strict enable/disable: drop any requested UC that isn't enabled
+    # process-wide, preserving the caller's order. If nothing remains,
+    # this is a clean no-op — never an error on the clip-save path.
+    from maugood.clip_pipeline.pipeline import (  # noqa: PLC0415
+        enabled_use_cases,
+    )
+    _enabled = enabled_use_cases()
+    use_cases = tuple(uc for uc in use_cases if uc in _enabled)
+    if not use_cases:
+        logger.info(
+            "single-clip match: clip=%s no enabled use cases — skipping",
+            clip_id,
+        )
+        return
+
     with tenant_context(scope.tenant_schema):
         try:
             with engine.begin() as conn:
@@ -1763,6 +1778,34 @@ class ReprocessFaceMatchWorker:
     ) -> None:
         engine = get_engine()
         settings = get_settings()
+
+        # Strict enable/disable: a disabled UC must not run even via the
+        # manual reprocess trigger. Filter to the process-wide enabled
+        # set (stable order preserved); an empty result is a clean no-op.
+        from maugood.clip_pipeline.pipeline import (  # noqa: PLC0415
+            enabled_use_cases,
+        )
+        _enabled = enabled_use_cases()
+        use_cases = tuple(uc for uc in use_cases if uc in _enabled)
+        if not use_cases:
+            logger.info(
+                "face match reprocess: tenant=%s no enabled use cases — "
+                "nothing to do",
+                scope.tenant_id,
+            )
+            self._set_status(
+                status="completed",
+                mode=mode,
+                use_cases=[],
+                total_clips=0,
+                processed_clips=0,
+                matched_total=0,
+                failed_count=0,
+                errors=[],
+                started_at=datetime.now(timezone.utc).isoformat(),
+                ended_at=datetime.now(timezone.utc).isoformat(),
+            )
+            return
 
         now_iso = datetime.now(timezone.utc).isoformat()
         self._set_status(

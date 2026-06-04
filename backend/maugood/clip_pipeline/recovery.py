@@ -734,7 +734,24 @@ def run_recovery(
                     "clip pipeline recovery: tenant=%s schema=%s scanned=%d",
                     tenant_id, schema, len(decisions),
                 )
+                # Gate boot recovery on the process-wide enabled set —
+                # a disabled UC's stuck row must NOT be recovered or
+                # re-run anywhere. Imported lazily to avoid a circular
+                # import on pipeline.py (which imports this module).
+                from maugood.clip_pipeline.pipeline import (  # noqa: PLC0415
+                    enabled_use_cases_for,
+                )
+
+                enabled = enabled_use_cases_for(
+                    TenantScope(tenant_id=tenant_id, tenant_schema=schema)
+                )
                 for decision in decisions:
+                    if decision.use_case not in enabled:
+                        # Leave the row untouched (still 'processing');
+                        # if the UC is re-enabled later a future sweep
+                        # will pick it up. Disabled => no work, no claim.
+                        summary.skipped += 1
+                        continue
                     summary.scanned += 1
                     if decision.klass == "A":
                         applied = apply_class_a(

@@ -16,6 +16,7 @@ import { ModalShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
 import {
   useClipEncodingConfig,
+  useClipPipelineConfig,
   useDetectionConfig,
   useLiveMatchingConfig,
   usePutClipEncodingConfig,
@@ -23,15 +24,18 @@ import {
   usePutLiveMatchingConfig,
   useTrackerConfig,
   usePutTrackerConfig,
+  useUpdateClipPipelineConfig,
 } from "./hooks";
 import {
   CLIP_ENCODING_DEFAULTS,
+  CLIP_USE_CASES,
   DETECTION_DEFAULTS,
   DET_SIZE_OPTIONS,
   RESOLUTION_OPTIONS,
   TRACKER_DEFAULTS,
   X264_PRESETS,
   type ClipEncodingConfig,
+  type ClipUseCase,
   type DetectionConfig,
   type TrackerConfig,
   type X264Preset,
@@ -49,6 +53,8 @@ export function SystemSettingsPage() {
       </div>
 
       <LiveMatchingCard />
+      <div style={{ height: 16 }} />
+      <ClipPipelineCard />
       <div style={{ height: 16 }} />
       <DetectionCard />
       <div style={{ height: 16 }} />
@@ -216,6 +222,133 @@ function LiveMatchingCard() {
               {toast}
             </span>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Clip processing card — UC1/UC2/UC3 toggles
+//
+// Each use case is an independent manual reprocessor that runs against
+// saved clips. Turning one OFF stops all processing for it. The PUT body
+// is the array of enabled use cases (e.g. ["uc1","uc3"]); all off -> [].
+
+function ClipPipelineCard() {
+  const { t } = useTranslation();
+  const remote = useClipPipelineConfig();
+  const put = useUpdateClipPipelineConfig();
+  const [draft, setDraft] = useState<ClipUseCase[]>([]);
+  const [toast, setToast] = useState<string | null>(null);
+
+  // Sync draft from server on mount + on every refetch.
+  useEffect(() => {
+    if (remote.data) setDraft(remote.data.use_cases);
+  }, [remote.data]);
+
+  const remoteSet = [...(remote.data?.use_cases ?? [])].sort().join(",");
+  const draftSet = [...draft].sort().join(",");
+  const dirty = remoteSet !== draftSet;
+
+  const isOn = (uc: ClipUseCase) => draft.includes(uc);
+
+  const toggle = (uc: ClipUseCase, next: boolean) => {
+    setDraft((prev) =>
+      next ? [...prev, uc] : prev.filter((x) => x !== uc),
+    );
+  };
+
+  const onSave = async () => {
+    setToast(null);
+    try {
+      // Preserve the canonical uc1/uc2/uc3 ordering in the PUT body.
+      const ordered = CLIP_USE_CASES.filter((uc) => draft.includes(uc));
+      await put.mutateAsync({ use_cases: [...ordered] });
+      setToast(t("systemSettings.savedToast") as string);
+      setTimeout(() => setToast(null), 4000);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setToast(formatApiError(err, t));
+      } else {
+        setToast(t("common.errorGeneric") as string);
+      }
+    }
+  };
+
+  return (
+    <div className="card">
+      <div className="card-head">
+        <h3 className="card-title">
+          {t("systemSettings.clipPipeline.title")}
+        </h3>
+        <p className="card-sub">
+          {t("systemSettings.clipPipeline.subtitle")}
+        </p>
+      </div>
+      <div
+        style={{
+          padding: 16,
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+        }}
+      >
+        {remote.isError && (
+          <span className="text-sm" style={{ color: "var(--danger-text)" }}>
+            {t("common.errorGeneric")}
+          </span>
+        )}
+
+        {CLIP_USE_CASES.map((uc) => (
+          <ToggleRow
+            key={uc}
+            checked={isOn(uc)}
+            onChange={(v) => toggle(uc, v)}
+            label={t(`systemSettings.clipPipeline.${uc}.label`)}
+            hint={t(`systemSettings.clipPipeline.${uc}.hint`)}
+          />
+        ))}
+
+        <p
+          className="text-xs text-dim"
+          style={{ margin: 0 }}
+        >
+          {t("systemSettings.clipPipeline.offHint")}
+        </p>
+
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginTop: 8,
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {toast && (
+              <span
+                className="text-sm"
+                style={{
+                  color: toast.startsWith("✗")
+                    ? "var(--danger-text)"
+                    : "var(--success-text)",
+                }}
+              >
+                {toast}
+              </span>
+            )}
+          </div>
+          <button
+            className="btn btn-primary"
+            onClick={onSave}
+            disabled={!dirty || put.isPending || remote.isLoading}
+          >
+            <Icon name="check" size={12} />
+            {put.isPending ? t("common.saving") : t("common.save")}
+          </button>
         </div>
       </div>
     </div>
