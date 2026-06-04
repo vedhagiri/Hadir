@@ -2040,11 +2040,13 @@ interface WorkersSnapshot {
 
 function WorkersTablePanel() {
   const { t } = useTranslation();
+  // Manual-refresh only — auto-polling removed at operator request.
+  // The "Sync now" button below is the sole refresh path; the panel
+  // also fetches once on mount and on tab switch.
   const q = useQuery({
     queryKey: ["pipeline-monitor", "workers"],
     queryFn: () => api<WorkersSnapshot>("/api/pipeline-monitor/workers"),
-    refetchInterval: 1500,
-    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: false,
   });
 
   if (q.isLoading) {
