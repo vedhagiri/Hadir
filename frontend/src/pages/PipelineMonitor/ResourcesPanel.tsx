@@ -20,6 +20,66 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ApiError, api } from "../../api/client";
+import { ResourceTimeseries } from "./ResourceTimeseries";
+import { TopProcessesPanel } from "./TopProcessesPanel";
+
+// Per-row health pill — green/yellow/red dot + label. Reused by the
+// per-camera and per-stage tables so the leftmost column tells the
+// admin "is this row healthy?" in one glance, without scanning the
+// numeric columns. Pure: no hooks, no fetches.
+type Severity = "ok" | "warn" | "bad";
+const sevColor: Record<Severity, { bd: string; bg: string; fg: string }> = {
+  ok: {
+    bd: "var(--success, #10b981)",
+    bg: "var(--success-soft, #ecfdf5)",
+    fg: "var(--success-text, #047857)",
+  },
+  warn: {
+    bd: "var(--warning, #f59e0b)",
+    bg: "var(--warning-soft, #fffbeb)",
+    fg: "var(--warning-text, #b45309)",
+  },
+  bad: {
+    bd: "var(--danger, #ef4444)",
+    bg: "var(--danger-soft, #fef2f2)",
+    fg: "var(--danger-text, #b91c1c)",
+  },
+};
+
+function HealthPill({ sev, label }: { sev: Severity; label: string }) {
+  const c = sevColor[sev];
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "2px 10px",
+        borderRadius: 999,
+        background: c.bg,
+        color: c.fg,
+        border: `1px solid ${c.bd}`,
+        fontSize: 10,
+        fontWeight: 600,
+        textTransform: "uppercase",
+        letterSpacing: 0.4,
+        whiteSpace: "nowrap",
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: 999,
+          background: c.bd,
+          display: "inline-block",
+        }}
+      />
+      {label}
+    </span>
+  );
+}
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -756,6 +816,7 @@ function CamerasResourceTable({ cameras }: ResourcesCamerasResponse) {
         >
           <thead>
             <tr style={{ background: "var(--bg-sunken, #f9fafb)" }}>
+              <th style={cellStyle}>{t("resources.col.health")}</th>
               <th style={cellStyle}>{t("resources.col.camera")}</th>
               <th style={cellStyle}>{t("resources.col.cpuShare")}</th>
               <th style={cellStyle}>{t("resources.col.memShare")}</th>
@@ -768,8 +829,24 @@ function CamerasResourceTable({ cameras }: ResourcesCamerasResponse) {
             </tr>
           </thead>
           <tbody>
-            {cameras.map((c) => (
+            {cameras.map((c) => {
+              // Same thresholds the per-column colours below use, but
+              // collapsed into a single severity for the leading pill
+              // so the admin scans one column instead of four.
+              const cameraSev: Severity =
+                c.frame_drops_60s > 30 || c.rtsp_reconnects_60s > 2
+                  ? "bad"
+                  : c.frame_drops_60s > 10 ||
+                    c.rtsp_reconnects_60s > 0 ||
+                    c.clip_queue_size > 10
+                  ? "warn"
+                  : "ok";
+              const cameraSevLabel = t(`resources.health.${cameraSev}`);
+              return (
               <tr key={c.camera_id}>
+                <td style={cellStyle}>
+                  <HealthPill sev={cameraSev} label={cameraSevLabel} />
+                </td>
                 <td style={cellStyle}>
                   <div style={{ fontWeight: 600 }}>{c.camera_name}</div>
                   <div className="text-dim" style={{ fontSize: 10 }}>
@@ -818,7 +895,8 @@ function CamerasResourceTable({ cameras }: ResourcesCamerasResponse) {
                   {c.clip_recording_active ? " ●" : ""}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -866,6 +944,7 @@ function StagesBreakdownTable({ stages }: ResourcesStagesResponse) {
         >
           <thead>
             <tr style={{ background: "var(--bg-sunken, #f9fafb)" }}>
+              <th style={cellStyle}>{t("resources.col.health")}</th>
               <th style={cellStyle}>{t("resources.col.stage")}</th>
               <th style={cellStyle}>{t("resources.col.scope")}</th>
               <th style={cellStyle}>{t("resources.col.avgMs")}</th>
@@ -875,8 +954,19 @@ function StagesBreakdownTable({ stages }: ResourcesStagesResponse) {
             </tr>
           </thead>
           <tbody>
-            {stages.map((s) => (
+            {stages.map((s) => {
+              const stageSev: Severity =
+                s.error_count_5min >= 10 || (s.queue_size ?? 0) >= 50
+                  ? "bad"
+                  : s.error_count_5min > 0 || (s.queue_size ?? 0) > 10
+                  ? "warn"
+                  : "ok";
+              const stageSevLabel = t(`resources.health.${stageSev}`);
+              return (
               <tr key={s.key}>
+                <td style={cellStyle}>
+                  <HealthPill sev={stageSev} label={stageSevLabel} />
+                </td>
                 <td style={cellStyle}>
                   <div style={{ fontWeight: 600 }}>
                     {t(`resources.stageName.${s.key}`, {
@@ -937,7 +1027,8 @@ function StagesBreakdownTable({ stages }: ResourcesStagesResponse) {
                   {s.error_count_5min}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -968,6 +1059,8 @@ export function ResourcesPanel({ isAdmin }: { isAdmin: boolean }) {
           {t("resources.loading")}
         </div>
       )}
+      <ResourceTimeseries isAdmin={isAdmin} />
+      <TopProcessesPanel isAdmin={isAdmin} />
       {hostQ.data && <SystemOverviewCard {...hostQ.data} />}
       {camerasQ.data && <CamerasResourceTable {...camerasQ.data} />}
       {stagesQ.data && <StagesBreakdownTable {...stagesQ.data} />}

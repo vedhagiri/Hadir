@@ -130,6 +130,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     notification_worker.start()
     retention_scheduler.start()
     lifecycle_scheduler.start()
+    # P29 — host-resource ring buffer (CPU/mem/swap/I/O over time).
+    from maugood.observability import timeseries as _ts  # noqa: PLC0415
+    _ts.start()
     # Queue-based clip-processing pipeline (cropping + matching
     # workers). Side-by-side with the legacy ReprocessFaceMatchWorker
     # path — operators submit batches via /api/clip-pipeline/submit.
@@ -163,6 +166,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         lifecycle_scheduler.stop()
         reconcile_scheduler.stop()
         clip_pipeline.stop()
+        from maugood.observability import timeseries as _ts_stop  # noqa: PLC0415
+        _ts_stop.stop()
         limiter.stop()
 
 

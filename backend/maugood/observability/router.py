@@ -15,12 +15,13 @@ import logging
 from datetime import datetime, timezone
 from typing import Annotated, Any, Literal, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from maugood.auth.dependencies import CurrentUser, require_role
 from maugood.capture import capture_manager
 from maugood.observability import host_metrics
+from maugood.observability import timeseries as timeseries_buffer
 from maugood.tenants.scope import TenantScope
 
 logger = logging.getLogger(__name__)
@@ -462,4 +463,148 @@ def get_resources_stages(
             clip_stage,
         ],
         generated_at=datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# /timeseries — Live line-chart data
+# ---------------------------------------------------------------------------
+
+
+_RANGE_SECONDS: dict[str, int] = {
+    "15m": 15 * 60,
+    "1h": 60 * 60,
+    "6h": 6 * 60 * 60,
+    "24h": 24 * 60 * 60,
+}
+
+
+class TimeseriesPointOut(BaseModel):
+    ts: float
+    cpu_percent: float = 0.0
+    mem_percent: float = 0.0
+    mem_used_mb: int = 0
+    swap_percent: float = 0.0
+    swap_used_mb: int = 0
+    disk_read_mb_s: float = 0.0
+    disk_write_mb_s: float = 0.0
+    net_recv_mb_s: float = 0.0
+    net_sent_mb_s: float = 0.0
+    backend_cpu_percent: float = 0.0
+    backend_mem_mb: float = 0.0
+
+
+class ResourcesTimeseriesOut(BaseModel):
+    range: str
+    sample_interval_s: float
+    points: list[TimeseriesPointOut]
+    generated_at: str
+
+
+@router.get("/timeseries", response_model=ResourcesTimeseriesOut)
+def get_resources_timeseries(
+    user: Annotated[CurrentUser, ADMIN],
+    range_: str = Query(
+        "1h",
+        alias="range",
+        description="Look-back window: 15m, 1h, 6h, 24h.",
+    ),
+) -> ResourcesTimeseriesOut:
+    """Return the host-resource ring buffer for the requested window.
+
+    Host-wide regardless of tenant — the host is shared. The frontend
+    chart consumes ``points[]`` directly; one record per ``SAMPLE_INTERVAL_S``
+    (10 s).
+
+    Defaults to the last hour. Unknown values fall back to 1h so a
+    typo doesn't return an empty chart.
+    """
+
+    seconds = _RANGE_SECONDS.get(range_, _RANGE_SECONDS["1h"])
+    since = max(0.0, datetime.now(tz=timezone.utc).timestamp() - seconds)
+    samples = timeseries_buffer.snapshot(since_ts=since)
+    return ResourcesTimeseriesOut(
+        range=range_ if range_ in _RANGE_SECONDS else "1h",
+        sample_interval_s=timeseries_buffer.SAMPLE_INTERVAL_S,
+        points=[
+            TimeseriesPointOut(
+                ts=s.ts,
+                cpu_percent=s.cpu_percent,
+                mem_percent=s.mem_percent,
+                mem_used_mb=s.mem_used_mb,
+                swap_percent=s.swap_percent,
+                swap_used_mb=s.swap_used_mb,
+                disk_read_mb_s=s.disk_read_mb_s,
+                disk_write_mb_s=s.disk_write_mb_s,
+                net_recv_mb_s=s.net_recv_mb_s,
+                net_sent_mb_s=s.net_sent_mb_s,
+                backend_cpu_percent=s.backend_cpu_percent,
+                backend_mem_mb=s.backend_mem_mb,
+            )
+            for s in samples
+        ],
+        generated_at=datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# /processes — Top-N processes by combined CPU + memory share
+# ---------------------------------------------------------------------------
+
+
+class ProcessRowOut(BaseModel):
+    pid: int
+    name: str
+    cmdline_short: str = ""
+    user: str = ""
+    cpu_percent: float = 0.0
+    memory_mb: float = 0.0
+    memory_percent: float = 0.0
+    swap_mb: Optional[float] = None
+    threads: int = 0
+    create_time: float = 0.0
+
+
+class ResourcesProcessesOut(BaseModel):
+    processes: list[ProcessRowOut]
+    generated_at: str
+    swap_supported: bool
+
+
+@router.get("/processes", response_model=ResourcesProcessesOut)
+def get_resources_processes(
+    user: Annotated[CurrentUser, ADMIN],
+    limit: int = Query(15, ge=1, le=50),
+) -> ResourcesProcessesOut:
+    """Top processes by combined CPU + memory share.
+
+    Host-wide — every process on the box, not just backend children.
+    The frontend re-sorts client-side by the active metric tab
+    (CPU / memory / swap) without a round-trip.
+
+    Per-process swap is a Linux-only signal (``/proc/<pid>/status``);
+    ``swap_supported`` tells the UI whether to hide the column on
+    other OSes.
+    """
+
+    rows = host_metrics.read_top_processes(limit=limit)
+    swap_supported = any(r.swap_mb is not None for r in rows)
+    return ResourcesProcessesOut(
+        processes=[
+            ProcessRowOut(
+                pid=r.pid,
+                name=r.name,
+                cmdline_short=r.cmdline_short,
+                user=r.user,
+                cpu_percent=r.cpu_percent,
+                memory_mb=r.memory_mb,
+                memory_percent=r.memory_percent,
+                swap_mb=r.swap_mb,
+                threads=r.threads,
+                create_time=r.create_time,
+            )
+            for r in rows
+        ],
+        generated_at=datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),
+        swap_supported=swap_supported,
     )

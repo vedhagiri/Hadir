@@ -467,6 +467,135 @@ def read_thread_breakdown() -> ThreadBreakdown:
     return ThreadBreakdown(total=total, categories=categories)
 
 
+@dataclass
+class ProcessRow:
+    """One row in the top-processes table.
+
+    ``cpu_percent`` is psutil's process-level reading at sample time;
+    on a fresh-spawned process the first call returns 0 — by design.
+    ``swap_mb`` is Linux-only (reads ``/proc/<pid>/status.VmSwap``);
+    ``None`` on macOS / Windows / sandboxed Docker without /proc.
+    """
+
+    pid: int = 0
+    name: str = ""
+    cmdline_short: str = ""
+    user: str = ""
+    cpu_percent: float = 0.0
+    memory_mb: float = 0.0
+    memory_percent: float = 0.0
+    swap_mb: Optional[float] = None
+    threads: int = 0
+    create_time: float = 0.0
+
+
+def _read_proc_swap_mb(pid: int) -> Optional[float]:
+    """Linux: read ``VmSwap:`` from ``/proc/<pid>/status``. Returns MB
+    as float, or ``None`` when unavailable."""
+
+    try:
+        with open(f"/proc/{pid}/status", encoding="ascii") as fh:
+            for line in fh:
+                if line.startswith("VmSwap:"):
+                    # ``VmSwap:       123 kB``
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[1].isdigit():
+                        return round(int(parts[1]) / 1024.0, 1)
+                    return 0.0
+    except (FileNotFoundError, PermissionError, OSError):
+        return None
+    # No VmSwap line — swap not used.
+    return 0.0
+
+
+def read_top_processes(limit: int = 10) -> list[ProcessRow]:
+    """Return the top-``limit`` processes on the host by CPU%.
+
+    The caller asks for one "most interesting" sort and we hand back
+    a single list — frontend can re-sort client-side by CPU / memory
+    / swap from the same payload (saves a round-trip per tab change).
+    Each row is sampled twice 100 ms apart so psutil's
+    ``cpu_percent`` reading is non-zero on first call.
+    """
+
+    import psutil  # noqa: PLC0415
+
+    rows: list[ProcessRow] = []
+    # First pass primes ``cpu_percent``.
+    procs: list[Any] = []
+    try:
+        for proc in psutil.process_iter(
+            ["pid", "name", "username", "create_time"]
+        ):
+            try:
+                proc.cpu_percent(interval=None)
+                procs.append(proc)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+    except Exception as exc:  # noqa: BLE001
+        # If we can't iterate at all, return empty.
+        return rows
+
+    # Brief sleep so the next cpu_percent call has a delta to work with.
+    time.sleep(0.1)
+
+    n_cpu = max(1, psutil.cpu_count(logical=True) or 1)
+
+    for proc in procs:
+        try:
+            info = proc.info
+            cpu_pct = float(proc.cpu_percent(interval=None))
+            try:
+                mem = proc.memory_info()
+                mem_mb = round(mem.rss / 1024 / 1024, 1)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                mem_mb = 0.0
+            try:
+                mem_pct = round(float(proc.memory_percent()), 2)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                mem_pct = 0.0
+            try:
+                threads = int(proc.num_threads())
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                threads = 0
+            try:
+                cmd_parts = proc.cmdline() or []
+                cmd_short = " ".join(cmd_parts)[:120]
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                cmd_short = ""
+            swap_mb = _read_proc_swap_mb(int(info["pid"]))
+            rows.append(
+                ProcessRow(
+                    pid=int(info["pid"]),
+                    name=str(info.get("name") or ""),
+                    cmdline_short=cmd_short,
+                    user=str(info.get("username") or ""),
+                    # Normalise: psutil reports cumulative across cores
+                    # (>100% possible), normalise to single-core scale
+                    # for display — matches the host CPU gauge.
+                    cpu_percent=round(cpu_pct / n_cpu, 1),
+                    memory_mb=mem_mb,
+                    memory_percent=mem_pct,
+                    swap_mb=swap_mb,
+                    threads=threads,
+                    create_time=float(info.get("create_time") or 0.0),
+                )
+            )
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+        except Exception:  # noqa: BLE001
+            continue
+
+    # Sort by combined cost — CPU + memory share gives "biggest
+    # contributor to current pressure" without picking one or the
+    # other; the frontend re-sorts per tab anyway.
+    rows.sort(
+        key=lambda r: (r.cpu_percent + r.memory_percent),
+        reverse=True,
+    )
+    return rows[:limit]
+
+
 def face_crops_size(base_path: Optional[str] = None) -> tuple[int, float]:
     """Return ``(file_count, total_gb)`` for the face-crops tree.
 

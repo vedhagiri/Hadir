@@ -3662,7 +3662,13 @@
     "noWorkers": "No running workers yet. Cameras with worker_enabled=true and a reachable RTSP feed appear here.",
     "perStage": "Pipeline stage breakdown",
     "perStageNote": "Detection + matching + attendance are host-wide; RTSP reader + clip save are per-camera.",
+    "health": {
+      "ok": "OK",
+      "warn": "Warn",
+      "bad": "Critical"
+    },
     "col": {
+      "health": "Health",
       "camera": "Camera",
       "cpuShare": "CPU share (est.)",
       "memShare": "Memory (est.)",
@@ -3689,6 +3695,47 @@
       "matching": "Face Matching",
       "attendance": "Attendance Compute",
       "clip_save": "Clip Save"
+    },
+    "chart": {
+      "tablistAria": "Pick a metric to chart",
+      "tabCpu": "CPU",
+      "tabMemory": "Memory",
+      "tabIo": "IO Speed",
+      "tabSwap": "SWAP",
+      "rangeLabel": "Range",
+      "range15m": "Last 15 min",
+      "range1h": "Last hour",
+      "range6h": "Last 6 hours",
+      "range24h": "Last 24 hours",
+      "export": "Export CSV",
+      "loading": "Loading samples…",
+      "cpuLabel": "CPU usage",
+      "memLabel": "Memory usage",
+      "swapLabel": "Swap usage",
+      "ioLabel": "Disk I/O (R+W)",
+      "svgAria": "{{metric}} timeseries chart",
+      "currentLabel": "now",
+      "samples_one": "{{count}} sample",
+      "samples_other": "{{count}} samples"
+    },
+    "processes": {
+      "title": "Top processes — who's using CPU, memory and swap",
+      "note": "Host-wide. Refreshes every 10 s. Sort tab re-orders client-side.",
+      "tabCpu": "By CPU",
+      "tabMemory": "By Memory",
+      "tabSwap": "By Swap",
+      "loading": "Sampling processes…",
+      "empty": "No processes returned. The endpoint may have failed.",
+      "col": {
+        "process": "Process",
+        "pid": "PID",
+        "cpu": "CPU %",
+        "memMb": "Memory MB",
+        "memPct": "Memory %",
+        "swap": "Swap MB",
+        "threads": "Threads",
+        "age": "Age"
+      }
     }
   },
   "queueClear": {
