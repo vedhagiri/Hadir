@@ -106,10 +106,16 @@ def _ffmpeg_socket_timeout_flag() -> Optional[str]:
         help_text = (proc.stdout or "") + (proc.stderr or "")
     except Exception:  # noqa: BLE001
         return None
-    # Preference order: the modern generic flag first, then the rtsp
-    # demuxer flag, then the legacy one. Match on the bare token so a
-    # word-boundary check isn't fooled by substrings.
-    for flag in ("rw_timeout", "timeout", "stimeout"):
+    # Preference order: the RTSP demuxer's own ``-timeout`` (microseconds)
+    # FIRST, then the legacy ``-stimeout`` (≤4.x), and ``-rw_timeout`` LAST.
+    # ``-rw_timeout`` shows up in ``-h full`` on modern ffmpeg (7.x) but is
+    # an AVIO/protocol-only option — the rtsp demuxer REJECTS it as an input
+    # option ("Option rw_timeout not found", rc=8), which aborts every
+    # segmenter spawn and breaks all stream-copy clip recording. Picking
+    # ``-timeout`` for rtsp:// inputs is correct on both modern and old
+    # builds. Match on the bare token so a word-boundary check isn't fooled
+    # by substrings.
+    for flag in ("timeout", "stimeout", "rw_timeout"):
         if re.search(rf"(?<![\w-])-{flag}\b", help_text):
             return f"-{flag}"
     return None
