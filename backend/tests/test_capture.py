@@ -23,7 +23,6 @@ from sqlalchemy import delete, func, insert, select
 
 from maugood.capture import manager as manager_mod
 from maugood.capture.analyzer import Detection
-from maugood.capture.events import captures_dir
 from maugood.capture.reader import CaptureWorker, ReaderConfig
 from maugood.capture.tracker import Bbox
 from maugood.cameras import repository as camera_repo
@@ -188,13 +187,26 @@ def _seed_camera(
 
 
 @pytest.mark.usefixtures("clean_capture")
-def test_worker_emits_one_event_per_new_track_not_per_frame(
+def test_worker_does_not_emit_detection_events_live_deferred_to_reprocess(
     admin_engine,
 ) -> None:
+    """The live capture worker no longer emits ``detection_events`` rows
+    or writes per-track face crops directly.
+
+    Architecture change (see ``reader.py`` — "Live workflow no longer
+    emits detection_events rows or writes per-track face crops. Those
+    are deferred to the manual reprocess pipelines (UC1 / UC2 / UC3)").
+    This test guards that contract: even with ``live_matching_enabled=
+    True`` and a multi-track scripted feed, the worker must write ZERO
+    rows. Emitter correctness itself is covered by the direct
+    ``test_emit_*`` tests, which call ``emit_detection_event`` directly.
+    """
     cam_id = _seed_camera(admin_engine, name="worker-test", plain_url="rtsp://fake/1")
 
     # 3 frames: frame1 = 1 face, frame2 = same face (slight shift → same
-    # track), frame3 = two faces (continuation + one brand-new).
+    # track), frame3 = two faces (continuation + one brand-new). Under
+    # the OLD architecture this produced 2 events; under the new one it
+    # produces none from the live path.
     frames = [
         (True, _blank_frame()),
         (True, _blank_frame()),
@@ -226,20 +238,11 @@ def test_worker_emits_one_event_per_new_track_not_per_frame(
             reconnect_backoff_max_s=0.01,
             health_interval_s=1000.0,  # suppress health writes in this test
             max_iterations=3,
-            # Force every detect call (blank frames produce no motion).
             force_detect_every_s=0.0,
-            # Walk every seq sequentially so all 3 scripted detections
-            # are consumed by the tracker (P28.5a refactor: production
-            # skip-to-latest would otherwise drop intermediate frames).
             analyzer_consume_every_seq=True,
         ),
-        # Post-fix-detector-mode-preflight: the absolute quality gate
-        # is gone; this knob is now a no-op. Left in the dict for
-        # back-compat with pre-fix capture_config JSON shapes.
         capture_config={"min_face_quality_to_save": 0.0},
-        # Migration 0072: live matching is per-camera and defaults OFF.
-        # This test exercises the full face-recognition → emit path, so
-        # turn it on explicitly.
+        # Even with live matching ON, the live worker defers emission.
         live_matching_enabled=True,
     )
 
@@ -257,55 +260,47 @@ def test_worker_emits_one_event_per_new_track_not_per_frame(
             )
         ).all()
 
-    # 3 frames produced 2 NEW tracks (frame1 + frame3's second face);
-    # frame2 and frame3's first face were continuations.
-    assert len(rows) == 2, f"expected 2 events, got {len(rows)}: {rows}"
-    assert len({r.track_id for r in rows}) == 2
+    # New architecture: detection_events + face-crop emission are
+    # deferred to the UC1/UC2/UC3 reprocess pipelines, so the live
+    # worker writes nothing.
+    assert rows == [], f"live worker must not emit events, got {len(rows)}: {rows}"
 
 
 # --- Face crops on disk are Fernet-encrypted -----------------------------
 
 
 @pytest.mark.usefixtures("clean_capture")
-def test_event_crops_on_disk_are_encrypted_not_jpeg(admin_engine) -> None:
+def test_event_crops_on_disk_are_encrypted_not_jpeg(
+    admin_engine, monkeypatch, tmp_path
+) -> None:
+    """``emit_detection_event`` Fernet-encrypts the face crop before
+    writing it to disk — opening the file as an image yields garbage.
+
+    Emission moved off the live worker to the UC1/UC2/UC3 reprocess
+    pipelines, so this exercises the emitter directly — the layer that
+    owns the encryption-at-rest invariant.
+    """
+    from maugood.capture import events as events_mod  # noqa: PLC0415
+
+    monkeypatch.setattr(
+        events_mod, "captures_dir",
+        lambda tenant_id, camera_id, *, now=None:
+            tmp_path / "captures" / str(tenant_id) / str(camera_id),
+    )
+
     cam_id = _seed_camera(admin_engine, name="crop-test", plain_url="rtsp://fake/2")
 
-    analyzer = _StubAnalyzer(
-        [[Detection(bbox=Bbox(x=20, y=20, w=40, h=40), det_score=0.95)]]
-    )
-    frames = [(True, _blank_frame())]
-
-    worker = CaptureWorker(
-        engine=get_engine(),
-        scope=TENANT,
+    new_id = events_mod.emit_detection_event(
+        get_engine(),
+        TENANT,
         camera_id=cam_id,
-        camera_name="crop-test",
-        rtsp_url_plain="rtsp://fake/2",
-        analyzer=analyzer,
-        capture_factory=lambda _url: _ScriptedCapture(frames),
-        config=ReaderConfig(
-            analyzer_max_fps=1000.0,
-            reconnect_backoff_initial_s=0.01,
-            reconnect_backoff_max_s=0.01,
-            health_interval_s=1000.0,
-            max_iterations=1,
-            force_detect_every_s=0.0,
-            analyzer_consume_every_seq=True,
-        ),
-        # P28.5b: same reasoning as the tracker-shape test — disable
-        # the quality threshold so test bboxes (small) reach the
-        # face-save path.
+        frame_bgr=_blank_frame(w=320, h=240),
+        bbox=Bbox(x=20, y=20, w=40, h=40),
+        det_score=0.95,
+        track_id="t-crop-test",
         capture_config={"min_face_quality_to_save": 0.0},
-        # Migration 0072: live matching is per-camera and defaults OFF;
-        # this test needs the full recognition → emit path on.
-        live_matching_enabled=True,
     )
-
-    worker.start()
-    deadline = time.time() + 5.0
-    while worker.is_alive() and time.time() < deadline:
-        time.sleep(0.05)
-    worker.stop()
+    assert new_id is not None
 
     # Exactly one event row, with a non-empty face_crop_path.
     with admin_engine.begin() as conn:
@@ -313,11 +308,10 @@ def test_event_crops_on_disk_are_encrypted_not_jpeg(admin_engine) -> None:
             select(
                 detection_events.c.face_crop_path,
                 detection_events.c.bbox,
-                detection_events.c.track_id,
                 detection_events.c.employee_id,
                 detection_events.c.embedding,
                 detection_events.c.confidence,
-            ).where(detection_events.c.camera_id == cam_id)
+            ).where(detection_events.c.id == new_id)
         ).one()
     assert row.face_crop_path
     assert row.employee_id is None  # P9 fills this
@@ -325,16 +319,14 @@ def test_event_crops_on_disk_are_encrypted_not_jpeg(admin_engine) -> None:
     assert row.confidence is None
     assert set(row.bbox.keys()) == {"x", "y", "w", "h"}
 
-    # File exists and its first bytes are NOT the JPEG magic.
+    # File exists and its first bytes are NOT the JPEG magic — i.e. it's
+    # Fernet ciphertext, not a readable JPEG.
     p = Path(row.face_crop_path)
     assert p.exists()
     assert p.read_bytes()[:3] != b"\xff\xd8\xff"
-    # Fernet tokens on disk start with 'gAAAAA' → base64('gAAAA...') = 'Z0FBQ...'
-    # but raw Fernet ciphertext bytes begin with 0x80 0x00 etc. Either way, the
-    # point is 'not a JPEG'. We already asserted that above.
 
-    # And the configured captures_dir for today owns the file.
-    expected_root = captures_dir(TENANT.tenant_id, cam_id)
+    # And the (monkeypatched) captures_dir for this camera owns the file.
+    expected_root = tmp_path / "captures" / str(TENANT.tenant_id) / str(cam_id)
     assert str(p.parent) == str(expected_root)
 
 
@@ -466,56 +458,43 @@ def test_worker_writes_health_snapshot(admin_engine) -> None:
 
 
 @pytest.mark.usefixtures("clean_capture")
-def test_recent_events_query_shape_matches_pilot_check(admin_engine) -> None:
+def test_recent_events_query_shape_matches_pilot_check(
+    admin_engine, monkeypatch, tmp_path
+) -> None:
     """Sanity check for the pilot verification SQL.
 
     The pilot plan asks operators to run:
       SELECT COUNT(*) FROM detection_events
       WHERE captured_at > now() - interval '5 minutes';
-    This test confirms the table + column shape our emitter writes are
-    exactly what that query expects.
+    This test confirms the table + column shape the emitter writes are
+    exactly what that query expects. Emission moved off the live worker
+    to the UC reprocess pipelines, so it drives ``emit_detection_event``
+    directly.
     """
+    from datetime import datetime, timezone
+    from maugood.capture import events as events_mod  # noqa: PLC0415
+
+    monkeypatch.setattr(
+        events_mod, "captures_dir",
+        lambda tenant_id, camera_id, *, now=None:
+            tmp_path / "captures" / str(tenant_id) / str(camera_id),
+    )
 
     cam_id = _seed_camera(
         admin_engine, name="shape-test", plain_url="rtsp://fake/5"
     )
-    analyzer = _StubAnalyzer(
-        [[Detection(bbox=Bbox(x=5, y=5, w=30, h=30), det_score=0.9)]]
-    )
-    frames = [(True, _blank_frame())]
 
-    worker = CaptureWorker(
-        engine=get_engine(),
-        scope=TENANT,
+    new_id = events_mod.emit_detection_event(
+        get_engine(),
+        TENANT,
         camera_id=cam_id,
-        camera_name="shape-test",
-        rtsp_url_plain="rtsp://fake/5",
-        analyzer=analyzer,
-        capture_factory=lambda _url: _ScriptedCapture(frames),
-        config=ReaderConfig(
-            analyzer_max_fps=1000.0,
-            reconnect_backoff_initial_s=0.01,
-            reconnect_backoff_max_s=0.01,
-            health_interval_s=1000.0,
-            max_iterations=1,
-            force_detect_every_s=0.0,
-            analyzer_consume_every_seq=True,
-        ),
-        # P28.5b: same reasoning as the tracker-shape test — disable
-        # the quality threshold so test bboxes (small) reach the
-        # face-save path.
+        frame_bgr=_blank_frame(w=320, h=240),
+        bbox=Bbox(x=5, y=5, w=30, h=30),
+        det_score=0.9,
+        track_id="t-shape-test",
         capture_config={"min_face_quality_to_save": 0.0},
-        # Migration 0072: live matching is per-camera and defaults OFF;
-        # this test needs the full recognition → emit path on.
-        live_matching_enabled=True,
     )
-    worker.start()
-    deadline = time.time() + 5.0
-    while worker.is_alive() and time.time() < deadline:
-        time.sleep(0.05)
-    worker.stop()
-
-    from datetime import datetime, timezone
+    assert new_id is not None
 
     with admin_engine.begin() as conn:
         count = conn.execute(
