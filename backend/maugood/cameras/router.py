@@ -28,6 +28,8 @@ from maugood.cameras import repository as repo
 from maugood.cameras import rtsp as rtsp_io
 from maugood.cameras import transfer
 from maugood.cameras.schemas import (
+    CameraBulkUpdateIn,
+    CameraBulkUpdateResult,
     CameraCreateIn,
     CameraExportFile,
     CameraImportPreview,
@@ -528,6 +530,102 @@ def import_cameras_endpoint(
         skipped=skipped,
         errors=errors,
         rows=result_rows,
+    )
+
+
+@router.post("/bulk-update", response_model=CameraBulkUpdateResult)
+def bulk_update_cameras_endpoint(
+    payload: CameraBulkUpdateIn,
+    user: Annotated[CurrentUser, ADMIN],
+) -> CameraBulkUpdateResult:
+    """Flip any of the four operational toggles
+    (``worker_enabled`` / ``display_enabled`` / ``detection_enabled`` /
+    ``clip_recording_enabled``) across many cameras in one call.
+
+    Mirrors the single PATCH mechanics. Unknown / cross-tenant
+    ``camera_id`` values fall silently into ``not_found`` — never a 403
+    (403 would leak existence; this is the tenant-isolation guard,
+    relying on ``repo.get_camera``'s ``WHERE tenant_id`` filter). This
+    endpoint touches ONLY the four booleans — it never reads, writes,
+    logs, or audits an ``rtsp_url``.
+    """
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    provided = payload.model_dump(exclude_unset=True)
+
+    toggle_keys = (
+        "worker_enabled",
+        "display_enabled",
+        "detection_enabled",
+        "clip_recording_enabled",
+    )
+    toggle_values: dict[str, object] = {
+        key: provided[key]
+        for key in toggle_keys
+        if key in provided and provided[key] is not None
+    }
+    if not toggle_values:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "field": "toggles",
+                "message": (
+                    "at least one of worker_enabled/display_enabled/"
+                    "detection_enabled/clip_recording_enabled is required"
+                ),
+            },
+        )
+
+    # De-duplicate while preserving the operator's order.
+    seen: set[int] = set()
+    ordered_ids: list[int] = []
+    for cid in payload.camera_ids:
+        if cid not in seen:
+            seen.add(cid)
+            ordered_ids.append(cid)
+
+    not_found: list[int] = []
+    updated_ids: list[int] = []
+    updated_rows: list[repo.CameraRow] = []
+
+    with get_engine().begin() as conn:
+        for cid in ordered_ids:
+            before = repo.get_camera(conn, scope, cid)
+            if before is None:
+                # Cross-tenant / unknown id — silent not_found, never 403.
+                not_found.append(cid)
+                continue
+            repo.update_camera(conn, scope, cid, values=dict(toggle_values))
+            after = repo.get_camera(conn, scope, cid)
+            assert after is not None
+            write_audit(
+                conn,
+                tenant_id=scope.tenant_id,
+                actor_user_id=user.id,
+                action="camera.updated",
+                entity_type="camera",
+                entity_id=str(cid),
+                before=_audit_payload(before),
+                after={**_audit_payload(after), "bulk_update": True},
+            )
+            updated_ids.append(cid)
+            updated_rows.append(after)
+
+    # Hot-reload capture workers for everything we touched (after commit)
+    # so worker / detection toggles take effect immediately.
+    for cid in updated_ids:
+        capture_manager.on_camera_updated(cid, tenant_id=scope.tenant_id)
+
+    logger.info(
+        "cameras bulk-updated: tenant=%s updated=%s not_found=%s",
+        scope.tenant_id,
+        len(updated_ids),
+        len(not_found),
+    )
+    return CameraBulkUpdateResult(
+        updated=len(updated_ids),
+        not_found=not_found,
+        cameras=[_row_to_out(r) for r in updated_rows],
     )
 
 

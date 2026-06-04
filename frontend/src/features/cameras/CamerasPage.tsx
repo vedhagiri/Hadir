@@ -16,6 +16,7 @@ import { CameraImportModal } from "./CameraImportModal";
 import { PreviewModal } from "./PreviewModal";
 import {
   exportCameras,
+  useBulkUpdateCameras,
   useCameras,
   useDeleteCamera,
   usePatchCamera,
@@ -24,18 +25,30 @@ import { useWorkers } from "../operations/hooks";
 import type { WorkerStats } from "../operations/types";
 import type { Camera } from "./types";
 
+// The four bulk-toggleable settings, in display order. The value is the
+// i18n key suffix under ``cameras.bulk.*`` for the setting's label.
+const BULK_FIELDS = {
+  worker_enabled: "worker",
+  display_enabled: "display",
+  detection_enabled: "detection",
+  clip_recording_enabled: "clipSaving",
+} as const;
+
 export function CamerasPage() {
   const { t } = useTranslation();
   const list = useCameras();
   const workers = useWorkers();
   const del = useDeleteCamera();
   const patch = usePatchCamera();
+  const bulk = useBulkUpdateCameras();
 
   // Bulk JSON import/export state.
   const [showImport, setShowImport] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+  const [bulkApplied, setBulkApplied] = useState<number | null>(null);
 
   // Camera-id → worker payload, used by StatusDot so the pill reflects
   // the same real-time state the Worker Monitoring page shows
@@ -51,8 +64,58 @@ export function CamerasPage() {
 
   const items = list.data?.items ?? [];
   const allIds = items.map((c) => c.id);
-  const allSelected =
-    allIds.length > 0 && allIds.every((id) => selected.has(id));
+  // Count only ids that are still present in the current list — the list
+  // can change under us (poll / CRUD) and stale ids must not inflate counts.
+  const selectedIds = allIds.filter((id) => selected.has(id));
+  const selectedCount = selectedIds.length;
+  const allSelected = allIds.length > 0 && selectedCount === allIds.length;
+  const someSelected = selectedCount > 0 && !allSelected;
+
+  // Indeterminate is a DOM-only property — set it imperatively on the header
+  // checkbox whenever the selection straddles "some but not all".
+  const headerCheckRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (headerCheckRef.current) {
+      headerCheckRef.current.indeterminate = someSelected;
+    }
+  }, [someSelected]);
+
+  // Drop any selected ids that no longer exist in the list (camera deleted,
+  // tenant switch, etc.) so the bulk bar count never references stale rows.
+  useEffect(() => {
+    setSelected((prev) => {
+      const present = new Set(allIds);
+      let changed = false;
+      const next = new Set<number>();
+      prev.forEach((id) => {
+        if (present.has(id)) next.add(id);
+        else changed = true;
+      });
+      return changed ? next : prev;
+    });
+    // allIds identity changes every render; key on its joined signature.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allIds.join(",")]);
+
+  const clearSelection = () => setSelected(new Set());
+
+  const applyBulk = (field: keyof typeof BULK_FIELDS, value: boolean) => {
+    if (selectedIds.length === 0) return;
+    setBulkError(null);
+    setBulkApplied(null);
+    bulk.mutate(
+      { camera_ids: selectedIds, [field]: value },
+      {
+        onSuccess: (res) => {
+          setBulkApplied(res.updated);
+          clearSelection();
+        },
+        onError: (e) => {
+          setBulkError(extractApiError(e, t("cameras.bulk.failed")));
+        },
+      },
+    );
+  };
 
   const toggleOne = (id: number) => {
     setSelected((prev) => {
@@ -184,6 +247,47 @@ export function CamerasPage() {
         </div>
       )}
 
+      {bulkError && (
+        <div
+          role="alert"
+          style={{
+            background: "var(--danger-soft)",
+            color: "var(--danger-text)",
+            padding: "8px 12px",
+            borderRadius: "var(--radius-sm)",
+            fontSize: 12.5,
+            marginBottom: 12,
+          }}
+        >
+          {bulkError}
+        </div>
+      )}
+
+      {bulkApplied !== null && selectedCount === 0 && (
+        <div
+          role="status"
+          style={{
+            background: "var(--success-soft, var(--bg-sunken))",
+            color: "var(--text)",
+            padding: "8px 12px",
+            borderRadius: "var(--radius-sm)",
+            fontSize: 12.5,
+            marginBottom: 12,
+          }}
+        >
+          {t("cameras.bulk.applied", { count: bulkApplied })}
+        </div>
+      )}
+
+      {selectedCount > 0 && (
+        <BulkActionBar
+          count={selectedCount}
+          busy={bulk.isPending}
+          onApply={applyBulk}
+          onClear={clearSelection}
+        />
+      )}
+
       <div className="card">
         <div className="card-head">
           <h3 className="card-title">{t("cameras.page.allCameras")}</h3>
@@ -196,6 +300,7 @@ export function CamerasPage() {
             <tr>
               <th style={{ width: 36 }}>
                 <input
+                  ref={headerCheckRef}
                   type="checkbox"
                   checked={allSelected}
                   onChange={toggleAll}
@@ -362,6 +467,101 @@ export function CamerasPage() {
         />
       )}
     </>
+  );
+}
+
+/**
+ * Bulk Actions bar — appears above the table whenever ≥1 camera is
+ * selected. Shows "N selected" plus an Enable / Disable pair for each of
+ * the four operational settings (Worker / Display / Detection / Clip
+ * Saving). Each button fires a single ``bulk-update`` with exactly one
+ * boolean field set across every selected camera. Buttons disable while a
+ * mutation is in flight. Layout reuses the design's ``card`` + ``btn`` +
+ * ``btn-sm`` classes; the small inline styles match the inline-style
+ * pattern already used elsewhere on this page.
+ */
+function BulkActionBar({
+  count,
+  busy,
+  onApply,
+  onClear,
+}: {
+  count: number;
+  busy: boolean;
+  onApply: (field: keyof typeof BULK_FIELDS, value: boolean) => void;
+  onClear: () => void;
+}) {
+  const { t } = useTranslation();
+  const fields = Object.entries(BULK_FIELDS) as [
+    keyof typeof BULK_FIELDS,
+    (typeof BULK_FIELDS)[keyof typeof BULK_FIELDS],
+  ][];
+  return (
+    <div
+      className="card"
+      role="region"
+      aria-label={t("cameras.bulk.regionAria")}
+      style={{
+        marginBottom: 12,
+        padding: "12px 16px",
+        display: "flex",
+        alignItems: "center",
+        flexWrap: "wrap",
+        gap: 16,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <strong style={{ fontSize: 13 }}>
+          {t("cameras.bulk.selected", { count })}
+        </strong>
+        <button type="button" className="btn btn-sm" onClick={onClear}>
+          {t("cameras.bulk.clear")}
+        </button>
+      </div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: 14,
+        }}
+      >
+        {fields.map(([field, labelKey]) => (
+          <div
+            key={field}
+            style={{ display: "flex", alignItems: "center", gap: 6 }}
+          >
+            <span className="text-xs text-dim" style={{ fontWeight: 500 }}>
+              {t(`cameras.bulk.${labelKey}`)}
+            </span>
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={busy}
+              onClick={() => onApply(field, true)}
+              title={t("cameras.bulk.enableTitle", {
+                setting: t(`cameras.bulk.${labelKey}`),
+                count,
+              })}
+            >
+              {t("cameras.bulk.enable")}
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={busy}
+              onClick={() => onApply(field, false)}
+              title={t("cameras.bulk.disableTitle", {
+                setting: t(`cameras.bulk.${labelKey}`),
+                count,
+              })}
+            >
+              {t("cameras.bulk.disable")}
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

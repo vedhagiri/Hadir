@@ -685,6 +685,24 @@
       "switchDetectionTitle": "Click to toggle face detection on/off (worker keeps streaming)",
       "switchClipTitle": "Click to toggle clip saving on/off (detection keeps running)"
     },
+    "bulk": {
+      "regionAria": "Bulk actions for selected cameras",
+      "selectAll": "Select all",
+      "selected_one": "{{count}} selected",
+      "selected_other": "{{count}} selected",
+      "clear": "Clear",
+      "worker": "Worker",
+      "display": "Display",
+      "detection": "Detection",
+      "clipSaving": "Clip Saving",
+      "enable": "Enable",
+      "disable": "Disable",
+      "enableTitle": "Enable {{setting}} for {{count}} selected camera(s)",
+      "disableTitle": "Disable {{setting}} for {{count}} selected camera(s)",
+      "applied_one": "Updated {{count}} camera.",
+      "applied_other": "Updated {{count}} cameras.",
+      "failed": "Could not apply the bulk change. Try again."
+    },
     "status": {
       "off": "Off",
       "offTitle": "Worker is disabled",

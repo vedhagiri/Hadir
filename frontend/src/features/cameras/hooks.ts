@@ -6,6 +6,8 @@ import type { UseQueryResult } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import type {
   Camera,
+  CameraBulkUpdateInput,
+  CameraBulkUpdateResult,
   CameraCreateInput,
   CameraExportFile,
   CameraImportPreview,
@@ -74,6 +76,26 @@ export function useDeleteCamera() {
       // changes capture-manager state (workers start, stop, or
       // hot-reload). Cross-invalidate so the Worker Monitoring page
       // colours flip immediately instead of waiting on its 5 s poll.
+      qc.invalidateQueries({ queryKey: ["operations", "workers"] });
+    },
+  });
+}
+
+// ── Bulk toggle update ──────────────────────────────────────────────────────
+
+// Toggle one of worker/display/detection/clip-recording across many cameras
+// in a single request. Invalidates the same queries as usePatchCamera so the
+// table + Worker Monitoring page reflect the new state immediately.
+export function useBulkUpdateCameras() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CameraBulkUpdateInput) =>
+      api<CameraBulkUpdateResult>("/api/cameras/bulk-update", {
+        method: "POST",
+        body,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: LIST_KEY });
       qc.invalidateQueries({ queryKey: ["operations", "workers"] });
     },
   });

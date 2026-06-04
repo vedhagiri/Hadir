@@ -165,6 +165,24 @@ export interface CameraExportFile {
   cameras: CameraExportItem[];
 }
 
+// ── Bulk toggle update ──────────────────────────────────────────────────────
+// Mirrors POST /api/cameras/bulk-update. Send only the one toggle being
+// changed; the backend applies it to every camera in ``camera_ids``.
+
+export interface CameraBulkUpdateInput {
+  camera_ids: number[];
+  worker_enabled?: boolean;
+  display_enabled?: boolean;
+  detection_enabled?: boolean;
+  clip_recording_enabled?: boolean;
+}
+
+export interface CameraBulkUpdateResult {
+  updated: number;
+  not_found: number[];
+  cameras: Camera[];
+}
+
 export type OnExisting = "update" | "skip";
 
 export interface CameraImportRequest {

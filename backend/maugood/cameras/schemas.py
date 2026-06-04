@@ -80,6 +80,36 @@ class CameraListOut(BaseModel):
     items: list[CameraOut]
 
 
+class CameraBulkUpdateIn(BaseModel):
+    """Body for ``POST /api/cameras/bulk-update``. Drives the Cameras
+    page "Bulk Actions" feature — flip any of the four operational
+    toggles across many cameras in one call.
+
+    Every toggle is optional + nullable; only the keys the operator
+    actually sends (and that aren't ``None``) are applied. At least one
+    toggle must resolve to a value — the router rejects an all-``None``
+    body with 400. This endpoint deliberately touches ONLY the four
+    booleans; it never accepts or audits an ``rtsp_url``.
+    """
+
+    camera_ids: list[int] = Field(min_length=1)
+    worker_enabled: Optional[bool] = None
+    display_enabled: Optional[bool] = None
+    detection_enabled: Optional[bool] = None
+    clip_recording_enabled: Optional[bool] = None
+
+
+class CameraBulkUpdateResult(BaseModel):
+    """Response for the bulk-update endpoint. ``cameras`` carries the
+    updated rows (so the frontend can refresh in place); ``not_found``
+    lists the requested ids that didn't resolve in this tenant — the
+    tenant-isolation + unknown-id path (never a 403)."""
+
+    updated: int
+    not_found: list[int]
+    cameras: list[CameraOut]
+
+
 class CameraCreateIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     location: str = Field(default="", max_length=200)

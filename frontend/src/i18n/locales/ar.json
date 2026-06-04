@@ -685,6 +685,24 @@
       "switchDetectionTitle": "انقر للتبديل بين تشغيل/إيقاف الكشف عن الوجوه (العامل يستمر في البث)",
       "switchClipTitle": "انقر للتبديل بين تشغيل/إيقاف حفظ المقاطع (الكشف يستمر)"
     },
+    "bulk": {
+      "regionAria": "إجراءات جماعية على الكاميرات المحددة",
+      "selectAll": "تحديد الكل",
+      "selected_one": "تم تحديد {{count}}",
+      "selected_other": "تم تحديد {{count}}",
+      "clear": "إلغاء التحديد",
+      "worker": "العامل",
+      "display": "العرض",
+      "detection": "الكشف",
+      "clipSaving": "حفظ المقاطع",
+      "enable": "تفعيل",
+      "disable": "تعطيل",
+      "enableTitle": "تفعيل {{setting}} لعدد {{count}} كاميرا محددة",
+      "disableTitle": "تعطيل {{setting}} لعدد {{count}} كاميرا محددة",
+      "applied_one": "تم تحديث {{count}} كاميرا.",
+      "applied_other": "تم تحديث {{count}} كاميرا.",
+      "failed": "تعذّر تطبيق التغيير الجماعي. حاول مرة أخرى."
+    },
     "status": {
       "off": "متوقّف",
       "offTitle": "العامل معطّل",
