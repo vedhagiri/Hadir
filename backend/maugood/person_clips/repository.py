@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import delete, func, insert, select
+from sqlalchemy import delete, func, insert, or_, select
 from sqlalchemy.engine import Engine, Row
 
 from maugood.db import cameras, clip_processing_results, employees, person_clips
@@ -67,8 +67,6 @@ def list_clips(
         #      a completed match for this employee
         # (3) is the broad guarantee — UC1 or UC2 hitting on the
         # employee surfaces the clip regardless of which UC ran.
-        from sqlalchemy import or_  # noqa: PLC0415
-
         cpr_subq = (
             select(clip_processing_results.c.person_clip_id)
             .where(
@@ -99,8 +97,19 @@ def list_clips(
             person_clips.c.matched_status == matched_status
         )
 
-    if recording_mode is not None and recording_mode in ("save_clips", "logs_only"):
-        base = base.where(person_clips.c.recording_mode == recording_mode)
+    if recording_mode == "save_clips":
+        # NULL is the legacy/save_clips sentinel (migration 0075): the
+        # reader's save-clips path leaves ``recording_mode`` NULL, so the
+        # Saved Clips view must match BOTH NULL and the explicit value —
+        # otherwise real recorded clips (all NULL) never show up.
+        base = base.where(
+            or_(
+                person_clips.c.recording_mode == "save_clips",
+                person_clips.c.recording_mode.is_(None),
+            )
+        )
+    elif recording_mode == "logs_only":
+        base = base.where(person_clips.c.recording_mode == "logs_only")
 
     if recording_status is not None and recording_status in (
         "recording", "finalizing", "completed", "failed", "abandoned"

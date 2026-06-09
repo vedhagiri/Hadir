@@ -64,7 +64,7 @@ export function ClipLogsPage() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const isSaveClips = mode === "save_clips";
   const hasFilter = cameraId !== null || start !== null || end !== null;
-  const colCount = isSaveClips ? 7 : 5;
+  const colCount = 6;
 
   const switchMode = (next: Mode) => {
     if (next === mode) return;
@@ -177,8 +177,9 @@ export function ClipLogsPage() {
               <th style={{ width: 100 }}>Start</th>
               <th style={{ width: 100 }}>End</th>
               <th style={{ width: 90 }}>Duration</th>
-              <th style={{ width: 80, textAlign: "center" }}>Persons</th>
-              {isSaveClips && <th>Matched</th>}
+              {!isSaveClips && (
+                <th style={{ width: 80, textAlign: "center" }}>Persons</th>
+              )}
               {isSaveClips && <th style={{ width: 90, textAlign: "end" }}>Size</th>}
             </tr>
           </thead>
@@ -239,7 +240,6 @@ export function ClipLogsPage() {
               const dur = clip.duration_seconds;
               const durStr =
                 dur > 0 ? `${Math.floor(dur / 60)}m ${Math.round(dur % 60)}s` : "—";
-              const matchedNames = clip.matched_employee_names ?? [];
               const pc = clip.person_count ?? 0;
               return (
                 <tr key={clip.id}>
@@ -256,29 +256,14 @@ export function ClipLogsPage() {
                     {endStr}
                   </td>
                   <td className="mono text-xs">{durStr}</td>
-                  <td style={{ textAlign: "center" }}>
-                    <span
-                      className={pc >= 2 ? "pill pill-warning" : "pill pill-neutral"}
-                      style={{ fontVariantNumeric: "tabular-nums", opacity: pc >= 1 ? 1 : 0.45 }}
-                    >
-                      {pc}
-                    </span>
-                  </td>
-                  {isSaveClips && (
-                    <td
-                      className="text-sm"
-                      style={{
-                        maxWidth: 220,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {matchedNames.length > 0 ? (
-                        matchedNames.join(", ")
-                      ) : (
-                        <span className="text-dim">—</span>
-                      )}
+                  {!isSaveClips && (
+                    <td style={{ textAlign: "center" }}>
+                      <span
+                        className={pc >= 2 ? "pill pill-warning" : "pill pill-neutral"}
+                        style={{ fontVariantNumeric: "tabular-nums", opacity: pc >= 1 ? 1 : 0.45 }}
+                      >
+                        {pc}
+                      </span>
                     </td>
                   )}
                   {isSaveClips && (
