@@ -62,6 +62,25 @@ class _FakeWorker:
             return False
         return (time.time() - self._ts) <= max_age_s
 
+    def is_capture_fresh(self, max_age_s: float = 10.0) -> bool:
+        # The fake doesn't model a separate reader timestamp; mirror
+        # jpeg presence so the "online" stats assertions hold.
+        if self._jpeg is None:
+            return False
+        return (time.time() - self._ts) <= max_age_s
+
+    # Viewer-gated preview hooks. The fake serves its planted JPEG
+    # regardless of viewer state, so these are no-ops — they exist so
+    # the router's notify_viewer_* calls don't AttributeError.
+    def add_viewer(self, kind: str = "face") -> None:
+        return None
+
+    def remove_viewer(self, kind: str = "face") -> None:
+        return None
+
+    def touch_viewer(self, kind: str = "face") -> None:
+        return None
+
     def get_stats(self) -> dict:
         return {
             "fps_reader": 12.0,

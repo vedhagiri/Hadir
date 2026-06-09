@@ -124,6 +124,13 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         target=_run_backfill, name="enroll-backfill", daemon=True
     ).start()
 
+    # Cap native inference threads before any model loads. Must run before
+    # capture_manager.start() (which triggers lazy InsightFace/YOLO load) and
+    # before the enrollment backfill thread above does any embedding work.
+    # Knob: MAUGOOD_INFERENCE_THREADS (default 2 — see detection/thread_limits.py).
+    from maugood.detection.thread_limits import apply_inference_thread_caps  # noqa: PLC0415
+    apply_inference_thread_caps()
+
     capture_manager.start()
     attendance_scheduler.start()
     report_runner.start()

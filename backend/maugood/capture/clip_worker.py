@@ -349,15 +349,6 @@ class ClipWorker:
         matched_employees: list[int] = clip_data.get("matched_employees", [])
         resolution_w: Optional[int] = clip_data.get("resolution_w")
         resolution_h: Optional[int] = clip_data.get("resolution_h")
-        # Migration 0052 / 0053 — which detector triggered the clip.
-        # Default falls back to 'body' (migration 0053 server_default)
-        # if the reader's clip_data dict is missing the key.
-        detection_source_raw = clip_data.get("detection_source", "body")
-        detection_source = (
-            detection_source_raw
-            if detection_source_raw in ("face", "body", "both")
-            else "body"
-        )
         # Migration 0054 — id of the row INSERTed at clip start with
         # recording_status='recording'. When present we UPDATE that
         # row; when absent (start INSERT failed), we INSERT a fresh
@@ -604,7 +595,6 @@ class ClipWorker:
                         fps_recorded=round(actual_fps, 2),
                         resolution_w=int(resolution_w) if resolution_w else None,
                         resolution_h=int(resolution_h) if resolution_h else None,
-                        detection_source=detection_source,
                         chunk_count=len(chunk_records),
                         recording_status="completed",
                     )
@@ -704,16 +694,13 @@ class ClipWorker:
             # OR from the detail drawer's Reprocess button. Both go
             # through ``POST /api/person-clips/{id}/reprocess``.
             #
-            # Rationale: many clips on body-source cameras have no
-            # faces to match (back-of-head, occlusion). Auto-running
+            # Rationale: many clips have no faces to match
+            # (back-of-head, occlusion) — clip recording is driven by
+            # YOLO body presence, not face visibility. Auto-running
             # face-match on every clip burns CPU on guaranteed
             # no-result work. Operator-triggered keeps the matching
             # CPU spent only on clips the operator actually cares
             # about identifying.
-            #
-            # ``detection_source`` is still persisted on the row
-            # (used by the UI to surface which detector triggered
-            # the clip).
             #
             # Queue-based auto-submit (new, queue-pipeline arch): when
             # a clip lands in the DB with ``recording_status=completed``
@@ -772,7 +759,6 @@ class ClipWorker:
                 "t_start": float (unix epoch seconds),
                 "t_end":   float,
                 "person_count": int,
-                "detection_source": str,
                 "existing_clip_id": Optional[int],  # placeholder row id
                 "segmenter_ref": RtspSegmenter,
             }
@@ -794,7 +780,6 @@ class ClipWorker:
         t_start = float(clip_data["t_start"])
         t_end = float(clip_data["t_end"])
         person_count = int(clip_data.get("person_count", 1))
-        detection_source = str(clip_data.get("detection_source", "body"))
         existing_clip_id: Optional[int] = clip_data.get("existing_clip_id")
         segmenter = clip_data.get("segmenter_ref")
         if segmenter is None:
@@ -909,7 +894,6 @@ class ClipWorker:
                 fps_recorded=None,
                 resolution_w=None,
                 resolution_h=None,
-                detection_source=detection_source,
                 chunk_count=len(segments),
                 recording_status="completed",
             )

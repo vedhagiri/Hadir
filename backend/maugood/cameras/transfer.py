@@ -33,8 +33,6 @@ from maugood.cameras.schemas import (
 
 EXPORT_SCHEMA_VERSION = 1
 
-_VALID_CLIP_SOURCES = ("face", "body", "both")
-
 
 def build_export_payload(
     rows,
@@ -68,7 +66,6 @@ def build_export_payload(
                 detection_enabled=row.detection_enabled,
                 clip_recording_enabled=row.clip_recording_enabled,
                 live_matching_enabled=row.live_matching_enabled,
-                clip_detection_source=row.clip_detection_source,
                 capture_config=CaptureConfig.model_validate(row.capture_config),
                 brand=row.brand,
             )
@@ -166,12 +163,6 @@ def classify_imports(
                 ).model_dump()
             except ValidationError:
                 field_error = "invalid capture_config"
-        if (
-            field_error is None
-            and item.clip_detection_source is not None
-            and item.clip_detection_source not in _VALID_CLIP_SOURCES
-        ):
-            field_error = "clip_detection_source must be face, body, or both"
 
         matched = by_code.get(code) if code else None
         stream_owner = by_canon.get(canon) if canon else None

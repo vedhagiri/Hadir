@@ -326,7 +326,6 @@ def test_person_clip_chunks_row_persists(admin_engine) -> None:
                 file_path="/tmp/phase-b-test.mp4",
                 filesize_bytes=0,
                 frame_count=120,
-                detection_source="body",
                 chunk_count=2,
             )
         )
@@ -416,7 +415,6 @@ def test_person_clip_chunks_uniq_clip_idx_rejects_dup(admin_engine) -> None:
                 duration_seconds=1.0,
                 file_path="/tmp/phase-b-dup.mp4",
                 frame_count=3,
-                detection_source="face",
                 chunk_count=1,
             )
         )

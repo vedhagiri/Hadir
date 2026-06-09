@@ -239,9 +239,6 @@ def _row_to_out(
         fps_recorded=getattr(row, "fps_recorded", None),
         resolution_w=getattr(row, "resolution_w", None),
         resolution_h=getattr(row, "resolution_h", None),
-        detection_source=str(
-            getattr(row, "detection_source", "face") or "face"
-        ),
         chunk_count=int(getattr(row, "chunk_count", 1) or 1),
         recording_status=str(
             getattr(row, "recording_status", "completed") or "completed"
@@ -718,14 +715,6 @@ def list_person_clips(
     ),
     start: Optional[str] = Query(default=None, description="ISO datetime"),
     end: Optional[str] = Query(default=None, description="ISO datetime"),
-    detection_source: Optional[str] = Query(
-        default=None,
-        description=(
-            "Filter by which detector triggered the clip. "
-            "One of 'face', 'body', 'both'. Omitted = all."
-        ),
-        pattern=r"^(face|body|both)$",
-    ),
     recording_status: Optional[str] = Query(
         default=None,
         description=(
@@ -810,7 +799,6 @@ def list_person_clips(
                 camera_id=camera_id, employee_id=employee_id,
                 matched_employee_id=matched_employee_id,
                 start=start_dt, end=end_dt,
-                detection_source=detection_source,
                 recording_status=recording_status,
                 matched_status=matched_status,
             )

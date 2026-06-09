@@ -36,9 +36,6 @@ class PersonClipOut(BaseModel):
     fps_recorded: Optional[float] = None
     resolution_w: Optional[int] = None
     resolution_h: Optional[int] = None
-    # Migration 0052 — which detector triggered the clip.
-    # 'face' (default, pre-0052), 'body', or 'both'.
-    detection_source: str = "face"
     # Number of intermediate chunks merged into the final file
     # (Phase B). Phase A always emits 1.
     chunk_count: int = 1

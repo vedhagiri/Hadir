@@ -7,13 +7,20 @@
 //   and exposes a rolling buffer of the last 50 detection events.
 //   Auto-reconnects with exponential backoff on disconnect (max 30 s).
 //   Closes cleanly on unmount or camera switch.
+//   The ``lastHeartbeatMsg`` field carries person_boxes + frame dimensions
+//   used by the SVG box overlay on the MJPEG stream.
 
 import { useQuery } from "@tanstack/react-query";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api } from "../../api/client";
-import type { LiveEvent, LiveStats, WsMessage } from "./types";
+import type {
+  HeartbeatMessage,
+  LiveEvent,
+  LiveStats,
+  WsMessage,
+} from "./types";
 
 const ROLLING_BUFFER_SIZE = 50;
 
@@ -41,6 +48,8 @@ export interface EventStreamHandle {
   status: EventStreamStatus;
   /** Server's most recent heartbeat (ISO string), or null. */
   lastHeartbeat: string | null;
+  /** Full last heartbeat message — provides person_boxes + frame dimensions. */
+  lastHeartbeatMsg: HeartbeatMessage | null;
   /** Force a reconnect — used by the page's "Reconnect" button. */
   reconnect: () => void;
 }
@@ -57,6 +66,8 @@ export function useEventStream(cameraId: number | null): EventStreamHandle {
   const [events, setEvents] = useState<LiveEvent[]>([]);
   const [status, setStatus] = useState<EventStreamStatus>("idle");
   const [lastHeartbeat, setLastHeartbeat] = useState<string | null>(null);
+  const [lastHeartbeatMsg, setLastHeartbeatMsg] =
+    useState<HeartbeatMessage | null>(null);
   const [reconnectNonce, setReconnectNonce] = useState(0);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -98,6 +109,7 @@ export function useEventStream(cameraId: number | null): EventStreamHandle {
       }
       if (msg.type === "heartbeat") {
         setLastHeartbeat(msg.server_time);
+        setLastHeartbeatMsg(msg);
         return;
       }
       if (msg.type === "detection") {
@@ -154,7 +166,9 @@ export function useEventStream(cameraId: number | null): EventStreamHandle {
   useEffect(() => {
     setEvents([]);
     setLastHeartbeat(null);
+    setLastHeartbeatMsg(null);
   }, [cameraId]);
 
-  return { events, status, lastHeartbeat, reconnect };
+  return { events, status, lastHeartbeat, lastHeartbeatMsg, reconnect };
 }
+

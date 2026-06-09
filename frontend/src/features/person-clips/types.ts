@@ -26,9 +26,6 @@ export interface PersonClipOut {
   fps_recorded: number | null;
   resolution_w: number | null;
   resolution_h: number | null;
-  // Migration 0052 — which detector triggered the clip.
-  // 'face' (default, pre-0052), 'body', or 'both'.
-  detection_source: ClipDetectionSource;
   // Number of intermediate chunks merged into the final file.
   // 1 for short clips; >1 for long-duration clips.
   chunk_count: number;
@@ -55,9 +52,6 @@ export interface PersonClipOut {
   created_at: string;
 }
 
-// Migration 0052 — clip recording trigger source.
-export type ClipDetectionSource = "face" | "body" | "both";
-
 // Migration 0054 / 0055 — clip recording lifecycle status.
 //
 //   recording  reader is actively writing chunk frames
@@ -72,13 +66,6 @@ export type RecordingStatus =
   | "completed"
   | "failed"
   | "abandoned";
-
-// Filter value for the segmented control on PersonClipsPage. "all"
-// omits the ``detection_source`` query param; the others map directly
-// to the backend ``?detection_source=`` filter.
-export type ClipDetectionSourceFilter =
-  | "all"
-  | ClipDetectionSource;
 
 export interface PersonClipListResponse {
   items: PersonClipOut[];
@@ -125,9 +112,6 @@ export interface PersonClipFilters {
   employee_id: number | null;
   start: string | null;
   end: string | null;
-  // Migration 0052: filter by detector source. "all" omits the
-  // query param so legacy clips (predating the column) still appear.
-  detection_source: ClipDetectionSourceFilter;
   // Click-driven filters from the Face-matching pills and the
   // Summary band. ``null`` = pill/tile not active.
   matched_status: ClipMatchedStatusFilter;

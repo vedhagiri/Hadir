@@ -1837,19 +1837,6 @@ cameras = Table(
         nullable=False,
         server_default="false",
     ),
-    # Migration 0052 — per-camera override of which detector drives
-    # clip recording. 'face' = InsightFace face count (the pre-0052
-    # default trigger). 'body' = YOLO person count. 'both' = OR of
-    # the two. Hot-swappable via the reconcile loop.
-    # Migration 0053 changed the default from 'face' to 'body' — new
-    # cameras start with body presence as their trigger so seated
-    # employees with hidden faces still keep recording.
-    Column(
-        "clip_detection_source",
-        Text,
-        nullable=False,
-        server_default="body",
-    ),
     # P28.5b: per-camera capture knob bag. Defaults match the
     # prototype's tested constants. Schema is open by design — the
     # set of knobs evolves between phases without a migration. The
@@ -1895,12 +1882,6 @@ cameras = Table(
     Column("model", Text, nullable=True),
     Column("mount_location", Text, nullable=True),
     UniqueConstraint("tenant_id", "name", name="uq_cameras_tenant_name"),
-    # Migration 0052 — per-camera trigger detector for clip recording.
-    # CHECK guards against UI/API drift writing unknown values.
-    CheckConstraint(
-        "clip_detection_source IN ('face', 'body', 'both')",
-        name="ck_cameras_clip_detection_source",
-    ),
 )
 
 
@@ -2309,16 +2290,8 @@ person_clips = Table(
     Column("resolution_w", Integer, nullable=True),
     Column("resolution_h", Integer, nullable=True),
     # Migration 0052 — Option 2 (body-presence) clip metadata.
-    # detection_source: which detector triggered the clip start —
-    #   'face' (pre-0052 default), 'body' (YOLO person), 'both' (OR).
     # chunk_count: number of intermediate chunks merged into this clip.
     #   1 for short clips (no rotation); >1 for long clips.
-    Column(
-        "detection_source",
-        Text,
-        nullable=False,
-        server_default="face",
-    ),
     Column(
         "chunk_count",
         Integer,
@@ -2379,11 +2352,6 @@ person_clips = Table(
     CheckConstraint(
         "face_crops_status IN ('pending','processing','processed','failed')",
         name="ck_person_clips_face_crops_status",
-    ),
-    # Migration 0052 — which detector triggered the clip.
-    CheckConstraint(
-        "detection_source IN ('face', 'body', 'both')",
-        name="ck_person_clips_detection_source",
     ),
     # Migration 0054 + 0055 — recording lifecycle status.
     CheckConstraint(

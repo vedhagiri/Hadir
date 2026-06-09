@@ -947,7 +947,9 @@
       "identified": "تم التعرّف",
       "confidence": "الثقة",
       "status": "الحالة"
-    }
+    },
+    "showBoxes": "إظهار الاكتشافات",
+    "livePersons": "الأشخاص المباشرون"
   },
   "calendar": {
     "title": "تقويم الحضور",

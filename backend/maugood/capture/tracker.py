@@ -196,6 +196,17 @@ class IoUTracker:
 
         self.max_duration_sec = max_duration_sec
 
+    def get_all_bboxes(self) -> "list[Bbox]":
+        """Return the last-known bbox for every currently-alive track.
+
+        Unlike ``update()`` which only returns bboxes for detections
+        matched in the current cycle, this returns ALL alive tracks.
+        Used by the preview overlay so a box stays drawn while the
+        tracker remembers the person, even when YOLO missed them this
+        cycle (back-to-camera / briefly occluded / sitting still).
+        """
+        return [t.bbox for t in self._tracks.values()]
+
     def update_tracker_config(self, config: dict) -> None:
         """P28.5c hot-reload entry point. Applies tenant-level
         ``tracker_config`` changes WITHOUT restarting the worker.

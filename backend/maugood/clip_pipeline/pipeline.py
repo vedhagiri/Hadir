@@ -1077,6 +1077,16 @@ class ClipPipeline:
                 finally:
                     tmp_path.unlink(missing_ok=True)
 
+                # Memory fix: UC1 uses frames only in the cropping stage
+                # above (_save_face_crops_to_db). The matching stage only
+                # calls _backfill_crop_matches which reads frame_results,
+                # not frames. Drop the numpy arrays now so the 158+ MB
+                # of per-frame BGR data is freed before the MatchJob sits
+                # in the matching queue. UC2/UC3 still need frames in the
+                # matching stage to call _save_face_crops_uc2_best_per_track
+                # / _save_face_crops_to_db, so they carry the list through.
+                frames_for_match = [] if job.use_case == "uc1" else frames
+
                 # Hand off to the matching stage.
                 match_job = MatchJob(
                     job_id=job.job_id,
@@ -1098,12 +1108,18 @@ class ClipPipeline:
                         "duration_seconds": float(row.duration_seconds or 0.0),
                         "frame_count": int(row.frame_count or 0),
                         "camera_id": int(row.camera_id),
-                        "frames": frames,
+                        "frames": frames_for_match,
                         "t_total_start": t_total_start,
                     },
                     crop_match_index=crop_match_index,
                     initial_face_crop_count=initial_count,
                 )
+                # Release the local frame reference now. For UC1 this
+                # was already cleared above. For UC2/UC3 the MatchJob
+                # holds the only remaining reference; the local variable
+                # is no longer needed and we want the refcount to drop
+                # as soon as the matching worker finishes with them.
+                del frames, frames_for_match
 
             # Outside the tenant_context so the queue submission isn't
             # tied to a connection scope. mark_cropping_finished does
@@ -1275,6 +1291,8 @@ class ClipPipeline:
                 if job.use_case == "uc1" and job.frame_results:
                     # Crops already exist with employee_id=NULL; backfill
                     # the matched ones now (employee_id + match_confidence).
+                    # clip_meta["frames"] is [] for UC1 (cleared in the
+                    # cropping stage once _save_face_crops_to_db finished).
                     _backfill_crop_matches(
                         engine, scope, job.crop_match_index, det_employee_map,
                         frame_results=job.frame_results,
@@ -1301,6 +1319,14 @@ class ClipPipeline:
                         use_case=job.use_case,
                         det_employee_map=det_employee_map,
                     )
+
+                # Memory fix: frames and frame_results are no longer
+                # needed past this point. Release them immediately so
+                # the numpy arrays (158+ MB per clip for UC2/UC3) and
+                # the detection embedding dicts are freed before the
+                # remainder of _handle_match executes.
+                clip_meta["frames"] = []
+                job.frame_results = []
 
                 # Enrich match_details with employee names.
                 name_map = _resolve_employee_names(engine, scope, matched_ids)

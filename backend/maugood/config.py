@@ -266,6 +266,7 @@ class Settings(BaseSettings):
     request_sla_business_day_hours: int = 8
 
 
+
 def get_settings() -> Settings:
     """Return a fresh Settings instance.
 

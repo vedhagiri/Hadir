@@ -61,10 +61,6 @@ class CameraOut(BaseModel):
     # The analyzer runs full recognition only when
     # ``detection_enabled AND live_matching_enabled``.
     live_matching_enabled: bool = False
-    # Migration 0052 — which detector drives the clip-recording
-    # trigger. 'face' (default, pre-migration behaviour), 'body'
-    # (YOLO person count drives it — Option 2 surface), 'both' (OR).
-    clip_detection_source: str = "face"
     capture_config: CaptureConfig
     created_at: datetime
     last_seen_at: Optional[datetime] = None
@@ -141,12 +137,6 @@ class CameraCreateIn(BaseModel):
     # Migration 0072 — per-camera live-matching gate. Default False so a
     # freshly-added camera does nothing until the operator turns it on.
     live_matching_enabled: bool = False
-    # Migration 0052 / 0053 — 'face' | 'body' | 'both'. Default
-    # bumped from 'face' to 'body' in migration 0053: a stationary
-    # seated employee whose face is hidden (looking down at a desk,
-    # back-to-camera) still keeps the clip alive because YOLO body
-    # detection finds them regardless of motion.
-    clip_detection_source: str = Field(default="body", pattern=r"^(face|body|both)$")
     capture_config: CaptureConfig = Field(default_factory=CaptureConfig)
     # Optional brand tag. The frontend offers a curated dropdown
     # (Samsung, Hikvision, Dahua, CP Plus, Axis, Panasonic, Others)
@@ -171,9 +161,6 @@ class CameraPatchIn(BaseModel):
     clip_recording_enabled: Optional[bool] = None
     # Migration 0072 — per-camera live-matching gate.
     live_matching_enabled: Optional[bool] = None
-    clip_detection_source: Optional[str] = Field(
-        default=None, pattern=r"^(face|body|both)$"
-    )
     # PATCH expects a complete CaptureConfig when present (UI sends
     # the whole bag). A future API version could accept partial
     # updates by switching to a dedicated CaptureConfigPatch model.
@@ -208,7 +195,6 @@ class CameraExportItem(BaseModel):
     clip_recording_enabled: bool
     # Migration 0072 — per-camera live-matching gate.
     live_matching_enabled: bool = False
-    clip_detection_source: str
     capture_config: CaptureConfig
     brand: Optional[str] = None
 
@@ -243,7 +229,6 @@ class CameraImportItem(BaseModel):
     clip_recording_enabled: Optional[bool] = None
     # Migration 0072 — per-camera live-matching gate.
     live_matching_enabled: Optional[bool] = None
-    clip_detection_source: Optional[str] = None
     capture_config: Optional[dict] = None
     brand: Optional[str] = None
 

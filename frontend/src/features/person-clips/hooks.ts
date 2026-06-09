@@ -31,9 +31,6 @@ export function usePersonClips(
   if (filters.employee_id !== null) params.set("employee_id", String(filters.employee_id));
   if (filters.start) params.set("start", filters.start);
   if (filters.end) params.set("end", filters.end);
-  if (filters.detection_source !== "all") {
-    params.set("detection_source", filters.detection_source);
-  }
   if (filters.matched_status !== null) {
     params.set("matched_status", filters.matched_status);
   }

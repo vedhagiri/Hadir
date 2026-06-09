@@ -947,7 +947,9 @@
       "identified": "Identified",
       "confidence": "Confidence",
       "status": "Status"
-    }
+    },
+    "showBoxes": "Show detections",
+    "livePersons": "Live persons"
   },
   "calendar": {
     "title": "Attendance calendar",
@@ -1088,22 +1090,7 @@
       "sub": "Either no detections were captured, or this day has no attendance record."
     },
     "close": "Close",
-    "holiday": {
-      "detailsLabel": "Holiday details",
-      "officialBadge": "Official Holiday",
-      "unknownName": "Public Holiday",
-      "noActivityChip": "No activity",
-      "workedTitle": "Worked on a public holiday",
-      "noAttendanceMessage": "No attendance is expected today. This day is excluded from the absent count.",
-      "note": "If this day should have been a working day, contact your HR team to update the holiday schedule.",
-      "fact1Title": "No attendance required",
-      "fact1Sub": "Employees are not expected to work on this official holiday.",
-      "fact2Title": "Record stays clean",
-      "fact2Sub": "Absence on a public holiday is not counted against the employee's attendance record.",
-      "fact3Title": "Overtime applies if worked",
-      "fact3Sub": "Any hours logged by the camera on this day are treated as overtime per the assigned shift policy.",
-      "workedSubtitle": "Camera detections were recorded on {{name}}. Hours are counted as overtime per policy."
-    },
+    "holiday": "Holiday",
     "weekend": "Weekend",
     "weekendShort": "Week off",
     "absentShort": "Absent",

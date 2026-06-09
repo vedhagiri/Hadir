@@ -134,7 +134,6 @@ def _row_to_out(row: repo.CameraRow) -> CameraOut:
         detection_enabled=row.detection_enabled,
         clip_recording_enabled=row.clip_recording_enabled,
         live_matching_enabled=row.live_matching_enabled,
-        clip_detection_source=row.clip_detection_source,
         capture_config=CaptureConfig.model_validate(row.capture_config),
         created_at=row.created_at,
         last_seen_at=row.last_seen_at,
@@ -170,7 +169,6 @@ def _audit_payload(row: repo.CameraRow) -> dict:
         "detection_enabled": row.detection_enabled,
         "clip_recording_enabled": row.clip_recording_enabled,
         "live_matching_enabled": row.live_matching_enabled,
-        "clip_detection_source": row.clip_detection_source,
         "capture_config": dict(row.capture_config),
     }
 
@@ -345,7 +343,6 @@ def import_cameras_endpoint(
                         live_matching_enabled=_bool_or(
                             item.live_matching_enabled, False
                         ),
-                        clip_detection_source=item.clip_detection_source or "body",
                         camera_code=(item.camera_code or "").strip() or None,
                         zone=item.zone,
                         capture_config=row.capture_config,
@@ -433,11 +430,6 @@ def import_cameras_endpoint(
                         values["live_matching_enabled"] = bool(
                             item.live_matching_enabled
                         )
-                    if (
-                        "clip_detection_source" in fs
-                        and item.clip_detection_source is not None
-                    ):
-                        values["clip_detection_source"] = item.clip_detection_source
                     if row.capture_config is not None:
                         values["capture_config"] = row.capture_config
                     if "brand" in fs:
@@ -674,7 +666,6 @@ def create_camera_endpoint(
                 detection_enabled=payload.detection_enabled,
                 clip_recording_enabled=payload.clip_recording_enabled,
                 live_matching_enabled=payload.live_matching_enabled,
-                clip_detection_source=payload.clip_detection_source,
                 camera_code=payload.camera_code,
                 zone=payload.zone,
                 capture_config=payload.capture_config.model_dump(),
@@ -742,20 +733,6 @@ def patch_camera_endpoint(
             values["clip_recording_enabled"] = provided["clip_recording_enabled"]
         if "live_matching_enabled" in provided:
             values["live_matching_enabled"] = provided["live_matching_enabled"]
-        if (
-            "clip_detection_source" in provided
-            and provided["clip_detection_source"] is not None
-        ):
-            v = provided["clip_detection_source"]
-            if v not in ("face", "body", "both"):
-                raise HTTPException(
-                    status_code=400,
-                    detail={
-                        "field": "clip_detection_source",
-                        "message": "must be 'face', 'body', or 'both'",
-                    },
-                )
-            values["clip_detection_source"] = v
         if "capture_config" in provided and provided["capture_config"] is not None:
             # CaptureConfig is a Pydantic model — model_dump() canonicalises
             # the JSONB shape so two writes of equivalent payloads produce

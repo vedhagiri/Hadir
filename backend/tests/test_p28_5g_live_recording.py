@@ -77,7 +77,6 @@ def _make_clip(
                 duration_seconds=1.0,
                 file_path=file_path,
                 frame_count=3,
-                detection_source="body",
                 chunk_count=1,
                 recording_status=recording_status,
             )
@@ -128,7 +127,6 @@ def test_recording_status_check_rejects_unknown(
                     clip_end=now,
                     duration_seconds=0.0,
                     frame_count=0,
-                    detection_source="body",
                     chunk_count=1,
                     recording_status="garbage_value",
                 )

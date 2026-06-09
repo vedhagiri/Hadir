@@ -222,6 +222,7 @@ def live_mjpg(
     request: Request,
     user: Annotated[CurrentUser, Depends(require_role("Admin"))],
     scope: Annotated[TenantScope, Depends(get_tenant_scope)],
+    overlay: bool = Query(default=True),
 ) -> StreamingResponse:
     """Stream the latest annotated frames as multipart MJPEG.
 
@@ -250,6 +251,13 @@ def live_mjpg(
             status_code=503, detail="too many viewers; try again later"
         )
 
+    # Viewer-gated preview: tell the worker a face-overlay viewer is
+    # live so it starts encoding the preview JPEG. Released in the
+    # generator's ``finally``.
+    capture_manager.notify_viewer_connected(
+        scope.tenant_id, camera_id, "face"
+    )
+
     # Subscription audit — written ONCE per stream open. Closes are
     # audited from inside the generator's ``finally`` so a network
     # drop counts as an unsubscribe.
@@ -268,6 +276,7 @@ def live_mjpg(
     captured_tenant_id = scope.tenant_id
     captured_schema = scope.tenant_schema
     actor_id_for_close = user.id if user.id > 0 else None
+    use_overlay = overlay
 
     boundary = b"--frame"
 
@@ -279,8 +288,11 @@ def live_mjpg(
             while True:
                 if await request.is_disconnected():
                     break
-                got = capture_manager.get_preview(
-                    captured_tenant_id, camera_id
+                # Use clean (no-box) slot when caller requested overlay=False.
+                got = (
+                    capture_manager.get_preview(captured_tenant_id, camera_id)
+                    if use_overlay
+                    else capture_manager.get_clean_preview(captured_tenant_id, camera_id)
                 )
                 fresh = (
                     got is not None
@@ -310,6 +322,9 @@ def live_mjpg(
                 await asyncio.sleep(MJPEG_FRAME_INTERVAL_S)
         finally:
             _release_mjpeg(captured_tenant_id, camera_id)
+            capture_manager.notify_viewer_disconnected(
+                captured_tenant_id, camera_id, "face"
+            )
             try:
                 with tenant_context(captured_schema):
                     with get_engine().begin() as conn:
@@ -381,6 +396,12 @@ def live_persons_mjpg(
             status_code=503, detail="too many viewers; try again later"
         )
 
+    # Viewer-gated preview: register a persons-overlay viewer so the
+    # worker encodes the persons preview slot. Released in ``finally``.
+    capture_manager.notify_viewer_connected(
+        scope.tenant_id, camera_id, "persons"
+    )
+
     engine = get_engine()
     with engine.begin() as conn:
         write_audit(
@@ -435,6 +456,9 @@ def live_persons_mjpg(
                 await asyncio.sleep(MJPEG_FRAME_INTERVAL_S)
         finally:
             _release_mjpeg(captured_tenant_id, camera_id)
+            capture_manager.notify_viewer_disconnected(
+                captured_tenant_id, camera_id, "persons"
+            )
             try:
                 with tenant_context(captured_schema):
                     with get_engine().begin() as conn:
@@ -505,6 +529,15 @@ def live_persons_jpg(
         raise HTTPException(
             status_code=503, detail="camera_display_disabled"
         )
+
+    # Viewer-gated preview: this single-shot poll holds no MJPEG slot
+    # but IS a viewer — keep the persons feed warm so it stays encoded
+    # for ``preview_idle_timeout_s`` after the last poll. The very
+    # first poll on a cold feed may 503 (parity with MJPEG cold-start);
+    # the next poll lands a frame once the worker has encoded one.
+    capture_manager.notify_viewer_active(
+        scope.tenant_id, camera_id, "persons"
+    )
 
     got = capture_manager.get_persons_preview(
         scope.tenant_id, camera_id
@@ -602,9 +635,15 @@ def _ws_authorise(
 
 
 def _camera_status_for_stats(*, tenant_id: int, camera_id: int) -> str:
-    """Quick reachability call used by the WS heartbeat + stats endpoint."""
+    """Quick reachability call used by the WS heartbeat + stats endpoint.
 
-    if capture_manager.is_preview_fresh(
+    Uses reader-side liveness (``is_capture_fresh``), NOT preview
+    freshness: with viewer-gated preview an unwatched-but-capturing
+    camera produces no JPEG, so ``is_preview_fresh`` would wrongly
+    report it offline. The reader's ``_last_frame_at`` keeps ticking
+    regardless of whether anyone is watching."""
+
+    if capture_manager.is_capture_fresh(
         tenant_id, camera_id, max_age_s=FRAME_FRESH_MAX_AGE_S
     ):
         return "online"
@@ -705,19 +744,40 @@ async def events_ws(websocket: WebSocket, camera_id: int) -> None:
                 worker_stats = capture_manager.get_worker_stats(
                     scope.tenant_id, camera_id
                 ) or {}
-                await websocket.send_json(
-                    {
-                        "type": "heartbeat",
-                        "server_time": datetime.now(tz=timezone.utc).isoformat(),
-                        "camera_status": _camera_status_for_stats(
-                            tenant_id=scope.tenant_id, camera_id=camera_id
-                        ),
-                        "status": worker_stats.get("status"),
-                        "fps_reader": worker_stats.get("fps_reader"),
-                        "fps_analyzer": worker_stats.get("fps_analyzer"),
-                        "motion_skipped": worker_stats.get("motion_skipped"),
-                    }
+                hb: dict = {
+                    "type": "heartbeat",
+                    "server_time": datetime.now(tz=timezone.utc).isoformat(),
+                    "camera_status": _camera_status_for_stats(
+                        tenant_id=scope.tenant_id, camera_id=camera_id
+                    ),
+                    "status": worker_stats.get("status"),
+                    "fps_reader": worker_stats.get("fps_reader"),
+                    "fps_analyzer": worker_stats.get("fps_analyzer"),
+                    "motion_skipped": worker_stats.get("motion_skipped"),
+                    # Native camera fps (CAP_PROP_FPS from RTSP). Null
+                    # until the worker's first successful read.
+                    "fps_native": worker_stats.get("fps_native"),
+                }
+                # Add detection-box data so the frontend can draw an
+                # SVG overlay on the WebRTC/MJPEG player without a
+                # separate polling request. Zero counts when the worker
+                # isn't running (display_enabled=false path is already
+                # rejected above, so this only fires if the worker
+                # crashed between auth and heartbeat).
+                boxes_data = capture_manager.get_latest_boxes(
+                    scope.tenant_id, camera_id
                 )
+                if boxes_data:
+                    hb["person_count"] = boxes_data["person_count"]
+                    hb["person_boxes"] = boxes_data["boxes"]
+                    hb["frame_width"] = boxes_data["frame_width"]
+                    hb["frame_height"] = boxes_data["frame_height"]
+                else:
+                    hb["person_count"] = 0
+                    hb["person_boxes"] = []
+                    hb["frame_width"] = 0
+                    hb["frame_height"] = 0
+                await websocket.send_json(hb)
             if now - last_stats >= 30.0:
                 last_stats = now
                 stats = _stats_for_camera(scope=scope, camera_id=camera_id)
@@ -809,6 +869,10 @@ def _stats_for_camera(*, scope: TenantScope, camera_id: int) -> dict:
         fps_reader = float(worker_stats.get("fps_reader", 0.0) or 0.0)
         fps_analyzer = float(worker_stats.get("fps_analyzer", 0.0) or 0.0)
         motion_skipped = int(worker_stats.get("motion_skipped", 0) or 0)
+        _raw_native = worker_stats.get("fps_native")
+        fps_native: Optional[float] = (
+            float(_raw_native) if _raw_native is not None else None
+        )
     else:
         fps_reader = (
             float(health.frames_last_minute) / 60.0
@@ -817,6 +881,7 @@ def _stats_for_camera(*, scope: TenantScope, camera_id: int) -> dict:
         )
         fps_analyzer = 0.0
         motion_skipped = 0
+        fps_native = None
     # Migration 0054 — live person count for the 🔴 LIVE modal
     # header. ``max(face_count, yolo_person_count, active_tracks)``
     # under the hood — see CaptureWorker.get_live_person_count.
@@ -835,6 +900,10 @@ def _stats_for_camera(*, scope: TenantScope, camera_id: int) -> dict:
         "fps": round(fps_reader, 2),
         "fps_reader": round(fps_reader, 2),
         "fps_analyzer": round(fps_analyzer, 2),
+        # Native fps from the RTSP stream (CAP_PROP_FPS). Null until the
+        # worker connects for the first time; stays null for workers that
+        # are not currently running.
+        "fps_native": round(fps_native, 1) if fps_native is not None else None,
         "motion_skipped": motion_skipped,
         "live_person_count": live_person_count,
         "status": _camera_status_for_stats(tenant_id=scope.tenant_id, camera_id=camera_id),

@@ -3,7 +3,18 @@ FROM python:3.11-slim
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    # Native-thread caps: prevent each OpenCV/ONNX/OpenBLAS call from
+    # spawning a thread-pool the size of all vCPUs. With 21 cameras and
+    # a single serialising _detect_lock, one detection runs at a time;
+    # giving it 2–4 intra-op threads beats 24 (cache thrash). The Python-
+    # side cv2/torch/ort caps are applied in main.py lifespan via
+    # detection/thread_limits.py; these env vars reach the native libs
+    # that read them at import time (before Python even starts caps).
+    OMP_NUM_THREADS=2 \
+    OPENBLAS_NUM_THREADS=2 \
+    MKL_NUM_THREADS=2 \
+    NUMEXPR_NUM_THREADS=2
 
 WORKDIR /app
 

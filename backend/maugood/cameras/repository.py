@@ -89,10 +89,6 @@ class CameraRow:
     # The analyzer runs full recognition only when
     # ``detection_enabled AND live_matching_enabled``.
     live_matching_enabled: bool = False
-    # Migration 0052 / 0053 — clip-recording trigger source (face / body / both).
-    # Default is 'body' so a stationary seated person keeps the clip alive
-    # via YOLO body detection regardless of face visibility / movement.
-    clip_detection_source: str = "body"
     # Migration 0034 — running human-readable code (CAM-001 etc.).
     camera_code: str = ""
     # Migration 0034 — zone tag.
@@ -161,9 +157,6 @@ def _row_to_camera(row) -> CameraRow:
         live_matching_enabled=bool(
             getattr(row, "live_matching_enabled", False)
         ),
-        clip_detection_source=str(
-            getattr(row, "clip_detection_source", "face") or "face"
-        ),
         camera_code=str(row.camera_code) if row.camera_code is not None else "",
         zone=row.zone,
         capture_config=_normalise_capture_config(row.capture_config),
@@ -195,7 +188,6 @@ _SELECT_COLUMNS = (
     cameras.c.detection_enabled,
     cameras.c.clip_recording_enabled,
     cameras.c.live_matching_enabled,
-    cameras.c.clip_detection_source,
     cameras.c.camera_code,
     cameras.c.zone,
     cameras.c.capture_config,
@@ -274,7 +266,6 @@ def create_camera(
     detection_enabled: bool = True,
     clip_recording_enabled: bool = True,
     live_matching_enabled: bool = False,
-    clip_detection_source: str = "body",
     camera_code: Optional[str] = None,
     zone: Optional[str] = None,
     capture_config: Optional[dict[str, Any]] = None,
@@ -299,11 +290,6 @@ def create_camera(
         "detection_enabled": detection_enabled,
         "clip_recording_enabled": clip_recording_enabled,
         "live_matching_enabled": live_matching_enabled,
-        "clip_detection_source": (
-            clip_detection_source
-            if clip_detection_source in ("face", "body", "both")
-            else "face"
-        ),
     }
     if capture_config is not None:
         values["capture_config"] = _normalise_capture_config(capture_config)

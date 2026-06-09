@@ -223,7 +223,6 @@ def seeded(admin_engine: Engine) -> Iterator[dict]:
                 clip_end=now + timedelta(seconds=10),
                 duration_seconds=10.0,
                 recording_status="completed",
-                detection_source="face",
                 face_crops_status="processed",
             )
             .returning(person_clips.c.id)
@@ -238,7 +237,6 @@ def seeded(admin_engine: Engine) -> Iterator[dict]:
                 clip_end=now + timedelta(seconds=10),
                 duration_seconds=10.0,
                 recording_status="completed",
-                detection_source="face",
                 face_crops_status="processed",
             )
             .returning(person_clips.c.id)
@@ -254,7 +252,6 @@ def seeded(admin_engine: Engine) -> Iterator[dict]:
                 clip_end=now + timedelta(seconds=10),
                 duration_seconds=10.0,
                 recording_status="completed",
-                detection_source="face",
                 face_crops_status="processed",
             )
             .returning(person_clips.c.id)

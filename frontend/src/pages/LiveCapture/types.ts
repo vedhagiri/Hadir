@@ -2,6 +2,14 @@
 // what ``maugood/live_capture/router.py`` actually emits — keep these
 // in sync with the backend Pydantic responses.
 
+// One person bounding box as sent in the WebSocket heartbeat.
+export interface PersonBox {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
 export interface LiveStats {
   detections_last_10m: number;
   known_count: number;
@@ -10,6 +18,9 @@ export interface LiveStats {
   fps: number;
   fps_reader: number;
   fps_analyzer: number;
+  /** Native fps reported by the camera's RTSP stream (CAP_PROP_FPS).
+   * Null until the worker connects for the first time. */
+  fps_native: number | null;
   motion_skipped: number;
   /** Migration 0054 — live count of people currently in frame.
    * ``max(face_count, yolo_person_count, active_tracks)`` from the
@@ -49,7 +60,14 @@ export interface HeartbeatMessage {
   status?: string | null;
   fps_reader?: number | null;
   fps_analyzer?: number | null;
+  /** Native fps from RTSP stream. Null until worker first connects. */
+  fps_native?: number | null;
   motion_skipped?: number | null;
+  // Box overlay additions: person detection boxes baked by the analyzer.
+  person_count?: number | null;
+  person_boxes?: PersonBox[] | null;
+  frame_width?: number | null;
+  frame_height?: number | null;
 }
 
 export interface StatsMessage {

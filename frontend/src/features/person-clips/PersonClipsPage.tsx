@@ -364,126 +364,27 @@ function ClipSummaryBand({
   );
 }
 
-// Phase C — segmented control for the clip detection-source filter
-// (migration 0052). "all" omits the query param so legacy face-mode
-// clips still appear; the others map directly to the backend filter.
-function SourceFilter({
-  value,
-  onChange,
-}: {
-  value: "all" | "face" | "body" | "both";
-  onChange: (v: "all" | "face" | "body" | "both") => void;
-}) {
-  const { t } = useTranslation();
-  const options: Array<{
-    key: "all" | "face" | "body" | "both";
-    label: string;
-  }> = [
-    { key: "all", label: t("personClips.source.all") },
-    { key: "face", label: t("personClips.source.face") },
-    { key: "body", label: t("personClips.source.body") },
-    { key: "both", label: t("personClips.source.both") },
-  ];
-  return (
-    <div
-      role="radiogroup"
-      aria-label={t("personClips.source.label") as string}
-      style={{
-        display: "inline-flex",
-        border: "1px solid var(--border)",
-        borderRadius: "var(--radius-sm)",
-        overflow: "hidden",
-        background: "var(--bg-elev)",
-      }}
-    >
-      {options.map((o, idx) => (
-        <button
-          key={o.key}
-          type="button"
-          role="radio"
-          aria-checked={value === o.key}
-          aria-pressed={value === o.key}
-          onClick={() => onChange(o.key)}
-          style={{
-            padding: "6px 10px",
-            fontSize: 12,
-            border: "none",
-            borderInlineStart:
-              idx === 0 ? "none" : "1px solid var(--border)",
-            background:
-              value === o.key ? "var(--bg-active, var(--accent-soft))" : "transparent",
-            color:
-              value === o.key
-                ? "var(--text)"
-                : "var(--text-secondary)",
-            fontWeight: value === o.key ? 600 : 400,
-            cursor: "pointer",
-            fontFamily: "var(--font-sans)",
-          }}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
-// Phase C — small chip badge that surfaces ``detection_source`` on
-// each clip card. Plain text + a coloured dot is enough; we don't
-// want a third icon set in the design system.
-function SourceBadge({
-  source,
-  chunkCount,
-}: {
-  source: "face" | "body" | "both";
-  chunkCount: number;
-}) {
-  const { t } = useTranslation();
-  const colour =
-    source === "face"
-      ? "var(--accent)"
-      : source === "body"
-        ? "var(--info-text, #2563eb)"
-        : "var(--warning-text, #b45309)";
-  const label =
-    source === "face"
-      ? t("personClips.source.face")
-      : source === "body"
-        ? t("personClips.source.body")
-        : t("personClips.source.both");
+// Small chip badge that surfaces the chunk count on each clip card
+// when a long recording was merged from multiple chunks (>1).
+function ChunkBadge({ chunkCount }: { chunkCount: number }) {
+  if (chunkCount <= 1) return null;
   return (
     <span
+      className="mono"
       style={{
         display: "inline-flex",
         alignItems: "center",
-        gap: 4,
         fontSize: 11,
         padding: "2px 6px",
         borderRadius: 10,
         background: "var(--bg-elev)",
         border: "1px solid var(--border)",
-        color: "var(--text-secondary)",
+        color: "var(--text-tertiary)",
       }}
-      title={String(label)}
+      title={`${chunkCount} chunks`}
     >
-      <span
-        aria-hidden
-        style={{
-          width: 6,
-          height: 6,
-          borderRadius: "50%",
-          background: colour,
-        }}
-      />
-      {label}
-      {chunkCount > 1 && (
-        <span
-          className="mono"
-          style={{ marginInlineStart: 4, color: "var(--text-tertiary)" }}
-        >
-          ×{chunkCount}
-        </span>
-      )}
+      ×{chunkCount}
     </span>
   );
 }
@@ -503,7 +404,6 @@ export function PersonClipsPage() {
     employee_id: null,
     start: null,
     end: null,
-    detection_source: "all",
     matched_status: null,
     recording_status: null,
     page: 1,
@@ -601,7 +501,6 @@ export function PersonClipsPage() {
           filters.employee_id !== null ||
           filters.start !== null ||
           filters.end !== null ||
-          filters.detection_source !== "all" ||
           filters.matched_status !== null ||
           filters.recording_status !== null
         }
@@ -612,7 +511,6 @@ export function PersonClipsPage() {
             employee_id: null,
             start: null,
             end: null,
-            detection_source: "all",
             matched_status: null,
             recording_status: null,
           })
@@ -1280,12 +1178,6 @@ function ClipsTab({
               </option>
             ))}
           </select>
-          <SourceFilter
-            value={filters.detection_source}
-            onChange={(detection_source) =>
-              onUpdateFilters({ detection_source })
-            }
-          />
           <input
             type="datetime-local"
             value={filters.start ?? ""}
@@ -5245,12 +5137,9 @@ function ClipCard({
             </span>
           </>
         )}
-        {/* Phase C — surface which detector triggered this clip,
-            plus chunk_count when >1 (long recordings). */}
-        <SourceBadge
-          source={clip.detection_source}
-          chunkCount={clip.chunk_count}
-        />
+        {/* Surface chunk_count when >1 (long recordings merged from
+            multiple chunks). */}
+        <ChunkBadge chunkCount={clip.chunk_count} />
       </div>
 
       {/* Precise clip start → end times. Mono for alignment; matches

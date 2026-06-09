@@ -23,7 +23,6 @@ def list_clips(
     matched_employee_id: Optional[int] = None,
     start: Optional[datetime] = None,
     end: Optional[datetime] = None,
-    detection_source: Optional[str] = None,
     recording_status: Optional[str] = None,
     matched_status: Optional[str] = None,
 ) -> tuple[list[Row], int]:
@@ -90,12 +89,6 @@ def list_clips(
         base = base.where(person_clips.c.clip_start >= start)
     if end is not None:
         base = base.where(person_clips.c.clip_end <= end)
-    if detection_source is not None and detection_source in (
-        "face", "body", "both"
-    ):
-        base = base.where(
-            person_clips.c.detection_source == detection_source
-        )
     # Face-matching status filter (matched_status column). Clicking a
     # pill on the page passes one of pending|processing|processed|failed.
     if matched_status is not None and matched_status in (

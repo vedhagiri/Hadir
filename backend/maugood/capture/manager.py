@@ -248,7 +248,6 @@ class CaptureManager:
         detection_config: Optional[dict[str, Any]] = None,
         detection_enabled: bool = True,
         clip_recording_enabled: bool = True,
-        clip_detection_source: str = "body",
         clip_encoding_config: Optional[dict[str, Any]] = None,
         live_matching_enabled: bool = False,
         schema: Optional[str] = None,
@@ -293,7 +292,6 @@ class CaptureManager:
                 detection_config=detection_config,
                 detection_enabled=detection_enabled,
                 clip_recording_enabled=clip_recording_enabled,
-                clip_detection_source=clip_detection_source,
                 clip_encoding_config=clip_encoding_config,
                 live_matching_enabled=live_matching_enabled,
             )
@@ -434,6 +432,62 @@ class CaptureManager:
             return False
         return worker.is_persons_preview_fresh(max_age_s=max_age_s)
 
+    def get_clean_preview(
+        self, tenant_id: int, camera_id: int
+    ) -> "Optional[tuple[bytes, float]]":
+        """Return the unannotated (no bounding boxes) JPEG for this camera.
+        Same tenant-scoping as ``get_preview``."""
+        with self._lock:
+            worker = self._workers.get((tenant_id, camera_id))
+        if worker is None:
+            return None
+        return worker.get_latest_clean_jpeg()
+
+    # --- Viewer-gated preview notifications --------------------------------
+    # The live-capture router calls these as MJPEG streams open / close
+    # and on each snapshot poll, so the worker only encodes the preview
+    # JPEG while someone is actually watching. Unknown (tenant, camera)
+    # tuples are silent no-ops — cross-tenant guesses can't toggle a
+    # worker's preview, and a viewer for a since-stopped worker is moot.
+
+    def notify_viewer_connected(
+        self, tenant_id: int, camera_id: int, kind: str = "face"
+    ) -> None:
+        with self._lock:
+            worker = self._workers.get((tenant_id, camera_id))
+        if worker is not None:
+            worker.add_viewer(kind)
+
+    def notify_viewer_disconnected(
+        self, tenant_id: int, camera_id: int, kind: str = "face"
+    ) -> None:
+        with self._lock:
+            worker = self._workers.get((tenant_id, camera_id))
+        if worker is not None:
+            worker.remove_viewer(kind)
+
+    def notify_viewer_active(
+        self, tenant_id: int, camera_id: int, kind: str = "face"
+    ) -> None:
+        """Keep a feed warm for a single-shot snapshot poll (no stream
+        slot held). See ``CaptureWorker.touch_viewer``."""
+        with self._lock:
+            worker = self._workers.get((tenant_id, camera_id))
+        if worker is not None:
+            worker.touch_viewer(kind)
+
+    def is_capture_fresh(
+        self, tenant_id: int, camera_id: int, *, max_age_s: float = 10.0
+    ) -> bool:
+        """Reader-side liveness (independent of preview encoding). Use
+        this — not ``is_preview_fresh`` — to report a camera online /
+        offline now that preview is viewer-gated."""
+        with self._lock:
+            worker = self._workers.get((tenant_id, camera_id))
+        if worker is None:
+            return False
+        return worker.is_capture_fresh(max_age_s=max_age_s)
+
     def get_worker_stats(
         self, tenant_id: int, camera_id: int
     ) -> Optional[dict]:
@@ -445,6 +499,31 @@ class CaptureManager:
 
     # ------------------------------------------------------------------
     # P28.8 — operations endpoints helpers
+
+    def get_latest_boxes(
+        self, tenant_id: int, camera_id: int
+    ) -> Optional[dict]:
+        """Return the most recent detection-box payload for the live-capture
+        WebSocket heartbeat. Returns ``None`` when the (tenant_id, camera_id)
+        pair has no running worker — callers emit zero counts in that case.
+
+        Defence-in-depth: the (tenant_id, camera_id) key must match exactly.
+        A camera_id that exists under another tenant returns None, just like
+        ``get_preview``.
+
+        Defensively handles workers that don't implement ``get_latest_boxes``
+        (test stubs, old worker objects from before this method was added)
+        by returning None.
+        """
+
+        with self._lock:
+            worker = self._workers.get((tenant_id, camera_id))
+        if worker is None:
+            return None
+        get_boxes = getattr(worker, "get_latest_boxes", None)
+        if get_boxes is None:
+            return None
+        return get_boxes()
 
     def get_full_worker_stats(
         self, tenant_id: int, camera_id: int
@@ -619,7 +698,6 @@ class CaptureManager:
                             cameras_table.c.detection_enabled,
                             cameras_table.c.clip_recording_enabled,
                             cameras_table.c.live_matching_enabled,
-                            cameras_table.c.clip_detection_source,
                             cameras_table.c.capture_config,
                         ).where(
                             cameras_table.c.tenant_id == tenant_id,
@@ -675,9 +753,6 @@ class CaptureManager:
             detection_config=detection_cfg,
             detection_enabled=bool(cam_row.detection_enabled),
             clip_recording_enabled=bool(cam_row.clip_recording_enabled),
-            clip_detection_source=str(
-                getattr(cam_row, "clip_detection_source", "body") or "body"
-            ),
             clip_encoding_config=encoding_cfg,
             live_matching_enabled=bool(
                 getattr(cam_row, "live_matching_enabled", False)
@@ -1070,9 +1145,6 @@ class CaptureManager:
                 clip_recording_enabled=bool(
                     getattr(row, "clip_recording_enabled", True)
                 ),
-                clip_detection_source=str(
-                    getattr(row, "clip_detection_source", "body") or "body"
-                ),
                 clip_encoding_config=encoding_config,
                 live_matching_enabled=bool(
                     getattr(row, "live_matching_enabled", False)
@@ -1128,7 +1200,6 @@ class CaptureManager:
             # live_matching_enabled; the manager simply threads the
             # camera-row value into the worker (no tenant-wide source).
             cameras_table.c.live_matching_enabled,
-            cameras_table.c.clip_detection_source,
             cameras_table.c.capture_config,
         ).where(
             cameras_table.c.tenant_id == tenant_id,
@@ -1337,7 +1408,7 @@ class CaptureManager:
         tenants = self._discover_tenants()
         # desired[(t, c)] = (name, plain_url, capture_config, tracker_config,
         #                    detection_config, detection_enabled,
-        #                    clip_recording_enabled, clip_detection_source,
+        #                    clip_recording_enabled,
         #                    clip_encoding_config, live_matching_enabled,
         #                    schema)
         desired: dict[
@@ -1345,7 +1416,7 @@ class CaptureManager:
             tuple[
                 str, str, dict[str, Any],
                 dict[str, Any], dict[str, Any],
-                bool, bool, str, dict[str, Any], bool, Optional[str],
+                bool, bool, dict[str, Any], bool, Optional[str],
             ],
         ] = {}
         for tenant_id, schema in tenants:
@@ -1396,9 +1467,6 @@ class CaptureManager:
                     tenant_tracker, tenant_detection,
                     bool(getattr(row, "detection_enabled", True)),
                     bool(getattr(row, "clip_recording_enabled", True)),
-                    str(
-                        getattr(row, "clip_detection_source", "body") or "body"
-                    ),
                     tenant_encoding,
                     # Migration 0072 — per-camera live-matching gate.
                     bool(getattr(row, "live_matching_enabled", False)),
@@ -1434,7 +1502,6 @@ class CaptureManager:
                 tenant_detection,
                 desired_detection_enabled,
                 desired_clip_recording_enabled,
-                desired_clip_detection_source,
                 desired_clip_encoding,
                 desired_live_matching_enabled,
                 schema,
@@ -1456,7 +1523,6 @@ class CaptureManager:
                     detection_config=tenant_detection,
                     detection_enabled=desired_detection_enabled,
                     clip_recording_enabled=desired_clip_recording_enabled,
-                    clip_detection_source=desired_clip_detection_source,
                     clip_encoding_config=desired_clip_encoding,
                     live_matching_enabled=desired_live_matching_enabled,
                     schema=schema,
@@ -1590,32 +1656,6 @@ class CaptureManager:
                             },
                             "after": {
                                 "clip_recording_enabled": desired_clip_recording_enabled
-                            },
-                        },
-                    )
-
-                # Migration 0052: clip_detection_source drift. Hot-swaps
-                # which detector drives the clip-recording trigger.
-                # When the value actually changes the worker finalizes
-                # any in-flight clip immediately so the next clip
-                # starts cleanly under the new source.
-                current_clip_source = existing.get_clip_detection_source()
-                if current_clip_source != desired_clip_detection_source:
-                    existing.update_clip_detection_source(
-                        desired_clip_detection_source
-                    )
-                    report["config_updated"] += 1
-                    self._audit_worker_event(
-                        tenant_id=tid,
-                        schema=schema,
-                        action="capture.worker.clip_detection_source_updated",
-                        entity_id=str(cid),
-                        payload={
-                            "before": {
-                                "clip_detection_source": current_clip_source
-                            },
-                            "after": {
-                                "clip_detection_source": desired_clip_detection_source
                             },
                         },
                     )

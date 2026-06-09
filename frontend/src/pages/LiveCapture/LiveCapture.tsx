@@ -1,22 +1,22 @@
-// Live Capture page — full-page video player with a camera-picker
+// Live Capture page — full-page MJPEG viewer with a camera-picker
 // sidebar. The event-stream feed that used to sit under the viewer
 // has been removed; the Camera Logs page is the persistent
 // historical view, and a full-page player is what operators actually
 // want here.
 //
-// The viewer is a plain <img> pointing at the MJPEG endpoint;
-// bounding boxes are baked into the JPEG by the capture worker, so
-// there's no canvas or SVG overlay layer.
+// The viewer is a plain <img> pointing at the MJPEG endpoint.
+// A SVG box overlay is drawn on top of the <img> using bounding-box
+// coordinates delivered via the WebSocket heartbeat message.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
 
 import { useCameras } from "../../features/cameras/hooks";
 import type { Camera } from "../../features/cameras/types";
 import { RollingNumber } from "../../motion/RollingNumber";
 import { Icon } from "../../shell/Icon";
-import { useLiveStats } from "./hooks";
+import { useEventStream, useLiveStats } from "./hooks";
+import type { PersonBox } from "./types";
 
 export function LiveCapturePage() {
   const { t } = useTranslation();
@@ -46,10 +46,12 @@ export function LiveCapturePage() {
   const imgRef = useRef<HTMLImageElement | null>(null);
   const viewerCardRef = useRef<HTMLDivElement | null>(null);
 
-  // Stats hook is the only stream we keep — it powers the
-  // online/offline pill and the rolling counters. The WebSocket
-  // event-stream subscription was retired alongside the
-  // event-stream UI block; Camera Logs is the historical view.
+  // SVG box overlay state — populated from WebSocket heartbeat messages.
+  const [showBoxes, setShowBoxes] = useState(true);
+  const [boxes, setBoxes] = useState<PersonBox[]>([]);
+  const [frameWidth, setFrameWidth] = useState(0);
+  const [frameHeight, setFrameHeight] = useState(0);
+
   const activeCam = useMemo(
     () => allCameras.find((c) => c.id === activeCamId) ?? null,
     [allCameras, activeCamId],
@@ -57,6 +59,33 @@ export function LiveCapturePage() {
   const activeIsLive =
     activeCam != null && activeCam.worker_enabled && activeCam.display_enabled;
   const stats = useLiveStats(paused || !activeIsLive ? null : activeCamId);
+
+  // The viewer is "active" when the camera is live and not paused.
+  const isViewerActive = activeIsLive && !paused && activeCamId != null;
+
+  // Event stream subscription — used only to receive heartbeat box data.
+  // The event rows themselves are not displayed here (Camera Logs is the
+  // historical view), but the heartbeat carries person_boxes + frame dims.
+  const eventStream = useEventStream(isViewerActive ? activeCamId : null);
+
+  // Keep box state in sync with the latest heartbeat.
+  useEffect(() => {
+    const hb = eventStream.lastHeartbeatMsg;
+    if (hb == null) return;
+    setBoxes(hb.person_boxes ?? []);
+    if (hb.frame_width != null) setFrameWidth(hb.frame_width);
+    if (hb.frame_height != null) setFrameHeight(hb.frame_height);
+  }, [eventStream.lastHeartbeatMsg]);
+
+  // Reset box overlay state when the camera changes.
+  useEffect(() => {
+    setBoxes([]);
+    setFrameWidth(0);
+    setFrameHeight(0);
+  }, [activeCamId]);
+
+  // MJPEG stream URL — always the direct endpoint.
+  const mjpegUrl = `/api/cameras/${activeCamId ?? 0}/live.mjpg`;
 
   const onTogglePause = () => setPaused((p) => !p);
   const onSelect = (id: number) => {
@@ -67,10 +96,7 @@ export function LiveCapturePage() {
 
   const camStatus = stats.data?.status ?? "offline";
   const showOffline =
-    activeIsLive &&
-    !paused &&
-    stats.data &&
-    camStatus === "offline";
+    activeIsLive && !paused && stats.data != null && camStatus === "offline";
 
   // P28.5b: explanatory empty states for cameras the operator
   // selected but that aren't currently streaming. The MJPEG endpoint
@@ -100,10 +126,11 @@ export function LiveCapturePage() {
   const ABORT_PIXEL =
     "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
   const showLiveImg =
-    activeIsLive && !showOffline && !paused && activeCamId != null;
-  const streamingUrl = showLiveImg
-    ? `/api/cameras/${activeCamId}/live.mjpg`
-    : "";
+    activeIsLive &&
+    !showOffline &&
+    !paused &&
+    activeCamId != null;
+  const streamingUrl = showLiveImg ? mjpegUrl : "";
   const stageRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const stage = stageRef.current;
@@ -162,27 +189,6 @@ export function LiveCapturePage() {
     }
   };
 
-  // Empty-state short-circuit: when the tenant has zero cameras
-  // configured the viewer + sidebar are both meaningless. Render a
-  // centered call-to-action that points the operator at the Cameras
-  // page (Admin-only, same nav section, so the link always resolves
-  // for any role that can reach Live Capture).
-  const noCamerasConfigured =
-    !camerasQuery.isLoading && allCameras.length === 0;
-  if (noCamerasConfigured) {
-    return (
-      <>
-        <div className="page-header">
-          <div>
-            <h1 className="page-title">{t("liveCapture.title")}</h1>
-            <p className="page-sub">{t("liveCapture.subtitle")}</p>
-          </div>
-        </div>
-        <LiveCaptureEmptyState />
-      </>
-    );
-  }
-
   return (
     <>
       <div className="page-header">
@@ -201,66 +207,47 @@ export function LiveCapturePage() {
           </p>
         </div>
         <div className="page-actions">
-          {/* Pause + Fullscreen are inert until the operator selects a
-              camera. The design system's base ``.btn`` rule does not
-              paint a disabled state, so we apply the standard greyed
-              opacity + ``not-allowed`` cursor inline. Title carries the
-              "Select a camera first" hint so a pointer user sees the
-              gating reason on hover; ``aria-disabled`` mirrors it for
-              screen-readers redundantly with the native ``disabled``. */}
-          {(() => {
-            const camNotSelected = activeCamId == null;
-            const disabledStyle = camNotSelected
-              ? ({ opacity: 0.55, cursor: "not-allowed" } as const)
-              : undefined;
-            const selectFirst = t("liveCapture.selectCameraFirst", {
-              defaultValue: "Select a camera first",
-            }) as string;
-            const fsLabel = (
+          <label className="live-capture__show-boxes-toggle">
+            <input
+              type="checkbox"
+              checked={showBoxes}
+              onChange={(e) => setShowBoxes(e.target.checked)}
+            />
+            {t("liveCapture.showBoxes")}
+          </label>
+          <button
+            className="btn"
+            onClick={onTogglePause}
+            disabled={activeCamId == null}
+            aria-pressed={paused}
+          >
+            <Icon name={paused ? "play" : "pause"} size={12} />
+            {paused ? t("liveCapture.resume") : t("liveCapture.pause")}
+          </button>
+          <button
+            className="btn"
+            onClick={onToggleFullscreen}
+            disabled={activeCamId == null}
+            aria-pressed={isFullscreen}
+            title={
               isFullscreen
-                ? t("liveCapture.exitFullscreen", {
+                ? (t("liveCapture.exitFullscreen", {
                     defaultValue: "Exit fullscreen",
-                  })
-                : t("liveCapture.fullscreen", { defaultValue: "Fullscreen" })
-            ) as string;
-            return (
-              <>
-                <button
-                  className="btn"
-                  onClick={onTogglePause}
-                  disabled={camNotSelected}
-                  aria-disabled={camNotSelected}
-                  aria-pressed={paused}
-                  title={
-                    camNotSelected
-                      ? selectFirst
-                      : paused
-                        ? (t("liveCapture.resume") as string)
-                        : (t("liveCapture.pause") as string)
-                  }
-                  style={disabledStyle}
-                >
-                  <Icon name={paused ? "play" : "pause"} size={12} />
-                  {paused ? t("liveCapture.resume") : t("liveCapture.pause")}
-                </button>
-                <button
-                  className="btn"
-                  onClick={onToggleFullscreen}
-                  disabled={camNotSelected}
-                  aria-disabled={camNotSelected}
-                  aria-pressed={isFullscreen}
-                  title={camNotSelected ? selectFirst : fsLabel}
-                  style={disabledStyle}
-                >
-                  <Icon
-                    name={isFullscreen ? "minimize" : "maximize"}
-                    size={12}
-                  />
-                  {fsLabel}
-                </button>
-              </>
-            );
-          })()}
+                  }) as string)
+                : (t("liveCapture.fullscreen", {
+                    defaultValue: "Fullscreen",
+                  }) as string)
+            }
+          >
+            <Icon name={isFullscreen ? "minimize" : "maximize"} size={12} />
+            {isFullscreen
+              ? (t("liveCapture.exitFullscreen", {
+                  defaultValue: "Exit fullscreen",
+                }) as string)
+              : (t("liveCapture.fullscreen", {
+                  defaultValue: "Fullscreen",
+                }) as string)}
+          </button>
         </div>
       </div>
 
@@ -348,6 +335,41 @@ export function LiveCapturePage() {
                 pointerEvents: "none",
               }}
             />
+
+            {/* SVG bounding-box overlay. The viewBox matches the camera's
+                native frame dimensions so the rects line up with real
+                coordinates regardless of the rendered size. */}
+            {showBoxes &&
+              boxes.length > 0 &&
+              frameWidth > 0 &&
+              frameHeight > 0 && (
+                <svg
+                  className="live-capture__box-overlay"
+                  viewBox={`0 0 ${frameWidth} ${frameHeight}`}
+                  preserveAspectRatio="none"
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    width: "100%",
+                    height: "100%",
+                    pointerEvents: "none",
+                  }}
+                >
+                  {boxes.map((b, i) => (
+                    <rect
+                      key={i}
+                      x={b.x1}
+                      y={b.y1}
+                      width={b.x2 - b.x1}
+                      height={b.y2 - b.y1}
+                      fill="none"
+                      stroke="var(--accent)"
+                      strokeWidth={2}
+                    />
+                  ))}
+                </svg>
+              )}
+
             {activeCamId == null && (
               <div
                 style={{
@@ -456,11 +478,8 @@ export function LiveCapturePage() {
                   : t("liveCapture.statusOffline")}
               </span>
             </div>
-            {/* Live person count — replaces the "Last 10m · Known ·
-                Unknown" rollup. Sourced from the worker's most recent
-                analyzer cycle (``max(face_count, yolo_person_count,
-                active_tracks)``), so it reflects what's in frame
-                right now, not aggregated history. */}
+            {/* Live person count — sourced from the worker's most recent
+                analyzer cycle, so it reflects what's in frame right now. */}
             <div className="flex items-center gap-2">
               <span
                 aria-hidden
@@ -666,62 +685,5 @@ function CameraRow({
         </span>
       )}
     </button>
-  );
-}
-
-function LiveCaptureEmptyState() {
-  const { t } = useTranslation();
-  return (
-    <div
-      className="card"
-      style={{
-        padding: "48px 24px",
-        textAlign: "center",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: 16,
-      }}
-    >
-      <div
-        aria-hidden
-        style={{
-          width: 56,
-          height: 56,
-          borderRadius: "50%",
-          background: "var(--bg-sunken)",
-          border: "1px solid var(--border)",
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "var(--text-secondary)",
-        }}
-      >
-        <Icon name="camera" size={24} />
-      </div>
-      <div>
-        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>
-          {t("liveCapture.emptyState.title", "No cameras configured")}
-        </h2>
-        <p
-          style={{
-            margin: "6px 0 0",
-            color: "var(--text-secondary)",
-            fontSize: 13.5,
-            lineHeight: 1.55,
-            maxWidth: 420,
-          }}
-        >
-          {t(
-            "liveCapture.emptyState.description",
-            "Add a camera to start streaming live feeds. RTSP credentials are encrypted at rest and the worker picks them up automatically.",
-          )}
-        </p>
-      </div>
-      <Link to="/cameras" className="btn btn-primary">
-        <Icon name="plus" size={12} />
-        {t("liveCapture.emptyState.cta", "Add camera")}
-      </Link>
-    </div>
   );
 }

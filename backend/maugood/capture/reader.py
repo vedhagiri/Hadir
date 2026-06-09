@@ -45,10 +45,11 @@ from __future__ import annotations
 import collections
 import logging
 import os
+import queue
 import tempfile
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional, Protocol
@@ -185,6 +186,20 @@ def _preflight_tcp_reachable(
 # --- Worker config ---------------------------------------------------------
 
 
+def _preview_idle_timeout_default() -> float:
+    """Default preview idle-timeout (seconds) from the environment.
+
+    ``MAUGOOD_PREVIEW_IDLE_TIMEOUT_S`` overrides the 45 s default; a
+    malformed value falls back to 45.0 rather than crashing worker
+    construction.
+    """
+
+    try:
+        return max(0.0, float(os.environ.get("MAUGOOD_PREVIEW_IDLE_TIMEOUT_S", "45")))
+    except (TypeError, ValueError):
+        return 45.0
+
+
 @dataclass
 class ReaderConfig:
     """Tuning knobs for a single camera worker."""
@@ -243,6 +258,41 @@ class ReaderConfig:
     # Preview JPEG quality. 70 is the LAN sweet spot — sharp face IDs
     # at ~80 KB for 1280×720. P28.5 chose 70; we keep it.
     preview_jpeg_quality: int = 70
+
+    # Viewer-gated preview: how long after the last viewer disconnects
+    # (or last single-shot snapshot poll) the worker keeps encoding the
+    # preview JPEG before going idle. The grace window avoids tearing
+    # the preview down between a viewer's reconnects / a poller's ticks.
+    # Env override ``MAUGOOD_PREVIEW_IDLE_TIMEOUT_S`` (default 45 s).
+    # The reader/analyzer/clip loop is unaffected — only the
+    # copy+annotate+encode preview work is gated.
+    preview_idle_timeout_s: float = field(
+        default_factory=lambda: _preview_idle_timeout_default()
+    )
+
+    # Preview throttle: cap encode rate to this fps even when a viewer
+    # is connected. The camera may run at 15–25 fps natively; the browser
+    # MJPEG consumer is already capped at 25 fps in the router but a
+    # human eye can't distinguish > 10 fps in a surveillance tile, and
+    # each encode is a full frame.copy() + cv2.imencode() on the reader
+    # thread competing with cap.read(). 10 fps halves encode work vs 20
+    # fps. Env override ``MAUGOOD_PREVIEW_MAX_FPS``.
+    preview_max_fps: float = field(
+        default_factory=lambda: float(
+            __import__("os").environ.get("MAUGOOD_PREVIEW_MAX_FPS", "10")
+        )
+    )
+
+    # Preview downscale: resize the frame to at most this width before
+    # encoding. Full-res 1080p JPEG encode at 70 quality ≈ 3–8 ms +
+    # large byte payload; 960px ≈ 1–2 ms + ~40% smaller JPEG. The
+    # browser MJPEG viewport is rarely wider than 960 px. Set to 0 to
+    # disable. Env override ``MAUGOOD_PREVIEW_MAX_WIDTH``.
+    preview_max_width: int = field(
+        default_factory=lambda: int(
+            __import__("os").environ.get("MAUGOOD_PREVIEW_MAX_WIDTH", "960")
+        )
+    )
 
 
 # --- Cheap motion check ----------------------------------------------------
@@ -332,7 +382,6 @@ class CaptureWorker:
         detection_config: Optional[dict] = None,
         detection_enabled: bool = True,
         clip_recording_enabled: bool = True,
-        clip_detection_source: str = "body",
         clip_encoding_config: Optional[dict] = None,
         live_matching_enabled: bool = False,
     ) -> None:
@@ -379,27 +428,6 @@ class CaptureWorker:
         # ``update_clip_recording_enabled`` without a worker restart.
         self._clip_recording_enabled_lock = threading.Lock()
         self._clip_recording_enabled: bool = bool(clip_recording_enabled)
-
-        # Migration 0052 / 0053 — per-camera clip recording trigger
-        # source.
-        # 'body' — YOLO person count drives any_person (default since
-        #          migration 0053). Faces don't have to be visible
-        #          for a clip to start; stationary seated employees
-        #          keep clips alive via YOLO body detection.
-        # 'face' — InsightFace face count drives any_person (was the
-        #          pre-0052 implicit default). YOLO body count is
-        #          ignored — only used now when the operator wants
-        #          face-only recording.
-        # 'both' — OR of the two signals.
-        # Hot-swappable via ``update_clip_detection_source``; an active
-        # clip is finalized immediately on swap so the new source's
-        # first clip starts clean.
-        self._clip_detection_source_lock = threading.Lock()
-        self._clip_detection_source: str = (
-            clip_detection_source
-            if clip_detection_source in ("face", "body", "both")
-            else "body"
-        )
 
         # Migration 0052 / Phase B — tenant-level clip encoding config.
         # Keys: chunk_duration_sec, video_crf, video_preset,
@@ -531,12 +559,44 @@ class CaptureWorker:
         # doesn't tear the other.
         self._latest_persons_jpeg: Optional[bytes] = None
         self._latest_persons_jpeg_ts: float = 0.0
+        # Clean (no-overlay) JPEG — same resolution as _latest_jpeg but
+        # encoded BEFORE annotate_frame runs. Served by live.mjpg?overlay=false.
+        self._latest_clean_jpeg: Optional[bytes] = None
+        self._latest_clean_jpeg_ts: float = 0.0
+
+        # Viewer-gated preview. The preview JPEGs (face slot = Live
+        # Capture, persons slot = Person Clips Watch-Live) are only
+        # encoded while a feed has a live viewer OR is within the
+        # ``preview_idle_timeout_s`` grace window after its last
+        # viewer / snapshot poll. With nobody watching, the reader
+        # skips frame.copy() + annotate_frame() + encode_jpeg()
+        # entirely — the #1 constant CPU sink on a multi-camera host.
+        # Detection, logging, clip recording are unaffected.
+        self._viewer_lock = threading.Lock()
+        self._face_viewers = 0
+        self._persons_viewers = 0
+        self._last_face_viewer_at = 0.0
+        self._last_persons_viewer_at = 0.0
+        # Throttle: tracks when we last emitted a preview JPEG so we can
+        # skip encoding frames that arrive faster than preview_max_fps.
+        self._last_preview_encode_ts: float = 0.0
+
+        # Frame dimensions — populated on the first successful read and
+        # used by ``get_latest_boxes`` so callers can normalise box
+        # coordinates to a 0-1 range without knowing the camera
+        # resolution upfront.
+        self._frame_width: int = 0
+        self._frame_height: int = 0
 
         # Stats consumed by the WebSocket heartbeat + /live-stats.
         self._stats_lock = threading.Lock()
         self._stats: dict[str, float | int | str | None] = {
             "fps_reader": 0.0,
             "fps_analyzer": 0.0,
+            # Native FPS reported by the camera's RTSP stream (CAP_PROP_FPS).
+            # Populated on first successful read by _detect_camera_metadata.
+            # None until the camera connects for the first time.
+            "fps_native": None,
             "active_tracks": 0,
             "motion_skipped": 0,
             "status": "starting",
@@ -746,6 +806,22 @@ class CaptureWorker:
         }
         self._metadata_written = False
 
+        # Dedicated clip frame writer thread (encode mode only).
+        # In stream_copy mode the segmenter owns the H.264 capture so no
+        # per-frame JPEG I/O ever touches the reader thread — queue and
+        # thread are both None. In encode mode the reader enqueues
+        # (frame_copy, tmpdir_path, frame_idx) tuples; the writer handles
+        # cv2.imencode + write_bytes off the critical read path.
+        # maxsize=60 ≈ 2.4 s buffer at 25 fps. When full, frames are
+        # dropped (accepted gap in the clip) rather than blocking the
+        # reader which would cause RTSP frame loss.
+        self._clip_frame_queue: Optional[queue.Queue] = (
+            queue.Queue(maxsize=60)
+            if self._clip_saving_mode != "stream_copy"
+            else None
+        )
+        self._clip_frame_writer_thread: Optional[threading.Thread] = None
+
         self._stop = threading.Event()
         self._reader_thread: Optional[threading.Thread] = None
         self._analyzer_thread: Optional[threading.Thread] = None
@@ -763,6 +839,15 @@ class CaptureWorker:
         # person-present event fires.
         if self._segmenter is not None:
             self._segmenter.start()
+        # Clip frame writer thread (encode mode only). Handles JPEG
+        # encode + disk write off the reader's critical read path.
+        if self._clip_frame_queue is not None:
+            self._clip_frame_writer_thread = threading.Thread(
+                target=self._run_clip_frame_writer,
+                name=f"clipwrite-{self.camera_id}",
+                daemon=True,
+            )
+            self._clip_frame_writer_thread.start()
         self._reader_thread = threading.Thread(
             target=self._run_reader,
             name=f"capread-{self.camera_id}",
@@ -781,6 +866,20 @@ class CaptureWorker:
         self._clip_worker.stop(timeout=timeout)
         if self._segmenter is not None:
             self._segmenter.stop(timeout_s=timeout)
+        # Signal the clip frame writer thread to exit via a None sentinel,
+        # then join it. The reader has already stopped setting the stop
+        # event so no new items will land in the queue after this.
+        if self._clip_frame_queue is not None:
+            try:
+                self._clip_frame_queue.put(None, timeout=1.0)
+            except queue.Full:
+                pass
+        if (
+            self._clip_frame_writer_thread is not None
+            and self._clip_frame_writer_thread.is_alive()
+        ):
+            self._clip_frame_writer_thread.join(timeout=timeout)
+        self._clip_frame_writer_thread = None
         for t in (self._reader_thread, self._analyzer_thread):
             if t is not None and t.is_alive():
                 t.join(timeout=timeout)
@@ -791,6 +890,8 @@ class CaptureWorker:
         with self._preview_lock:
             self._latest_jpeg = None
             self._latest_jpeg_ts = 0.0
+            self._latest_clean_jpeg = None
+            self._latest_clean_jpeg_ts = 0.0
 
     def is_alive(self) -> bool:
         # The worker is "alive" if at least one of its threads is still
@@ -824,6 +925,20 @@ class CaptureWorker:
                 return None
             return self._latest_persons_jpeg, self._latest_persons_jpeg_ts
 
+    def get_latest_clean_jpeg(self) -> Optional[tuple[bytes, float]]:
+        """Return the latest unannotated JPEG (no bounding boxes) and its
+        capture timestamp. Returns None if no clean frame is available."""
+        with self._preview_lock:
+            if self._latest_clean_jpeg is None:
+                return None
+            return self._latest_clean_jpeg, self._latest_clean_jpeg_ts
+
+    def is_clean_preview_fresh(self, max_age_s: float = 10.0) -> bool:
+        with self._preview_lock:
+            if self._latest_clean_jpeg is None:
+                return False
+            return (time.time() - self._latest_clean_jpeg_ts) <= max_age_s
+
     def is_preview_fresh(self, max_age_s: float = 5.0) -> bool:
         with self._preview_lock:
             if self._latest_jpeg is None:
@@ -837,6 +952,127 @@ class CaptureWorker:
             return (
                 (time.time() - self._latest_persons_jpeg_ts) <= max_age_s
             )
+
+    # ------------------------------------------------------------------
+    # Viewer-gated preview API
+    #
+    # The live-capture router calls add_viewer / remove_viewer when an
+    # MJPEG stream opens / closes, and touch_viewer on each single-shot
+    # snapshot poll (live-persons.jpg thumbnail, which holds no stream
+    # slot but is still a viewer). ``kind`` is "face" (Live Capture
+    # face overlay) or "persons" (Person Clips body overlay) so the two
+    # feeds gate independently — a Live Capture viewer doesn't force the
+    # persons feed to encode, and vice-versa.
+
+    def add_viewer(self, kind: str = "face") -> None:
+        """Register a connected preview viewer for the given feed."""
+        now = time.time()
+        with self._viewer_lock:
+            if kind == "persons":
+                self._persons_viewers += 1
+                self._last_persons_viewer_at = now
+            else:
+                self._face_viewers += 1
+                self._last_face_viewer_at = now
+
+    def remove_viewer(self, kind: str = "face") -> None:
+        """Deregister a preview viewer. Clamps at 0 (a double-release
+        must never drive the count negative). Refreshes the timestamp
+        so the idle grace window starts from the disconnect moment."""
+        now = time.time()
+        with self._viewer_lock:
+            if kind == "persons":
+                self._persons_viewers = max(0, self._persons_viewers - 1)
+                self._last_persons_viewer_at = now
+            else:
+                self._face_viewers = max(0, self._face_viewers - 1)
+                self._last_face_viewer_at = now
+
+    def touch_viewer(self, kind: str = "face") -> None:
+        """Mark recent viewer activity WITHOUT changing the count.
+
+        Used by single-shot snapshot endpoints (the persons thumbnail
+        poll) that don't hold an MJPEG slot but must keep the feed warm
+        for ``preview_idle_timeout_s`` after each poll."""
+        now = time.time()
+        with self._viewer_lock:
+            if kind == "persons":
+                self._last_persons_viewer_at = now
+            else:
+                self._last_face_viewer_at = now
+
+    def _face_preview_active(self) -> bool:
+        now = time.time()
+        with self._viewer_lock:
+            if self._face_viewers > 0:
+                return True
+            return (
+                now - self._last_face_viewer_at
+            ) <= self._config.preview_idle_timeout_s
+
+    def _persons_preview_active(self) -> bool:
+        now = time.time()
+        with self._viewer_lock:
+            if self._persons_viewers > 0:
+                return True
+            return (
+                now - self._last_persons_viewer_at
+            ) <= self._config.preview_idle_timeout_s
+
+    def viewer_stats(self) -> dict[str, Any]:
+        """Diagnostics: per-feed viewer counts + whether each feed is
+        currently encoding (live viewer or inside the idle window)."""
+        with self._viewer_lock:
+            face_viewers = self._face_viewers
+            persons_viewers = self._persons_viewers
+        return {
+            "face_viewers": face_viewers,
+            "persons_viewers": persons_viewers,
+            "viewers_total": face_viewers + persons_viewers,
+            "face_preview_active": self._face_preview_active(),
+            "persons_preview_active": self._persons_preview_active(),
+        }
+
+    def is_capture_fresh(self, max_age_s: float = 10.0) -> bool:
+        """Camera liveness based on the READER (``_last_frame_at``),
+        independent of preview freshness. With viewer-gated preview an
+        unwatched-but-capturing camera has no JPEG, so preview
+        freshness can't be used to report online/offline — this can."""
+        last = self._last_frame_at
+        if last is None:
+            return False
+        return (time.time() - last) <= max_age_s
+
+    def get_latest_boxes(self) -> dict:
+        """Return the most recent detection box set for the WebSocket
+        heartbeat overlay.
+
+        The returned dict carries pixel-coordinate boxes from the
+        analyzer's last detection cycle, plus the frame dimensions so
+        the frontend can normalise to 0-1 without a separate resolution
+        query. The ``_cached_boxes`` list (``AnnotationBox`` objects)
+        stores face bboxes; ``len(_cached_boxes)`` is the face count.
+        Thread-safe read under the cached-boxes lock.
+        """
+
+        with self._cached_boxes_lock:
+            boxes_snapshot = list(self._cached_boxes)
+
+        boxes = [
+            {
+                "x1": int(b.x),
+                "y1": int(b.y),
+                "x2": int(b.x + b.w),
+                "y2": int(b.y + b.h),
+            }
+            for b in boxes_snapshot
+        ]
+        return {
+            "person_count": len(boxes),
+            "boxes": boxes,
+            "frame_width": self._frame_width,
+            "frame_height": self._frame_height,
+        }
 
     def get_stats(self) -> dict:
         with self._stats_lock:
@@ -1091,46 +1327,6 @@ class CaptureWorker:
                 int(self._active_track_count),
             )
 
-    def get_clip_detection_source(self) -> str:
-        """Read the live clip-recording detection-source mode.
-
-        One of ``'face'``, ``'body'``, ``'both'`` (migration 0052).
-        Hot-swapped via ``update_clip_detection_source`` from the
-        reconcile loop.
-        """
-
-        with self._clip_detection_source_lock:
-            return self._clip_detection_source
-
-    def update_clip_detection_source(self, source: str) -> None:
-        """Hot-swap which detector drives clip recording.
-
-        On a real change, finalizes the currently-active clip
-        immediately so the next clip recorded under the new source
-        starts cleanly (avoids a clip that switched signal mid-flight
-        having ambiguous semantics on the row).
-
-        Invalid values are clamped to ``'body'`` (the migration 0053
-        default) rather than raised — the reconcile loop must never
-        crash a worker over a bad row.
-        """
-
-        new = source if source in ("face", "body", "both") else "body"
-        with self._clip_detection_source_lock:
-            old = self._clip_detection_source
-            self._clip_detection_source = new
-        if old != new:
-            if self._clip_recording:
-                self._finalize_current_clip()
-            logger.info(
-                "capture worker clip_detection_source updated: tenant=%s "
-                "camera_id=%s old=%s new=%s",
-                self._scope.tenant_id,
-                self.camera_id,
-                old,
-                new,
-            )
-
     def get_clip_encoding_config(self) -> dict:
         """Snapshot of the live tenant encoding config.
 
@@ -1250,7 +1446,6 @@ class CaptureWorker:
         from maugood.db import person_clips as _pc  # noqa: PLC0415
 
         start_dt = datetime.fromtimestamp(start_ts, tz=timezone.utc)
-        source = self.get_clip_detection_source()
         try:
             with self._engine.begin() as conn:
                 result = conn.execute(
@@ -1276,7 +1471,6 @@ class CaptureWorker:
                         fps_recorded=None,
                         resolution_w=None,
                         resolution_h=None,
-                        detection_source=source,
                         chunk_count=1,
                         recording_status="recording",
                     )
@@ -1380,19 +1574,30 @@ class CaptureWorker:
             )
 
     def _open_new_chunk(self, now: float, chunk_index: int) -> dict:
-        """Open a fresh chunk: tempdir + zero counters.
+        """Open a fresh chunk: tmpdir (encode mode) or None (stream_copy).
 
-        Each chunk owns its own ``TemporaryDirectory`` so ClipWorker can
-        encode them in turn and call ``.cleanup()`` on each as it
-        finishes. The dict shape mirrors the worker-side contract
-        (frame_count / first_ts / last_ts feed the per-chunk DB row
-        and the per-chunk FPS calculation).
+        In stream_copy mode the RtspSegmenter writes the H.264 stream
+        directly — no per-frame JPEGs are produced, so creating a
+        TemporaryDirectory wastes syscalls and disk inodes.  The dict
+        shape is identical in both modes; only ``tmpdir`` differs.
+
+        Each chunk owns its own ``TemporaryDirectory`` (encode mode)
+        so ClipWorker can encode them in turn and call ``.cleanup()``
+        on each as it finishes. The dict shape mirrors the worker-side
+        contract (frame_count / first_ts / last_ts feed the per-chunk
+        DB row and the per-chunk FPS calculation).
         """
 
-        return {
-            "tmpdir": tempfile.TemporaryDirectory(
+        saving_mode = getattr(self, "_clip_saving_mode", "encode")
+        tmpdir = (
+            None
+            if saving_mode == "stream_copy"
+            else tempfile.TemporaryDirectory(
                 prefix=f"maugood_clip_chunk{chunk_index:03d}_"
-            ),
+            )
+        )
+        return {
+            "tmpdir": tmpdir,
             "chunk_index": chunk_index,
             "chunk_start_ts": now,
             "first_ts": now,
@@ -1454,6 +1659,90 @@ class CaptureWorker:
             "clip chunk rotated: camera=%s closed_index=%d frames=%d",
             self.camera_id, closed["chunk_index"], closed["frame_count"],
         )
+
+    def _run_clip_frame_writer(self) -> None:
+        """Clip frame writer thread — encode mode only.
+
+        Drains ``_clip_frame_queue`` of ``(frame_bgr, tmpdir_path,
+        frame_idx)`` tuples and writes each as a JPEG. Offloads
+        ~4-8 ms of CPU + disk I/O per frame from the reader thread
+        so the RTSP read loop stays unblocked at native fps regardless
+        of clip recording activity.
+
+        Terminates on a ``None`` sentinel (sent by ``stop()``).
+        """
+
+        q = self._clip_frame_queue
+        if q is None:
+            return
+        while True:
+            try:
+                item = q.get(timeout=5.0)
+            except queue.Empty:
+                if self._stop.is_set():
+                    break
+                continue
+            if item is None:  # sentinel — exit cleanly
+                break
+            frame_bgr, tmpdir_path, idx = item
+            try:
+                jpeg = self._encode_clip_frame(frame_bgr)
+                if jpeg is None:
+                    continue
+                frame_path = Path(tmpdir_path) / f"frame_{idx:08d}.jpg"
+                frame_path.write_bytes(jpeg)
+            except OSError:
+                logger.debug(
+                    "clip frame write failed (writer thread): camera=%s frame=%d",
+                    self.camera_id, idx,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _record_clip_frame(self, frame_bgr, now: float) -> None:
+        """Record one frame during clip recording.
+
+        Dispatches based on the clip saving mode:
+
+        * **stream_copy** — the RtspSegmenter owns the H.264 capture.
+          No JPEG I/O is needed on the reader thread; we only update
+          timing + frame count (used for the 3-frame minimum check and
+          clip-duration metadata passed to ClipWorker).
+        * **encode** — update timing + frame count on the reader thread
+          (fast), then enqueue the frame copy for the async writer
+          thread (``_run_clip_frame_writer``). The encode + disk write
+          happen off the reader's hot path. Non-blocking: if the queue
+          is full, the frame is dropped rather than stalling the reader.
+
+        This replaces direct calls to ``_write_frame_to_current_chunk``
+        in ``_check_and_record_clip``.
+        """
+
+        if self._current_chunk is None:
+            return
+        idx = self._current_chunk.get("frame_count", 0)
+        # Update count + timestamps — fast, no I/O.
+        self._current_chunk["frame_count"] = idx + 1
+        self._current_chunk["last_ts"] = now
+        self._clip_last_ts = now
+
+        if self._clip_saving_mode == "stream_copy":
+            # Segmenter handles the actual H.264 stream — nothing to write.
+            return
+
+        # Encode mode: dispatch to the async writer thread.
+        tmpdir = self._current_chunk.get("tmpdir")
+        if tmpdir is None or self._clip_frame_queue is None:
+            return
+        try:
+            self._clip_frame_queue.put_nowait(
+                (frame_bgr.copy(), tmpdir.name, idx)
+            )
+        except queue.Full:
+            logger.debug(
+                "clip frame queue full: camera=%s frame=%d dropped",
+                self.camera_id, idx,
+            )
 
     def _check_and_record_clip(self, frame_bgr) -> None:
         """Called by the reader thread on every frame.
@@ -1568,7 +1857,7 @@ class CaptureWorker:
                 if clip_age >= max_clip_duration:
                     if face_count > self._clip_max_person_count:
                         self._clip_max_person_count = face_count
-                    self._write_frame_to_current_chunk(frame_bgr, now)
+                    self._record_clip_frame(frame_bgr, now)
                     logger.debug(
                         "clip split (max-duration reached): camera=%s "
                         "clip_id=%s age=%.1fs threshold=%.1fs",
@@ -1585,9 +1874,10 @@ class CaptureWorker:
             if face_count > self._clip_max_person_count:
                 self._clip_max_person_count = face_count
 
-            # Write the current frame to disk — every native-FPS frame,
-            # no subsampling.
-            self._write_frame_to_current_chunk(frame_bgr, now)
+            # Record the current frame. In stream_copy mode this only
+            # updates timing + count (segmenter owns the H.264 capture).
+            # In encode mode this queues the frame for the async writer.
+            self._record_clip_frame(frame_bgr, now)
 
         else:
             if self._clip_recording:
@@ -1599,7 +1889,7 @@ class CaptureWorker:
                 if absent_for >= self._CLIP_FINALIZE_AFTER_NO_PERSON_SEC:
                     self._finalize_current_clip()
                 else:
-                    self._write_frame_to_current_chunk(frame_bgr, now)
+                    self._record_clip_frame(frame_bgr, now)
 
     def _finalize_current_clip(self) -> None:
         """Submit the current clip (all chunks) to the ClipWorker and
@@ -1671,11 +1961,6 @@ class CaptureWorker:
                 "matched_employees": matched_ids,
                 "resolution_w": resolution_w,
                 "resolution_h": resolution_h,
-                # Migration 0052: which detector triggered the clip.
-                # ClipWorker persists this on the person_clips row and
-                # uses it to decide whether the post-finalize face-
-                # match auto-trigger should fire (body-only clips skip).
-                "detection_source": self.get_clip_detection_source(),
                 # Snapshot of the encoding config taken at clip start.
                 # ClipWorker uses this for per-chunk encode params +
                 # the keep-chunks-after-merge decision.
@@ -1717,7 +2002,6 @@ class CaptureWorker:
                     "t_start": float(first_ts),
                     "t_end": float(last_ts),
                     "person_count": max(self._clip_max_person_count, 0),
-                    "detection_source": self.get_clip_detection_source(),
                     "existing_clip_id": existing_clip_id,
                     "segmenter_ref": self._segmenter,
                 }
@@ -1893,6 +2177,10 @@ class CaptureWorker:
                     # re-read).
                     if not first_frame_seen:
                         first_frame_seen = True
+                        # Capture frame dimensions for get_latest_boxes().
+                        h, w = frame.shape[:2]
+                        self._frame_height = h
+                        self._frame_width = w
                         self._detect_camera_metadata(cap)
 
                     # Hand the frame to the analyzer + count for fps.
@@ -2122,19 +2410,13 @@ class CaptureWorker:
                 # Uses hysteresis: person is only marked absent after
                 # N consecutive empty-detection cycles.
                 face_count = len(detections)
-                # Migration 0052: per-camera clip detection source picks
-                # which signal drives the clip-recording trigger.
-                #   face — InsightFace face count only.
-                #   body — YOLO person count only (back-to-camera /
-                #          occluded faces still keep the clip alive).
-                #   both — OR of the two (pre-0052 default).
-                _src = self.get_clip_detection_source()
-                if _src == "face":
-                    any_person = face_count > 0
-                elif _src == "body":
-                    any_person = person_count > 0
-                else:  # "both"
-                    any_person = (face_count > 0) or (person_count > 0)
+                # Migration 0074: clip recording is always driven by
+                # YOLO body/person presence. A clip stays alive while
+                # YOLO sees a person — back-to-camera / occluded faces
+                # never affect the trigger. Face detection does not run
+                # in the live loop (live matching is deferred to the
+                # UC1/UC2/UC3 reprocess pipelines).
+                any_person = person_count > 0
                 with self._person_present_lock:
                     if any_person:
                         self._no_person_consecutive_count = 0
@@ -2205,19 +2487,23 @@ class CaptureWorker:
                 for (x1, y1, x2, y2) in person_boxes_xyxy
             ]
             body_matches = self._body_tracker.update(body_bboxes_in, now)
-            # Stable count + bboxes from the tracker. ``active_tracks``
-            # collapses NMS-missed overlapping detections to a single
-            # ID (the tracker's greedy match claims both boxes for
-            # the same track on the next frame).
+            # Stable count from the tracker.
             tracked_body_count = self._body_tracker.active_tracks
+            # Use ALL alive tracker bboxes for the preview overlay — not
+            # just this cycle's matched detections. When YOLO misses the
+            # person (sitting still, back-to-camera, brief occlusion),
+            # body_matches is empty but the tracker keeps their last-known
+            # bbox alive for idle_timeout_s. Boxes stay drawn while the
+            # tracker says "person present" and disappear exactly when it
+            # says "no person" — consistent with live_person_count.
             tracked_body_boxes_xyxy: list[tuple[int, int, int, int]] = [
                 (
-                    int(m.bbox.x),
-                    int(m.bbox.y),
-                    int(m.bbox.x + m.bbox.w),
-                    int(m.bbox.y + m.bbox.h),
+                    int(b.x),
+                    int(b.y),
+                    int(b.x + b.w),
+                    int(b.y + b.h),
                 )
-                for m in body_matches
+                for b in self._body_tracker.get_all_bboxes()
             ]
             # Migration 0057 — publish the stable tracker count to
             # the shared state read by ``get_live_person_count``.
@@ -2376,49 +2662,117 @@ class CaptureWorker:
     # Preview JPEG (reader thread)
 
     def _update_preview(self, frame_bgr) -> None:  # type: ignore[no-untyped-def]
-        """Annotate two copies of the frame — one with face boxes,
-        one with person bboxes — encode each as JPEG, store both.
+        """Annotate + encode the preview JPEG(s) — **only for feeds with
+        an active viewer**.
 
-        Two slots exist so the Live Capture viewer (face matching)
-        and the Person Clips Watch-Live modal (person presence) can
-        each see the overlay that fits their context without
-        cross-contamination. Failures are swallowed at DEBUG — preview
-        is a viewer feature; the underlying capture loop must keep
-        running.
+        Two slots exist so the Live Capture viewer (face overlay) and
+        the Person Clips Watch-Live modal (person overlay) can each see
+        the overlay that fits their context. Each feed is gated
+        independently: when a feed has no live viewer and is past its
+        idle-timeout grace window, its frame.copy() + annotate_frame() +
+        encode_jpeg() are **skipped entirely** and its stale JPEG buffer
+        released. When NO feed is active this returns almost immediately
+        — the single largest constant CPU saving on a multi-camera host.
+
+        Detection, logging, and clip recording run on separate paths and
+        are unaffected. Failures are swallowed at DEBUG — preview is a
+        viewer feature; the underlying capture loop must keep running.
         """
 
+        face_active = self._face_preview_active()
+        persons_active = self._persons_preview_active()
+
+        # Fast path: nobody watching either feed. Release any stale
+        # buffers (so a reconnecting viewer doesn't get a frozen frame)
+        # and skip all copy/annotate/encode work.
+        if not face_active and not persons_active:
+            if (
+                self._latest_jpeg is not None
+                or self._latest_persons_jpeg is not None
+                or self._latest_clean_jpeg is not None
+            ):
+                with self._preview_lock:
+                    self._latest_jpeg = None
+                    self._latest_jpeg_ts = 0.0
+                    self._latest_persons_jpeg = None
+                    self._latest_persons_jpeg_ts = 0.0
+                    self._latest_clean_jpeg = None
+                    self._latest_clean_jpeg_ts = 0.0
+            return
+
+        # Throttle: skip encode if we fired too recently. The reader runs
+        # at native camera fps (15–25); browser MJPEG tiles don't need more
+        # than ~10 fps, and each encode costs a full frame.copy() + imencode
+        # on the reader thread — competing with cap.read().
+        now_mono = time.monotonic()
+        max_fps = max(self._config.preview_max_fps, 0.5)
+        if (now_mono - self._last_preview_encode_ts) < (1.0 / max_fps):
+            return
+        self._last_preview_encode_ts = now_mono
+
         try:
+            import cv2 as _cv2  # noqa: PLC0415
+
             with self._cached_boxes_lock:
                 boxes = list(self._cached_boxes)
                 person_boxes = list(self._cached_person_boxes)
 
-            # Always copy: OpenCV's cap.read() reuses the same buffer on the
-            # next call, so if encode_jpeg is still running when cap.read()
-            # fires, the bottom of the frame gets overwritten and produces
-            # gray/corrupted pixels in the MJPEG stream.
-            face_preview = frame_bgr.copy()
-            if boxes:
-                annotate_frame(face_preview, boxes)
-            face_jpeg = encode_jpeg(
-                face_preview, quality=self._config.preview_jpeg_quality
-            )
+            face_jpeg: Optional[bytes] = None
+            persons_jpeg: Optional[bytes] = None
+            clean_jpeg: Optional[bytes] = None
 
-            # Persons-only preview. We always render this (even with
-            # empty box list) so the slot stays fresh — viewers
-            # connecting mid-stream still get current frames.
-            persons_preview = frame_bgr.copy()
-            if person_boxes:
-                annotate_frame(persons_preview, person_boxes)
-            persons_jpeg = encode_jpeg(
-                persons_preview,
-                quality=self._config.preview_jpeg_quality,
-            )
+            max_w = self._config.preview_max_width
+
+            def _prep_preview(frame):  # type: ignore[no-untyped-def]
+                """Copy frame and downscale if wider than preview_max_width."""
+                img = frame.copy()
+                if max_w > 0:
+                    h, w = img.shape[:2]
+                    if w > max_w:
+                        scale = max_w / w
+                        img = _cv2.resize(
+                            img,
+                            (max_w, max(1, int(h * scale))),
+                            interpolation=_cv2.INTER_LINEAR,
+                        )
+                return img
+
+            # Face-overlay feed (Live Capture). Always copy: OpenCV's
+            # cap.read() reuses the same buffer on the next call, so if
+            # encode_jpeg is still running when cap.read() fires, the
+            # bottom of the frame gets overwritten → gray/corrupted
+            # pixels in the MJPEG stream.
+            if face_active:
+                face_preview = _prep_preview(frame_bgr)
+                # Encode clean frame BEFORE annotating — serves overlay=false viewers.
+                clean_jpeg = encode_jpeg(
+                    face_preview, quality=self._config.preview_jpeg_quality
+                )
+                if boxes:
+                    annotate_frame(face_preview, boxes)
+                    face_jpeg = encode_jpeg(
+                        face_preview, quality=self._config.preview_jpeg_quality
+                    )
+                else:
+                    face_jpeg = clean_jpeg  # no boxes → reuse
+
+            # Persons-overlay feed (Person Clips Watch-Live).
+            if persons_active:
+                persons_preview = _prep_preview(frame_bgr)
+                if person_boxes:
+                    annotate_frame(persons_preview, person_boxes)
+                persons_jpeg = encode_jpeg(
+                    persons_preview,
+                    quality=self._config.preview_jpeg_quality,
+                )
 
             now_ts = time.time()
             with self._preview_lock:
                 if face_jpeg is not None:
                     self._latest_jpeg = face_jpeg
                     self._latest_jpeg_ts = now_ts
+                    self._latest_clean_jpeg = clean_jpeg
+                    self._latest_clean_jpeg_ts = now_ts
                 if persons_jpeg is not None:
                     self._latest_persons_jpeg = persons_jpeg
                     self._latest_persons_jpeg_ts = now_ts
@@ -2586,6 +2940,12 @@ class CaptureWorker:
                 "detected_at": now,
             }
             self._metadata_written = True
+
+        # Publish native fps into the stats dict so /live-stats and
+        # the WebSocket heartbeat can surface it without an extra lock.
+        if fps is not None:
+            with self._stats_lock:
+                self._stats["fps_native"] = fps
 
         # Persist to the cameras row. One UPDATE; if it fails (DB
         # transient, permission), log + move on — the worker keeps
@@ -2971,6 +3331,9 @@ class CaptureWorker:
             "errors_5min": self._error_count_5min,
             "recent_errors": list(self._recent_errors),
             "metadata": metadata,
+            # Viewer-gated preview diagnostics (per-feed viewer counts +
+            # whether each feed is currently encoding).
+            "preview": self.viewer_stats(),
         }
 
     # ------------------------------------------------------------------
