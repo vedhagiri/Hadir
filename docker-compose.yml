@@ -94,6 +94,9 @@ services:
       # volume maps to ./data/faces and person clips need their own
       # directory at ./data/person_clips/ (not under ./data/faces/).
       - ${MAUGOOD_PERSON_CLIPS_DIR:-./data/person_clips}:/person_clips
+      # Final MP4 clips (encode mode). New path-format clips land here.
+      # Without this mount clips are lost when the container restarts.
+      - ${MAUGOOD_CLIP_STORAGE_DIR:-./data/clips}:/clips
       # Face crop images extracted from person clips. Each crop is
       # stored camera-wise/event-wise at this path.
       - ${MAUGOOD_FACE_CROPS_DIR:-./data/face_crops}:/face_crops

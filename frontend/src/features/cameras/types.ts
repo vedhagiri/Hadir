@@ -48,6 +48,10 @@ export interface Camera {
   // when detection_enabled is also true (runtime auto-gate). When
   // false, detection still emits events but they stay unmatched.
   live_matching_enabled: boolean;
+  // Migration 0075 — per-camera recording mode. 'save_clips' writes
+  // full MP4 video clips; 'logs_only' runs detection + writes a
+  // lightweight presence log (no video file).
+  recording_mode: "save_clips" | "logs_only";
   capture_config: CaptureConfig;
   created_at: string;
   last_seen_at: string | null;
@@ -80,6 +84,7 @@ export interface CameraCreateInput {
   detection_enabled: boolean;
   clip_recording_enabled: boolean;
   live_matching_enabled?: boolean;
+  recording_mode?: "save_clips" | "logs_only";
   capture_config: CaptureConfig;
   brand?: string | null;
 }
@@ -95,6 +100,7 @@ export interface CameraPatchInput {
   detection_enabled?: boolean;
   clip_recording_enabled?: boolean;
   live_matching_enabled?: boolean;
+  recording_mode?: "save_clips" | "logs_only";
   capture_config?: CaptureConfig;
   brand?: string | null;
 }

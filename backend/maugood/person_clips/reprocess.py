@@ -76,7 +76,7 @@ def _encrypt_embedding_safe(emb: Any) -> Optional[bytes]:
 _FRAMES_PER_SECOND_SAMPLE = 2
 
 # Max number of frames to process from a single clip (safety cap).
-_MAX_FRAMES_PER_CLIP = 200
+_MAX_FRAMES_PER_CLIP = 60
 
 # Valid use cases.
 ALL_USE_CASES = ("uc1", "uc2", "uc3")
@@ -672,7 +672,8 @@ def _save_face_crops_uc2_best_per_track(
     frame_count: int,
     sample_interval: int,
     det_employee_map: Optional[dict[tuple[int, int], Optional[int]]] = None,
-) -> int:
+    return_index: bool = False,
+) -> "int | tuple[int, dict[tuple[int, int], int]]":
     """UC2's reference-parity save path.
 
     Returns ``saved_count``. Side effects: writes Fernet-encrypted
@@ -682,6 +683,8 @@ def _save_face_crops_uc2_best_per_track(
     import cv2  # noqa: PLC0415
 
     if not frame_results:
+        if return_index:
+            return 0, {}
         return 0
 
     # 1. Compute composite quality for every detection (cheap — pure
@@ -706,6 +709,7 @@ def _save_face_crops_uc2_best_per_track(
     # 3. For each track, pick the single highest-composite-quality
     #    detection. Then apply pose + quality gates.
     saved = 0
+    save_index: dict[tuple[int, int], int] = {}
     for track_id, members in tracks.items():
         if not members:
             continue
@@ -796,7 +800,7 @@ def _save_face_crops_uc2_best_per_track(
         # detail drawer can still surface both.
         try:
             with engine.begin() as conn:
-                conn.execute(
+                result = conn.execute(
                     sa_insert(face_crops).values(
                         tenant_id=scope.tenant_id,
                         camera_id=camera_id,
@@ -821,8 +825,11 @@ def _save_face_crops_uc2_best_per_track(
                         # Without this column, Unidentified Faces →
                         # Similarity Groups has no embedding to cluster.
                         embedding=_encrypt_embedding_safe(det.get("embedding")),
-                    )
+                    ).returning(face_crops.c.id)
                 )
+                inserted_id = int(result.scalar_one())
+            if best_key is not None:
+                save_index[best_key] = inserted_id
         except Exception:  # noqa: BLE001
             crop_path.unlink(missing_ok=True)
             continue
@@ -839,6 +846,8 @@ def _save_face_crops_uc2_best_per_track(
         )
         saved += 1
 
+    if return_index:
+        return saved, save_index
     return saved
 
 

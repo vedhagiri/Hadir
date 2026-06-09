@@ -1881,6 +1881,15 @@ cameras = Table(
     Column("brand", Text, nullable=True),
     Column("model", Text, nullable=True),
     Column("mount_location", Text, nullable=True),
+    # Migration 0075 — per-camera recording mode. 'save_clips' (default)
+    # records a video file and inserts a person_clips row. 'logs_only'
+    # inserts a presence-log person_clips row without writing video to disk.
+    Column(
+        "recording_mode",
+        Text,
+        nullable=False,
+        server_default="save_clips",
+    ),
     UniqueConstraint("tenant_id", "name", name="uq_cameras_tenant_name"),
 )
 
@@ -2321,6 +2330,11 @@ person_clips = Table(
         DateTime(timezone=True),
         nullable=True,
     ),
+    # Migration 0075 — per-clip recording mode. NULL means a legacy or
+    # 'save_clips' clip (backward-compat; the application treats NULL as
+    # 'save_clips'). 'logs_only' marks a presence-log row inserted without
+    # an associated video file.
+    Column("recording_mode", Text, nullable=True),
     Column(
         "created_at",
         DateTime(timezone=True),

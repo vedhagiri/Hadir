@@ -36,6 +36,7 @@ import { UnidentifiedFacesPage } from "./features/unidentified-faces/Unidentifie
 import { CamerasPage } from "./features/cameras/CamerasPage";
 import { FaceCropsPage } from "./features/face-crops/FaceCropsPage";
 import { PersonClipsPage } from "./features/person-clips/PersonClipsPage";
+import { ClipLogsPage } from "./features/clip-logs/ClipLogTable";
 import { ClipAnalyticsPage } from "./features/clip-analytics/ClipAnalyticsPage";
 import { StorageAnalyticsPage } from "./features/storage-analytics/StorageAnalyticsPage";
 import { DashboardRouter } from "./features/dashboard/DashboardRouter";
@@ -142,6 +143,7 @@ export function App() {
         <Route path="camera-logs" element={<CameraLogsPage />} />
         <Route path="unidentified-faces" element={<UnidentifiedFacesPage />} />
         <Route path="person-clips" element={<PersonClipsPage />} />
+        <Route path="clip-logs" element={<AdminOnly><ClipLogsPage /></AdminOnly>} />
         <Route path="clip-analytics" element={<ClipAnalyticsPage />} />
         <Route path="storage-analytics" element={<AdminOnly><StorageAnalyticsPage /></AdminOnly>} />
         <Route path="face-crops" element={<FaceCropsPage />} />
@@ -208,6 +210,7 @@ export function App() {
             id !== "camera-logs" &&
             id !== "unidentified-faces" &&
             id !== "person-clips" &&
+            id !== "clip-logs" &&
             id !== "clip-analytics" &&
             id !== "face-crops" &&
             id !== "live" &&

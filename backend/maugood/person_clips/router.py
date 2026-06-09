@@ -11,11 +11,13 @@ New in migration 0048+:
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import func, select, text
 
 from maugood.auth.audit import write_audit
@@ -68,6 +70,46 @@ from maugood.tenants.scope import TenantScope, resolve_tenant_schema_via_engine
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/person-clips", tags=["person-clips"])
+
+# ---------------------------------------------------------------------------
+# Decrypted-clip cache — avoids re-decrypting the same clip for every
+# browser range request.  A 3-minute clip at 90 MB encrypted takes ~420 ms
+# to decrypt; the browser makes 3-4 concurrent range requests when loading
+# video, each of which would re-decrypt without this cache.
+#
+# Keys:   (tenant_id, clip_id)
+# Values: (decrypted_bytes, inserted_at_epoch)
+# TTL:    60 seconds — long enough for a full watch session, short enough
+#         that edited/re-encrypted clips pick up the new version promptly.
+# Cap:    5 simultaneous clips — prevents the cache from consuming > ~350 MB.
+# ---------------------------------------------------------------------------
+_CLIP_CACHE_TTL_S = 60
+_CLIP_CACHE_MAX = 5
+_clip_cache: dict[tuple[int, int], tuple[bytes, float]] = {}
+_clip_cache_lock = threading.Lock()
+
+
+def _cache_get(tenant_id: int, clip_id: int) -> bytes | None:
+    key = (tenant_id, clip_id)
+    with _clip_cache_lock:
+        entry = _clip_cache.get(key)
+        if entry is None:
+            return None
+        data, ts = entry
+        if time.time() - ts > _CLIP_CACHE_TTL_S:
+            del _clip_cache[key]
+            return None
+        return data
+
+
+def _cache_put(tenant_id: int, clip_id: int, data: bytes) -> None:
+    key = (tenant_id, clip_id)
+    with _clip_cache_lock:
+        # Evict oldest entry if at cap.
+        if len(_clip_cache) >= _CLIP_CACHE_MAX and key not in _clip_cache:
+            oldest = min(_clip_cache, key=lambda k: _clip_cache[k][1])
+            del _clip_cache[oldest]
+        _clip_cache[key] = (data, time.time())
 
 ADMIN = Depends(require_role("Admin"))
 HR_OR_ADMIN = Depends(require_any_role("Admin", "HR"))
@@ -251,6 +293,7 @@ def _row_to_out(
             if matched_crop_by_clip is not None
             else None
         ),
+        recording_mode=str(getattr(row, "recording_mode", None) or "") or None,
         created_at=row.created_at,
     )
 
@@ -733,6 +776,15 @@ def list_person_clips(
         ),
         pattern=r"^(pending|processing|processed|failed)$",
     ),
+    recording_mode: Optional[str] = Query(
+        default=None,
+        description=(
+            "Filter by camera recording mode. 'save_clips' returns rows "
+            "that have (or had) an MP4 file; 'logs_only' returns presence-log "
+            "rows where file_path is NULL. Omitted = all modes."
+        ),
+        pattern=r"^(save_clips|logs_only)$",
+    ),
 ) -> PersonClipListResponse:
     """List person clips, with optional filters.
 
@@ -801,6 +853,7 @@ def list_person_clips(
                 start=start_dt, end=end_dt,
                 recording_status=recording_status,
                 matched_status=matched_status,
+                recording_mode=recording_mode,
             )
     except Exception:
         logger.exception(
@@ -1691,10 +1744,21 @@ def person_clip_thumbnail(
 @router.get("/{clip_id}/stream")
 def stream_person_clip(
     clip_id: int,
+    request: Request,
     user: Annotated[CurrentUser, HR_ADMIN_OR_MANAGER],
-    response: Response,
 ) -> Response:
-    """Stream a person clip video file. Decrypts on the fly."""
+    """Stream a person clip video file with range-request support.
+
+    Decrypts the Fernet-encrypted MP4 once, then serves the requested
+    byte range.  Range requests are required for browser video seeking
+    — without 206 responses the ``<video>`` element cannot seek past
+    the first buffered segment.
+
+    The full decrypted clip is held in memory during the request
+    (~70 MB for a 3-minute clip).  This is acceptable because only
+    one browser tab per user streams at a time, and clips are served
+    directly (no blob-URL indirection on the frontend).
+    """
 
     scope = TenantScope(tenant_id=user.tenant_id)
     engine = get_engine()
@@ -1710,15 +1774,25 @@ def stream_person_clip(
 
     file_path = Path(str(row.file_path))
     if not file_path.exists():
-        logger.warning("clip file missing on disk: clip_id=%s path=%s", clip_id, file_path)
+        logger.warning(
+            "clip file missing on disk: clip_id=%s path=%s", clip_id, file_path
+        )
         raise HTTPException(status_code=410, detail="clip file missing")
 
-    try:
-        encrypted = file_path.read_bytes()
-        plain = decrypt_bytes(encrypted)
-    except Exception as exc:
-        logger.error("clip decrypt failed: clip_id=%s reason=%s", clip_id, type(exc).__name__)
-        raise HTTPException(status_code=500, detail="clip decrypt failed") from exc
+    # Check cache first — avoids re-decrypting for every browser range request.
+    plain = _cache_get(user.tenant_id, clip_id)
+    if plain is None:
+        try:
+            encrypted = file_path.read_bytes()
+            plain = decrypt_bytes(encrypted)
+            _cache_put(user.tenant_id, clip_id, plain)
+        except Exception as exc:
+            logger.error(
+                "clip decrypt failed: clip_id=%s reason=%s",
+                clip_id,
+                type(exc).__name__,
+            )
+            raise HTTPException(status_code=500, detail="clip decrypt failed") from exc
 
     with engine.begin() as conn:
         write_audit(
@@ -1731,14 +1805,52 @@ def stream_person_clip(
             after={"camera_id": row.camera_id, "employee_id": row.employee_id},
         )
 
+    total = len(plain)
     filename = f"person-clip-{clip_id}.mp4"
-    response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    base_headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Disposition": f'inline; filename="{filename}"',
+    }
+
+    range_header = request.headers.get("range")
+    if range_header:
+        # Parse "bytes=start-end" — browsers send this for all video seeks.
+        try:
+            unit, rng = range_header.split("=", 1)
+            start_s, end_s = rng.split("-", 1)
+            start = int(start_s) if start_s else 0
+            end = int(end_s) if end_s else total - 1
+            end = min(end, total - 1)
+        except (ValueError, AttributeError):
+            raise HTTPException(status_code=416, detail="invalid Range header")
+
+        if start > end or start >= total:
+            raise HTTPException(
+                status_code=416,
+                headers={"Content-Range": f"bytes */{total}"},
+                detail="range not satisfiable",
+            )
+
+        chunk = plain[start : end + 1]
+        return Response(
+            content=chunk,
+            status_code=206,
+            media_type="video/mp4",
+            headers={
+                **base_headers,
+                "Content-Range": f"bytes {start}-{end}/{total}",
+                "Content-Length": str(len(chunk)),
+            },
+        )
+
+    # No Range header — return the full file (initial load or download).
     return Response(
         content=plain,
+        status_code=200,
         media_type="video/mp4",
         headers={
-            "Content-Length": str(len(plain)),
-            "Accept-Ranges": "bytes",
+            **base_headers,
+            "Content-Length": str(total),
         },
     )
 

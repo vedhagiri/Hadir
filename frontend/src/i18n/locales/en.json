@@ -650,6 +650,10 @@
     "brand": "Brand",
     "brandHint": "Used to render a brand-coloured chip next to this camera in lists. Pick Others if your brand isn't listed — a generic camera icon is shown.",
     "brandPlaceholder": "— Pick a brand —",
+    "recordingMode": "Recording mode",
+    "recordingModeSaveClips": "Save Clips",
+    "recordingModeLogsOnly": "Logs Only",
+    "recordingModeHint": "Save Clips records full MP4 video. Logs Only logs detection events with no video saved.",
     "page": {
       "title": "Cameras",
       "sub_one": "1 camera",

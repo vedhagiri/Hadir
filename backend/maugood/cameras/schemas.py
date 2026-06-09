@@ -14,7 +14,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+_VALID_RECORDING_MODES = {"save_clips", "logs_only"}
 
 
 class CaptureConfig(BaseModel):
@@ -61,6 +63,10 @@ class CameraOut(BaseModel):
     # The analyzer runs full recognition only when
     # ``detection_enabled AND live_matching_enabled``.
     live_matching_enabled: bool = False
+    # Migration 0075 — per-camera recording mode. 'save_clips' writes
+    # video files; 'logs_only' writes only a lightweight presence-log
+    # person_clips row with file_path=NULL.
+    recording_mode: str = "save_clips"
     capture_config: CaptureConfig
     created_at: datetime
     last_seen_at: Optional[datetime] = None
@@ -137,6 +143,8 @@ class CameraCreateIn(BaseModel):
     # Migration 0072 — per-camera live-matching gate. Default False so a
     # freshly-added camera does nothing until the operator turns it on.
     live_matching_enabled: bool = False
+    # Migration 0075 — per-camera recording mode.
+    recording_mode: str = "save_clips"
     capture_config: CaptureConfig = Field(default_factory=CaptureConfig)
     # Optional brand tag. The frontend offers a curated dropdown
     # (Samsung, Hikvision, Dahua, CP Plus, Axis, Panasonic, Others)
@@ -144,6 +152,15 @@ class CameraCreateIn(BaseModel):
     # name; the schema stays free-form so future brands can be added
     # without a migration.
     brand: Optional[str] = Field(default=None, max_length=64)
+
+    @field_validator("recording_mode")
+    @classmethod
+    def _validate_recording_mode(cls, v: str) -> str:
+        if v not in _VALID_RECORDING_MODES:
+            raise ValueError(
+                f"recording_mode must be one of {sorted(_VALID_RECORDING_MODES)}"
+            )
+        return v
 
 
 class CameraPatchIn(BaseModel):
@@ -161,11 +178,22 @@ class CameraPatchIn(BaseModel):
     clip_recording_enabled: Optional[bool] = None
     # Migration 0072 — per-camera live-matching gate.
     live_matching_enabled: Optional[bool] = None
+    # Migration 0075 — per-camera recording mode.
+    recording_mode: Optional[str] = None
     # PATCH expects a complete CaptureConfig when present (UI sends
     # the whole bag). A future API version could accept partial
     # updates by switching to a dedicated CaptureConfigPatch model.
     capture_config: Optional[CaptureConfig] = None
     brand: Optional[str] = Field(default=None, max_length=64)
+
+    @field_validator("recording_mode")
+    @classmethod
+    def _validate_recording_mode(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in _VALID_RECORDING_MODES:
+            raise ValueError(
+                f"recording_mode must be one of {sorted(_VALID_RECORDING_MODES)}"
+            )
+        return v
 
 
 # --- Import / export (bulk JSON transfer) ----------------------------------

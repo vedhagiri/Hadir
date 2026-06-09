@@ -106,6 +106,8 @@ class CameraRow:
     brand: Optional[str] = None
     model: Optional[str] = None
     mount_location: Optional[str] = None
+    # Migration 0075 — per-camera recording mode.
+    recording_mode: str = "save_clips"
 
 
 def _decrypt_and_parse_host(token: str) -> str:
@@ -173,6 +175,7 @@ def _row_to_camera(row) -> CameraRow:
         brand=row.brand,
         model=row.model,
         mount_location=row.mount_location,
+        recording_mode=str(getattr(row, "recording_mode", None) or "save_clips"),
     )
 
 
@@ -202,6 +205,7 @@ _SELECT_COLUMNS = (
     cameras.c.brand,
     cameras.c.model,
     cameras.c.mount_location,
+    cameras.c.recording_mode,
 )
 
 
@@ -266,6 +270,7 @@ def create_camera(
     detection_enabled: bool = True,
     clip_recording_enabled: bool = True,
     live_matching_enabled: bool = False,
+    recording_mode: str = "save_clips",
     camera_code: Optional[str] = None,
     zone: Optional[str] = None,
     capture_config: Optional[dict[str, Any]] = None,
@@ -290,6 +295,7 @@ def create_camera(
         "detection_enabled": detection_enabled,
         "clip_recording_enabled": clip_recording_enabled,
         "live_matching_enabled": live_matching_enabled,
+        "recording_mode": recording_mode,
     }
     if capture_config is not None:
         values["capture_config"] = _normalise_capture_config(capture_config)

@@ -71,7 +71,7 @@ def _env_int(name: str, default: int) -> int:
 
 CROPPING_WORKERS = _env_int("MAUGOOD_CLIP_PIPELINE_CROPPING_WORKERS", 1)
 MATCHING_WORKERS = _env_int("MAUGOOD_CLIP_PIPELINE_MATCHING_WORKERS", 1)
-QUEUE_MAX_DEPTH = _env_int("MAUGOOD_CLIP_PIPELINE_QUEUE_MAX_DEPTH", 4096)
+QUEUE_MAX_DEPTH = _env_int("MAUGOOD_CLIP_PIPELINE_QUEUE_MAX_DEPTH", 64)
 
 
 # ---- clip-pipeline use-case enable set ------------------------------------
@@ -964,6 +964,7 @@ class ClipPipeline:
             _run_detection,
             _sample_frames,
             _save_face_crops_to_db,
+            _save_face_crops_uc2_best_per_track,
             _upsert_processing_result,
         )
 
@@ -1052,40 +1053,60 @@ class ClipPipeline:
                         face_extract_duration_ms=int(extract_s * 1000),
                     )
 
-                    # UC1 saves crops first (with employee_id=NULL); the
-                    # matching worker backfills the IDs after running
-                    # the matcher. UC2/UC3 save crops in the matching
-                    # worker because they need the match result to pick
-                    # the best crop per track (UC2) or to bake the ID
-                    # into the INSERT (UC3) — same logic as the legacy
-                    # path, just split across two workers.
+                    # All UCs now save crops in the cropping stage so
+                    # MatchJob never holds frame arrays (memory-leak fix).
+                    # UC1: save with employee_id=NULL, backfill after match.
+                    # UC2: best-per-track save with employee_id=NULL, backfill after match.
+                    # UC3: save all crops with employee_id=NULL, backfill after match.
                     initial_count = 0
                     crop_match_index: dict[tuple[int, int], int] = {}
-                    if job.use_case == "uc1" and frame_results:
-                        initial_count, crop_match_index = _save_face_crops_to_db(
-                            engine, scope, job.clip_id, int(row.camera_id),
-                            frames, frame_results,
-                            row.clip_start,
-                            float(row.duration_seconds or 0.0),
-                            int(row.frame_count or 0),
-                            sample_interval,
-                            use_case=job.use_case,
-                            det_employee_map=None,
-                            max_crops_override=30,
-                            return_index=True,
-                        )
+                    if frame_results:
+                        if job.use_case == "uc1":
+                            initial_count, crop_match_index = _save_face_crops_to_db(
+                                engine, scope, job.clip_id, int(row.camera_id),
+                                frames, frame_results,
+                                row.clip_start,
+                                float(row.duration_seconds or 0.0),
+                                int(row.frame_count or 0),
+                                sample_interval,
+                                use_case=job.use_case,
+                                det_employee_map=None,
+                                max_crops_override=30,
+                                return_index=True,
+                            )
+                        elif job.use_case == "uc2":
+                            result = _save_face_crops_uc2_best_per_track(
+                                engine, scope, job.clip_id, int(row.camera_id),
+                                frames, frame_results,
+                                row.clip_start,
+                                float(row.duration_seconds or 0.0),
+                                int(row.frame_count or 0),
+                                sample_interval,
+                                det_employee_map=None,
+                                return_index=True,
+                            )
+                            initial_count, crop_match_index = result
+                        else:
+                            # UC3: save all crops with employee_id=NULL, backfill after match
+                            initial_count, crop_match_index = _save_face_crops_to_db(
+                                engine, scope, job.clip_id, int(row.camera_id),
+                                frames, frame_results,
+                                row.clip_start,
+                                float(row.duration_seconds or 0.0),
+                                int(row.frame_count or 0),
+                                sample_interval,
+                                use_case=job.use_case,
+                                det_employee_map=None,
+                                return_index=True,
+                            )
                 finally:
                     tmp_path.unlink(missing_ok=True)
 
-                # Memory fix: UC1 uses frames only in the cropping stage
-                # above (_save_face_crops_to_db). The matching stage only
-                # calls _backfill_crop_matches which reads frame_results,
-                # not frames. Drop the numpy arrays now so the 158+ MB
-                # of per-frame BGR data is freed before the MatchJob sits
-                # in the matching queue. UC2/UC3 still need frames in the
-                # matching stage to call _save_face_crops_uc2_best_per_track
-                # / _save_face_crops_to_db, so they carry the list through.
-                frames_for_match = [] if job.use_case == "uc1" else frames
+                # All UCs now save crops in the cropping stage — frames not
+                # needed by MatchJob. Free the numpy arrays immediately so
+                # the 158+ MB of per-frame BGR data is GC'd before the
+                # MatchJob sits in the matching queue.
+                del frames  # All UCs now save crops in the cropping stage — frames not needed by MatchJob
 
                 # Hand off to the matching stage.
                 match_job = MatchJob(
@@ -1108,18 +1129,13 @@ class ClipPipeline:
                         "duration_seconds": float(row.duration_seconds or 0.0),
                         "frame_count": int(row.frame_count or 0),
                         "camera_id": int(row.camera_id),
-                        "frames": frames_for_match,
                         "t_total_start": t_total_start,
                     },
                     crop_match_index=crop_match_index,
                     initial_face_crop_count=initial_count,
                 )
-                # Release the local frame reference now. For UC1 this
-                # was already cleared above. For UC2/UC3 the MatchJob
-                # holds the only remaining reference; the local variable
-                # is no longer needed and we want the refcount to drop
-                # as soon as the matching worker finishes with them.
-                del frames, frames_for_match
+                # Local frame reference already freed above.
+                del frame_results  # release local reference; MatchJob carries the list now
 
             # Outside the tenant_context so the queue submission isn't
             # tied to a connection scope. mark_cropping_finished does
@@ -1171,8 +1187,6 @@ class ClipPipeline:
             _emit_attendance_detection_events,
             _match_detections,
             _resolve_employee_names,
-            _save_face_crops_to_db,
-            _save_face_crops_uc2_best_per_track,
             _upsert_processing_result,
             match_only_from_saved_crops,
         )
@@ -1285,47 +1299,21 @@ class ClipPipeline:
                     match_s,
                 ) = _match_detections(job.frame_results, scope)
 
-                # Save / backfill face_crops based on UC.
+                # Backfill / update face_crops based on UC.
+                # Crops were already saved in the cropping stage (for ALL
+                # UCs) with employee_id=NULL. Now that matching has run,
+                # backfill the matched employee IDs + confidence.
                 clip_meta = job.clip_meta
                 face_crop_count = job.initial_face_crop_count
-                if job.use_case == "uc1" and job.frame_results:
-                    # Crops already exist with employee_id=NULL; backfill
-                    # the matched ones now (employee_id + match_confidence).
-                    # clip_meta["frames"] is [] for UC1 (cleared in the
-                    # cropping stage once _save_face_crops_to_db finished).
+                # All UCs: crops were saved in the cropping stage with
+                # employee_id=NULL. Backfill the matched employee IDs now.
+                if job.frame_results:
                     _backfill_crop_matches(
                         engine, scope, job.crop_match_index, det_employee_map,
                         frame_results=job.frame_results,
                     )
-                elif job.use_case == "uc2" and job.frame_results:
-                    face_crop_count = _save_face_crops_uc2_best_per_track(
-                        engine, scope, job.clip_id, clip_meta["camera_id"],
-                        clip_meta["frames"], job.frame_results,
-                        clip_meta["clip_start"],
-                        clip_meta["duration_seconds"],
-                        clip_meta["frame_count"],
-                        job.frames_meta["sample_interval"],
-                        det_employee_map=det_employee_map,
-                    )
-                elif job.frame_results:
-                    # UC3 — save after match with employee_id baked in.
-                    face_crop_count = _save_face_crops_to_db(
-                        engine, scope, job.clip_id, clip_meta["camera_id"],
-                        clip_meta["frames"], job.frame_results,
-                        clip_meta["clip_start"],
-                        clip_meta["duration_seconds"],
-                        clip_meta["frame_count"],
-                        job.frames_meta["sample_interval"],
-                        use_case=job.use_case,
-                        det_employee_map=det_employee_map,
-                    )
 
-                # Memory fix: frames and frame_results are no longer
-                # needed past this point. Release them immediately so
-                # the numpy arrays (158+ MB per clip for UC2/UC3) and
-                # the detection embedding dicts are freed before the
-                # remainder of _handle_match executes.
-                clip_meta["frames"] = []
+                # frame_results are no longer needed past this point.
                 job.frame_results = []
 
                 # Enrich match_details with employee names.

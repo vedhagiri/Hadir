@@ -134,6 +134,7 @@ def _row_to_out(row: repo.CameraRow) -> CameraOut:
         detection_enabled=row.detection_enabled,
         clip_recording_enabled=row.clip_recording_enabled,
         live_matching_enabled=row.live_matching_enabled,
+        recording_mode=row.recording_mode,
         capture_config=CaptureConfig.model_validate(row.capture_config),
         created_at=row.created_at,
         last_seen_at=row.last_seen_at,
@@ -169,6 +170,7 @@ def _audit_payload(row: repo.CameraRow) -> dict:
         "detection_enabled": row.detection_enabled,
         "clip_recording_enabled": row.clip_recording_enabled,
         "live_matching_enabled": row.live_matching_enabled,
+        "recording_mode": row.recording_mode,
         "capture_config": dict(row.capture_config),
     }
 
@@ -666,6 +668,7 @@ def create_camera_endpoint(
                 detection_enabled=payload.detection_enabled,
                 clip_recording_enabled=payload.clip_recording_enabled,
                 live_matching_enabled=payload.live_matching_enabled,
+                recording_mode=payload.recording_mode,
                 camera_code=payload.camera_code,
                 zone=payload.zone,
                 capture_config=payload.capture_config.model_dump(),
@@ -733,6 +736,8 @@ def patch_camera_endpoint(
             values["clip_recording_enabled"] = provided["clip_recording_enabled"]
         if "live_matching_enabled" in provided:
             values["live_matching_enabled"] = provided["live_matching_enabled"]
+        if "recording_mode" in provided and provided["recording_mode"] is not None:
+            values["recording_mode"] = provided["recording_mode"]
         if "capture_config" in provided and provided["capture_config"] is not None:
             # CaptureConfig is a Pydantic model — model_dump() canonicalises
             # the JSONB shape so two writes of equivalent payloads produce

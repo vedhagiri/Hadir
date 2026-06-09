@@ -64,6 +64,10 @@ class PersonClipOut(BaseModel):
     # employee's own face on the card instead of the multi-person
     # thumbnail.
     matched_face_crop_id: Optional[int] = None
+    # Camera-level recording mode that produced this row.
+    # 'save_clips' = full MP4 on disk; 'logs_only' = presence log only
+    # (file_path is NULL, no video to play).  NULL for legacy rows.
+    recording_mode: Optional[str] = None
     created_at: datetime
 
 

@@ -250,6 +250,7 @@ class CaptureManager:
         clip_recording_enabled: bool = True,
         clip_encoding_config: Optional[dict[str, Any]] = None,
         live_matching_enabled: bool = False,
+        recording_mode: str = "save_clips",
         schema: Optional[str] = None,
     ) -> bool:
         """Start a worker for ``(tenant_id, camera_id)`` with the given
@@ -294,6 +295,7 @@ class CaptureManager:
                 clip_recording_enabled=clip_recording_enabled,
                 clip_encoding_config=clip_encoding_config,
                 live_matching_enabled=live_matching_enabled,
+                recording_mode=recording_mode,
             )
             worker.start()
         except Exception as exc:  # noqa: BLE001
@@ -699,6 +701,7 @@ class CaptureManager:
                             cameras_table.c.clip_recording_enabled,
                             cameras_table.c.live_matching_enabled,
                             cameras_table.c.capture_config,
+                            cameras_table.c.recording_mode,
                         ).where(
                             cameras_table.c.tenant_id == tenant_id,
                             cameras_table.c.id == camera_id,
@@ -756,6 +759,9 @@ class CaptureManager:
             clip_encoding_config=encoding_cfg,
             live_matching_enabled=bool(
                 getattr(cam_row, "live_matching_enabled", False)
+            ),
+            recording_mode=str(
+                getattr(cam_row, "recording_mode", None) or "save_clips"
             ),
             schema=schema,
         )
@@ -1149,6 +1155,7 @@ class CaptureManager:
                 live_matching_enabled=bool(
                     getattr(row, "live_matching_enabled", False)
                 ),
+                recording_mode=str(getattr(row, "recording_mode", None) or "save_clips"),
                 schema=schema,
             )
             plain_url = ""  # noqa: F841
@@ -1201,6 +1208,8 @@ class CaptureManager:
             # camera-row value into the worker (no tenant-wide source).
             cameras_table.c.live_matching_enabled,
             cameras_table.c.capture_config,
+            # Migration 0075 — per-camera recording mode.
+            cameras_table.c.recording_mode,
         ).where(
             cameras_table.c.tenant_id == tenant_id,
             cameras_table.c.worker_enabled.is_(True),
@@ -1410,13 +1419,13 @@ class CaptureManager:
         #                    detection_config, detection_enabled,
         #                    clip_recording_enabled,
         #                    clip_encoding_config, live_matching_enabled,
-        #                    schema)
+        #                    recording_mode, schema)
         desired: dict[
             WorkerKey,
             tuple[
                 str, str, dict[str, Any],
                 dict[str, Any], dict[str, Any],
-                bool, bool, dict[str, Any], bool, Optional[str],
+                bool, bool, dict[str, Any], bool, str, Optional[str],
             ],
         ] = {}
         for tenant_id, schema in tenants:
@@ -1470,6 +1479,8 @@ class CaptureManager:
                     tenant_encoding,
                     # Migration 0072 — per-camera live-matching gate.
                     bool(getattr(row, "live_matching_enabled", False)),
+                    # Migration 0075 — per-camera recording mode.
+                    str(getattr(row, "recording_mode", None) or "save_clips"),
                     schema,
                 )
 
@@ -1504,6 +1515,7 @@ class CaptureManager:
                 desired_clip_recording_enabled,
                 desired_clip_encoding,
                 desired_live_matching_enabled,
+                desired_recording_mode,
                 schema,
             ) = desired[key]
             tid, cid = key
@@ -1525,6 +1537,7 @@ class CaptureManager:
                     clip_recording_enabled=desired_clip_recording_enabled,
                     clip_encoding_config=desired_clip_encoding,
                     live_matching_enabled=desired_live_matching_enabled,
+                    recording_mode=desired_recording_mode,
                     schema=schema,
                 ):
                     report["started"] += 1
@@ -1677,6 +1690,29 @@ class CaptureManager:
                         payload={
                             "before": current_encoding,
                             "after": desired_clip_encoding,
+                        },
+                    )
+
+                # Migration 0075: per-camera recording_mode drift. Hot-swaps
+                # via update_recording_mode — finalizes any in-progress clip
+                # before switching to logs_only, rebuilds the segmenter when
+                # switching back to save_clips in stream_copy mode.
+                current_recording_mode = existing.get_recording_mode()
+                if current_recording_mode != desired_recording_mode:
+                    existing.update_recording_mode(desired_recording_mode)
+                    report["config_updated"] += 1
+                    self._audit_worker_event(
+                        tenant_id=tid,
+                        schema=schema,
+                        action="capture.worker.recording_mode_updated",
+                        entity_id=str(cid),
+                        payload={
+                            "before": {
+                                "recording_mode": current_recording_mode
+                            },
+                            "after": {
+                                "recording_mode": desired_recording_mode
+                            },
                         },
                     )
             except Exception as exc:  # noqa: BLE001

@@ -25,6 +25,7 @@ def list_clips(
     end: Optional[datetime] = None,
     recording_status: Optional[str] = None,
     matched_status: Optional[str] = None,
+    recording_mode: Optional[str] = None,
 ) -> tuple[list[Row], int]:
     """Return ``(rows, total_count)`` for the given filters.
 
@@ -97,6 +98,9 @@ def list_clips(
         base = base.where(
             person_clips.c.matched_status == matched_status
         )
+
+    if recording_mode is not None and recording_mode in ("save_clips", "logs_only"):
+        base = base.where(person_clips.c.recording_mode == recording_mode)
 
     if recording_status is not None and recording_status in (
         "recording", "finalizing", "completed", "failed", "abandoned"

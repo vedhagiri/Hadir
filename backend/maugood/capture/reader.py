@@ -384,6 +384,7 @@ class CaptureWorker:
         clip_recording_enabled: bool = True,
         clip_encoding_config: Optional[dict] = None,
         live_matching_enabled: bool = False,
+        recording_mode: str = "save_clips",
     ) -> None:
         self._engine = engine
         self._scope = scope
@@ -707,6 +708,16 @@ class CaptureWorker:
             camera_name=self.camera_name,
         )
 
+        # Migration 0075 — per-camera recording mode. 'save_clips'
+        # (default) records MP4 files + inserts person_clips rows the
+        # normal way. 'logs_only' skips all file I/O and ClipWorker
+        # submission; instead it inserts a lightweight presence-log
+        # person_clips row (file_path=NULL, recording_status='completed',
+        # recording_mode='logs_only'). Hot-swapped by the reconcile loop
+        # via update_recording_mode() without a worker restart.
+        self._recording_mode_lock = threading.Lock()
+        self._recording_mode: str = str(recording_mode or "save_clips")
+
         # Option B — RTSP stream-copy segmenter. Constructed only when
         # the operator opts into ``MAUGOOD_CLIP_SAVING_MODE=stream_copy``.
         # When enabled, a parallel ffmpeg subprocess writes 10-second
@@ -717,19 +728,9 @@ class CaptureWorker:
             get_settings().clip_saving_mode or "encode"
         ).strip().lower()
         self._segmenter: Optional[RtspSegmenter] = None
-        if self._clip_saving_mode == "stream_copy":
-            seg_root = Path(
-                os.environ.get(
-                    "MAUGOOD_RTSP_SEGMENTS_ROOT",
-                    "/tmp/maugood-rtsp-segments",
-                )
-            )
-            self._segmenter = RtspSegmenter(
-                tenant_id=self._scope.tenant_id,
-                camera_id=self.camera_id,
-                rtsp_url_plain=self._rtsp_url_plain,
-                segments_dir=seg_root / str(self._scope.tenant_id) / str(self.camera_id),
-            )
+        # Only build the segmenter when recording mode allows video.
+        if self._recording_mode == "save_clips":
+            self._segmenter = self._build_segmenter()
 
         # P28.8 — pipeline stage tracking. Timestamps default to None
         # (= "never"); the get_stats() consumer treats an unset
@@ -1371,6 +1372,104 @@ class CaptureWorker:
                 cleaned,
             )
 
+    # ------------------------------------------------------------------
+    # Migration 0075: per-camera recording mode hot-swap
+
+    def _build_segmenter(self) -> Optional["RtspSegmenter"]:
+        """Construct an RtspSegmenter for stream_copy mode.
+
+        Returns None when MAUGOOD_CLIP_SAVING_MODE is not 'stream_copy'
+        (the normal encode path needs no segmenter).  Called from
+        __init__ and from update_recording_mode when switching back to
+        save_clips mode.
+        """
+        if self._clip_saving_mode != "stream_copy":
+            return None
+        seg_root = Path(
+            os.environ.get(
+                "MAUGOOD_RTSP_SEGMENTS_ROOT",
+                "/tmp/maugood-rtsp-segments",
+            )
+        )
+        return RtspSegmenter(
+            tenant_id=self._scope.tenant_id,
+            camera_id=self.camera_id,
+            rtsp_url_plain=self._rtsp_url_plain,
+            segments_dir=seg_root / str(self._scope.tenant_id) / str(self.camera_id),
+        )
+
+    def get_recording_mode(self) -> str:
+        """Return the live recording mode ('save_clips' or 'logs_only').
+
+        Read on the hot path by _check_and_record_clip so the lock
+        must remain cheap.
+        """
+        with self._recording_mode_lock:
+            return self._recording_mode
+
+    def update_recording_mode(self, mode: str) -> None:
+        """Hot-swap the per-camera recording mode without restarting the
+        worker.
+
+        save_clips → logs_only:
+          * Finalize any clip currently in progress (so it lands on
+            disk and gets a proper DB row before the segmenter stops).
+          * Stop + discard the segmenter (no new H.264 segments needed).
+
+        logs_only → save_clips:
+          * In stream_copy mode rebuild and start a fresh segmenter so
+            the rolling segment buffer is ready for the next clip.
+
+        Any other transition (e.g. same-value write from the reconcile
+        tick) is a silent no-op after the lock to keep the path cheap.
+        """
+        new_mode = str(mode or "save_clips")
+        with self._recording_mode_lock:
+            old_mode = self._recording_mode
+            if old_mode == new_mode:
+                return
+            self._recording_mode = new_mode
+
+        logger.info(
+            "capture worker recording_mode updated: tenant=%s "
+            "camera_id=%s old=%s new=%s",
+            self._scope.tenant_id,
+            self.camera_id,
+            old_mode,
+            new_mode,
+        )
+
+        if new_mode == "logs_only":
+            # Finalize any in-flight clip before disabling the segmenter
+            # so no partial clip is orphaned.
+            if self._clip_recording:
+                self._finalize_current_clip()
+            if self._segmenter is not None:
+                try:
+                    self._segmenter.stop(timeout_s=5.0)
+                except Exception:  # noqa: BLE001
+                    pass
+                self._segmenter = None
+
+        elif new_mode == "save_clips":
+            # In stream_copy mode we need a warm segment buffer for the
+            # next person-triggered clip. Encode mode needs nothing here
+            # (frames are queued directly from the reader thread).
+            if self._clip_saving_mode == "stream_copy":
+                new_seg = self._build_segmenter()
+                if new_seg is not None:
+                    try:
+                        new_seg.start()
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "capture worker: segmenter start failed on "
+                            "mode switch: camera=%s reason=%s",
+                            self.camera_id,
+                            type(exc).__name__,
+                        )
+                        new_seg = None
+                self._segmenter = new_seg
+
     def update_detection_config(self, new_config: dict) -> None:
         """Hot-reload entry point for tenant-level detection_config
         changes. Forwards to the analyzer's ``update_config`` which
@@ -1781,6 +1880,13 @@ class CaptureWorker:
         if not self.is_clip_recording_enabled():
             return
 
+        # Migration 0075: logs_only mode — run the presence state machine
+        # but skip all file I/O and ClipWorker submission. Inserts a
+        # lightweight presence-log person_clips row instead.
+        if self.get_recording_mode() == "logs_only":
+            self._check_and_log_presence()
+            return
+
         from maugood.config import get_settings as _gs  # noqa: PLC0415
         settings = _gs()
         if not settings.clip_save_enabled:
@@ -2044,6 +2150,104 @@ class CaptureWorker:
             # PersonClipsPage doesn't carry a ghost 🔴 LIVE entry.
             self._delete_recording_row(self._current_clip_id)
             self._current_clip_id = None
+
+    # ------------------------------------------------------------------
+    # Migration 0075 — logs_only presence tracking
+
+    def _check_and_log_presence(self) -> None:
+        """Presence state machine for logs_only mode.
+
+        Mirrors the person-detection lifecycle in _check_and_record_clip
+        but produces no frames, no tmpdir, no ClipWorker submission.
+        On person-absent past the grace period it calls
+        _finalize_presence_log() to INSERT a lightweight person_clips
+        row (file_path=NULL, recording_status='completed',
+        recording_mode='logs_only').
+        """
+        with self._person_present_lock:
+            person_here = self._person_present
+            face_count = self._face_count
+            active_tracks = self._active_track_count
+
+        now = time.time()
+        has_person = person_here or (active_tracks > 0)
+
+        if has_person:
+            self._last_person_seen_ts = now
+            if not self._clip_recording:
+                self._clip_recording = True
+                self._clip_start_ts = now
+                self._clip_first_ts = now
+                self._clip_last_ts = now
+                self._clip_max_person_count = 0
+            # Track max persons.
+            if face_count > self._clip_max_person_count:
+                self._clip_max_person_count = face_count
+            self._clip_last_ts = now
+        else:
+            if self._clip_recording:
+                absent_for = now - self._last_person_seen_ts
+                if absent_for >= self._CLIP_FINALIZE_AFTER_NO_PERSON_SEC:
+                    self._finalize_presence_log()
+
+    def _finalize_presence_log(self) -> None:
+        """Insert a presence-log person_clips row (logs_only mode).
+
+        The row has file_path=NULL, recording_status='completed',
+        recording_mode='logs_only', correct clip_start / clip_end /
+        duration_seconds / person_count. Resets clip recording state
+        before attempting the INSERT so a DB failure never leaves the
+        worker wedged.
+        """
+        if not self._clip_recording or self._clip_start_ts is None:
+            return
+        start_ts = self._clip_start_ts
+        end_ts = self._clip_last_ts or start_ts
+        duration = max(0.0, end_ts - start_ts)
+        person_count = max(0, int(self._clip_max_person_count))
+
+        # Reset clip state first so any exception below doesn't leave
+        # the worker stuck in a recording state.
+        self._clip_recording = False
+        self._clip_start_ts = None
+        self._clip_last_ts = None
+        self._clip_max_person_count = 0
+
+        from datetime import datetime, timezone as _tz  # noqa: PLC0415
+
+        from maugood.db import person_clips as _pc, tenant_context  # noqa: PLC0415
+
+        start_dt = datetime.fromtimestamp(start_ts, tz=_tz.utc)
+        end_dt = datetime.fromtimestamp(end_ts, tz=_tz.utc)
+        try:
+            with tenant_context(self._scope.tenant_schema):
+                with self._engine.begin() as conn:
+                    conn.execute(
+                        _pc.insert().values(
+                            tenant_id=self._scope.tenant_id,
+                            camera_id=self.camera_id,
+                            clip_start=start_dt,
+                            clip_end=end_dt,
+                            duration_seconds=round(duration, 2),
+                            person_count=person_count,
+                            recording_status="completed",
+                            recording_mode="logs_only",
+                            matched_status="pending",
+                            file_path=None,
+                        )
+                    )
+            logger.info(
+                "presence log: camera=%s duration=%.1fs persons=%d",
+                self.camera_id,
+                duration,
+                person_count,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "presence log insert failed: camera=%s reason=%s",
+                self.camera_id,
+                type(exc).__name__,
+            )
 
     # ------------------------------------------------------------------
     # Reader thread
