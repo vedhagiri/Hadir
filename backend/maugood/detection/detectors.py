@@ -244,9 +244,18 @@ def _load_face_app(det_size: int = DEFAULT_DET_SIZE):  # type: ignore[no-untyped
         logger.info(
             "InsightFace: loading buffalo_l at det_size=%d (CPU)", det_size
         )
-        # No allowed_modules → detection AND recognition both load,
-        # so ``face.normed_embedding`` is populated for the matcher.
-        app = FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"])
+        # Restrict to detection + recognition only — these are the
+        # two models the pipeline uses (det_10g for boxes,
+        # w600k_r50 for ``face.normed_embedding`` → the matcher).
+        # Omitting ``allowed_modules`` would also load 1k3d68 (3D
+        # landmark, ~144 MB), 2d106det (2D landmark) and genderage,
+        # none of which attendance consumes — ~150-350 MB of weights
+        # + ONNX Runtime arenas saved by not loading them.
+        app = FaceAnalysis(
+            name="buffalo_l",
+            providers=["CPUExecutionProvider"],
+            allowed_modules=["detection", "recognition"],
+        )
         # ctx_id=-1 = CPU.
         app.prepare(ctx_id=-1, det_size=(det_size, det_size))
         _face_app = app
