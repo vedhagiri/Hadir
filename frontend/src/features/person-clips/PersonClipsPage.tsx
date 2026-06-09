@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 
-import { api } from "../../api/client";
 import { DrawerShell, ModalShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
 import {
@@ -414,8 +413,6 @@ export function PersonClipsPage() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [reprocessDialog, setReprocessDialog] = useState(false);
   const [selectedClip, setSelectedClip] = useState<PersonClipOut | null>(null);
-  // Migration 0054 — MJPEG live-preview modal for in-progress clips.
-  const [liveClip, setLiveClip] = useState<PersonClipOut | null>(null);
 
   const cameras = useCameraOptions();
   const list = usePersonClips(filters);
@@ -601,7 +598,6 @@ export function PersonClipsPage() {
           onDeleteTarget={setDeleteTarget}
           onBulkDeleteTarget={setBulkDeleteTarget}
           onOpenDetail={setSelectedClip}
-          onOpenLive={setLiveClip}
         />
       )}
 
@@ -676,21 +672,15 @@ export function PersonClipsPage() {
       {selectedClip && (
         <ClipDetailDrawer clip={selectedClip} onClose={() => setSelectedClip(null)} />
       )}
-
-      {liveClip && (
-        <LiveMjpegModal
-          clip={liveClip}
-          onClose={() => setLiveClip(null)}
-        />
-      )}
     </>
   );
 }
 
-// Migration 0054 — LIVE badge pulse animation. Injected once at the
-// document level. Cheap, idempotent (the browser ignores duplicate
-// rule keys); we'd normally put this in a CSS file but the design
-// CSS bundle is verbatim per the project's red lines.
+// Pill pulse + spinner animations used by the in-flight status pills
+// (recording / finalizing). Injected once at the document level —
+// cheap, idempotent (the browser ignores duplicate rule keys); we'd
+// normally put this in a CSS file but the design CSS bundle is
+// verbatim per the project's red lines.
 function ensureLiveStyleInjected(): void {
   if (typeof document === "undefined") return;
   if (document.getElementById("maugood-live-pulse-style")) return;
@@ -705,250 +695,14 @@ function ensureLiveStyleInjected(): void {
   0%   { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
 }
-/* Surveillance-style scanline drift on live tiles — extremely
-   subtle, only visible against dark RTSP frames. */
-@keyframes maugood-scanline {
-  0%   { background-position: 0 0; }
-  100% { background-position: 0 8px; }
-}
 /* Streaming-player play button hover affordance. The tile's
    onClick handles the play action; the scale is purely visual. */
 [role="button"]:hover > div > div > .clip-play-btn,
 [role="button"]:focus-visible > div > div > .clip-play-btn {
   transform: scale(1.08);
 }
-/* Live surveillance tile hover affordance — slight zoom on the
-   feed + watch button reveals brighter accent. */
-.clip-tile-live > img {
-  transition: transform 0.5s ease;
-}
-.clip-tile-live:hover > img,
-.clip-tile-live:focus-visible > img {
-  transform: scale(1.025);
-}
-.clip-tile-live:hover .clip-watch-btn,
-.clip-tile-live:focus-visible .clip-watch-btn {
-  transform: scale(1.08);
-  background: rgba(255,255,255,0.32) !important;
-  border-color: rgba(255,255,255,0.85) !important;
-}
-.clip-tile-live .clip-watch-btn { transform: scale(1); }
 `;
   document.head.appendChild(style);
-}
-
-// Migration 0054 — Modal that overlays the camera's live MJPEG
-// feed for an in-progress clip. Reuses the existing
-// /api/cameras/{camera_id}/live.mjpg endpoint (P28.5a). Cookies
-// flow with the same-origin request so no auth header plumbing.
-function LiveMjpegModal({
-  clip,
-  onClose,
-}: {
-  clip: PersonClipOut;
-  onClose: () => void;
-}) {
-  const { t } = useTranslation();
-
-  // Migration 0054 — poll live-stats at 1 Hz so the in-modal counter
-  // tracks the user's visual perception. Independent of the
-  // PersonClipsPage list polling (5 s); also doesn't bloat the list
-  // payload. ``placeholderData`` keeps the last value while the next
-  // poll is in flight so the counter doesn't flicker.
-  const liveStatsPath = `/api/cameras/${clip.camera_id}/live-stats`;
-  type _LiveStats = {
-    live_person_count: number;
-    fps_reader: number;
-    fps_analyzer: number;
-    motion_skipped: number;
-  };
-  const stats = useQuery<_LiveStats>({
-    queryKey: ["live-stats", clip.camera_id],
-    queryFn: () => api<_LiveStats>(liveStatsPath),
-    refetchInterval: 1_000,
-    refetchIntervalInBackground: false,
-    placeholderData: (prev) => prev,
-    staleTime: 0,
-  });
-  const livePersons = stats.data?.live_person_count ?? clip.person_count;
-  const fpsReader = stats.data?.fps_reader ?? 0;
-  const fpsAnalyzer = stats.data?.fps_analyzer ?? 0;
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  // Migration 0055 — persons-only MJPEG variant. Server-side overlay
-  // draws YOLO body boxes only (no face boxes, no employee labels)
-  // because the Person Clips view is body-presence based — face
-  // matching isn't relevant here. Cache bust on every open keeps a
-  // previously-disconnected stream from re-using a stale handle.
-  const src = `/api/cameras/${clip.camera_id}/live-persons.mjpg?_t=${clip.id}`;
-
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={t("personClips.live.modalTitle") as string}
-      onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 100,
-        background: "rgba(0,0,0,0.75)",
-        display: "grid",
-        placeItems: "center",
-        padding: 20,
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          background: "var(--bg)",
-          borderRadius: "var(--radius-md)",
-          maxWidth: "90vw",
-          maxHeight: "90vh",
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-          boxShadow: "0 20px 60px rgba(0,0,0,0.4)",
-        }}
-      >
-        <div
-          style={{
-            padding: "10px 14px",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            borderBottom: "1px solid var(--border)",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span
-              aria-hidden
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: "50%",
-                background: "var(--danger-text, #c0392b)",
-                animation: "maugood-live-pulse 1.4s ease-in-out infinite",
-              }}
-            />
-            <span style={{ fontWeight: 600, fontSize: 14 }}>
-              {clip.camera_name}
-            </span>
-            <span
-              style={{
-                fontSize: 11,
-                padding: "2px 6px",
-                borderRadius: 4,
-                background: "var(--danger-text, #c0392b)",
-                color: "#fff",
-                fontWeight: 700,
-                letterSpacing: "0.04em",
-              }}
-            >
-              {t("personClips.live.badge")}
-            </span>
-            {/* Migration 0054 — real-time occupancy pill, polled 1 Hz
-                via live-stats. Updates as people enter / leave frame
-                without waiting on the list-endpoint refetch. */}
-            <span
-              className="mono"
-              style={{
-                fontSize: 12,
-                padding: "2px 8px",
-                borderRadius: 4,
-                background: "var(--bg-elev)",
-                border: "1px solid var(--border)",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                fontWeight: 600,
-              }}
-              aria-label={t("personClips.live.peopleCountAria") as string}
-              title={t("personClips.live.peopleCountAria") as string}
-            >
-              <Icon name="users" size={12} />
-              {livePersons}
-            </span>
-            {/* Migration 0057 — frame-rate stats pills. Reader fps is
-                how fast frames are being pulled off RTSP; analyzer
-                fps is how often detection actually runs (motion-skip
-                drops this on quiet scenes). High reader / low
-                analyzer is normal; low reader is a red flag for
-                lagging clips. */}
-            <span
-              className="mono"
-              style={{
-                fontSize: 11,
-                padding: "2px 7px",
-                borderRadius: 4,
-                background: "var(--bg-elev)",
-                border: "1px solid var(--border)",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 5,
-                color: "var(--text-secondary)",
-              }}
-              aria-label={
-                t("personClips.live.fpsAria", {
-                  reader: fpsReader.toFixed(1),
-                  analyzer: fpsAnalyzer.toFixed(1),
-                }) as string
-              }
-              title={
-                t("personClips.live.fpsAria", {
-                  reader: fpsReader.toFixed(1),
-                  analyzer: fpsAnalyzer.toFixed(1),
-                }) as string
-              }
-            >
-              <Icon name="zap" size={11} />
-              {fpsReader.toFixed(0)}
-              <span style={{ opacity: 0.4 }}>/</span>
-              {fpsAnalyzer.toFixed(0)}
-              <span style={{ opacity: 0.5, fontSize: 10 }}>fps</span>
-            </span>
-            <span className="text-xs text-dim" style={{ marginInlineStart: 4 }}>
-              {t("personClips.live.modalHint")}
-            </span>
-          </div>
-          <button
-            type="button"
-            className="btn btn-sm"
-            onClick={onClose}
-            aria-label={t("common.close") as string}
-          >
-            ✕
-          </button>
-        </div>
-        <div
-          style={{
-            background: "#000",
-            display: "grid",
-            placeItems: "center",
-            minWidth: 480,
-            minHeight: 270,
-          }}
-        >
-          <img
-            src={src}
-            alt={t("personClips.live.modalTitle") as string}
-            style={{
-              maxWidth: "85vw",
-              maxHeight: "75vh",
-              display: "block",
-            }}
-          />
-        </div>
-      </div>
-    </div>
-  );
 }
 
 // ── PipelineStatsBar ─────────────────────────────────────────────────────────
@@ -1103,7 +857,6 @@ function ClipsTab({
   onDeleteTarget,
   onBulkDeleteTarget,
   onOpenDetail,
-  onOpenLive,
 }: {
   filters: PersonClipFilters;
   list: ReturnType<typeof usePersonClips>;
@@ -1119,8 +872,6 @@ function ClipsTab({
   onDeleteTarget: (c: PersonClipOut) => void;
   onBulkDeleteTarget: (cs: PersonClipOut[]) => void;
   onOpenDetail: (c: PersonClipOut) => void;
-  // Migration 0054 — open the live MJPEG modal for a recording clip.
-  onOpenLive: (c: PersonClipOut) => void;
 }) {
   const { t } = useTranslation();
 
@@ -1263,7 +1014,6 @@ function ClipsTab({
               onToggleSelect={() => onToggleSelect(clip.id)}
               onDelete={() => onDeleteTarget(clip)}
               onOpenDetail={() => onOpenDetail(clip)}
-              onOpenLive={onOpenLive}
             />
           ))}
         </div>
@@ -4351,127 +4101,6 @@ function _BarMetric({
 
 // ── ClipCard ─────────────────────────────────────────────────────────────────
 
-// Migration 0058 — cadence of the card thumbnail-poll loop. 3 s
-// trades smooth motion for a ~100× drop in network + CPU vs
-// continuous MJPEG. Modal stays on full MJPEG for smooth video.
-const CARD_THUMB_REFRESH_MS = 3000;
-
-// Migration 0058 — polled <img> for the Person Clips card preview.
-// Fetches a fresh JPEG from /live-persons.jpg every
-// CARD_THUMB_REFRESH_MS; on transient errors it just leaves the
-// last good frame on screen until the next poll succeeds. No
-// persistent MJPEG connection, no viewer-slot consumed, no
-// continuous browser decode load.
-//
-// Cache-bust via timestamp query param so the browser doesn't 304
-// us back stale frames; the server also sets no-store, but the
-// query param is cheap belt-and-braces.
-function PolledLivePersonsImage({ cameraId }: { cameraId: number }) {
-  const [src, setSrc] = useState(
-    () => `/api/cameras/${cameraId}/live-persons.jpg?t=${Date.now()}`
-  );
-  useEffect(() => {
-    // Refresh the cache-bust token on a timer. React re-renders the
-    // <img> with the new src; the browser fires a fresh GET. Old
-    // <img> contents stay on screen until the new image lands —
-    // i.e. there is no flash to black between polls.
-    const id = window.setInterval(() => {
-      setSrc(
-        `/api/cameras/${cameraId}/live-persons.jpg?t=${Date.now()}`
-      );
-    }, CARD_THUMB_REFRESH_MS);
-    return () => window.clearInterval(id);
-  }, [cameraId]);
-  return (
-    <img
-      src={src}
-      alt=""
-      style={{
-        width: "100%",
-        height: "100%",
-        objectFit: "cover",
-        display: "block",
-        filter: "saturate(1.05)",
-      }}
-      onError={(e) => {
-        // Transient errors (503 cold-start, network blip) shouldn't
-        // hide the previous good frame — only nuke the img on
-        // permanent breakage. We can't tell from onError which
-        // case this is, but the next poll will replace src and the
-        // browser will re-try. Leaving the element visible.
-        (e.target as HTMLImageElement).style.visibility = "hidden";
-        window.setTimeout(() => {
-          (e.target as HTMLImageElement).style.visibility = "visible";
-        }, CARD_THUMB_REFRESH_MS);
-      }}
-    />
-  );
-}
-
-// Migration 0055 — surveillance-style corner brackets. Renders four
-// L-shapes around the live preview to evoke a CCTV/security-monitor
-// frame. Pure CSS borders so it's effectively free at render time.
-function CornerBrackets() {
-  const bracketSize = 14;
-  const bracketThickness = 1.5;
-  const bracketColour = "rgba(255,255,255,0.65)";
-  const inset = 8;
-  const common: React.CSSProperties = {
-    position: "absolute",
-    width: bracketSize,
-    height: bracketSize,
-    pointerEvents: "none",
-  };
-  return (
-    <>
-      {/* top-left */}
-      <span
-        aria-hidden
-        style={{
-          ...common,
-          top: inset,
-          left: inset,
-          borderTop: `${bracketThickness}px solid ${bracketColour}`,
-          borderLeft: `${bracketThickness}px solid ${bracketColour}`,
-        }}
-      />
-      {/* top-right */}
-      <span
-        aria-hidden
-        style={{
-          ...common,
-          top: inset,
-          right: inset,
-          borderTop: `${bracketThickness}px solid ${bracketColour}`,
-          borderRight: `${bracketThickness}px solid ${bracketColour}`,
-        }}
-      />
-      {/* bottom-left */}
-      <span
-        aria-hidden
-        style={{
-          ...common,
-          bottom: inset,
-          left: inset,
-          borderBottom: `${bracketThickness}px solid ${bracketColour}`,
-          borderLeft: `${bracketThickness}px solid ${bracketColour}`,
-        }}
-      />
-      {/* bottom-right */}
-      <span
-        aria-hidden
-        style={{
-          ...common,
-          bottom: inset,
-          right: inset,
-          borderBottom: `${bracketThickness}px solid ${bracketColour}`,
-          borderRight: `${bracketThickness}px solid ${bracketColour}`,
-        }}
-      />
-    </>
-  );
-}
-
 // Migration 0058 — right-click context menu for clip cards.
 // Opens at cursor on right-click; closes on outside click / Esc.
 // Auto-clamps to viewport so a click at the bottom-right of the
@@ -4629,14 +4258,12 @@ function ClipCard({
   onToggleSelect,
   onDelete,
   onOpenDetail,
-  onOpenLive,
 }: {
   clip: PersonClipOut;
   isSelected: boolean;
   onToggleSelect: () => void;
   onDelete: () => void;
   onOpenDetail: () => void;
-  onOpenLive: (clip: PersonClipOut) => void;
 }) {
   const [showVideo, setShowVideo] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -4662,11 +4289,11 @@ function ClipCard({
       : null;
   const { t } = useTranslation();
 
-  // Migration 0054 / 0055 — in-flight states have no playable MP4
-  // yet; clicking the tile opens the live MJPEG modal of the source
-  // camera. ``recording`` = reader is actively writing frames;
-  // ``finalizing`` = reader handed off and ClipWorker is encoding
-  // (can take minutes for a long clip at native resolution).
+  // In-flight states have no playable MP4 yet, so the tile renders a
+  // static placeholder (no live preview). ``recording`` = reader is
+  // actively writing frames; ``finalizing`` = reader handed off and
+  // ClipWorker is encoding (can take minutes for a long clip at
+  // native resolution).
   const isRecording = clip.recording_status === "recording";
   const isFinalizing = clip.recording_status === "finalizing";
   const isInFlight = isRecording || isFinalizing;
@@ -4725,19 +4352,11 @@ function ClipCard({
   }, [clip.recording_status]);
 
   const handlePlay = () => {
-    // Migration 0055 — finalizing clips have no playable artifact:
-    // the reader is done writing frames but ClipWorker is still
-    // encoding the MP4. Showing the live MJPEG here would be
-    // misleading (the camera might be recording the NEXT clip), and
-    // the partial encode isn't decodable. The tile renders a
-    // spinner instead of an action; clicks are no-ops.
-    if (isFinalizing) {
-      return;
-    }
-    // Recording — camera is actively capturing THIS clip. Live view
-    // is meaningful and matches what's being written to disk.
-    if (isRecording) {
-      onOpenLive(clip);
+    // In-flight clips (recording / finalizing) have no playable
+    // artifact yet: the reader may still be writing frames or
+    // ClipWorker is still encoding the MP4. The tile renders a static
+    // placeholder instead of an action; clicks are no-ops.
+    if (isInFlight) {
       return;
     }
     if (videoUrl) {
@@ -4809,8 +4428,8 @@ function ClipCard({
       {/* Migration 0054 / 0055 — premium in-flight status pill.
           Recording: red gradient + pulsing dot, surveillance feel.
           Finalizing: amber gradient + spinning hint.
-          The pill sits above the live preview so the MJPEG underneath
-          doesn't fight with it visually. */}
+          The pill sits above the static placeholder so it stands out
+          against the dark tile. */}
       {isInFlight && (
         <div
           style={{
@@ -4861,7 +4480,6 @@ function ClipCard({
 
       {/* Thumbnail / Video */}
       <div
-        className={isRecording ? "clip-tile-live" : undefined}
         style={{
           position: "relative",
           width: "100%",
@@ -4869,24 +4487,18 @@ function ClipCard({
           background: "#0b0f14",
           display: "grid",
           placeItems: "center",
-          // Migration 0055 — finalizing tiles are inert: the file
-          // isn't decodable yet and the camera might be recording
-          // the NEXT clip, so live-view here would be misleading.
-          cursor: isFinalizing ? "default" : "pointer",
+          // In-flight tiles (recording / finalizing) are inert: there
+          // is no decodable artifact yet, so the tile is a static
+          // placeholder rather than a play affordance.
+          cursor: isInFlight ? "default" : "pointer",
           overflow: "hidden",
         }}
-        onClick={isFinalizing ? undefined : handlePlay}
-        role={isFinalizing ? undefined : "button"}
-        aria-label={
-          isFinalizing
-            ? undefined
-            : isRecording
-              ? (t("personClips.live.watchLive") as string)
-              : "Play clip"
-        }
-        tabIndex={isFinalizing ? -1 : 0}
+        onClick={isInFlight ? undefined : handlePlay}
+        role={isInFlight ? undefined : "button"}
+        aria-label={isInFlight ? undefined : "Play clip"}
+        tabIndex={isInFlight ? -1 : 0}
         onKeyDown={
-          isFinalizing
+          isInFlight
             ? undefined
             : (e) => {
                 if (e.key === "Enter" || e.key === " ") {
@@ -4904,64 +4516,6 @@ function ClipCard({
             style={{ width: "100%", height: "100%", display: "block" }}
             onError={() => setPlayError(true)}
           />
-        ) : isRecording ? (
-          /* Migration 0055 + 0058 — surveillance-style live preview
-             tile in thumbnail-poll mode. The card refreshes a single
-             JPEG every ``CARD_THUMB_REFRESH_MS`` (3 s) instead of
-             streaming MJPEG, cutting card-level network + CPU by
-             ~100× vs continuous video. The modal still uses smooth
-             MJPEG for the full Watch-Live experience; this tile is
-             just the "is something happening?" affordance. */
-          <>
-            <PolledLivePersonsImage cameraId={clip.camera_id} />
-            <CornerBrackets />
-            <div
-              aria-hidden
-              style={{
-                position: "absolute",
-                inset: 0,
-                pointerEvents: "none",
-                background:
-                  "linear-gradient(180deg, transparent 0%, transparent 55%, rgba(0,0,0,0.55) 100%)",
-              }}
-            />
-            <div
-              aria-hidden
-              style={{
-                position: "absolute",
-                inset: 0,
-                display: "grid",
-                placeItems: "center",
-                pointerEvents: "none",
-              }}
-            >
-              <span
-                className="clip-watch-btn"
-                style={{
-                  width: 48,
-                  height: 48,
-                  borderRadius: "50%",
-                  background: "rgba(255,255,255,0.18)",
-                  border: "1.5px solid rgba(255,255,255,0.55)",
-                  backdropFilter: "blur(8px) saturate(140%)",
-                  display: "grid",
-                  placeItems: "center",
-                  color: "#fff",
-                  boxShadow:
-                    "0 4px 16px rgba(0,0,0,0.45), 0 0 0 4px rgba(255,255,255,0.06)",
-                  transition: "transform 0.15s ease, background 0.15s ease",
-                  paddingInlineStart: 2,
-                }}
-              >
-                <Icon
-                  name="play"
-                  size={18}
-                  strokeWidth={0}
-                  style={{ fill: "currentColor" }}
-                />
-              </span>
-            </div>
-          </>
         ) : thumbUrl && !thumbError ? (
           <img
             src={thumbUrl}
@@ -4973,11 +4527,11 @@ function ClipCard({
           <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 11 }}>Load failed</div>
         ) : null}
 
-        {/* Migration 0055 — the legacy icon overlay only runs for
-            completed + finalizing clips. Recording clips have their
-            own surveillance-style overlay built into the live
-            preview branch above. */}
-        {!showVideo && !isRecording && (
+        {/* Static overlay for the three non-playing states:
+            recording → videocam + "Recording…"
+            finalizing → spinning loader + "Encoding…"
+            completed → minimal circular play button + duration */}
+        {!showVideo && (
           <div
             style={{
               position: "absolute",
@@ -4995,9 +4549,9 @@ function ClipCard({
                 color: "rgba(255,255,255,0.7)",
               }}
             >
-              {/* Migration 0055 — three overlay states:
-                  - recording  → videocam + "Watch live"
-                  - finalizing → spinning loader + "Encoding…" (no click)
+              {/* Three overlay states:
+                  - recording  → videocam + "Recording…"
+                  - finalizing → spinning loader + "Encoding…"
                   - completed  → minimal circular play button
                                  (white round button, black filled
                                   triangle, soft shadow — streaming-
@@ -5049,7 +4603,7 @@ function ClipCard({
                 {isFinalizing
                   ? t("personClips.live.encodingProgress")
                   : isRecording
-                    ? t("personClips.live.watchLive")
+                    ? t("personClips.live.recording")
                     : fmtDuration(clip.duration_seconds)}
               </span>
             </div>

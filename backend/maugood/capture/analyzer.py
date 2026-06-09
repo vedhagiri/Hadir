@@ -167,9 +167,8 @@ class InsightFaceAnalyzer:
         crops, person count, AND raw person bboxes — no duplicate
         YOLO call. In ``insightface`` mode InsightFace runs for face
         crops and YOLO runs separately for the person pass (count +
-        bboxes from the SAME YOLO inference). The bboxes feed the
-        persons-only live overlay served from the
-        ``live-persons.mjpg`` endpoint.
+        bboxes from the SAME YOLO inference). The bboxes drive the
+        clip-recording person-presence trigger.
         """
         cfg = self._snapshot_config()
         raw_faces, person_count, person_boxes = (

@@ -29,9 +29,9 @@ export interface PersonClipOut {
   // Number of intermediate chunks merged into the final file.
   // 1 for short clips; >1 for long-duration clips.
   chunk_count: number;
-  // Migration 0054 — lifecycle status. While 'recording' the card
-  // renders a 🔴 LIVE badge and offers MJPEG preview from the
-  // camera's live stream (/api/cameras/{id}/live.mjpg).
+  // Migration 0054 — lifecycle status. While 'recording' / 'finalizing'
+  // the card renders a static placeholder (no playable MP4 yet); once
+  // 'completed' it shows the encoded-clip thumbnail + play button.
   recording_status: RecordingStatus;
   // Use-case codes (e.g. ['uc1','uc2']) the clip has been processed
   // by. Empty list = "Not Processed" — drives the Clip Analytics

@@ -911,39 +911,6 @@
     }
   },
   "liveCapture": {
-    "title": "Live capture",
-    "subtitle": "Real-time face detection",
-    "pause": "Pause",
-    "resume": "Resume",
-    "fullscreen": "Fullscreen",
-    "exitFullscreen": "Exit fullscreen",
-    "reconnect": "Reconnect",
-    "paused": "Paused",
-    "reconnecting": "Reconnecting…",
-    "offline": "Camera offline",
-    "selectCameraPrompt": "Select a camera to begin",
-    "selectCameraFirst": "Select a camera first",
-    "viewerAlt": "Live camera view",
-    "cameras": "Cameras",
-    "noCameras": "No cameras configured.",
-    "displayDisabled": "Display disabled by Admin",
-    "displayDisabledTooltip": "Display disabled by Admin — capture worker still recording.",
-    "workerDisabled": "Capture worker disabled — no recording.",
-    "workerDisabledTooltip": "Capture worker disabled — no live stream available.",
-    "workerDisabledHeading": "Worker off",
-    "detectionsLast10m": "Detections last 10m",
-    "known": "Known",
-    "unknown": "Unknown",
-    "statusOnline": "Online",
-    "statusOffline": "Offline",
-    "eventStream": "Event stream",
-    "live": "live",
-    "onlyUnknown": "Only unknown",
-    "exportLastHour": "Export last hour",
-    "identified": "Identified",
-    "unknownFace": "Unknown face",
-    "eventsEmpty": "Select a camera to see live detections.",
-    "eventsWaiting": "Waiting for the first detection…",
     "col": {
       "face": "Face",
       "time": "Time",
@@ -951,9 +918,7 @@
       "identified": "Identified",
       "confidence": "Confidence",
       "status": "Status"
-    },
-    "showBoxes": "Show detections",
-    "livePersons": "Live persons"
+    }
   },
   "calendar": {
     "title": "Attendance calendar",
@@ -1646,12 +1611,8 @@
       "badge": "Live",
       "finalizing": "Encoding",
       "encodingProgress": "Encoding video…",
-      "watchLive": "Watch live",
-      "modalTitle": "Live camera preview",
-      "modalHint": "Live MJPEG from the source camera while this clip is recording.",
       "deleteDisabled": "Cannot delete while recording — wait until the person leaves the frame.",
-      "peopleCountAria": "People currently in frame (updates every second)",
-      "fpsAria": "Reader {{reader}} fps · Analyzer {{analyzer}} fps. Reader is the RTSP read rate; analyzer is how often detection actually runs (motion-skip drops this on quiet frames)."
+      "recording": "Recording…"
     },
     "startEnd": {
       "recording": "Recording…",

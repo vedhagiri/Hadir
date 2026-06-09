@@ -1049,9 +1049,18 @@ def test_per_tenant_config_changes_isolated(admin_engine) -> None:
         # Synthetic "other tenant" worker — install a fake worker on
         # key (99, 1). Its config must remain untouched when we tweak
         # tenant 1's row.
-        from tests.test_live_capture import _FakeWorker  # noqa: PLC0415
+        class _FakeWorker:
+            def __init__(self, *, camera_id: int) -> None:
+                self.camera_id = camera_id
+                self._stopped = False
 
-        synthetic = _FakeWorker(camera_id=1, jpeg=b"\xff\xd8\xff\xe0\xff\xd9")
+            def is_alive(self) -> bool:
+                return not self._stopped
+
+            def stop(self, timeout: float = 5.0) -> None:
+                self._stopped = True
+
+        synthetic = _FakeWorker(camera_id=1)
         # Monkey-patch get_capture_config + update_config onto the
         # fake (it doesn't own a real config bag).
         synthetic._cfg = {"max_faces_per_event": 10}  # type: ignore[attr-defined]
@@ -1548,129 +1557,23 @@ def test_orphan_cleanup_script_reclassifies_missing_files(
             pass
 
 
-# --- Viewer-gated preview (CPU optimization) -------------------------------
+# --- Reader-side liveness --------------------------------------------------
 
 
-class _PreviewAnalyzer:
-    """Minimal analyzer stub for viewer-gate tests — no model load."""
-
-    def detect(self, _frame):  # type: ignore[no-untyped-def]
-        return []
-
-    def detect_and_count(self, frame):  # type: ignore[no-untyped-def]
-        return [], 0, []
-
-    def detect_persons(self, _frame) -> int:  # type: ignore[no-untyped-def]
-        return 0
-
-    def detect_person_boxes(self, _frame) -> list:  # type: ignore[no-untyped-def]
-        return []
-
-    def embed_crop(self, _crop):  # type: ignore[no-untyped-def]
-        return None
-
-    def update_config(self, _cfg) -> None:  # type: ignore[no-untyped-def]
-        return None
-
-
-def _viewer_gate_worker() -> CaptureWorker:
-    # preview_idle_timeout_s=0.0 makes the gate deterministic: a feed is
-    # active iff it has a live viewer (no grace window to wait out).
-    return CaptureWorker(
-        engine=get_engine(),
-        scope=TENANT,
-        camera_id=4242,
-        camera_name="viewer-gate-test",
-        rtsp_url_plain="rtsp://fake/x",
-        analyzer=_PreviewAnalyzer(),
-        config=ReaderConfig(preview_idle_timeout_s=0.0),
-    )
-
-
-def test_preview_skipped_when_no_viewers(admin_engine) -> None:
-    """With no viewer and a zero idle-timeout, _update_preview must NOT
-    produce a JPEG — the copy/annotate/encode work is skipped."""
-    w = _viewer_gate_worker()
-    assert w.viewer_stats()["face_preview_active"] is False
-    assert w.viewer_stats()["persons_preview_active"] is False
-
-    w._update_preview(_blank_frame())
-
-    assert w.get_latest_jpeg() is None
-    assert w.get_latest_persons_jpeg() is None
-
-
-def test_preview_encodes_face_feed_only_for_face_viewer(admin_engine) -> None:
-    """A face viewer activates the face feed only; the persons feed
-    stays idle (no encode) until it has its own viewer."""
-    w = _viewer_gate_worker()
-    w.add_viewer("face")
-    assert w.viewer_stats()["face_viewers"] == 1
-    assert w.viewer_stats()["face_preview_active"] is True
-    assert w.viewer_stats()["persons_preview_active"] is False
-
-    w._update_preview(_blank_frame())
-
-    assert w.get_latest_jpeg() is not None  # face feed encoded
-    assert w.get_latest_persons_jpeg() is None  # persons feed skipped
-
-
-def test_preview_released_after_last_viewer_leaves(admin_engine) -> None:
-    """Once the last viewer disconnects (past the idle window), the next
-    _update_preview releases the stale JPEG buffer and skips encoding."""
-    w = _viewer_gate_worker()
-    w.add_viewer("face")
-    w._update_preview(_blank_frame())
-    assert w.get_latest_jpeg() is not None
-
-    w.remove_viewer("face")
-    assert w.viewer_stats()["face_viewers"] == 0
-    assert w.viewer_stats()["face_preview_active"] is False  # timeout=0
-
-    w._update_preview(_blank_frame())
-    assert w.get_latest_jpeg() is None  # buffer released
-
-
-def test_touch_viewer_keeps_persons_feed_warm(admin_engine) -> None:
-    """A single-shot snapshot poll (touch_viewer) activates the persons
-    feed within the idle window without holding a viewer count."""
-    # touch needs a positive grace window to be meaningful (with a 0 s
-    # timeout, any time elapsed after the touch already exceeds it).
+def test_is_capture_fresh_tracks_last_frame_at(admin_engine) -> None:
+    """Camera liveness tracks the reader's _last_frame_at. There is no
+    preview/viewer subsystem any more — liveness is purely reader-side."""
     w = CaptureWorker(
         engine=get_engine(),
         scope=TENANT,
-        camera_id=4243,
-        camera_name="touch-gate-test",
+        camera_id=4242,
+        camera_name="liveness-test",
         rtsp_url_plain="rtsp://fake/x",
-        analyzer=_PreviewAnalyzer(),
-        config=ReaderConfig(preview_idle_timeout_s=30.0),
+        analyzer=_StubAnalyzer([]),
     )
-    w.touch_viewer("persons")
-    assert w.viewer_stats()["persons_viewers"] == 0
-    assert w.viewer_stats()["persons_preview_active"] is True
-    # Face feed had no viewer and no touch → still inactive.
-    assert w.viewer_stats()["face_preview_active"] is False
-
-    w._update_preview(_blank_frame())
-    assert w.get_latest_persons_jpeg() is not None
-    assert w.get_latest_jpeg() is None  # face feed skipped
-
-
-def test_remove_viewer_clamps_at_zero(admin_engine) -> None:
-    """A double-release must never drive the viewer count negative."""
-    w = _viewer_gate_worker()
-    w.add_viewer("face")
-    w.remove_viewer("face")
-    w.remove_viewer("face")
-    assert w.viewer_stats()["face_viewers"] == 0
-
-
-def test_is_capture_fresh_independent_of_preview(admin_engine) -> None:
-    """Camera liveness tracks the reader's _last_frame_at, not preview
-    freshness — an unwatched-but-capturing camera reports fresh."""
-    w = _viewer_gate_worker()
     assert w.is_capture_fresh() is False  # no frame read yet
     w._last_frame_at = time.time()
     assert w.is_capture_fresh(max_age_s=10.0) is True
-    # No preview produced (no viewer), yet capture is still fresh.
-    assert w.get_latest_jpeg() is None
+    w._last_frame_at = time.time() - 100.0
+    assert w.is_capture_fresh(max_age_s=10.0) is False
+

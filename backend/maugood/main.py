@@ -38,7 +38,6 @@ from maugood.employees.delete_requests import router as delete_requests_router
 from maugood.employees.lifecycle_cron import lifecycle_scheduler
 from maugood.identification.router import router as identification_router
 from maugood.leave_calendar import router as leave_calendar_router
-from maugood.live_capture import router as live_capture_router
 from maugood.manager_assignments import router as manager_assignments_router
 from maugood.policies import router as policies_router
 from maugood.reporting.former_employees import router as former_employees_router
@@ -318,7 +317,6 @@ def create_app() -> FastAPI:
     app.include_router(scheduled_reports_router)
     app.include_router(erp_export_router)
     app.include_router(notifications_router)
-    app.include_router(live_capture_router)
     app.include_router(operations_router)
     # P29 — Resources tab endpoints under /api/operations/resources/*.
     from maugood.observability import router as observability_router  # noqa: PLC0415

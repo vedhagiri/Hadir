@@ -47,8 +47,6 @@ import numpy as np
 from sqlalchemy import func, insert, update
 from sqlalchemy.engine import Engine
 
-from maugood.capture.directory import employee_directory
-from maugood.capture.event_bus import DetectionEvent, event_bus
 from maugood.config import get_settings
 from maugood.db import camera_health_snapshots, cameras, detection_events
 from maugood.employees.photos import encrypt_bytes
@@ -387,29 +385,6 @@ def emit_detection_event(
 
     observe_detection_event(
         scope.tenant_id, identified=employee_id is not None
-    )
-
-    # P28.5: fan out to live-capture WebSocket subscribers. The
-    # ``event_bus`` publish is non-blocking — full subscriber queues
-    # drop their oldest event rather than stall the capture loop.
-    name_label: Optional[str] = None
-    code_label: Optional[str] = None
-    if employee_id is not None:
-        resolved = employee_directory.label_for(scope, employee_id)
-        if resolved is not None:
-            name_label, code_label = resolved
-    event_bus.publish(
-        DetectionEvent(
-            tenant_id=scope.tenant_id,
-            camera_id=camera_id,
-            captured_at=captured_at.timestamp(),
-            employee_id=employee_id,
-            employee_code=code_label,
-            employee_name=name_label,
-            confidence=confidence,
-            bbox={"x": bbox.x, "y": bbox.y, "w": bbox.w, "h": bbox.h},
-            event_id=int(new_id),
-        )
     )
 
     return int(new_id)

@@ -67,14 +67,6 @@ services:
       # 2 intra-op threads is faster than 24 (no cache thrash). Raise to 4 on
       # lighter loads with ≥16 cores.
       MAUGOOD_INFERENCE_THREADS: ${MAUGOOD_INFERENCE_THREADS:-2}
-      # Preview encode rate cap (fps). Even when a viewer is connected, the
-      # reader encodes at most this many JPEGs/sec per camera. 10 fps halves
-      # encode work vs native 20-25 fps; human eye can't distinguish above ~10.
-      MAUGOOD_PREVIEW_MAX_FPS: ${MAUGOOD_PREVIEW_MAX_FPS:-10}
-      # Preview downscale: resize to at most this width before encoding.
-      # 960px covers any live-view tile; full 1080p encode is rarely useful.
-      # Set to 0 to disable. Saves ~40% JPEG size + ~50% encode time.
-      MAUGOOD_PREVIEW_MAX_WIDTH: ${MAUGOOD_PREVIEW_MAX_WIDTH:-960}
     volumes:
       - ./backend:/app
       # P28-followup: the pre_omran_reset_seed script needs to read the

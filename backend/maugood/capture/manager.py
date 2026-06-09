@@ -26,17 +26,9 @@ states the actual worker count.
 Multi-tenant keying: the ``_workers`` dict is keyed by
 ``(tenant_id, camera_id)``. Two tenants both happening to mint a
 camera with id=7 (yes, they can — ids are per-schema sequences) get
-two distinct workers. Cross-tenant ``get_preview`` returns ``None``
-regardless of how the camera_id guess lines up — defence in depth on
-top of the router's ``WHERE tenant_id = …`` filter.
-
-Per-worker preview JPEG (P28.5a): the live-capture MJPEG endpoint
-asks this manager for the latest annotated frame via
-``get_preview(tenant_id, camera_id)``; the manager looks up the
-worker and forwards to ``CaptureWorker.get_latest_jpeg``. There is
-no process-global frame buffer — each worker holds its own slot.
-When a worker is stopped the slot drops with it, so a stale frame
-can never outlive the worker that produced it.
+two distinct workers. Cross-tenant reads return ``None`` regardless
+of how the camera_id guess lines up — defence in depth on top of the
+router's ``WHERE tenant_id = …`` filter.
 
 Public surface:
 
@@ -52,8 +44,8 @@ Public surface:
   ad-hoc from tests for deterministic timing.
 * ``on_camera_*`` — synchronous CRUD reactions (defer to reconcile_all
   shape for the heavy lift).
-* ``get_preview`` / ``is_preview_fresh`` / ``get_worker_stats`` —
-  consumed by the live-capture router.
+* ``is_capture_fresh`` / ``get_worker_stats`` — camera liveness +
+  per-worker stats consumed by the operations / system surfaces.
 
 P28.5b knobs:
 
@@ -385,99 +377,6 @@ class CaptureManager:
     # ------------------------------------------------------------------
     # Public reads
 
-    def get_preview(
-        self, tenant_id: int, camera_id: int
-    ) -> Optional[tuple[bytes, float]]:
-        """Return ``(jpeg, ts)`` for the worker, or ``None``.
-
-        The (tenant_id, camera_id) tuple must match a running worker
-        exactly. A camera_id that exists in another tenant returns
-        None — the live-capture router relies on that as a defence-
-        in-depth check on top of its ``WHERE tenant_id = …`` filter.
-        """
-
-        with self._lock:
-            worker = self._workers.get((tenant_id, camera_id))
-        if worker is None:
-            return None
-        return worker.get_latest_jpeg()
-
-    def is_preview_fresh(
-        self, tenant_id: int, camera_id: int, *, max_age_s: float = 5.0
-    ) -> bool:
-        with self._lock:
-            worker = self._workers.get((tenant_id, camera_id))
-        if worker is None:
-            return False
-        return worker.is_preview_fresh(max_age_s=max_age_s)
-
-    def get_persons_preview(
-        self, tenant_id: int, camera_id: int
-    ) -> Optional[tuple[bytes, float]]:
-        """Migration 0055 — persons-only preview slot. Served by the
-        live-persons.mjpg endpoint to the Watch-Live modal on the
-        Person Clips page. Same tenant scoping as ``get_preview``.
-        """
-
-        with self._lock:
-            worker = self._workers.get((tenant_id, camera_id))
-        if worker is None:
-            return None
-        return worker.get_latest_persons_jpeg()
-
-    def is_persons_preview_fresh(
-        self, tenant_id: int, camera_id: int, *, max_age_s: float = 5.0
-    ) -> bool:
-        with self._lock:
-            worker = self._workers.get((tenant_id, camera_id))
-        if worker is None:
-            return False
-        return worker.is_persons_preview_fresh(max_age_s=max_age_s)
-
-    def get_clean_preview(
-        self, tenant_id: int, camera_id: int
-    ) -> "Optional[tuple[bytes, float]]":
-        """Return the unannotated (no bounding boxes) JPEG for this camera.
-        Same tenant-scoping as ``get_preview``."""
-        with self._lock:
-            worker = self._workers.get((tenant_id, camera_id))
-        if worker is None:
-            return None
-        return worker.get_latest_clean_jpeg()
-
-    # --- Viewer-gated preview notifications --------------------------------
-    # The live-capture router calls these as MJPEG streams open / close
-    # and on each snapshot poll, so the worker only encodes the preview
-    # JPEG while someone is actually watching. Unknown (tenant, camera)
-    # tuples are silent no-ops — cross-tenant guesses can't toggle a
-    # worker's preview, and a viewer for a since-stopped worker is moot.
-
-    def notify_viewer_connected(
-        self, tenant_id: int, camera_id: int, kind: str = "face"
-    ) -> None:
-        with self._lock:
-            worker = self._workers.get((tenant_id, camera_id))
-        if worker is not None:
-            worker.add_viewer(kind)
-
-    def notify_viewer_disconnected(
-        self, tenant_id: int, camera_id: int, kind: str = "face"
-    ) -> None:
-        with self._lock:
-            worker = self._workers.get((tenant_id, camera_id))
-        if worker is not None:
-            worker.remove_viewer(kind)
-
-    def notify_viewer_active(
-        self, tenant_id: int, camera_id: int, kind: str = "face"
-    ) -> None:
-        """Keep a feed warm for a single-shot snapshot poll (no stream
-        slot held). See ``CaptureWorker.touch_viewer``."""
-        with self._lock:
-            worker = self._workers.get((tenant_id, camera_id))
-        if worker is not None:
-            worker.touch_viewer(kind)
-
     def is_capture_fresh(
         self, tenant_id: int, camera_id: int, *, max_age_s: float = 10.0
     ) -> bool:
@@ -501,31 +400,6 @@ class CaptureManager:
 
     # ------------------------------------------------------------------
     # P28.8 — operations endpoints helpers
-
-    def get_latest_boxes(
-        self, tenant_id: int, camera_id: int
-    ) -> Optional[dict]:
-        """Return the most recent detection-box payload for the live-capture
-        WebSocket heartbeat. Returns ``None`` when the (tenant_id, camera_id)
-        pair has no running worker — callers emit zero counts in that case.
-
-        Defence-in-depth: the (tenant_id, camera_id) key must match exactly.
-        A camera_id that exists under another tenant returns None, just like
-        ``get_preview``.
-
-        Defensively handles workers that don't implement ``get_latest_boxes``
-        (test stubs, old worker objects from before this method was added)
-        by returning None.
-        """
-
-        with self._lock:
-            worker = self._workers.get((tenant_id, camera_id))
-        if worker is None:
-            return None
-        get_boxes = getattr(worker, "get_latest_boxes", None)
-        if get_boxes is None:
-            return None
-        return get_boxes()
 
     def get_full_worker_stats(
         self, tenant_id: int, camera_id: int
@@ -833,32 +707,15 @@ class CaptureManager:
         }
 
     def get_subscriber_counts(self) -> dict[str, int]:
-        """Live-capture subscriber counts for the Super-Admin page.
+        """Live-stream subscriber counts for the Super-Admin page.
 
-        Uses the existing ``maugood.capture.event_bus`` + the live-capture
-        router's MJPEG viewer registry. Defensive — returns zeros if
-        either module isn't available.
+        The live-capture preview/viewer subsystem has been removed —
+        there are no MJPEG or WebSocket subscribers any more, so this
+        always reports zero. Kept as a stable shape for the Super-Admin
+        system page consumer.
         """
 
-        mjpeg = 0
-        ws = 0
-        try:
-            from maugood.live_capture import router as lc_router  # noqa: PLC0415
-
-            counter = getattr(lc_router, "active_mjpeg_count", None)
-            if callable(counter):
-                mjpeg = int(counter())
-        except Exception:  # noqa: BLE001
-            pass
-        try:
-            from maugood.capture.event_bus import event_bus  # noqa: PLC0415
-
-            counter = getattr(event_bus, "subscriber_count", None)
-            if callable(counter):
-                ws = int(counter())
-        except Exception:  # noqa: BLE001
-            pass
-        return {"mjpeg": mjpeg, "ws": ws}
+        return {"mjpeg": 0, "ws": 0}
 
     def _read_tenant_configs(
         self, *, tenant_id: int, schema: str
