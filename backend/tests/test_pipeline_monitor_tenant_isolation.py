@@ -30,9 +30,9 @@ def test_pipeline_monitor_redacts_cross_tenant_jobs() -> None:
     p = ClipPipeline()
     p.start()
     try:
-        # uc1 worker is busy on FOREIGN tenant 999; uc3 on OWN tenant 1.
+        # uc1 worker is busy on FOREIGN tenant 999; uc2 on OWN tenant 1.
         _inject_busy(p._cropping_by_uc["uc1"], clip_id=777, tenant_id=999, uc="UC1")
-        _inject_busy(p._cropping_by_uc["uc3"], clip_id=11, tenant_id=1, uc="UC3")
+        _inject_busy(p._cropping_by_uc["uc2"], clip_id=11, tenant_id=1, uc="UC2")
 
         snap = p.status_snapshot(tenant_id=1)
         blob = json.dumps(snap)
@@ -43,11 +43,11 @@ def test_pipeline_monitor_redacts_cross_tenant_jobs() -> None:
         assert "current_job_tenant_id" not in blob, "internal tenant key leaked"
 
         # Own-tenant job stays visible.
-        uc3_jobs = [
+        uc2_jobs = [
             w["current_job"]
-            for w in snap["cropping_by_uc"]["uc3"]["workers"] if w["busy"]
+            for w in snap["cropping_by_uc"]["uc2"]["workers"] if w["busy"]
         ]
-        assert any("11" in j for j in uc3_jobs), f"own job hidden: {uc3_jobs}"
+        assert any("11" in j for j in uc2_jobs), f"own job hidden: {uc2_jobs}"
 
         # Foreign worker still shown as busy (health/utilisation visible),
         # but its job identifier is redacted to "".

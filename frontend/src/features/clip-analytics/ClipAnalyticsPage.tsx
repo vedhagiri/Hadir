@@ -5,7 +5,7 @@
 // purely: "person was detected → clip was saved → row appears here".
 //
 // Face matching, face crop extraction, and UC comparison are manual:
-// click ⋮ → "Identify Event" → pick UC1 / UC2 / UC3 to process.
+// click ⋮ → "Identify Event" → pick UC1 / UC2 to process.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -52,9 +52,9 @@ type ProcessingFilter =
   | "saved"
   | "processed";
 
-type ProcessedUcFilter = "any" | "uc1" | "uc2" | "uc3" | "not_processed";
+type ProcessedUcFilter = "any" | "uc1" | "uc2" | "not_processed";
 
-const ALL_USE_CASES = ["uc1", "uc2", "uc3"] as const;
+const ALL_USE_CASES = ["uc1", "uc2"] as const;
 type UseCaseCode = (typeof ALL_USE_CASES)[number];
 
 // Two-line "time over date" cell renderer for the Start / End columns.
@@ -208,7 +208,7 @@ function processingStatusKey(c: PersonClipOut): string {
 // Per-UC status pill for the Processed UCs column. Each clip carries
 // ``processed_use_cases`` (completed) and ``processing_use_cases``
 // (in-flight) — the cell renders one pill per known UC so an operator
-// can see at a glance which of UC1 / UC2 / UC3 has run, which is still
+// can see at a glance which of UC1 / UC2 has run, which is still
 // running, and which hasn't started. A summary line under the pills
 // surfaces the count + match outcome (matched vs unmatched) so the
 // column conveys both pipeline progress and search result.
@@ -1235,7 +1235,7 @@ export function ClipAnalyticsPage() {
         onRetryFailed={() => {
           setRetryDone(null);
           retryFailed.mutate(
-            { use_cases: ["uc1", "uc2", "uc3"], max_clips: 200 },
+            { use_cases: ["uc1", "uc2"], max_clips: 200 },
             {
               onSuccess: (res) => {
                 setRetryDone({
@@ -1533,7 +1533,6 @@ export function ClipAnalyticsPage() {
                   <option value="any">{t("clipAnalytics.ucFilter.any")}</option>
                   <option value="uc1">UC1</option>
                   <option value="uc2">UC2</option>
-                  <option value="uc3">UC3</option>
                   <option value="not_processed">{t("clipAnalytics.ucFilter.notProcessed")}</option>
                 </select>
               </th>
@@ -2230,12 +2229,12 @@ function MenuItem({
 }
 
 // ---------------------------------------------------------------------------
-// Identify Event modal — UC1 / UC2 / UC3 selection + overwrite confirm.
+// Identify Event modal — UC1 / UC2 selection + overwrite confirm.
 // ---------------------------------------------------------------------------
 
 type IdentifyStep = "pick" | "confirm-overwrite";
 
-// ---- Identify Event — visual catalogue for the three UC tiles ----
+// ---- Identify Event — visual catalogue for the UC tiles ----
 
 interface UseCaseTile {
   code: UseCaseCode;
@@ -2272,17 +2271,6 @@ const UC_TILES: readonly UseCaseTile[] = [
     accent: "#8b5cf6",
     accentSoft: "rgba(139,92,246,0.12)",
   },
-  {
-    code: "uc3",
-    title: "InsightFace Direct",
-    subtitle: "Skip crop storage. Just match and report.",
-    speedLabel: "Fastest",
-    speedTone: "fast",
-    accuracyLabel: "Lowest overhead",
-    iconName: "sparkles",
-    accent: "#10b981",
-    accentSoft: "rgba(16,185,129,0.12)",
-  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -2307,7 +2295,7 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
 
   const [selected, setSelected] = useState<Set<UseCaseCode>>(
-    () => new Set(["uc3"] as UseCaseCode[]),
+    () => new Set(["uc1"] as UseCaseCode[]),
   );
   const [mode, setMode] = useState<BatchMode>("skip_existing");
   const [error, setError] = useState<string | null>(null);
@@ -4719,12 +4707,11 @@ function DeleteClipModal({
 // back to 5 s once everything has reached a terminal state.
 // ---------------------------------------------------------------------------
 
-type UcCode = "uc1" | "uc2" | "uc3";
+type UcCode = "uc1" | "uc2";
 
 const UC_LIVE_META: Record<UcCode, { label: string; accent: string; accentSoft: string }> = {
   uc1: { label: "YOLO + Face", accent: "#3b82f6", accentSoft: "rgba(59,130,246,0.12)" },
   uc2: { label: "InsightFace + Crops", accent: "#8b5cf6", accentSoft: "rgba(139,92,246,0.12)" },
-  uc3: { label: "InsightFace Direct", accent: "#10b981", accentSoft: "rgba(16,185,129,0.12)" },
 };
 
 function LiveProcessingModal({
@@ -4754,12 +4741,10 @@ function LiveProcessingModal({
   const results = useClipProcessingResults(clip.id, true);
   const uc1Crops = useClipFaceCrops(clip.id, "uc1");
   const uc2Crops = useClipFaceCrops(clip.id, "uc2");
-  const uc3Crops = useClipFaceCrops(clip.id, "uc3");
 
   const ucResults = results.data?.results ?? [];
   const uc1 = ucResults.find((r) => r.use_case === "uc1") ?? null;
   const uc2 = ucResults.find((r) => r.use_case === "uc2") ?? null;
-  const uc3 = ucResults.find((r) => r.use_case === "uc3") ?? null;
 
   // Esc to close.
   useEffect(() => {
@@ -4942,13 +4927,12 @@ function LiveProcessingModal({
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(3, 1fr)",
+                gridTemplateColumns: "repeat(2, 1fr)",
                 gap: 12,
               }}
             >
               <UcLiveCard ucCode="uc1" result={uc1} cropsCount={uc1Crops.data?.total ?? 0} />
               <UcLiveCard ucCode="uc2" result={uc2} cropsCount={uc2Crops.data?.total ?? 0} />
-              <UcLiveCard ucCode="uc3" result={uc3} cropsCount={uc3Crops.data?.total ?? 0} />
             </div>
 
             {/* Detected/matched persons */}
@@ -4962,11 +4946,10 @@ function LiveProcessingModal({
             )}
 
             {/* Live face crops */}
-            {(uc1Crops.data?.items ?? uc2Crops.data?.items ?? uc3Crops.data?.items) && (() => {
+            {(uc1Crops.data?.items ?? uc2Crops.data?.items) && (() => {
               const allCrops = [
                 ...(uc1Crops.data?.items ?? []),
                 ...(uc2Crops.data?.items ?? []),
-                ...(uc3Crops.data?.items ?? []),
               ];
               return (
                 <>

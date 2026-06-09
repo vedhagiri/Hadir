@@ -62,7 +62,7 @@ def test_snapshot_shape(client: TestClient, admin_user: dict) -> None:
     assert r.status_code == 200, r.text
     body = r.json()
     keys = {row["key"] for row in body["queues"]}
-    assert keys == {"crop_uc1", "crop_uc2", "crop_uc3", "match", "clip_save"}
+    assert keys == {"crop_uc1", "crop_uc2", "match", "clip_save"}
     # Scopes are well-formed.
     for row in body["queues"]:
         assert row["scope"] in ("process_wide", "tenant_scoped")
@@ -246,7 +246,7 @@ def test_endpoint_clear_all_aggregates(
     monkeypatch.setattr(
         pipeline_mod.clip_pipeline,
         "clear_all_queues",
-        lambda: {"crop_uc1": 5, "crop_uc2": 2, "crop_uc3": 0, "match": 1},
+        lambda: {"crop_uc1": 5, "crop_uc2": 2, "match": 1},
     )
     monkeypatch.setattr(
         capture_manager,
@@ -262,7 +262,7 @@ def test_endpoint_clear_all_aggregates(
     body = r.json()
     assert body["cleared"]["crop_uc1"] == 5
     assert body["cleared"]["clip_save"] == 8
-    assert body["cleared_total"] == 5 + 2 + 0 + 1 + 8
+    assert body["cleared_total"] == 5 + 2 + 1 + 8
 
 
 def test_clear_writes_audit(

@@ -83,14 +83,14 @@ export const LIVE_MATCHING_DEFAULT: LiveMatchingConfig = {
 
 // Clip processing use cases — manual reprocessors that run against saved
 // clips. Sent / received on /api/system/clip-pipeline-config as a single
-// ``{use_cases: string[]}`` payload (subset of uc1/uc2/uc3, may be empty).
-export type ClipUseCase = "uc1" | "uc2" | "uc3";
+// ``{use_cases: string[]}`` payload (subset of uc1/uc2, may be empty).
+export type ClipUseCase = "uc1" | "uc2";
 
 export interface ClipPipelineConfig {
   use_cases: ClipUseCase[];
 }
 
-export const CLIP_USE_CASES: readonly ClipUseCase[] = ["uc1", "uc2", "uc3"] as const;
+export const CLIP_USE_CASES: readonly ClipUseCase[] = ["uc1", "uc2"] as const;
 
 export const CLIP_PIPELINE_DEFAULT: ClipPipelineConfig = {
   use_cases: [],

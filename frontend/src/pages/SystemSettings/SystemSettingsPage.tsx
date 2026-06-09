@@ -73,7 +73,7 @@ export function SystemSettingsPage() {
 // analyzer thread skips face detection / recognition / embedding /
 // matcher_cache / detection_events emission. Person bounding boxes
 // still drive the live preview overlay and the clip-recording trigger;
-// identification only happens later via the manual UC1/UC2/UC3
+// identification only happens later via the manual UC1/UC2
 // reprocessors on saved clips.
 
 function LiveMatchingCard() {
@@ -229,11 +229,11 @@ function LiveMatchingCard() {
 }
 
 // ---------------------------------------------------------------------------
-// Clip processing card — UC1/UC2/UC3 toggles
+// Clip processing card — UC1/UC2 toggles
 //
 // Each use case is an independent manual reprocessor that runs against
 // saved clips. Turning one OFF stops all processing for it. The PUT body
-// is the array of enabled use cases (e.g. ["uc1","uc3"]); all off -> [].
+// is the array of enabled use cases (e.g. ["uc1","uc2"]); all off -> [].
 
 function ClipPipelineCard() {
   const { t } = useTranslation();
@@ -262,7 +262,7 @@ function ClipPipelineCard() {
   const onSave = async () => {
     setToast(null);
     try {
-      // Preserve the canonical uc1/uc2/uc3 ordering in the PUT body.
+      // Preserve the canonical uc1/uc2 ordering in the PUT body.
       const ordered = CLIP_USE_CASES.filter((uc) => draft.includes(uc));
       await put.mutateAsync({ use_cases: [...ordered] });
       setToast(t("systemSettings.savedToast") as string);

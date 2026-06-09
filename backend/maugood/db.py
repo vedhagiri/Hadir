@@ -575,7 +575,7 @@ tenant_settings = Table(
     # FALSE (the default since migration 0060) the analyzer runs YOLO
     # body detection only — person bboxes drive the preview and clip-
     # recording trigger; face matching happens later via the manual
-    # UC1/UC2/UC3 reprocessors on saved clips.
+    # UC1/UC2 reprocessors on saved clips.
     Column(
         "live_matching_enabled",
         Boolean,
@@ -595,9 +595,9 @@ tenant_settings = Table(
     # Migration 0073 — per-tenant clip-pipeline use-case enable set.
     # JSONB, NULLABLE, no server default. NULL means "inherit the
     # process-wide env/default" (the runtime resolver falls back to
-    # ``MAUGOOD_CLIP_PIPELINE_USE_CASES`` if set, else all-three). A
+    # ``MAUGOOD_CLIP_PIPELINE_USE_CASES`` if set, else all). A
     # non-NULL value is a JSON array of strings, each in
-    # ``{"uc1", "uc2", "uc3"}``; an empty array means "none run".
+    # ``{"uc1", "uc2"}``; an empty array means "none run".
     Column(
         "clip_pipeline_use_cases",
         JSONB,
@@ -2428,7 +2428,7 @@ person_clip_chunks = Table(
 
 # Per-use-case face-matching results for a person clip. One row per
 # (person_clip_id, use_case). UC1=yolo+face pipeline, UC2=insightface with
-# explicit crop storage, UC3=insightface direct matching.
+# explicit crop storage.
 clip_processing_results = Table(
     "clip_processing_results",
     metadata,
@@ -2520,7 +2520,7 @@ face_crops = Table(
     Column("event_timestamp", Text, nullable=False),
     Column("face_index", Integer, nullable=False, server_default="1"),
     Column("file_path", Text, nullable=True),
-    # Migration 0050 — which UC pipeline created this crop (uc1 / uc2 / uc3).
+    # Migration 0050 — which UC pipeline created this crop (uc1 / uc2).
     # NULL for rows written before this column was added.
     Column("use_case", Text, nullable=True),
     # Migration 0051 — matched employee, NULL = unknown person.

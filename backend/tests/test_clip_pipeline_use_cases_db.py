@@ -68,8 +68,8 @@ def test_get_returns_env_default_when_null(
     _login(client, admin_user)
     resp = client.get("/api/system/clip-pipeline-config")
     assert resp.status_code == 200, resp.text
-    # NULL column → env unset → default all-three.
-    assert resp.json()["use_cases"] == ["uc1", "uc2", "uc3"]
+    # NULL column → env unset → default both.
+    assert resp.json()["use_cases"] == ["uc1", "uc2"]
     _reset_column(admin_engine)
 
 
@@ -97,11 +97,11 @@ def test_put_normalizes_order_and_dedupes(
     _login(client, admin_user)
     resp = client.put(
         "/api/system/clip-pipeline-config",
-        json={"use_cases": ["uc3", "uc1", "uc1"]},
+        json={"use_cases": ["uc2", "uc1", "uc1"]},
     )
     assert resp.status_code == 200, resp.text
-    # Deduped + order-normalized to canonical (uc1, uc2, uc3).
-    assert resp.json()["use_cases"] == ["uc1", "uc3"]
+    # Deduped + order-normalized to canonical (uc1, uc2).
+    assert resp.json()["use_cases"] == ["uc1", "uc2"]
     _reset_column(admin_engine)
 
 
@@ -177,11 +177,11 @@ def test_endpoints_admin_only(
 
 
 def _fresh_pipeline(monkeypatch):
-    """Reload pipeline with all three UCs enabled at the env layer + a
+    """Reload pipeline with both UCs enabled at the env layer + a
     stubbed crop handler, started. The DB value (if any) overrides env
     at submit time via ``enabled_use_cases_for``."""
 
-    monkeypatch.setenv("MAUGOOD_CLIP_PIPELINE_USE_CASES", "uc1,uc2,uc3")
+    monkeypatch.setenv("MAUGOOD_CLIP_PIPELINE_USE_CASES", "uc1,uc2")
     monkeypatch.setenv("MAUGOOD_CLIP_PIPELINE_DISABLE_RECOVERY", "1")
     mod = importlib.reload(pipeline_mod)
     pipe = mod.ClipPipeline()
@@ -197,7 +197,7 @@ def test_db_value_drives_submit_batch(
     admin_engine: Engine, monkeypatch
 ) -> None:
     """PUT uc1 only (via DB) → submit_batch for that tenant queues only
-    uc1 even though env enables all three and all three stages run."""
+    uc1 even though env enables both and both stages run."""
 
     mod, pipe = _fresh_pipeline(monkeypatch)
     try:
@@ -210,19 +210,19 @@ def test_db_value_drives_submit_batch(
             )
         mod.invalidate_use_cases_cache(None)
 
-        # All three cropping stages exist (started from env); the DB
+        # Both cropping stages exist (started from env); the DB
         # value gates at submit time.
-        assert set(pipe._cropping_by_uc.keys()) == {"uc1", "uc2", "uc3"}
+        assert set(pipe._cropping_by_uc.keys()) == {"uc1", "uc2"}
 
         batch = pipe.submit_batch(
             scope=_SCOPE,
             clip_ids=[5001],
-            use_cases=["uc1", "uc2", "uc3"],
+            use_cases=["uc1", "uc2"],
             skip_existing=False,
             submitted_by_user_id=None,
             submitted_by_email="test",
         )
-        # Only uc1 queues — uc2/uc3 dropped by the per-tenant resolver.
+        # Only uc1 queues — uc2 dropped by the per-tenant resolver.
         assert batch.queued_jobs == 1
         assert set(batch.per_uc.keys()) == {"uc1"}
     finally:
@@ -247,7 +247,7 @@ def test_db_empty_array_queues_nothing(
         batch = pipe.submit_batch(
             scope=_SCOPE,
             clip_ids=[5002],
-            use_cases=["uc1", "uc2", "uc3"],
+            use_cases=["uc1", "uc2"],
             skip_existing=False,
             submitted_by_user_id=None,
             submitted_by_email="test",
@@ -265,7 +265,7 @@ def test_null_column_falls_back_to_env(
 ) -> None:
     """When the column is NULL the resolver uses the env-derived set."""
 
-    monkeypatch.setenv("MAUGOOD_CLIP_PIPELINE_USE_CASES", "uc2,uc3")
+    monkeypatch.setenv("MAUGOOD_CLIP_PIPELINE_USE_CASES", "uc2")
     monkeypatch.setenv("MAUGOOD_CLIP_PIPELINE_DISABLE_RECOVERY", "1")
     mod = importlib.reload(pipeline_mod)
     try:
@@ -278,7 +278,7 @@ def test_null_column_falls_back_to_env(
         mod.invalidate_use_cases_cache(None)
 
         got = mod.enabled_use_cases_for(_SCOPE)
-        assert got == ("uc2", "uc3")
+        assert got == ("uc2",)
     finally:
         _reset_column(admin_engine)
         importlib.reload(pipeline_mod)
@@ -288,7 +288,7 @@ def test_per_tenant_isolation(admin_engine: Engine, monkeypatch) -> None:
     """Tenant 1's DB value (uc1) doesn't affect a tenant whose column is
     NULL — that tenant still sees the env/default set."""
 
-    monkeypatch.setenv("MAUGOOD_CLIP_PIPELINE_USE_CASES", "uc1,uc2,uc3")
+    monkeypatch.setenv("MAUGOOD_CLIP_PIPELINE_USE_CASES", "uc1,uc2")
     monkeypatch.setenv("MAUGOOD_CLIP_PIPELINE_DISABLE_RECOVERY", "1")
     mod = importlib.reload(pipeline_mod)
     try:
@@ -307,7 +307,7 @@ def test_per_tenant_isolation(admin_engine: Engine, monkeypatch) -> None:
         # A bare tenant_id with no schema can't read the DB → env default.
         # This stands in for "another tenant whose column is NULL": the
         # resolver returns the env/default set, NOT tenant 1's value.
-        assert mod.enabled_use_cases_for(999) == ("uc1", "uc2", "uc3")
+        assert mod.enabled_use_cases_for(999) == ("uc1", "uc2")
     finally:
         _reset_column(admin_engine)
         importlib.reload(pipeline_mod)

@@ -29,7 +29,7 @@ The reader thread does ONLY: read RTSP → hand the frame to the
 analyzer → drive clip recording / presence logging. There is no live
 preview / MJPEG viewer subsystem — person presence either saves a clip
 or writes a logs-only row; identification runs later via the manual
-reprocess pipelines (UC1 / UC2 / UC3).
+reprocess pipelines (UC1 / UC2).
 
 Test-friendly: ``VideoCaptureFactory`` and ``Analyzer`` are both
 injectable, ``ReaderConfig.max_iterations`` bounds the analyzer loop
@@ -359,7 +359,7 @@ class CaptureWorker:
         # no detection_events row). Person bboxes still drive the
         # preview + clip-recording trigger so the live stream and the
         # MP4 archive both keep working — identification just happens
-        # later via UC1/UC2/UC3 reprocess. Reconcile loop hot-swaps
+        # later via UC1/UC2 reprocess. Reconcile loop hot-swaps
         # via ``update_live_matching_enabled``.
         self._live_matching_enabled_lock = threading.Lock()
         self._live_matching_enabled = bool(live_matching_enabled)
@@ -2334,7 +2334,7 @@ class CaptureWorker:
                 # YOLO sees a person — back-to-camera / occluded faces
                 # never affect the trigger. Face detection does not run
                 # in the live loop (live matching is deferred to the
-                # UC1/UC2/UC3 reprocess pipelines).
+                # UC1/UC2 reprocess pipelines).
                 any_person = person_count > 0
                 with self._person_present_lock:
                     if any_person:
@@ -2445,7 +2445,7 @@ class CaptureWorker:
             # Live workflow no longer runs face matching. The matcher
             # cache, face-crop extraction, and detection_events
             # emission are all deferred to the manual reprocess
-            # endpoints (UC1 / UC2 / UC3) — live capture is now
+            # endpoints (UC1 / UC2) — live capture is now
             # purely: read RTSP → detect persons → save clip.
             #
             # We still hand a same-length list to the publisher /
@@ -2456,7 +2456,7 @@ class CaptureWorker:
 
             # Live workflow no longer emits detection_events rows or
             # writes per-track face crops. Those are deferred to the
-            # manual reprocess pipelines (UC1 / UC2 / UC3) which run
+            # manual reprocess pipelines (UC1 / UC2) which run
             # against the saved clip MP4 on operator demand. Keeps
             # the live loop CPU- and IO-light: read RTSP → detect
             # persons → save clip → done.

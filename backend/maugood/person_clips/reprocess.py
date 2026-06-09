@@ -1,19 +1,16 @@
 """Background reprocess workers for face matching on saved person clips.
 
-Three use-case pipelines, each independently tracked in
+Two use-case pipelines, each independently tracked in
 ``clip_processing_results``:
 
 * **UC1** (``use_case="uc1"``) — ``mode="yolo+face"``: YOLO finds person
   bounding boxes, InsightFace runs inside each box to detect + embed faces.
   Tends to recall persons whose face isn't dominant in the full frame.
+  Default single-clip mode for newly recorded clips.
 
 * **UC2** (``use_case="uc2"``) — ``mode="insightface"`` with explicit face
   crop storage: InsightFace buffalo_l runs directly on sampled frames for
   both detection and recognition. Crops are saved to ``face_crops`` table.
-
-* **UC3** (``use_case="uc3"``) — ``mode="insightface"`` direct match only:
-  Same detector as UC2 but skips crop storage — faster and lighter on disk.
-  Default single-clip mode for newly recorded clips.
 
 Entry points:
 
@@ -79,8 +76,8 @@ _FRAMES_PER_SECOND_SAMPLE = 2
 _MAX_FRAMES_PER_CLIP = 60
 
 # Valid use cases.
-ALL_USE_CASES = ("uc1", "uc2", "uc3")
-DEFAULT_USE_CASES = ("uc3",)
+ALL_USE_CASES = ("uc1", "uc2")
+DEFAULT_USE_CASES = ("uc1",)
 
 
 # ---------------------------------------------------------------------------
@@ -143,9 +140,6 @@ def _run_detection(
       ``Face_Recogination/files (3)/``. det_size=640, min_face 60²,
       min_det 0.45. The save layer adds the composite quality scorer
       + best-per-track selection.
-    * **UC3** (``insightface``) — canonical match, permissive recall.
-      Defaults except a loosened min_face / min_det so it never
-      under-finds vs UC2.
     """
     from maugood.detection import DetectorConfig, detect as detector_detect  # noqa: PLC0415
 
@@ -170,7 +164,7 @@ def _run_detection(
             min_det_score=0.45,
         )
     else:
-        # UC3 + any other future insightface caller — recall-first.
+        # Any other future insightface caller — recall-first.
         cfg = DetectorConfig(
             mode=mode,
             min_face_pixels=30 * 30,
@@ -1425,8 +1419,8 @@ def _process_clip_for_use_case(
             )
             return {"status": "failed", "use_case": use_case, "error": "no frames"}
 
-        # UC1: yolo+face + crops; UC2/UC3: insightface + crops.
-        # All three pipelines save face crops so unknown persons are always
+        # UC1: yolo+face + crops; UC2: insightface + crops.
+        # Both pipelines save face crops so unknown persons are always
         # visible in the detail drawer regardless of match outcome.
         if use_case == "uc1":
             mode = "yolo+face"
@@ -1451,7 +1445,7 @@ def _process_clip_for_use_case(
         # or without a successful match. Save crops FIRST so a matcher
         # crash never strands the evidence; the rows initially carry
         # employee_id=NULL and we backfill the matched ones after the
-        # match step runs. UC2 / UC3 keep the original "match-then-save"
+        # match step runs. UC2 keeps the original "match-then-save"
         # order so the live-capture single-pass shape is unchanged.
         #
         # UC1 also gets a larger ``max_crops_override`` (30 vs the
@@ -1494,16 +1488,6 @@ def _process_clip_for_use_case(
                 clip_start, duration_seconds, frame_count, sample_interval,
                 det_employee_map=det_employee_map,
             )
-        elif frame_results:
-            # UC3 unchanged — save after match with employee_id baked
-            # into the INSERT, raw bbox crop + 30% pad + 200-px upscale.
-            face_crop_count = _save_face_crops_to_db(
-                engine, scope, clip_id, camera_id,
-                frames, frame_results,
-                clip_start, duration_seconds, frame_count, sample_interval,
-                use_case=use_case,
-                det_employee_map=det_employee_map,
-            )
 
         # Enrich match_details with employee names.
         name_map = _resolve_employee_names(engine, scope, matched_ids)
@@ -1530,8 +1514,8 @@ def _process_clip_for_use_case(
             match_details=match_details if match_details else None,
         )
 
-        # Also update the legacy matched_employees on person_clips (UC3 is canonical).
-        if use_case == "uc3":
+        # Also update the legacy matched_employees on person_clips (UC1 is canonical).
+        if use_case == "uc1":
             with engine.begin() as conn:
                 conn.execute(
                     sa_update(person_clips)

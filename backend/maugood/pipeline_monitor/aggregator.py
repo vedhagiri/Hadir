@@ -268,7 +268,7 @@ def _pipeline_rows(tenant_id: int) -> list[dict[str, Any]]:
         ]
 
     rows: list[dict[str, Any]] = []
-    ucs = snap.get("config", {}).get("ucs", ["uc1", "uc2", "uc3"])
+    ucs = snap.get("config", {}).get("ucs", ["uc1", "uc2"])
     cropping_by_uc = snap.get("cropping_by_uc", {}) or {}
     for uc in ucs:
         b = cropping_by_uc.get(uc) or {}

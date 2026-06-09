@@ -813,12 +813,12 @@ def patch_camera_metadata(
 #
 # Targets every operator-visible queue in one place:
 #
-#   - crop_uc1 / crop_uc2 / crop_uc3   — ClipPipeline in-memory stage queues
-#   - match                            — ClipPipeline matching stage queue
-#   - clip_save                        — per-camera ClipWorker queues
-#                                        (tenant-scoped via CaptureManager)
+#   - crop_uc1 / crop_uc2   — ClipPipeline in-memory stage queues
+#   - match                 — ClipPipeline matching stage queue
+#   - clip_save             — per-camera ClipWorker queues
+#                             (tenant-scoped via CaptureManager)
 #
-# **Process-wide caveat (documented at the route)**: the three clip-
+# **Process-wide caveat (documented at the route)**: the clip-
 # pipeline stages and the matching stage are process-global — they
 # don't know about tenants. An Admin clearing them discards every
 # tenant's in-memory backlog at once. The DB-side companion cleanup
@@ -831,7 +831,6 @@ def patch_camera_metadata(
 _QUEUE_DISPLAY: dict[str, str] = {
     "crop_uc1": "UC1 Face Cropping",
     "crop_uc2": "UC2 Face Cropping",
-    "crop_uc3": "UC3 Face Cropping",
     "match": "Face Matching",
     "clip_save": "Clip Saving",
 }
@@ -890,7 +889,7 @@ def _read_queue_snapshot(scope: TenantScope) -> QueueSnapshotOut:
         )
 
     rows: list[QueueRowOut] = []
-    for key in ("crop_uc1", "crop_uc2", "crop_uc3", "match"):
+    for key in ("crop_uc1", "crop_uc2", "match"):
         rows.append(
             QueueRowOut(
                 key=key,
@@ -940,7 +939,7 @@ def clear_queues(
     """Drain one queue (or every queue) and cancel the matching
     pending ``clip_processing_results`` rows for this tenant.
 
-    Body: ``{queue: "crop_uc1" | "crop_uc2" | "crop_uc3" | "match" |
+    Body: ``{queue: "crop_uc1" | "crop_uc2" | "match" |
     "clip_save" | "all"}``. An unknown key returns 400.
 
     **Active/running workers are NOT affected** — only the queued
@@ -978,7 +977,7 @@ def clear_queues(
             capture_manager.drain_clip_save_queues_for_tenant(scope.tenant_id)
         )
     else:
-        # crop_uc1 / crop_uc2 / crop_uc3 / match
+        # crop_uc1 / crop_uc2 / match
         cleared[queue_key] = clip_pipeline.clear_queue(queue_key)
 
     cleared_total = sum(int(v) for v in cleared.values())
@@ -1104,7 +1103,7 @@ class PipelineEncodingOut(BaseModel):
 
 
 class IdentifyUseCaseStatsOut(BaseModel):
-    use_case: str  # "uc1" | "uc2" | "uc3"
+    use_case: str  # "uc1" | "uc2"
     pending: int = 0
     processing: int = 0
     completed_today: int = 0
@@ -1326,7 +1325,7 @@ def get_pipeline_monitor(
     identify.active_clip_ids = active_clip_ids
     identify.running = len(active_clip_ids)
     # Group by ``(status, use_case)`` so the panel can break the numbers
-    # down per UC1 / UC2 / UC3. ``ended_at`` filters the "today" bucket
+    # down per UC1 / UC2. ``ended_at`` filters the "today" bucket
     # for completed + failed; the running buckets (pending, processing)
     # don't have an end_at yet so we count them lifetime.
     cpr_rows: list[Any] = []
@@ -1372,8 +1371,8 @@ def get_pipeline_monitor(
         )
 
     # Roll into a per-UC dict — UC keys lower-cased + restricted to the
-    # known three so a typo in the DB doesn't pollute the panel.
-    KNOWN_UCS = ("uc1", "uc2", "uc3")
+    # known set so a typo in the DB doesn't pollute the panel.
+    KNOWN_UCS = ("uc1", "uc2")
     per_uc: dict[str, dict[str, int]] = {
         uc: {"pending": 0, "processing": 0, "completed_today": 0, "failed_today": 0, "completed_total": 0}
         for uc in KNOWN_UCS

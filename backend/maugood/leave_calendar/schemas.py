@@ -146,7 +146,7 @@ class TenantSettingsResponse(BaseModel):
     # detection / recognition / matcher_cache / detection_events
     # emission entirely. Person bounding boxes still drive the live
     # preview + clip-recording trigger; identification only happens
-    # later via the manual UC1/UC2/UC3 reprocessors. Default is False
+    # later via the manual UC1/UC2 reprocessors. Default is False
     # since migration 0060 — operators opt in from System Settings.
     live_matching_enabled: bool = False
     updated_at: str

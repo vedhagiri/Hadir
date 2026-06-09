@@ -76,16 +76,16 @@ QUEUE_MAX_DEPTH = _env_int("MAUGOOD_CLIP_PIPELINE_QUEUE_MAX_DEPTH", 64)
 
 # ---- clip-pipeline use-case enable set ------------------------------------
 #
-# ``MAUGOOD_CLIP_PIPELINE_USE_CASES`` (CSV, default "uc1,uc2,uc3") is the
+# ``MAUGOOD_CLIP_PIPELINE_USE_CASES`` (CSV, default "uc1,uc2") is the
 # env-layer source of truth for which use cases run process-wide. A
 # per-tenant override lives in ``tenant_settings.clip_pipeline_use_cases``
 # (migration 0073) and, when set (non-NULL), wins over the env default at
 # submit time via ``enabled_use_cases_for``. The canonical ordering is
-# always (uc1, uc2, uc3) regardless of input order.
+# always (uc1, uc2) regardless of input order.
 
 # Canonical valid set + ordering. Referenced by ``system/router.py``'s
 # config endpoint comment as ``pipeline._VALID_USE_CASES``.
-_VALID_USE_CASES: tuple[str, ...] = ("uc1", "uc2", "uc3")
+_VALID_USE_CASES: tuple[str, ...] = ("uc1", "uc2")
 
 
 def _env_use_cases(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
@@ -96,8 +96,8 @@ def _env_use_cases(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
     * The env var being **unset** (``None``) returns ``default`` verbatim
       — that's how "no operator override" means "run the default set".
     * A present value (even ``""``) is parsed: split on commas, strip +
-      lowercase each token, keep only tokens in ``{uc1, uc2, uc3}``,
-      dedupe, and return them in the canonical (uc1, uc2, uc3) order.
+      lowercase each token, keep only tokens in ``{uc1, uc2}``,
+      dedupe, and return them in the canonical (uc1, uc2) order.
     * An empty string or an all-invalid value parses to ``()`` — i.e. a
       deliberate "run nothing", distinct from the unset/default case.
     """
@@ -117,7 +117,7 @@ def _env_use_cases(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
 # stage startup spins up exactly the env-enabled cropping stages. Tests
 # reload this module to recompute it under a changed env.
 ENABLED_USE_CASES: tuple[str, ...] = _env_use_cases(
-    "MAUGOOD_CLIP_PIPELINE_USE_CASES", ("uc1", "uc2", "uc3")
+    "MAUGOOD_CLIP_PIPELINE_USE_CASES", ("uc1", "uc2")
 )
 
 
@@ -305,8 +305,8 @@ class ClipPipeline:
     """Process-wide singleton — see module docstring."""
 
     # Valid UCs each get their own cropping queue + worker so the
-    # Pipeline Monitor table can show 3 independent rows (UC1, UC2,
-    # UC3 cropping). They still serialise on the InsightFace detector
+    # Pipeline Monitor table can show independent rows (UC1, UC2
+    # cropping). They still serialise on the InsightFace detector
     # lock under the hood, but the per-UC visibility + tracking is
     # the goal here, not raw parallelism (see the architecture
     # confirmation conversation). Bound to the env-derived enabled set so
@@ -395,7 +395,7 @@ class ClipPipeline:
         """Snapshot of every in-memory queue's current depth.
 
         Keys are stable identifiers used by the Clear Queues UI:
-        ``crop_uc1`` / ``crop_uc2`` / ``crop_uc3`` / ``match``. Disabled
+        ``crop_uc1`` / ``crop_uc2`` / ``match``. Disabled
         UCs are omitted (no stage exists). Process-wide — the queue
         itself isn't tenant-scoped; the per-tenant DB cleanup happens
         separately in the router.
@@ -412,7 +412,7 @@ class ClipPipeline:
     def clear_queue(self, queue_name: str) -> int:
         """Drain one named in-memory queue. Returns the count cleared.
 
-        Names: ``crop_uc1``, ``crop_uc2``, ``crop_uc3``, ``match``.
+        Names: ``crop_uc1``, ``crop_uc2``, ``match``.
         Returns 0 for an unknown name rather than raising — the router
         validates input before calling and an unknown name reaching
         here would indicate a wiring bug, not user input.
@@ -1053,11 +1053,10 @@ class ClipPipeline:
                         face_extract_duration_ms=int(extract_s * 1000),
                     )
 
-                    # All UCs now save crops in the cropping stage so
+                    # Both UCs now save crops in the cropping stage so
                     # MatchJob never holds frame arrays (memory-leak fix).
                     # UC1: save with employee_id=NULL, backfill after match.
                     # UC2: best-per-track save with employee_id=NULL, backfill after match.
-                    # UC3: save all crops with employee_id=NULL, backfill after match.
                     initial_count = 0
                     crop_match_index: dict[tuple[int, int], int] = {}
                     if frame_results:
@@ -1074,7 +1073,8 @@ class ClipPipeline:
                                 max_crops_override=30,
                                 return_index=True,
                             )
-                        elif job.use_case == "uc2":
+                        else:
+                            # UC2: best-per-track save with employee_id=NULL, backfill after match
                             result = _save_face_crops_uc2_best_per_track(
                                 engine, scope, job.clip_id, int(row.camera_id),
                                 frames, frame_results,
@@ -1086,19 +1086,6 @@ class ClipPipeline:
                                 return_index=True,
                             )
                             initial_count, crop_match_index = result
-                        else:
-                            # UC3: save all crops with employee_id=NULL, backfill after match
-                            initial_count, crop_match_index = _save_face_crops_to_db(
-                                engine, scope, job.clip_id, int(row.camera_id),
-                                frames, frame_results,
-                                row.clip_start,
-                                float(row.duration_seconds or 0.0),
-                                int(row.frame_count or 0),
-                                sample_interval,
-                                use_case=job.use_case,
-                                det_employee_map=None,
-                                return_index=True,
-                            )
                 finally:
                     tmp_path.unlink(missing_ok=True)
 
@@ -1343,10 +1330,10 @@ class ClipPipeline:
                     match_details=match_details if match_details else None,
                 )
 
-                # Legacy parity — UC3 owns the canonical matched_employees
+                # Legacy parity — UC1 owns the canonical matched_employees
                 # column on person_clips so existing Camera Logs / drawer
                 # paths continue to surface the match.
-                if job.use_case == "uc3":
+                if job.use_case == "uc1":
                     with engine.begin() as conn:
                         conn.execute(
                             sa_update(person_clips)

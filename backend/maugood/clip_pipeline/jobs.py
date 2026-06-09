@@ -40,7 +40,7 @@ class MatchJob:
     sampling metadata needed by ``_save_face_crops_*`` / backfill paths.
     The matcher then runs ``_match_detections`` against the matcher
     cache and either backfills the just-saved face_crops (UC1 path) or
-    saves the best-per-track crops with employee_id baked in (UC2/UC3
+    saves the best-per-track crops with employee_id baked in (UC2
     parity with the existing ``_process_clip_for_use_case``).
     """
 
@@ -60,7 +60,7 @@ class MatchJob:
     extract_seconds: float
     clip_meta: dict[str, Any]
     # The face_crops index returned by ``_save_face_crops_to_db`` for
-    # UC1 — needed for the backfill step. Empty dict for UC2 / UC3 where
+    # UC1 — needed for the backfill step. Empty dict for UC2 where
     # the crops are saved AFTER matching.
     crop_match_index: dict[tuple[int, int], int] = field(default_factory=dict)
     initial_face_crop_count: int = 0

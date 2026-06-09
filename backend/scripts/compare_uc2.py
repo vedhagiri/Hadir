@@ -22,7 +22,7 @@ What it does, per clip
    plaintext copies to the comparison dir, ``old/`` subfolder).
 2. UPDATEs the DB so existing ``use_case='uc2'`` rows for the clip
    become ``use_case='uc2_legacy'``. They stay queryable but the
-   frontend (which only knows uc1/uc2/uc3) hides them.
+   frontend (which only knows uc1/uc2) hides them.
 3. Calls ``process_single_clip`` with ``use_cases=('uc2',)`` — the new
    reference-parity pipeline runs.
 4. Snapshots the freshly written UC2 crops to the comparison dir's

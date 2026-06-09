@@ -1,6 +1,6 @@
-"""Tests for the single-knob UC1/UC2/UC3 enable/disable control.
+"""Tests for the single-knob UC1/UC2 enable/disable control.
 
-``MAUGOOD_CLIP_PIPELINE_USE_CASES`` (CSV, default "uc1,uc2,uc3") is the
+``MAUGOOD_CLIP_PIPELINE_USE_CASES`` (CSV, default "uc1,uc2") is the
 single source of truth for which clip-pipeline use cases run. A disabled
 use case must run NOWHERE: not on auto-submit, not on the reconcile
 resubmit, not on boot recovery, and the pipeline must not even spin up
@@ -32,16 +32,16 @@ from maugood.tenants.scope import TenantScope
     "raw,expected",
     [
         # Unset (None) → default all-on.
-        (None, ("uc1", "uc2", "uc3")),
+        (None, ("uc1", "uc2")),
         # Explicit full set.
-        ("uc1,uc2,uc3", ("uc1", "uc2", "uc3")),
+        ("uc1,uc2", ("uc1", "uc2")),
         # Single UC.
         ("uc1", ("uc1",)),
         ("uc2", ("uc2",)),
-        # Subset — order normalised to canonical uc1,uc2,uc3.
-        ("uc3,uc1", ("uc1", "uc3")),
+        # Subset — order normalised to canonical uc1,uc2.
+        ("uc2,uc1", ("uc1", "uc2")),
         # Whitespace + case tolerated.
-        (" UC1 , Uc3 ", ("uc1", "uc3")),
+        (" UC1 , Uc2 ", ("uc1", "uc2")),
         # Dupes deduped.
         ("uc1,uc1,uc2", ("uc1", "uc2")),
         # Invalid tokens dropped.
@@ -59,7 +59,7 @@ def test_env_use_cases_parser(monkeypatch, raw, expected):
     else:
         monkeypatch.setenv("MAUGOOD_CLIP_PIPELINE_USE_CASES", raw)
     got = pipeline_mod._env_use_cases(
-        "MAUGOOD_CLIP_PIPELINE_USE_CASES", ("uc1", "uc2", "uc3")
+        "MAUGOOD_CLIP_PIPELINE_USE_CASES", ("uc1", "uc2")
     )
     assert got == expected
 
@@ -109,12 +109,12 @@ def test_only_uc1_enabled(monkeypatch):
         batch = pipe.submit_batch(
             scope=_SCOPE,
             clip_ids=[101],
-            use_cases=["uc1", "uc2", "uc3"],
+            use_cases=["uc1", "uc2"],
             skip_existing=False,
             submitted_by_user_id=None,
             submitted_by_email="test",
         )
-        # uc2/uc3 dropped at the chokepoint — one queued job (uc1).
+        # uc2 dropped at the chokepoint — one queued job (uc1).
         assert batch.queued_jobs == 1
         assert set(batch.per_uc.keys()) == {"uc1"}
     finally:
@@ -122,23 +122,23 @@ def test_only_uc1_enabled(monkeypatch):
         importlib.reload(pipeline_mod)
 
 
-def test_uc1_and_uc3_enabled(monkeypatch):
-    mod, pipe, _seen = _fresh_pipeline(monkeypatch, "uc1,uc3")
+def test_uc1_and_uc2_enabled(monkeypatch):
+    mod, pipe, _seen = _fresh_pipeline(monkeypatch, "uc1,uc2")
     try:
-        assert mod.ENABLED_USE_CASES == ("uc1", "uc3")
-        assert set(pipe._cropping_by_uc.keys()) == {"uc1", "uc3"}
+        assert mod.ENABLED_USE_CASES == ("uc1", "uc2")
+        assert set(pipe._cropping_by_uc.keys()) == {"uc1", "uc2"}
 
         batch = pipe.submit_batch(
             scope=_SCOPE,
             clip_ids=[202],
-            use_cases=["uc1", "uc2", "uc3"],
+            use_cases=["uc1", "uc2"],
             skip_existing=False,
             submitted_by_user_id=None,
             submitted_by_email="test",
         )
-        # uc2 dropped; uc1 + uc3 queue.
+        # Both uc1 + uc2 queue.
         assert batch.queued_jobs == 2
-        assert set(batch.per_uc.keys()) == {"uc1", "uc3"}
+        assert set(batch.per_uc.keys()) == {"uc1", "uc2"}
     finally:
         pipe.stop()
         importlib.reload(pipeline_mod)
@@ -157,7 +157,7 @@ def test_empty_disables_everything(monkeypatch):
         batch = pipe.submit_batch(
             scope=_SCOPE,
             clip_ids=[303],
-            use_cases=["uc1", "uc2", "uc3"],
+            use_cases=["uc1", "uc2"],
             skip_existing=False,
             submitted_by_user_id=None,
             submitted_by_email="test",
@@ -169,22 +169,22 @@ def test_empty_disables_everything(monkeypatch):
         importlib.reload(pipeline_mod)
 
 
-def test_default_unset_runs_all_three(monkeypatch):
+def test_default_unset_runs_both(monkeypatch):
     mod, pipe, _seen = _fresh_pipeline(monkeypatch, None)
     try:
-        assert mod.ENABLED_USE_CASES == ("uc1", "uc2", "uc3")
-        assert set(pipe._cropping_by_uc.keys()) == {"uc1", "uc2", "uc3"}
+        assert mod.ENABLED_USE_CASES == ("uc1", "uc2")
+        assert set(pipe._cropping_by_uc.keys()) == {"uc1", "uc2"}
 
         batch = pipe.submit_batch(
             scope=_SCOPE,
             clip_ids=[404],
-            use_cases=["uc1", "uc2", "uc3"],
+            use_cases=["uc1", "uc2"],
             skip_existing=False,
             submitted_by_user_id=None,
             submitted_by_email="test",
         )
-        assert batch.queued_jobs == 3
-        assert set(batch.per_uc.keys()) == {"uc1", "uc2", "uc3"}
+        assert batch.queued_jobs == 2
+        assert set(batch.per_uc.keys()) == {"uc1", "uc2"}
     finally:
         pipe.stop()
         importlib.reload(pipeline_mod)
@@ -198,10 +198,10 @@ def test_default_unset_runs_all_three(monkeypatch):
 def test_recovery_skips_disabled_use_case(monkeypatch):
     """``run_recovery`` must not claim / enqueue a decision whose UC is
     disabled. We stub tenant discovery + the validator so no DB is hit,
-    feeding one uc1 (disabled) and one uc3 (enabled) Class-C decision.
+    feeding one uc1 (disabled) and one uc2 (enabled) Class-C decision.
     """
 
-    monkeypatch.setenv("MAUGOOD_CLIP_PIPELINE_USE_CASES", "uc3")
+    monkeypatch.setenv("MAUGOOD_CLIP_PIPELINE_USE_CASES", "uc2")
     importlib.reload(pipeline_mod)
 
     import maugood.clip_pipeline.recovery as recovery_mod
@@ -229,7 +229,7 @@ def test_recovery_skips_disabled_use_case(monkeypatch):
     monkeypatch.setattr(
         recovery_mod,
         "validate_stuck_jobs",
-        lambda **kw: [_decision("uc1"), _decision("uc3")],
+        lambda **kw: [_decision("uc1"), _decision("uc2")],
     )
     # tenant_context is a context manager around DB scope — neutralise it.
     monkeypatch.setattr(
@@ -255,11 +255,11 @@ def test_recovery_skips_disabled_use_case(monkeypatch):
         enqueue_class_c=lambda d: enqueued_c.append(d.use_case),
     )
 
-    # uc1 (disabled) skipped entirely; only uc3 enqueued for restart.
-    assert enqueued_c == ["uc3"]
+    # uc1 (disabled) skipped entirely; only uc2 enqueued for restart.
+    assert enqueued_c == ["uc2"]
     assert summary.class_c == 1
     assert summary.skipped == 1
 
-    monkeypatch.setenv("MAUGOOD_CLIP_PIPELINE_USE_CASES", "uc1,uc2,uc3")
+    monkeypatch.setenv("MAUGOOD_CLIP_PIPELINE_USE_CASES", "uc1,uc2")
     importlib.reload(pipeline_mod)
     importlib.reload(recovery_mod)

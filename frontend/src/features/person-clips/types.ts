@@ -265,10 +265,8 @@ export interface PipelineStats {
   // Per-UC completed run counts
   uc1_completed: number;
   uc2_completed: number;
-  uc3_completed: number;
   avg_uc1_duration_ms: number | null;
   avg_uc2_duration_ms: number | null;
-  avg_uc3_duration_ms: number | null;
   // Throughput / activity
   clips_today: number;
   matched_today: number;
@@ -327,7 +325,7 @@ export interface FaceCropListResponse {
 // ── UC Comparison ────────────────────────────────────────────────────────────
 
 export interface UseCaseStatsRow {
-  use_case: "uc1" | "uc2" | "uc3";
+  use_case: "uc1" | "uc2";
   label: string;
   mode: string;
   has_data: boolean;

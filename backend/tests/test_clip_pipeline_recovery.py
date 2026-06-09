@@ -14,7 +14,7 @@ Coverage:
 * Class C — five distinct sub-cases all decided correctly:
     - no face_crops rows at all
     - face_crops present but cropping stage didn't commit duration
-    - UC2 / UC3 (intermixed crops; unsafe to reuse)
+    - non-UC1 / UC2 (intermixed crops; unsafe to reuse)
     - face_crops present, disk files missing
     - face_crops present, disk files empty (size 0)
 """
@@ -182,12 +182,12 @@ def test_class_c_when_crops_exist_but_extract_duration_null():
 
 
 # ---------------------------------------------------------------------------
-# Class C: UC2 / UC3 intermixed crops
+# Class C: non-UC1 (UC2) intermixed crops
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("uc", ["uc2", "uc3"])
-def test_class_c_for_uc2_or_uc3_even_with_clean_state(uc, tmp_path):
+@pytest.mark.parametrize("uc", ["uc2"])
+def test_class_c_for_non_uc1_even_with_clean_state(uc, tmp_path):
     crop = tmp_path / "crop.jpg"
     crop.write_bytes(b"\xff\xd8\xff" + b"x" * 64)
     row = _make_row(
@@ -202,7 +202,8 @@ def test_class_c_for_uc2_or_uc3_even_with_clean_state(uc, tmp_path):
         sample_paths=[str(crop)],
     )
     assert decision.klass == "C"
-    assert "UC2/UC3" in decision.reason
+    # Non-UC1 crops are written during matching → always unsafe to reuse.
+    assert "interleaved with matching" in decision.reason
 
 
 # ---------------------------------------------------------------------------

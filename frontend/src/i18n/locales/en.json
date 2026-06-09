@@ -798,7 +798,7 @@
     },
     "liveMatching": {
       "title": "Live identification",
-      "subtitle": "Master switch for real-time face matching from the RTSP stream. When off, the live pipeline runs person detection only — identification happens later via the manual UC1/UC2/UC3 reprocessors on saved clips.",
+      "subtitle": "Master switch for real-time face matching from the RTSP stream. When off, the live pipeline runs person detection only — identification happens later via the manual UC1/UC2 reprocessors on saved clips.",
       "bullet1": "Live RTSP stream + person bounding boxes remain on.",
       "bullet2": "No embedding extraction, no matcher cache lookup, no detection_events insert.",
       "bullet3": "No live attendance updates from the analyzer — only clip reprocess paths.",
@@ -820,10 +820,6 @@
       "uc2": {
         "label": "UC2 — InsightFace + crop storage",
         "hint": "Runs InsightFace detection and stores the cropped faces for later review and matching."
-      },
-      "uc3": {
-        "label": "UC3 — InsightFace direct match",
-        "hint": "Runs InsightFace detection and matches faces against enrolled employees directly, without storing crops."
       }
     },
     "detection": {
@@ -1589,9 +1585,7 @@
       "uc1": "Use Case 1 — YOLO + face crops",
       "uc1Hint": "Person-box detection → face crops → match",
       "uc2": "Use Case 2 — InsightFace + crops",
-      "uc2Hint": "Full-frame face detection → crops → match",
-      "uc3": "Use Case 3 — Direct match (no crops)",
-      "uc3Hint": "Face detection → match in one pass, no crop save"
+      "uc2Hint": "Full-frame face detection → crops → match"
     },
     "totalSuffix": "clips",
     "totalSizeSuffix": "total",
@@ -1654,10 +1648,6 @@
       "uc2": {
         "label": "Use Case 2",
         "mode": "InsightFace + crops"
-      },
-      "uc3": {
-        "label": "Use Case 3",
-        "mode": "InsightFace direct match"
       }
     },
     "clipStatus": {
@@ -1691,8 +1681,7 @@
       "selectUseCases": "Select use cases",
       "ucShort": {
         "uc1": "YOLO+Face",
-        "uc2": "InsightFace+crops",
-        "uc3": "InsightFace"
+        "uc2": "InsightFace+crops"
       },
       "selectAtLeastOne": "Select at least one use case.",
       "reprocessRunning": "A reprocess is already running for this clip.",
@@ -2975,11 +2964,6 @@
         "subtitle": "Stores face crops with pose-aware quality scoring.",
         "speed": "Balanced",
         "accuracy": "Evidence trail"
-      },
-      "uc3": {
-        "subtitle": "Skip crop storage. Just match and report.",
-        "speed": "Fastest",
-        "accuracy": "Lowest overhead"
       }
     },
     "batchModal": {
@@ -3552,8 +3536,7 @@
     },
     "uc": {
       "uc1": "Body detection first, then face inside each box.",
-      "uc2": "Stores face crops with pose-aware quality scoring.",
-      "uc3": "Skip crop storage. Just match and report."
+      "uc2": "Stores face crops with pose-aware quality scoring."
     }
   },
   "resources": {
@@ -3569,7 +3552,7 @@
       "camera_analyzers": "Camera analyzers — detect + match (one per camera)",
       "clip_writers": "Clip writers — ffmpeg encode (one per camera)",
       "rtsp_segmenters": "RTSP segmenters — stream-copy chunking",
-      "face_matching": "Face matching — UC1/UC2/UC3 reprocess",
+      "face_matching": "Face matching — UC1/UC2 reprocess",
       "clip_pipeline": "Clip pipeline workers — crop/match/identify",
       "face_crops": "Face crop batch",
       "attendance": "Attendance recompute scheduler",
@@ -3695,7 +3678,6 @@
     "queueName": {
       "crop_uc1": "UC1 Face Cropping",
       "crop_uc2": "UC2 Face Cropping",
-      "crop_uc3": "UC3 Face Cropping",
       "match": "Face Matching",
       "clip_save": "Clip Saving (per camera)"
     },

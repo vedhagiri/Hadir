@@ -1305,7 +1305,7 @@ function MatchedClipsTab({ employeeId }: { employeeId: number }) {
           }}
         >
           No matched clips yet. When this person is identified in a clip
-          (via UC1 / UC2 / UC3 on the Clip Analytics page), it'll show
+          (via UC1 / UC2 on the Clip Analytics page), it'll show
           up here.
         </div>
       )}
@@ -1591,8 +1591,6 @@ function ucAccentSoft(uc: string): string {
       return "rgba(59,130,246,0.12)";
     case "uc2":
       return "rgba(139,92,246,0.12)";
-    case "uc3":
-      return "rgba(16,185,129,0.12)";
     default:
       return "var(--bg-sunken)";
   }
@@ -1604,8 +1602,6 @@ function ucAccentText(uc: string): string {
       return "#1d4ed8";
     case "uc2":
       return "#6d28d9";
-    case "uc3":
-      return "#047857";
     default:
       return "var(--text-secondary)";
   }
@@ -1617,8 +1613,6 @@ function ucAccentBorder(uc: string): string {
       return "rgba(59,130,246,0.25)";
     case "uc2":
       return "rgba(139,92,246,0.25)";
-    case "uc3":
-      return "rgba(16,185,129,0.25)";
     default:
       return "var(--border)";
   }

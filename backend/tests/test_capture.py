@@ -195,7 +195,7 @@ def test_worker_does_not_emit_detection_events_live_deferred_to_reprocess(
 
     Architecture change (see ``reader.py`` — "Live workflow no longer
     emits detection_events rows or writes per-track face crops. Those
-    are deferred to the manual reprocess pipelines (UC1 / UC2 / UC3)").
+    are deferred to the manual reprocess pipelines (UC1 / UC2)").
     This test guards that contract: even with ``live_matching_enabled=
     True`` and a multi-track scripted feed, the worker must write ZERO
     rows. Emitter correctness itself is covered by the direct
@@ -261,7 +261,7 @@ def test_worker_does_not_emit_detection_events_live_deferred_to_reprocess(
         ).all()
 
     # New architecture: detection_events + face-crop emission are
-    # deferred to the UC1/UC2/UC3 reprocess pipelines, so the live
+    # deferred to the UC1/UC2 reprocess pipelines, so the live
     # worker writes nothing.
     assert rows == [], f"live worker must not emit events, got {len(rows)}: {rows}"
 
@@ -276,7 +276,7 @@ def test_event_crops_on_disk_are_encrypted_not_jpeg(
     """``emit_detection_event`` Fernet-encrypts the face crop before
     writing it to disk — opening the file as an image yields garbage.
 
-    Emission moved off the live worker to the UC1/UC2/UC3 reprocess
+    Emission moved off the live worker to the UC1/UC2 reprocess
     pipelines, so this exercises the emitter directly — the layer that
     owns the encryption-at-rest invariant.
     """

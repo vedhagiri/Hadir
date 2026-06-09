@@ -702,10 +702,8 @@ def get_system_stats(
         recording_abandoned=rc.get("abandoned", 0),
         uc1_completed=int(uc_map.get("uc1", {}).get("cnt", 0)),
         uc2_completed=int(uc_map.get("uc2", {}).get("cnt", 0)),
-        uc3_completed=int(uc_map.get("uc3", {}).get("cnt", 0)),
         avg_uc1_duration_ms=uc_map.get("uc1", {}).get("avg_ms"),
         avg_uc2_duration_ms=uc_map.get("uc2", {}).get("avg_ms"),
-        avg_uc3_duration_ms=uc_map.get("uc3", {}).get("avg_ms"),
         clips_today=int(today_clips or 0),
         matched_today=int(today_matched or 0),
         avg_clip_duration_seconds=avg_dur,
@@ -1048,7 +1046,6 @@ def person_clip_stats(
 _UC_META: dict[str, dict[str, str]] = {
     "uc1": {"label": "Use Case 1", "mode": "YOLO + Face crops"},
     "uc2": {"label": "Use Case 2", "mode": "InsightFace + best-per-track"},
-    "uc3": {"label": "Use Case 3", "mode": "InsightFace direct match"},
 }
 
 
@@ -1105,7 +1102,7 @@ def get_uc_comparison(
                 ).label("unknown_count"),
             )
             .where(clip_processing_results.c.tenant_id == scope.tenant_id)
-            .where(clip_processing_results.c.use_case.in_(("uc1", "uc2", "uc3")))
+            .where(clip_processing_results.c.use_case.in_(("uc1", "uc2")))
             .group_by(clip_processing_results.c.use_case)
         ).all()
 
@@ -1134,7 +1131,7 @@ def get_uc_comparison(
                   SELECT use_case, match_details
                     FROM clip_processing_results
                    WHERE tenant_id = :tid
-                     AND use_case IN ('uc1', 'uc2', 'uc3')
+                     AND use_case IN ('uc1', 'uc2')
                      AND status = 'completed'
                      AND match_details IS NOT NULL
                      AND jsonb_typeof(match_details) = 'array'
@@ -1167,7 +1164,7 @@ def get_uc_comparison(
                 func.avg(face_crops.c.detection_score).label("avg_det"),
             )
             .where(face_crops.c.tenant_id == scope.tenant_id)
-            .where(face_crops.c.use_case.in_(("uc1", "uc2", "uc3")))
+            .where(face_crops.c.use_case.in_(("uc1", "uc2")))
             .group_by(face_crops.c.use_case)
         ).all()
 
@@ -1183,11 +1180,11 @@ def get_uc_comparison(
         # --- Storage bytes — stat the JPEGs ---------------------------------
         # Limit to a representative sample if the tenant has many crops
         # so we don't burn 10s on disk I/O for a dashboard tab.
-        storage_by_uc: dict[str, int] = {"uc1": 0, "uc2": 0, "uc3": 0}
+        storage_by_uc: dict[str, int] = {"uc1": 0, "uc2": 0}
         path_rows = conn.execute(
             select(face_crops.c.use_case, face_crops.c.file_path)
             .where(face_crops.c.tenant_id == scope.tenant_id)
-            .where(face_crops.c.use_case.in_(("uc1", "uc2", "uc3")))
+            .where(face_crops.c.use_case.in_(("uc1", "uc2")))
             .where(face_crops.c.file_path.is_not(None))
         ).all()
         for r in path_rows:
@@ -1238,7 +1235,7 @@ def get_uc_comparison(
             storage_bytes=storage_by_uc.get(uc_key, 0),
         )
 
-    use_cases_list = [per_uc[k] for k in ("uc1", "uc2", "uc3")]
+    use_cases_list = [per_uc[k] for k in ("uc1", "uc2")]
 
     # --- Winners ------------------------------------------------------------
     with_data = [u for u in use_cases_list if u.has_data]
@@ -1322,7 +1319,7 @@ def reprocess_face_match(
     ``mode``: ``"all"`` re-processes every clip; ``"skip_existing"`` skips
     clips that already have ``matched_employees``.
 
-    ``use_cases``: list of ``["uc1", "uc2", "uc3"]`` (any combination).
+    ``use_cases``: list of ``["uc1", "uc2"]`` (any combination).
     """
 
     schema = resolve_tenant_schema_via_engine(get_engine(), user.tenant_id)
@@ -1386,7 +1383,7 @@ def reprocess_face_match_status(
 @router.get("/processed-counts")
 def processed_counts(
     user: Annotated[CurrentUser, HR_OR_ADMIN],
-    use_cases: str = "uc1,uc2,uc3",
+    use_cases: str = "uc1,uc2",
 ) -> dict:
     """How many clips already have a ``completed`` row in
     ``clip_processing_results`` for each requested use case.

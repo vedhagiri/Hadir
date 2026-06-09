@@ -132,14 +132,14 @@ def test_batch_tracker_transitions_through_full_lifecycle():
     batch = tracker.create(
         tenant_id=1,
         clip_ids=[100, 101],
-        use_cases=["uc1", "uc3"],
+        use_cases=["uc1", "uc2"],
         skip_existing=False,
         submitted_by_user_id=1,
         submitted_by_email="op@example.com",
     )
     # Fan-out: 2 clips × 2 UCs = 4 jobs. Caller marks each as submitted.
     for clip_id in [100, 101]:
-        for uc in ["uc1", "uc3"]:
+        for uc in ["uc1", "uc2"]:
             tracker.mark_submitted(batch.batch_id, uc)
     snap = tracker.snapshot(tenant_id=1)[0]
     assert snap["total_jobs"] == 4
@@ -163,7 +163,7 @@ def test_batch_tracker_transitions_through_full_lifecycle():
     assert snap["per_uc"]["uc1"]["completed"] == 1
 
     # Skipped count never enters either queue.
-    tracker.mark_skipped(batch.batch_id, "uc3")
+    tracker.mark_skipped(batch.batch_id, "uc2")
     snap = tracker.snapshot(tenant_id=1)[0]
     assert snap["skipped_jobs"] == 1
     assert snap["total_jobs"] == 5  # skipped jobs count toward the total

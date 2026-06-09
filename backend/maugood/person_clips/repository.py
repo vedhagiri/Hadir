@@ -61,11 +61,11 @@ def list_clips(
         # these is true:
         #   1) legacy ``person_clips.employee_id`` link points at them
         #   2) ``person_clips.matched_employees`` JSONB contains their
-        #      id (only UC3 writes this — load-bearing bug if we stop
-        #      here, because operators may only run UC1)
+        #      id (only UC1 writes this — load-bearing bug if we stop
+        #      here, because operators may only run UC2)
         #   3) ANY ``clip_processing_results`` row for this clip has
         #      a completed match for this employee
-        # (3) is the broad guarantee — UC1, UC2 or UC3 hitting on the
+        # (3) is the broad guarantee — UC1 or UC2 hitting on the
         # employee surfaces the clip regardless of which UC ran.
         from sqlalchemy import or_  # noqa: PLC0415
 

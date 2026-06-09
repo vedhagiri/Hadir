@@ -931,23 +931,23 @@ def put_live_matching_config(
 # Migration 0073 — Clip-pipeline use-case enable set (UI-controllable).
 # ---------------------------------------------------------------------------
 #
-# Per-tenant control over which clip-pipeline use cases (uc1/uc2/uc3)
+# Per-tenant control over which clip-pipeline use cases (uc1/uc2)
 # run, replacing the env-only ``MAUGOOD_CLIP_PIPELINE_USE_CASES`` knob.
 # The DB value (when set) wins over env; env wins over the default
-# all-three. The GET returns the EFFECTIVE set for the caller's tenant.
+# all. The GET returns the EFFECTIVE set for the caller's tenant.
 
 # Canonical UC ordering — kept local so the router doesn't import the
 # heavy clip_pipeline module just for a constant. Matches
 # ``maugood.clip_pipeline.pipeline._VALID_USE_CASES``.
-_VALID_CLIP_USE_CASES: tuple[str, ...] = ("uc1", "uc2", "uc3")
+_VALID_CLIP_USE_CASES: tuple[str, ...] = ("uc1", "uc2")
 
 
 class ClipPipelineConfigIn(BaseModel):
     """Inbound shape for ``PUT /api/system/clip-pipeline-config``.
 
     ``use_cases`` is the full desired enabled set. Each item must be in
-    ``{uc1, uc2, uc3}``; the validator dedupes and order-normalizes to
-    the canonical (uc1, uc2, uc3) order. An EMPTY array is allowed and
+    ``{uc1, uc2}``; the validator dedupes and order-normalizes to
+    the canonical (uc1, uc2) order. An EMPTY array is allowed and
     means "no use case runs for this tenant".
     """
 

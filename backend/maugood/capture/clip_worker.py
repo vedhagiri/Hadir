@@ -704,7 +704,7 @@ class ClipWorker:
             #
             # Queue-based auto-submit (new, queue-pipeline arch): when
             # a clip lands in the DB with ``recording_status=completed``
-            # and a real ``file_path``, we push (clip, uc1/uc2/uc3)
+            # and a real ``file_path``, we push (clip, uc1/uc2)
             # jobs onto the always-on clip_pipeline. ``skip_existing``
             # means a future re-finalize never double-processes. The
             # pipeline's queue cap silently drops jobs when overloaded
@@ -768,7 +768,7 @@ class ClipWorker:
           2. ``ffmpeg -f concat -c copy`` → single MP4 in a temp dir
           3. Fernet-encrypt → /data/clips/{tenant}/{camera}/{ts}.mp4
           4. INSERT person_clips row with recording_status=completed
-          5. Auto-submit (clip, uc1/uc2/uc3) to clip_pipeline
+          5. Auto-submit (clip, uc1/uc2) to clip_pipeline
         """
 
         import shutil  # noqa: PLC0415

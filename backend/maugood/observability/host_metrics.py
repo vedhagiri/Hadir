@@ -380,7 +380,7 @@ _CATEGORY_DISPLAY: dict[str, str] = {
     "camera_analyzers": "Camera analyzers (detect + match)",
     "clip_writers": "Clip writers (ffmpeg encode)",
     "rtsp_segmenters": "RTSP segmenters",
-    "face_matching": "Face matching (UC1/UC2/UC3 reprocess)",
+    "face_matching": "Face matching (UC1/UC2 reprocess)",
     "clip_pipeline": "Clip pipeline workers",
     "face_crops": "Face crop batch",
     "attendance": "Attendance scheduler",

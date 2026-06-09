@@ -61,7 +61,7 @@ interface EncodingWorker {
 }
 
 interface IdentifyUseCaseStats {
-  use_case: string; // "uc1" | "uc2" | "uc3"
+  use_case: string; // "uc1" | "uc2"
   pending: number;
   processing: number;
   completed_today: number;
@@ -834,13 +834,6 @@ const UC_META: Record<
     accentSoft: "rgba(139,92,246,0.12)",
     iconName: "user",
   },
-  uc3: {
-    title: "InsightFace Direct",
-    subtitle: "Skip crop storage. Just match and report.",
-    accent: "#10b981",
-    accentSoft: "rgba(16,185,129,0.12)",
-    iconName: "sparkles",
-  },
 };
 
 function IdentifyPanel({ data }: { data: PipelineMonitorOut["identify"] }) {
@@ -878,7 +871,7 @@ function IdentifyPanel({ data }: { data: PipelineMonitorOut["identify"] }) {
         ]}
       />
 
-      {/* Per-use-case breakdown — one card per UC1 / UC2 / UC3. */}
+      {/* Per-use-case breakdown — one card per UC1 / UC2. */}
       <div
         style={{
           marginTop: 14,
@@ -895,7 +888,7 @@ function IdentifyPanel({ data }: { data: PipelineMonitorOut["identify"] }) {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(3, 1fr)",
+          gridTemplateColumns: "repeat(2, 1fr)",
           gap: 12,
         }}
       >

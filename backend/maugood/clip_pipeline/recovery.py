@@ -435,8 +435,8 @@ def _classify_row(
             recovery_attempts_after=attempts,
         )
 
-    # Check 5 before Check 4: UC2/UC3 always full-restart because
-    # their crops are written during matching, so any crops present
+    # Check 5 before Check 4: UC2 always full-restart because
+    # its crops are written during matching, so any crops present
     # are by definition incomplete. Cheaper than the disk check.
     if use_case != "uc1":
         return RecoveryDecision(
@@ -445,7 +445,7 @@ def _classify_row(
             clip_id=clip_id,
             use_case=use_case,
             klass="C",
-            reason="UC2/UC3 crops are interleaved with matching — unsafe to reuse",
+            reason="UC2 crops are interleaved with matching — unsafe to reuse",
             artifact_count=artifact_count,
             artifact_disk_ok=None,
             recovery_attempts_before=attempts,
@@ -793,7 +793,7 @@ def run_recovery(
 
                     if decision.klass == "C":
                         # Wipe any partial crops before re-running.
-                        # UC2/UC3 deliberately delete here even though
+                        # UC2 deliberately deletes here even though
                         # the crop_count might be > 0 — those are
                         # mid-matching artifacts, not reusable.
                         try:

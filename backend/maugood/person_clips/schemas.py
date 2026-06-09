@@ -45,7 +45,7 @@ class PersonClipOut(BaseModel):
     recording_status: str = "completed"
     # Use-case codes (e.g. ['uc1','uc2']) where ``clip_processing_results
     # .status='processed'`` exists for this clip. Empty list = clip has
-    # not been processed by any of UC1/UC2/UC3. Drives the "Processed
+    # not been processed by any of UC1/UC2. Drives the "Processed
     # Use Cases" column on the Clip Analytics page.
     processed_use_cases: list[str] = []
     # UCs with ``clip_processing_results.status`` in ('processing',
@@ -100,7 +100,7 @@ class BulkDeleteClipResponse(BaseModel):
 
 class ReprocessFaceMatchRequest(BaseModel):
     mode: str = "all"
-    use_cases: list[str] = Field(default_factory=lambda: ["uc3"])
+    use_cases: list[str] = Field(default_factory=lambda: ["uc1"])
 
 
 class ReprocessFaceMatchResponse(BaseModel):
@@ -111,7 +111,7 @@ class ReprocessFaceMatchResponse(BaseModel):
 class ReprocessFaceMatchStatus(BaseModel):
     status: str = "idle"
     mode: str = "all"
-    use_cases: list[str] = Field(default_factory=lambda: ["uc3"])
+    use_cases: list[str] = Field(default_factory=lambda: ["uc1"])
     total_clips: int = 0
     processed_clips: int = 0
     matched_total: int = 0
@@ -270,10 +270,8 @@ class PipelineStats(BaseModel):
     # Per-use-case aggregates
     uc1_completed: int = 0
     uc2_completed: int = 0
-    uc3_completed: int = 0
     avg_uc1_duration_ms: Optional[float] = None
     avg_uc2_duration_ms: Optional[float] = None
-    avg_uc3_duration_ms: Optional[float] = None
 
     # Throughput / activity — UTC-day windowed where applicable
     clips_today: int = 0            # person_clips.created_at >= today-UTC
@@ -294,7 +292,7 @@ class SystemStatsResponse(BaseModel):
 
 
 class SingleClipReprocessRequest(BaseModel):
-    use_cases: list[str] = Field(default_factory=lambda: ["uc3"])
+    use_cases: list[str] = Field(default_factory=lambda: ["uc1"])
 
 
 class SingleClipReprocessResponse(BaseModel):
@@ -343,7 +341,7 @@ class FaceCropListResponse(BaseModel):
 class UseCaseStats(BaseModel):
     """Per-UC aggregate stats consumed by the Comparison tab."""
 
-    use_case: str                       # "uc1" | "uc2" | "uc3"
+    use_case: str                       # "uc1" | "uc2"
     label: str                          # "Use Case 1"
     mode: str                           # human-readable detector mode
     has_data: bool                      # any rows at all for this UC?

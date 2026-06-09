@@ -36,7 +36,7 @@ router = APIRouter(prefix="/api/clip-pipeline", tags=["clip-pipeline"])
 ADMIN_OR_HR = Depends(require_any_role("Admin", "HR"))
 
 
-VALID_USE_CASES = ("uc1", "uc2", "uc3")
+VALID_USE_CASES = ("uc1", "uc2")
 
 
 # ---- request / response shapes ----------------------------------------------
@@ -505,7 +505,7 @@ class RetryFailedRequest(BaseModel):
     """
 
     use_cases: list[str] = Field(
-        default=["uc1", "uc2", "uc3"], min_length=1, max_length=3
+        default=["uc1", "uc2"], min_length=1, max_length=2
     )
     max_clips: int = Field(default=200, gt=0, le=2000)
 

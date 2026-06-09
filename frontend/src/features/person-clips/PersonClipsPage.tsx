@@ -2230,7 +2230,6 @@ function BarGauge({
 const _UC_COLORS: Record<string, { accent: string; soft: string }> = {
   uc1: { accent: "#2563eb", soft: "rgba(37, 99, 235, 0.10)" },
   uc2: { accent: "#7c3aed", soft: "rgba(124, 58, 237, 0.10)" },
-  uc3: { accent: "#0b6e4f", soft: "rgba(11, 110, 79, 0.10)" },
 };
 
 function _fmtMsCompact(ms: number | null | undefined): string {
@@ -2667,13 +2666,6 @@ function _ProcessingLifecycleCard({
       done: p?.uc2_completed ?? 0,
       avg: p?.avg_uc2_duration_ms ?? null,
     },
-    {
-      key: "uc3",
-      label: "UC3",
-      mode: "InsightFace direct match",
-      done: p?.uc3_completed ?? 0,
-      avg: p?.avg_uc3_duration_ms ?? null,
-    },
   ];
 
   return (
@@ -2833,7 +2825,7 @@ function _ProcessingLifecycleCard({
             {
               key: "processing",
               label: "Processing",
-              hint: "Running UC1 / UC2 / UC3",
+              hint: "Running UC1 / UC2",
               value: p?.clips_processing ?? 0,
               color: "#2563eb",
               pulse: (p?.clips_processing ?? 0) > 0,
@@ -3286,7 +3278,7 @@ function _HealthSummary({
     {
       label: "Awaiting match",
       value: `${(matchPendingRate * 100).toFixed(1)}%`,
-      hint: `${pipeline.clips_pending} clips waiting for operator to trigger UC1/UC2/UC3`,
+      hint: `${pipeline.clips_pending} clips waiting for operator to trigger UC1/UC2`,
       good: matchPendingRate < 0.5,
     },
   ];
@@ -3371,7 +3363,7 @@ function _humanSecondsLabel(s: number): string {
 // ── _CompactStatsTable — 7-row quick-reference table ───────────────────────
 // Mirrors the operator's preferred compact format:
 //   Completed runs / Avg processing / Faces detected / Crops saved /
-//   Avg quality / Match rate / Storage  vs  UC1 / UC2 / UC3
+//   Avg quality / Match rate / Storage  vs  UC1 / UC2
 // Renders as a clean styled HTML table — no bars, no icons, just numbers.
 
 function _CompactStatsTable({ ucs }: { ucs: UseCaseStatsRow[] }) {
@@ -4115,10 +4107,10 @@ function ClipContextMenu({
   x: number;
   y: number;
   onClose: () => void;
-  // Fires one use case at a time so the operator can run UC1 / UC2 /
-  // UC3 independently — the backend daemon thread handles whichever
+  // Fires one use case at a time so the operator can run UC1 / UC2
+  // independently — the backend daemon thread handles whichever
   // single use case the menu picked.
-  onProcess: (useCase: "uc1" | "uc2" | "uc3") => void;
+  onProcess: (useCase: "uc1" | "uc2") => void;
   processBusy: boolean;
 }) {
   const { t } = useTranslation();
@@ -4142,9 +4134,9 @@ function ClipContextMenu({
     };
   }, [onClose]);
 
-  // Three separate use cases, three separate menu items.
+  // Two separate use cases, two separate menu items.
   const items: {
-    key: "uc1" | "uc2" | "uc3";
+    key: "uc1" | "uc2";
     label: string;
     hint: string;
   }[] = [
@@ -4157,11 +4149,6 @@ function ClipContextMenu({
       key: "uc2",
       label: t("personClips.contextMenu.uc2") as string,
       hint: t("personClips.contextMenu.uc2Hint") as string,
-    },
-    {
-      key: "uc3",
-      label: t("personClips.contextMenu.uc3") as string,
-      hint: t("personClips.contextMenu.uc3Hint") as string,
     },
   ];
 
@@ -5183,7 +5170,7 @@ function ReprocessDialog({
 }) {
   const { t } = useTranslation();
   const [mode, setMode] = useState<"all" | "skip_existing">("all");
-  const [selectedUcs, setSelectedUcs] = useState<Set<string>>(new Set(["uc3"]));
+  const [selectedUcs, setSelectedUcs] = useState<Set<string>>(new Set(["uc1"]));
 
   const toggleUc = (uc: string) => {
     setSelectedUcs((prev) => {
@@ -5291,7 +5278,7 @@ function ReprocessDialog({
               Use cases
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {["uc1", "uc2", "uc3"].map((uc) => (
+              {["uc1", "uc2"].map((uc) => (
                 <label
                   key={uc}
                   style={{
@@ -5365,12 +5352,6 @@ const UC_META: Record<
     mode: "InsightFace + crops",
     accent: "#7c3aed",
     glyph: "2",
-  },
-  uc3: {
-    label: "Use Case 3",
-    mode: "InsightFace direct match",
-    accent: "#0b6e4f",
-    glyph: "3",
   },
 };
 
@@ -6273,7 +6254,7 @@ function UseCaseResultSection({
   clipId,
   focusEmployeeId,
 }: {
-  useCase: "uc1" | "uc2" | "uc3";
+  useCase: "uc1" | "uc2";
   result: ClipProcessingResult | null;
   cropsData: FaceCropListResponse | undefined;
   loading: boolean;
@@ -6624,7 +6605,7 @@ function Kpi({
 // ── ClipDetailDrawer ──────────────────────────────────────────────────────────
 
 // Exported so the Clip Analytics page can reuse the same View Details
-// drawer (thumbnail + metadata + UC1/UC2/UC3 sections + face crops +
+// drawer (thumbnail + metadata + UC1/UC2 sections + face crops +
 // reprocess form). Single source of truth keeps the two pages visually
 // consistent.
 //
@@ -6654,18 +6635,16 @@ export function ClipDetailDrawer({
 
   const uc1Result = results.find((r) => r.use_case === "uc1") ?? null;
   const uc2Result = results.find((r) => r.use_case === "uc2") ?? null;
-  const uc3Result = results.find((r) => r.use_case === "uc3") ?? null;
 
   // Open-the-form handler. Pre-checks whichever UCs already have a
   // ``clip_processing_results`` row for this clip so "Reprocess" means
   // "re-run everything that was run before" by default. If nothing has
-  // ever run on this clip, fall back to UC3 (the original default).
+  // ever run on this clip, fall back to UC1 (the original default).
   const openReprocessForm = () => {
     const seeded = new Set<string>();
     if (uc1Result) seeded.add("uc1");
     if (uc2Result) seeded.add("uc2");
-    if (uc3Result) seeded.add("uc3");
-    if (seeded.size === 0) seeded.add("uc3");
+    if (seeded.size === 0) seeded.add("uc1");
     setSelectedUcs(seeded);
     setShowReprocessForm(true);
   };
@@ -6678,8 +6657,6 @@ export function ClipDetailDrawer({
     uc1Result?.status === "processing" || uc1Result?.status === "pending";
   const uc2Pending =
     uc2Result?.status === "processing" || uc2Result?.status === "pending";
-  const uc3Pending =
-    uc3Result?.status === "processing" || uc3Result?.status === "pending";
 
   const uc1Crops = useClipFaceCrops(
     uc1Result ? clip.id : null,
@@ -6690,11 +6667,6 @@ export function ClipDetailDrawer({
     uc2Result ? clip.id : null,
     "uc2",
     uc2Pending,
-  );
-  const uc3Crops = useClipFaceCrops(
-    uc3Result ? clip.id : null,
-    "uc3",
-    uc3Pending,
   );
 
   // Transition watcher — defence in depth on top of the polling above.
@@ -6708,15 +6680,13 @@ export function ClipDetailDrawer({
   const lastUcStatusRef = useRef<Record<string, string | null>>({
     uc1: null,
     uc2: null,
-    uc3: null,
   });
   useEffect(() => {
     const cur: Record<string, string | null> = {
       uc1: uc1Result?.status ?? null,
       uc2: uc2Result?.status ?? null,
-      uc3: uc3Result?.status ?? null,
     };
-    for (const uc of ["uc1", "uc2", "uc3"] as const) {
+    for (const uc of ["uc1", "uc2"] as const) {
       const prev = lastUcStatusRef.current[uc];
       if (prev !== "completed" && cur[uc] === "completed") {
         qc.invalidateQueries({
@@ -6730,7 +6700,6 @@ export function ClipDetailDrawer({
     clip.id,
     uc1Result?.status,
     uc2Result?.status,
-    uc3Result?.status,
   ]);
 
   const reprocess = useSingleClipReprocess(clip.id);
@@ -6886,7 +6855,7 @@ export function ClipDetailDrawer({
                 {t("personClips.detail.selectUseCases") as string}
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-                {(["uc1", "uc2", "uc3"] as const).map((uc) => (
+                {(["uc1", "uc2"] as const).map((uc) => (
                   <label
                     key={uc}
                     style={{
@@ -6948,7 +6917,7 @@ export function ClipDetailDrawer({
           {/* Use case sections — one dashboard card per UC. Each card
               owns its own header strip, KPI row, crop grid and
               lightbox. Phase bars render in place while a run is in
-              progress. Sections always render in UC1 → UC2 → UC3
+              progress. Sections always render in UC1 → UC2
               order; not-yet-processed UCs show an empty-state hint. */}
           <div style={{ marginBottom: 16 }}>
             <div
@@ -6979,14 +6948,6 @@ export function ClipDetailDrawer({
               result={uc2Result}
               cropsData={uc2Crops.data}
               loading={uc2Crops.isLoading}
-              clipId={clip.id}
-              focusEmployeeId={focusEmployeeId ?? null}
-            />
-            <UseCaseResultSection
-              useCase="uc3"
-              result={uc3Result}
-              cropsData={uc3Crops.data}
-              loading={uc3Crops.isLoading}
               clipId={clip.id}
               focusEmployeeId={focusEmployeeId ?? null}
             />
