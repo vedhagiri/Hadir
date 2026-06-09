@@ -189,6 +189,9 @@ function fmtBytes(bytes: number): string {
 // clip's current state; the caller translates it (this helper is pure
 // and has no ``t`` in scope).
 function processingStatusKey(c: PersonClipOut): string {
+  // Migration 0075 — logs_only clips are presence logs: no video and no
+  // UC pipeline. Surface "Logs only" instead of the misleading "Saved".
+  if (c.recording_mode === "logs_only") return "logsOnly";
   switch (c.recording_status) {
     case "recording":
       return "recording";
@@ -833,6 +836,10 @@ export function ClipAnalyticsPage() {
   const [cameraId, setCameraId] = useState<number | null>(null);
   const [processingFilter, setProcessingFilter] =
     useState<ProcessingFilter>("all");
+  // Recording-mode filter: 'all' | 'save_clips' (incl. legacy NULL) |
+  // 'logs_only'. Server-side via the /api/person-clips recording_mode param.
+  const [recordingMode, setRecordingMode] =
+    useState<"all" | "save_clips" | "logs_only">("all");
   const [startDate, setStartDate] = useState<string>(""); // YYYY-MM-DD
   const [endDate, setEndDate] = useState<string>("");
 
@@ -969,10 +976,11 @@ export function ClipAnalyticsPage() {
       // processed_use_cases.
       p.set("recording_status", "completed");
     }
+    if (recordingMode !== "all") p.set("recording_mode", recordingMode);
     if (startDate) p.set("start", `${startDate}T00:00:00`);
     if (endDate) p.set("end", `${endDate}T23:59:59`);
     return p.toString();
-  }, [page, cameraId, processingFilter, startDate, endDate]);
+  }, [page, cameraId, processingFilter, recordingMode, startDate, endDate]);
 
   const list = useQuery({
     queryKey: ["clip-analytics", "list", qs],
@@ -1493,7 +1501,29 @@ export function ClipAnalyticsPage() {
                   background: "var(--bg-elev)",
                   boxShadow: "inset 0 -1px 0 var(--border)",
                 }}
-              />
+              >
+                <select
+                  value={recordingMode}
+                  onChange={(e) => {
+                    setRecordingMode(
+                      e.target.value as "all" | "save_clips" | "logs_only",
+                    );
+                    setPage(1);
+                  }}
+                  style={filterControlStyle}
+                  aria-label={t("clipAnalytics.filters.byRecordingMode")}
+                >
+                  <option value="all">
+                    {t("clipAnalytics.recordingMode.all")}
+                  </option>
+                  <option value="save_clips">
+                    {t("clipAnalytics.recordingMode.saveClips")}
+                  </option>
+                  <option value="logs_only">
+                    {t("clipAnalytics.recordingMode.logsOnly")}
+                  </option>
+                </select>
+              </th>
               <th
                 style={{
                   background: "var(--bg-elev)",
@@ -1592,8 +1622,12 @@ export function ClipAnalyticsPage() {
               // have no playable MP4 yet. Row stays non-clickable so
               // we don't open an empty video modal on the partial
               // file. ``completed`` is the only state with a stable
-              // artifact on disk.
-              const playable = c.recording_status === "completed";
+              // artifact on disk. Migration 0075 — ``logs_only`` clips
+              // are presence logs with no video at all, so they are
+              // never clickable regardless of status.
+              const playable =
+                c.recording_status === "completed" &&
+                c.recording_mode !== "logs_only";
               return (
                 <tr
                   key={c.id}
@@ -5679,6 +5713,10 @@ function StatusPill({
         };
       case "saved":
         return { bg: "var(--success-soft)", fg: "var(--success-text)" };
+      case "logsOnly":
+        // Presence log — neutral slate tone, distinct from the green
+        // "Saved" (which implies a stored video clip).
+        return { bg: "rgba(100,116,139,0.14)", fg: "#475569" };
       case "recording":
         return { bg: "var(--danger-soft)", fg: "var(--danger-text)" };
       case "finalizing":

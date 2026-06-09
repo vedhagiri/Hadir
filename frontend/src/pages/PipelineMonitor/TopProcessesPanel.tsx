@@ -11,7 +11,6 @@ import { useTranslation } from "react-i18next";
 
 import { ApiError, api } from "../../api/client";
 
-const POLL_INTERVAL_MS = 10000;
 const LIMIT = 20;
 
 interface ProcessRow {
@@ -43,7 +42,7 @@ function useProcesses(enabled: boolean) {
         `/api/operations/resources/processes?limit=${LIMIT}`,
       ),
     enabled,
-    refetchInterval: POLL_INTERVAL_MS,
+    refetchInterval: false,
     refetchIntervalInBackground: false,
     retry: (failureCount, error) => {
       if (

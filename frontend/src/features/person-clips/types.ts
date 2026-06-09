@@ -33,6 +33,10 @@ export interface PersonClipOut {
   // the card renders a static placeholder (no playable MP4 yet); once
   // 'completed' it shows the encoded-clip thumbnail + play button.
   recording_status: RecordingStatus;
+  // Per-camera recording mode at capture time (migration 0075). null =
+  // legacy/save_clips (has an MP4). 'logs_only' rows are presence logs
+  // with no video file — non-clickable in the analytics table.
+  recording_mode?: "save_clips" | "logs_only" | null;
   // Use-case codes (e.g. ['uc1','uc2']) the clip has been processed
   // by. Empty list = "Not Processed" — drives the Clip Analytics
   // table's "Processed Use Cases" column.

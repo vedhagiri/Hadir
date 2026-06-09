@@ -17,8 +17,6 @@ import { useTranslation } from "react-i18next";
 
 import { ApiError, api } from "../../api/client";
 
-const POLL_INTERVAL_MS = 10000;
-
 type RangeKey = "15m" | "1h" | "6h" | "24h";
 type MetricKey = "cpu" | "memory" | "io_speed" | "swap";
 
@@ -52,7 +50,7 @@ function useTimeseries(range: RangeKey, enabled: boolean) {
         `/api/operations/resources/timeseries?range=${encodeURIComponent(range)}`,
       ),
     enabled,
-    refetchInterval: POLL_INTERVAL_MS,
+    refetchInterval: false,
     refetchIntervalInBackground: false,
     retry: (failureCount, error) => {
       if (

@@ -183,17 +183,26 @@ export function PipelineMonitor() {
         <div>
           <h1 className="page-title">{t("pipelineMonitor.title")}</h1>
           <p className="page-sub">
-            {t("pipelineMonitor.subtitle", {
-              seconds: POLL_INTERVAL_MS / 1000,
-            })}
-            {data && (
+            {t("pipelineMonitor.subtitle")}
+            {/* The Resources tab is manual-refresh (its own Sync Now +
+                Last Updated), so suppress the shared auto-refresh timer
+                text there. */}
+            {tab !== "resources" && (
               <>
                 {" "}
-                <span className="text-dim">
-                  {t("pipelineMonitor.lastUpdate", {
-                    time: new Date(data.generated_at).toLocaleTimeString(),
-                  })}
-                </span>
+                {t("pipelineMonitor.autoRefresh", {
+                  seconds: POLL_INTERVAL_MS / 1000,
+                })}
+                {data && (
+                  <>
+                    {" "}
+                    <span className="text-dim">
+                      {t("pipelineMonitor.lastUpdate", {
+                        time: new Date(data.generated_at).toLocaleTimeString(),
+                      })}
+                    </span>
+                  </>
+                )}
               </>
             )}
           </p>

@@ -2808,7 +2808,13 @@
       "byStartDate": "Filter by start date",
       "byEndDate": "Filter by end date",
       "byStatus": "Filter by processing status",
-      "byProcessedUcs": "Filter by processed use cases"
+      "byProcessedUcs": "Filter by processed use cases",
+      "byRecordingMode": "Filter by recording mode"
+    },
+    "recordingMode": {
+      "all": "All modes",
+      "saveClips": "Saved clips",
+      "logsOnly": "Logs only"
     },
     "status": {
       "all": "All",
@@ -2816,6 +2822,7 @@
       "finalizing": "Finalizing",
       "processing": "Processing",
       "saved": "Saved",
+      "logsOnly": "Logs only",
       "processed": "Processed",
       "failed": "Failed",
       "abandoned": "Abandoned"
@@ -3345,7 +3352,8 @@
   },
   "pipelineMonitor": {
     "title": "Pipeline Monitor",
-    "subtitle": "Real-time view of every stage: RTSP feed → clip recording → encoding → identify event. Refreshes every {{seconds}} s.",
+    "subtitle": "Real-time view of every stage: RTSP feed → clip recording → encoding → identify event.",
+    "autoRefresh": "Refreshes every {{seconds}} s.",
     "lastUpdate": "Last update: {{time}}",
     "stagesAria": "Pipeline stages",
     "chips": {
@@ -3521,6 +3529,10 @@
   },
   "resources": {
     "loading": "Loading resource metrics…",
+    "lastUpdated": "Last updated: {{time}}",
+    "notSynced": "Not synced yet",
+    "syncNow": "Sync Now",
+    "syncing": "Syncing…",
     "systemOverview": "System Overview",
     "hostWideNote": "Host-wide — shared across all tenants on this server",
     "threadsTitle": "Backend threads — what's running",

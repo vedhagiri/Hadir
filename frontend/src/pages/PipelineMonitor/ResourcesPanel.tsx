@@ -15,11 +15,12 @@
 // verbatim — additional layout state lives in inline styles, scoped
 // to this file.
 
-import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ApiError, api } from "../../api/client";
+import { Icon } from "../../shell/Icon";
 import { ResourceTimeseries } from "./ResourceTimeseries";
 import { TopProcessesPanel } from "./TopProcessesPanel";
 
@@ -80,8 +81,6 @@ function HealthPill({ sev, label }: { sev: Severity; label: string }) {
     </span>
   );
 }
-
-const POLL_INTERVAL_MS = 5000;
 
 // ---------------------------------------------------------------------------
 // API types — mirror the Pydantic shapes in
@@ -219,7 +218,7 @@ function useResourcesHost(enabled: boolean) {
     queryKey: ["operations", "resources", "host"],
     queryFn: () => api<ResourcesHostResponse>("/api/operations/resources/host"),
     enabled,
-    refetchInterval: POLL_INTERVAL_MS,
+    refetchInterval: false,
     refetchIntervalInBackground: false,
     retry: (failureCount, error) => {
       if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
@@ -236,7 +235,7 @@ function useResourcesCameras(enabled: boolean) {
     queryFn: () =>
       api<ResourcesCamerasResponse>("/api/operations/resources/cameras"),
     enabled,
-    refetchInterval: POLL_INTERVAL_MS,
+    refetchInterval: false,
     refetchIntervalInBackground: false,
   });
 }
@@ -246,7 +245,7 @@ function useResourcesStages(enabled: boolean) {
     queryKey: ["operations", "resources", "stages"],
     queryFn: () => api<ResourcesStagesResponse>("/api/operations/resources/stages"),
     enabled,
-    refetchInterval: POLL_INTERVAL_MS,
+    refetchInterval: false,
     refetchIntervalInBackground: false,
   });
 }
@@ -1042,9 +1041,33 @@ function StagesBreakdownTable({ stages }: ResourcesStagesResponse) {
 
 export function ResourcesPanel({ isAdmin }: { isAdmin: boolean }) {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const hostQ = useResourcesHost(isAdmin);
   const camerasQ = useResourcesCameras(isAdmin);
   const stagesQ = useResourcesStages(isAdmin);
+
+  // Manual refresh only — every Resources query auto-poll is off. We
+  // stamp "last updated" from the host query's resolution, which covers
+  // both the initial page-load fetch and each Sync Now refetch.
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [syncing, setSyncing] = useState(false);
+
+  useEffect(() => {
+    if (hostQ.dataUpdatedAt) setLastUpdated(new Date(hostQ.dataUpdatedAt));
+  }, [hostQ.dataUpdatedAt]);
+
+  const syncNow = async () => {
+    setSyncing(true);
+    try {
+      // Prefix match — refetches host + cameras + stages + processes +
+      // timeseries in one shot (all keyed under operations/resources).
+      await queryClient.refetchQueries({
+        queryKey: ["operations", "resources"],
+      });
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   return (
     <div
@@ -1054,6 +1077,34 @@ export function ResourcesPanel({ isAdmin }: { isAdmin: boolean }) {
         gap: 12,
       }}
     >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+          flexWrap: "wrap",
+        }}
+      >
+        <span className="text-sm text-dim">
+          {lastUpdated
+            ? t("resources.lastUpdated", {
+                time: lastUpdated.toLocaleTimeString(),
+              })
+            : t("resources.notSynced")}
+        </span>
+        <button
+          type="button"
+          className="btn btn-sm"
+          onClick={syncNow}
+          disabled={syncing || !isAdmin}
+          aria-busy={syncing}
+          style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+        >
+          <Icon name="refresh" size={14} />
+          {syncing ? t("resources.syncing") : t("resources.syncNow")}
+        </button>
+      </div>
       {hostQ.isLoading && (
         <div className="text-sm text-dim" style={{ padding: 16 }}>
           {t("resources.loading")}
