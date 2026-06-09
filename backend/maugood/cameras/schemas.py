@@ -63,10 +63,10 @@ class CameraOut(BaseModel):
     # The analyzer runs full recognition only when
     # ``detection_enabled AND live_matching_enabled``.
     live_matching_enabled: bool = False
-    # Migration 0075 — per-camera recording mode. 'save_clips' writes
-    # video files; 'logs_only' writes only a lightweight presence-log
-    # person_clips row with file_path=NULL.
-    recording_mode: str = "save_clips"
+    # Migration 0075 — per-camera recording mode. 'logs_only' (system
+    # default, migration 0076) writes only a lightweight presence-log
+    # person_clips row with file_path=NULL; 'save_clips' writes video files.
+    recording_mode: str = "logs_only"
     capture_config: CaptureConfig
     created_at: datetime
     last_seen_at: Optional[datetime] = None
@@ -143,8 +143,10 @@ class CameraCreateIn(BaseModel):
     # Migration 0072 — per-camera live-matching gate. Default False so a
     # freshly-added camera does nothing until the operator turns it on.
     live_matching_enabled: bool = False
-    # Migration 0075 — per-camera recording mode.
-    recording_mode: str = "save_clips"
+    # Migration 0075 — per-camera recording mode. 'logs_only' is the
+    # system default (migration 0076) — a new camera logs presence
+    # without writing video unless the operator picks 'save_clips'.
+    recording_mode: str = "logs_only"
     capture_config: CaptureConfig = Field(default_factory=CaptureConfig)
     # Optional brand tag. The frontend offers a curated dropdown
     # (Samsung, Hikvision, Dahua, CP Plus, Axis, Panasonic, Others)

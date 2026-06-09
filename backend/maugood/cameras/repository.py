@@ -106,8 +106,9 @@ class CameraRow:
     brand: Optional[str] = None
     model: Optional[str] = None
     mount_location: Optional[str] = None
-    # Migration 0075 — per-camera recording mode.
-    recording_mode: str = "save_clips"
+    # Migration 0075 — per-camera recording mode. Default 'logs_only'
+    # (system default, migration 0076).
+    recording_mode: str = "logs_only"
 
 
 def _decrypt_and_parse_host(token: str) -> str:
@@ -270,7 +271,7 @@ def create_camera(
     detection_enabled: bool = True,
     clip_recording_enabled: bool = True,
     live_matching_enabled: bool = False,
-    recording_mode: str = "save_clips",
+    recording_mode: str = "logs_only",
     camera_code: Optional[str] = None,
     zone: Optional[str] = None,
     capture_config: Optional[dict[str, Any]] = None,

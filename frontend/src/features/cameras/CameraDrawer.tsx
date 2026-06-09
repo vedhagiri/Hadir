@@ -71,8 +71,9 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
     initial?.clip_recording_enabled ?? true,
   );
   // Migration 0075 — per-camera recording mode (save_clips | logs_only).
+  // 'logs_only' is the system default (migration 0076).
   const [recordingMode, setRecordingMode] = useState<"save_clips" | "logs_only">(
-    initial?.recording_mode ?? "save_clips",
+    initial?.recording_mode ?? "logs_only",
   );
   const [matchingEnabled, setMatchingEnabled] = useState(
     initial?.live_matching_enabled ?? true,
@@ -93,7 +94,7 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
     setDisplayEnabled(initial?.display_enabled ?? true);
     setDetectionEnabled(initial?.detection_enabled ?? true);
     setClipRecordingEnabled(initial?.clip_recording_enabled ?? true);
-    setRecordingMode(initial?.recording_mode ?? "save_clips");
+    setRecordingMode(initial?.recording_mode ?? "logs_only");
     setMatchingEnabled(initial?.live_matching_enabled ?? true);
     setConfig(initial?.capture_config ?? DEFAULT_CAPTURE_CONFIG);
     setRtspUrl("");

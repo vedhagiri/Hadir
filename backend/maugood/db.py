@@ -1881,14 +1881,15 @@ cameras = Table(
     Column("brand", Text, nullable=True),
     Column("model", Text, nullable=True),
     Column("mount_location", Text, nullable=True),
-    # Migration 0075 — per-camera recording mode. 'save_clips' (default)
-    # records a video file and inserts a person_clips row. 'logs_only'
-    # inserts a presence-log person_clips row without writing video to disk.
+    # Migration 0075 — per-camera recording mode. 'logs_only' (default,
+    # set by migration 0076) inserts a presence-log person_clips row
+    # without writing video to disk. 'save_clips' records a video file
+    # and inserts a person_clips row.
     Column(
         "recording_mode",
         Text,
         nullable=False,
-        server_default="save_clips",
+        server_default="logs_only",
     ),
     UniqueConstraint("tenant_id", "name", name="uq_cameras_tenant_name"),
 )
