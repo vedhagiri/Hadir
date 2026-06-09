@@ -55,14 +55,6 @@ class CameraOut(BaseModel):
     # written. Default True (current behaviour). See
     # docs/phases/cameras-detection-toggle.md.
     detection_enabled: bool
-    # Migration 0049 — when False the capture pipeline keeps running
-    # (detection, tracking, events) but no video clip is written to
-    # disk and no person_clips row is inserted.
-    clip_recording_enabled: bool = True
-    # Migration 0072 — per-camera live face-recognition/matching gate.
-    # The analyzer runs full recognition only when
-    # ``detection_enabled AND live_matching_enabled``.
-    live_matching_enabled: bool = False
     # Migration 0075 — per-camera recording mode. 'logs_only' (system
     # default, migration 0076) writes only a lightweight presence-log
     # person_clips row with file_path=NULL; 'save_clips' writes video files.
@@ -102,9 +94,6 @@ class CameraBulkUpdateIn(BaseModel):
     worker_enabled: Optional[bool] = None
     display_enabled: Optional[bool] = None
     detection_enabled: Optional[bool] = None
-    clip_recording_enabled: Optional[bool] = None
-    # Migration 0072 — per-camera live-matching toggle, bulk variant.
-    live_matching_enabled: Optional[bool] = None
 
 
 class CameraBulkUpdateResult(BaseModel):
@@ -139,10 +128,6 @@ class CameraCreateIn(BaseModel):
     worker_enabled: bool = False
     display_enabled: bool = False
     detection_enabled: bool = False
-    clip_recording_enabled: bool = False
-    # Migration 0072 — per-camera live-matching gate. Default False so a
-    # freshly-added camera does nothing until the operator turns it on.
-    live_matching_enabled: bool = False
     # Migration 0075 — per-camera recording mode. 'logs_only' is the
     # system default (migration 0076) — a new camera logs presence
     # without writing video unless the operator picks 'save_clips'.
@@ -177,9 +162,6 @@ class CameraPatchIn(BaseModel):
     worker_enabled: Optional[bool] = None
     display_enabled: Optional[bool] = None
     detection_enabled: Optional[bool] = None
-    clip_recording_enabled: Optional[bool] = None
-    # Migration 0072 — per-camera live-matching gate.
-    live_matching_enabled: Optional[bool] = None
     # Migration 0075 — per-camera recording mode.
     recording_mode: Optional[str] = None
     # PATCH expects a complete CaptureConfig when present (UI sends
@@ -222,9 +204,6 @@ class CameraExportItem(BaseModel):
     worker_enabled: bool
     display_enabled: bool
     detection_enabled: bool
-    clip_recording_enabled: bool
-    # Migration 0072 — per-camera live-matching gate.
-    live_matching_enabled: bool = False
     capture_config: CaptureConfig
     brand: Optional[str] = None
 
@@ -256,9 +235,6 @@ class CameraImportItem(BaseModel):
     worker_enabled: Optional[bool] = None
     display_enabled: Optional[bool] = None
     detection_enabled: Optional[bool] = None
-    clip_recording_enabled: Optional[bool] = None
-    # Migration 0072 — per-camera live-matching gate.
-    live_matching_enabled: Optional[bool] = None
     capture_config: Optional[dict] = None
     brand: Optional[str] = None
 

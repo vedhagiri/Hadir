@@ -37,7 +37,6 @@ def _create(client: TestClient, name: str, url: str) -> dict:
             "worker_enabled": True,
             "display_enabled": True,
             "detection_enabled": True,
-            "clip_recording_enabled": True,
         },
     )
     assert resp.status_code == 201, resp.text
@@ -71,7 +70,6 @@ def test_bulk_disable_worker_and_detection_two_cameras(
         assert cam["detection_enabled"] is False
         # Untouched toggles stay as they were.
         assert cam["display_enabled"] is True
-        assert cam["clip_recording_enabled"] is True
 
     # Audit rows: camera.updated with after.bulk_update == True for each.
     with admin_engine.begin() as conn:
@@ -144,7 +142,6 @@ def test_bulk_update_explicit_null_toggles_is_400(
             "worker_enabled": None,
             "display_enabled": None,
             "detection_enabled": None,
-            "clip_recording_enabled": None,
         },
     )
     assert resp.status_code == 400, resp.text

@@ -45,7 +45,6 @@ interface RtspWorker {
 interface RecordingCamera {
   camera_id: number;
   camera_name: string;
-  recording_enabled: boolean;
   recording_active: boolean;
   current_clip_id: number | null;
   elapsed_sec: number;
@@ -515,7 +514,7 @@ function CamerasPanel({ data }: { data: PipelineMonitorOut }) {
                   : "ok",
           },
           {
-            label: t("pipelineMonitor.cameras.cards.clipSaving"),
+            label: t("pipelineMonitor.cameras.cards.recording"),
             value: `${recordingActive} / ${recordingEnabled}`,
             tone: recordingActive > 0 ? "ok" : "neutral",
           },
@@ -573,7 +572,7 @@ function CamerasPanel({ data }: { data: PipelineMonitorOut }) {
                 <th style={thStyle}>{t("pipelineMonitor.cameras.cols.workers")}</th>
                 <th style={thStyle}>{t("pipelineMonitor.cameras.cols.workerStatus")}</th>
                 <th style={thStyle}>{t("pipelineMonitor.cameras.cols.rtsp")}</th>
-                <th style={thStyle}>{t("pipelineMonitor.cameras.cols.clipSaving")}</th>
+                <th style={thStyle}>{t("pipelineMonitor.cameras.cols.recording")}</th>
                 <th style={thStyle}>{t("pipelineMonitor.cameras.cols.processing")}</th>
               </tr>
             </thead>
@@ -611,7 +610,6 @@ function CameraRowView({ row }: { row: CameraRow }) {
 
   const clipBlurb = (() => {
     if (!row.recording) return "—";
-    if (!row.recording.recording_enabled) return t("pipelineMonitor.cell.disabled");
     if (row.recording.recording_active) {
       return t("pipelineMonitor.cell.recording", {
         seconds: Math.round(row.recording.elapsed_sec),
@@ -649,7 +647,7 @@ function CameraRowView({ row }: { row: CameraRow }) {
         {rtspBlurb}
       </td>
       <td style={tdStyle} className="text-sm">
-        <Pill tone={row.recording?.recording_active ? "ok" : row.recording?.recording_enabled ? "neutral" : "neutral"}>
+        <Pill tone={row.recording?.recording_active ? "ok" : "neutral"}>
           {clipBlurb}
         </Pill>
       </td>
@@ -784,10 +782,8 @@ function RecordingPanel({
                   <Pill tone="danger">
                     <PulseDot /> {t("pipelineMonitor.cell.recordingLabel")}
                   </Pill>
-                ) : c.recording_enabled ? (
-                  <Pill tone="neutral">{t("pipelineMonitor.cell.idle")}</Pill>
                 ) : (
-                  <Pill tone="neutral">{t("pipelineMonitor.cell.disabled")}</Pill>
+                  <Pill tone="neutral">{t("pipelineMonitor.cell.idle")}</Pill>
                 )}
               </td>
               <td className="mono text-sm">

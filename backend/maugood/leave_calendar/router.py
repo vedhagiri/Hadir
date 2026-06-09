@@ -1239,9 +1239,6 @@ def _to_tenant_settings_response(row) -> TenantSettingsResponse:  # type: ignore
         # still serves a sane default instead of 500'ing.
         date_format=str(getattr(row, "date_format", None) or "DD/MM/YYYY"),
         time_format=str(getattr(row, "time_format", None) or "24h"),
-        live_matching_enabled=bool(
-            getattr(row, "live_matching_enabled", False)
-        ),
         updated_at=row.updated_at.isoformat(),
     )
 
@@ -1262,7 +1259,6 @@ def get_tenant_settings(
                 tenant_settings.c.timezone,
                 tenant_settings.c.date_format,
                 tenant_settings.c.time_format,
-                tenant_settings.c.live_matching_enabled,
                 tenant_settings.c.updated_at,
             ).where(tenant_settings.c.tenant_id == scope.tenant_id)
         ).first()
@@ -1276,7 +1272,6 @@ def get_tenant_settings(
                     tenant_settings.c.tenant_id,
                     tenant_settings.c.weekend_days,
                     tenant_settings.c.timezone,
-                    tenant_settings.c.live_matching_enabled,
                     tenant_settings.c.updated_at,
                 ).where(tenant_settings.c.tenant_id == scope.tenant_id)
             ).first()
@@ -1301,7 +1296,6 @@ def patch_tenant_settings(
                 tenant_settings.c.timezone,
                 tenant_settings.c.date_format,
                 tenant_settings.c.time_format,
-                tenant_settings.c.live_matching_enabled,
             ).where(tenant_settings.c.tenant_id == scope.tenant_id)
         ).first()
         values: dict[str, Any] = {"updated_at": datetime.now(tz=timezone.utc)}
@@ -1313,8 +1307,6 @@ def patch_tenant_settings(
             values["date_format"] = payload.date_format
         if payload.time_format is not None:
             values["time_format"] = payload.time_format
-        if payload.live_matching_enabled is not None:
-            values["live_matching_enabled"] = payload.live_matching_enabled
 
         # Detect a real timezone change. Triggers the post-commit
         # recompute_today() below so the operator gets correct
@@ -1358,9 +1350,6 @@ def patch_tenant_settings(
                     "time_format": str(
                         getattr(before, "time_format", None) or "24h"
                     ),
-                    "live_matching_enabled": bool(
-                        getattr(before, "live_matching_enabled", True)
-                    ),
                 }
                 if before is not None
                 else None
@@ -1377,7 +1366,6 @@ def patch_tenant_settings(
                 tenant_settings.c.timezone,
                 tenant_settings.c.date_format,
                 tenant_settings.c.time_format,
-                tenant_settings.c.live_matching_enabled,
                 tenant_settings.c.updated_at,
             ).where(tenant_settings.c.tenant_id == scope.tenant_id)
         ).first()

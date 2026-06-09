@@ -570,11 +570,10 @@ def detect_person_boxes(  # type: ignore[no-untyped-def]
     modes (YOLO body detection runs in both).
 
     Falls back to ``[]`` when ``ultralytics`` is not installed — the
-    body-only analyzer path (default since migration 0060's
-    ``live_matching_enabled=False``) MUST keep running even on
-    environments that haven't pip-installed the YOLO dep. Without
-    this guard the analyzer thread spams ``ModuleNotFoundError`` at
-    the cycle rate (~6×/sec).
+    body-only analyzer path MUST keep running even on environments
+    that haven't pip-installed the YOLO dep. Without this guard the
+    analyzer thread spams ``ModuleNotFoundError`` at the cycle rate
+    (~6×/sec).
     """
 
     global _yolo_unavailable_warned

@@ -83,12 +83,6 @@ class CameraRow:
     worker_enabled: bool
     display_enabled: bool
     detection_enabled: bool = True
-    # Migration 0049 — clip-recording gate.
-    clip_recording_enabled: bool = True
-    # Migration 0072 — per-camera live face-recognition/matching gate.
-    # The analyzer runs full recognition only when
-    # ``detection_enabled AND live_matching_enabled``.
-    live_matching_enabled: bool = False
     # Migration 0034 — running human-readable code (CAM-001 etc.).
     camera_code: str = ""
     # Migration 0034 — zone tag.
@@ -154,12 +148,6 @@ def _row_to_camera(row) -> CameraRow:
         worker_enabled=bool(row.worker_enabled),
         display_enabled=bool(row.display_enabled),
         detection_enabled=bool(row.detection_enabled),
-        clip_recording_enabled=bool(
-            getattr(row, "clip_recording_enabled", True)
-        ),
-        live_matching_enabled=bool(
-            getattr(row, "live_matching_enabled", False)
-        ),
         camera_code=str(row.camera_code) if row.camera_code is not None else "",
         zone=row.zone,
         capture_config=_normalise_capture_config(row.capture_config),
@@ -190,8 +178,6 @@ _SELECT_COLUMNS = (
     cameras.c.worker_enabled,
     cameras.c.display_enabled,
     cameras.c.detection_enabled,
-    cameras.c.clip_recording_enabled,
-    cameras.c.live_matching_enabled,
     cameras.c.camera_code,
     cameras.c.zone,
     cameras.c.capture_config,
@@ -269,8 +255,6 @@ def create_camera(
     worker_enabled: bool = True,
     display_enabled: bool = True,
     detection_enabled: bool = True,
-    clip_recording_enabled: bool = True,
-    live_matching_enabled: bool = False,
     recording_mode: str = "logs_only",
     camera_code: Optional[str] = None,
     zone: Optional[str] = None,
@@ -294,8 +278,6 @@ def create_camera(
         "worker_enabled": worker_enabled,
         "display_enabled": display_enabled,
         "detection_enabled": detection_enabled,
-        "clip_recording_enabled": clip_recording_enabled,
-        "live_matching_enabled": live_matching_enabled,
         "recording_mode": recording_mode,
     }
     if capture_config is not None:

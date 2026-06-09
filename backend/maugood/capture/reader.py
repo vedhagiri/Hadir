@@ -323,9 +323,7 @@ class CaptureWorker:
         tracker_config: Optional[dict] = None,
         detection_config: Optional[dict] = None,
         detection_enabled: bool = True,
-        clip_recording_enabled: bool = True,
         clip_encoding_config: Optional[dict] = None,
-        live_matching_enabled: bool = False,
         recording_mode: str = "save_clips",
     ) -> None:
         self._engine = engine
@@ -352,25 +350,6 @@ class CaptureWorker:
         # worker.
         self._detection_enabled_lock = threading.Lock()
         self._detection_enabled = bool(detection_enabled)
-
-        # Migration 0059 — tenant-wide live matching toggle. When
-        # False the analyzer runs YOLO body detection only (no face
-        # detection, no recognition, no embeddings, no matcher cache,
-        # no detection_events row). Person bboxes still drive the
-        # preview + clip-recording trigger so the live stream and the
-        # MP4 archive both keep working — identification just happens
-        # later via UC1/UC2 reprocess. Reconcile loop hot-swaps
-        # via ``update_live_matching_enabled``.
-        self._live_matching_enabled_lock = threading.Lock()
-        self._live_matching_enabled = bool(live_matching_enabled)
-
-        # Migration 0049 — per-camera clip-recording gate. When False
-        # the reader keeps reading + detection keeps running, but
-        # _manage_clip_recording is a no-op (no frames written, no
-        # ClipWorker submission). Hot-swapped via
-        # ``update_clip_recording_enabled`` without a worker restart.
-        self._clip_recording_enabled_lock = threading.Lock()
-        self._clip_recording_enabled: bool = bool(clip_recording_enabled)
 
         # Migration 0052 / Phase B — tenant-level clip encoding config.
         # Keys: chunk_duration_sec, video_crf, video_preset,
@@ -907,41 +886,6 @@ class CaptureWorker:
                 new,
             )
 
-    def is_live_matching_enabled(self) -> bool:
-        """Migration 0059 — tenant-wide live-matching toggle.
-
-        Read by the analyzer thread once per cycle. When False the
-        analyzer drops every face-matching surface (face detection,
-        embedding, matcher cache, detection_events insert, live
-        attendance recompute trigger) and runs YOLO body detection
-        only for the preview overlay + clip trigger.
-        """
-
-        with self._live_matching_enabled_lock:
-            return bool(self._live_matching_enabled)
-
-    def update_live_matching_enabled(self, enabled: bool) -> None:
-        """Hot-reload entry point for the live-matching toggle.
-
-        Called by the manager's reconcile tick when an Admin flips
-        the System Settings switch. Takes effect on the next analyzer
-        cycle — no worker restart, no dropped frames.
-        """
-
-        new = bool(enabled)
-        with self._live_matching_enabled_lock:
-            old = self._live_matching_enabled
-            self._live_matching_enabled = new
-        if old != new:
-            logger.info(
-                "capture worker live_matching_enabled updated: "
-                "tenant=%s camera_id=%s old=%s new=%s",
-                self._scope.tenant_id,
-                self.camera_id,
-                old,
-                new,
-            )
-
     def get_recording_state(self) -> dict:
         """Live snapshot of the per-camera clip recording state.
 
@@ -964,7 +908,6 @@ class CaptureWorker:
 
             elapsed_sec = max(0.0, _time.time() - self._clip_start_ts)
         return {
-            "recording_enabled": self.is_clip_recording_enabled(),
             "recording_active": bool(self._clip_recording),
             "current_clip_id": self._current_clip_id,
             "elapsed_sec": round(elapsed_sec, 1),
@@ -983,48 +926,6 @@ class CaptureWorker:
                 else 0
             ),
         }
-
-    def is_clip_recording_enabled(self) -> bool:
-        """Read the live clip-recording toggle flag.
-
-        Migration 0049: when False, _check_and_record_clip is a no-op
-        (the reader keeps reading + detection keeps running, but no
-        video frames are written to disk and no person_clips rows are
-        created). Hot-swapped via ``update_clip_recording_enabled``
-        without a worker restart.
-        """
-
-        with self._clip_recording_enabled_lock:
-            return bool(self._clip_recording_enabled)
-
-    def update_clip_recording_enabled(self, enabled: bool) -> None:
-        """Hot-reload entry point for the per-camera clip-recording toggle.
-
-        The reconcile loop diffs ``cameras.clip_recording_enabled`` and
-        calls this when an operator flips the switch in the UI. No
-        worker restart, no dropped frames — the next reader frame
-        observes the new value via ``is_clip_recording_enabled``.
-
-        When flipping from enabled to disabled while a clip is actively
-        recording, the current clip is finalized immediately so no
-        partial clip is orphaned.
-        """
-
-        new = bool(enabled)
-        with self._clip_recording_enabled_lock:
-            old = self._clip_recording_enabled
-            self._clip_recording_enabled = new
-        if old != new:
-            if not new and self._clip_recording:
-                self._finalize_current_clip()
-            logger.info(
-                "capture worker clip_recording_enabled updated: tenant=%s "
-                "camera_id=%s old=%s new=%s",
-                self._scope.tenant_id,
-                self.camera_id,
-                old,
-                new,
-            )
 
     def get_live_person_count(self) -> int:
         """Return the live number of people the worker currently
@@ -1594,13 +1495,6 @@ class CaptureWorker:
         person stays in frame, because every N seconds the buffer is
         handed off to the worker and reset.
         """
-
-        # Migration 0049: per-camera clip-recording gate. When False
-        # the reader keeps reading + detection keeps running, but no
-        # video frames are written to disk and no person_clips rows
-        # are created. Hot-swapped via update_clip_recording_enabled.
-        if not self.is_clip_recording_enabled():
-            return
 
         # Migration 0075: logs_only mode — run the presence state machine
         # but skip all file I/O and ClipWorker submission. Inserts a
@@ -2262,50 +2156,35 @@ class CaptureWorker:
 
             moved, prev_motion_gray = _check_motion(frame, prev_motion_gray)
             force = (now - last_detect_ts) >= self._config.force_detect_every_s
-            detection_enabled = self.is_detection_enabled()
-            # Migration 0059 — when live matching is off, the analyzer
-            # runs YOLO body detection only. We still feed an empty
-            # ``detections`` list through the tracker below so any
-            # leftover face tracks expire on schedule.
-            live_matching_enabled = self.is_live_matching_enabled()
-            # Clip Saving must work independently of the Detection
-            # toggle — when an operator turns Detection off but leaves
-            # Clip Saving on, YOLO body detection still has to run in
-            # the background to drive the clip trigger. The Detection
-            # toggle only gates the *preview overlay* (boxes drawn on
-            # the live stream), not whether detection executes at all.
-            clip_recording_enabled = self.is_clip_recording_enabled()
-            needs_detection = detection_enabled or clip_recording_enabled
-
+            # The analyzer runs YOLO body detection only. Face
+            # matching + attendance happen later via the UC1/UC2 clip
+            # reprocess pipelines; the live loop never emits
+            # ``detection_events``. We still feed an empty ``detections``
+            # list through the tracker below so any leftover face tracks
+            # expire on schedule.
+            #
+            # A running worker always records per its ``recording_mode``
+            # (save_clips drives clip capture, logs_only drives the
+            # presence state machine), so YOLO body detection always has
+            # to run to feed the clip / presence trigger. The Detection
+            # toggle only gates the *preview overlay* (boxes drawn on the
+            # live stream), not whether detection executes at all.
             detections: list = []
             person_boxes_xyxy: list = []
             person_count = 0
-            if (moved or force) and needs_detection:
+            if moved or force:
                 try:
-                    if detection_enabled and live_matching_enabled:
-                        # Full pass — face detection + YOLO body
-                        # detection + recognition in a single
-                        # ``detect_and_count`` call. Used when the
-                        # operator has explicitly enabled live face
-                        # matching (rare since migration 0060).
-                        detections, person_count, person_boxes_xyxy = (
-                            self._analyzer.detect_and_count(frame)
-                        )
-                    else:
-                        # Body-only path. Covers three cases:
-                        #   * Detection ON, live matching OFF (default
-                        #     since 0060) → preview overlay + clip
-                        #     trigger.
-                        #   * Detection OFF, Clip Saving ON → background
-                        #     driver for the clip trigger; the preview
-                        #     overlay is suppressed below.
-                        #   * Detection ON, Clip Saving ON, live matching
-                        #     OFF → same as the first case.
-                        person_boxes_xyxy = (
-                            self._analyzer.detect_person_boxes(frame)
-                        )
-                        person_count = len(person_boxes_xyxy)
-                        detections = []
+                    # Body-only path (always). YOLO person boxes drive
+                    # the preview overlay + clip-recording trigger.
+                    # Face matching is deferred to the UC1/UC2 reprocess
+                    # pipelines, so the live loop never runs face
+                    # detection / recognition. ``detections`` stays empty
+                    # and feeds the tracker so leftover tracks expire.
+                    person_boxes_xyxy = (
+                        self._analyzer.detect_person_boxes(frame)
+                    )
+                    person_count = len(person_boxes_xyxy)
+                    detections = []
                     last_detect_ts = now
                 except Exception as exc:  # noqa: BLE001
                     # Carry the message + class name. The previous log
@@ -2354,27 +2233,6 @@ class CaptureWorker:
                     # here as a safety net for the unlikely path
                     # where the body tracker update fails.
                     self._yolo_person_count = int(person_count)
-            elif (moved or force) and not needs_detection:
-                # Both the Detection toggle and Clip Saving are OFF —
-                # short-circuit every expensive call. Bump
-                # ``last_detect_ts`` so the force-detect-every-Ns timer
-                # doesn't keep firing every cycle while detection is
-                # paused; we'll resume cleanly when re-enabled. The
-                # trackers are still driven below with empty inputs so
-                # any leftover tracks idle-expire on schedule.
-                last_detect_ts = now
-                # P37: detection disabled → ramp up consecutive counter
-                # so any ongoing clip gets a graceful wind-down rather
-                # than an instant cutoff (same hysteresis as above).
-                with self._person_present_lock:
-                    self._no_person_consecutive_count += 1
-                    if (
-                        self._no_person_consecutive_count
-                        >= self._no_person_consecutive_threshold
-                    ):
-                        self._person_present = False
-                    self._face_count = 0
-                    self._yolo_person_count = 0
             else:
                 with self._stats_lock:
                     cur = int(self._stats["motion_skipped"] or 0)

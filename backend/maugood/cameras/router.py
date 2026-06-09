@@ -132,8 +132,6 @@ def _row_to_out(row: repo.CameraRow) -> CameraOut:
         worker_enabled=row.worker_enabled,
         display_enabled=row.display_enabled,
         detection_enabled=row.detection_enabled,
-        clip_recording_enabled=row.clip_recording_enabled,
-        live_matching_enabled=row.live_matching_enabled,
         recording_mode=row.recording_mode,
         capture_config=CaptureConfig.model_validate(row.capture_config),
         created_at=row.created_at,
@@ -153,7 +151,7 @@ def _row_to_out(row: repo.CameraRow) -> CameraOut:
 def _audit_payload(row: repo.CameraRow) -> dict:
     """The slice of camera state we record on every audit row.
 
-    Carries the full operational state (both flags + the knob bag)
+    Carries the full operational state (the flags + the knob bag)
     so a before/after pair captures any flip without ambiguity. Never
     contains the encrypted token or the plaintext URL — only the
     parsed host.
@@ -168,8 +166,6 @@ def _audit_payload(row: repo.CameraRow) -> dict:
         "worker_enabled": row.worker_enabled,
         "display_enabled": row.display_enabled,
         "detection_enabled": row.detection_enabled,
-        "clip_recording_enabled": row.clip_recording_enabled,
-        "live_matching_enabled": row.live_matching_enabled,
         "recording_mode": row.recording_mode,
         "capture_config": dict(row.capture_config),
     }
@@ -339,12 +335,6 @@ def import_cameras_endpoint(
                         worker_enabled=_bool_or(item.worker_enabled, False),
                         display_enabled=_bool_or(item.display_enabled, False),
                         detection_enabled=_bool_or(item.detection_enabled, False),
-                        clip_recording_enabled=_bool_or(
-                            item.clip_recording_enabled, False
-                        ),
-                        live_matching_enabled=_bool_or(
-                            item.live_matching_enabled, False
-                        ),
                         camera_code=(item.camera_code or "").strip() or None,
                         zone=item.zone,
                         capture_config=row.capture_config,
@@ -418,20 +408,6 @@ def import_cameras_endpoint(
                         and item.detection_enabled is not None
                     ):
                         values["detection_enabled"] = bool(item.detection_enabled)
-                    if (
-                        "clip_recording_enabled" in fs
-                        and item.clip_recording_enabled is not None
-                    ):
-                        values["clip_recording_enabled"] = bool(
-                            item.clip_recording_enabled
-                        )
-                    if (
-                        "live_matching_enabled" in fs
-                        and item.live_matching_enabled is not None
-                    ):
-                        values["live_matching_enabled"] = bool(
-                            item.live_matching_enabled
-                        )
                     if row.capture_config is not None:
                         values["capture_config"] = row.capture_config
                     if "brand" in fs:
@@ -545,15 +521,14 @@ def bulk_update_cameras_endpoint(
     user: Annotated[CurrentUser, ADMIN],
 ) -> CameraBulkUpdateResult:
     """Flip any of the operational toggles
-    (``worker_enabled`` / ``display_enabled`` / ``detection_enabled`` /
-    ``clip_recording_enabled`` / ``live_matching_enabled``) across many
-    cameras in one call.
+    (``worker_enabled`` / ``display_enabled`` / ``detection_enabled``)
+    across many cameras in one call.
 
     Mirrors the single PATCH mechanics. Unknown / cross-tenant
     ``camera_id`` values fall silently into ``not_found`` — never a 403
     (403 would leak existence; this is the tenant-isolation guard,
     relying on ``repo.get_camera``'s ``WHERE tenant_id`` filter). This
-    endpoint touches ONLY the four booleans — it never reads, writes,
+    endpoint touches ONLY the three booleans — it never reads, writes,
     logs, or audits an ``rtsp_url``.
     """
 
@@ -564,8 +539,6 @@ def bulk_update_cameras_endpoint(
         "worker_enabled",
         "display_enabled",
         "detection_enabled",
-        "clip_recording_enabled",
-        "live_matching_enabled",
     )
     toggle_values: dict[str, object] = {
         key: provided[key]
@@ -579,8 +552,7 @@ def bulk_update_cameras_endpoint(
                 "field": "toggles",
                 "message": (
                     "at least one of worker_enabled/display_enabled/"
-                    "detection_enabled/clip_recording_enabled/"
-                    "live_matching_enabled is required"
+                    "detection_enabled is required"
                 ),
             },
         )
@@ -666,8 +638,6 @@ def create_camera_endpoint(
                 worker_enabled=payload.worker_enabled,
                 display_enabled=payload.display_enabled,
                 detection_enabled=payload.detection_enabled,
-                clip_recording_enabled=payload.clip_recording_enabled,
-                live_matching_enabled=payload.live_matching_enabled,
                 recording_mode=payload.recording_mode,
                 camera_code=payload.camera_code,
                 zone=payload.zone,
@@ -732,10 +702,6 @@ def patch_camera_endpoint(
             values["display_enabled"] = provided["display_enabled"]
         if "detection_enabled" in provided:
             values["detection_enabled"] = provided["detection_enabled"]
-        if "clip_recording_enabled" in provided:
-            values["clip_recording_enabled"] = provided["clip_recording_enabled"]
-        if "live_matching_enabled" in provided:
-            values["live_matching_enabled"] = provided["live_matching_enabled"]
         if "recording_mode" in provided and provided["recording_mode"] is not None:
             values["recording_mode"] = provided["recording_mode"]
         if "capture_config" in provided and provided["capture_config"] is not None:

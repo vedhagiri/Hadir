@@ -196,10 +196,10 @@ def test_worker_does_not_emit_detection_events_live_deferred_to_reprocess(
     Architecture change (see ``reader.py`` — "Live workflow no longer
     emits detection_events rows or writes per-track face crops. Those
     are deferred to the manual reprocess pipelines (UC1 / UC2)").
-    This test guards that contract: even with ``live_matching_enabled=
-    True`` and a multi-track scripted feed, the worker must write ZERO
-    rows. Emitter correctness itself is covered by the direct
-    ``test_emit_*`` tests, which call ``emit_detection_event`` directly.
+    This test guards that contract: even with a multi-track scripted
+    feed, the worker must write ZERO rows. Emitter correctness itself
+    is covered by the direct ``test_emit_*`` tests, which call
+    ``emit_detection_event`` directly.
     """
     cam_id = _seed_camera(admin_engine, name="worker-test", plain_url="rtsp://fake/1")
 
@@ -242,8 +242,6 @@ def test_worker_does_not_emit_detection_events_live_deferred_to_reprocess(
             analyzer_consume_every_seq=True,
         ),
         capture_config={"min_face_quality_to_save": 0.0},
-        # Even with live matching ON, the live worker defers emission.
-        live_matching_enabled=True,
     )
 
     worker.start()
@@ -431,9 +429,6 @@ def test_worker_writes_health_snapshot(admin_engine) -> None:
         # the quality threshold so test bboxes (small) reach the
         # face-save path.
         capture_config={"min_face_quality_to_save": 0.0},
-        # Migration 0072: live matching is per-camera and defaults OFF;
-        # this test needs the full recognition → emit path on.
-        live_matching_enabled=True,
     )
     worker.start()
     deadline = time.time() + 5.0

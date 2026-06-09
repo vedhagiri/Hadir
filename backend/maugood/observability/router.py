@@ -563,6 +563,8 @@ class ProcessRowOut(BaseModel):
     swap_mb: Optional[float] = None
     threads: int = 0
     create_time: float = 0.0
+    status: str = ""
+    is_self: bool = False
 
 
 class ResourcesProcessesOut(BaseModel):
@@ -602,6 +604,8 @@ def get_resources_processes(
                 swap_mb=r.swap_mb,
                 threads=r.threads,
                 create_time=r.create_time,
+                status=r.status,
+                is_self=r.is_self,
             )
             for r in rows
         ],

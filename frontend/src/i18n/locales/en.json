@@ -576,7 +576,6 @@
   },
   "cameras": {
     "label": "Camera",
-    "matchingNeedsDetection": "Turn on Face detection first — matching only runs when detection is on.",
     "addTitle": "Add camera",
     "editTitle": "Edit",
     "fields": {
@@ -589,8 +588,6 @@
       "workerEnabled": "Capture worker",
       "displayEnabled": "Live preview",
       "detectionEnabled": "Face detection",
-      "matchingEnabled": "Face matching",
-      "clipRecordingEnabled": "Clip Saving",
       "clipDetectionSource": "Clip detection source",
       "captureSettings": "Capture settings",
       "maxFacesPerEvent": "Max faces per event",
@@ -608,8 +605,6 @@
       "workerEnabled": "When off, this camera stops detecting faces. No attendance impact for absent employees.",
       "displayEnabled": "When off, the worker keeps recording but this camera doesn't appear in Live Capture viewer.",
       "detectionEnabled": "When off, frames flow to the live preview but the analyzer skips detection — saves CPU when you only want monitoring without face capture.",
-      "matchingEnabled": "When off, faces are detected but not recognised against enrolled employees. Only runs while Face detection is on.",
-      "clipRecordingEnabled": "When off, detection keeps running but no clip segments are written to disk.",
       "maxFacesPerEvent": "1 to 50",
       "maxEventDurationSec": "5 to 600 seconds",
       "minFaceQualityToSave": "0.0 to 1.0 (higher = stricter)",
@@ -682,8 +677,7 @@
       "colWorker": "Worker",
       "colDisplay": "Display",
       "colDetection": "Detection",
-      "colMatching": "Matching",
-      "colClipSaving": "Clip Saving",
+      "colRecording": "Recording",
       "colActions": "Actions",
       "loading": "Loading…",
       "loadError": "Could not load cameras.",
@@ -691,8 +685,9 @@
       "switchWorkerTitle": "Click to toggle worker on/off",
       "switchDisplayTitle": "Click to toggle display on/off",
       "switchDetectionTitle": "Click to toggle face detection on/off (worker keeps streaming)",
-      "switchMatchingTitle": "Click to toggle face matching (recognition) on/off",
-      "switchClipTitle": "Click to toggle clip saving on/off (detection keeps running)"
+      "switchRecordingTitle": "Click to switch recording mode (Save Clips / Logs Only)",
+      "recordingClips": "Clips",
+      "recordingLogs": "Logs"
     },
     "bulk": {
       "regionAria": "Bulk actions for selected cameras",
@@ -703,8 +698,6 @@
       "worker": "Worker",
       "display": "Display",
       "detection": "Detection",
-      "matching": "Matching",
-      "clipSaving": "Clip Saving",
       "enable": "Enable",
       "disable": "Disable",
       "enableTitle": "Enable {{setting}} for {{count}} selected camera(s)",
@@ -795,19 +788,6 @@
     "resetButton": "Reset to defaults",
     "resetConfirm": {
       "title": "Reset to defaults?"
-    },
-    "liveMatching": {
-      "title": "Live identification",
-      "subtitle": "Master switch for real-time face matching from the RTSP stream. When off, the live pipeline runs person detection only — identification happens later via the manual UC1/UC2 reprocessors on saved clips.",
-      "bullet1": "Live RTSP stream + person bounding boxes remain on.",
-      "bullet2": "No embedding extraction, no matcher cache lookup, no detection_events insert.",
-      "bullet3": "No live attendance updates from the analyzer — only clip reprocess paths.",
-      "bullet4": "Clip recording continues; faces can be identified later on demand.",
-      "toggleLabel": "Live identification",
-      "statusOn": "On",
-      "statusOff": "Off",
-      "toastOn": "Live identification enabled — applying within 2 seconds.",
-      "toastOff": "Live identification disabled — applying within 2 seconds."
     },
     "clipPipeline": {
       "title": "Clip processing",
@@ -3399,7 +3379,7 @@
       "cards": {
         "activeCameras": "Active cameras",
         "rtspRunning": "RTSP running",
-        "clipSaving": "Clip saving",
+        "recording": "Recording",
         "encodingAlive": "Encoding alive"
       },
       "cols": {
@@ -3407,7 +3387,7 @@
         "workers": "Workers",
         "workerStatus": "Worker status",
         "rtsp": "RTSP",
-        "clipSaving": "Clip saving",
+        "recording": "Recording",
         "processing": "Processing"
       },
       "emptyPrefix": "No active camera workers. Add a camera under",
@@ -3654,22 +3634,18 @@
       "samples_other": "{{count}} samples"
     },
     "processes": {
-      "title": "Top processes — who's using CPU, memory and swap",
-      "note": "Host-wide. Refreshes every 10 s. Sort tab re-orders client-side.",
-      "tabCpu": "By CPU",
-      "tabMemory": "By Memory",
-      "tabSwap": "By Swap",
+      "title": "Running Processes",
+      "note": "top 20 by memory",
       "loading": "Sampling processes…",
       "empty": "No processes returned. The endpoint may have failed.",
+      "thisApp": "this app",
       "col": {
-        "process": "Process",
         "pid": "PID",
-        "cpu": "CPU %",
-        "memMb": "Memory MB",
-        "memPct": "Memory %",
-        "swap": "Swap MB",
-        "threads": "Threads",
-        "age": "Age"
+        "process": "Process",
+        "user": "User",
+        "cpu": "CPU",
+        "memory": "Memory",
+        "status": "Status"
       }
     }
   },

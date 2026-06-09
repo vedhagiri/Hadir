@@ -487,6 +487,10 @@ class ProcessRow:
     swap_mb: Optional[float] = None
     threads: int = 0
     create_time: float = 0.0
+    # psutil process status (sleeping / running / disk-sleep / …).
+    status: str = ""
+    # True for the backend's own process — the UI tags it "this app".
+    is_self: bool = False
 
 
 def _read_proc_swap_mb(pid: int) -> Optional[float]:
@@ -525,7 +529,7 @@ def read_top_processes(limit: int = 10) -> list[ProcessRow]:
     procs: list[Any] = []
     try:
         for proc in psutil.process_iter(
-            ["pid", "name", "username", "create_time"]
+            ["pid", "name", "username", "create_time", "status"]
         ):
             try:
                 proc.cpu_percent(interval=None)
@@ -567,6 +571,8 @@ def read_top_processes(limit: int = 10) -> list[ProcessRow]:
             rows.append(
                 ProcessRow(
                     pid=int(info["pid"]),
+                    status=str(info.get("status") or ""),
+                    is_self=int(info["pid"]) == os.getpid(),
                     name=str(info.get("name") or ""),
                     cmdline_short=cmd_short,
                     user=str(info.get("username") or ""),

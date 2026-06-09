@@ -60,7 +60,6 @@ from sqlalchemy import (
     create_engine,
     event,
     func,
-    text,
 )
 from sqlalchemy.dialects.postgresql import CITEXT, JSONB
 
@@ -568,19 +567,6 @@ tenant_settings = Table(
             '"resolution_max_height": null, '
             '"keep_chunks_after_merge": false}'
         ),
-    ),
-    # Migration 0059 — Admin toggle that disables every live face-
-    # matching surface (detection_events emission, embedding extraction,
-    # matcher_cache lookup, live attendance recompute trigger). When
-    # FALSE (the default since migration 0060) the analyzer runs YOLO
-    # body detection only — person bboxes drive the preview and clip-
-    # recording trigger; face matching happens later via the manual
-    # UC1/UC2 reprocessors on saved clips.
-    Column(
-        "live_matching_enabled",
-        Boolean,
-        nullable=False,
-        server_default=text("false"),
     ),
     # Migration 0069 — opt-in automatic clip-video reclamation. NULL
     # (the default) keeps the P25 retention sweep hands-off; a positive
@@ -1813,29 +1799,6 @@ cameras = Table(
     # pipeline" behaviour. See docs/phases/cameras-detection-toggle.md.
     Column(
         "detection_enabled", Boolean, nullable=False, server_default="true"
-    ),
-    # Migration 0049 — per-camera clip-recording gate. When False the
-    # capture pipeline continues (RTSP read, detection, tracking,
-    # detection_events) but no video is written to disk and no
-    # person_clips row is inserted. Default true preserves existing
-    # behaviour for all pre-migration cameras.
-    Column(
-        "clip_recording_enabled", Boolean, nullable=False, server_default="true"
-    ),
-    # Migration 0072 — per-camera live face-recognition/matching gate.
-    # Moves the control off the tenant-wide
-    # ``tenant_settings.live_matching_enabled`` (migration 0059) onto
-    # each camera. When False the analyzer skips face detection +
-    # embedding + matcher_cache calls for this camera (the analyzer
-    # auto-gates on ``detection_enabled AND live_matching_enabled``).
-    # server_default false is safe for out-of-band INSERTs; the API
-    # create path also defaults it False. Migration 0072 backfills
-    # existing rows from the legacy tenant-wide flag.
-    Column(
-        "live_matching_enabled",
-        Boolean,
-        nullable=False,
-        server_default="false",
     ),
     # P28.5b: per-camera capture knob bag. Defaults match the
     # prototype's tested constants. Schema is open by design — the

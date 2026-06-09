@@ -67,16 +67,10 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
   const [detectionEnabled, setDetectionEnabled] = useState(
     initial?.detection_enabled ?? true,
   );
-  const [clipRecordingEnabled, setClipRecordingEnabled] = useState(
-    initial?.clip_recording_enabled ?? true,
-  );
   // Migration 0075 — per-camera recording mode (save_clips | logs_only).
   // 'logs_only' is the system default (migration 0076).
   const [recordingMode, setRecordingMode] = useState<"save_clips" | "logs_only">(
     initial?.recording_mode ?? "logs_only",
-  );
-  const [matchingEnabled, setMatchingEnabled] = useState(
-    initial?.live_matching_enabled ?? true,
   );
   const [config, setConfig] = useState<CaptureConfig>(
     initial?.capture_config ?? DEFAULT_CAPTURE_CONFIG,
@@ -93,9 +87,7 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
     setWorkerEnabled(initial?.worker_enabled ?? true);
     setDisplayEnabled(initial?.display_enabled ?? true);
     setDetectionEnabled(initial?.detection_enabled ?? true);
-    setClipRecordingEnabled(initial?.clip_recording_enabled ?? true);
     setRecordingMode(initial?.recording_mode ?? "logs_only");
-    setMatchingEnabled(initial?.live_matching_enabled ?? true);
     setConfig(initial?.capture_config ?? DEFAULT_CAPTURE_CONFIG);
     setRtspUrl("");
     setShowSettings(false);
@@ -136,9 +128,7 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
           worker_enabled: workerEnabled,
           display_enabled: displayEnabled,
           detection_enabled: detectionEnabled,
-          clip_recording_enabled: clipRecordingEnabled,
           recording_mode: recordingMode,
-          live_matching_enabled: matchingEnabled,
           capture_config: config,
           brand: brandNorm,
         };
@@ -161,14 +151,8 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
         if (detectionEnabled !== initial.detection_enabled) {
           patchBody.detection_enabled = detectionEnabled;
         }
-        if (clipRecordingEnabled !== initial.clip_recording_enabled) {
-          patchBody.clip_recording_enabled = clipRecordingEnabled;
-        }
         if (recordingMode !== initial.recording_mode) {
           patchBody.recording_mode = recordingMode;
-        }
-        if (matchingEnabled !== initial.live_matching_enabled) {
-          patchBody.live_matching_enabled = matchingEnabled;
         }
         if (!configsEqual(config, initial.capture_config)) {
           patchBody.capture_config = config;
@@ -355,23 +339,6 @@ export function CameraDrawer({ mode, initial, onClose }: Props) {
               onChange={setDetectionEnabled}
               label={t("cameras.fields.detectionEnabled")}
               hint={t("cameras.hints.detectionEnabled")}
-            />
-            <ToggleRow
-              checked={matchingEnabled && detectionEnabled}
-              onChange={setMatchingEnabled}
-              disabled={!detectionEnabled}
-              label={t("cameras.fields.matchingEnabled")}
-              hint={
-                detectionEnabled
-                  ? t("cameras.hints.matchingEnabled")
-                  : t("cameras.matchingNeedsDetection")
-              }
-            />
-            <ToggleRow
-              checked={clipRecordingEnabled}
-              onChange={setClipRecordingEnabled}
-              label={t("cameras.fields.clipRecordingEnabled")}
-              hint={t("cameras.hints.clipRecordingEnabled")}
             />
             <Field
               label={t("cameras.recordingMode")}

@@ -40,14 +40,6 @@ export interface Camera {
   // keeps reading frames + driving live preview but the analyzer
   // skips the expensive detect() call and writes no detection_events.
   detection_enabled: boolean;
-  // Migration 0049 — per-camera gate for person-clip video recording.
-  // When disabled, the reader keeps reading + detection keeps running,
-  // but no video files are written and no person_clips rows are created.
-  clip_recording_enabled: boolean;
-  // Per-camera face-recognition (matching) gate. Matching only runs
-  // when detection_enabled is also true (runtime auto-gate). When
-  // false, detection still emits events but they stay unmatched.
-  live_matching_enabled: boolean;
   // Migration 0075 — per-camera recording mode. 'save_clips' writes
   // full MP4 video clips; 'logs_only' runs detection + writes a
   // lightweight presence log (no video file).
@@ -82,8 +74,6 @@ export interface CameraCreateInput {
   worker_enabled: boolean;
   display_enabled: boolean;
   detection_enabled: boolean;
-  clip_recording_enabled: boolean;
-  live_matching_enabled?: boolean;
   recording_mode?: "save_clips" | "logs_only";
   capture_config: CaptureConfig;
   brand?: string | null;
@@ -98,8 +88,6 @@ export interface CameraPatchInput {
   worker_enabled?: boolean;
   display_enabled?: boolean;
   detection_enabled?: boolean;
-  clip_recording_enabled?: boolean;
-  live_matching_enabled?: boolean;
   recording_mode?: "save_clips" | "logs_only";
   capture_config?: CaptureConfig;
   brand?: string | null;
@@ -148,7 +136,6 @@ export interface CameraExportItem {
   worker_enabled: boolean;
   display_enabled: boolean;
   detection_enabled: boolean;
-  clip_recording_enabled: boolean;
   capture_config: CaptureConfig;
   brand: string | null;
 }
@@ -170,8 +157,6 @@ export interface CameraBulkUpdateInput {
   worker_enabled?: boolean;
   display_enabled?: boolean;
   detection_enabled?: boolean;
-  clip_recording_enabled?: boolean;
-  live_matching_enabled?: boolean;
 }
 
 export interface CameraBulkUpdateResult {

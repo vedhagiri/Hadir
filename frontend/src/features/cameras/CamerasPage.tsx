@@ -31,8 +31,6 @@ const BULK_FIELDS = {
   worker_enabled: "worker",
   display_enabled: "display",
   detection_enabled: "detection",
-  clip_recording_enabled: "clipSaving",
-  live_matching_enabled: "matching",
 } as const;
 
 export function CamerasPage() {
@@ -184,22 +182,19 @@ export function CamerasPage() {
       patch: { detection_enabled: !cam.detection_enabled },
     });
   };
-  const toggleClipRecordingEnabled = (cam: Camera) => {
+  // Recording mode is a binary enum (save_clips ↔ logs_only) — the
+  // switch maps ON = Save Clips (writes MP4), OFF = Logs Only
+  // (presence row, no video). Lets the operator flip it inline
+  // without opening the drawer.
+  const toggleRecordingMode = (cam: Camera) => {
     patch.mutate({
       id: cam.id,
-      patch: { clip_recording_enabled: !cam.clip_recording_enabled },
+      patch: {
+        recording_mode:
+          cam.recording_mode === "save_clips" ? "logs_only" : "save_clips",
+      },
     });
   };
-  const toggleMatchingEnabled = (cam: Camera) => {
-    // Auto-gate: matching only runs with detection on. Guard here too
-    // so a programmatic call can't enable it on a detection-off camera.
-    if (!cam.detection_enabled) return;
-    patch.mutate({
-      id: cam.id,
-      patch: { live_matching_enabled: !cam.live_matching_enabled },
-    });
-  };
-
   return (
     <>
       <div className="page-header">
@@ -330,15 +325,14 @@ export function CamerasPage() {
               <th>{t("cameras.page.colWorker")}</th>
               <th>{t("cameras.page.colDisplay")}</th>
               <th>{t("cameras.page.colDetection")}</th>
-              <th>{t("cameras.page.colMatching")}</th>
-              <th>{t("cameras.page.colClipSaving")}</th>
+              <th>{t("cameras.page.colRecording")}</th>
               <th style={{ textAlign: "right" }}>{t("cameras.page.colActions")}</th>
             </tr>
           </thead>
           <tbody>
             {list.isLoading && (
               <tr>
-                <td colSpan={15} className="text-sm text-dim" style={{ padding: 16 }}>
+                <td colSpan={14} className="text-sm text-dim" style={{ padding: 16 }}>
                   {t("cameras.page.loading")}
                 </td>
               </tr>
@@ -346,7 +340,7 @@ export function CamerasPage() {
             {list.isError && (
               <tr>
                 <td
-                  colSpan={15}
+                  colSpan={14}
                   className="text-sm"
                   style={{ padding: 16, color: "var(--danger-text)" }}
                 >
@@ -424,23 +418,20 @@ export function CamerasPage() {
                   />
                 </td>
                 <td>
-                  <Switch
-                    checked={cam.live_matching_enabled && cam.detection_enabled}
-                    onChange={() => toggleMatchingEnabled(cam)}
-                    disabled={!cam.detection_enabled}
-                    title={
-                      cam.detection_enabled
-                        ? t("cameras.page.switchMatchingTitle")
-                        : t("cameras.matchingNeedsDetection")
-                    }
-                  />
-                </td>
-                <td>
-                  <Switch
-                    checked={cam.clip_recording_enabled}
-                    onChange={() => toggleClipRecordingEnabled(cam)}
-                    title={t("cameras.page.switchClipTitle")}
-                  />
+                  <div
+                    style={{ display: "flex", alignItems: "center", gap: 6 }}
+                  >
+                    <Switch
+                      checked={cam.recording_mode === "save_clips"}
+                      onChange={() => toggleRecordingMode(cam)}
+                      title={t("cameras.page.switchRecordingTitle")}
+                    />
+                    <span className="text-xs text-dim">
+                      {cam.recording_mode === "save_clips"
+                        ? t("cameras.page.recordingClips")
+                        : t("cameras.page.recordingLogs")}
+                    </span>
+                  </div>
                 </td>
                 <td style={{ textAlign: "right" }}>
                   <RowActionsMenu
@@ -454,7 +445,7 @@ export function CamerasPage() {
             })}
             {list.data && list.data.items.length === 0 && !list.isLoading && (
               <tr>
-                <td colSpan={15} className="text-sm text-dim" style={{ padding: 16 }}>
+                <td colSpan={14} className="text-sm text-dim" style={{ padding: 16 }}>
                   {t("cameras.page.empty")}
                 </td>
               </tr>
@@ -496,8 +487,8 @@ export function CamerasPage() {
 /**
  * Bulk Actions bar — appears above the table whenever ≥1 camera is
  * selected. Shows "N selected" plus an Enable / Disable pair for each of
- * the four operational settings (Worker / Display / Detection / Clip
- * Saving). Each button fires a single ``bulk-update`` with exactly one
+ * the three operational settings (Worker / Display / Detection). Each
+ * button fires a single ``bulk-update`` with exactly one
  * boolean field set across every selected camera. Buttons disable while a
  * mutation is in flight. Layout reuses the design's ``card`` + ``btn`` +
  * ``btn-sm`` classes; the small inline styles match the inline-style

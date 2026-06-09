@@ -1071,7 +1071,6 @@ class PipelineRtspOut(BaseModel):
 class PipelineRecordingCameraOut(BaseModel):
     camera_id: int
     camera_name: str
-    recording_enabled: bool
     recording_active: bool
     current_clip_id: Optional[int] = None
     elapsed_sec: float = 0.0
@@ -1203,7 +1202,7 @@ def get_pipeline_monitor(
                     select(
                         cameras.c.id,
                         cameras.c.name,
-                        cameras.c.clip_recording_enabled,
+                        cameras.c.worker_enabled,
                     ).where(cameras.c.tenant_id == scope.tenant_id)
                 ).all()
             )
@@ -1213,7 +1212,10 @@ def get_pipeline_monitor(
             "for tenant_id=%s",
             scope.tenant_id,
         )
-    enabled_camera_ids = {int(r.id) for r in cam_rows if r.clip_recording_enabled}
+    # A running worker always records per its ``recording_mode``; the
+    # surviving on/off gate is ``worker_enabled`` (a worker-disabled
+    # camera records nothing).
+    enabled_camera_ids = {int(r.id) for r in cam_rows if r.worker_enabled}
     recording.enabled_cameras = len(enabled_camera_ids)
     camera_names = {int(r.id): str(r.name) for r in cam_rows}
 
@@ -1233,7 +1235,6 @@ def get_pipeline_monitor(
             PipelineRecordingCameraOut(
                 camera_id=int(camera_id),
                 camera_name=camera_names.get(int(camera_id), f"Camera {camera_id}"),
-                recording_enabled=bool(rec.get("recording_enabled")),
                 recording_active=bool(rec.get("recording_active")),
                 current_clip_id=rec.get("current_clip_id"),
                 elapsed_sec=float(rec.get("elapsed_sec") or 0.0),

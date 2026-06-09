@@ -70,17 +70,6 @@ export const RESOLUTION_OPTIONS: readonly (number | null)[] = [
   null, 480, 720, 1080,
 ] as const;
 
-// Migration 0059 — live identification toggle. Sent / received on
-// /api/system/live-matching as a single ``{enabled: bool}`` payload.
-// Default is FALSE since migration 0060 — operators explicitly opt in.
-export interface LiveMatchingConfig {
-  enabled: boolean;
-}
-
-export const LIVE_MATCHING_DEFAULT: LiveMatchingConfig = {
-  enabled: false,
-};
-
 // Clip processing use cases — manual reprocessors that run against saved
 // clips. Sent / received on /api/system/clip-pipeline-config as a single
 // ``{use_cases: string[]}`` payload (subset of uc1/uc2, may be empty).
