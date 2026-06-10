@@ -38,6 +38,11 @@ class EmailMessage:
     from_name: str = ""
     # Each attachment is ``(filename, content_type, bytes)``.
     attachments: tuple[tuple[str, str, bytes], ...] = ()
+    # Inline (CID-referenced) images: ``(cid, content_type, bytes)``.
+    # The HTML references them as ``<img src="cid:{cid}">``. Gmail and
+    # Outlook strip inline SVG + ``data:`` URIs — multipart/related
+    # CID parts are the only portable way to embed images.
+    inline_images: tuple[tuple[str, str, bytes], ...] = ()
 
 
 class EmailSender(Protocol):
@@ -97,6 +102,18 @@ def _to_python_email(m: EmailMessage) -> PyEmailMessage:
     msg["Subject"] = m.subject
     msg.set_content(m.text or "(no text body)")
     msg.add_alternative(m.html, subtype="html")
+    if m.inline_images:
+        # Attach to the HTML alternative so it becomes
+        # multipart/related — clients render the cid: refs in place.
+        html_part = msg.get_payload()[-1]
+        for cid, ctype, data in m.inline_images:
+            maintype, _, subtype = ctype.partition("/")
+            html_part.add_related(
+                data,
+                maintype=maintype or "image",
+                subtype=subtype or "png",
+                cid=f"<{cid}>",
+            )
     for filename, ctype, data in m.attachments:
         maintype, _, subtype = ctype.partition("/")
         if not subtype:
@@ -187,6 +204,16 @@ class GraphSender:
                 "contentBytes": base64.b64encode(data).decode("ascii"),
             }
             for filename, ctype, data in m.attachments
+        ] + [
+            {
+                "@odata.type": "#microsoft.graph.fileAttachment",
+                "name": cid,
+                "contentType": ctype,
+                "contentBytes": base64.b64encode(data).decode("ascii"),
+                "contentId": cid,
+                "isInline": True,
+            }
+            for cid, ctype, data in m.inline_images
         ]
         return {
             "message": {

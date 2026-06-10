@@ -21,7 +21,10 @@ the queue drains (same contract as the user-notification worker).
 from __future__ import annotations
 
 import logging
+import mimetypes
 from datetime import date, datetime, time as dtime, timedelta
+from functools import lru_cache
+from pathlib import Path
 from typing import Optional
 
 from sqlalchemy import select
@@ -46,6 +49,20 @@ _CATEGORY_LABELS = {
     "late": "Late notifications",
     "absent": "Absent notifications",
 }
+
+# Static PNG assets shipped with the backend — referenced from the
+# email HTML via cid: (Gmail/Outlook strip inline SVG + data: URIs,
+# so CID inline attachments are the only portable embedding).
+_ASSET_DIR = Path(__file__).resolve().parent.parent / "emailing" / "templates" / "assets"
+
+
+@lru_cache(maxsize=8)
+def _asset_bytes(name: str) -> Optional[bytes]:
+    try:
+        return (_ASSET_DIR / name).read_bytes()
+    except OSError:
+        logger.warning("email asset missing: %s", name)
+        return None
 
 
 def _fmt_time(value: Optional[dtime], time_format: str) -> Optional[str]:
@@ -123,8 +140,14 @@ def _late_minutes(
     return minutes if minutes > 0 else None
 
 
-def _logo_data_url(conn: Connection, scope: TenantScope) -> Optional[str]:
-    from maugood.reporting.pdf import _logo_data_url as _encode  # noqa: PLC0415
+def _tenant_logo(
+    conn: Connection, scope: TenantScope
+) -> Optional[tuple[str, bytes]]:
+    """(mime, bytes) of the tenant's branding logo, or None.
+
+    SVG logos are skipped — mail clients don't render SVG even as an
+    inline attachment; the header falls back to the tenant name.
+    """
 
     row = conn.execute(
         select(tenant_branding.c.logo_path).where(
@@ -133,14 +156,21 @@ def _logo_data_url(conn: Connection, scope: TenantScope) -> Optional[str]:
     ).first()
     if row is None or not row.logo_path:
         return None
-    return _encode(str(row.logo_path))
+    path = Path(str(row.logo_path))
+    mime, _ = mimetypes.guess_type(path.name)
+    if not mime or not mime.startswith("image/") or mime == "image/svg+xml":
+        return None
+    try:
+        return mime, path.read_bytes()
+    except OSError:
+        return None
 
 
 def _build_message(
     *,
     sender: SenderConfig,
     tenant: dict,
-    logo_data_url: Optional[str],
+    tenant_logo: Optional[tuple[str, bytes]],
     recipient: str,
     recipient_kind: str,
     recipient_name: str,
@@ -184,11 +214,30 @@ def _build_message(
             f"Team attendance: {ctx['employee_name']} — {title} — {date_short}"
         )
 
+    inline_images: list[tuple[str, str, bytes]] = []
+    icon = _asset_bytes(f"icon_{status}.png")
+    icon_cid = None
+    if icon:
+        icon_cid = "status-icon"
+        inline_images.append((icon_cid, "image/png", icon))
+    logo_cid = None
+    if tenant_logo is not None:
+        logo_cid = "tenant-logo"
+        inline_images.append((logo_cid, tenant_logo[0], tenant_logo[1]))
+    brand = _asset_bytes("maugoodai_logo.png")
+    brand_cid = None
+    if brand:
+        brand_cid = "maugood-logo"
+        inline_images.append((brand_cid, "image/png", brand))
+
     html = render_attendance_email_html(
         context={
             "status": status,
             "tenant": tenant,
-            "logo_data_url": logo_data_url,
+            "logo_data_url": None,
+            "icon_cid": icon_cid,
+            "logo_cid": logo_cid,
+            "brand_cid": brand_cid,
             "recipient_kind": recipient_kind,
             "recipient_name": recipient_name,
             "employee": {
@@ -230,6 +279,7 @@ def _build_message(
         to=(recipient,),
         from_address=sender.from_address or "no-reply@example.com",
         from_name=sender.from_name,
+        inline_images=tuple(inline_images),
     )
     snapshot = {
         "subject": subject,
@@ -272,7 +322,7 @@ def drain_attendance_emails(*, scope: TenantScope) -> dict:
         tenant = _tenant_summary(conn, tenant_id=scope.tenant_id)
         if not (tenant.get("name") or "").strip():
             tenant["name"] = "Maugood"
-        logo_data_url = _logo_data_url(conn, scope)
+        tenant_logo = _tenant_logo(conn, scope)
         time_format = _time_format_for(conn, scope)
 
     if sender is None:
@@ -329,12 +379,21 @@ def drain_attendance_emails(*, scope: TenantScope) -> dict:
                         )
                         counts["skipped"] += 1
                         continue
+                if recipient.lower().endswith("@maugood.local"):
+                    # Placeholder / PDPL-redacted addresses are never
+                    # real mailboxes — sending them only burns the
+                    # provider's bounce budget and sender reputation.
+                    repo.mark_skipped(
+                        conn, scope, row_id=p.id, reason="placeholder_email"
+                    )
+                    counts["skipped"] += 1
+                    continue
                 shift = _shift_info(conn, scope, ctx["policy_id"])
 
             message, snapshot = _build_message(
                 sender=sender,
                 tenant=tenant,
-                logo_data_url=logo_data_url,
+                tenant_logo=tenant_logo,
                 recipient=recipient,
                 recipient_kind=p.recipient_kind,
                 recipient_name=recipient_name,

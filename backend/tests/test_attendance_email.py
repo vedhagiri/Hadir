@@ -1075,3 +1075,99 @@ def test_absent_sweep_fires_only_after_shift_end(
     finally:
         with admin_engine.begin() as conn:
             conn.execute(delete(employees).where(employees.c.id == emp2))
+
+
+# ---------------------------------------------------------------------------
+# Gmail-safe CID inline images
+# ---------------------------------------------------------------------------
+
+
+def test_emails_carry_cid_inline_images(
+    admin_engine: Engine, test_employee: dict
+) -> None:
+    """Every attendance email embeds the status icon (and brand logo)
+    as CID parts — Gmail strips inline SVG/data URIs, so the icons
+    must travel as multipart/related attachments."""
+
+    from maugood.emailing.providers import _to_python_email
+
+    today = _today_local()
+    _set_config(admin_engine, present=True)
+    _enable_email(admin_engine)
+    _insert_attendance(
+        admin_engine,
+        employee_id=test_employee["id"],
+        the_date=today,
+        in_time=time(7, 32),
+    )
+    engine = get_engine()
+    with engine.begin() as conn:
+        repo.enqueue(
+            conn,
+            TENANT,
+            employee_id=test_employee["id"],
+            the_date=today,
+            status="present",
+        )
+    recorder = _Recorder()
+    set_sender_factory(lambda _cfg: recorder)
+    drain_attendance_emails(scope=TENANT)
+
+    assert len(recorder.sent) == 1
+    msg = recorder.sent[0]
+    cids = {cid for cid, _, _ in msg.inline_images}
+    assert "status-icon" in cids
+    assert "maugood-logo" in cids
+    assert 'src="cid:status-icon"' in msg.html
+    assert "<svg" not in msg.html  # Gmail-stripped markup is gone
+
+    # The stdlib MIME build nests them as related image/png parts
+    # with matching Content-IDs.
+    mime = _to_python_email(msg)
+    related = [
+        p
+        for p in mime.walk()
+        if p.get_content_type() == "image/png" and p.get("Content-ID")
+    ]
+    found = {p.get("Content-ID") for p in related}
+    assert "<status-icon>" in found
+    assert "<maugood-logo>" in found
+
+
+def test_placeholder_addresses_never_emailed(
+    admin_engine: Engine, test_employee: dict
+) -> None:
+    """@maugood.local (seeded/PDPL-redacted) recipients are skipped —
+    they can only bounce and poison the sender reputation."""
+
+    today = _today_local()
+    _set_config(admin_engine, present=True)
+    _enable_email(admin_engine)
+    with admin_engine.begin() as conn:
+        conn.execute(
+            update(employees)
+            .where(employees.c.id == test_employee["id"])
+            .values(email="om9999@maugood.local")
+        )
+    engine = get_engine()
+    with engine.begin() as conn:
+        repo.enqueue(
+            conn,
+            TENANT,
+            employee_id=test_employee["id"],
+            the_date=today,
+            status="present",
+        )
+    recorder = _Recorder()
+    set_sender_factory(lambda _cfg: recorder)
+    counts = drain_attendance_emails(scope=TENANT)
+    assert counts["skipped"] == 1
+    assert recorder.sent == []
+    with engine.begin() as conn:
+        row = conn.execute(
+            select(attendance_email_log.c.last_error).where(
+                attendance_email_log.c.tenant_id == 1,
+                attendance_email_log.c.employee_id == test_employee["id"],
+            )
+        ).first()
+    assert row.last_error == "placeholder_email"

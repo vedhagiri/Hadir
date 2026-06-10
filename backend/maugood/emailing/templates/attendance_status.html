@@ -54,9 +54,9 @@
             <td style="padding:26px 32px 22px 32px;background:#ffffff;border-bottom:1px solid #eef1f4;">
               <table width="100%" cellpadding="0" cellspacing="0" border="0">
                 <tr>
-                  {% if logo_data_url %}
+                  {% if logo_cid or logo_data_url %}
                   <td valign="middle" style="width:64px;">
-                    <img src="{{ logo_data_url }}" alt="{{ tenant.name }}" width="56" height="56" style="display:block;border-radius:10px;">
+                    <img src="{{ ('cid:' ~ logo_cid) if logo_cid else logo_data_url }}" alt="{{ tenant.name }}" width="56" height="56" style="display:block;border-radius:10px;">
                   </td>
                   <td valign="middle" style="padding-inline-start:16px;">
                   {% else %}
@@ -79,6 +79,9 @@
               <table width="100%" cellpadding="0" cellspacing="0" border="0">
                 <tr>
                   <td align="center" style="padding:34px 32px 30px 32px;">
+                    {% if icon_cid %}
+                    <img src="cid:{{ icon_cid }}" alt="{{ title }}" width="72" height="72" style="display:inline-block;">
+                    {% else %}
                     <table cellpadding="0" cellspacing="0" border="0">
                       <tr>
                         <td align="center" valign="middle"
@@ -87,6 +90,7 @@
                         </td>
                       </tr>
                     </table>
+                    {% endif %}
                     <div style="font-size:26px;font-weight:800;color:#ffffff;letter-spacing:0.02em;margin-top:16px;text-shadow:0 1px 2px rgba(0,0,0,0.12);">{{ title }}</div>
                     <div style="font-size:13px;color:rgba(255,255,255,0.92);margin-top:6px;">{{ hero_sub }}</div>
                   </td>
@@ -261,7 +265,11 @@
                 <table width="100%" cellpadding="0" cellspacing="0" border="0">
                   <tr>
                     <td valign="middle" style="font-size:13px;font-weight:700;color:#10243e;">
+                      {% if brand_cid %}
+                      <img src="cid:{{ brand_cid }}" alt="MaugoodAI" height="28" style="display:block;height:28px;width:auto;">
+                      {% else %}
                       Maugood<span style="color:#0f766e;">AI</span>
+                      {% endif %}
                     </td>
                     <td valign="middle" align="right" style="font-size:11px;color:#9aa3ab;">
                       CCTV-based AI attendance system<br>Powered by Muscat Tech Solutions
