@@ -105,6 +105,31 @@ class Settings(BaseSettings):
     #                    viable.
     clip_saving_mode: str = "stream_copy"
 
+    # --- Detection reader (low-CPU multi-camera fix) -----------------------
+    # How the capture worker pulls frames for DETECTION (the analyzer):
+    #   * ``cv2``    — ``cv2.VideoCapture`` + ``cap.read()`` at the camera's
+    #                  native fps + native resolution. Decodes AND
+    #                  full-resolution YUV→BGR converts every frame. On a
+    #                  multi-camera 4 MP host this is the dominant CPU + RAM
+    #                  cost. The historical default.
+    #   * ``ffmpeg`` — one ffmpeg subprocess per camera that decodes once
+    #                  and emits a downscaled, fps-capped ``rawvideo`` pipe
+    #                  (``maugood.capture.ffmpeg_source``). Detection only
+    #                  needs small frames; with ``clip_saving_mode=
+    #                  stream_copy`` the saved clip comes from the segmenter,
+    #                  so downscaling here is free. This is the
+    #                  ``clips_preview_v2`` prototype design, proven to hold
+    #                  21 × 4 MP HEVC cameras with stable CPU + memory.
+    # Default stays ``cv2`` (no behaviour change on existing deployments);
+    # set ``MAUGOOD_DETECTION_READER=ffmpeg`` to enable the low-CPU reader.
+    detection_reader: str = "cv2"
+    # Output fps + box the ffmpeg detection reader produces. 4 fps / VGA
+    # matches the prototype and is ample for dwell-based presence + YOLO
+    # at det_size ≤ 640. Aspect ratio is preserved (padded into the box).
+    detection_reader_fps: int = 4
+    detection_reader_width: int = 640
+    detection_reader_height: int = 480
+
     # --- RTSP capture resilience (dead-camera timeout fix) -----------------
     # An unreachable camera must never block its worker (or the host)
     # for the OS TCP-SYN default of ~30 s. Two independent guards, both

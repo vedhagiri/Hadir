@@ -1868,6 +1868,55 @@ class CaptureWorker:
     # ------------------------------------------------------------------
     # Reader thread
 
+    def _use_ffmpeg_reader(self) -> bool:
+        """Decide whether this worker reads via the low-CPU ffmpeg
+        downscale pipe (vs ``cv2.VideoCapture`` at native res/fps).
+
+        Conditions (all required):
+        * The production ``default_capture_factory`` is in use — tests
+          inject their own factory and must keep getting it.
+        * ``MAUGOOD_DETECTION_READER=ffmpeg`` (opt-in; default ``cv2``).
+        * The reader frames are detection-only for this camera, i.e.
+          either it's ``logs_only`` (never saves video) OR the tenant
+          uses ``clip_saving_mode=stream_copy`` (the clip comes from the
+          ``RtspSegmenter``, not these frames). In legacy ``encode``
+          mode a ``save_clips`` camera still needs full-resolution frames
+          to build the MP4, so it stays on cv2.
+        """
+
+        if self._capture_factory is not default_capture_factory:
+            return False
+        if get_settings().detection_reader != "ffmpeg":
+            return False
+        return (
+            self.get_recording_mode() == "logs_only"
+            or self._clip_saving_mode == "stream_copy"
+        )
+
+    def _open_capture_source(self) -> FrameSource:
+        """Open the per-camera frame source for one connection attempt.
+
+        Returns the low-CPU ffmpeg downscale pipe when enabled (see
+        ``_use_ffmpeg_reader``), otherwise the injected/default cv2
+        capture factory. Both satisfy the ``FrameSource`` Protocol so
+        the read loop below is identical for either.
+        """
+
+        if self._use_ffmpeg_reader():
+            from maugood.capture.ffmpeg_source import (  # noqa: PLC0415
+                FfmpegFrameSource,
+            )
+
+            s = get_settings()
+            return FfmpegFrameSource(
+                self._rtsp_url_plain,
+                fps=s.detection_reader_fps,
+                width=s.detection_reader_width,
+                height=s.detection_reader_height,
+                read_timeout_s=max(10.0, float(s.rtsp_read_timeout_sec) * 2.0),
+            )
+        return self._capture_factory(self._rtsp_url_plain)
+
     def _run_reader(self) -> None:
         """Outer reconnect loop + inner read loop. Native FPS."""
 
@@ -1926,7 +1975,7 @@ class CaptureWorker:
                         backoff = self._bump_backoff(backoff)
                         continue
 
-                cap = self._capture_factory(self._rtsp_url_plain)
+                cap = self._open_capture_source()
                 if not cap.isOpened():
                     self._set_status("reconnecting", error="could not open stream")
                     self._record_unreachable("could not open stream")
