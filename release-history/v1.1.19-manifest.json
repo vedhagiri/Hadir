@@ -1,0 +1,24 @@
+{
+  "version": "1.1.19",
+  "previous_version": "1.1.18",
+  "commit_id": "903692c7bb1011862ea5a123abf38ec0ce6b37f8",
+  "previous_commit_id": "7735f84aebb1bb01947e5f35ac9cde261406f7ed",
+  "all_new_install": false,
+  "new_migrations": [],
+  "services_changed": {
+    "backend": true,
+    "frontend": true,
+    "nginx": false,
+    "postgres": false
+  },
+  "compose_changed": false,
+  "https_compose_changed": false,
+  "env_keys_added": [
+    "MAUGOOD_DETECTION_READER",
+    "MAUGOOD_DETECTION_READER_FPS",
+    "MAUGOOD_DETECTION_READER_HEIGHT",
+    "MAUGOOD_DETECTION_READER_WIDTH"
+  ],
+  "env_keys_removed": [],
+  "upgrade_scripts": []
+}
