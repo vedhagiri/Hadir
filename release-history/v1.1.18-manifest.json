@@ -1,0 +1,29 @@
+{
+  "version": "1.1.18",
+  "previous_version": "1.1.17",
+  "commit_id": "7735f84aebb1bb01947e5f35ac9cde261406f7ed",
+  "previous_commit_id": "156cbe1c5d499e98fe50f7dbe88464374d080e66",
+  "all_new_install": false,
+  "new_migrations": [
+    "0071_index_drift_retention_default.py",
+    "0072_cameras_live_matching.py",
+    "0073_tenant_settings_clip_pipeline_use_cases.py",
+    "0074_drop_clip_detection_source.py",
+    "0075_cameras_recording_mode.py",
+    "0076_cameras_default_logs_only.py",
+    "0077_remove_uc3.py",
+    "0078_remove_live_matching.py",
+    "0079_remove_clip_recording.py"
+  ],
+  "services_changed": {
+    "backend": true,
+    "frontend": true,
+    "nginx": false,
+    "postgres": false
+  },
+  "compose_changed": true,
+  "https_compose_changed": false,
+  "env_keys_added": [],
+  "env_keys_removed": [],
+  "upgrade_scripts": []
+}
