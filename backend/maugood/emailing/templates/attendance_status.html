@@ -1,0 +1,291 @@
+<!--
+  Maugood attendance status email (Present / Late / Absent).
+
+  Port of the CEO-approved design (docs/email-samples/attendance/).
+  Inline styles only — Gmail / Outlook / mobile clients drop <style>
+  blocks. The status hero uses a CSS gradient with a solid
+  background-color fallback; the person+badge icon is inline SVG with
+  the status word as a text fallback for clients that strip SVG.
+
+  Context keys:
+    status            'present' | 'late' | 'absent'
+    tenant            {name}
+    logo_data_url     data: URL for the tenant logo (optional)
+    employee          {name, code, department}
+    date_label        e.g. "Wednesday, 10 June 2026"
+    date_short        e.g. "Wed, 10 June 2026"
+    check_in_label    formatted time or None
+    check_out_label   formatted time or None
+    total_label       e.g. "8h 02m" or None
+    late_minutes      int or None (late only)
+    shift_label       e.g. "07:30 AM – 03:30 PM" or None
+    grace_label       e.g. "15 minutes" or None (late only)
+    category_label    e.g. "Present notifications" (footer opt-out text)
+    app_version       e.g. "1.1.19"
+-->
+{% if status == 'present' %}
+  {% set grad_a, grad_b, deep = '#0ba360', '#16c79a', '#0a8a52' %}
+  {% set soft, soft_border = '#e7f7ef', '#c4ead7' %}
+  {% set title = 'Present' %}
+  {% set hero_sub = 'Attendance recorded successfully — on time' %}
+{% elif status == 'late' %}
+  {% set grad_a, grad_b, deep = '#e88f1f', '#f5b942', '#b45309' %}
+  {% set soft, soft_border = '#fdf4e3', '#f3ddb0' %}
+  {% set title = 'Late Arrival' %}
+  {% set hero_sub = 'Checked in ' ~ (late_minutes or '') ~ ' minutes after shift start' if late_minutes else 'Checked in after shift start' %}
+{% else %}
+  {% set grad_a, grad_b, deep = '#d6453d', '#ef7468', '#b91c1c' %}
+  {% set soft, soft_border = '#fdefee', '#f2c9c5' %}
+  {% set title = 'Absent' %}
+  {% set hero_sub = 'No attendance recorded for this day' %}
+{% endif %}
+<!doctype html>
+<html lang="en">
+<body style="margin:0;padding:0;background:#eef1f5;font-family:'Segoe UI',Arial,Helvetica,sans-serif;color:#1f2937;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#eef1f5;padding:32px 0;">
+    <tr>
+      <td align="center">
+
+        <table width="620" cellpadding="0" cellspacing="0" border="0"
+               style="background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e3e8ee;box-shadow:0 10px 30px rgba(16,42,67,0.10);">
+
+          <!-- Brand header: tenant logo -->
+          <tr>
+            <td style="padding:26px 32px 22px 32px;background:#ffffff;border-bottom:1px solid #eef1f4;">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  {% if logo_data_url %}
+                  <td valign="middle" style="width:64px;">
+                    <img src="{{ logo_data_url }}" alt="{{ tenant.name }}" width="56" height="56" style="display:block;border-radius:10px;">
+                  </td>
+                  <td valign="middle" style="padding-inline-start:16px;">
+                  {% else %}
+                  <td valign="middle">
+                  {% endif %}
+                    <div style="font-size:17px;font-weight:700;letter-spacing:0.01em;color:#10243e;">{{ tenant.name }}</div>
+                    <div style="font-size:11.5px;color:#7b8794;letter-spacing:0.14em;text-transform:uppercase;margin-top:2px;">Attendance Notification</div>
+                  </td>
+                  <td valign="middle" align="right" style="font-size:12px;color:#7b8794;">
+                    {{ date_short }}
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Status hero -->
+          <tr>
+            <td style="padding:0;background:linear-gradient(135deg,{{ grad_a }} 0%,{{ grad_b }} 100%);background-color:{{ grad_a }};" align="center">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td align="center" style="padding:34px 32px 30px 32px;">
+                    <table cellpadding="0" cellspacing="0" border="0">
+                      <tr>
+                        <td align="center" valign="middle"
+                            style="width:72px;height:72px;background:#ffffff;border-radius:50%;box-shadow:0 6px 18px rgba(0,0,0,0.18);">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 48 48"><circle cx="19" cy="13.5" r="7.5" fill="#3d4854"/><path d="M5.5 41c0-8.6 6.1-14.5 13.5-14.5 3.4 0 6.4 1.2 8.7 3.2 a13.5 13.5 0 0 0-5.2 10.1l0 1.2z" fill="#3d4854"/><circle cx="34" cy="32.5" r="11.5" fill="{{ grad_a }}" stroke="#ffffff" stroke-width="2.5"/>{% if status == 'present' %}<polyline points="29.5,32.5 33,36 39,29.5" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>{% elif status == 'late' %}<circle cx="34" cy="32.5" r="6.2" fill="none" stroke="#ffffff" stroke-width="2.2"/><polyline points="34,28.8 34,32.5 37,34.2" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>{% else %}<line x1="30.5" y1="29" x2="37.5" y2="36" stroke="#ffffff" stroke-width="3" stroke-linecap="round"/><line x1="37.5" y1="29" x2="30.5" y2="36" stroke="#ffffff" stroke-width="3" stroke-linecap="round"/>{% endif %}</svg>
+                        </td>
+                      </tr>
+                    </table>
+                    <div style="font-size:26px;font-weight:800;color:#ffffff;letter-spacing:0.02em;margin-top:16px;text-shadow:0 1px 2px rgba(0,0,0,0.12);">{{ title }}</div>
+                    <div style="font-size:13px;color:rgba(255,255,255,0.92);margin-top:6px;">{{ hero_sub }}</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Greeting -->
+          <tr>
+            <td style="padding:26px 32px 0 32px;font-size:14px;line-height:1.65;">
+              <p style="margin:0 0 8px 0;">Dear <strong>{{ recipient_name | default(employee.name) }}</strong>,</p>
+              <p style="margin:0;color:#3d4854;">
+                {% if recipient_kind == 'manager' %}
+                {% if status == 'present' %}
+                Your team member <strong>{{ employee.name }}</strong> ({{ employee.code }}) has been recorded as
+                <strong style="color:{{ deep }};">Present</strong> for <strong>{{ date_label }}</strong>.
+                {% elif status == 'late' %}
+                Your team member <strong>{{ employee.name }}</strong> ({{ employee.code }}) checked in{% if late_minutes %} <strong style="color:{{ deep }};">{{ late_minutes }} minutes late</strong>{% endif %} on
+                <strong>{{ date_label }}</strong> and has been recorded as
+                <strong style="color:{{ deep }};">Late</strong>.
+                {% else %}
+                No attendance was recorded for your team member <strong>{{ employee.name }}</strong> ({{ employee.code }}) on
+                <strong>{{ date_label }}</strong>. Their status has been marked as
+                <strong style="color:{{ deep }};">Absent</strong>.
+                {% endif %}
+                {% else %}
+                {% if status == 'present' %}
+                Your attendance for <strong>{{ date_label }}</strong> has been recorded as
+                <strong style="color:{{ deep }};">Present</strong>. Have a productive day!
+                {% elif status == 'late' %}
+                You checked in{% if late_minutes %} <strong style="color:{{ deep }};">{{ late_minutes }} minutes late</strong>{% endif %} on
+                <strong>{{ date_label }}</strong>. Your attendance has been recorded as
+                <strong style="color:{{ deep }};">Late</strong>.
+                {% else %}
+                No attendance was recorded for you on <strong>{{ date_label }}</strong>.
+                Your status for the day has been marked as
+                <strong style="color:{{ deep }};">Absent</strong>.
+                {% endif %}
+                {% endif %}
+              </p>
+            </td>
+          </tr>
+
+          <!-- Time tiles -->
+          <tr>
+            <td style="padding:22px 32px 0 32px;">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td align="center" style="width:33%;background:#f7f9fb;border:1px solid #e8edf2;border-radius:12px;padding:16px 8px;">
+                    <div style="font-size:10.5px;letter-spacing:0.12em;color:#7b8794;font-weight:700;">CHECK-IN</div>
+                    {% if check_in_label %}
+                    <div style="font-size:22px;font-weight:800;color:{{ deep if status != 'absent' else '#1f2937' }};margin-top:6px;">{{ check_in_label }}</div>
+                    {% if status == 'late' and late_minutes %}
+                    <div style="font-size:10.5px;color:{{ deep }};font-weight:700;margin-top:3px;letter-spacing:0.06em;">+{{ late_minutes }} MIN</div>
+                    {% else %}
+                    <div style="font-size:10.5px;color:#9aa3ab;font-weight:600;margin-top:3px;">&nbsp;</div>
+                    {% endif %}
+                    {% else %}
+                    <div style="font-size:22px;font-weight:800;color:#9aa3ab;margin-top:6px;">&mdash;</div>
+                    <div style="font-size:10.5px;color:#9aa3ab;font-weight:600;margin-top:3px;letter-spacing:0.06em;">NOT RECORDED</div>
+                    {% endif %}
+                  </td>
+                  <td style="width:12px;font-size:0;">&nbsp;</td>
+                  <td align="center" style="width:33%;background:#f7f9fb;border:1px solid #e8edf2;border-radius:12px;padding:16px 8px;">
+                    <div style="font-size:10.5px;letter-spacing:0.12em;color:#7b8794;font-weight:700;">CHECK-OUT</div>
+                    {% if check_out_label %}
+                    <div style="font-size:22px;font-weight:800;color:#1f2937;margin-top:6px;">{{ check_out_label }}</div>
+                    <div style="font-size:10.5px;color:#9aa3ab;font-weight:600;margin-top:3px;">&nbsp;</div>
+                    {% else %}
+                    <div style="font-size:22px;font-weight:800;color:#9aa3ab;margin-top:6px;">&mdash;</div>
+                    <div style="font-size:10.5px;color:#9aa3ab;font-weight:600;margin-top:3px;letter-spacing:0.06em;">NOT RECORDED</div>
+                    {% endif %}
+                  </td>
+                  <td style="width:12px;font-size:0;">&nbsp;</td>
+                  <td align="center" style="width:33%;background:#f7f9fb;border:1px solid #e8edf2;border-radius:12px;padding:16px 8px;">
+                    <div style="font-size:10.5px;letter-spacing:0.12em;color:#7b8794;font-weight:700;">TOTAL HOURS</div>
+                    {% if total_label %}
+                    <div style="font-size:22px;font-weight:800;color:#1f2937;margin-top:6px;">{{ total_label }}</div>
+                    <div style="font-size:10.5px;color:#9aa3ab;font-weight:600;margin-top:3px;">&nbsp;</div>
+                    {% else %}
+                    <div style="font-size:22px;font-weight:800;color:#9aa3ab;margin-top:6px;">&mdash;</div>
+                    <div style="font-size:10.5px;color:#9aa3ab;font-weight:600;margin-top:3px;">&nbsp;</div>
+                    {% endif %}
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Employee details -->
+          <tr>
+            <td style="padding:22px 32px 0 32px;">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #e8edf2;border-radius:12px;">
+                <tr>
+                  <td style="padding:6px 20px;">
+                    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:13px;">
+                      <tr>
+                        <td style="color:#7b8794;padding:10px 0;width:42%;border-bottom:1px solid #eef1f4;">Employee name</td>
+                        <td style="font-weight:600;color:#1f2937;padding:10px 0;border-bottom:1px solid #eef1f4;">{{ employee.name }}</td>
+                      </tr>
+                      <tr>
+                        <td style="color:#7b8794;padding:10px 0;border-bottom:1px solid #eef1f4;">Employee ID</td>
+                        <td style="font-weight:600;color:#1f2937;padding:10px 0;border-bottom:1px solid #eef1f4;">{{ employee.code }}</td>
+                      </tr>
+                      {% if employee.department %}
+                      <tr>
+                        <td style="color:#7b8794;padding:10px 0;border-bottom:1px solid #eef1f4;">Department</td>
+                        <td style="font-weight:600;color:#1f2937;padding:10px 0;border-bottom:1px solid #eef1f4;">{{ employee.department }}</td>
+                      </tr>
+                      {% endif %}
+                      <tr>
+                        <td style="color:#7b8794;padding:10px 0;border-bottom:1px solid #eef1f4;">Date</td>
+                        <td style="font-weight:600;color:#1f2937;padding:10px 0;border-bottom:1px solid #eef1f4;">{{ date_label }}</td>
+                      </tr>
+                      <tr>
+                        <td style="color:#7b8794;padding:10px 0;border-bottom:{{ '1px solid #eef1f4' if shift_label or grace_label else 'none' }};">Status</td>
+                        <td style="font-weight:600;padding:10px 0;border-bottom:{{ '1px solid #eef1f4' if shift_label or grace_label else 'none' }};"><span style="color:{{ deep }};font-weight:800;">{{ title }}</span></td>
+                      </tr>
+                      {% if shift_label %}
+                      <tr>
+                        <td style="color:#7b8794;padding:10px 0;border-bottom:{{ '1px solid #eef1f4' if grace_label else 'none' }};">Shift</td>
+                        <td style="font-weight:600;color:#1f2937;padding:10px 0;border-bottom:{{ '1px solid #eef1f4' if grace_label else 'none' }};">{{ shift_label }}</td>
+                      </tr>
+                      {% endif %}
+                      {% if grace_label %}
+                      <tr>
+                        <td style="color:#7b8794;padding:10px 0;border-bottom:none;">Grace period</td>
+                        <td style="font-weight:600;color:#1f2937;padding:10px 0;border-bottom:none;">{{ grace_label }}</td>
+                      </tr>
+                      {% endif %}
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          {% if status == 'late' and recipient_kind != 'manager' %}
+          <tr>
+            <td style="padding:16px 32px 0 32px;">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:{{ soft }};border:1px solid {{ soft_border }};border-radius:10px;">
+                <tr>
+                  <td style="padding:12px 16px;font-size:12.5px;line-height:1.6;color:#4b5563;">
+                    Late due to an approved reason? Submit an <strong>exception request</strong>
+                    from My Requests in Maugood and your manager will review it.
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          {% elif status == 'absent' and recipient_kind != 'manager' %}
+          <tr>
+            <td style="padding:16px 32px 0 32px;">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:{{ soft }};border:1px solid {{ soft_border }};border-radius:10px;">
+                <tr>
+                  <td style="padding:12px 16px;font-size:12.5px;line-height:1.6;color:#4b5563;">
+                    On leave, or is this incorrect? Submit a <strong>leave or exception
+                    request</strong> from My Requests in Maugood &mdash; once approved, this
+                    day is recomputed automatically.
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          {% endif %}
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:22px 32px 20px 32px;">
+              <div style="border-top:1px solid #eef1f4;padding-top:16px;">
+                <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                  <tr>
+                    <td valign="middle" style="font-size:13px;font-weight:700;color:#10243e;">
+                      Maugood<span style="color:#0f766e;">AI</span>
+                    </td>
+                    <td valign="middle" align="right" style="font-size:11px;color:#9aa3ab;">
+                      CCTV-based AI attendance system<br>Powered by Muscat Tech Solutions
+                    </td>
+                  </tr>
+                </table>
+                <div style="font-size:11px;color:#9aa3ab;line-height:1.6;margin-top:12px;">
+                  {% if recipient_kind == 'manager' %}
+                  You&rsquo;re receiving this as the reporting manager of
+                  <strong style="color:#7b8794;">{{ employee.name }}</strong>.
+                  {% endif %}
+                  You&rsquo;re receiving this because <strong style="color:#7b8794;">{{ category_label }}</strong>
+                  are enabled for {{ tenant.name }}. An administrator can manage this in
+                  <strong style="color:#7b8794;">Settings &rarr; Notifications</strong> in Maugood.
+                </div>
+              </div>
+            </td>
+          </tr>
+
+        </table>
+
+        <div style="font-size:11px;color:#aab3bc;padding:14px 0;">&copy; {{ date_label[-4:] }} Muscat Tech Solutions &middot; Maugood{% if app_version %} v{{ app_version }}{% endif %}</div>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

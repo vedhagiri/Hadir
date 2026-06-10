@@ -276,6 +276,30 @@
       "category": "Category",
       "inApp": "In-app bell",
       "email": "Email"
+    },
+    "attendanceEmail": {
+      "title": "Attendance emails to employees",
+      "subtitle": "Send each employee a branded email when their day is recorded — Present and Late go out at first check-in, Absent goes out after the day ends. Delivery uses the provider from Settings → Email (it must be enabled there) and applies tenant-wide; recent deliveries are listed below for troubleshooting.",
+      "present": "Present notifications",
+      "late": "Late notifications",
+      "absent": "Absent notifications",
+      "logTitle": "Recent deliveries",
+      "logEmpty": "No attendance emails yet. They will appear here once a toggle is on and attendance is recorded.",
+      "colEmployee": "Employee",
+      "colDate": "Date",
+      "colStatus": "Status",
+      "colRecipient": "Recipient",
+      "colDelivery": "Delivery",
+      "presentShort": "Present",
+      "lateShort": "Late",
+      "absentShort": "Absent",
+      "outcome": {
+        "sent": "Sent",
+        "failed": "Failed",
+        "skipped": "Skipped",
+        "pending": "Pending"
+      },
+      "managerCopy": "Manager"
     }
   },
   "settings": {
@@ -2463,7 +2487,33 @@
       "earlyOut": "Early out",
       "shortHours": "Short hours",
       "ot": "OT {{value}}"
-    }
+    },
+    "sendEmails": "Send notifications",
+    "sendingEmails": "Sending…",
+    "sendEmailsTooltip": "Email each employee their attendance status for the selected date (Present / Late / Absent). Already-notified employees are skipped.",
+    "sendEmailsResult": "Attendance emails: {{sent}} sent, {{already}} already sent earlier, {{skipped}} skipped, {{failed}} failed.",
+    "sendEmailsFailed": "Sending attendance emails failed",
+    "sendEmailsSelected": "Send to {{count}} selected",
+    "selectAllAria": "Select all visible employees for notification",
+    "selectRowAria": "Select {{name}} for notification",
+    "sendDismiss": "Dismiss",
+    "sendNoTargets": "No employees matched — nobody has a status for today yet.",
+    "sendStatus": {
+      "present": "Present",
+      "late": "Late",
+      "absent": "Absent"
+    },
+    "sendOutcome": {
+      "sent": "Sent",
+      "already_sent": "Already sent",
+      "failed": "Failed",
+      "skipped": "Skipped",
+      "pending": "Pending",
+      "no_status": "No status yet",
+      "toggle_off": "Toggle off"
+    },
+    "resendLabel": "Resend even if already sent",
+    "resendTooltip": "Tick to re-send notifications that were already delivered for this date — useful for testing or after fixing an email problem."
   },
   "dashboard": {
     "common": {

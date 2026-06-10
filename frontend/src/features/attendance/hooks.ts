@@ -119,3 +119,56 @@ export function useEmployeeDayEvents(
     enabled: employeeId !== null && isoDate !== null,
   });
 }
+
+
+// Manual attendance email send (0080, hidden Shift+A button on the
+// Daily attendance page). Queues today's statuses + drains in one call.
+export interface SendResultItem {
+  employee_id: number;
+  employee_name: string;
+  employee_code: string;
+  status: "present" | "late" | "absent" | null;
+  outcome:
+    | "sent"
+    | "already_sent"
+    | "failed"
+    | "skipped"
+    | "pending"
+    | "no_status"
+    | "toggle_off";
+  recipient_email: string | null;
+  error: string | null;
+}
+
+export interface SendTodayResult {
+  date: string;
+  considered: number;
+  queued: number;
+  already_queued: number;
+  no_status: number;
+  toggle_off: number;
+  sent: number;
+  failed: number;
+  skipped: number;
+  results: SendResultItem[];
+}
+
+export function useSendTodayAttendanceEmails() {
+  return useMutation({
+    mutationFn: (input: {
+      employeeIds?: number[];
+      date?: string;
+      resend?: boolean;
+    }) =>
+      api<SendTodayResult>("/api/attendance-email/send-today", {
+        method: "POST",
+        body: {
+          ...(input.employeeIds && input.employeeIds.length > 0
+            ? { employee_ids: input.employeeIds }
+            : {}),
+          ...(input.date ? { date: input.date } : {}),
+          ...(input.resend ? { resend: true } : {}),
+        },
+      }),
+  });
+}

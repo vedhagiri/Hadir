@@ -51,3 +51,41 @@ export interface NotificationPreference {
 export interface PreferenceListResponse {
   items: NotificationPreference[];
 }
+
+// --- Attendance status emails (0080) ---------------------------------------
+// Tenant-wide Admin toggles + read-only delivery log. Recipients are
+// employees (by their employee email), so these are not per-user
+// preference rows — a separate config bag on tenant_settings.
+
+export type AttendanceEmailStatus = "present" | "late" | "absent";
+
+export interface AttendanceEmailConfig {
+  present: boolean;
+  late: boolean;
+  absent: boolean;
+}
+
+export interface AttendanceEmailLogItem {
+  id: number;
+  employee_id: number;
+  employee_name: string;
+  employee_code: string;
+  date: string;
+  status: AttendanceEmailStatus;
+  recipient_kind: "employee" | "manager";
+  recipient_email: string | null;
+  subject: string | null;
+  attempts: number;
+  sent_at: string | null;
+  failed_at: string | null;
+  skipped_at: string | null;
+  last_error: string | null;
+  created_at: string | null;
+}
+
+export interface AttendanceEmailLogResponse {
+  items: AttendanceEmailLogItem[];
+  total: number;
+  page: number;
+  page_size: number;
+}

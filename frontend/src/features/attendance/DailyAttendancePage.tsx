@@ -8,7 +8,7 @@
 // union of department membership + manager_assignments (handled in
 // the router, not here).
 
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { AnomalyInfoBanner } from "../../components/AnomalyNote";
@@ -22,7 +22,12 @@ import { useTenantDateTime } from "../../util/datetime";
 import { useDepartments } from "../departments/hooks";
 import { useEmployeeList, useMyTeamList } from "../employees/hooks";
 import { AttendanceDrawer } from "./AttendanceDrawer";
-import { useAttendance, useRegenerateAttendance } from "./hooks";
+import {
+  useAttendance,
+  useRegenerateAttendance,
+  useSendTodayAttendanceEmails,
+} from "./hooks";
+import type { SendTodayResult } from "./hooks";
 import { formatMinutes } from "./timeFormat";
 import type { AttendanceItem } from "./types";
 
@@ -49,6 +54,74 @@ export function DailyAttendancePage() {
   const [regenInfo, setRegenInfo] = useState<string | null>(null);
   const [pdfModalOpen, setPdfModalOpen] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
+
+  // Hidden manual email-send mode (0080). Revealed by Shift+A —
+  // an operator chord, deliberately not in any menu. Admin/HR only;
+  // ignored while typing in an input/textarea/select. While visible,
+  // the table gains a checkbox column for targeting specific
+  // employees; no selection = send to everyone with a status today.
+  const [sendBtnVisible, setSendBtnVisible] = useState(false);
+  const [sendResult, setSendResult] = useState<SendTodayResult | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [resendMode, setResendMode] = useState(false);
+  const sendEmails = useSendTodayAttendanceEmails();
+  useEffect(() => {
+    if (!isAdminLike) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.shiftKey || (e.key !== "A" && e.key !== "a")) return;
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName ?? "";
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        el?.isContentEditable
+      ) {
+        return;
+      }
+      setSendBtnVisible((v) => {
+        if (v) {
+          // Leaving send mode clears the selection + results.
+          setSelectedIds(new Set());
+          setSendResult(null);
+          setSendError(null);
+          setResendMode(false);
+        }
+        return !v;
+      });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isAdminLike]);
+
+  const toggleSelected = (employeeId: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(employeeId)) next.delete(employeeId);
+      else next.add(employeeId);
+      return next;
+    });
+  };
+
+  const onSendEmails = async () => {
+    setSendResult(null);
+    setSendError(null);
+    try {
+      const r = await sendEmails.mutateAsync({
+        ...(selectedIds.size > 0 ? { employeeIds: [...selectedIds] } : {}),
+        // The date picker's current value — notifications go out for
+        // the day being viewed, not blindly for today.
+        date,
+        ...(resendMode ? { resend: true } : {}),
+      });
+      setSendResult(r);
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : t("dailyAttendance.sendEmailsFailed");
+      setSendError(`${t("dailyAttendance.sendEmailsFailed")}: ${msg}`);
+    }
+  };
 
   // Client-side quick-find — matches the displayed rows in the table
   // (stats below still reflect the full scope so the operator sees
@@ -319,6 +392,46 @@ export function DailyAttendancePage() {
           </p>
         </div>
         <div className="page-actions">
+          {sendBtnVisible && isAdminLike && (
+            <>
+              <label
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  color: resendMode
+                    ? "var(--danger-text, #b45309)"
+                    : "var(--text-secondary)",
+                  cursor: "pointer",
+                }}
+                title={t("dailyAttendance.resendTooltip")}
+              >
+                <input
+                  type="checkbox"
+                  checked={resendMode}
+                  onChange={(e) => setResendMode(e.target.checked)}
+                />
+                {t("dailyAttendance.resendLabel")}
+              </label>
+              <button
+                className="btn"
+                onClick={() => void onSendEmails()}
+                disabled={sendEmails.isPending}
+                title={t("dailyAttendance.sendEmailsTooltip")}
+              >
+                <span aria-hidden style={{ marginInlineEnd: 4 }}>✉</span>
+                {sendEmails.isPending
+                  ? t("dailyAttendance.sendingEmails")
+                  : selectedIds.size > 0
+                    ? t("dailyAttendance.sendEmailsSelected", {
+                        count: selectedIds.size,
+                      })
+                    : t("dailyAttendance.sendEmails")}
+              </button>
+            </>
+          )}
           <button
             className="btn"
             onClick={onRegenerate}
@@ -357,6 +470,97 @@ export function DailyAttendancePage() {
           }}
         >
           {regenInfo}
+        </div>
+      )}
+
+      {sendError && (
+        <div
+          className="card"
+          style={{
+            padding: "10px 14px",
+            marginBottom: 12,
+            background: "var(--danger-soft, var(--bg-sunken))",
+            borderColor: "var(--danger, var(--border))",
+            fontSize: 13,
+          }}
+        >
+          {sendError}
+        </div>
+      )}
+
+      {sendResult && (
+        <div
+          className="card"
+          style={{ padding: "12px 14px", marginBottom: 12, fontSize: 13 }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: 8,
+            }}
+          >
+            <strong>
+              {sendResult.date}
+              {" — "}
+              {t("dailyAttendance.sendEmailsResult", {
+                sent: sendResult.sent,
+                already: sendResult.already_queued,
+                failed: sendResult.failed,
+                skipped: sendResult.skipped + sendResult.toggle_off,
+              })}
+            </strong>
+            <button
+              className="btn btn-sm"
+              onClick={() => setSendResult(null)}
+              aria-label={t("dailyAttendance.sendDismiss")}
+            >
+              {t("dailyAttendance.sendDismiss")}
+            </button>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 6,
+              maxHeight: 180,
+              overflowY: "auto",
+            }}
+          >
+            {sendResult.results.map((r) => {
+              const ok = r.outcome === "sent" || r.outcome === "already_sent";
+              const bad = r.outcome === "failed";
+              return (
+                <span
+                  key={`${r.employee_id}-${r.status ?? "none"}`}
+                  className="pill pill-neutral"
+                  title={r.error ?? r.recipient_email ?? undefined}
+                  style={{
+                    fontSize: 11.5,
+                    color: ok
+                      ? "var(--success, #0a8a52)"
+                      : bad
+                        ? "var(--danger-text, #b91c1c)"
+                        : "var(--text-secondary)",
+                  }}
+                >
+                  {r.employee_name}
+                  {" · "}
+                  {r.status
+                    ? t(`dailyAttendance.sendStatus.${r.status}`)
+                    : "—"}
+                  {" · "}
+                  {t(`dailyAttendance.sendOutcome.${r.outcome}`)}
+                </span>
+              );
+            })}
+            {sendResult.results.length === 0 && (
+              <span className="text-dim">
+                {t("dailyAttendance.sendNoTargets")}
+              </span>
+            )}
+          </div>
         </div>
       )}
 
@@ -644,6 +848,39 @@ export function DailyAttendancePage() {
                   reliably when applied per <th>. ``zIndex`` is below
                   the card-head + anomaly so a long header doesn't
                   overlap them on the way out. */}
+              {sendBtnVisible && isAdminLike && (
+                <th
+                  style={{
+                    position: "sticky",
+                    top: theadTop,
+                    zIndex: 18,
+                    background: "var(--bg-elev, #fff)",
+                    width: 34,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    aria-label={t("dailyAttendance.selectAllAria")}
+                    checked={
+                      filteredItems.length > 0 &&
+                      filteredItems.every((it) =>
+                        selectedIds.has(it.employee_id),
+                      )
+                    }
+                    onChange={(e) => {
+                      const all = e.target.checked;
+                      setSelectedIds((prev) => {
+                        const next = new Set(prev);
+                        for (const it of filteredItems) {
+                          if (all) next.add(it.employee_id);
+                          else next.delete(it.employee_id);
+                        }
+                        return next;
+                      });
+                    }}
+                  />
+                </th>
+              )}
               {([
                 "employee", "department", "status",
                 "in", "out", "hours", "ot", "flags",
@@ -666,7 +903,7 @@ export function DailyAttendancePage() {
             {list.isLoading && (
               <tr>
                 <td
-                  colSpan={8}
+                  colSpan={sendBtnVisible && isAdminLike ? 9 : 8}
                   className="text-sm text-dim"
                   style={{ padding: 16 }}
                 >
@@ -677,7 +914,7 @@ export function DailyAttendancePage() {
             {list.isError && (
               <tr>
                 <td
-                  colSpan={8}
+                  colSpan={sendBtnVisible && isAdminLike ? 9 : 8}
                   className="text-sm"
                   style={{ padding: 16, color: "var(--danger-text)" }}
                 >
@@ -691,6 +928,18 @@ export function DailyAttendancePage() {
                 onClick={() => setDrawerItem(it)}
                 style={{ cursor: "pointer" }}
               >
+                {sendBtnVisible && isAdminLike && (
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      aria-label={t("dailyAttendance.selectRowAria", {
+                        name: it.full_name,
+                      })}
+                      checked={selectedIds.has(it.employee_id)}
+                      onChange={() => toggleSelected(it.employee_id)}
+                    />
+                  </td>
+                )}
                 <td>
                   <div
                     style={{ display: "flex", alignItems: "center", gap: 10 }}
@@ -751,7 +1000,7 @@ export function DailyAttendancePage() {
             {list.data && list.data.items.length === 0 && !list.isLoading && (
               <tr>
                 <td
-                  colSpan={8}
+                  colSpan={sendBtnVisible && isAdminLike ? 9 : 8}
                   className="text-sm text-dim"
                   style={{ padding: 16 }}
                 >
@@ -767,7 +1016,7 @@ export function DailyAttendancePage() {
               !list.isLoading && (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={sendBtnVisible && isAdminLike ? 9 : 8}
                     className="text-sm text-dim"
                     style={{ padding: 16 }}
                   >

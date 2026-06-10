@@ -19,6 +19,7 @@ from fastapi import FastAPI
 from maugood import __version__
 from maugood.attendance import attendance_scheduler
 from maugood.attendance.router import router as attendance_router
+from maugood.attendance_email.router import router as attendance_email_router
 from maugood.audit_log.router import router as audit_log_router
 from maugood.auth import get_rate_limiter
 from maugood.auth import router as auth_router
@@ -293,6 +294,7 @@ def create_app() -> FastAPI:
     app.include_router(cameras_router)
     app.include_router(identification_router)
     app.include_router(attendance_router)
+    app.include_router(attendance_email_router)
     app.include_router(attendance_calendar_router)
     app.include_router(detection_events_router)
     app.include_router(system_router)

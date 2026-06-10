@@ -124,6 +124,42 @@ def _maybe_notify_overtime(
     )
 
 
+def _maybe_queue_attendance_email(
+    conn,
+    scope: TenantScope,
+    *,
+    employee_id: int,
+    the_date,
+    today_local,
+    prior_in_time,
+    record,
+) -> None:
+    """Best-effort present/late email enqueue — never breaks the
+    recompute transaction's caller on failure."""
+
+    try:
+        from maugood.attendance_email.producer import (  # noqa: PLC0415
+            maybe_enqueue_on_recompute,
+        )
+
+        maybe_enqueue_on_recompute(
+            conn,
+            scope,
+            employee_id=employee_id,
+            the_date=the_date,
+            today_local=today_local,
+            prior_in_time=prior_in_time,
+            record=record,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "attendance email enqueue failed for employee %s on %s",
+            employee_id,
+            the_date,
+            exc_info=True,
+        )
+
+
 def _recompute_for_inner(
     scope: TenantScope, *, employee_id: int, the_date
 ) -> bool:
@@ -179,6 +215,13 @@ def _recompute_for_inner(
         prior_overtime = attendance_repo.existing_overtime_minutes(
             conn, scope, employee_id=employee_id, the_date=the_date
         )
+        from maugood.attendance_email.repository import (  # noqa: PLC0415
+            prior_check_in,
+        )
+
+        prior_in = prior_check_in(
+            conn, scope, employee_id=employee_id, the_date=the_date
+        )
         attendance_repo.upsert_attendance(conn, scope, record)
         _maybe_notify_overtime(
             conn,
@@ -186,6 +229,20 @@ def _recompute_for_inner(
             employee_id=employee_id,
             the_date=the_date,
             prior_overtime=prior_overtime,
+            record=record,
+        )
+        today_local = (
+            datetime.now(timezone.utc)
+            .astimezone(attendance_repo.local_tz_for(settings))
+            .date()
+        )
+        _maybe_queue_attendance_email(
+            conn,
+            scope,
+            employee_id=employee_id,
+            the_date=the_date,
+            today_local=today_local,
+            prior_in_time=prior_in,
             record=record,
         )
     return True
@@ -282,6 +339,13 @@ def _recompute_today_inner(scope: TenantScope) -> int:
                 prior_overtime = attendance_repo.existing_overtime_minutes(
                     conn, scope, employee_id=emp_id, the_date=today
                 )
+                from maugood.attendance_email.repository import (  # noqa: PLC0415
+                    prior_check_in,
+                )
+
+                prior_in = prior_check_in(
+                    conn, scope, employee_id=emp_id, the_date=today
+                )
                 attendance_repo.upsert_attendance(conn, scope, record)
                 _maybe_notify_overtime(
                     conn,
@@ -289,6 +353,15 @@ def _recompute_today_inner(scope: TenantScope) -> int:
                     employee_id=emp_id,
                     the_date=today,
                     prior_overtime=prior_overtime,
+                    record=record,
+                )
+                _maybe_queue_attendance_email(
+                    conn,
+                    scope,
+                    employee_id=emp_id,
+                    the_date=today,
+                    today_local=today,
+                    prior_in_time=prior_in,
                     record=record,
                 )
             upserted += 1

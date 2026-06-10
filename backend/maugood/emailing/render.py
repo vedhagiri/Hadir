@@ -31,3 +31,12 @@ def render_report_email_html(*, context: dict) -> str:
 def render_notification_email_html(*, context: dict) -> str:
     template = _jinja_env.get_template("notification.html")
     return template.render(**context)
+
+
+def render_attendance_email_html(*, context: dict) -> str:
+    """Attendance status email (Present / Late / Absent) — the
+    CEO-approved premium layout ported from
+    ``docs/email-samples/attendance/``."""
+
+    template = _jinja_env.get_template("attendance_status.html")
+    return template.render(**context)

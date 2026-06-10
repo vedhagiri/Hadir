@@ -5,6 +5,8 @@ import type { UseQueryResult } from "@tanstack/react-query";
 
 import { api } from "../api/client";
 import type {
+  AttendanceEmailConfig,
+  AttendanceEmailLogResponse,
   NotificationCategory,
   NotificationListResponse,
   PreferenceListResponse,
@@ -12,6 +14,8 @@ import type {
 
 const LIST_KEY = ["notifications"] as const;
 const PREFS_KEY = ["notification-preferences"] as const;
+const ATT_EMAIL_CONFIG_KEY = ["attendance-email-config"] as const;
+const ATT_EMAIL_LOG_KEY = ["attendance-email-log"] as const;
 
 
 export function useNotifications(
@@ -83,5 +87,53 @@ export function usePatchPreference() {
         body: input,
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: PREFS_KEY }),
+  });
+}
+
+
+// --- Attendance status emails (0080) ---------------------------------------
+
+
+export function useAttendanceEmailConfig(
+  enabled: boolean,
+): UseQueryResult<AttendanceEmailConfig, Error> {
+  return useQuery({
+    queryKey: ATT_EMAIL_CONFIG_KEY,
+    queryFn: () => api<AttendanceEmailConfig>("/api/attendance-email-config"),
+    staleTime: 60 * 1000,
+    enabled,
+  });
+}
+
+
+export function usePutAttendanceEmailConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: AttendanceEmailConfig) =>
+      api<AttendanceEmailConfig>("/api/attendance-email-config", {
+        method: "PUT",
+        body: input,
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ATT_EMAIL_CONFIG_KEY });
+      void qc.invalidateQueries({ queryKey: ATT_EMAIL_LOG_KEY });
+    },
+  });
+}
+
+
+export function useAttendanceEmailLog(
+  enabled: boolean,
+  pageSize = 25,
+): UseQueryResult<AttendanceEmailLogResponse, Error> {
+  return useQuery({
+    queryKey: [...ATT_EMAIL_LOG_KEY, pageSize],
+    queryFn: () =>
+      api<AttendanceEmailLogResponse>(
+        `/api/attendance-email-log?page=1&page_size=${pageSize}`,
+      ),
+    staleTime: 15 * 1000,
+    refetchInterval: 30 * 1000,
+    enabled,
   });
 }

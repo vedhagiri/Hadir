@@ -589,6 +589,16 @@ tenant_settings = Table(
         JSONB,
         nullable=True,
     ),
+    # Migration 0080 — tenant-wide attendance email toggles flipped by
+    # the Admin in Settings → Notifications. All-false default keeps
+    # the feature opt-in; the email worker re-reads this per delivery
+    # so a flip takes effect within one tick.
+    Column(
+        "attendance_email_config",
+        JSONB,
+        nullable=False,
+        server_default='{"present": false, "late": false, "absent": false}',
+    ),
     Column(
         "updated_at",
         DateTime(timezone=True),
@@ -2096,6 +2106,78 @@ attendance_records = Table(
         "ix_attendance_records_tenant_date",
         "tenant_id",
         "date",
+    ),
+)
+
+
+# --- Attendance email log (0080) -------------------------------------------
+# Queue + durable delivery log for attendance status emails (Present /
+# Late / Absent to the employee's email address). One row per
+# (employee, date, status); the unique constraint makes the producer
+# idempotent across recompute ticks. Drained by the notification email
+# worker — sent_at on success, failed_at + last_error per failed
+# attempt (3 max), skipped_at when delivery is suppressed (toggle off,
+# email config disabled, employee has no email).
+attendance_email_log = Table(
+    "attendance_email_log",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "employee_id",
+        Integer,
+        ForeignKey("employees.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column("date", Date, nullable=False),
+    Column("status", Text, nullable=False),
+    # 0081: each notification fans out to the employee + their
+    # reporting manager as two independently-tracked rows.
+    Column(
+        "recipient_kind",
+        Text,
+        nullable=False,
+        server_default="employee",
+    ),
+    Column("recipient_email", Text, nullable=True),
+    Column("subject", Text, nullable=True),
+    Column("in_time", Time, nullable=True),
+    Column("out_time", Time, nullable=True),
+    Column("late_minutes", Integer, nullable=True),
+    Column("total_minutes", Integer, nullable=True),
+    Column("attempts", Integer, nullable=False, server_default="0"),
+    Column("sent_at", DateTime(timezone=True), nullable=True),
+    Column("failed_at", DateTime(timezone=True), nullable=True),
+    Column("skipped_at", DateTime(timezone=True), nullable=True),
+    Column("last_error", Text, nullable=True),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    CheckConstraint(
+        "status IN ('present', 'late', 'absent')",
+        name="ck_attendance_email_log_status",
+    ),
+    CheckConstraint(
+        "recipient_kind IN ('employee', 'manager')",
+        name="ck_attendance_email_log_recipient_kind",
+    ),
+    UniqueConstraint(
+        "tenant_id",
+        "employee_id",
+        "date",
+        "status",
+        "recipient_kind",
+        name="uq_attendance_email_log_emp_date_status_kind",
     ),
 )
 

@@ -335,6 +335,28 @@ def _tick() -> int:
             scope = TenantScope(tenant_id=int(tr.id))
             with tenant_context(str(tr.schema_name)):
                 counts = drain_one_tenant(scope=scope)
+                # 0080: attendance status emails (Present/Late/Absent
+                # to employees) share this tick. Failure-isolated —
+                # a broken attendance drain must not stall the user
+                # notification queue.
+                try:
+                    from maugood.attendance_email.worker import (  # noqa: PLC0415
+                        drain_attendance_emails,
+                    )
+
+                    att_counts = drain_attendance_emails(scope=scope)
+                    if any(att_counts.values()):
+                        logger.info(
+                            "attendance emails tenant=%s %s",
+                            tr.schema_name,
+                            att_counts,
+                        )
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "attendance email drain failed for %s",
+                        tr.schema_name,
+                        exc_info=True,
+                    )
                 # P26: refresh ``maugood_active_sessions`` per
                 # tenant on the same 30-second tick. We're
                 # already inside the tenant context so a plain
