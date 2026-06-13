@@ -485,6 +485,17 @@
     "loadError": "Couldn’t load email settings.",
     "signInPrompt": "Sign in to configure email.",
     "save": "Save changes",
+    "edit": "Edit",
+    "editMode": "Edit email settings",
+    "cancelEdit": "Cancel",
+    "pendingWarning": "{{count}} email(s) pending in the delivery queue.",
+    "disableQueueNote": "Saving with email disabled will immediately cancel {{count}} pending queued email(s).",
+    "viewCard": {
+      "title": "Current configuration",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "lastUpdated": "Last updated"
+    },
     "field": {
       "provider": "Provider",
       "host": "Host",
@@ -513,6 +524,7 @@
     "msg": {
       "saved": "Saved.",
       "saveFailed": "Save failed.",
+      "disabledCancelled": "Email disabled — {{count}} pending message(s) cancelled.",
       "testAddressRequired": "Type an email address to test against.",
       "testSent": "Test email sent to {{to}}.",
       "testFailed": "Test send failed."

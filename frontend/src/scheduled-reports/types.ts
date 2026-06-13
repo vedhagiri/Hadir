@@ -17,6 +17,7 @@ export interface EmailConfig {
   from_name: string;
   enabled: boolean;
   updated_at: string;
+  cancelled_queue_rows?: number;
 }
 
 export interface EmailConfigUpdate {

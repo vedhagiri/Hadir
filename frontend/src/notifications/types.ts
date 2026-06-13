@@ -65,6 +65,10 @@ export interface AttendanceEmailConfig {
   absent: boolean;
 }
 
+export interface AttendanceEmailConfigOut extends AttendanceEmailConfig {
+  cancelled_queue_rows: number;
+}
+
 export interface AttendanceEmailLogItem {
   id: number;
   employee_id: number;

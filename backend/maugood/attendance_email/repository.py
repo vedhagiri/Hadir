@@ -337,23 +337,71 @@ def mark_skipped(
     )
 
 
+def cancel_pending_for_statuses(
+    conn: Connection,
+    scope: TenantScope,
+    *,
+    statuses: list[str],
+) -> int:
+    """Immediately skip every unsent queue row whose status was just disabled.
+
+    Called by the PUT /attendance-email-config handler when one or more
+    toggles are flipped off.  Returns the number of rows cancelled so
+    the caller can surface the count to the operator.
+    """
+    if not statuses:
+        return 0
+    result = conn.execute(
+        update(attendance_email_log)
+        .where(
+            attendance_email_log.c.tenant_id == scope.tenant_id,
+            attendance_email_log.c.status.in_(statuses),
+            attendance_email_log.c.sent_at.is_(None),
+            attendance_email_log.c.failed_at.is_(None),
+            attendance_email_log.c.skipped_at.is_(None),
+        )
+        .values(
+            skipped_at=datetime.now(timezone.utc),
+            last_error="toggle_off_admin",
+        )
+    )
+    return int(result.rowcount)
+
+
 def list_log(
     conn: Connection,
     scope: TenantScope,
     *,
     page: int = 1,
     page_size: int = 50,
+    search: Optional[str] = None,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
 ) -> tuple[list[dict], int]:
     """Read-only delivery log for the settings page, newest first."""
 
-    total = int(
-        conn.execute(
-            select(func.count())
-            .select_from(attendance_email_log)
-            .where(attendance_email_log.c.tenant_id == scope.tenant_id)
-        ).scalar()
-        or 0
+    base_where = [attendance_email_log.c.tenant_id == scope.tenant_id]
+    if search:
+        base_where.append(
+            func.lower(employees.c.full_name).contains(search.lower())
+        )
+    if date_from:
+        base_where.append(attendance_email_log.c.date >= date_from)
+    if date_to:
+        base_where.append(attendance_email_log.c.date <= date_to)
+
+    base_q = (
+        select(func.count())
+        .select_from(attendance_email_log)
+        .join(
+            employees,
+            (employees.c.id == attendance_email_log.c.employee_id)
+            & (employees.c.tenant_id == attendance_email_log.c.tenant_id),
+        )
+        .where(*base_where)
     )
+    total = int(conn.execute(base_q).scalar() or 0)
+
     rows = conn.execute(
         select(
             attendance_email_log.c.id,
@@ -377,7 +425,7 @@ def list_log(
             (employees.c.id == attendance_email_log.c.employee_id)
             & (employees.c.tenant_id == attendance_email_log.c.tenant_id),
         )
-        .where(attendance_email_log.c.tenant_id == scope.tenant_id)
+        .where(*base_where)
         .order_by(attendance_email_log.c.id.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
@@ -612,6 +660,44 @@ def log_outcomes_for(
         }
         for r in rows
     }
+
+
+def cancel_all_pending(conn: Connection, scope: TenantScope) -> int:
+    """Immediately mark every pending queue row as skipped.
+
+    Called when the email provider is disabled so in-flight rows are
+    cut off in this request rather than waiting for the next 30 s tick.
+    Returns the count of rows cancelled.
+    """
+    result = conn.execute(
+        update(attendance_email_log)
+        .where(
+            attendance_email_log.c.tenant_id == scope.tenant_id,
+            attendance_email_log.c.sent_at.is_(None),
+            attendance_email_log.c.skipped_at.is_(None),
+            attendance_email_log.c.attempts < MAX_ATTEMPTS,
+        )
+        .values(
+            skipped_at=datetime.now(timezone.utc),
+            last_error="email_provider_disabled",
+        )
+    )
+    return int(result.rowcount)
+
+
+def count_pending(conn: Connection, scope: TenantScope) -> int:
+    """Number of undelivered queue rows (not yet sent / skipped / maxed out)."""
+    row = conn.execute(
+        select(func.count())
+        .select_from(attendance_email_log)
+        .where(
+            attendance_email_log.c.tenant_id == scope.tenant_id,
+            attendance_email_log.c.sent_at.is_(None),
+            attendance_email_log.c.skipped_at.is_(None),
+            attendance_email_log.c.attempts < MAX_ATTEMPTS,
+        )
+    ).scalar()
+    return int(row or 0)
 
 
 def absent_rows_with_policy(

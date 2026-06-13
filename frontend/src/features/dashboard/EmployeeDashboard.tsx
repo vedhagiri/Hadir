@@ -87,10 +87,11 @@ export function EmployeeDashboard() {
       {/* Greeting */}
       <div>
         <h1 className="page-title">
-          {t("dashboard.employee.greeting", {
-            defaultValue: "Welcome back",
-          }) as string}
-          {me.data?.full_name ? `, ${me.data.full_name}` : ""}
+          {me.data?.full_name
+            ? t("dashboard.employee.greeting", {
+                name: me.data.full_name,
+              })
+            : t("dashboard.employee.greeting", { name: "" })}
         </h1>
         <p className="page-sub">
           {t("dashboard.employee.subtitle", {
@@ -464,3 +465,4 @@ function KpiTile({
     </div>
   );
 }
+

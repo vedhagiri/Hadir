@@ -78,16 +78,32 @@ def get_attendance_email_config(
         )
 
 
-@router.put("/attendance-email-config", response_model=AttendanceEmailConfig)
+class AttendanceEmailConfigOut(AttendanceEmailConfig):
+    cancelled_queue_rows: int = 0
+
+
+@router.put("/attendance-email-config", response_model=AttendanceEmailConfigOut)
 def put_attendance_email_config(
     payload: AttendanceEmailConfig,
     user: Annotated[CurrentUser, ADMIN],
-) -> AttendanceEmailConfig:
+) -> AttendanceEmailConfigOut:
     scope = TenantScope(tenant_id=user.tenant_id)
     new_config = payload.model_dump()
     with get_engine().begin() as conn:
         before = repo.load_config(conn, scope)
         repo.save_config(conn, scope, new_config)
+
+        # Immediately cancel pending queue rows for any status that
+        # was just toggled off so no stale emails fire on the next
+        # worker tick.
+        disabled_now = [
+            s for s in ("present", "late", "absent")
+            if before.get(s) and not new_config.get(s)
+        ]
+        cancelled = repo.cancel_pending_for_statuses(
+            conn, scope, statuses=disabled_now
+        )
+
         write_audit(
             conn,
             tenant_id=scope.tenant_id,
@@ -96,9 +112,11 @@ def put_attendance_email_config(
             entity_type="tenant_settings",
             entity_id=str(scope.tenant_id),
             before=before,
-            after=new_config,
+            after={**new_config, "cancelled_queue_rows": cancelled},
         )
-    return AttendanceEmailConfig.model_validate(new_config)
+    return AttendanceEmailConfigOut.model_validate(
+        {**new_config, "cancelled_queue_rows": cancelled}
+    )
 
 
 class SendTodayIn(BaseModel):
@@ -282,16 +300,35 @@ def send_today_attendance_emails(
     )
 
 
+@router.get("/attendance-email/pending-count")
+def get_pending_count(
+    user: Annotated[CurrentUser, ADMIN],
+) -> dict:
+    scope = TenantScope(tenant_id=user.tenant_id)
+    with get_engine().begin() as conn:
+        count = repo.count_pending(conn, scope)
+    return {"count": count}
+
+
 @router.get("/attendance-email-log", response_model=AttendanceEmailLogOut)
 def get_attendance_email_log(
     user: Annotated[CurrentUser, ADMIN_OR_HR],
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
+    search: Optional[str] = Query(default=None),
+    date_from: Optional[dt_date] = Query(default=None),
+    date_to: Optional[dt_date] = Query(default=None),
 ) -> AttendanceEmailLogOut:
     scope = TenantScope(tenant_id=user.tenant_id)
     with get_engine().begin() as conn:
         items, total = repo.list_log(
-            conn, scope, page=page, page_size=page_size
+            conn,
+            scope,
+            page=page,
+            page_size=page_size,
+            search=search or None,
+            date_from=date_from,
+            date_to=date_to,
         )
     return AttendanceEmailLogOut(
         items=[AttendanceEmailLogItem.model_validate(i) for i in items],

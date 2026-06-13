@@ -14,6 +14,7 @@ import type {
 } from "./types";
 
 const EMAIL_KEY = ["email-config"] as const;
+const EMAIL_PENDING_KEY = ["email-pending-count"] as const;
 const SCHEDULES_KEY = ["report-schedules"] as const;
 const RUNS_KEY = ["report-runs"] as const;
 
@@ -27,6 +28,15 @@ export function useEmailConfig(): UseQueryResult<EmailConfig, Error> {
   });
 }
 
+export function usePendingEmailCount(): UseQueryResult<{ count: number }, Error> {
+  return useQuery({
+    queryKey: EMAIL_PENDING_KEY,
+    queryFn: () => api<{ count: number }>("/api/attendance-email/pending-count"),
+    staleTime: 15 * 1000,
+    refetchInterval: 30 * 1000,
+  });
+}
+
 export function usePatchEmailConfig() {
   const qc = useQueryClient();
   return useMutation({
@@ -35,7 +45,10 @@ export function usePatchEmailConfig() {
         method: "PATCH",
         body: input,
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: EMAIL_KEY }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: EMAIL_KEY });
+      void qc.invalidateQueries({ queryKey: EMAIL_PENDING_KEY });
+    },
   });
 }
 

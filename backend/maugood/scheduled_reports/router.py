@@ -225,7 +225,27 @@ def patch_email_config(
             },
         )
         row = _read_email_row(conn, tenant_id=user.tenant_id)
-    return _email_config_response(row)
+
+    # When email is disabled, immediately cancel any pending queue rows so
+    # the operator's intent takes effect in this request, not the next tick.
+    cancelled = 0
+    if provided.get("enabled") is False:
+        from maugood.attendance_email import repository as email_repo  # noqa: PLC0415
+        from maugood.tenants.scope import TenantScope  # noqa: PLC0415
+
+        scope = TenantScope(tenant_id=user.tenant_id)
+        with get_engine().begin() as conn:
+            cancelled = email_repo.cancel_all_pending(conn, scope)
+        if cancelled:
+            logger.info(
+                "email disabled — cancelled %d pending queue row(s) for tenant %d",
+                cancelled,
+                user.tenant_id,
+            )
+
+    resp = _email_config_response(row)
+    # Attach the cancellation count so the frontend can surface it.
+    return {**resp.model_dump(), "cancelled_queue_rows": cancelled}
 
 
 @router.post("/api/email-config/test")

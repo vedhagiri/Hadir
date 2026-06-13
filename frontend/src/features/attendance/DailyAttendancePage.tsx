@@ -15,6 +15,7 @@ import { AnomalyInfoBanner } from "../../components/AnomalyNote";
 
 import { useMe } from "../../auth/AuthProvider";
 import { DatePicker, todayIso } from "../../components/DatePicker";
+import { ModalShell } from "../../components/DrawerShell";
 import { PdfOptionsModal } from "../../components/PdfOptionsModal";
 import { useConfidentialDownload } from "../../components/useConfidentialDownload";
 import { primaryRole } from "../../types";
@@ -55,73 +56,25 @@ export function DailyAttendancePage() {
   const [pdfModalOpen, setPdfModalOpen] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
 
-  // Hidden manual email-send mode (0080). Revealed by Shift+A —
-  // an operator chord, deliberately not in any menu. Admin/HR only;
-  // ignored while typing in an input/textarea/select. While visible,
-  // the table gains a checkbox column for targeting specific
-  // employees; no selection = send to everyone with a status today.
+  // Manual email-send modal (0080). Button hidden by default;
+  // revealed by clicking the ✉ icon toggle or Shift+A. Admin/HR only.
+  const [sendModalOpen, setSendModalOpen] = useState(false);
   const [sendBtnVisible, setSendBtnVisible] = useState(false);
   const [sendResult, setSendResult] = useState<SendTodayResult | null>(null);
-  const [sendError, setSendError] = useState<string | null>(null);
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  const [resendMode, setResendMode] = useState(false);
   const sendEmails = useSendTodayAttendanceEmails();
+
   useEffect(() => {
     if (!isAdminLike) return;
     const onKey = (e: KeyboardEvent) => {
       if (!e.shiftKey || (e.key !== "A" && e.key !== "a")) return;
       const el = e.target as HTMLElement | null;
       const tag = el?.tagName ?? "";
-      if (
-        tag === "INPUT" ||
-        tag === "TEXTAREA" ||
-        tag === "SELECT" ||
-        el?.isContentEditable
-      ) {
-        return;
-      }
-      setSendBtnVisible((v) => {
-        if (v) {
-          // Leaving send mode clears the selection + results.
-          setSelectedIds(new Set());
-          setSendResult(null);
-          setSendError(null);
-          setResendMode(false);
-        }
-        return !v;
-      });
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el?.isContentEditable) return;
+      setSendBtnVisible(true);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [isAdminLike]);
-
-  const toggleSelected = (employeeId: number) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(employeeId)) next.delete(employeeId);
-      else next.add(employeeId);
-      return next;
-    });
-  };
-
-  const onSendEmails = async () => {
-    setSendResult(null);
-    setSendError(null);
-    try {
-      const r = await sendEmails.mutateAsync({
-        ...(selectedIds.size > 0 ? { employeeIds: [...selectedIds] } : {}),
-        // The date picker's current value — notifications go out for
-        // the day being viewed, not blindly for today.
-        date,
-        ...(resendMode ? { resend: true } : {}),
-      });
-      setSendResult(r);
-    } catch (err) {
-      const msg =
-        err instanceof Error ? err.message : t("dailyAttendance.sendEmailsFailed");
-      setSendError(`${t("dailyAttendance.sendEmailsFailed")}: ${msg}`);
-    }
-  };
 
   // Client-side quick-find — matches the displayed rows in the table
   // (stats below still reflect the full scope so the operator sees
@@ -392,45 +345,15 @@ export function DailyAttendancePage() {
           </p>
         </div>
         <div className="page-actions">
-          {sendBtnVisible && isAdminLike && (
-            <>
-              <label
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  fontSize: 12.5,
-                  fontWeight: 600,
-                  color: resendMode
-                    ? "var(--danger-text, #b45309)"
-                    : "var(--text-secondary)",
-                  cursor: "pointer",
-                }}
-                title={t("dailyAttendance.resendTooltip")}
-              >
-                <input
-                  type="checkbox"
-                  checked={resendMode}
-                  onChange={(e) => setResendMode(e.target.checked)}
-                />
-                {t("dailyAttendance.resendLabel")}
-              </label>
-              <button
-                className="btn"
-                onClick={() => void onSendEmails()}
-                disabled={sendEmails.isPending}
-                title={t("dailyAttendance.sendEmailsTooltip")}
-              >
-                <span aria-hidden style={{ marginInlineEnd: 4 }}>✉</span>
-                {sendEmails.isPending
-                  ? t("dailyAttendance.sendingEmails")
-                  : selectedIds.size > 0
-                    ? t("dailyAttendance.sendEmailsSelected", {
-                        count: selectedIds.size,
-                      })
-                    : t("dailyAttendance.sendEmails")}
-              </button>
-            </>
+          {isAdminLike && sendBtnVisible && (
+            <button
+              className="btn"
+              onClick={() => setSendModalOpen(true)}
+              title={t("dailyAttendance.sendEmailsTooltip")}
+            >
+              <span aria-hidden style={{ marginInlineEnd: 4 }}>✉</span>
+              {t("dailyAttendance.sendEmails")}
+            </button>
           )}
           <button
             className="btn"
@@ -473,96 +396,6 @@ export function DailyAttendancePage() {
         </div>
       )}
 
-      {sendError && (
-        <div
-          className="card"
-          style={{
-            padding: "10px 14px",
-            marginBottom: 12,
-            background: "var(--danger-soft, var(--bg-sunken))",
-            borderColor: "var(--danger, var(--border))",
-            fontSize: 13,
-          }}
-        >
-          {sendError}
-        </div>
-      )}
-
-      {sendResult && (
-        <div
-          className="card"
-          style={{ padding: "12px 14px", marginBottom: 12, fontSize: 13 }}
-        >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              marginBottom: 8,
-            }}
-          >
-            <strong>
-              {sendResult.date}
-              {" — "}
-              {t("dailyAttendance.sendEmailsResult", {
-                sent: sendResult.sent,
-                already: sendResult.already_queued,
-                failed: sendResult.failed,
-                skipped: sendResult.skipped + sendResult.toggle_off,
-              })}
-            </strong>
-            <button
-              className="btn btn-sm"
-              onClick={() => setSendResult(null)}
-              aria-label={t("dailyAttendance.sendDismiss")}
-            >
-              {t("dailyAttendance.sendDismiss")}
-            </button>
-          </div>
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: 6,
-              maxHeight: 180,
-              overflowY: "auto",
-            }}
-          >
-            {sendResult.results.map((r) => {
-              const ok = r.outcome === "sent" || r.outcome === "already_sent";
-              const bad = r.outcome === "failed";
-              return (
-                <span
-                  key={`${r.employee_id}-${r.status ?? "none"}`}
-                  className="pill pill-neutral"
-                  title={r.error ?? r.recipient_email ?? undefined}
-                  style={{
-                    fontSize: 11.5,
-                    color: ok
-                      ? "var(--success, #0a8a52)"
-                      : bad
-                        ? "var(--danger-text, #b91c1c)"
-                        : "var(--text-secondary)",
-                  }}
-                >
-                  {r.employee_name}
-                  {" · "}
-                  {r.status
-                    ? t(`dailyAttendance.sendStatus.${r.status}`)
-                    : "—"}
-                  {" · "}
-                  {t(`dailyAttendance.sendOutcome.${r.outcome}`)}
-                </span>
-              );
-            })}
-            {sendResult.results.length === 0 && (
-              <span className="text-dim">
-                {t("dailyAttendance.sendNoTargets")}
-              </span>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* Filter row */}
       <div
@@ -848,39 +681,6 @@ export function DailyAttendancePage() {
                   reliably when applied per <th>. ``zIndex`` is below
                   the card-head + anomaly so a long header doesn't
                   overlap them on the way out. */}
-              {sendBtnVisible && isAdminLike && (
-                <th
-                  style={{
-                    position: "sticky",
-                    top: theadTop,
-                    zIndex: 18,
-                    background: "var(--bg-elev, #fff)",
-                    width: 34,
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    aria-label={t("dailyAttendance.selectAllAria")}
-                    checked={
-                      filteredItems.length > 0 &&
-                      filteredItems.every((it) =>
-                        selectedIds.has(it.employee_id),
-                      )
-                    }
-                    onChange={(e) => {
-                      const all = e.target.checked;
-                      setSelectedIds((prev) => {
-                        const next = new Set(prev);
-                        for (const it of filteredItems) {
-                          if (all) next.add(it.employee_id);
-                          else next.delete(it.employee_id);
-                        }
-                        return next;
-                      });
-                    }}
-                  />
-                </th>
-              )}
               {([
                 "employee", "department", "status",
                 "in", "out", "hours", "ot", "flags",
@@ -903,7 +703,7 @@ export function DailyAttendancePage() {
             {list.isLoading && (
               <tr>
                 <td
-                  colSpan={sendBtnVisible && isAdminLike ? 9 : 8}
+                  colSpan={8}
                   className="text-sm text-dim"
                   style={{ padding: 16 }}
                 >
@@ -914,7 +714,7 @@ export function DailyAttendancePage() {
             {list.isError && (
               <tr>
                 <td
-                  colSpan={sendBtnVisible && isAdminLike ? 9 : 8}
+                  colSpan={8}
                   className="text-sm"
                   style={{ padding: 16, color: "var(--danger-text)" }}
                 >
@@ -928,18 +728,6 @@ export function DailyAttendancePage() {
                 onClick={() => setDrawerItem(it)}
                 style={{ cursor: "pointer" }}
               >
-                {sendBtnVisible && isAdminLike && (
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <input
-                      type="checkbox"
-                      aria-label={t("dailyAttendance.selectRowAria", {
-                        name: it.full_name,
-                      })}
-                      checked={selectedIds.has(it.employee_id)}
-                      onChange={() => toggleSelected(it.employee_id)}
-                    />
-                  </td>
-                )}
                 <td>
                   <div
                     style={{ display: "flex", alignItems: "center", gap: 10 }}
@@ -1000,7 +788,7 @@ export function DailyAttendancePage() {
             {list.data && list.data.items.length === 0 && !list.isLoading && (
               <tr>
                 <td
-                  colSpan={sendBtnVisible && isAdminLike ? 9 : 8}
+                  colSpan={8}
                   className="text-sm text-dim"
                   style={{ padding: 16 }}
                 >
@@ -1016,7 +804,7 @@ export function DailyAttendancePage() {
               !list.isLoading && (
                 <tr>
                   <td
-                    colSpan={sendBtnVisible && isAdminLike ? 9 : 8}
+                    colSpan={8}
                     className="text-sm text-dim"
                     style={{ padding: 16 }}
                   >
@@ -1057,7 +845,431 @@ export function DailyAttendancePage() {
         busy={pdfBusy}
       />
       {confidentialModal}
+
+      {sendModalOpen && (
+        <SendEmailModal
+          items={list.data?.items ?? []}
+          date={date}
+          sendEmails={sendEmails}
+          initialResult={sendResult}
+          onClose={() => {
+            setSendModalOpen(false);
+            setSendResult(null);
+          }}
+          onSent={(r) => setSendResult(r)}
+        />
+      )}
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SendEmailModal
+// ---------------------------------------------------------------------------
+
+const STATUS_COLOR: Record<string, string> = {
+  present: "#0a8a52",
+  late: "#b45309",
+  absent: "#b91c1c",
+};
+
+function SendEmailModal({
+  items,
+  date,
+  sendEmails,
+  initialResult,
+  onClose,
+  onSent,
+}: {
+  items: AttendanceItem[];
+  date: string;
+  sendEmails: ReturnType<typeof useSendTodayAttendanceEmails>;
+  initialResult: SendTodayResult | null;
+  onClose: () => void;
+  onSent: (r: SendTodayResult) => void;
+}) {
+  // Only employees that could plausibly receive an email (skip weekends/holidays).
+  const sendable = items.filter(
+    (it) => !it.is_weekend && !it.is_holiday && (it.absent || it.in_time),
+  );
+
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(
+    () => new Set(sendable.map((i) => i.employee_id)),
+  );
+  const [result, setResult] = useState<SendTodayResult | null>(initialResult);
+  const [error, setError] = useState<string | null>(null);
+  const [modalPage, setModalPage] = useState(1);
+
+  const MODAL_PAGE_SIZE = 10;
+  const totalPages = Math.max(1, Math.ceil(sendable.length / MODAL_PAGE_SIZE));
+  const pagedSendable = sendable.slice(
+    (modalPage - 1) * MODAL_PAGE_SIZE,
+    modalPage * MODAL_PAGE_SIZE,
+  );
+
+  const allSelected =
+    sendable.length > 0 &&
+    sendable.every((i) => selectedIds.has(i.employee_id));
+
+  const toggle = (id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    setSelectedIds(
+      allSelected
+        ? new Set()
+        : new Set(sendable.map((i) => i.employee_id)),
+    );
+  };
+
+  const doSend = async (resend = false) => {
+    setError(null);
+    try {
+      const r = await sendEmails.mutateAsync({
+        ...(selectedIds.size < sendable.length
+          ? { employeeIds: [...selectedIds] }
+          : {}),
+        date,
+        ...(resend ? { resend: true } : {}),
+      });
+      setResult(r);
+      onSent(r);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Send failed");
+    }
+  };
+
+  const alreadySentCount = result?.already_queued ?? 0;
+  const isPending = sendEmails.isPending;
+
+  return (
+    <ModalShell onClose={onClose}>
+      <div
+        role="dialog"
+        aria-labelledby="send-email-modal-title"
+        style={{
+          position: "fixed",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -50%)",
+          width: 540,
+          maxWidth: "92vw",
+          maxHeight: "88vh",
+          background: "var(--bg)",
+          border: "1px solid var(--border-strong)",
+          borderRadius: "var(--radius)",
+          zIndex: 60,
+          boxShadow: "var(--shadow-lg)",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        {/* Header */}
+        <div
+          style={{
+            padding: "16px 20px 12px",
+            borderBottom: "1px solid var(--border)",
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            flexShrink: 0,
+          }}
+        >
+          <div>
+            <h2
+              id="send-email-modal-title"
+              style={{ margin: 0, fontSize: 17, fontWeight: 700 }}
+            >
+              ✉ Send Attendance Emails
+            </h2>
+            <p style={{ margin: "3px 0 0", fontSize: 12, color: "var(--text-secondary)" }}>
+              Date: <strong>{date}</strong> · {selectedIds.size} of{" "}
+              {sendable.length} employee{sendable.length !== 1 ? "s" : ""} selected
+            </p>
+          </div>
+          <button
+            className="icon-btn"
+            aria-label="Close"
+            onClick={onClose}
+            style={{ marginTop: 2 }}
+          >
+            ×
+          </button>
+        </div>
+
+        {/* Body */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "12px 20px" }}>
+
+          {/* Error */}
+          {error && (
+            <div
+              style={{
+                background: "var(--danger-soft)",
+                color: "var(--danger-text)",
+                border: "1px solid var(--danger-border, #fecaca)",
+                borderRadius: 8,
+                padding: "8px 12px",
+                fontSize: 12.5,
+                marginBottom: 12,
+              }}
+            >
+              {error}
+            </div>
+          )}
+
+          {/* Result view */}
+          {result && (
+            <div style={{ marginBottom: 14 }}>
+              <div
+                style={{
+                  background: "var(--bg-sunken)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 10,
+                  padding: "10px 14px",
+                  fontSize: 12.5,
+                }}
+              >
+                <strong>
+                  {result.sent} sent · {result.already_queued} already sent ·{" "}
+                  {result.failed} failed · {result.skipped + result.toggle_off} skipped
+                </strong>
+                <div
+                  style={{
+                    marginTop: 8,
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 5,
+                  }}
+                >
+                  {result.results.map((r) => {
+                    const ok = r.outcome === "sent" || r.outcome === "already_sent";
+                    const bad = r.outcome === "failed";
+                    return (
+                      <span
+                        key={`${r.employee_id}-${r.status ?? "none"}`}
+                        className="pill pill-neutral"
+                        title={r.error ?? r.recipient_email ?? undefined}
+                        style={{
+                          fontSize: 11.5,
+                          color: ok
+                            ? "var(--success, #0a8a52)"
+                            : bad
+                              ? "var(--danger-text, #b91c1c)"
+                              : "var(--text-secondary)",
+                        }}
+                      >
+                        {r.employee_name} ·{" "}
+                        {r.status ?? "—"} ·{" "}
+                        {r.outcome.replace(/_/g, " ")}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Resend prompt — only when some were already sent */}
+              {alreadySentCount > 0 && (
+                <div
+                  style={{
+                    marginTop: 10,
+                    background: "color-mix(in srgb, #f59e0b 10%, transparent)",
+                    border: "1px solid #f59e0b",
+                    borderRadius: 10,
+                    padding: "12px 16px",
+                    fontSize: 13,
+                  }}
+                >
+                  <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                    ⚠ {alreadySentCount} employee
+                    {alreadySentCount !== 1 ? "s" : ""} already received an
+                    email.
+                  </div>
+                  <div style={{ color: "var(--text-secondary)", fontSize: 12, marginBottom: 10 }}>
+                    Do you want to send again to those employees?
+                  </div>
+                  <button
+                    className="btn"
+                    style={{ borderColor: "#f59e0b", color: "#92400e" }}
+                    disabled={isPending}
+                    onClick={() => void doSend(true)}
+                  >
+                    {isPending ? "Sending…" : `Send again to ${alreadySentCount} employee${alreadySentCount !== 1 ? "s" : ""}`}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Employee list — only show when no result yet */}
+          {!result && (
+            <>
+              {sendable.length === 0 ? (
+                <p style={{ color: "var(--text-secondary)", fontSize: 13, textAlign: "center", padding: "20px 0" }}>
+                  No employees with attendance status for this date.
+                </p>
+              ) : (
+                <>
+                  {/* Select all row */}
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      padding: "6px 0 10px",
+                      borderBottom: "1px solid var(--border)",
+                      marginBottom: 6,
+                      cursor: "pointer",
+                      fontSize: 12.5,
+                      fontWeight: 600,
+                      color: "var(--text-secondary)",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={toggleAll}
+                    />
+                    Select all ({sendable.length})
+                  </label>
+
+                  {/* Per-employee rows (current page only) */}
+                  {pagedSendable.map((it) => {
+                    const status = it.absent
+                      ? "absent"
+                      : it.late
+                        ? "late"
+                        : it.in_time
+                          ? "present"
+                          : null;
+                    const checked = selectedIds.has(it.employee_id);
+                    return (
+                      <label
+                        key={it.employee_id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                          padding: "8px 6px",
+                          borderRadius: 8,
+                          cursor: "pointer",
+                          background: checked
+                            ? "var(--bg-elev)"
+                            : "transparent",
+                          transition: "background 0.1s",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggle(it.employee_id)}
+                        />
+                        <Avatar name={it.full_name} seed={it.employee_code} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.2 }}>
+                            {it.full_name}
+                          </div>
+                          <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                            {it.employee_code} · {it.department.name}
+                          </div>
+                        </div>
+                        {status && (
+                          <span
+                            className="pill pill-neutral"
+                            style={{
+                              fontSize: 11,
+                              color: STATUS_COLOR[status] ?? "var(--text-secondary)",
+                              flexShrink: 0,
+                            }}
+                          >
+                            {status}
+                          </span>
+                        )}
+                      </label>
+                    );
+                  })}
+
+                  {/* Pagination strip */}
+                  {totalPages > 1 && (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        paddingTop: 10,
+                        marginTop: 6,
+                        borderTop: "1px solid var(--border)",
+                        fontSize: 12,
+                        color: "var(--text-secondary)",
+                      }}
+                    >
+                      <button
+                        className="btn btn-sm"
+                        disabled={modalPage === 1}
+                        onClick={() => setModalPage((p) => p - 1)}
+                        style={{ minWidth: 72 }}
+                      >
+                        ← Previous
+                      </button>
+                      <span>
+                        Page {modalPage} of {totalPages} &nbsp;·&nbsp; {sendable.length} total
+                      </span>
+                      <button
+                        className="btn btn-sm"
+                        disabled={modalPage === totalPages}
+                        onClick={() => setModalPage((p) => p + 1)}
+                        style={{ minWidth: 72 }}
+                      >
+                        Next →
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div
+          style={{
+            padding: "12px 20px",
+            borderTop: "1px solid var(--border)",
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: 8,
+            flexShrink: 0,
+          }}
+        >
+          {result ? (
+            <button className="btn btn-primary" onClick={onClose}>
+              Done
+            </button>
+          ) : (
+            <>
+              <button className="btn" onClick={onClose}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                disabled={selectedIds.size === 0 || isPending}
+                onClick={() => void doSend(false)}
+              >
+                {isPending
+                  ? "Sending…"
+                  : `Send to ${selectedIds.size} employee${selectedIds.size !== 1 ? "s" : ""}`}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </ModalShell>
   );
 }
 

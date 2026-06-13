@@ -6,6 +6,7 @@ import type { UseQueryResult } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type {
   AttendanceEmailConfig,
+  AttendanceEmailConfigOut,
   AttendanceEmailLogResponse,
   NotificationCategory,
   NotificationListResponse,
@@ -110,7 +111,7 @@ export function usePutAttendanceEmailConfig() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: AttendanceEmailConfig) =>
-      api<AttendanceEmailConfig>("/api/attendance-email-config", {
+      api<AttendanceEmailConfigOut>("/api/attendance-email-config", {
         method: "PUT",
         body: input,
       }),
@@ -122,16 +123,30 @@ export function usePutAttendanceEmailConfig() {
 }
 
 
+export interface AttendanceEmailLogParams {
+  page?: number;
+  page_size?: number;
+  search?: string;
+  date_from?: string;
+  date_to?: string;
+}
+
 export function useAttendanceEmailLog(
   enabled: boolean,
-  pageSize = 25,
+  params: AttendanceEmailLogParams = {},
 ): UseQueryResult<AttendanceEmailLogResponse, Error> {
+  const { page = 1, page_size = 50, search, date_from, date_to } = params;
+  const qs = new URLSearchParams({
+    page: String(page),
+    page_size: String(page_size),
+    ...(search ? { search } : {}),
+    ...(date_from ? { date_from } : {}),
+    ...(date_to ? { date_to } : {}),
+  });
   return useQuery({
-    queryKey: [...ATT_EMAIL_LOG_KEY, pageSize],
+    queryKey: [...ATT_EMAIL_LOG_KEY, page, page_size, search ?? "", date_from ?? "", date_to ?? ""],
     queryFn: () =>
-      api<AttendanceEmailLogResponse>(
-        `/api/attendance-email-log?page=1&page_size=${pageSize}`,
-      ),
+      api<AttendanceEmailLogResponse>(`/api/attendance-email-log?${qs.toString()}`),
     staleTime: 15 * 1000,
     refetchInterval: 30 * 1000,
     enabled,

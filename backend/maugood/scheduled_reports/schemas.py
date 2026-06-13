@@ -36,6 +36,8 @@ class EmailConfigResponse(BaseModel):
     from_name: str
     enabled: bool
     updated_at: str
+    # Present only on PATCH responses where email was just disabled.
+    cancelled_queue_rows: int = 0
 
 
 class EmailConfigUpdateRequest(BaseModel):

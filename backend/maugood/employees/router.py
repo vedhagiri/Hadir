@@ -2906,24 +2906,41 @@ async def import_employees_endpoint(
                     section_id_for_employee = sec_id
 
                 # P28.7: resolve reports_to_email → user_id within the
-                # tenant. Unknown email is a per-row error so the
-                # operator can fix the spelling without losing the rest
-                # of the file.
+                # tenant. Accepts an email address or a full name.
+                # Unknown value is a per-row error so the operator can
+                # fix the cell without losing the rest of the file.
                 reports_to_id: Optional[int] = None
                 if row.reports_to_email:
+                    import re as _re  # noqa: PLC0415
+
                     from sqlalchemy import select as _select  # noqa: PLC0415
                     from maugood.db import users as _users  # noqa: PLC0415
 
+                    val = row.reports_to_email.strip()
+                    # Try email first
                     user_row = conn.execute(
                         _select(_users.c.id).where(
                             _users.c.tenant_id == scope.tenant_id,
-                            func.lower(_users.c.email)
-                            == row.reports_to_email.strip().lower(),
+                            func.lower(_users.c.email) == val.lower(),
                         )
                     ).first()
                     if user_row is None:
+                        # Try full name — normalize internal whitespace on
+                        # both sides so "Ahmed  Ali" matches "Ahmed Ali"
+                        norm_val = _re.sub(r"\s+", " ", val).lower()
+                        user_row = conn.execute(
+                            _select(_users.c.id).where(
+                                _users.c.tenant_id == scope.tenant_id,
+                                func.lower(
+                                    func.regexp_replace(
+                                        _users.c.full_name, r"\s+", " ", "g"
+                                    )
+                                ) == norm_val,
+                            )
+                        ).first()
+                    if user_row is None:
                         raise _RowError(
-                            f"unknown reports_to_email '{row.reports_to_email}'"
+                            f"unknown reports_to_email '{val}'"
                         )
                     reports_to_id = int(user_row.id)
 
