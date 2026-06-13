@@ -1,0 +1,19 @@
+{
+  "version": "1.1.21",
+  "previous_version": "1.1.20",
+  "commit_id": "6699cb6af7ac7365d9b64e19a0de2549bfe9a766",
+  "previous_commit_id": "fc428a0a30d9c1d2291781cdb50df7b88c69e406",
+  "all_new_install": false,
+  "new_migrations": [],
+  "services_changed": {
+    "backend": true,
+    "frontend": true,
+    "nginx": false,
+    "postgres": false
+  },
+  "compose_changed": false,
+  "https_compose_changed": false,
+  "env_keys_added": [],
+  "env_keys_removed": [],
+  "upgrade_scripts": []
+}
