@@ -94,24 +94,21 @@ def _maybe_notify_overtime(
     if emp_row is None:
         return
 
-    # Manager scope = explicit assignments + department-membership
-    # union (matches P15). Pull the visible-set the same way the
-    # request inbox does so the manager who'd act on this rate
-    # gets the bell.
-    from maugood.manager_assignments.repository import (  # noqa: PLC0415
-        get_manager_visible_employee_ids,
-    )
-    from maugood.db import manager_assignments as _ma  # noqa: PLC0415
+    # Find the employee's direct manager via reports_to_user_id
+    # (the single manager from the employee import hierarchy).
+    from maugood.db import employees as _emp_tbl  # noqa: PLC0415
 
-    direct_managers = [
-        int(r.manager_user_id)
-        for r in conn.execute(
-            _select(_ma.c.manager_user_id).where(
-                _ma.c.tenant_id == scope.tenant_id,
-                _ma.c.employee_id == employee_id,
-            )
-        ).all()
-    ]
+    mgr_row = conn.execute(
+        _select(_emp_tbl.c.reports_to_user_id).where(
+            _emp_tbl.c.tenant_id == scope.tenant_id,
+            _emp_tbl.c.id == employee_id,
+        )
+    ).first()
+    direct_managers = (
+        [int(mgr_row.reports_to_user_id)]
+        if mgr_row and mgr_row.reports_to_user_id is not None
+        else []
+    )
     notify_overtime_flagged(
         conn,
         scope,

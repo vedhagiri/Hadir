@@ -308,7 +308,6 @@ export function EmployeeViewDrawer({
 function TeamMembersTab({ employeeId }: { employeeId: number }) {
   const { t } = useTranslation();
   const team = useEmployeeTeamMembers(employeeId);
-  const [showTiers, setShowTiers] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
   if (team.isLoading) {
@@ -326,7 +325,7 @@ function TeamMembersTab({ employeeId }: { employeeId: number }) {
     );
   }
 
-  const { scope, scope_name, items } = team.data;
+  const { items } = team.data;
 
   const needle = searchQuery.trim().toLowerCase();
   const filteredItems = needle
@@ -343,7 +342,7 @@ function TeamMembersTab({ employeeId }: { employeeId: number }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      {/* Scope + controls bar */}
+      {/* Count bar */}
       <div
         style={{
           display: "flex",
@@ -357,64 +356,25 @@ function TeamMembersTab({ employeeId }: { employeeId: number }) {
           fontSize: 12.5,
         }}
       >
-        <div>
-          <span className="text-xs text-dim" style={{ marginInlineEnd: 6 }}>
-            {t("employees.team.scopeLabel", {
-              defaultValue: "Scope",
-            }) as string}
-          </span>
-          <span style={{ fontWeight: 500 }}>
-            {t(`employees.team.scope.${scope}`, {
-              defaultValue:
-                scope === "division"
-                  ? "Division"
-                  : scope === "section"
-                    ? "Section"
-                    : "Department",
-            }) as string}
-            {" · "}
-            {scope_name || "—"}
-          </span>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <button
-            type="button"
-            className="btn btn-sm"
-            onClick={() => setShowTiers((v) => !v)}
-            aria-pressed={showTiers}
-            title={
-              showTiers
-                ? (t("employees.team.hideTiers", {
-                    defaultValue: "Hide org tiers",
-                  }) as string)
-                : (t("employees.team.showTiers", {
-                    defaultValue: "Show org tiers",
-                  }) as string)
-            }
-          >
-            {showTiers
-              ? (t("employees.team.hideTiers", {
-                  defaultValue: "Hide org tiers",
-                }) as string)
-              : (t("employees.team.showTiers", {
-                  defaultValue: "Show org tiers",
-                }) as string)}
-          </button>
-          <span className="mono text-xs text-dim">
-            {showFiltered ? (
-              <>
-                {filteredItems.length}
-                <span style={{ opacity: 0.6 }}>/{items.length}</span>
-              </>
-            ) : (
-              items.length
-            )}{" "}
-            {t("employees.team.members", {
-              count: items.length,
-              defaultValue: items.length === 1 ? "member" : "members",
-            }) as string}
-          </span>
-        </div>
+        <span style={{ fontWeight: 500 }}>
+          {t("employees.team.directReportsLabel", {
+            defaultValue: "Direct reports",
+          }) as string}
+        </span>
+        <span className="mono text-xs text-dim">
+          {showFiltered ? (
+            <>
+              {filteredItems.length}
+              <span style={{ opacity: 0.6 }}>/{items.length}</span>
+            </>
+          ) : (
+            items.length
+          )}{" "}
+          {t("employees.team.members", {
+            count: items.length,
+            defaultValue: items.length === 1 ? "member" : "members",
+          }) as string}
+        </span>
       </div>
 
       {/* Search bar */}
@@ -491,7 +451,7 @@ function TeamMembersTab({ employeeId }: { employeeId: number }) {
         >
           <Icon name="users" size={28} />
           {t("employees.team.empty", {
-            defaultValue: "No other team members in this scope.",
+            defaultValue: "No employees report to this person.",
           }) as string}
         </div>
       ) : filteredItems.length === 0 ? (
@@ -541,25 +501,11 @@ function TeamMembersTab({ employeeId }: { employeeId: number }) {
                     defaultValue: "Designation",
                   }) as string}
                 </th>
-                {showTiers && (
-                  <>
-                    <th style={{ textTransform: "uppercase", fontSize: 11 }}>
-                      {t("employees.team.col.division", {
-                        defaultValue: "Division",
-                      }) as string}
-                    </th>
-                    <th style={{ textTransform: "uppercase", fontSize: 11 }}>
-                      {t("employees.team.col.department", {
-                        defaultValue: "Department",
-                      }) as string}
-                    </th>
-                    <th style={{ textTransform: "uppercase", fontSize: 11 }}>
-                      {t("employees.team.col.section", {
-                        defaultValue: "Section",
-                      }) as string}
-                    </th>
-                  </>
-                )}
+                <th style={{ textTransform: "uppercase", fontSize: 11 }}>
+                  {t("employees.team.col.department", {
+                    defaultValue: "Department",
+                  }) as string}
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -570,19 +516,9 @@ function TeamMembersTab({ employeeId }: { employeeId: number }) {
                     {m.full_name}
                   </td>
                   <td className="text-sm">{m.designation ?? "—"}</td>
-                  {showTiers && (
-                    <>
-                      <td className="text-sm text-dim">
-                        {m.division_name ?? "—"}
-                      </td>
-                      <td className="text-sm text-dim">
-                        {m.department_name ?? "—"}
-                      </td>
-                      <td className="text-sm text-dim">
-                        {m.section_name ?? "—"}
-                      </td>
-                    </>
-                  )}
+                  <td className="text-sm text-dim">
+                    {m.department_name ?? "—"}
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -636,13 +636,13 @@ def regenerate_attendance_employee(
                 and str(emp_row.email).lower() == user.email.lower()
             )
             if not is_admin_hr and not is_self_row:
-                # Manager: must see this employee via team membership.
+                # Manager: must see this employee via direct reports.
                 if "Manager" in user.roles:
-                    from maugood.manager_assignments.repository import (  # noqa: PLC0415
-                        get_manager_visible_employee_ids,
+                    from maugood.employees.repository import (  # noqa: PLC0415
+                        manager_team_employee_ids,
                     )
-                    visible = get_manager_visible_employee_ids(
-                        conn, scope, manager_user_id=user.id
+                    visible = manager_team_employee_ids(
+                        conn, scope, user_email=user.email, user_id=user.id
                     )
                     if body.employee_id not in visible:
                         raise HTTPException(status_code=403, detail="forbidden")

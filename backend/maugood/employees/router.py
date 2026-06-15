@@ -516,18 +516,23 @@ def list_employees_endpoint(
     ] = "desc",
 ) -> EmployeeListOut:
     scope = TenantScope(tenant_id=user.tenant_id)
-    # Manager scoping: narrow the result set to the manager's visible
-    # employees (department membership ∪ explicit assignments).
+    # Manager scoping: narrow the result set to the manager's direct
+    # reports (driven by reports_to_user_id from employee import).
     restrict_ids: Optional[frozenset[int]] = None
     if "Manager" in user.roles and "Admin" not in user.roles and "HR" not in user.roles:
-        from maugood.manager_assignments.repository import (  # noqa: PLC0415
-            get_manager_visible_employee_ids,
-        )
-
         with get_engine().begin() as conn:
-            visible = get_manager_visible_employee_ids(
-                conn, scope, manager_user_id=user.id
+            direct_reports = repo.manager_team_employee_ids(
+                conn, scope, user_email=user.email, user_id=user.id
             )
+            # Also include the manager's own employee row so they can
+            # see themselves in the list.
+            from maugood.requests.repository import (  # noqa: PLC0415
+                employee_for_user_email,
+            )
+            my_emp_id = employee_for_user_email(conn, scope, email=user.email)
+        visible = set(direct_reports)
+        if my_emp_id is not None:
+            visible.add(int(my_emp_id))
         restrict_ids = frozenset(visible)
     # Backwards compat: if the caller passes status_filter explicitly,
     # honor it; otherwise fall back to the legacy include_inactive flag.
@@ -1939,23 +1944,13 @@ class TeamMemberOut(_TM_BaseModel):
     employee_code: str
     full_name: str
     designation: Optional[str] = None
-    # Dev-visibility: each member's resolved org tiers so the operator
-    # can eyeball which rule fired for which row. ``None`` when the
-    # employee isn't mapped at that tier (sections are optional, and
-    # divisions are derived through ``departments.division_id``).
-    division_name: Optional[str] = None
     department_name: Optional[str] = None
-    section_name: Optional[str] = None
 
 
 class TeamMembersOut(_TM_BaseModel):
-    # ``scope`` describes which tier of the org structure the team
-    # was resolved against, so the frontend can label the tab
-    # accurately ("Division · Engineering" / "Department · Ops" /
-    # "Section · Backend"). ``section`` is the strictest match —
-    # active only when the viewed employee is a Manager and their
-    # division/department/section names are all distinct (Rule 0).
-    scope: Literal["division", "department", "section"]
+    # ``scope`` is always "manager_group"; ``scope_name`` is the
+    # manager's full name (empty string when no manager assigned).
+    scope: str
     scope_name: str
     items: list[TeamMemberOut]
 
@@ -1967,39 +1962,26 @@ def list_team_members_endpoint(
         CurrentUser, Depends(require_any_role("Admin", "HR", "Manager"))
     ],
 ) -> TeamMembersOut:
-    """Resolve an employee's team-mates by an org-structure rule set.
+    """Return direct reports of the viewed employee.
 
-    Rules — first match wins:
+    Finds the employee's user account via email, then returns every
+    active employee whose ``reports_to_user_id`` points to that user.
+    Self-excluded. Returns an empty list when the employee has no
+    matching user account or no direct reports.
 
-    * Rule 0 (Manager triple) — when the viewed employee's designation
-      contains "manager" (case-insensitive substring) AND their
-      division/department/section names are all distinct (none of the
-      three pairs equal): team is every active employee whose
-      ``(division_id, department_id, section_id)`` triple matches
-      the manager's exactly.
-    * Rule 1 (Flat hierarchy) — when ``division.name ==
-      department.name == section.name`` (all three exist with the
-      same name): team is every active employee whose department
-      rolls up to the same division.
-    * Rule 2 / fall-back — every active employee in the same
-      department.
-
-    Comparison is on the ``name`` column per the product spec.
-    Self-excluded; ``status='active'`` only.
-
-    Manager scope: a Manager can fetch this for any employee in
-    their visible set (department membership ∪ direct
-    ``manager_assignments`` per P8); out-of-scope ids return 404 to
-    avoid leaking existence. Admin/HR see any employee.
+    Manager scope: a Manager can fetch this for any employee in their
+    visible set; out-of-scope ids return 404 to avoid leaking
+    existence. Admin/HR see any employee.
     """
+
+    import re as _re  # noqa: PLC0415
 
     from sqlalchemy import select as _select  # noqa: PLC0415
 
     from maugood.db import (  # noqa: PLC0415
         departments as _departments,
-        divisions as _divisions,
         employees as _employees,
-        sections as _sections,
+        users as _users,
     )
     from maugood.employees.repository import (  # noqa: PLC0415
         manager_team_employee_ids,
@@ -2009,33 +1991,11 @@ def list_team_members_endpoint(
     is_admin_or_hr = "Admin" in user.roles or "HR" in user.roles
 
     with get_engine().begin() as conn:
+        # Fetch the target employee's email so we can find their user account.
         target = conn.execute(
             _select(
                 _employees.c.id,
-                _employees.c.department_id,
-                _employees.c.section_id,
-                _employees.c.designation,
-                _departments.c.name.label("dept_name"),
-                _departments.c.division_id,
-                _divisions.c.name.label("div_name"),
-                _sections.c.name.label("sec_name"),
-            )
-            .select_from(
-                _employees.join(
-                    _departments,
-                    (_departments.c.id == _employees.c.department_id)
-                    & (_departments.c.tenant_id == _employees.c.tenant_id),
-                )
-                .outerjoin(
-                    _divisions,
-                    (_divisions.c.id == _departments.c.division_id)
-                    & (_divisions.c.tenant_id == _employees.c.tenant_id),
-                )
-                .outerjoin(
-                    _sections,
-                    (_sections.c.id == _employees.c.section_id)
-                    & (_sections.c.tenant_id == _employees.c.tenant_id),
-                )
+                _employees.c.email,
             )
             .where(
                 _employees.c.tenant_id == scope.tenant_id,
@@ -2046,21 +2006,11 @@ def list_team_members_endpoint(
             raise HTTPException(status_code=404, detail="employee not found")
 
         if not is_admin_or_hr:
-            # Use the team-rule resolver (My Team / Daily Attendance /
-            # Calendar all share this). Falls back to the legacy P8
-            # visible-set when the Manager has no matching employees
-            # row — so existing tenants relying on department-only
-            # scoping still see the same set.
             visible = set(
                 manager_team_employee_ids(
                     conn, scope, user_email=user.email, user_id=user.id
                 )
             )
-            # ``manager_team_employee_ids`` deliberately excludes the
-            # manager's own employee row; for the team-members
-            # endpoint a Manager can legitimately view their own
-            # profile's team-mates, so add self back into the allow
-            # set when an email bridge exists.
             from maugood.requests.repository import (  # noqa: PLC0415
                 employee_for_user_email,
             )
@@ -2070,99 +2020,75 @@ def list_team_members_endpoint(
             if my_emp_id is not None:
                 visible.add(int(my_emp_id))
             if employee_id not in visible:
-                # 404 not 403 — never leak existence to a Manager who
-                # can't see the row.
                 raise HTTPException(status_code=404, detail="employee not found")
 
-        div_name = target.div_name
-        dept_name = target.dept_name
-        sec_name = target.sec_name
-        designation = target.designation
+        # Resolve employee → user by email (the email bridge used across the
+        # codebase until an explicit user↔employee join table is added).
+        emp_email = (target.email or "").strip().lower()
+        if not emp_email:
+            return TeamMembersOut(scope="direct_reports", scope_name="", items=[])
 
-        # Rule 0 — Manager triple. Designation contains "manager" as a
-        # case-insensitive substring AND the three tier names are all
-        # distinct (none of the three pairs equal). This catches the
-        # "Operations Manager" / "Logistics Manager" cases sitting at
-        # a real Division+Department+Section path.
-        rule_zero = (
-            designation is not None
-            and "manager" in designation.lower()
-            and div_name is not None
-            and dept_name is not None
-            and sec_name is not None
-            and div_name != dept_name
-            and dept_name != sec_name
-            and div_name != sec_name
-            and target.division_id is not None
-            and target.section_id is not None
-        )
+        # Try exact email match first, then normalized full-name match — mirrors
+        # the import logic so the same values that were stored are found here.
+        user_row = conn.execute(
+            _select(_users.c.id).where(
+                _users.c.tenant_id == scope.tenant_id,
+                func.lower(_users.c.email) == emp_email,
+            )
+        ).first()
+        if user_row is None:
+            # Fall back to full-name match for employees whose system account
+            # email differs from their HR record email.
+            emp_full_name = conn.execute(
+                _select(_employees.c.full_name)
+                .where(
+                    _employees.c.tenant_id == scope.tenant_id,
+                    _employees.c.id == employee_id,
+                )
+            ).scalar_one_or_none()
+            if emp_full_name:
+                norm = _re.sub(r"\s+", " ", emp_full_name).lower().strip()
+                user_row = conn.execute(
+                    _select(_users.c.id).where(
+                        _users.c.tenant_id == scope.tenant_id,
+                        func.lower(
+                            func.regexp_replace(_users.c.full_name, r"\s+", " ", "g")
+                        ) == norm,
+                    )
+                ).first()
 
-        rule_one = (
-            div_name is not None
-            and dept_name is not None
-            and sec_name is not None
-            and div_name == dept_name == sec_name
-            and target.division_id is not None
-        )
+        if user_row is None:
+            return TeamMembersOut(scope="direct_reports", scope_name="", items=[])
 
-        base = (
+        target_user_id = int(user_row.id)
+
+        rows = conn.execute(
             _select(
                 _employees.c.id,
                 _employees.c.employee_code,
                 _employees.c.full_name,
                 _employees.c.designation,
-                _divisions.c.name.label("member_div_name"),
                 _departments.c.name.label("member_dept_name"),
-                _sections.c.name.label("member_sec_name"),
             )
             .select_from(
-                _employees.join(
+                _employees.outerjoin(
                     _departments,
                     (_departments.c.id == _employees.c.department_id)
                     & (_departments.c.tenant_id == _employees.c.tenant_id),
                 )
-                .outerjoin(
-                    _divisions,
-                    (_divisions.c.id == _departments.c.division_id)
-                    & (_divisions.c.tenant_id == _employees.c.tenant_id),
-                )
-                .outerjoin(
-                    _sections,
-                    (_sections.c.id == _employees.c.section_id)
-                    & (_sections.c.tenant_id == _employees.c.tenant_id),
-                )
             )
             .where(
                 _employees.c.tenant_id == scope.tenant_id,
+                _employees.c.reports_to_user_id == target_user_id,
                 _employees.c.id != employee_id,
                 _employees.c.status == "active",
             )
             .order_by(_employees.c.full_name.asc())
-        )
-
-        scope_label: Literal["division", "department", "section"]
-        if rule_zero:
-            stmt = base.where(
-                _employees.c.department_id == target.department_id,
-                _employees.c.section_id == target.section_id,
-                _departments.c.division_id == target.division_id,
-            )
-            scope_label = "section"
-            scope_name = sec_name or ""
-        elif rule_one:
-            stmt = base.where(_departments.c.division_id == target.division_id)
-            scope_label = "division"
-            scope_name = div_name or ""
-        else:
-            stmt = base.where(_employees.c.department_id == target.department_id)
-            scope_label = "department"
-            scope_name = dept_name or ""
-
-        rows = conn.execute(stmt).all()
+        ).all()
 
     return TeamMembersOut(
-        scope=scope_label,
-        scope_name=scope_name,
+        scope="direct_reports",
+        scope_name="",
         items=[
             TeamMemberOut(
                 id=int(r.id),
@@ -2171,19 +2097,9 @@ def list_team_members_endpoint(
                 designation=(
                     str(r.designation) if r.designation is not None else None
                 ),
-                division_name=(
-                    str(r.member_div_name)
-                    if r.member_div_name is not None
-                    else None
-                ),
                 department_name=(
                     str(r.member_dept_name)
                     if r.member_dept_name is not None
-                    else None
-                ),
-                section_name=(
-                    str(r.member_sec_name)
-                    if r.member_sec_name is not None
                     else None
                 ),
             )
@@ -2220,12 +2136,8 @@ def soft_delete_employee_endpoint(
         # Manager-scope check: 404 (not 403) so existence isn't leaked
         # to a Manager who doesn't manage the target employee.
         if not is_admin_or_hr:
-            from maugood.manager_assignments.repository import (  # noqa: PLC0415
-                get_manager_visible_employee_ids,
-            )
-
-            visible = get_manager_visible_employee_ids(
-                conn, scope, manager_user_id=user.id
+            visible = repo.manager_team_employee_ids(
+                conn, scope, user_email=user.email, user_id=user.id
             )
             if employee_id not in visible:
                 raise HTTPException(
@@ -2940,7 +2852,7 @@ async def import_employees_endpoint(
                         ).first()
                     if user_row is None:
                         raise _RowError(
-                            f"unknown reports_to_email '{val}'"
+                            f"Manager not found: '{val}' — no user with this name or email exists in the system"
                         )
                     reports_to_id = int(user_row.id)
 

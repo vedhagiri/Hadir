@@ -552,11 +552,58 @@ def list_all_for_export(conn: Connection, scope: TenantScope) -> list[EmployeeRo
 #
 # Rules — first match wins:
 #   0. Manager triple — designation contains "manager" (CI substring) AND
-#      div / dept / section names are all distinct → exact triple match
-#      on (division_id, department_id, section_id).
-#   1. Flat hierarchy — div.name == dept.name == sec.name → same division
-#   2. Fallback — same department
 # ---------------------------------------------------------------------------
+# Team / visibility helpers — driven by ``reports_to_user_id``
+# ---------------------------------------------------------------------------
+
+
+def _user_id_for_employee(
+    conn: Connection,
+    scope: TenantScope,
+    employee_id: int,
+) -> Optional[int]:
+    """Return the ``users.id`` that corresponds to ``employee_id``.
+
+    Tries email first; falls back to normalised full-name match
+    (mirrors the import path so the same value that was stored is
+    found here).  Returns ``None`` when no match is found.
+    """
+    import re as _re  # noqa: PLC0415
+
+    emp = conn.execute(
+        select(employees.c.email, employees.c.full_name).where(
+            employees.c.tenant_id == scope.tenant_id,
+            employees.c.id == employee_id,
+        )
+    ).first()
+    if emp is None:
+        return None
+
+    emp_email = (emp.email or "").strip().lower()
+    if emp_email:
+        row = conn.execute(
+            select(users.c.id).where(
+                users.c.tenant_id == scope.tenant_id,
+                func.lower(users.c.email) == emp_email,
+            )
+        ).first()
+        if row is not None:
+            return int(row.id)
+
+    if emp.full_name:
+        norm = _re.sub(r"\s+", " ", emp.full_name).lower().strip()
+        row = conn.execute(
+            select(users.c.id).where(
+                users.c.tenant_id == scope.tenant_id,
+                func.lower(
+                    func.regexp_replace(users.c.full_name, r"\s+", " ", "g")
+                ) == norm,
+            )
+        ).first()
+        if row is not None:
+            return int(row.id)
+
+    return None
 
 
 def resolve_team_employee_ids(
@@ -564,108 +611,27 @@ def resolve_team_employee_ids(
     scope: TenantScope,
     target_employee_id: int,
 ) -> frozenset[int]:
-    """Return the set of teammate ids for ``target_employee_id``.
+    """Return the direct-report ids for ``target_employee_id``.
 
-    The target itself is excluded; only ``status='active'`` rows
-    count. Returns an empty set when the target row doesn't exist
-    in the tenant.
+    Resolves the employee's user account via email (with name fallback),
+    then returns every active employee whose ``reports_to_user_id``
+    points to that user. The target itself is always excluded.
+    Returns an empty set when no user account is found or when the
+    employee has no direct reports.
     """
-
-    from maugood.db import (  # noqa: PLC0415
-        departments as _departments,
-        divisions as _divisions,
-        sections as _sections,
-    )
-
-    target = conn.execute(
-        select(
-            employees.c.id,
-            employees.c.department_id,
-            employees.c.section_id,
-            employees.c.designation,
-            _departments.c.name.label("dept_name"),
-            _departments.c.division_id,
-            _divisions.c.name.label("div_name"),
-            _sections.c.name.label("sec_name"),
-        )
-        .select_from(
-            employees.join(
-                _departments,
-                (_departments.c.id == employees.c.department_id)
-                & (_departments.c.tenant_id == employees.c.tenant_id),
-            )
-            .outerjoin(
-                _divisions,
-                (_divisions.c.id == _departments.c.division_id)
-                & (_divisions.c.tenant_id == employees.c.tenant_id),
-            )
-            .outerjoin(
-                _sections,
-                (_sections.c.id == employees.c.section_id)
-                & (_sections.c.tenant_id == employees.c.tenant_id),
-            )
-        )
-        .where(
-            employees.c.tenant_id == scope.tenant_id,
-            employees.c.id == target_employee_id,
-        )
-    ).first()
-    if target is None:
+    user_id = _user_id_for_employee(conn, scope, target_employee_id)
+    if user_id is None:
         return frozenset()
 
-    div_name = target.div_name
-    dept_name = target.dept_name
-    sec_name = target.sec_name
-    designation = target.designation
-
-    rule_zero = (
-        designation is not None
-        and "manager" in designation.lower()
-        and div_name is not None
-        and dept_name is not None
-        and sec_name is not None
-        and div_name != dept_name
-        and dept_name != sec_name
-        and div_name != sec_name
-        and target.division_id is not None
-        and target.section_id is not None
-    )
-    rule_one = (
-        div_name is not None
-        and dept_name is not None
-        and sec_name is not None
-        and div_name == dept_name == sec_name
-        and target.division_id is not None
-    )
-
-    base = (
-        select(employees.c.id)
-        .select_from(
-            employees.join(
-                _departments,
-                (_departments.c.id == employees.c.department_id)
-                & (_departments.c.tenant_id == employees.c.tenant_id),
-            )
-        )
-        .where(
+    rows = conn.execute(
+        select(employees.c.id).where(
             employees.c.tenant_id == scope.tenant_id,
+            employees.c.reports_to_user_id == user_id,
             employees.c.id != target_employee_id,
             employees.c.status == "active",
         )
-    )
-
-    if rule_zero:
-        stmt = base.where(
-            employees.c.department_id == target.department_id,
-            employees.c.section_id == target.section_id,
-            _departments.c.division_id == target.division_id,
-        )
-    elif rule_one:
-        stmt = base.where(_departments.c.division_id == target.division_id)
-    else:
-        stmt = base.where(employees.c.department_id == target.department_id)
-
-    return frozenset(int(r.id) for r in conn.execute(stmt).all())
+    ).all()
+    return frozenset(int(r.id) for r in rows)
 
 
 def manager_team_employee_ids(
@@ -675,35 +641,28 @@ def manager_team_employee_ids(
     user_email: str,
     user_id: Optional[int] = None,
 ) -> frozenset[int]:
-    """Convenience: ``user.email`` → manager's employee row → team ids.
+    """Return active employee ids that report directly to this manager.
 
-    Primary path: lower-cased email match against ``employees.email``,
-    then the team-rule resolver gets applied to that employee record.
-    The manager's own employee.id is **excluded** from the returned
-    set — same shape as Team Members tab + My Team.
-
-    Fallback: when the manager has no matching employee row (some
-    tenants run Manager users as pure operators with no profile),
-    fall back to the legacy P8 visible-set
-    (``manager_assignments`` ∪ ``user_departments``) — this preserves
-    behaviour for tenants that haven't migrated to the new
-    designation-based hierarchy. ``user_id`` is required for the
-    fallback path; without it the fallback is skipped and an empty
-    set is returned.
+    Looks up the manager's user row by email, then returns every active
+    employee whose ``reports_to_user_id`` matches. The manager's own
+    employee row is not included (they don't report to themselves).
+    Returns an empty set when the user is not found.
     """
-
-    from maugood.requests.repository import (  # noqa: PLC0415
-        employee_for_user_email,
-    )
-
-    my_emp_id = employee_for_user_email(conn, scope, email=user_email)
-    if my_emp_id is not None:
-        return resolve_team_employee_ids(conn, scope, my_emp_id)
-
-    if user_id is None:
+    u_row = conn.execute(
+        select(users.c.id).where(
+            users.c.tenant_id == scope.tenant_id,
+            func.lower(users.c.email) == user_email.strip().lower(),
+        )
+    ).first()
+    if u_row is None:
         return frozenset()
-    from maugood.manager_assignments.repository import (  # noqa: PLC0415
-        get_manager_visible_employee_ids as _legacy,
-    )
 
-    return frozenset(int(x) for x in _legacy(conn, scope, manager_user_id=user_id))
+    mgr_user_id = int(u_row.id)
+    rows = conn.execute(
+        select(employees.c.id).where(
+            employees.c.tenant_id == scope.tenant_id,
+            employees.c.reports_to_user_id == mgr_user_id,
+            employees.c.status == "active",
+        )
+    ).all()
+    return frozenset(int(r.id) for r in rows)

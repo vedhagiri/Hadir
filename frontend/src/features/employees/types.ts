@@ -64,20 +64,18 @@ export interface EmployeeListResponse {
 }
 
 // Team Members tab — slim shape returned by
-// ``GET /api/employees/{id}/team-members``. Scope tells the UI
-// which org tier the team was resolved against.
+// ``GET /api/employees/{id}/team-members``. Members share the same
+// manager (``reports_to_user_id``); scope_name is the manager's name.
 export interface TeamMember {
   id: number;
   employee_code: string;
   full_name: string;
   designation: string | null;
-  division_name: string | null;
   department_name: string | null;
-  section_name: string | null;
 }
 
 export interface TeamMembersResponse {
-  scope: "division" | "department" | "section";
+  scope: string;
   scope_name: string;
   items: TeamMember[];
 }
