@@ -199,6 +199,7 @@ def _read_email_config(conn: Connection, *, tenant_id: int) -> Optional[SenderCo
             email_config_t.c.graph_client_secret_encrypted,
             email_config_t.c.from_address,
             email_config_t.c.from_name,
+            email_config_t.c.bcc_address,
             email_config_t.c.enabled,
         ).where(email_config_t.c.tenant_id == tenant_id)
     ).first()
@@ -216,6 +217,7 @@ def _read_email_config(conn: Connection, *, tenant_id: int) -> Optional[SenderCo
         graph_client_secret=decrypt_secret(row.graph_client_secret_encrypted),
         from_address=str(row.from_address or ""),
         from_name=str(row.from_name or ""),
+        bcc_address=str(row.bcc_address or ""),
         enabled=bool(row.enabled),
     )
 

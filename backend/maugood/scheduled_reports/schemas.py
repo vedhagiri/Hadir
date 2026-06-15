@@ -34,6 +34,7 @@ class EmailConfigResponse(BaseModel):
     has_graph_client_secret: bool
     from_address: str
     from_name: str
+    bcc_address: str
     enabled: bool
     updated_at: str
     # Present only on PATCH responses where email was just disabled.
@@ -55,6 +56,7 @@ class EmailConfigUpdateRequest(BaseModel):
     graph_client_secret: Optional[str] = Field(default=None, max_length=2000)
     from_address: Optional[EmailStr] = None
     from_name: Optional[str] = Field(default=None, max_length=200)
+    bcc_address: Optional[EmailStr] = None
     enabled: Optional[bool] = None
 
 

@@ -15,6 +15,7 @@ export interface EmailConfig {
   has_graph_client_secret: boolean;
   from_address: string;
   from_name: string;
+  bcc_address: string;
   enabled: boolean;
   updated_at: string;
   cancelled_queue_rows?: number;
@@ -32,6 +33,7 @@ export interface EmailConfigUpdate {
   graph_client_secret?: string;
   from_address?: string;
   from_name?: string;
+  bcc_address?: string;
   enabled?: boolean;
 }
 

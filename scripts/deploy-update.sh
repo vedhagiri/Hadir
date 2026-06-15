@@ -859,3 +859,15 @@ echo "    tar -xzf ${BACKUP_DIR}.tar.gz -C ./backups"
 echo "    cp -a backups/${TIMESTAMP}-pre-update/.env ./.env"
 echo "    # then re-extract the previous release zip on top, and:"
 echo "    docker compose -f ${COMPOSE_FILE_REL} up -d --build"
+
+# ---------------------------------------------------------------------------
+# Prune dangling Docker images left behind by the rebuild.
+# Only removes untagged/unreferenced layers — backups, database, and data
+# volumes are never touched.
+# ---------------------------------------------------------------------------
+
+if [[ ${DRY_RUN} -eq 0 && -n "${REBUILD_LIST}" ]]; then
+    echo
+    echo ">> Pruning dangling Docker images from previous build"
+    docker image prune -f | grep -E 'deleted|reclaimed|Total' || true
+fi

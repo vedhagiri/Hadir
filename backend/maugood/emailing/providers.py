@@ -63,6 +63,7 @@ class SmtpConfig:
     username: str
     password: str
     use_tls: bool
+    bcc_address: str = ""
 
 
 class SmtpSender:
@@ -73,6 +74,8 @@ class SmtpSender:
 
     def send(self, message: EmailMessage) -> None:
         msg = _to_python_email(message)
+        if self._config.bcc_address:
+            msg["Bcc"] = self._config.bcc_address
         cfg = self._config
         with smtplib.SMTP(cfg.host, cfg.port, timeout=30) as smtp:
             smtp.ehlo()
@@ -135,6 +138,7 @@ class GraphConfig:
     client_id: str
     client_secret: str
     sender_address: str  # the mailbox we send "from" — must be licensed
+    bcc_address: str = ""
 
 
 class GraphSender:
@@ -215,23 +219,25 @@ class GraphSender:
             }
             for cid, ctype, data in m.inline_images
         ]
-        return {
-            "message": {
-                "subject": m.subject,
-                "body": {"contentType": "HTML", "content": m.html},
-                "toRecipients": [
-                    {"emailAddress": {"address": addr}} for addr in m.to
-                ],
-                "from": {
-                    "emailAddress": {
-                        "address": m.from_address,
-                        "name": m.from_name or m.from_address,
-                    }
-                },
-                "attachments": attachments_payload,
+        msg: dict = {
+            "subject": m.subject,
+            "body": {"contentType": "HTML", "content": m.html},
+            "toRecipients": [
+                {"emailAddress": {"address": addr}} for addr in m.to
+            ],
+            "from": {
+                "emailAddress": {
+                    "address": m.from_address,
+                    "name": m.from_name or m.from_address,
+                }
             },
-            "saveToSentItems": False,
+            "attachments": attachments_payload,
         }
+        if self._config.bcc_address:
+            msg["bccRecipients"] = [
+                {"emailAddress": {"address": self._config.bcc_address}}
+            ]
+        return {"message": msg, "saveToSentItems": False}
 
 
 # ---------------------------------------------------------------------------
@@ -262,6 +268,7 @@ class SenderConfig:
     from_address: str
     from_name: str
     enabled: bool
+    bcc_address: str = ""
 
 
 _factory: Optional[Callable[[SenderConfig], EmailSender]] = None
@@ -348,6 +355,7 @@ def get_sender(config: SenderConfig) -> EmailSender:
                 username=config.smtp_username,
                 password=config.smtp_password,
                 use_tls=config.smtp_use_tls,
+                bcc_address=config.bcc_address,
             )
         )
     if config.provider == "microsoft_graph":
@@ -357,6 +365,7 @@ def get_sender(config: SenderConfig) -> EmailSender:
                 client_id=config.graph_client_id,
                 client_secret=config.graph_client_secret,
                 sender_address=config.from_address,
+                bcc_address=config.bcc_address,
             )
         )
     raise ValueError(f"unknown email provider: {config.provider!r}")

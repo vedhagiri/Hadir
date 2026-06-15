@@ -145,6 +145,7 @@ function ProviderConfigModal({
   const [graphClientSecret, setGraphClientSecret] = useState("");
   const [fromAddress, setFromAddress] = useState(d.from_address);
   const [fromName, setFromName] = useState(d.from_name);
+  const [bccAddress, setBccAddress] = useState(d.bcc_address);
   const [enabled, setEnabled] = useState(d.enabled);
   const [error, setError] = useState<string | null>(null);
 
@@ -183,6 +184,7 @@ function ProviderConfigModal({
       graph_client_id: graphClientId,
       from_address: fromAddress,
       from_name: fromName,
+      bcc_address: bccAddress,
       enabled,
     };
     if (smtpPassword.length > 0) payload.smtp_password = smtpPassword;
@@ -533,6 +535,15 @@ function ProviderConfigModal({
                   <input className="input" value={fromName} onChange={(e) => setFromName(e.target.value)} placeholder="Maugood Reports" />
                 </Field>
               </div>
+              <Field label="BCC (monitoring address)">
+                <input
+                  className="input"
+                  type="email"
+                  value={bccAddress}
+                  onChange={(e) => setBccAddress(e.target.value)}
+                  placeholder="monitoring@your-company.com (optional)"
+                />
+              </Field>
               <label
                 style={{
                   display: "flex",

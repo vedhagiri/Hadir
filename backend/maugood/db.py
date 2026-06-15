@@ -839,6 +839,7 @@ email_config = Table(
     Column("graph_client_secret_encrypted", Text, nullable=True),
     Column("from_address", Text, nullable=False, server_default=""),
     Column("from_name", Text, nullable=False, server_default=""),
+    Column("bcc_address", Text, nullable=False, server_default=""),
     Column("enabled", Boolean, nullable=False, server_default="false"),
     Column(
         "updated_at",

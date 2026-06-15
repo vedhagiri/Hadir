@@ -2,7 +2,6 @@ FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     # Native-thread caps: prevent each OpenCV/ONNX/OpenBLAS call from
     # spawning a thread-pool the size of all vCPUs. With 21 cameras and
@@ -43,7 +42,11 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml ./
-RUN pip install --upgrade pip \
+# BuildKit cache mount keeps downloaded wheels between builds so
+# heavy packages (torch, insightface, scipy) are not re-downloaded
+# on every update — the cache stays on the host, not in the image.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip \
     && pip install ".[dev]"
 
 COPY maugood ./maugood

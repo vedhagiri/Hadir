@@ -105,6 +105,7 @@ def _email_config_response(row) -> EmailConfigResponse:
         has_graph_client_secret=bool(row.graph_client_secret_encrypted),
         from_address=str(row.from_address or ""),
         from_name=str(row.from_name or ""),
+        bcc_address=str(row.bcc_address or ""),
         enabled=bool(row.enabled),
         updated_at=row.updated_at.isoformat()
         if row.updated_at is not None
@@ -127,6 +128,7 @@ def _read_email_row(conn, *, tenant_id: int):
             email_config_t.c.graph_client_secret_encrypted,
             email_config_t.c.from_address,
             email_config_t.c.from_name,
+            email_config_t.c.bcc_address,
             email_config_t.c.enabled,
             email_config_t.c.updated_at,
         ).where(email_config_t.c.tenant_id == tenant_id)
@@ -182,6 +184,7 @@ def patch_email_config(
         "graph_client_id",
         "from_address",
         "from_name",
+        "bcc_address",
         "enabled",
     ):
         if key in provided:
@@ -267,6 +270,7 @@ def send_test_email(
         graph_client_secret=decrypt_secret(row.graph_client_secret_encrypted),
         from_address=str(row.from_address or ""),
         from_name=str(row.from_name or ""),
+        bcc_address=str(row.bcc_address or ""),
         enabled=bool(row.enabled),
     )
     if not sender_cfg.from_address:
