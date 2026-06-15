@@ -1,0 +1,21 @@
+{
+  "version": "1.1.22",
+  "previous_version": "1.1.21",
+  "commit_id": "5362c14aa4e9d800698015aa68c6f62b8714f61f",
+  "previous_commit_id": "6699cb6af7ac7365d9b64e19a0de2549bfe9a766",
+  "all_new_install": false,
+  "new_migrations": [
+    "0082_email_config_bcc.py"
+  ],
+  "services_changed": {
+    "backend": true,
+    "frontend": true,
+    "nginx": false,
+    "postgres": false
+  },
+  "compose_changed": false,
+  "https_compose_changed": false,
+  "env_keys_added": [],
+  "env_keys_removed": [],
+  "upgrade_scripts": []
+}

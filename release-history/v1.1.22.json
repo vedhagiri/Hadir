@@ -1,0 +1,18 @@
+{
+  "version": "1.1.22",
+  "label": "v1.1.22",
+  "git_url": "https://github.com/vedhagiri/Hadir.git",
+  "branch": "release-omran",
+  "commit_id": "5362c14aa4e9d800698015aa68c6f62b8714f61f",
+  "commit_short": "5362c14",
+  "built_at_utc": "2026-06-15T10:46:16Z",
+  "built_at_local": "2026-06-15 16:16:16 IST",
+  "machine": {
+    "hostname": "inaisys-02",
+    "os": "Linux",
+    "kernel": "Linux 6.17.0-35-generic x86_64",
+    "user": "hari-inaisys",
+    "python_version": "3.12.3",
+    "node_version": "24.16.0"
+  }
+}
