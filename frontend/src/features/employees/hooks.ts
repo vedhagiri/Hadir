@@ -177,6 +177,9 @@ export interface ImportPreviewRow {
   relieving_date: string | null;
   reports_to_email: string | null;
   defaulted_joining_date: boolean;
+  // First validation problem for the row (null = importable). Drives the
+  // inline error flag in the editable preview grid.
+  error?: string | null;
 }
 
 export interface ImportPreviewResult {

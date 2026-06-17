@@ -19,6 +19,7 @@ import {
   useImportEmployees,
   usePreviewImport,
   type ImportPreviewResult,
+  type ImportPreviewRow,
 } from "./hooks";
 import type { ImportResult } from "./types";
 
@@ -33,6 +34,10 @@ export function ImportModal({ onClose }: Props) {
   const [step, setStep] = useState<Step>("select");
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<ImportPreviewResult | null>(null);
+  // Editable copy of the preview rows — the operator fixes cells inline,
+  // presses Re-check to re-validate, then imports the corrected rows.
+  const [editRows, setEditRows] = useState<ImportPreviewRow[]>([]);
+  const [dirty, setDirty] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [dragOver, setDragOver] = useState(false);
 
@@ -51,21 +56,51 @@ export function ImportModal({ onClose }: Props) {
     try {
       const r = await previewMutation.mutateAsync(file);
       setPreview(r);
+      setEditRows(r.rows);
+      setDirty(false);
       setStep("preview");
     } catch {
       // previewMutation.error renders below
     }
   };
 
-  const runImport = async () => {
-    if (!file) return;
+  // Re-validate the operator's edited rows (serialised to CSV) without
+  // leaving the preview — surfaces remaining errors (e.g. manager still
+  // not found) before import.
+  const recheck = async () => {
     try {
-      const r = await importMutation.mutateAsync(file);
+      const r = await previewMutation.mutateAsync(rowsToCsvFile(editRows));
+      setPreview(r);
+      setEditRows(r.rows);
+      setDirty(false);
+    } catch {
+      // previewMutation.error renders below
+    }
+  };
+
+  const runImport = async () => {
+    // Import the edited rows (CSV), so inline fixes are applied. Falls
+    // back to the original file only if nothing was loaded into the grid.
+    const payload = editRows.length > 0 ? rowsToCsvFile(editRows) : file;
+    if (!payload) return;
+    try {
+      const r = await importMutation.mutateAsync(payload);
       setResult(r);
       setStep("result");
     } catch {
       // importMutation.error renders below
     }
+  };
+
+  const updateCell = (
+    rowNum: number,
+    field: EditableField,
+    value: string,
+  ) => {
+    setEditRows((prev) =>
+      prev.map((r) => (r.row === rowNum ? { ...r, [field]: value } : r)),
+    );
+    setDirty(true);
   };
 
   const back = () => {
@@ -292,78 +327,49 @@ export function ImportModal({ onClose }: Props) {
 
             {step === "preview" && preview && (
               <>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                   <span className="pill pill-info">
-                    {t("importEmployees.pillReady", { count: preview.rows.length })}
+                    {t("importEmployees.pillReady", {
+                      count: editRows.filter((r) => !r.error).length,
+                    })}
                   </span>
-                  {preview.errors.length > 0 && (
+                  {editRows.some((r) => r.error) && (
                     <span className="pill pill-warning">
-                      {t("importEmployees.pillErrors", { count: preview.errors.length })}
-                    </span>
-                  )}
-                  {preview.rows.some((r) => r.defaulted_joining_date) && (
-                    <span className="pill pill-neutral">
-                      {t("importEmployees.pillDefaultedJoining", {
-                        count: preview.rows.filter((r) => r.defaulted_joining_date).length,
+                      {t("importEmployees.pillErrors", {
+                        count: editRows.filter((r) => r.error).length,
                       })}
                     </span>
                   )}
+                  {editRows.some((r) => r.defaulted_joining_date) && (
+                    <span className="pill pill-neutral">
+                      {t("importEmployees.pillDefaultedJoining", {
+                        count: editRows.filter((r) => r.defaulted_joining_date).length,
+                      })}
+                    </span>
+                  )}
+                  {dirty && (
+                    <span style={{ fontSize: 11.5, color: "var(--text-tertiary)" }}>
+                      {t("importEmployees.editedRecheckHint")}
+                    </span>
+                  )}
                 </div>
-
-                {preview.errors.length > 0 && (
-                  <div
-                    style={{
-                      border: "1px solid var(--border)",
-                      borderRadius: "var(--radius-sm)",
-                      overflow: "hidden",
-                    }}
-                  >
-                    <div
-                      style={{
-                        padding: "6px 10px",
-                        background: "var(--bg-sunken)",
-                        fontSize: 11,
-                        fontWeight: 600,
-                        textTransform: "uppercase",
-                        letterSpacing: "0.04em",
-                      }}
-                    >
-                      {t("importEmployees.rowErrorsHeader")}
-                    </div>
-                    <div style={{ maxHeight: 120, overflowY: "auto" }}>
-                      {preview.errors.map((e) => (
-                        <div
-                          key={e.row}
-                          style={{
-                            padding: "6px 10px",
-                            fontSize: 12,
-                            borderTop: "1px solid var(--border)",
-                          }}
-                        >
-                          <span className="mono">#{e.row}</span> · {e.message}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
+                  {t("importEmployees.editHint")}
+                </div>
 
                 <div
                   style={{
                     border: "1px solid var(--border)",
                     borderRadius: "var(--radius-sm)",
                     overflow: "auto",
-                    maxHeight: 380,
+                    maxHeight: 420,
                   }}
                 >
-                  {/* Operator request — show Email + Phone in the
-                      preview so the operator can sanity-check the
-                      contact fields before committing the import.
-                      Both were already in the ImportPreviewRow shape
-                      but weren't rendered. */}
-                  <table className="table" style={{ minWidth: 1080 }}>
+                  <table className="table" style={{ minWidth: 1280 }}>
                     <thead>
                       <tr>
-                        <th style={{ width: 50 }}>{t("importEmployees.col.row")}</th>
+                        <th style={{ width: 44 }}>{t("importEmployees.col.row")}</th>
+                        <th style={{ width: 28 }} aria-label="status" />
                         <th>{t("importEmployees.col.code")}</th>
                         <th>{t("importEmployees.col.name")}</th>
                         <th>{t("importEmployees.col.email")}</th>
@@ -372,63 +378,51 @@ export function ImportModal({ onClose }: Props) {
                         <th>{t("importEmployees.col.department")}</th>
                         <th>{t("importEmployees.col.division")}</th>
                         <th>{t("importEmployees.col.section")}</th>
+                        <th>{t("importEmployees.col.reportsTo")}</th>
                         <th>{t("importEmployees.col.joining")}</th>
                         <th>{t("importEmployees.col.relieving")}</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {preview.rows.map((r) => (
-                        <tr key={r.row}>
+                      {editRows.map((r) => (
+                        <tr
+                          key={r.row}
+                          style={
+                            r.error
+                              ? { background: "var(--danger-soft)" }
+                              : undefined
+                          }
+                        >
                           <td className="mono text-xs">{r.row}</td>
-                          <td className="mono text-sm">{r.employee_code}</td>
-                          <td className="text-sm">{r.full_name}</td>
-                          <td
-                            className="text-sm"
-                            style={{
-                              maxWidth: 200,
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                            title={r.email ?? undefined}
-                          >
-                            {r.email ?? "—"}
+                          <td style={{ textAlign: "center" }}>
+                            {r.error ? (
+                              <span
+                                title={r.error}
+                                style={{ color: "var(--danger-text)", cursor: "help" }}
+                              >
+                                ⚠
+                              </span>
+                            ) : (
+                              <span style={{ color: "var(--success-text)" }}>✓</span>
+                            )}
                           </td>
-                          <td className="mono text-xs">
-                            {r.phone ?? "—"}
-                          </td>
-                          <td className="text-sm">{r.designation ?? "—"}</td>
-                          <td className="text-sm">{r.department}</td>
-                          <td className="text-sm">{r.division ?? "—"}</td>
-                          <td className="text-sm">{r.section ?? "—"}</td>
-                          <td
-                            className="mono text-xs"
-                            style={
-                              r.defaulted_joining_date
-                                ? {
-                                    color: "var(--accent)",
-                                    fontWeight: 600,
-                                  }
-                                : undefined
-                            }
-                            title={
-                              r.defaulted_joining_date
-                                ? t("importEmployees.defaultedToToday")
-                                : undefined
-                            }
-                          >
-                            {r.joining_date ?? "—"}
-                            {r.defaulted_joining_date && " *"}
-                          </td>
-                          <td className="mono text-xs">
-                            {r.relieving_date ?? "—"}
-                          </td>
+                          <td>{importCell(r, "employee_code", updateCell)}</td>
+                          <td>{importCell(r, "full_name", updateCell)}</td>
+                          <td>{importCell(r, "email", updateCell)}</td>
+                          <td>{importCell(r, "phone", updateCell)}</td>
+                          <td>{importCell(r, "designation", updateCell)}</td>
+                          <td>{importCell(r, "department", updateCell)}</td>
+                          <td>{importCell(r, "division", updateCell)}</td>
+                          <td>{importCell(r, "section", updateCell)}</td>
+                          <td>{importCell(r, "reports_to_email", updateCell)}</td>
+                          <td>{importCell(r, "joining_date", updateCell)}</td>
+                          <td>{importCell(r, "relieving_date", updateCell)}</td>
                         </tr>
                       ))}
-                      {preview.rows.length === 0 && (
+                      {editRows.length === 0 && (
                         <tr>
                           <td
-                            colSpan={11}
+                            colSpan={13}
                             className="text-sm text-dim"
                             style={{ padding: 16 }}
                           >
@@ -479,16 +473,30 @@ export function ImportModal({ onClose }: Props) {
                       {t("importEmployees.cancel")}
                     </button>
                     <button
+                      className={`btn${dirty ? " btn-primary" : ""}`}
+                      onClick={recheck}
+                      disabled={previewMutation.isPending || importMutation.isPending}
+                    >
+                      <Icon name="refresh" size={12} />
+                      {previewMutation.isPending
+                        ? t("importEmployees.rechecking")
+                        : t("importEmployees.recheck")}
+                    </button>
+                    <button
                       className="btn btn-primary"
                       onClick={runImport}
                       disabled={
-                        importMutation.isPending || preview.rows.length === 0
+                        importMutation.isPending ||
+                        previewMutation.isPending ||
+                        editRows.filter((r) => !r.error).length === 0
                       }
                     >
                       <Icon name="upload" size={12} />
                       {importMutation.isPending
                         ? t("importEmployees.importing")
-                        : t("importEmployees.confirmImport", { count: preview.rows.length })}
+                        : t("importEmployees.confirmImport", {
+                            count: editRows.filter((r) => !r.error).length,
+                          })}
                     </button>
                   </div>
                 </div>
@@ -514,46 +522,159 @@ export function ImportModal({ onClose }: Props) {
                     {t("importEmployees.resultErrors", { count: result.errors.length })}
                   </span>
                 </div>
-                {result.errors.length > 0 && (
-                  <div>
-                    <div
-                      style={{
-                        fontSize: 11,
-                        textTransform: "uppercase",
-                        letterSpacing: "0.05em",
-                        fontWeight: 500,
-                        color: "var(--text-tertiary)",
-                        margin: "6px 0",
-                      }}
-                    >
-                      {t("importEmployees.rowLevelErrors")}
+                {result.errors.length > 0 && (() => {
+                  const { managerGroups, other } = groupImportErrors(result.errors);
+                  return (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                      {managerGroups.length > 0 && (
+                        <div>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "baseline",
+                              justifyContent: "space-between",
+                              gap: 8,
+                              margin: "4px 0 8px",
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontSize: 11,
+                                textTransform: "uppercase",
+                                letterSpacing: "0.05em",
+                                fontWeight: 600,
+                                color: "var(--text-tertiary)",
+                              }}
+                            >
+                              {t("importEmployees.managersMissingTitle")}
+                            </span>
+                            <span style={{ fontSize: 11.5, color: "var(--text-tertiary)" }}>
+                              {t("importEmployees.managersMissingCount", {
+                                managers: managerGroups.length,
+                                rows: managerGroups.reduce((n, g) => n + g.rows.length, 0),
+                              })}
+                            </span>
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 11.5,
+                              color: "var(--text-secondary)",
+                              background: "var(--warning-soft, var(--bg-sunken))",
+                              border: "1px solid var(--border)",
+                              borderRadius: "var(--radius-sm)",
+                              padding: "8px 10px",
+                              marginBottom: 8,
+                              lineHeight: 1.5,
+                            }}
+                          >
+                            {t("importEmployees.managersMissingHint")}
+                          </div>
+                          <div
+                            style={{
+                              border: "1px solid var(--border)",
+                              borderRadius: "var(--radius-sm)",
+                              overflow: "hidden",
+                            }}
+                          >
+                            <table className="table" style={{ margin: 0 }}>
+                              <thead>
+                                <tr>
+                                  <th>{t("importEmployees.col.manager")}</th>
+                                  <th style={{ width: 70, textAlign: "end" }}>
+                                    {t("importEmployees.col.count")}
+                                  </th>
+                                  <th>{t("importEmployees.col.affectedRows")}</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {managerGroups.map((g) => (
+                                  <tr key={g.manager}>
+                                    <td className="text-sm" style={{ fontWeight: 500 }}>
+                                      {g.manager}
+                                    </td>
+                                    <td
+                                      className="mono text-sm"
+                                      style={{ textAlign: "end" }}
+                                    >
+                                      {g.rows.length}
+                                    </td>
+                                    <td
+                                      className="mono text-xs"
+                                      style={{ color: "var(--text-secondary)" }}
+                                    >
+                                      {g.rows.join(", ")}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+
+                      {other.length > 0 && (
+                        <div>
+                          <div
+                            style={{
+                              fontSize: 11,
+                              textTransform: "uppercase",
+                              letterSpacing: "0.05em",
+                              fontWeight: 600,
+                              color: "var(--text-tertiary)",
+                              margin: "4px 0 8px",
+                            }}
+                          >
+                            {t("importEmployees.otherErrorsTitle")}
+                          </div>
+                          <div
+                            style={{
+                              border: "1px solid var(--border)",
+                              borderRadius: "var(--radius-sm)",
+                              overflow: "hidden",
+                            }}
+                          >
+                            <table className="table" style={{ margin: 0 }}>
+                              <thead>
+                                <tr>
+                                  <th style={{ width: 70 }}>{t("importEmployees.col.row")}</th>
+                                  <th>{t("importEmployees.col.message")}</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {other
+                                  .slice()
+                                  .sort((a, b) => a.row - b.row)
+                                  .map((e) => (
+                                    <tr key={e.row}>
+                                      <td className="mono text-sm">{e.row}</td>
+                                      <td className="text-sm">{e.message}</td>
+                                    </tr>
+                                  ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    <table className="table">
-                      <thead>
-                        <tr>
-                          <th style={{ width: 80 }}>{t("importEmployees.col.row")}</th>
-                          <th>{t("importEmployees.col.message")}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {result.errors.map((e) => (
-                          <tr key={e.row}>
-                            <td className="mono text-sm">{e.row}</td>
-                            <td className="text-sm">{e.message}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                  );
+                })()}
                 <div
                   style={{
                     display: "flex",
-                    justifyContent: "flex-end",
+                    justifyContent: result.errors.length > 0 ? "space-between" : "flex-end",
                     gap: 8,
                     marginTop: 8,
                   }}
                 >
+                  {result.errors.length > 0 && (
+                    <button
+                      className="btn"
+                      onClick={() => downloadErrorsCsv(result.errors)}
+                    >
+                      <Icon name="download" size={12} />
+                      {t("importEmployees.downloadErrors")}
+                    </button>
+                  )}
                   <button className="btn btn-primary" onClick={onClose}>
                     <Icon name="check" size={12} />
                     {t("importEmployees.done")}
@@ -566,6 +687,148 @@ export function ImportModal({ onClose }: Props) {
       </div>
     </ModalShell>
   );
+}
+
+// Serialise edited preview rows back to a CSV File so the existing
+// CSV-capable preview/import endpoints can re-validate + import the
+// operator's inline fixes. Headers are the canonical column names the
+// import parser accepts.
+function rowsToCsvFile(rows: ImportPreviewRow[]): File {
+  const headers = [
+    "employee_code",
+    "full_name",
+    "email",
+    "department_code",
+    "reports_to_email",
+    "designation",
+    "phone",
+    "division_code",
+    "section_code",
+    "joining_date",
+    "relieving_date",
+  ];
+  const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const lines = [headers.join(",")];
+  for (const r of rows) {
+    lines.push(
+      [
+        r.employee_code,
+        r.full_name,
+        r.email,
+        r.department,
+        r.reports_to_email,
+        r.designation,
+        r.phone,
+        r.division,
+        r.section,
+        r.joining_date,
+        r.relieving_date,
+      ]
+        .map(esc)
+        .join(","),
+    );
+  }
+  const csv = "﻿" + lines.join("\r\n");
+  return new File([csv], "edited-import.csv", { type: "text/csv" });
+}
+
+// Columns the operator can edit inline (all string-typed fields). Kept
+// off ``row`` / ``defaulted_joining_date`` / ``error`` which are derived.
+type EditableField =
+  | "employee_code"
+  | "full_name"
+  | "email"
+  | "phone"
+  | "designation"
+  | "department"
+  | "division"
+  | "section"
+  | "reports_to_email"
+  | "joining_date"
+  | "relieving_date";
+
+// One editable cell in the preview grid. Renders an input bound to the
+// row's field; the CSV serialiser writes "" for blanks.
+function importCell(
+  r: ImportPreviewRow,
+  field: EditableField,
+  onChange: (rowNum: number, field: EditableField, value: string) => void,
+) {
+  const raw = r[field];
+  const value = raw == null ? "" : String(raw);
+  return (
+    <input
+      value={value}
+      onChange={(e) => onChange(r.row, field, e.target.value)}
+      spellCheck={false}
+      style={{
+        width: "100%",
+        minWidth: 96,
+        fontSize: 12,
+        padding: "3px 6px",
+        border: "1px solid var(--border)",
+        borderRadius: 5,
+        background: "var(--bg-elev)",
+        color: "var(--text)",
+      }}
+    />
+  );
+}
+
+interface ManagerGroup {
+  manager: string;
+  rows: number[];
+}
+
+// "Manager not found: 'Khalid Mohamed Mirza' — …" → group by manager name
+// so the same missing manager isn't repeated once per row.
+function groupImportErrors(errors: { row: number; message: string }[]): {
+  managerGroups: ManagerGroup[];
+  other: { row: number; message: string }[];
+} {
+  const re = /manager not found:\s*'(.+?)'/i;
+  const byManager = new Map<string, number[]>();
+  const other: { row: number; message: string }[] = [];
+  for (const e of errors) {
+    const m = e.message.match(re);
+    if (m && m[1]) {
+      const arr = byManager.get(m[1]) ?? [];
+      arr.push(e.row);
+      byManager.set(m[1], arr);
+    } else {
+      other.push(e);
+    }
+  }
+  const managerGroups: ManagerGroup[] = [...byManager.entries()]
+    .map(([manager, rows]) => ({
+      manager,
+      rows: [...rows].sort((a, b) => a - b),
+    }))
+    .sort((a, b) => b.rows.length - a.rows.length);
+  return { managerGroups, other };
+}
+
+function downloadErrorsCsv(errors: { row: number; message: string }[]): void {
+  const esc = (s: string) => `"${s.replace(/"/g, '""')}"`;
+  const lines = [
+    ["Row", "Message"],
+    ...errors
+      .slice()
+      .sort((a, b) => a.row - b.row)
+      .map((e) => [String(e.row), e.message]),
+  ];
+  const csv = lines.map((r) => r.map(esc).join(",")).join("\r\n");
+  const blob = new Blob(["﻿" + csv], {
+    type: "text/csv;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "import-errors.csv";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 function importErrorMessage(

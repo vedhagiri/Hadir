@@ -45,6 +45,7 @@ from maugood.db import (
     get_engine,
     person_clips,
     tenant_context,
+    tenant_settings,
 )
 from maugood.employees.photos import decrypt_bytes
 from maugood.tenants.scope import TenantScope
@@ -1166,6 +1167,137 @@ class ClipPipeline:
                 job.batch_id, job.use_case, stage="cropping"
             )
 
+    # ---- auto-delete after processing --------------------------------
+
+    def _maybe_auto_delete_clip_video(
+        self, engine, scope: TenantScope, clip_id: int
+    ) -> None:
+        """Soft-clear the raw video file for ``clip_id`` when the tenant
+        has ``auto_delete_clip_after_processing=True`` and every enabled
+        use-case for the clip has now completed.
+
+        Best-effort — any failure is logged at WARNING; the calling
+        match handler still marks the job completed.
+        """
+
+        # 1. Read the per-tenant flag (fail-open: any read error → skip).
+        try:
+            with tenant_context(scope.tenant_schema):
+                with engine.begin() as conn:
+                    setting_row = conn.execute(
+                        sa_select(
+                            tenant_settings.c.auto_delete_clip_after_processing
+                        ).where(tenant_settings.c.tenant_id == scope.tenant_id)
+                    ).first()
+        except Exception:  # noqa: BLE001
+            return
+
+        if setting_row is None or not setting_row.auto_delete_clip_after_processing:
+            return
+
+        # 2. Which UCs are enabled for this tenant? The clip is only
+        #    deleted once EVERY enabled use-case has completed for it:
+        #      • UC1 only  → delete after UC1 completes
+        #      • UC2 only  → delete after UC2 completes (crops stored)
+        #      • UC1 + UC2 → delete only after both complete
+        enabled = set(enabled_use_cases_for(scope))
+        if not enabled:
+            return
+
+        # 3. Which of the enabled UCs have a completed result for this clip?
+        try:
+            with tenant_context(scope.tenant_schema):
+                with engine.begin() as conn:
+                    done_rows = conn.execute(
+                        sa_select(clip_processing_results.c.use_case)
+                        .where(
+                            clip_processing_results.c.tenant_id == scope.tenant_id,
+                            clip_processing_results.c.person_clip_id == clip_id,
+                            clip_processing_results.c.use_case.in_(list(enabled)),
+                            clip_processing_results.c.status == "completed",
+                        )
+                        .distinct()
+                    ).fetchall()
+        except Exception:  # noqa: BLE001
+            return
+
+        done_ucs = {row.use_case for row in done_rows}
+        if not enabled.issubset(done_ucs):
+            return  # Not every enabled use-case has finished yet
+
+        # 4. Read the clip row (skip if already cleared or no file).
+        try:
+            with tenant_context(scope.tenant_schema):
+                with engine.begin() as conn:
+                    clip_row = conn.execute(
+                        sa_select(
+                            person_clips.c.file_path,
+                        ).where(
+                            person_clips.c.id == clip_id,
+                            person_clips.c.tenant_id == scope.tenant_id,
+                            person_clips.c.clip_file_deleted_at.is_(None),
+                            person_clips.c.file_path.is_not(None),
+                        )
+                    ).first()
+        except Exception:  # noqa: BLE001
+            return
+
+        if clip_row is None:
+            return  # Already cleared or no file
+
+        # 5. Best-effort unlink.
+        fp = Path(str(clip_row.file_path))
+        if fp.exists():
+            try:
+                fp.unlink()
+            except OSError as exc:
+                logger.warning(
+                    "clip_pipeline auto-delete: failed to unlink %s: %s", fp, exc
+                )
+
+        # 6. Soft-clear the DB row + audit.
+        from maugood.auth.audit import write_audit  # noqa: PLC0415
+
+        now_utc = datetime.now(tz=timezone.utc)
+        try:
+            with tenant_context(scope.tenant_schema):
+                with engine.begin() as conn:
+                    conn.execute(
+                        sa_update(person_clips)
+                        .where(
+                            person_clips.c.id == clip_id,
+                            person_clips.c.tenant_id == scope.tenant_id,
+                        )
+                        .values(
+                            clip_file_deleted_at=now_utc,
+                            file_path=None,
+                            filesize_bytes=0,
+                        )
+                    )
+                    write_audit(
+                        conn,
+                        tenant_id=scope.tenant_id,
+                        actor_user_id=None,
+                        action="clip_cleanup.auto_deleted_after_processing",
+                        entity_type="person_clips",
+                        entity_id=str(clip_id),
+                        after={
+                            "clip_id": clip_id,
+                            "file_path": str(clip_row.file_path),
+                        },
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "clip_pipeline auto-delete: DB clear failed clip=%s: %s",
+                clip_id, type(exc).__name__,
+            )
+            return
+
+        logger.info(
+            "clip_pipeline auto-delete: clip=%s video cleared after processing",
+            clip_id,
+        )
+
     # ---- stage 2: matching ------------------------------------------
 
     def _handle_match(self, job: MatchJob) -> None:
@@ -1250,6 +1382,14 @@ class ClipPipeline:
                             "failed clip=%s uc=%s reason=%s",
                             job.clip_id, job.use_case, type(exc).__name__,
                         )
+
+                try:
+                    self._maybe_auto_delete_clip_video(engine, scope, job.clip_id)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "clip_pipeline auto-delete (resume): clip=%s %s",
+                        job.clip_id, type(exc).__name__,
+                    )
 
                 self._tracker.mark_completed(job.batch_id, job.use_case)
                 return
@@ -1370,6 +1510,13 @@ class ClipPipeline:
                         "clip=%s uc=%s reason=%s",
                         job.clip_id, job.use_case, type(exc).__name__,
                     )
+            try:
+                self._maybe_auto_delete_clip_video(engine, scope, job.clip_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "clip_pipeline auto-delete: clip=%s %s",
+                    job.clip_id, type(exc).__name__,
+                )
             self._tracker.mark_completed(job.batch_id, job.use_case)
         except Exception as exc:  # noqa: BLE001
             logger.exception(

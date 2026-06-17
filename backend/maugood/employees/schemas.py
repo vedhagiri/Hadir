@@ -84,6 +84,7 @@ class EmployeeOut(BaseModel):
     designation: Optional[str] = None
     phone: Optional[str] = None
     reports_to_user_id: Optional[int] = None
+    reports_to_employee_id: Optional[int] = None
     reports_to_full_name: Optional[str] = None
     joining_date: Optional[date] = None
     relieving_date: Optional[date] = None
@@ -125,6 +126,7 @@ class EmployeeCreateIn(BaseModel):
     designation: Optional[str] = Field(default=None, max_length=80)
     phone: Optional[str] = Field(default=None, max_length=30)
     reports_to_user_id: Optional[int] = None
+    reports_to_employee_id: Optional[int] = None
     joining_date: Optional[date] = None
     relieving_date: Optional[date] = None
     # When status='inactive' on create, server requires a reason
@@ -163,6 +165,7 @@ class EmployeePatchIn(BaseModel):
     designation: Optional[str] = Field(default=None, max_length=80)
     phone: Optional[str] = Field(default=None, max_length=30)
     reports_to_user_id: Optional[int] = None
+    reports_to_employee_id: Optional[int] = None
     joining_date: Optional[date] = None
     relieving_date: Optional[date] = None
     deactivation_reason: Optional[str] = Field(default=None, max_length=400)
@@ -234,6 +237,10 @@ class ImportPreviewRow(BaseModel):
     relieving_date: Optional[str] = None
     reports_to_email: Optional[str] = None
     defaulted_joining_date: bool = False
+    # First validation problem for this row (None = importable). Lets the
+    # editable preview grid flag the row inline so the operator can fix it
+    # and Re-check before importing.
+    error: Optional[str] = None
 
 
 class ImportPreviewResult(BaseModel):

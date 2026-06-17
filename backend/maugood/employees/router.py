@@ -368,6 +368,7 @@ def _row_to_out(row: repo.EmployeeRow) -> EmployeeOut:
         designation=row.designation,
         phone=row.phone,
         reports_to_user_id=row.reports_to_user_id,
+        reports_to_employee_id=row.reports_to_employee_id,
         reports_to_full_name=row.reports_to_full_name,
         joining_date=row.joining_date,
         relieving_date=row.relieving_date,
@@ -731,6 +732,16 @@ def create_employee_endpoint(
                     detail="reports_to_user_id is not a user in this tenant",
                 )
 
+        # Same guard for the employee→employee org-chart link.
+        if payload.reports_to_employee_id is not None:
+            if not repo.is_employee_in_tenant(
+                conn, scope, payload.reports_to_employee_id
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="reports_to_employee_id is not an employee in this tenant",
+                )
+
         # Duplicate employee_code → 409 so callers can tell it apart from
         # malformed input (400s).
         if repo.get_employee_by_code(conn, scope, payload.employee_code) is not None:
@@ -824,6 +835,7 @@ def create_employee_endpoint(
             designation=payload.designation,
             phone=payload.phone,
             reports_to_user_id=payload.reports_to_user_id,
+            reports_to_employee_id=payload.reports_to_employee_id,
             joining_date=payload.joining_date,
             relieving_date=payload.relieving_date,
             deactivated_at=deactivated_at,
@@ -1719,6 +1731,23 @@ def patch_employee_endpoint(
                     detail="reports_to_user_id is not a user in this tenant",
                 )
 
+        # Same guard for the employee→employee org-chart link (0084).
+        if (
+            "reports_to_employee_id" in provided
+            and provided["reports_to_employee_id"] is not None
+        ):
+            mgr_eid = int(provided["reports_to_employee_id"])
+            if mgr_eid == employee_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="an employee cannot report to themselves",
+                )
+            if not repo.is_employee_in_tenant(conn, scope, mgr_eid):
+                raise HTTPException(
+                    status_code=400,
+                    detail="reports_to_employee_id is not an employee in this tenant",
+                )
+
         # BUG-008 / BUG-009 — duplicate email/phone pre-check on
         # PATCH too. Excludes the row being edited so an unrelated
         # update doesn't false-positive against its own values, and
@@ -1785,6 +1814,7 @@ def patch_employee_endpoint(
             "designation",
             "phone",
             "reports_to_user_id",
+            "reports_to_employee_id",
             "joining_date",
             "relieving_date",
         ):
@@ -1974,17 +2004,15 @@ def list_team_members_endpoint(
     existence. Admin/HR see any employee.
     """
 
-    import re as _re  # noqa: PLC0415
-
     from sqlalchemy import select as _select  # noqa: PLC0415
 
     from maugood.db import (  # noqa: PLC0415
         departments as _departments,
         employees as _employees,
-        users as _users,
     )
     from maugood.employees.repository import (  # noqa: PLC0415
         manager_team_employee_ids,
+        resolve_team_employee_ids,
     )
 
     scope = TenantScope(tenant_id=user.tenant_id)
@@ -2022,45 +2050,13 @@ def list_team_members_endpoint(
             if employee_id not in visible:
                 raise HTTPException(status_code=404, detail="employee not found")
 
-        # Resolve employee → user by email (the email bridge used across the
-        # codebase until an explicit user↔employee join table is added).
-        emp_email = (target.email or "").strip().lower()
-        if not emp_email:
+        # Direct reports = the employee→employee link (migration 0084)
+        # unioned with the legacy user-based link. This works for the
+        # name-based / email-less roster where the employee has no user
+        # account at all (which is why the old email-bridge returned 0).
+        member_ids = resolve_team_employee_ids(conn, scope, employee_id)
+        if not member_ids:
             return TeamMembersOut(scope="direct_reports", scope_name="", items=[])
-
-        # Try exact email match first, then normalized full-name match — mirrors
-        # the import logic so the same values that were stored are found here.
-        user_row = conn.execute(
-            _select(_users.c.id).where(
-                _users.c.tenant_id == scope.tenant_id,
-                func.lower(_users.c.email) == emp_email,
-            )
-        ).first()
-        if user_row is None:
-            # Fall back to full-name match for employees whose system account
-            # email differs from their HR record email.
-            emp_full_name = conn.execute(
-                _select(_employees.c.full_name)
-                .where(
-                    _employees.c.tenant_id == scope.tenant_id,
-                    _employees.c.id == employee_id,
-                )
-            ).scalar_one_or_none()
-            if emp_full_name:
-                norm = _re.sub(r"\s+", " ", emp_full_name).lower().strip()
-                user_row = conn.execute(
-                    _select(_users.c.id).where(
-                        _users.c.tenant_id == scope.tenant_id,
-                        func.lower(
-                            func.regexp_replace(_users.c.full_name, r"\s+", " ", "g")
-                        ) == norm,
-                    )
-                ).first()
-
-        if user_row is None:
-            return TeamMembersOut(scope="direct_reports", scope_name="", items=[])
-
-        target_user_id = int(user_row.id)
 
         rows = conn.execute(
             _select(
@@ -2079,7 +2075,7 @@ def list_team_members_endpoint(
             )
             .where(
                 _employees.c.tenant_id == scope.tenant_id,
-                _employees.c.reports_to_user_id == target_user_id,
+                _employees.c.id.in_(list(member_ids)),
                 _employees.c.id != employee_id,
                 _employees.c.status == "active",
             )
@@ -2500,77 +2496,111 @@ async def import_preview_endpoint(
                 ).fetchall()
             }
 
+    # Index this file's own rows so a "Reports To" manager can resolve to
+    # a row later in the same file (mirrors the import handler), and probe
+    # existing DB employees for manager existence.
+    import re as _pre_re  # noqa: PLC0415
+    from sqlalchemy import select as _psel  # noqa: PLC0415
+    from maugood.db import employees as _pemp  # noqa: PLC0415
+
+    file_emails: set[str] = set()
+    file_names: set[str] = set()
+    file_codes: set[str] = set()
+    for r in rows:
+        if r.email and r.email.strip():
+            file_emails.add(r.email.strip().lower())
+        if r.full_name and r.full_name.strip():
+            file_names.add(_pre_re.sub(r"\s+", " ", r.full_name).strip().lower())
+        if r.employee_code and r.employee_code.strip():
+            file_codes.add(r.employee_code.strip().lower())
+
+    def _mgr_exists(conn, value: str) -> bool:
+        v = value.strip()
+        low = v.lower()
+        norm = _pre_re.sub(r"\s+", " ", v).lower()
+        if low in file_emails or norm in file_names or low in file_codes:
+            return True
+        for cond in (
+            func.lower(_pemp.c.email) == low,
+            func.lower(func.regexp_replace(_pemp.c.full_name, r"\s+", " ", "g"))
+            == norm,
+            func.lower(_pemp.c.employee_code) == low,
+        ):
+            if conn.execute(
+                _psel(_pemp.c.id)
+                .where(_pemp.c.tenant_id == scope.tenant_id, cond)
+                .limit(1)
+            ).first():
+                return True
+        return False
+
     preview_rows: list[ImportPreviewRow] = []
     errors: list[ImportErrorSchema] = []
     today_iso = datetime.now(tz=timezone.utc).date().isoformat()
     seen: set[str] = set()
 
-    for r in rows:
-        if not r.employee_code:
-            errors.append(
-                ImportErrorSchema(row=r.excel_row, message="employee_code is required")
-            )
-            continue
-        if not r.full_name:
-            errors.append(
-                ImportErrorSchema(row=r.excel_row, message="full_name is required")
-            )
-            continue
-        if not r.department_code:
-            errors.append(
-                ImportErrorSchema(
-                    row=r.excel_row, message="department_code is required"
+    with engine.begin() as _mgr_conn:
+        for r in rows:
+            # Compute the first blocking problem for the row (None =
+            # importable). EVERY row is returned so the editable grid can
+            # show + fix it inline; ``errors`` keeps the summary list.
+            row_error: Optional[str] = None
+            if not r.employee_code:
+                row_error = "employee_code is required"
+            elif not r.full_name:
+                row_error = "full_name is required"
+            elif not r.department_code:
+                row_error = "department_code is required"
+            elif r.employee_code in seen:
+                row_error = (
+                    f"duplicate employee_code '{r.employee_code}' earlier in file"
                 )
-            )
-            continue
-        if r.employee_code in seen:
-            errors.append(
-                ImportErrorSchema(
-                    row=r.excel_row,
-                    message=(
-                        f"duplicate employee_code '{r.employee_code}' "
-                        "earlier in file"
-                    ),
+            elif r.employee_code in existing_codes:
+                row_error = f"employee_code '{r.employee_code}' already exists"
+            elif (
+                r.reports_to_email
+                and r.reports_to_email.strip()
+                and not _mgr_exists(_mgr_conn, r.reports_to_email.strip())
+            ):
+                row_error = (
+                    f"Manager not found: '{r.reports_to_email.strip()}' — no "
+                    "employee with this email, name, or code exists in the "
+                    "system or this import file"
                 )
-            )
-            continue
-        if r.employee_code in existing_codes:
-            errors.append(
-                ImportErrorSchema(
-                    row=r.excel_row,
-                    message=(
-                        f"employee_code '{r.employee_code}' already exists"
-                    ),
-                )
-            )
-            continue
-        seen.add(r.employee_code)
 
-        # Mirror the import handler's joining_date fallback so the
-        # preview shows the operator exactly what will land in the DB.
-        joining = r.joining_date
-        defaulted = False
-        if not joining or not joining.strip():
-            joining = today_iso
-            defaulted = True
+            if r.employee_code and not row_error:
+                seen.add(r.employee_code)
+            if row_error:
+                errors.append(
+                    ImportErrorSchema(row=r.excel_row, message=row_error)
+                )
 
-        preview_rows.append(
-            ImportPreviewRow(
-                row=r.excel_row,
-                employee_code=r.employee_code,
-                full_name=r.full_name,
-                email=r.email,
-                designation=r.designation,
-                phone=r.phone,
-                division=r.division_code,
-                department=r.department_code,
-                section=r.section_code,
-                joining_date=joining,
-                relieving_date=r.relieving_date,
-                reports_to_email=r.reports_to_email,
-                defaulted_joining_date=defaulted,
+            # Mirror the import handler's joining_date fallback so the
+            # preview shows the operator exactly what will land in the DB.
+            joining = r.joining_date
+            defaulted = False
+            if not joining or not joining.strip():
+                joining = today_iso
+                defaulted = True
+
+            preview_rows.append(
+                ImportPreviewRow(
+                    row=r.excel_row,
+                    employee_code=r.employee_code or "",
+                    full_name=r.full_name or "",
+                    email=r.email,
+                    designation=r.designation,
+                    phone=r.phone,
+                    division=r.division_code,
+                    department=r.department_code or "",
+                    section=r.section_code,
+                    joining_date=joining,
+                    relieving_date=r.relieving_date,
+                    reports_to_email=r.reports_to_email,
+                    defaulted_joining_date=defaulted,
+                    error=row_error,
+                )
             )
-        )
 
     return ImportPreviewResult(rows=preview_rows, errors=errors, warnings=[])
 
@@ -2609,6 +2639,61 @@ async def import_employees_endpoint(
         custom_field_defs = {
             f.code: f for f in cf_repo.list_fields(conn, scope)
         }
+
+    # Index of this file's own rows so a "Reports To" value can resolve
+    # to a manager that appears LATER in the same file (not only the DB).
+    # Powers the "manager exists somewhere?" guard below; the precise link
+    # is set in the second pass once every row exists.
+    import re as _rt_re  # noqa: PLC0415
+
+    _file_emails: set[str] = set()
+    _file_names: set[str] = set()
+    _file_codes: set[str] = set()
+    for _r in rows:
+        if _r.email and _r.email.strip():
+            _file_emails.add(_r.email.strip().lower())
+        if _r.full_name and _r.full_name.strip():
+            _file_names.add(_rt_re.sub(r"\s+", " ", _r.full_name).strip().lower())
+        if _r.employee_code and _r.employee_code.strip():
+            _file_codes.add(_r.employee_code.strip().lower())
+
+    def _manager_exists(conn, value: str) -> bool:
+        """True if a manager matching ``value`` (email / full name /
+        employee_code) exists in the DB OR anywhere in this import file.
+        Pure existence check — the exact link is resolved in the second
+        pass. Never creates anything."""
+        from sqlalchemy import select as _s  # noqa: PLC0415
+        from maugood.db import employees as _e  # noqa: PLC0415
+
+        v = value.strip()
+        low = v.lower()
+        norm = _rt_re.sub(r"\s+", " ", v).lower()
+        if low in _file_emails or norm in _file_names or low in _file_codes:
+            return True
+        if conn.execute(
+            _s(_e.c.id).where(
+                _e.c.tenant_id == scope.tenant_id,
+                func.lower(_e.c.email) == low,
+            ).limit(1)
+        ).first():
+            return True
+        if conn.execute(
+            _s(_e.c.id).where(
+                _e.c.tenant_id == scope.tenant_id,
+                func.lower(
+                    func.regexp_replace(_e.c.full_name, r"\s+", " ", "g")
+                ) == norm,
+            ).limit(1)
+        ).first():
+            return True
+        if conn.execute(
+            _s(_e.c.id).where(
+                _e.c.tenant_id == scope.tenant_id,
+                func.lower(_e.c.employee_code) == low,
+            ).limit(1)
+        ).first():
+            return True
+        return False
 
     for row in rows:
         # Basic per-row validation first so we don't waste a transaction.
@@ -2817,44 +2902,22 @@ async def import_employees_endpoint(
                         )
                     section_id_for_employee = sec_id
 
-                # P28.7: resolve reports_to_email → user_id within the
-                # tenant. Accepts an email address or a full name.
-                # Unknown value is a per-row error so the operator can
-                # fix the cell without losing the rest of the file.
+                # reports_to is LINKED in a SECOND PASS after the create
+                # loop (a manager can appear later in the file than their
+                # report, so every employee row must exist first). But we
+                # validate NOW that the manager exists somewhere — the DB
+                # or this very file — so an unknown "Reports To" fails the
+                # row instead of importing with a dangling manager. The
+                # link is employee→employee (migration 0084); no user is
+                # ever created for a manager.
                 reports_to_id: Optional[int] = None
-                if row.reports_to_email:
-                    import re as _re  # noqa: PLC0415
-
-                    from sqlalchemy import select as _select  # noqa: PLC0415
-                    from maugood.db import users as _users  # noqa: PLC0415
-
-                    val = row.reports_to_email.strip()
-                    # Try email first
-                    user_row = conn.execute(
-                        _select(_users.c.id).where(
-                            _users.c.tenant_id == scope.tenant_id,
-                            func.lower(_users.c.email) == val.lower(),
-                        )
-                    ).first()
-                    if user_row is None:
-                        # Try full name — normalize internal whitespace on
-                        # both sides so "Ahmed  Ali" matches "Ahmed Ali"
-                        norm_val = _re.sub(r"\s+", " ", val).lower()
-                        user_row = conn.execute(
-                            _select(_users.c.id).where(
-                                _users.c.tenant_id == scope.tenant_id,
-                                func.lower(
-                                    func.regexp_replace(
-                                        _users.c.full_name, r"\s+", " ", "g"
-                                    )
-                                ) == norm_val,
-                            )
-                        ).first()
-                    if user_row is None:
-                        raise _RowError(
-                            f"Manager not found: '{val}' — no user with this name or email exists in the system"
-                        )
-                    reports_to_id = int(user_row.id)
+                rt_cell = (row.reports_to_email or "").strip()
+                if rt_cell and not _manager_exists(conn, rt_cell):
+                    raise _RowError(
+                        f"Manager not found: '{rt_cell}' — no employee with "
+                        "this email, name, or code exists in the system or "
+                        "this import file"
+                    )
 
                 existing = repo.get_employee_by_code(conn, scope, row.employee_code)
                 if existing is not None:
@@ -2903,42 +2966,25 @@ async def import_employees_endpoint(
                 created += 1
                 target_employee_id = new_id
 
-                # Default platform login: every imported employee
-                # gets a ``users`` row + Employee role so the role is
-                # surfaced on the employees list immediately. Future
-                # role changes go through the Edit drawer.
-                #
-                # When the import row has an email, that's the login
-                # email. When it doesn't (HR rosters often skip
-                # email), we synthesise one from the employee_code
-                # so the row is unique and the operator can either
-                # leave it placeholder or override later. The
-                # synthesised local-suffix `.maugood.local` is the
-                # same convention the PDPL redact path uses, so a
-                # quick grep tells you "no real email".
-                login_email = (
-                    row.email.strip()
-                    if row.email and row.email.strip()
-                    else f"{row.employee_code.lower()}@maugood.local"
-                )
-                _maybe_create_default_employee_login(
-                    conn=conn,
-                    scope=scope,
-                    actor_user_id=user.id,
-                    employee_email=login_email,
-                    employee_full_name=row.full_name,
-                    warnings=warnings,
-                    excel_row=row.excel_row,
-                )
-                # Backfill the employee row's email when we
-                # synthesised one — keeps the user↔employee join
-                # working in the list view (which matches by email).
-                if not row.email:
-                    repo.update_employee(
-                        conn,
-                        scope,
-                        new_id,
-                        values={"email": login_email},
+                # Default platform login: created ONLY when the import
+                # row carries a real email. Email-less rosters (e.g. the
+                # Omran HR export) must NOT get a synthesised
+                # ``{code}@maugood.local`` login, and must NOT have their
+                # email column backfilled with one — those dummy rows
+                # polluted both ``users`` and ``employees`` and had to be
+                # cleaned up by hand on every re-import. An employee with
+                # no email is created with ``email = NULL`` and no login;
+                # the operator adds a login from the Edit drawer if and
+                # when that person actually needs to sign in.
+                if row.email and row.email.strip():
+                    _maybe_create_default_employee_login(
+                        conn=conn,
+                        scope=scope,
+                        actor_user_id=user.id,
+                        employee_email=row.email.strip(),
+                        employee_full_name=row.full_name,
+                        warnings=warnings,
+                        excel_row=row.excel_row,
                     )
 
                 # P12: apply custom-field values from the row. Unknown
@@ -3005,6 +3051,107 @@ async def import_employees_endpoint(
                 )
             )
 
+    # ── Second pass: org-chart (reports-to) resolution ──────────────────
+    # Runs after every employee row exists so a manager referenced by NAME
+    # can be found even when they appear later in the file than their
+    # report. Resolves the manager to an EMPLOYEE (email → name → code);
+    # never creates a user. It also re-syncs reports-to on already-existing
+    # employees, so re-importing the roster rebuilds the org chart without
+    # re-creating anyone. Unknown / ambiguous managers are per-row warnings
+    # (the rest of the import still succeeds).
+    reports_to_set = 0
+    from maugood.db import employees as _employees_tbl  # noqa: PLC0415
+
+    for row in rows:
+        rt_value = (row.reports_to_email or "").strip() if row.reports_to_email else ""
+        if not rt_value:
+            continue
+        try:
+            with engine.begin() as conn:
+                emp = repo.get_employee_by_code(conn, scope, row.employee_code)
+                if emp is None:
+                    continue
+                try:
+                    mgr_emp_id, mgr_user_id = repo.resolve_manager_links(
+                        conn, scope, rt_value
+                    )
+                except ValueError as exc:
+                    warnings.append(
+                        ImportWarningSchema(row=row.excel_row, message=str(exc))
+                    )
+                    continue
+                if mgr_emp_id is None:
+                    warnings.append(
+                        ImportWarningSchema(
+                            row=row.excel_row,
+                            message=(
+                                f"manager not found: '{rt_value}' — "
+                                "reports-to left unset"
+                            ),
+                        )
+                    )
+                    continue
+                if mgr_emp_id == emp.id:
+                    warnings.append(
+                        ImportWarningSchema(
+                            row=row.excel_row,
+                            message=(
+                                "an employee cannot report to themselves — "
+                                "reports-to left unset"
+                            ),
+                        )
+                    )
+                    continue
+                if (
+                    emp.reports_to_employee_id == mgr_emp_id
+                    and (mgr_user_id is None or emp.reports_to_user_id == mgr_user_id)
+                ):
+                    continue  # already correct, no write/audit needed
+                # Always set the employee→employee link; set the user link
+                # only when the manager has a real login (never create one).
+                rt_values: dict[str, object] = {
+                    "reports_to_employee_id": mgr_emp_id
+                }
+                if mgr_user_id is not None:
+                    rt_values["reports_to_user_id"] = mgr_user_id
+                conn.execute(
+                    _employees_tbl.update()
+                    .where(
+                        _employees_tbl.c.tenant_id == scope.tenant_id,
+                        _employees_tbl.c.id == emp.id,
+                    )
+                    .values(**rt_values)
+                )
+                write_audit(
+                    conn,
+                    tenant_id=scope.tenant_id,
+                    actor_user_id=user.id,
+                    action="employee.reports_to_set",
+                    entity_type="employee",
+                    entity_id=str(emp.id),
+                    before={
+                        "reports_to_employee_id": emp.reports_to_employee_id,
+                        "reports_to_user_id": emp.reports_to_user_id,
+                    },
+                    after={
+                        "reports_to_employee_id": mgr_emp_id,
+                        "reports_to_user_id": (
+                            mgr_user_id
+                            if mgr_user_id is not None
+                            else emp.reports_to_user_id
+                        ),
+                    },
+                )
+                reports_to_set += 1
+        except Exception as exc:  # noqa: BLE001
+            short = str(exc).split("\n", 1)[0].strip() or exc.__class__.__name__
+            warnings.append(
+                ImportWarningSchema(
+                    row=row.excel_row,
+                    message=f"could not set reports-to: {short}",
+                )
+            )
+
     # One summary audit row with the counts — useful for an "audit log
     # shows X imported Y rows on Z date" query without scanning every
     # employee.* row.
@@ -3020,6 +3167,7 @@ async def import_employees_endpoint(
                 "updated": updated,
                 "errors": len(errors),
                 "warnings": len(warnings),
+                "reports_to_set": reports_to_set,
                 "filename": file.filename,
             },
         )

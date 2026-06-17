@@ -589,6 +589,16 @@ tenant_settings = Table(
         JSONB,
         nullable=True,
     ),
+    # Migration 0083 — auto-delete raw clip video once all enabled
+    # use-cases complete. Default false (opt-in). The matching stage
+    # checks this flag after marking the last UC as completed; face
+    # crops, detection_events, and attendance_records are untouched.
+    Column(
+        "auto_delete_clip_after_processing",
+        Boolean,
+        nullable=False,
+        server_default="false",
+    ),
     # Migration 0080 — tenant-wide attendance email toggles flipped by
     # the Admin in Settings → Notifications. All-false default keeps
     # the feature opt-in; the email worker re-reads this per delivery
@@ -1681,6 +1691,17 @@ employees = Table(
         "reports_to_user_id",
         Integer,
         ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    # Migration 0084 — employee→employee org chart link. The HR roster
+    # references managers by name (no emails), so this is the reliable
+    # manager link; ``reports_to_user_id`` above stays for tenants whose
+    # staff have real logins. ON DELETE SET NULL: deleting a manager
+    # doesn't cascade-delete their reports.
+    Column(
+        "reports_to_employee_id",
+        Integer,
+        ForeignKey("employees.id", ondelete="SET NULL"),
         nullable=True,
     ),
     Column("joining_date", Date, nullable=True),

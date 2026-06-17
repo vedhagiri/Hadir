@@ -36,6 +36,8 @@ build/
 backups/
 # Table-level backup artifacts (scripts/db_backup.py)
 db_backups/
+# Client DB backups shared for diagnosis (real PII — never commit)
+Client/
 
 # Node / Vite
 node_modules/

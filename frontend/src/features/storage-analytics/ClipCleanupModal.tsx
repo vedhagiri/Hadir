@@ -236,7 +236,7 @@ export function ClipCleanupModal({ filter, onClose }: Props) {
               style={{
                 padding: 12,
                 borderRadius: 6,
-                background: "var(--danger-bg)",
+                background: "var(--danger-soft)",
                 color: "var(--danger-text)",
                 fontSize: 13,
               }}
@@ -315,6 +315,12 @@ function PreviewBody({ data }: { data: ClipCleanupPreviewResponse }) {
   const locale = i18n.language;
   return (
     <>
+      {/* Confirmation headline */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, fontWeight: 600 }}>
+        <span aria-hidden="true" style={{ fontSize: 16 }}>⚠</span>
+        {t("clipCleanupModal.confirmHeadline") as string}
+      </div>
+
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <div className="stat">
           <div className="stat-label">{t("clipCleanupModal.colClips") as string}</div>
@@ -343,7 +349,7 @@ function PreviewBody({ data }: { data: ClipCleanupPreviewResponse }) {
           <div style={{ fontSize: 11, color: "var(--text-secondary)", fontWeight: 500, marginBottom: 6 }}>
             {t("clipCleanupModal.byCamera") as string}
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 160, overflowY: "auto" }}>
             {data.by_camera.map((row) => (
               <div
                 key={row.camera_id}
@@ -359,6 +365,33 @@ function PreviewBody({ data }: { data: ClipCleanupPreviewResponse }) {
         </div>
       )}
 
+      {data.capped && (
+        <div style={{ fontSize: 11.5, color: "var(--text-tertiary)" }}>
+          {t("clipCleanupModal.cappedNote", { cap: data.cap.toLocaleString() }) as string}
+        </div>
+      )}
+
+      {/* Irreversible warning */}
+      <div
+        role="alert"
+        style={{
+          padding: "10px 12px",
+          fontSize: 12,
+          background: "var(--danger-soft)",
+          border: "1px solid var(--danger)",
+          borderRadius: 6,
+          color: "var(--danger-text)",
+          fontWeight: 600,
+          display: "flex",
+          alignItems: "center",
+          gap: 7,
+        }}
+      >
+        <Icon name="trash" size={14} />
+        {t("clipCleanupModal.cannotUndo") as string}
+      </div>
+
+      {/* What's kept */}
       <div
         style={{
           padding: "8px 10px",

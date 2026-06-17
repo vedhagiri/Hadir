@@ -4,14 +4,44 @@
 // Uses the design system's .stat, .card, .table, .pill, .tabs, .filter-bar,
 // and .seg classes throughout — no custom CSS beyond inline layout tweaks.
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Icon } from "../../shell/Icon";
 import { useCameras } from "../cameras/hooks";
-import { ClipCleanupCard } from "./ClipCleanupCard";
-import { useStorageAnalytics } from "./hooks";
-import type { CameraStorageRow, DailyStorageRow, DaysWindow } from "./types";
+import { ClipCleanupDialog } from "./ClipCleanupDialog";
+import { DateRangePicker } from "./DateRangePicker";
+import { extractApiError } from "../../api/client";
+import type { StorageAnalyticsFilters } from "./hooks";
+import {
+  useAutoDeleteSetting,
+  useStorageAnalytics,
+  useUpdateAutoDeleteSetting,
+} from "./hooks";
+import type {
+  CameraStorageRow,
+  DailyStorageRow,
+  StorageWindowMode,
+} from "./types";
+
+function todayIso(): string {
+  const d = new Date();
+  return [
+    d.getFullYear(),
+    String(d.getMonth() + 1).padStart(2, "0"),
+    String(d.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function daysAgoIso(n: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return [
+    d.getFullYear(),
+    String(d.getMonth() + 1).padStart(2, "0"),
+    String(d.getDate()).padStart(2, "0"),
+  ].join("-");
+}
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
 
@@ -293,24 +323,62 @@ function ProcessingBar({ segments, total }: { segments: BarSegment[]; total: num
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
-const DAYS_OPTIONS: { value: DaysWindow; label: string }[] = [
-  { value: 7, label: "7d" },
-  { value: 14, label: "14d" },
-  { value: 30, label: "30d" },
-  { value: 90, label: "90d" },
-  { value: 365, label: "1y" },
+// Window presets shown as a segmented control. "overall" = all-time,
+// "range" = custom From/To date pickers; the rest are day lookbacks.
+const WINDOW_OPTIONS: { value: StorageWindowMode; labelKey: string }[] = [
+  { value: "overall", labelKey: "storageAnalytics.win.overall" },
+  { value: "7", labelKey: "storageAnalytics.win.7d" },
+  { value: "14", labelKey: "storageAnalytics.win.14d" },
+  { value: "30", labelKey: "storageAnalytics.win.30d" },
+  { value: "range", labelKey: "storageAnalytics.win.range" },
 ];
 
 type TabId = "by-camera" | "by-day";
 
 export function StorageAnalyticsPage() {
-  const { t } = useTranslation();
-  const [days, setDays] = useState<DaysWindow>(30);
+  const { t, i18n } = useTranslation();
+  const [winMode, setWinMode] = useState<StorageWindowMode>("30");
+  const [startDate, setStartDate] = useState<string>(daysAgoIso(7));
+  const [endDate, setEndDate] = useState<string>(todayIso());
   const [cameraId, setCameraId] = useState<number | null>(null);
   const [tab, setTab] = useState<TabId>("by-camera");
+  const [cleanupOpen, setCleanupOpen] = useState(false);
+
+  const autoDelete = useAutoDeleteSetting();
+  const updateAutoDelete = useUpdateAutoDeleteSetting();
+  // Target value awaiting Yes/No confirmation (null = no prompt open).
+  const [pendingAutoDelete, setPendingAutoDelete] = useState<boolean | null>(null);
+
+  const autoDeleteOn = autoDelete.data?.auto_delete_clip_after_processing ?? false;
+
+  // Only prompt when the click would actually change the value.
+  const requestAutoDelete = (value: boolean) => {
+    if (value === autoDeleteOn) return;
+    setPendingAutoDelete(value);
+  };
+
+  const confirmAutoDelete = () => {
+    if (pendingAutoDelete !== null) {
+      updateAutoDelete.mutate({ auto_delete_clip_after_processing: pendingAutoDelete });
+    }
+    setPendingAutoDelete(null);
+  };
+
+  const rangeInvalid =
+    winMode === "range" && (!startDate || !endDate || startDate > endDate);
+
+  const filters = useMemo<StorageAnalyticsFilters>(() => {
+    if (winMode === "range") {
+      return { days: 30, camera_id: cameraId, start: startDate, end: endDate };
+    }
+    if (winMode === "overall") {
+      return { days: 0, camera_id: cameraId };
+    }
+    return { days: Number(winMode), camera_id: cameraId };
+  }, [winMode, startDate, endDate, cameraId]);
 
   const cameras = useCameras();
-  const analytics = useStorageAnalytics({ days, camera_id: cameraId });
+  const analytics = useStorageAnalytics(filters, { enabled: !rangeInvalid });
 
   const ov = analytics.data?.overview;
   const matchRate = ov ? pct(ov.matched_face_crops, ov.total_face_crops) : 0;
@@ -364,19 +432,33 @@ export function StorageAnalyticsPage() {
             {t("storageAnalytics.window")}
           </span>
           <div className="seg" role="group" aria-label={t("storageAnalytics.daysWindowAria")}>
-            {DAYS_OPTIONS.map(({ value, label }) => (
+            {WINDOW_OPTIONS.map(({ value, labelKey }) => (
               <button
                 key={value}
                 type="button"
-                className={`seg-btn${days === value ? " active" : ""}`}
-                onClick={() => setDays(value)}
-                aria-pressed={days === value}
+                className={`seg-btn${winMode === value ? " active" : ""}`}
+                onClick={() => setWinMode(value)}
+                aria-pressed={winMode === value}
               >
-                {label}
+                {t(labelKey)}
               </button>
             ))}
           </div>
         </div>
+
+        {winMode === "range" && (
+          <div className="filter-group">
+            <DateRangePicker
+              start={startDate}
+              end={endDate}
+              maxDate={todayIso()}
+              onChange={(s, e) => {
+                setStartDate(s);
+                setEndDate(e);
+              }}
+            />
+          </div>
+        )}
 
         <div className="filter-group">
           <Icon name="camera" size={13} style={{ color: "var(--text-tertiary)" }} />
@@ -417,7 +499,11 @@ export function StorageAnalyticsPage() {
         )}
         {analytics.data && !analytics.isFetching && (
           <span className="pill pill-neutral" style={{ fontFamily: "var(--font-mono)", fontSize: 10.5 }}>
-            {t("storageAnalytics.daysWindow", { days })}
+            {winMode === "overall"
+              ? t("storageAnalytics.win.overall")
+              : winMode === "range"
+                ? `${new Date(startDate + "T00:00:00").toLocaleDateString(i18n.language, { month: "short", day: "numeric" })} – ${new Date(endDate + "T00:00:00").toLocaleDateString(i18n.language, { month: "short", day: "numeric" })}`
+                : t("storageAnalytics.daysWindow", { days: Number(winMode) })}
             {cameraId !== null ? ` · ${t("storageAnalytics.oneCamera")}` : ""}
           </span>
         )}
@@ -514,8 +600,128 @@ export function StorageAnalyticsPage() {
         </div>
       </div>
 
-      {/* ── Clip cleanup (Admin-only; the route already gates this page) ── */}
-      <ClipCleanupCard />
+      {/* ── Clip cleanup launcher (Admin-only; the route already gates this page) ── */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          flexWrap: "wrap",
+          padding: "12px 14px",
+          marginBottom: 16,
+          borderRadius: 10,
+          background: "var(--bg-elev)",
+          border: "1px solid var(--border)",
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, display: "flex", alignItems: "center", gap: 7 }}>
+            <Icon name="trash" size={15} style={{ color: "var(--text-tertiary)" }} />
+            {t("clipCleanup.title")}
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--text-tertiary)", marginTop: 3 }}>
+            {t("clipCleanup.subtitle")}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 14, flexShrink: 0, flexWrap: "wrap" }}>
+          {/* Auto-delete after processing — On/Off, outside the popup */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ textAlign: "end" }}>
+              <div style={{ fontSize: 12, fontWeight: 600 }}>
+                {t("clipCleanup.autoDeleteTitle")}
+              </div>
+              <div style={{ fontSize: 10.5, color: "var(--text-tertiary)" }}>
+                {t("clipCleanup.autoDeleteHint")}
+              </div>
+            </div>
+            <div className="seg" role="group" aria-label={t("clipCleanup.autoDeleteAria")}>
+              <button
+                type="button"
+                className={`seg-btn${!autoDeleteOn ? " active" : ""}`}
+                onClick={() => requestAutoDelete(false)}
+                aria-pressed={!autoDeleteOn}
+                disabled={updateAutoDelete.isPending || autoDelete.isLoading}
+              >
+                {t("clipCleanup.autoDeleteOff")}
+              </button>
+              <button
+                type="button"
+                className={`seg-btn${autoDeleteOn ? " active" : ""}`}
+                onClick={() => requestAutoDelete(true)}
+                aria-pressed={autoDeleteOn}
+                disabled={updateAutoDelete.isPending || autoDelete.isLoading}
+              >
+                {t("clipCleanup.autoDeleteOn")}
+              </button>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={() => setCleanupOpen(true)}
+            aria-label={t("clipCleanup.openAria")}
+          >
+            <Icon name="trash" size={13} />
+            {t("clipCleanup.open")}
+          </button>
+        </div>
+      </div>
+
+      {updateAutoDelete.isError && (
+        <div role="alert" style={{ fontSize: 11.5, color: "var(--danger-text)", margin: "-8px 2px 12px" }}>
+          {extractApiError(updateAutoDelete.error, t("clipCleanup.couldNotSave"))}
+        </div>
+      )}
+
+      {cleanupOpen && <ClipCleanupDialog onClose={() => setCleanupOpen(false)} />}
+
+      {pendingAutoDelete !== null && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("clipCleanup.autoDeleteTitle")}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0, 0, 0, 0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 110,
+            padding: 16,
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setPendingAutoDelete(null);
+          }}
+        >
+          <div className="card" style={{ width: "min(420px, 100%)", margin: 0 }}>
+            <div className="card-head">
+              <div className="card-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <Icon name="trash" size={15} />
+                {t("clipCleanup.autoDeleteTitle")}
+              </div>
+            </div>
+            <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                {pendingAutoDelete
+                  ? t("clipCleanup.autoDeleteConfirmOn")
+                  : t("clipCleanup.autoDeleteConfirmOff")}
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <button type="button" className="btn btn-sm" onClick={() => setPendingAutoDelete(null)}>
+                  {t("common.no")}
+                </button>
+                <button type="button" className="btn btn-primary" onClick={confirmAutoDelete}>
+                  {t("common.yes")}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Processing status card ── */}
       {ov && ov.total_clips > 0 && (
@@ -579,44 +785,6 @@ export function StorageAnalyticsPage() {
                   </div>
                 ))}
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Storage by camera overview (mini bars card) ── */}
-      {analytics.data && analytics.data.by_camera.length > 0 && tab === "by-camera" && (
-        <div className="card" style={{ marginBottom: 16 }}>
-          <div className="card-head">
-            <div>
-              <div className="card-title">{t("storageAnalytics.storageByCamera")}</div>
-              <div className="card-sub">{t("storageAnalytics.cameraCount", { count: analytics.data.by_camera.length })}</div>
-            </div>
-          </div>
-          <div className="card-body">
-            {(() => {
-              const maxB = Math.max(...analytics.data!.by_camera.map((r) => r.total_bytes), 1);
-              return analytics.data!.by_camera.map((row) => (
-                <div key={row.camera_id} style={{ marginBottom: 10 }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "baseline",
-                      marginBottom: 3,
-                      gap: 8,
-                    }}
-                  >
-                    <span style={{ fontSize: 12.5, fontWeight: 500, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {row.camera_name}
-                    </span>
-                    <span style={{ fontSize: 11.5, color: "var(--text-tertiary)", whiteSpace: "nowrap", fontFamily: "var(--font-mono)" }}>
-                      {fmtBytes(row.total_bytes)} · {t("storageAnalytics.clipsCount", { count: row.clip_count })}
-                    </span>
-                  </div>
-                  <MiniBar value={row.total_bytes} max={maxB} color="var(--accent)" />
-                </div>
-              ));
-            })()}
           </div>
         </div>
       )}

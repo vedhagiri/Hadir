@@ -5,17 +5,19 @@ import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 
 import { api } from "../../api/client";
 import type {
+  AutoDeleteSetting,
   ClipCleanupFilter,
   ClipCleanupPreviewResponse,
   ClipCleanupRunResponse,
   ClipRetentionSetting,
-  DaysWindow,
   StorageAnalyticsResponse,
 } from "./types";
 
 export interface StorageAnalyticsFilters {
-  days: DaysWindow;
+  days: number; // 0 = overall / all-time. Ignored when start+end are set.
   camera_id: number | null;
+  start?: string; // YYYY-MM-DD — custom range start (requires end)
+  end?: string; // YYYY-MM-DD — custom range end (requires start)
 }
 
 export function useStorageAnalytics(
@@ -23,7 +25,12 @@ export function useStorageAnalytics(
   options: { enabled?: boolean } = {},
 ): UseQueryResult<StorageAnalyticsResponse, Error> {
   const params = new URLSearchParams();
-  params.set("days", String(filters.days));
+  if (filters.start && filters.end) {
+    params.set("start", filters.start);
+    params.set("end", filters.end);
+  } else {
+    params.set("days", String(filters.days));
+  }
   if (filters.camera_id !== null) {
     params.set("camera_id", String(filters.camera_id));
   }
@@ -99,6 +106,38 @@ export function useUpdateClipRetentionSetting(): UseMutationResult<
     onSuccess: () => {
       void qc.invalidateQueries({
         queryKey: ["storage-analytics", "clip-retention"],
+      });
+    },
+  });
+}
+
+export function useAutoDeleteSetting(
+  options: { enabled?: boolean } = {},
+): UseQueryResult<AutoDeleteSetting, Error> {
+  return useQuery({
+    queryKey: ["storage-analytics", "auto-delete-setting"],
+    queryFn: () =>
+      api<AutoDeleteSetting>("/api/storage-analytics/auto-delete-setting"),
+    staleTime: 60 * 1000,
+    enabled: options.enabled ?? true,
+  });
+}
+
+export function useUpdateAutoDeleteSetting(): UseMutationResult<
+  AutoDeleteSetting,
+  Error,
+  { auto_delete_clip_after_processing: boolean }
+> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload) =>
+      api<AutoDeleteSetting>("/api/storage-analytics/auto-delete-setting", {
+        method: "PATCH",
+        body: payload,
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({
+        queryKey: ["storage-analytics", "auto-delete-setting"],
       });
     },
   });

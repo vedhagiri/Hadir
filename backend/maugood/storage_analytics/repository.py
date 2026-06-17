@@ -7,7 +7,7 @@ emitted (read-only analytics surface).
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import case, func, select
@@ -23,32 +23,73 @@ from maugood.storage_analytics.schemas import (
 from maugood.tenants.scope import TenantScope
 
 
+def _resolve_window(
+    days: int,
+    start: Optional[date],
+    end: Optional[date],
+) -> tuple[Optional[datetime], Optional[datetime], int, Optional[str], Optional[str]]:
+    """Resolve the requested window into ``(cutoff, upper, days_window,
+    range_start, range_end)``.
+
+    Three mutually-exclusive modes:
+
+    * **Custom range** — both ``start`` and ``end`` set. ``cutoff`` is the
+      UTC start-of-day for ``start``; ``upper`` is the exclusive
+      start-of-day for ``end + 1`` (so ``end`` is inclusive).
+    * **Overall (all-time)** — ``days <= 0`` and no range. Both bounds
+      ``None`` → no time filter applied.
+    * **Preset** — ``days > 0``. ``cutoff = now - days``; no upper bound.
+    """
+
+    if start is not None and end is not None:
+        cutoff = datetime.combine(start, time.min, tzinfo=timezone.utc)
+        upper = datetime.combine(
+            end + timedelta(days=1), time.min, tzinfo=timezone.utc
+        )
+        span = (end - start).days + 1
+        return cutoff, upper, span, start.isoformat(), end.isoformat()
+
+    if days <= 0:
+        # Overall / all-time — no lower bound.
+        return None, None, 0, None, None
+
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(days=days)
+    return cutoff, None, days, None, None
+
+
 def get_storage_analytics(
     conn: Connection,
     scope: TenantScope,
     *,
     days: int = 30,
+    start: Optional[date] = None,
+    end: Optional[date] = None,
     camera_id: Optional[int] = None,
 ) -> StorageAnalyticsResponse:
-    cutoff = datetime.now(tz=timezone.utc) - timedelta(days=days)
+    cutoff, upper, days_window, range_start, range_end = _resolve_window(
+        days, start, end
+    )
 
-    overview = _overview(conn, scope, cutoff, camera_id)
-    by_camera = _by_camera(conn, scope, cutoff, camera_id)
-    daily = _daily(conn, scope, cutoff, camera_id)
+    overview = _overview(conn, scope, cutoff, upper, camera_id)
+    by_camera = _by_camera(conn, scope, cutoff, upper, camera_id)
+    daily = _daily(conn, scope, cutoff, upper, camera_id)
 
     return StorageAnalyticsResponse(
         overview=overview,
         by_camera=by_camera,
         daily=daily,
-        days_window=days,
+        days_window=days_window,
         camera_id_filter=camera_id,
+        range_start=range_start,
+        range_end=range_end,
     )
 
 
 def _overview(
     conn: Connection,
     scope: TenantScope,
-    cutoff: datetime,
+    cutoff: Optional[datetime],
+    upper: Optional[datetime],
     camera_id: Optional[int],
 ) -> StorageOverview:
     # ── Clip aggregate ────────────────────────────────────────────────────────
@@ -71,10 +112,11 @@ def _overview(
         func.count()
         .filter(person_clips.c.recording_status == "recording")
         .label("recording_clips"),
-    ).where(
-        person_clips.c.tenant_id == scope.tenant_id,
-        person_clips.c.created_at >= cutoff,
-    )
+    ).where(person_clips.c.tenant_id == scope.tenant_id)
+    if cutoff is not None:
+        clip_stmt = clip_stmt.where(person_clips.c.created_at >= cutoff)
+    if upper is not None:
+        clip_stmt = clip_stmt.where(person_clips.c.created_at < upper)
     if camera_id is not None:
         clip_stmt = clip_stmt.where(person_clips.c.camera_id == camera_id)
     clip_row = conn.execute(clip_stmt).one()
@@ -85,10 +127,11 @@ def _overview(
         func.count()
         .filter(face_crops.c.employee_id.isnot(None))
         .label("matched_face_crops"),
-    ).where(
-        face_crops.c.tenant_id == scope.tenant_id,
-        face_crops.c.created_at >= cutoff,
-    )
+    ).where(face_crops.c.tenant_id == scope.tenant_id)
+    if cutoff is not None:
+        crop_stmt = crop_stmt.where(face_crops.c.created_at >= cutoff)
+    if upper is not None:
+        crop_stmt = crop_stmt.where(face_crops.c.created_at < upper)
     if camera_id is not None:
         crop_stmt = crop_stmt.where(face_crops.c.camera_id == camera_id)
     crop_row = conn.execute(crop_stmt).one()
@@ -116,7 +159,8 @@ def _overview(
 def _by_camera(
     conn: Connection,
     scope: TenantScope,
-    cutoff: datetime,
+    cutoff: Optional[datetime],
+    upper: Optional[datetime],
     camera_id: Optional[int],
 ) -> list[CameraStorageRow]:
     # ── Clips per camera ──────────────────────────────────────────────────────
@@ -137,13 +181,14 @@ def _by_camera(
                 & (cameras.c.tenant_id == scope.tenant_id),
             )
         )
-        .where(
-            person_clips.c.tenant_id == scope.tenant_id,
-            person_clips.c.created_at >= cutoff,
-        )
+        .where(person_clips.c.tenant_id == scope.tenant_id)
         .group_by(person_clips.c.camera_id, cameras.c.name)
         .order_by(func.sum(person_clips.c.filesize_bytes).desc())
     )
+    if cutoff is not None:
+        clip_stmt = clip_stmt.where(person_clips.c.created_at >= cutoff)
+    if upper is not None:
+        clip_stmt = clip_stmt.where(person_clips.c.created_at < upper)
     if camera_id is not None:
         clip_stmt = clip_stmt.where(person_clips.c.camera_id == camera_id)
     clip_rows = conn.execute(clip_stmt).fetchall()
@@ -157,12 +202,13 @@ def _by_camera(
             .filter(face_crops.c.employee_id.isnot(None))
             .label("matched_crops"),
         )
-        .where(
-            face_crops.c.tenant_id == scope.tenant_id,
-            face_crops.c.created_at >= cutoff,
-        )
+        .where(face_crops.c.tenant_id == scope.tenant_id)
         .group_by(face_crops.c.camera_id)
     )
+    if cutoff is not None:
+        crop_stmt = crop_stmt.where(face_crops.c.created_at >= cutoff)
+    if upper is not None:
+        crop_stmt = crop_stmt.where(face_crops.c.created_at < upper)
     if camera_id is not None:
         crop_stmt = crop_stmt.where(face_crops.c.camera_id == camera_id)
     crop_rows = conn.execute(crop_stmt).fetchall()
@@ -193,7 +239,8 @@ def _by_camera(
 def _daily(
     conn: Connection,
     scope: TenantScope,
-    cutoff: datetime,
+    cutoff: Optional[datetime],
+    upper: Optional[datetime],
     camera_id: Optional[int],
 ) -> list[DailyStorageRow]:
     # ── Clips per day ─────────────────────────────────────────────────────────
@@ -206,13 +253,14 @@ def _daily(
                 "total_bytes"
             ),
         )
-        .where(
-            person_clips.c.tenant_id == scope.tenant_id,
-            person_clips.c.created_at >= cutoff,
-        )
+        .where(person_clips.c.tenant_id == scope.tenant_id)
         .group_by(func.date(person_clips.c.created_at))
         .order_by(func.date(person_clips.c.created_at))
     )
+    if cutoff is not None:
+        clip_stmt = clip_stmt.where(person_clips.c.created_at >= cutoff)
+    if upper is not None:
+        clip_stmt = clip_stmt.where(person_clips.c.created_at < upper)
     if camera_id is not None:
         clip_stmt = clip_stmt.where(person_clips.c.camera_id == camera_id)
     clip_rows = conn.execute(clip_stmt).fetchall()
@@ -227,12 +275,13 @@ def _daily(
             .filter(face_crops.c.employee_id.isnot(None))
             .label("matched_crops"),
         )
-        .where(
-            face_crops.c.tenant_id == scope.tenant_id,
-            face_crops.c.created_at >= cutoff,
-        )
+        .where(face_crops.c.tenant_id == scope.tenant_id)
         .group_by(func.date(face_crops.c.created_at))
     )
+    if cutoff is not None:
+        crop_stmt = crop_stmt.where(face_crops.c.created_at >= cutoff)
+    if upper is not None:
+        crop_stmt = crop_stmt.where(face_crops.c.created_at < upper)
     if camera_id is not None:
         crop_stmt = crop_stmt.where(face_crops.c.camera_id == camera_id)
     crop_rows = conn.execute(crop_stmt).fetchall()

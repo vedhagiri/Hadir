@@ -44,8 +44,10 @@ class StorageAnalyticsResponse(BaseModel):
     overview: StorageOverview
     by_camera: list[CameraStorageRow]
     daily: list[DailyStorageRow]
-    days_window: int
+    days_window: int  # 0 = overall / all-time
     camera_id_filter: Optional[int] = None
+    range_start: Optional[str] = None  # YYYY-MM-DD, set only in custom-range mode
+    range_end: Optional[str] = None
 
 
 # ── Clip cleanup (migration 0069) ──────────────────────────────────────────
@@ -126,3 +128,11 @@ class ClipRetentionSettingResponse(BaseModel):
 class ClipRetentionSettingPatchRequest(BaseModel):
     # NULL = disable automatic sweep. Positive integer enables it.
     clip_retention_days: Optional[int] = Field(default=None, ge=1, le=3650)
+
+
+class AutoDeleteSettingResponse(BaseModel):
+    auto_delete_clip_after_processing: bool
+
+
+class AutoDeleteSettingPatchRequest(BaseModel):
+    auto_delete_clip_after_processing: bool

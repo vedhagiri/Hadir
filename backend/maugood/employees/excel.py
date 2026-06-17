@@ -433,11 +433,18 @@ def build_export(
     headers = list(EXPORT_COLUMNS) + list(custom_field_codes)
     ws.append(headers)
     for row in rows:
-        reports_to_email = (
-            reports_to_email_by_user.get(row.reports_to_user_id, "")
-            if row.reports_to_user_id is not None
-            else ""
-        )
+        # Prefer the manager's display name (the employee→employee link,
+        # migration 0084) so a name-based / email-less roster round-trips:
+        # re-importing resolves the name back to the manager's employee.
+        # Fall back to the legacy user-email mapping for real-login tenants.
+        if row.reports_to_full_name:
+            reports_to_email = row.reports_to_full_name
+        elif row.reports_to_user_id is not None:
+            reports_to_email = reports_to_email_by_user.get(
+                row.reports_to_user_id, ""
+            )
+        else:
+            reports_to_email = ""
         base = [
             row.employee_code,
             row.full_name,

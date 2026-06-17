@@ -58,6 +58,7 @@ class EmployeeRow:
     designation: Optional[str] = None
     phone: Optional[str] = None
     reports_to_user_id: Optional[int] = None
+    reports_to_employee_id: Optional[int] = None
     reports_to_full_name: Optional[str] = None
     joining_date: Optional[date] = None
     relieving_date: Optional[date] = None
@@ -98,6 +99,11 @@ def _employee_select(scope: TenantScope):
     # reports_to manager's display name without a second query in
     # the router.
     reports_to = users.alias("reports_to_user")
+    # Migration 0084: the employee→employee org-chart link. The HR
+    # roster maps managers by name (no emails), so this is the reliable
+    # source; the manager's display name prefers the employee link and
+    # falls back to the user link.
+    reports_to_emp = employees.alias("reports_to_employee")
     return (
         select(
             employees.c.id,
@@ -119,7 +125,10 @@ def _employee_select(scope: TenantScope):
             employees.c.designation,
             employees.c.phone,
             employees.c.reports_to_user_id,
-            reports_to.c.full_name.label("reports_to_full_name"),
+            employees.c.reports_to_employee_id,
+            func.coalesce(
+                reports_to_emp.c.full_name, reports_to.c.full_name
+            ).label("reports_to_full_name"),
             employees.c.joining_date,
             employees.c.relieving_date,
             employees.c.deactivated_at,
@@ -154,6 +163,13 @@ def _employee_select(scope: TenantScope):
                     reports_to.c.tenant_id == employees.c.tenant_id,
                 ),
             )
+            .outerjoin(
+                reports_to_emp,
+                and_(
+                    reports_to_emp.c.id == employees.c.reports_to_employee_id,
+                    reports_to_emp.c.tenant_id == employees.c.tenant_id,
+                ),
+            )
         )
         .where(employees.c.tenant_id == scope.tenant_id)
     )
@@ -184,6 +200,10 @@ def _row_to_employee(row) -> EmployeeRow:
         reports_to_user_id=
             int(row.reports_to_user_id)
             if row.reports_to_user_id is not None
+            else None,
+        reports_to_employee_id=
+            int(row.reports_to_employee_id)
+            if getattr(row, "reports_to_employee_id", None) is not None
             else None,
         reports_to_full_name=row.reports_to_full_name,
         joining_date=row.joining_date,
@@ -454,6 +474,7 @@ def create_employee(
     designation: Optional[str] = None,
     phone: Optional[str] = None,
     reports_to_user_id: Optional[int] = None,
+    reports_to_employee_id: Optional[int] = None,
     joining_date: Optional[date] = None,
     relieving_date: Optional[date] = None,
     deactivated_at: Optional[datetime] = None,
@@ -473,6 +494,7 @@ def create_employee(
             designation=designation,
             phone=phone,
             reports_to_user_id=reports_to_user_id,
+            reports_to_employee_id=reports_to_employee_id,
             joining_date=joining_date,
             relieving_date=relieving_date,
             deactivated_at=deactivated_at,
@@ -494,6 +516,22 @@ def is_user_in_tenant(
         select(users.c.id).where(
             users.c.tenant_id == scope.tenant_id,
             users.c.id == user_id,
+        )
+    ).first()
+    return row is not None
+
+
+def is_employee_in_tenant(
+    conn: Connection, scope: TenantScope, employee_id: int
+) -> bool:
+    """Check that an ``employees.id`` belongs to this tenant — guards
+    ``reports_to_employee_id`` so a cross-tenant id can't sneak in via
+    PATCH/POST."""
+
+    row = conn.execute(
+        select(employees.c.id).where(
+            employees.c.tenant_id == scope.tenant_id,
+            employees.c.id == employee_id,
         )
     ).first()
     return row is not None
@@ -557,16 +595,19 @@ def list_all_for_export(conn: Connection, scope: TenantScope) -> list[EmployeeRo
 # ---------------------------------------------------------------------------
 
 
-def _user_id_for_employee(
+def _user_ids_for_employee(
     conn: Connection,
     scope: TenantScope,
     employee_id: int,
-) -> Optional[int]:
-    """Return the ``users.id`` that corresponds to ``employee_id``.
+) -> frozenset[int]:
+    """Return ALL ``users.id`` values that could represent ``employee_id``.
 
-    Tries email first; falls back to normalised full-name match
-    (mirrors the import path so the same value that was stored is
-    found here).  Returns ``None`` when no match is found.
+    Collects matches by email AND by normalised full-name (both lookups
+    run, not first-match).  When an employee has a real login account
+    (e.g. nasser.adawi@omran.om, user_id=56) AND an auto-generated
+    maugood.local account created during import (user_id=236), both
+    ids are returned.  The caller then uses ``IN (...)`` so direct
+    reports that point to *either* user_id are found correctly.
     """
     import re as _re  # noqa: PLC0415
 
@@ -577,33 +618,33 @@ def _user_id_for_employee(
         )
     ).first()
     if emp is None:
-        return None
+        return frozenset()
+
+    ids: set[int] = set()
 
     emp_email = (emp.email or "").strip().lower()
     if emp_email:
-        row = conn.execute(
+        for row in conn.execute(
             select(users.c.id).where(
                 users.c.tenant_id == scope.tenant_id,
                 func.lower(users.c.email) == emp_email,
             )
-        ).first()
-        if row is not None:
-            return int(row.id)
+        ).all():
+            ids.add(int(row.id))
 
     if emp.full_name:
         norm = _re.sub(r"\s+", " ", emp.full_name).lower().strip()
-        row = conn.execute(
+        for row in conn.execute(
             select(users.c.id).where(
                 users.c.tenant_id == scope.tenant_id,
                 func.lower(
                     func.regexp_replace(users.c.full_name, r"\s+", " ", "g")
                 ) == norm,
             )
-        ).first()
-        if row is not None:
-            return int(row.id)
+        ).all():
+            ids.add(int(row.id))
 
-    return None
+    return frozenset(ids)
 
 
 def resolve_team_employee_ids(
@@ -613,25 +654,147 @@ def resolve_team_employee_ids(
 ) -> frozenset[int]:
     """Return the direct-report ids for ``target_employee_id``.
 
-    Resolves the employee's user account via email (with name fallback),
+    Resolves ALL user accounts for the employee (email + name matches),
     then returns every active employee whose ``reports_to_user_id``
-    points to that user. The target itself is always excluded.
-    Returns an empty set when no user account is found or when the
-    employee has no direct reports.
+    points to any of them.  Using IN handles the case where the
+    employee has both a real login account and an auto-generated
+    maugood.local account — direct reports imported before the real
+    account existed will point to whichever id the name match found
+    first.  The target itself is always excluded.
     """
-    user_id = _user_id_for_employee(conn, scope, target_employee_id)
-    if user_id is None:
-        return frozenset()
+    ids: set[int] = set()
 
-    rows = conn.execute(
+    # New (migration 0084): direct employee→employee link. This is the
+    # reliable source for name-based / email-less rosters.
+    for r in conn.execute(
         select(employees.c.id).where(
             employees.c.tenant_id == scope.tenant_id,
-            employees.c.reports_to_user_id == user_id,
+            employees.c.reports_to_employee_id == target_employee_id,
             employees.c.id != target_employee_id,
             employees.c.status == "active",
         )
+    ).all():
+        ids.add(int(r.id))
+
+    # Legacy: user-based link, for tenants whose staff have real logins.
+    user_ids = _user_ids_for_employee(conn, scope, target_employee_id)
+    if user_ids:
+        for r in conn.execute(
+            select(employees.c.id).where(
+                employees.c.tenant_id == scope.tenant_id,
+                employees.c.reports_to_user_id.in_(list(user_ids)),
+                employees.c.id != target_employee_id,
+                employees.c.status == "active",
+            )
+        ).all():
+            ids.add(int(r.id))
+
+    return frozenset(ids)
+
+
+def resolve_manager_employee_id(
+    conn: Connection,
+    scope: TenantScope,
+    value: str,
+) -> Optional[int]:
+    """Resolve a ``reports_to`` cell to a manager's **employee id**.
+
+    Match order (first hit wins):
+      1. employee email (case-insensitive),
+      2. employee full name (whitespace-normalised, case-insensitive),
+      3. employee_code (case-insensitive).
+
+    Returns ``None`` when there's no match. Raises ``ValueError`` when a
+    **name** is ambiguous (matches more than one employee) so the import
+    surfaces a clear per-row error instead of guessing. Never creates a
+    user or an employee — pure lookup.
+    """
+    import re as _re  # noqa: PLC0415
+
+    val = (value or "").strip()
+    if not val:
+        return None
+
+    # 1. Email.
+    row = conn.execute(
+        select(employees.c.id).where(
+            employees.c.tenant_id == scope.tenant_id,
+            func.lower(employees.c.email) == val.lower(),
+        )
+    ).first()
+    if row is not None:
+        return int(row.id)
+
+    # 2. Full name — must be unambiguous.
+    norm = _re.sub(r"\s+", " ", val).lower()
+    name_rows = conn.execute(
+        select(employees.c.id).where(
+            employees.c.tenant_id == scope.tenant_id,
+            func.lower(
+                func.regexp_replace(employees.c.full_name, r"\s+", " ", "g")
+            ) == norm,
+        )
     ).all()
-    return frozenset(int(r.id) for r in rows)
+    if len(name_rows) > 1:
+        raise ValueError(
+            f"manager name '{val}' is ambiguous — "
+            f"{len(name_rows)} employees share it; use an email or code"
+        )
+    if len(name_rows) == 1:
+        return int(name_rows[0].id)
+
+    # 3. Employee code.
+    row = conn.execute(
+        select(employees.c.id).where(
+            employees.c.tenant_id == scope.tenant_id,
+            func.lower(employees.c.employee_code) == val.lower(),
+        )
+    ).first()
+    if row is not None:
+        return int(row.id)
+
+    return None
+
+
+def resolve_manager_links(
+    conn: Connection,
+    scope: TenantScope,
+    value: str,
+) -> tuple[Optional[int], Optional[int]]:
+    """Resolve a ``reports_to`` cell to ``(employee_id, user_id)``.
+
+    * ``employee_id`` — the manager's employee record (email → name →
+      code), via :func:`resolve_manager_employee_id`.
+    * ``user_id`` — the manager's **existing** login, looked up from the
+      resolved manager employee's email. ``None`` when the manager has no
+      email or no login. **Never creates a user** (no dummy accounts).
+
+    Both ``None`` when no manager matches. Raises ``ValueError`` on an
+    ambiguous name (propagated from ``resolve_manager_employee_id``).
+    """
+    emp_id = resolve_manager_employee_id(conn, scope, value)
+    if emp_id is None:
+        return None, None
+
+    mgr_email = conn.execute(
+        select(employees.c.email).where(
+            employees.c.tenant_id == scope.tenant_id,
+            employees.c.id == emp_id,
+        )
+    ).scalar_one_or_none()
+
+    user_id: Optional[int] = None
+    if mgr_email and mgr_email.strip():
+        u = conn.execute(
+            select(users.c.id).where(
+                users.c.tenant_id == scope.tenant_id,
+                func.lower(users.c.email) == mgr_email.strip().lower(),
+            )
+        ).first()
+        if u is not None:
+            user_id = int(u.id)
+
+    return emp_id, user_id
 
 
 def manager_team_employee_ids(

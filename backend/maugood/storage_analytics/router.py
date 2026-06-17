@@ -14,6 +14,7 @@ Endpoints:
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -36,6 +37,8 @@ from maugood.storage_analytics.cleanup import (
 )
 from maugood.storage_analytics.repository import get_storage_analytics
 from maugood.storage_analytics.schemas import (
+    AutoDeleteSettingPatchRequest,
+    AutoDeleteSettingResponse,
     ClipCleanupFilterBody,
     ClipCleanupPreviewResponse,
     ClipCleanupRunResponse,
@@ -68,8 +71,23 @@ def _to_filter(body: ClipCleanupFilterBody) -> ClipCleanupFilter:
 def analytics(
     days: Annotated[
         int,
-        Query(ge=7, le=365, description="Lookback window in days (7 / 14 / 30 / 90 / 365)."),
+        Query(
+            ge=0,
+            le=3650,
+            description=(
+                "Lookback window in days (7 / 14 / 30 …). 0 = overall / all-time. "
+                "Ignored when both 'start' and 'end' are supplied."
+            ),
+        ),
     ] = 30,
+    start: Annotated[
+        Optional[date],
+        Query(description="Custom range start (YYYY-MM-DD, inclusive). Requires 'end'."),
+    ] = None,
+    end: Annotated[
+        Optional[date],
+        Query(description="Custom range end (YYYY-MM-DD, inclusive). Requires 'start'."),
+    ] = None,
     camera_id: Annotated[
         Optional[int],
         Query(description="Restrict results to a single camera. Omit for all cameras."),
@@ -77,8 +95,23 @@ def analytics(
     scope: TenantScope = Depends(get_tenant_scope),
     _: CurrentUser = HR_OR_ADMIN,
 ) -> StorageAnalyticsResponse:
+    # Custom-range mode requires both bounds; reject a half-specified range
+    # with a clean 400 rather than silently falling back to the day window.
+    if (start is None) != (end is None):
+        raise HTTPException(
+            status_code=400,
+            detail="custom range requires both 'start' and 'end'",
+        )
+    if start is not None and end is not None and start > end:
+        raise HTTPException(
+            status_code=400,
+            detail="'start' must be on or before 'end'",
+        )
+
     with get_engine().begin() as conn:
-        return get_storage_analytics(conn, scope, days=days, camera_id=camera_id)
+        return get_storage_analytics(
+            conn, scope, days=days, start=start, end=end, camera_id=camera_id
+        )
 
 
 # ── Clip cleanup ──────────────────────────────────────────────────────────
@@ -221,3 +254,62 @@ def clip_retention_patch(
         )
 
     return ClipRetentionSettingResponse(clip_retention_days=new_value)
+
+
+# ── Auto-delete after processing ──────────────────────────────────────────
+
+
+@router.get("/auto-delete-setting", response_model=AutoDeleteSettingResponse)
+def auto_delete_setting_get(
+    scope: TenantScope = Depends(get_tenant_scope),
+    _: CurrentUser = ADMIN_ONLY,
+) -> AutoDeleteSettingResponse:
+    with get_engine().begin() as conn:
+        row = conn.execute(
+            select(tenant_settings.c.auto_delete_clip_after_processing).where(
+                tenant_settings.c.tenant_id == scope.tenant_id
+            )
+        ).first()
+    enabled = bool(row.auto_delete_clip_after_processing) if row is not None else False
+    return AutoDeleteSettingResponse(auto_delete_clip_after_processing=enabled)
+
+
+@router.patch("/auto-delete-setting", response_model=AutoDeleteSettingResponse)
+def auto_delete_setting_patch(
+    payload: AutoDeleteSettingPatchRequest,
+    scope: TenantScope = Depends(get_tenant_scope),
+    user: CurrentUser = ADMIN_ONLY,
+) -> AutoDeleteSettingResponse:
+    new_value = payload.auto_delete_clip_after_processing
+    with get_engine().begin() as conn:
+        before_row = conn.execute(
+            select(tenant_settings.c.auto_delete_clip_after_processing).where(
+                tenant_settings.c.tenant_id == scope.tenant_id
+            )
+        ).first()
+        if before_row is None:
+            conn.execute(
+                insert(tenant_settings).values(
+                    tenant_id=scope.tenant_id,
+                    auto_delete_clip_after_processing=new_value,
+                )
+            )
+            previous = False
+        else:
+            previous = bool(before_row.auto_delete_clip_after_processing)
+            conn.execute(
+                update(tenant_settings)
+                .where(tenant_settings.c.tenant_id == scope.tenant_id)
+                .values(auto_delete_clip_after_processing=new_value)
+            )
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="clip_cleanup.auto_delete_setting_updated",
+            entity_type="tenant_settings",
+            entity_id=str(scope.tenant_id),
+            before={"auto_delete_clip_after_processing": previous},
+            after={"auto_delete_clip_after_processing": new_value},
+        )
+    return AutoDeleteSettingResponse(auto_delete_clip_after_processing=new_value)

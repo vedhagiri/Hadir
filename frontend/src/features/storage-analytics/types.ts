@@ -36,11 +36,16 @@ export interface StorageAnalyticsResponse {
   overview: StorageOverview;
   by_camera: CameraStorageRow[];
   daily: DailyStorageRow[];
-  days_window: number;
+  days_window: number; // 0 = overall / all-time
   camera_id_filter: number | null;
+  range_start: string | null; // YYYY-MM-DD, set only in custom-range mode
+  range_end: string | null;
 }
 
 export type DaysWindow = 7 | 14 | 30 | 90 | 365;
+
+// Dashboard window selector: all-time, a day preset, or a custom date range.
+export type StorageWindowMode = "overall" | "7" | "14" | "30" | "range";
 
 // ── Clip cleanup (migration 0069) ──────────────────────────────────────────
 
@@ -82,4 +87,8 @@ export interface ClipCleanupRunResponse {
 
 export interface ClipRetentionSetting {
   clip_retention_days: number | null;
+}
+
+export interface AutoDeleteSetting {
+  auto_delete_clip_after_processing: boolean;
 }
