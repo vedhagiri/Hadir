@@ -1,0 +1,22 @@
+{
+  "version": "1.1.23",
+  "previous_version": "1.1.22",
+  "commit_id": "d6d85ac0b420459c72a34f81f08cf4bedce30f70",
+  "previous_commit_id": "5362c14aa4e9d800698015aa68c6f62b8714f61f",
+  "all_new_install": false,
+  "new_migrations": [
+    "0083_clip_auto_delete.py",
+    "0084_reports_to_employee.py"
+  ],
+  "services_changed": {
+    "backend": true,
+    "frontend": true,
+    "nginx": false,
+    "postgres": false
+  },
+  "compose_changed": false,
+  "https_compose_changed": false,
+  "env_keys_added": [],
+  "env_keys_removed": [],
+  "upgrade_scripts": []
+}
