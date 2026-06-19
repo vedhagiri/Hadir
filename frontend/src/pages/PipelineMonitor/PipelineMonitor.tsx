@@ -826,14 +826,14 @@ const UC_META: Record<
   { title: string; subtitle: string; accent: string; accentSoft: string; iconName: IconName }
 > = {
   uc1: {
-    title: "YOLO + Face",
-    subtitle: "Body detection first, then face inside each box.",
+    title: "Use Case 1 (High Accuracy)",
+    subtitle: "Finds people first, then their faces — best for crowded or distant areas.",
     accent: "#3b82f6",
     accentSoft: "rgba(59,130,246,0.12)",
     iconName: "shield",
   },
   uc2: {
-    title: "InsightFace + Crops",
+    title: "Use Case 2 (Standard)",
     subtitle: "Stores face crops with pose-aware quality scoring.",
     accent: "#8b5cf6",
     accentSoft: "rgba(139,92,246,0.12)",

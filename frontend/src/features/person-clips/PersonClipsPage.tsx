@@ -1689,7 +1689,7 @@ function SystemTab({
                 lineHeight: 1.4,
               }}
             >
-              How long the InsightFace / YOLO module lock was held across
+              How long the face-detection module lock was held across
               all camera workers. Above 80% means a single detector is
               saturated — adding cameras won't help until the lock eases.
             </div>
@@ -2655,14 +2655,14 @@ function _ProcessingLifecycleCard({
     {
       key: "uc1",
       label: "UC1",
-      mode: "YOLO + Face crops",
+      mode: "High Accuracy",
       done: p?.uc1_completed ?? 0,
       avg: p?.avg_uc1_duration_ms ?? null,
     },
     {
       key: "uc2",
       label: "UC2",
-      mode: "InsightFace + best-per-track",
+      mode: "Standard",
       done: p?.uc2_completed ?? 0,
       avg: p?.avg_uc2_duration_ms ?? null,
     },
@@ -5301,7 +5301,7 @@ function ReprocessDialog({
                   />
                   <span style={{ fontWeight: 600 }}>{uc.toUpperCase()}</span>
                   <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>
-                    {uc === "uc1" ? "YOLO+Face" : uc === "uc2" ? "InsightFace+crops" : "InsightFace"}
+                    {uc === "uc1" ? "High Accuracy" : uc === "uc2" ? "Standard" : "Standard"}
                   </span>
                 </label>
               ))}
@@ -5343,13 +5343,13 @@ const UC_META: Record<
 > = {
   uc1: {
     label: "Use Case 1",
-    mode: "YOLO + Face crops",
+    mode: "High Accuracy",
     accent: "#2563eb",
     glyph: "1",
   },
   uc2: {
     label: "Use Case 2",
-    mode: "InsightFace + crops",
+    mode: "Standard",
     accent: "#7c3aed",
     glyph: "2",
   },

@@ -2285,8 +2285,8 @@ interface UseCaseTile {
 const UC_TILES: readonly UseCaseTile[] = [
   {
     code: "uc1",
-    title: "YOLO + Face",
-    subtitle: "Body detection first, then face inside each box.",
+    title: "Use Case 1 (High Accuracy)",
+    subtitle: "Finds people first, then their faces — best for crowded or distant areas.",
     speedLabel: "Thorough",
     speedTone: "thorough",
     accuracyLabel: "Highest accuracy",
@@ -2296,7 +2296,7 @@ const UC_TILES: readonly UseCaseTile[] = [
   },
   {
     code: "uc2",
-    title: "InsightFace + Crops",
+    title: "Use Case 2 (Standard)",
     subtitle: "Stores face crops with pose-aware quality scoring.",
     speedLabel: "Balanced",
     speedTone: "balanced",
@@ -4744,8 +4744,8 @@ function DeleteClipModal({
 type UcCode = "uc1" | "uc2";
 
 const UC_LIVE_META: Record<UcCode, { label: string; accent: string; accentSoft: string }> = {
-  uc1: { label: "YOLO + Face", accent: "#3b82f6", accentSoft: "rgba(59,130,246,0.12)" },
-  uc2: { label: "InsightFace + Crops", accent: "#8b5cf6", accentSoft: "rgba(139,92,246,0.12)" },
+  uc1: { label: "Use Case 1 (High Accuracy)", accent: "#3b82f6", accentSoft: "rgba(59,130,246,0.12)" },
+  uc2: { label: "Use Case 2 (Standard)", accent: "#8b5cf6", accentSoft: "rgba(139,92,246,0.12)" },
 };
 
 function LiveProcessingModal({

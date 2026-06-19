@@ -830,25 +830,25 @@
       "subtitle": "Use-case processors that run face recognition against saved clips on demand. Turn each one on or off independently.",
       "offHint": "Turning a use case off stops all processing for it — saved clips for that path are no longer analysed until you turn it back on.",
       "uc1": {
-        "label": "UC1 — YOLO person + face",
-        "hint": "Detects people first with YOLO, then locates faces inside each body box. Best for crowded or wide-angle scenes."
+        "label": "Use Case 1 (High Accuracy)",
+        "hint": "Finds people first, then their faces inside each person — best for crowded or wide-angle scenes. Uses more processing time."
       },
       "uc2": {
-        "label": "UC2 — InsightFace + crop storage",
-        "hint": "Runs InsightFace detection and stores the cropped faces for later review and matching."
+        "label": "Use Case 2 (Standard)",
+        "hint": "Fast face detection that stores cropped faces for later review and matching."
       }
     },
     "detection": {
       "title": "Detection",
       "subtitle": "Backend, input size, confidence thresholds.",
-      "resetConfirm": "This will revert detection settings to the defaults (InsightFace, 320, score 0.50, min face 60×60).",
+      "resetConfirm": "This will revert detection settings to the defaults (Use Case 2 (Standard), size 320, score 0.50, min face 60×60).",
       "mode": {
-        "label": "Detector backend",
-        "insightfaceLabel": "InsightFace (default, faster)",
-        "yoloLabel": "YOLO + Face (better for crowded scenes)",
+        "label": "Detection mode",
+        "insightfaceLabel": "Use Case 2 (Standard)",
+        "yoloLabel": "Use Case 1 (High Accuracy)",
         "hint": {
-          "insightface": "Best for offices and clear face views. ~80 ms per analyzer cycle on a typical office laptop.",
-          "yolo+face": "Detects people first, then faces inside each body box. ~150 ms per analyzer cycle. Use for high-traffic areas."
+          "insightface": "Fast detection — best for clear faces at entry/exit points. Recommended for most cameras.",
+          "yolo+face": "Finds people first, then their faces — better for crowded or distant areas. Uses more processing time."
         }
       },
       "detSize": {
@@ -870,12 +870,12 @@
         "hint": "Faces smaller than this are skipped. 60 = 60×60 pixels (default)."
       },
       "yoloConf": {
-        "label": "YOLO confidence",
-        "hint": "Person-detection confidence threshold for YOLO+Face mode only."
+        "label": "Person-detection confidence",
+        "hint": "Person-detection confidence threshold for Use Case 1 (High Accuracy) mode only."
       },
       "showBodyBoxes": {
         "label": "Show body boxes on preview",
-        "hint": "Debug aid — overlays the YOLO body box alongside the face box on Live Capture."
+        "hint": "Debug aid — overlays the person box alongside the face box on Live Capture."
       }
     },
     "tracker": {
@@ -1598,10 +1598,10 @@
     },
     "contextMenu": {
       "title": "Run face matching",
-      "uc1": "Use Case 1 — YOLO + face crops",
-      "uc1Hint": "Person-box detection → face crops → match",
-      "uc2": "Use Case 2 — InsightFace + crops",
-      "uc2Hint": "Full-frame face detection → crops → match"
+      "uc1": "Use Case 1 (High Accuracy)",
+      "uc1Hint": "Finds people first, then their faces — best for crowded or distant areas. Uses more processing time.",
+      "uc2": "Use Case 2 (Standard)",
+      "uc2Hint": "Fast face detection — best for clear faces at entry/exit points."
     },
     "totalSuffix": "clips",
     "totalSizeSuffix": "total",
@@ -1659,11 +1659,11 @@
     "uc": {
       "uc1": {
         "label": "Use Case 1",
-        "mode": "YOLO + Face crops"
+        "mode": "High Accuracy"
       },
       "uc2": {
         "label": "Use Case 2",
-        "mode": "InsightFace + crops"
+        "mode": "Standard"
       }
     },
     "clipStatus": {
@@ -1696,8 +1696,8 @@
       "frames": "frames",
       "selectUseCases": "Select use cases",
       "ucShort": {
-        "uc1": "YOLO+Face",
-        "uc2": "InsightFace+crops"
+        "uc1": "High Accuracy",
+        "uc2": "Standard"
       },
       "selectAtLeastOne": "Select at least one use case.",
       "reprocessRunning": "A reprocess is already running for this clip.",
