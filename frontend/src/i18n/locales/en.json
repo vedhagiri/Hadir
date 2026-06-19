@@ -895,6 +895,25 @@
         "hint": "Stop saving new face crops after a person has been in frame this long. Per-camera setting (Cameras → Capture settings) overrides this default."
       }
     },
+    "reconnect": {
+      "title": "RTSP Reconnect",
+      "subtitle": "What the system does when a camera disconnects. Applies to every camera; takes effect on the next reconnect without a restart.",
+      "resetConfirm": "This will revert reconnect settings to the defaults (enabled, retry every 30 seconds).",
+      "enabled": {
+        "label": "Automatically reconnect",
+        "hint": "ON: keep trying to reconnect when a camera drops. OFF: stop after a disconnect and make no reconnect attempts until you turn this back on."
+      },
+      "interval": {
+        "label": "Reconnect interval",
+        "hint": "How often to retry while a camera is offline. Minimum 5 seconds, maximum 24 hours."
+      },
+      "unit": {
+        "seconds": "Seconds",
+        "minutes": "Minutes",
+        "hours": "Hours"
+      },
+      "effective": "Retries every {{seconds}} seconds."
+    },
     "clipEncoding": {
       "title": "Clip recording",
       "subtitle": "How long person-presence clips are split into chunks during recording, and the H.264 encoding parameters used for the final merged file.",
@@ -3466,7 +3485,8 @@
       "running": "Running",
       "reconnecting": "Reconnecting",
       "stopped": "Stopped",
-      "failed": "Failed"
+      "failed": "Failed",
+      "reconnectOff": "Auto-reconnect off"
     },
     "actions": {
       "restartAll": "Restart all workers"
@@ -3493,6 +3513,7 @@
     "cell": {
       "disabled": "Disabled",
       "idle": "Idle",
+      "offline": "Offline",
       "recording": "Recording ({{seconds}}s)",
       "workerDown": "Worker down",
       "queue": "queue: {{n}}",
@@ -3554,7 +3575,8 @@
       "cards": {
         "currentlyRecording": "Currently recording",
         "camerasEnabled": "Cameras enabled",
-        "camerasIdle": "Cameras idle"
+        "camerasIdle": "Cameras idle",
+        "camerasOffline": "Cameras offline"
       },
       "cols": {
         "camera": "Camera",

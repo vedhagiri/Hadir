@@ -1057,6 +1057,10 @@ class PipelineRtspWorkerOut(BaseModel):
     fps_reader: float = 0.0
     fps_analyzer: float = 0.0
     errors_5min: int = 0
+    # Host-safe reason for the current status (e.g. "reconnect disabled",
+    # "could not open stream"). Surfaced in the UI so a stopped camera's
+    # cause is visible. Never carries the RTSP URL.
+    last_error: Optional[str] = None
 
 
 class PipelineRtspOut(BaseModel):
@@ -1156,6 +1160,10 @@ def get_pipeline_monitor(
     # The per-tenant snapshot returns one entry per running worker; we
     # cross-reference ``cameras.worker_enabled`` for "configured" count.
     rtsp = PipelineRtspOut()
+    # Cameras whose RTSP stream is actually connected (status == running).
+    # Used below to gate the encoding "alive" count so an offline
+    # camera's idle encoder thread doesn't inflate it.
+    connected_cam_ids: set[int] = set()
     try:
         worker_keys = [
             (t, c) for (t, c) in capture_manager.workers_snapshot() if t == scope.tenant_id
@@ -1174,6 +1182,7 @@ def get_pipeline_monitor(
         status_value: str = str(stats.get("status", "stopped"))
         if status_value == "running":
             rtsp.running += 1
+            connected_cam_ids.add(int(camera_id))
         elif status_value == "reconnecting":
             rtsp.reconnecting += 1
         elif status_value == "failed":
@@ -1189,6 +1198,11 @@ def get_pipeline_monitor(
                 fps_reader=float(stats.get("fps_reader") or 0.0),
                 fps_analyzer=float(stats.get("fps_analyzer") or 0.0),
                 errors_5min=int(stats.get("errors_5min") or 0),
+                last_error=(
+                    str(stats.get("last_error"))
+                    if stats.get("last_error")
+                    else None
+                ),
             )
         )
 
@@ -1310,7 +1324,16 @@ def get_pipeline_monitor(
             )
         )
     encoding.total_workers = len(encoding.workers)
-    encoding.alive_workers = sum(1 for w in encoding.workers if w.alive)
+    # "Alive" = encoder thread up AND the camera's RTSP stream is
+    # connected. An offline camera's ClipWorker thread stays alive but
+    # idle (nothing to encode), so it shouldn't inflate the count — this
+    # matches the RTSP RUNNING predicate (status == "running") so
+    # "Encoding alive" reads the same as "RTSP running".
+    encoding.alive_workers = sum(
+        1
+        for w in encoding.workers
+        if w.alive and w.camera_id in connected_cam_ids
+    )
 
     # ---- Stage 4: Identify Event (face-match jobs) ------------------------
     identify = PipelineIdentifyOut()

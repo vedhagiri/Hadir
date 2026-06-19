@@ -20,6 +20,8 @@ import {
   useDetectionConfig,
   usePutClipEncodingConfig,
   usePutDetectionConfig,
+  usePutReconnectConfig,
+  useReconnectConfig,
   useTrackerConfig,
   usePutTrackerConfig,
   useUpdateClipPipelineConfig,
@@ -29,12 +31,19 @@ import {
   CLIP_USE_CASES,
   DETECTION_DEFAULTS,
   DET_SIZE_OPTIONS,
+  RECONNECT_DEFAULTS,
+  RECONNECT_INTERVAL_MAX_S,
+  RECONNECT_INTERVAL_MIN_S,
+  RECONNECT_UNIT_SECONDS,
   RESOLUTION_OPTIONS,
+  secondsToValueUnit,
   TRACKER_DEFAULTS,
   X264_PRESETS,
   type ClipEncodingConfig,
   type ClipUseCase,
   type DetectionConfig,
+  type ReconnectConfig,
+  type ReconnectUnit,
   type TrackerConfig,
   type X264Preset,
 } from "./types";
@@ -55,6 +64,8 @@ export function SystemSettingsPage() {
       <DetectionCard />
       <div style={{ height: 16 }} />
       <TrackerCard />
+      <div style={{ height: 16 }} />
+      <ReconnectCard />
       <div style={{ height: 16 }} />
       <ClipEncodingCard />
     </>
@@ -477,6 +488,158 @@ function TrackerCard() {
         <ConfirmModal
           title={t("systemSettings.resetConfirm.title")}
           message={t("systemSettings.tracker.resetConfirm")}
+          onConfirm={onReset}
+          onCancel={() => setConfirmReset(false)}
+          confirmLabel={t("common.reset")}
+          cancelLabel={t("common.cancel")}
+        />
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// RTSP reconnect card (migration 0085)
+//
+// Enable/disable auto-reconnect + a fixed retry interval the operator
+// enters as seconds / minutes / hours. Stored canonically as
+// interval_seconds; OFF → the worker makes no reconnect attempts.
+
+function ReconnectCard() {
+  const { t } = useTranslation();
+  const remote = useReconnectConfig();
+  const put = usePutReconnectConfig();
+  const [enabled, setEnabled] = useState<boolean>(RECONNECT_DEFAULTS.enabled);
+  const [value, setValue] = useState<number>(30);
+  const [unit, setUnit] = useState<ReconnectUnit>("seconds");
+  const [toast, setToast] = useState<string | null>(null);
+  const [confirmReset, setConfirmReset] = useState(false);
+
+  useEffect(() => {
+    if (!remote.data) return;
+    setEnabled(remote.data.enabled);
+    const vu = secondsToValueUnit(remote.data.interval_seconds);
+    setValue(vu.value);
+    setUnit(vu.unit);
+  }, [remote.data]);
+
+  const unitSeconds = RECONNECT_UNIT_SECONDS[unit];
+  const minValue = Math.max(
+    1,
+    Math.ceil(RECONNECT_INTERVAL_MIN_S / unitSeconds),
+  );
+  const maxValue = Math.floor(RECONNECT_INTERVAL_MAX_S / unitSeconds);
+  const intervalSeconds = clampInt(
+    Math.round(value * unitSeconds),
+    RECONNECT_INTERVAL_MIN_S,
+    RECONNECT_INTERVAL_MAX_S,
+  );
+  const payload: ReconnectConfig = {
+    enabled,
+    interval_seconds: intervalSeconds,
+  };
+  const dirty = JSON.stringify(payload) !== JSON.stringify(remote.data ?? {});
+
+  const onSave = async () => {
+    setToast(null);
+    try {
+      await put.mutateAsync(payload);
+      setToast(t("systemSettings.savedToast") as string);
+      setTimeout(() => setToast(null), 4000);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setToast(formatApiError(err, t));
+      } else {
+        setToast(t("common.errorGeneric") as string);
+      }
+    }
+  };
+
+  const onReset = () => {
+    setEnabled(RECONNECT_DEFAULTS.enabled);
+    const vu = secondsToValueUnit(RECONNECT_DEFAULTS.interval_seconds);
+    setValue(vu.value);
+    setUnit(vu.unit);
+    setConfirmReset(false);
+  };
+
+  return (
+    <div className="card">
+      <div className="card-head">
+        <h3 className="card-title">{t("systemSettings.reconnect.title")}</h3>
+        <p className="card-sub">{t("systemSettings.reconnect.subtitle")}</p>
+      </div>
+      <div
+        style={{
+          padding: 16,
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+        }}
+      >
+        <ToggleRow
+          checked={enabled}
+          onChange={setEnabled}
+          label={t("systemSettings.reconnect.enabled.label")}
+          hint={t("systemSettings.reconnect.enabled.hint")}
+        />
+
+        {enabled && (
+          <FieldGroup
+            label={t("systemSettings.reconnect.interval.label")}
+            hint={t("systemSettings.reconnect.interval.hint")}
+          >
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type="number"
+                min={minValue}
+                max={maxValue}
+                step={1}
+                value={value}
+                onChange={(e) =>
+                  setValue(
+                    clampInt(parseInt(e.target.value, 10), minValue, maxValue),
+                  )
+                }
+                style={{ ...inputStyle, width: 120 }}
+              />
+              <select
+                value={unit}
+                onChange={(e) => setUnit(e.target.value as ReconnectUnit)}
+                style={inputStyle}
+              >
+                <option value="seconds">
+                  {t("systemSettings.reconnect.unit.seconds")}
+                </option>
+                <option value="minutes">
+                  {t("systemSettings.reconnect.unit.minutes")}
+                </option>
+                <option value="hours">
+                  {t("systemSettings.reconnect.unit.hours")}
+                </option>
+              </select>
+            </div>
+            <span className="text-xs text-dim" style={{ marginTop: 4 }}>
+              {t("systemSettings.reconnect.effective", {
+                seconds: intervalSeconds,
+              })}
+            </span>
+          </FieldGroup>
+        )}
+
+        <CardFooter
+          dirty={dirty}
+          onSave={onSave}
+          saving={put.isPending}
+          onReset={() => setConfirmReset(true)}
+          toast={toast}
+        />
+      </div>
+
+      {confirmReset && (
+        <ConfirmModal
+          title={t("systemSettings.resetConfirm.title")}
+          message={t("systemSettings.reconnect.resetConfirm")}
           onConfirm={onReset}
           onCancel={() => setConfirmReset(false)}
           confirmLabel={t("common.reset")}

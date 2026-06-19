@@ -609,6 +609,18 @@ tenant_settings = Table(
         nullable=False,
         server_default='{"present": false, "late": false, "absent": false}',
     ),
+    # Migration 0085 — per-tenant RTSP reconnect behaviour, configurable
+    # from System Settings → RTSP Reconnect. ``enabled`` toggles whether a
+    # disconnected camera is retried at all; ``interval_seconds`` is the
+    # fixed delay between attempts when enabled. The capture worker reads
+    # this on the cold reconnect path (not the hot analyzer loop), so a
+    # change takes effect on the next reconnect without a restart.
+    Column(
+        "reconnect_config",
+        JSONB,
+        nullable=False,
+        server_default='{"enabled": true, "interval_seconds": 30}',
+    ),
     Column(
         "updated_at",
         DateTime(timezone=True),

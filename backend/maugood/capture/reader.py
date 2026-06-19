@@ -244,6 +244,15 @@ _MOTION_GRAY_WIDTH = 160
 _MOTION_PIXEL_THRESHOLD = 25
 _MOTION_MIN_PIXELS = 80
 
+# Migration 0085 — RTSP reconnect config. Fallback used when the tenant
+# row can't be read (transient DB error) so a camera is never stranded.
+# ``_RECONNECT_INTERVAL_MIN_S`` floors the configured interval; the
+# parked (reconnect-disabled) loop re-checks the config this often so an
+# operator re-enabling reconnect resumes within a few seconds.
+_RECONNECT_DEFAULTS: dict = {"enabled": True, "interval_seconds": 30}
+_RECONNECT_INTERVAL_MIN_S = 5.0
+_RECONNECT_PARK_RECHECK_S = 5.0
+
 
 def _check_motion(frame_bgr, prev_gray):  # type: ignore[no-untyped-def]
     """Return ``(moved, current_gray)``.
@@ -1928,7 +1937,6 @@ class CaptureWorker:
             self._reader_loop_outer()
 
     def _reader_loop_outer(self) -> None:
-        backoff = self._config.reconnect_backoff_initial_s
         while not self._stop.is_set():
             cap: Optional[FrameSource] = None
             try:
@@ -1949,13 +1957,21 @@ class CaptureWorker:
                         self._set_status("reconnecting", error=reason)
                         self._record_unreachable(reason)
                         self._record_error("rtsp", reason)
+                        _rc = self._load_reconnect_config()
                         logger.info(
-                            "camera %s: offline (%s) — attempt %d, "
-                            "retry in %.0fs",
+                            "camera %s: offline (%s) — attempt %d, %s",
                             self.camera_name,
                             reason,
                             self._reconnect_attempts,
-                            backoff,
+                            (
+                                "retry in %.0fs"
+                                % max(
+                                    _RECONNECT_INTERVAL_MIN_S,
+                                    float(_rc.get("interval_seconds", 30)),
+                                )
+                                if _rc.get("enabled", True)
+                                else "reconnect disabled — not retrying"
+                            ),
                         )
                         try:
                             from maugood.diagnostics import (  # noqa: PLC0415
@@ -1971,14 +1987,14 @@ class CaptureWorker:
                             )
                         except Exception:  # noqa: BLE001
                             pass
-                        self._sleep_interruptible(backoff)
-                        backoff = self._bump_backoff(backoff)
+                        self._reconnect_pause(_rc)
                         continue
 
                 cap = self._open_capture_source()
                 if not cap.isOpened():
                     self._set_status("reconnecting", error="could not open stream")
                     self._record_unreachable("could not open stream")
+                    _rc = self._load_reconnect_config()
                     # TEMP-DIAGNOSTIC-2026-05-20
                     try:
                         from maugood.diagnostics import (  # noqa: PLC0415
@@ -1989,17 +2005,15 @@ class CaptureWorker:
                             camera_id=self.camera_id,
                             camera_name=self.camera_name,
                             reason="could not open stream",
-                            backoff_s=backoff,
+                            backoff_s=float(_rc.get("interval_seconds", 30)),
                         )
                     except Exception:  # noqa: BLE001
                         pass
-                    self._sleep_interruptible(backoff)
-                    backoff = self._bump_backoff(backoff)
+                    self._reconnect_pause(_rc)
                     continue
 
                 self._set_status("running", error=None)
                 self._reconnect_attempts = 0
-                backoff = self._config.reconnect_backoff_initial_s
 
                 last_fps_ts = time.time()
                 frames_this_sec = 0
@@ -2152,8 +2166,7 @@ class CaptureWorker:
 
             if self._stop.is_set():
                 break
-            self._sleep_interruptible(backoff)
-            backoff = self._bump_backoff(backoff)
+            self._reconnect_pause()
 
         self._set_status("stopped", error=None)
 
@@ -2402,6 +2415,74 @@ class CaptureWorker:
 
     def _bump_backoff(self, current: float) -> float:
         return min(current * 2.0, self._config.reconnect_backoff_max_s)
+
+    def _load_reconnect_config(self) -> dict:
+        """Read the tenant's ``reconnect_config`` (migration 0085).
+
+        COLD PATH — only called while a camera is disconnected, so a tiny
+        single-row query per attempt is negligible (unlike detection
+        config which is on the 6 fps hot path and must be pushed/cached).
+        Reading it here makes the setting always-live: a UI change takes
+        effect on the next reconnect with no worker restart.
+
+        Falls back to enabled / 30 s on any error so a transient DB hiccup
+        never strands a camera offline. Runs inside the worker's
+        ``tenant_context`` (set in ``_reader_loop``); still filters
+        ``tenant_id`` for defence in depth.
+        """
+
+        try:
+            from maugood.db import tenant_settings as _ts  # noqa: PLC0415
+
+            with self._engine.begin() as conn:
+                row = conn.execute(
+                    select(_ts.c.reconnect_config).where(
+                        _ts.c.tenant_id == self._scope.tenant_id
+                    )
+                ).first()
+            if row is not None and isinstance(row.reconnect_config, dict):
+                out = dict(_RECONNECT_DEFAULTS)
+                out.update(row.reconnect_config)
+                return out
+        except Exception:  # noqa: BLE001
+            pass
+        return dict(_RECONNECT_DEFAULTS)
+
+    def _reconnect_pause(self, cfg: Optional[dict] = None) -> None:
+        """Wait before the next reconnect attempt per the tenant's
+        ``reconnect_config`` (migration 0085).
+
+        * ``enabled=True``  → sleep the configured fixed interval, then
+          return so the outer loop retries the connection.
+        * ``enabled=False`` → **PARK**: make no further connection
+          attempts. Stay alive (so the 2 s reconcile tick doesn't restart
+          us, and a re-enable is picked up without a manual restart),
+          sleeping in short interruptible slices and re-reading the config
+          until it flips back on or stop is requested.
+        """
+
+        if cfg is None:
+            cfg = self._load_reconnect_config()
+        if cfg.get("enabled", True):
+            interval = max(
+                _RECONNECT_INTERVAL_MIN_S,
+                float(cfg.get("interval_seconds", 30)),
+            )
+            self._sleep_interruptible(interval)
+            return
+        # Reconnect disabled for this tenant — park, don't retry.
+        self._set_status("stopped", error="reconnect disabled")
+        while not self._stop.is_set():
+            self._sleep_interruptible(_RECONNECT_PARK_RECHECK_S)
+            if self._stop.is_set():
+                return
+            if self._load_reconnect_config().get("enabled", True):
+                logger.info(
+                    "camera %s: reconnect re-enabled — resuming",
+                    self.camera_name,
+                )
+                self._set_status("reconnecting", error="reconnect re-enabled")
+                return
 
     def _record_health(
         self, frames: int, *, reachable: bool, note: Optional[str] = None
@@ -2923,6 +3004,10 @@ class CaptureWorker:
             "camera_id": self.camera_id,
             "camera_name": self.camera_name,
             "status": base.get("status", "starting"),
+            # Host-safe reason for the current status (e.g. "reconnect
+            # disabled", "could not open stream"). Never carries the RTSP
+            # URL — the worker only ever stores host-safe error strings.
+            "last_error": base.get("last_error"),
             "started_at": datetime.fromtimestamp(
                 self._started_at, tz=timezone.utc
             ).isoformat(timespec="seconds"),

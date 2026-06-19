@@ -82,45 +82,54 @@ def _live_capture_rows(tenant_id: int) -> list[dict[str, Any]]:
     except Exception:  # noqa: BLE001
         workers = []
 
-    # RTSP Live Feed — sum across every running capture worker.
-    rtsp_active = 0
+    # RTSP Live Feed — one rolled-up row. "Connected" means the worker's
+    # reported status is ``running`` — the SAME predicate the RTSP RUNNING
+    # chip uses (operations/router.py). A worker thread can be alive while
+    # its stream is down (reconnecting / stopped / failed), so the old
+    # ``is_alive()`` check over-counted offline cameras as "reading". Key
+    # off the stream status so this row matches the chip and reality.
+    total_cams = len(workers)
     rtsp_running = 0
-    rtsp_failed = 0
     rtsp_current_tasks: list[str] = []
-    rtsp_health = "idle"
+    connected_by_cam: dict[int, bool] = {}
     for cam_id, w in workers:
         try:
             stats = w.get_stats()
         except Exception:  # noqa: BLE001
+            connected_by_cam[cam_id] = False
             continue
-        if w.is_alive():
+        connected = str(stats.get("status", "stopped")) == "running"
+        connected_by_cam[cam_id] = connected
+        if connected:
             rtsp_running += 1
-            rtsp_active += 1
             rtsp_current_tasks.append(
                 f"cam #{cam_id} {stats.get('fps_reader', 0)}fps"
             )
-        else:
-            rtsp_failed += 1
+    rtsp_offline = total_cams - rtsp_running
 
-    if rtsp_failed > 0:
-        rtsp_health = "degraded"
-    elif rtsp_active > 0:
-        rtsp_health = "healthy"
+    # Offline cameras are surfaced via the FAILED count + task text; the
+    # feed itself stays HEALTHY as long as it's reading at least one
+    # stream (operator preference — no amber "degraded" for offline cams).
+    rtsp_health = "healthy" if rtsp_running > 0 else "idle"
 
     rows.append(
         _make_row(
             name="RTSP Live Feed",
             group="live_capture",
             status="running" if rtsp_running > 0 else "idle",
-            active_jobs=rtsp_active,
+            active_jobs=rtsp_running,
             active_unit="cams",
             queue_count=None,
             processing=rtsp_running,
             completed=None,  # not tracked here; per-camera health is the truth
-            failed=rtsp_failed,
+            failed=rtsp_offline,
             current_task=(
-                f"Reading {rtsp_running} stream{'' if rtsp_running == 1 else 's'}"
-                if rtsp_running
+                (
+                    f"Reading {rtsp_running} of {total_cams} camera"
+                    f"{'' if total_cams == 1 else 's'}"
+                    + (f" · {rtsp_offline} offline" if rtsp_offline else "")
+                )
+                if total_cams
                 else "no cameras"
             ),
             speed_ms=None,
@@ -140,6 +149,11 @@ def _live_capture_rows(tenant_id: int) -> list[dict[str, Any]]:
     clip_completed = 0
     clip_failed = 0
     clip_workers = 0
+    # Cameras actually being watched = those whose RTSP stream is
+    # connected (reuses the same predicate as the RTSP row). An offline
+    # camera's ClipWorker thread is alive but receives no frames, so it
+    # isn't "watching" anything.
+    clip_watching = 0
     clip_current: list[str] = []
     # Option B segmenter rollup: when stream_copy mode is on, aggregate
     # segment counts + disk usage across cameras so the dashboard
@@ -154,6 +168,8 @@ def _live_capture_rows(tenant_id: int) -> list[dict[str, Any]]:
         if cw is None:
             continue
         clip_workers += 1
+        if connected_by_cam.get(cam_id):
+            clip_watching += 1
         seg = getattr(w, "_segmenter", None)
         if seg is not None:
             seg_mode_detected = "stream_copy"
@@ -204,8 +220,8 @@ def _live_capture_rows(tenant_id: int) -> list[dict[str, Any]]:
         _make_row(
             name="Clip Saving",
             group="live_capture",
-            status="running" if clip_workers > 0 else "idle",
-            active_jobs=clip_workers,
+            status="running" if clip_watching > 0 else "idle",
+            active_jobs=clip_watching,
             active_unit="cams",
             queue_count=clip_queue,
             processing=clip_in_flight,
@@ -220,8 +236,8 @@ def _live_capture_rows(tenant_id: int) -> list[dict[str, Any]]:
                     )
                     if clip_current
                     else (
-                        f"Watching {clip_workers} camera"
-                        f"{'' if clip_workers == 1 else 's'}"
+                        f"Watching {clip_watching} camera"
+                        f"{'' if clip_watching == 1 else 's'}"
                         if clip_workers else "no cameras"
                     )
                 )
@@ -229,7 +245,7 @@ def _live_capture_rows(tenant_id: int) -> list[dict[str, Any]]:
             speed_ms=None,
             health="degraded" if clip_failed > 0 else (
                 "healthy" if clip_in_flight > 0 else
-                "healthy" if clip_workers > 0 else "idle"
+                "healthy" if clip_watching > 0 else "idle"
             ),
             detail={
                 "current": clip_current[:10],

@@ -40,6 +40,7 @@ interface RtspWorker {
   fps_reader: number;
   fps_analyzer: number;
   errors_5min: number;
+  last_error?: string | null;
 }
 
 interface RecordingCamera {
@@ -349,7 +350,7 @@ export function PipelineMonitor() {
           {data && tab === "cameras" && <CamerasPanel data={data} />}
           {data && tab === "rtsp" && <RtspPanel data={data.rtsp} />}
           {data && tab === "recording" && (
-            <RecordingPanel data={data.recording} />
+            <RecordingPanel data={data.recording} rtsp={data.rtsp} />
           )}
           {data && tab === "identify" && <IdentifyPanel data={data.identify} />}
           {tab === "queues" && <QueuePipelinePanel />}
@@ -650,7 +651,7 @@ function CameraRowView({ row }: { row: CameraRow }) {
         </span>
       </td>
       <td style={tdStyle}>
-        {row.rtsp ? <StatusBadge status={row.rtsp.status} /> : <em className="text-dim">{t("pipelineMonitor.cell.none")}</em>}
+        {row.rtsp ? <StatusBadge status={row.rtsp.status} lastError={row.rtsp.last_error} /> : <em className="text-dim">{t("pipelineMonitor.cell.none")}</em>}
       </td>
       <td style={tdStyle} className="mono text-sm">
         {rtspBlurb}
@@ -715,7 +716,7 @@ function RtspPanel({ data }: { data: PipelineMonitorOut["rtsp"] }) {
             <tr key={w.camera_id}>
               <td style={{ fontWeight: 500 }}>{w.camera_name}</td>
               <td>
-                <StatusBadge status={w.status} />
+                <StatusBadge status={w.status} lastError={w.last_error} />
               </td>
               <td className="mono text-sm">{fmtUptime(w.uptime_sec)}</td>
               <td className="mono text-sm">
@@ -743,10 +744,25 @@ function RtspPanel({ data }: { data: PipelineMonitorOut["rtsp"] }) {
 
 function RecordingPanel({
   data,
+  rtsp,
 }: {
   data: PipelineMonitorOut["recording"];
+  rtsp: PipelineMonitorOut["rtsp"];
 }) {
   const { t } = useTranslation();
+  // A camera whose RTSP stream isn't connected (status != running) can't
+  // record — surface it as "Offline" instead of "Idle" so the offline
+  // cameras show here too. Build the status lookup once.
+  const rtspByCam = new Map(rtsp.workers.map((w) => [w.camera_id, w]));
+  const isConnected = (camId: number): boolean =>
+    rtspByCam.get(camId)?.status === "running";
+  const offlineCount = data.cameras.filter(
+    (c) => !c.recording_active && !isConnected(c.camera_id),
+  ).length;
+  const idleCount = Math.max(
+    0,
+    data.enabled_cameras - data.active - offlineCount,
+  );
   return (
     <>
       <CountStrip
@@ -759,8 +775,13 @@ function RecordingPanel({
           { label: t("pipelineMonitor.recording.cards.camerasEnabled"), value: data.enabled_cameras, tone: "neutral" },
           {
             label: t("pipelineMonitor.recording.cards.camerasIdle"),
-            value: Math.max(0, data.enabled_cameras - data.active),
+            value: idleCount,
             tone: "neutral",
+          },
+          {
+            label: t("pipelineMonitor.recording.cards.camerasOffline"),
+            value: offlineCount,
+            tone: offlineCount > 0 ? "warn" : "neutral",
           },
         ]}
       />
@@ -791,8 +812,15 @@ function RecordingPanel({
                   <Pill tone="danger">
                     <PulseDot /> {t("pipelineMonitor.cell.recordingLabel")}
                   </Pill>
-                ) : (
+                ) : isConnected(c.camera_id) ? (
                   <Pill tone="neutral">{t("pipelineMonitor.cell.idle")}</Pill>
+                ) : (
+                  <Pill
+                    tone="neutral"
+                    title={rtspByCam.get(c.camera_id)?.last_error || undefined}
+                  >
+                    {t("pipelineMonitor.cell.offline")}
+                  </Pill>
                 )}
               </td>
               <td className="mono text-sm">
@@ -1209,8 +1237,10 @@ function CountStrip({
 
 function StatusBadge({
   status,
+  lastError,
 }: {
   status: RtspWorker["status"];
+  lastError?: string | null | undefined;
 }) {
   const { t } = useTranslation();
   const map: Record<RtspWorker["status"], Tone> = {
@@ -1220,19 +1250,37 @@ function StatusBadge({
     stopped: "neutral",
     failed: "danger",
   };
-  return <Pill tone={map[status]}>{t(`pipelineMonitor.status.${status}`)}</Pill>;
+  // Clearer label when a camera is stopped *because the operator turned
+  // auto-reconnect off* — distinguishes intentional "not retrying" from a
+  // crash/failure. The reason is surfaced verbatim on hover (title) for
+  // every status that carries one.
+  const reconnectOff =
+    status === "stopped" &&
+    !!lastError &&
+    lastError.toLowerCase().includes("reconnect disabled");
+  const label = reconnectOff
+    ? t("pipelineMonitor.status.reconnectOff")
+    : t(`pipelineMonitor.status.${status}`);
+  return (
+    <Pill tone={map[status]} title={lastError || undefined}>
+      {label}
+    </Pill>
+  );
 }
 
 function Pill({
   tone,
   children,
+  title,
 }: {
   tone: Tone;
   children: React.ReactNode;
+  title?: string | undefined;
 }) {
   const p = paletteFor(tone);
   return (
     <span
+      title={title}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -1243,6 +1291,7 @@ function Pill({
         color: p.fg,
         fontSize: 11.5,
         fontWeight: 600,
+        whiteSpace: "nowrap",
       }}
     >
       {children}

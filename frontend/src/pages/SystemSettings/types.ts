@@ -84,3 +84,38 @@ export const CLIP_USE_CASES: readonly ClipUseCase[] = ["uc1", "uc2"] as const;
 export const CLIP_PIPELINE_DEFAULT: ClipPipelineConfig = {
   use_cases: [],
 };
+
+// RTSP reconnect config (migration 0085). Stored canonically as
+// ``interval_seconds``; the UI presents value + unit (sec/min/hour) and
+// converts. ``enabled=false`` → the worker makes no reconnect attempts.
+export interface ReconnectConfig {
+  enabled: boolean;
+  interval_seconds: number;
+}
+
+export const RECONNECT_DEFAULTS: ReconnectConfig = {
+  enabled: true,
+  interval_seconds: 30,
+};
+
+// Server bounds (mirror maugood/system/router.py): 5 s … 24 h.
+export const RECONNECT_INTERVAL_MIN_S = 5;
+export const RECONNECT_INTERVAL_MAX_S = 86_400;
+
+export type ReconnectUnit = "seconds" | "minutes" | "hours";
+
+export const RECONNECT_UNIT_SECONDS: Record<ReconnectUnit, number> = {
+  seconds: 1,
+  minutes: 60,
+  hours: 3600,
+};
+
+// Split a canonical seconds value into the largest whole unit that
+// divides it evenly, so 300 → {5, "minutes"} and 3600 → {1, "hours"}.
+export function secondsToValueUnit(
+  total: number,
+): { value: number; unit: ReconnectUnit } {
+  if (total > 0 && total % 3600 === 0) return { value: total / 3600, unit: "hours" };
+  if (total > 0 && total % 60 === 0) return { value: total / 60, unit: "minutes" };
+  return { value: total, unit: "seconds" };
+}

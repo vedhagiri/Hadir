@@ -8,10 +8,12 @@ import {
   CLIP_ENCODING_DEFAULTS,
   CLIP_PIPELINE_DEFAULT,
   DETECTION_DEFAULTS,
+  RECONNECT_DEFAULTS,
   TRACKER_DEFAULTS,
   type ClipEncodingConfig,
   type ClipPipelineConfig,
   type DetectionConfig,
+  type ReconnectConfig,
   type TrackerConfig,
 } from "./types";
 
@@ -19,6 +21,7 @@ const DETECTION_KEY = ["system", "detection-config"] as const;
 const TRACKER_KEY = ["system", "tracker-config"] as const;
 const CLIP_ENCODING_KEY = ["system", "clip-encoding-config"] as const;
 const CLIP_PIPELINE_KEY = ["system", "clip-pipeline-config"] as const;
+const RECONNECT_KEY = ["system", "reconnect-config"] as const;
 
 export function useDetectionConfig() {
   return useQuery<DetectionConfig>({
@@ -111,6 +114,29 @@ export function useUpdateClipPipelineConfig() {
     onSuccess: (data) => {
       qc.setQueryData(CLIP_PIPELINE_KEY, data);
       void qc.invalidateQueries({ queryKey: CLIP_PIPELINE_KEY });
+    },
+  });
+}
+
+export function useReconnectConfig() {
+  return useQuery<ReconnectConfig>({
+    queryKey: RECONNECT_KEY,
+    queryFn: () => api<ReconnectConfig>("/api/system/reconnect-config"),
+    initialData: RECONNECT_DEFAULTS,
+    staleTime: 5_000,
+  });
+}
+
+export function usePutReconnectConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ReconnectConfig) =>
+      api<ReconnectConfig>("/api/system/reconnect-config", {
+        method: "PUT",
+        body,
+      }),
+    onSuccess: (data) => {
+      qc.setQueryData(RECONNECT_KEY, data);
     },
   });
 }

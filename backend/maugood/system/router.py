@@ -711,6 +711,96 @@ def put_tracker_config(
 
 
 # ---------------------------------------------------------------------------
+# Migration 0085 — RTSP reconnect config endpoints.
+#
+# Tenant-level. ``enabled`` toggles whether a disconnected camera is
+# retried at all; ``interval_seconds`` is the fixed delay between
+# attempts when enabled. The capture worker reads this on its cold
+# reconnect path (see reader.py ``_reconnect_pause``), so a change takes
+# effect on the next reconnect without a worker restart.
+# ---------------------------------------------------------------------------
+
+# Bounds: floor of 5 s stops an over-eager operator from hammering a dead
+# camera into a reconnect storm; ceiling of 86400 s = 24 h covers the
+# "check once a day" case. The UI presents seconds / minutes / hours and
+# converts to seconds before sending.
+_RECONNECT_INTERVAL_MIN = 5
+_RECONNECT_INTERVAL_MAX = 86_400
+
+_RECONNECT_DEFAULTS = {
+    "enabled": True,
+    "interval_seconds": 30,
+}
+
+
+class ReconnectConfigIn(BaseModel):
+    """Inbound shape for ``PUT /api/system/reconnect-config``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool
+    interval_seconds: int = Field(
+        ge=_RECONNECT_INTERVAL_MIN, le=_RECONNECT_INTERVAL_MAX
+    )
+
+
+class ReconnectConfigOut(ReconnectConfigIn):
+    model_config = ConfigDict(extra="ignore")
+
+
+def _load_reconnect_row(scope: TenantScope) -> dict:
+    engine = get_engine()
+    with engine.begin() as conn:
+        row = conn.execute(
+            select(
+                tenant_settings.c.reconnect_config,
+            ).where(tenant_settings.c.tenant_id == scope.tenant_id)
+        ).first()
+    out = dict(_RECONNECT_DEFAULTS)
+    if row is not None and isinstance(row.reconnect_config, dict):
+        out.update(row.reconnect_config)
+    return out
+
+
+@router.get("/reconnect-config", response_model=ReconnectConfigOut)
+def get_reconnect_config(
+    user: Annotated[CurrentUser, ADMIN],
+) -> ReconnectConfigOut:
+    scope = TenantScope(tenant_id=user.tenant_id)
+    return ReconnectConfigOut.model_validate(_load_reconnect_row(scope))
+
+
+@router.put("/reconnect-config", response_model=ReconnectConfigOut)
+def put_reconnect_config(
+    payload: dict,
+    user: Annotated[CurrentUser, ADMIN],
+) -> ReconnectConfigOut:
+    parsed = _validation_to_400(ReconnectConfigIn, payload)
+    scope = TenantScope(tenant_id=user.tenant_id)
+    new_config = parsed.model_dump()
+    before = _load_reconnect_row(scope)
+    engine = get_engine()
+    with engine.begin() as conn:
+        _ensure_tenant_settings_row(conn, scope.tenant_id)
+        conn.execute(
+            sql_update(tenant_settings)
+            .where(tenant_settings.c.tenant_id == scope.tenant_id)
+            .values(reconnect_config=new_config)
+        )
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="system.reconnect_config.updated",
+            entity_type="tenant_settings",
+            entity_id=str(scope.tenant_id),
+            before=before,
+            after=new_config,
+        )
+    return ReconnectConfigOut.model_validate(new_config)
+
+
+# ---------------------------------------------------------------------------
 # Migration 0052 — Phase C: clip encoding config endpoints.
 # ---------------------------------------------------------------------------
 
