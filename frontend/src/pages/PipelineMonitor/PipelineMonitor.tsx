@@ -17,6 +17,7 @@ import { RestartAllModal } from "../../features/operations/RestartAllModal";
 import { useRestartAllAndRecover } from "../../features/operations/hooks";
 import type { RestartAllAndRecoverResult } from "../../features/operations/types";
 import { Icon } from "../../shell/Icon";
+import { ALL_USE_CASE_CODES, useEnabledUseCases } from "../../hooks/useEnabledUseCases";
 import type { IconName } from "../../shell/Icon";
 import { ClearQueuesAction } from "./ClearQueuesAction";
 import { ResourcesPanel } from "./ResourcesPanel";
@@ -871,6 +872,22 @@ const UC_META: Record<
 
 function IdentifyPanel({ data }: { data: PipelineMonitorOut["identify"] }) {
   const { t } = useTranslation();
+  const enabledUcs = useEnabledUseCases();
+  // Show only the tenant's enabled use cases (Detection & Tracker → Clip
+  // processing). Empty match → fall back to all so the panel never blanks.
+  const shownUcs = data.use_cases.filter((uc) =>
+    (enabledUcs as readonly string[]).includes(uc.use_case),
+  );
+  const ucs = shownUcs.length ? shownUcs : data.use_cases;
+  // Aggregate strip recomputed from the shown use cases so totals match
+  // what's displayed (e.g. "Completed today" drops UC2's count when only
+  // UC1 is enabled). ``running`` has no per-UC breakdown — keep global.
+  const agg = {
+    pending: ucs.reduce((a, u) => a + u.pending, 0),
+    processing: ucs.reduce((a, u) => a + u.processing, 0),
+    completed_today: ucs.reduce((a, u) => a + u.completed_today, 0),
+    failed_today: ucs.reduce((a, u) => a + u.failed_today, 0),
+  };
   return (
     <>
       {/* Aggregate strip — sum across all UCs. */}
@@ -883,23 +900,23 @@ function IdentifyPanel({ data }: { data: PipelineMonitorOut["identify"] }) {
           },
           {
             label: t("pipelineMonitor.identify.cards.pending"),
-            value: data.pending,
-            tone: data.pending > 0 ? "warn" : "neutral",
+            value: agg.pending,
+            tone: agg.pending > 0 ? "warn" : "neutral",
           },
           {
             label: t("pipelineMonitor.identify.cards.processing"),
-            value: data.processing,
-            tone: data.processing > 0 ? "ok" : "neutral",
+            value: agg.processing,
+            tone: agg.processing > 0 ? "ok" : "neutral",
           },
           {
             label: t("pipelineMonitor.identify.cards.completedToday"),
-            value: data.completed_today,
+            value: agg.completed_today,
             tone: "ok",
           },
           {
             label: t("pipelineMonitor.identify.cards.failedToday"),
-            value: data.failed_today,
-            tone: data.failed_today > 0 ? "danger" : "neutral",
+            value: agg.failed_today,
+            tone: agg.failed_today > 0 ? "danger" : "neutral",
           },
         ]}
       />
@@ -921,11 +938,11 @@ function IdentifyPanel({ data }: { data: PipelineMonitorOut["identify"] }) {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(2, 1fr)",
+          gridTemplateColumns: `repeat(${Math.max(1, ucs.length)}, 1fr)`,
           gap: 12,
         }}
       >
-        {data.use_cases.map((uc) => (
+        {ucs.map((uc) => (
           <UseCaseStatsCard key={uc.use_case} stats={uc} />
         ))}
       </div>
@@ -1436,6 +1453,7 @@ interface QueueStatusOut {
 
 function QueuePipelinePanel() {
   const { t } = useTranslation();
+  const enabledUcs = useEnabledUseCases();
   const q = useQuery({
     queryKey: ["clip-pipeline", "status"],
     queryFn: () => api<QueueStatusOut>("/api/clip-pipeline/status"),
@@ -1462,6 +1480,22 @@ function QueuePipelinePanel() {
   }
 
   const d = q.data;
+  // Cropping workers are spawned per env-enabled use case (process-wide,
+  // shared across tenants). Hide the rows for use cases this tenant has
+  // disabled (Detection & Tracker → Clip processing) so the operator
+  // only sees their active workers. Matching workers carry no UC.
+  const disabledUcs = ALL_USE_CASE_CODES.filter(
+    (uc) => !enabledUcs.includes(uc),
+  );
+  const croppingStage =
+    disabledUcs.length === 0
+      ? d.cropping
+      : {
+          ...d.cropping,
+          workers: d.cropping.workers.filter(
+            (w) => !disabledUcs.some((uc) => w.name.includes(uc)),
+          ),
+        };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {/* Pipeline status banner */}
@@ -1513,7 +1547,7 @@ function QueuePipelinePanel() {
         <StageCard
           title={t("pipelineMonitor.queue.cropTitle")}
           subtitle={t("pipelineMonitor.queue.cropSubtitle")}
-          stage={d.cropping}
+          stage={croppingStage}
           accent="#6366f1"
           icon="camera"
         />

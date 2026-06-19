@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import { DrawerShell, ModalShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
+import { useEnabledUseCases } from "../../hooks/useEnabledUseCases";
 import {
   useBulkDeletePersonClips,
   useCameraOptions,
@@ -6623,6 +6624,7 @@ export function ClipDetailDrawer({
   focusEmployeeId?: number | null | undefined;
 }) {
   const { t } = useTranslation();
+  const enabledUcs = useEnabledUseCases();
   const [showReprocessForm, setShowReprocessForm] = useState(false);
   // Empty by default; seeded from the actual processing-results when
   // the form opens (see ``openReprocessForm`` below).
@@ -6935,22 +6937,26 @@ export function ClipDetailDrawer({
             {processingResults.isLoading && (
               <div className="text-sm text-dim">{t("common.loading") as string}</div>
             )}
-            <UseCaseResultSection
-              useCase="uc1"
-              result={uc1Result}
-              cropsData={uc1Crops.data}
-              loading={uc1Crops.isLoading}
-              clipId={clip.id}
-              focusEmployeeId={focusEmployeeId ?? null}
-            />
-            <UseCaseResultSection
-              useCase="uc2"
-              result={uc2Result}
-              cropsData={uc2Crops.data}
-              loading={uc2Crops.isLoading}
-              clipId={clip.id}
-              focusEmployeeId={focusEmployeeId ?? null}
-            />
+            {enabledUcs.includes("uc1") && (
+              <UseCaseResultSection
+                useCase="uc1"
+                result={uc1Result}
+                cropsData={uc1Crops.data}
+                loading={uc1Crops.isLoading}
+                clipId={clip.id}
+                focusEmployeeId={focusEmployeeId ?? null}
+              />
+            )}
+            {enabledUcs.includes("uc2") && (
+              <UseCaseResultSection
+                useCase="uc2"
+                result={uc2Result}
+                cropsData={uc2Crops.data}
+                loading={uc2Crops.isLoading}
+                clipId={clip.id}
+                focusEmployeeId={focusEmployeeId ?? null}
+              />
+            )}
           </div>
         </div>
 

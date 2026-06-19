@@ -34,6 +34,7 @@ import {
 } from "../person-clips/hooks";
 import type { ClipPipelineBatch } from "../person-clips/hooks";
 import { ClipDetailDrawer } from "../person-clips/PersonClipsPage";
+import { useEnabledUseCases } from "../../hooks/useEnabledUseCases";
 import type {
   ClipProcessingResult,
   FaceCropOut,
@@ -293,14 +294,19 @@ function UcPill({ code, state }: { code: string; state: UcCellState }) {
 
 function ProcessedUcCell({ clip }: { clip: PersonClipOut }) {
   const { t } = useTranslation();
+  const enabled = useEnabledUseCases();
   if (clip.recording_status !== "completed") {
     return (
       <span style={{ color: "var(--text-tertiary)", fontSize: 12 }}>—</span>
     );
   }
 
-  const processedCount = clip.processed_use_cases.length;
-  const total = ALL_USE_CASES.length;
+  // Only count / show the use cases enabled for this tenant (Detection &
+  // Tracker → Clip processing). A tenant running only UC1 never sees UC2.
+  const processedCount = clip.processed_use_cases.filter((u) =>
+    (enabled as readonly string[]).includes(u),
+  ).length;
+  const total = enabled.length;
 
   return (
     <div
@@ -315,7 +321,7 @@ function ProcessedUcCell({ clip }: { clip: PersonClipOut }) {
         style={{ display: "flex", gap: 4, flexWrap: "wrap" }}
         aria-label={t("clipAnalytics.uc.statusAria")}
       >
-        {ALL_USE_CASES.map((uc) => (
+        {enabled.map((uc) => (
           <UcPill key={uc} code={uc} state={ucState(uc, clip)} />
         ))}
       </div>
@@ -350,13 +356,20 @@ function ProcessedUcCell({ clip }: { clip: PersonClipOut }) {
 // matched) or a plain "No matches found" note (when unmatched).
 function MatchResultCell({ clip }: { clip: PersonClipOut }) {
   const { t } = useTranslation();
+  const enabled = useEnabledUseCases();
   if (clip.recording_status !== "completed") {
     return (
       <span style={{ color: "var(--text-tertiary)", fontSize: 12 }}>—</span>
     );
   }
-  const processed = clip.processed_use_cases;
-  const processing = clip.processing_use_cases ?? [];
+  // Restrict to the tenant's enabled use cases so a disabled UC never
+  // appears (matched, unmatched, or pending).
+  const processed = clip.processed_use_cases.filter((u) =>
+    (enabled as readonly string[]).includes(u),
+  );
+  const processing = (clip.processing_use_cases ?? []).filter((u) =>
+    (enabled as readonly string[]).includes(u),
+  );
   const matchedCount = clip.matched_employees.length;
 
   // Nothing has run and nothing is in flight — surface a neutral
@@ -380,7 +393,7 @@ function MatchResultCell({ clip }: { clip: PersonClipOut }) {
   const hasMatch = matchedCount > 0;
   const matchedUcs = hasMatch ? processed : [];
   const unmatchedUcs = hasMatch ? [] : processed;
-  const pendingUcs = ALL_USE_CASES.filter(
+  const pendingUcs = enabled.filter(
     (uc) => !processed.includes(uc) && !processing.includes(uc),
   );
 
@@ -831,6 +844,7 @@ function ProcessingHealthPanel({
 
 export function ClipAnalyticsPage() {
   const { t } = useTranslation();
+  const enabledUcs = useEnabledUseCases();
   // ---- server-driven filters ----
   const [page, setPage] = useState(1);
   const [cameraId, setCameraId] = useState<number | null>(null);
@@ -1561,8 +1575,8 @@ export function ClipAnalyticsPage() {
                   aria-label={t("clipAnalytics.filters.byProcessedUcs")}
                 >
                   <option value="any">{t("clipAnalytics.ucFilter.any")}</option>
-                  <option value="uc1">UC1</option>
-                  <option value="uc2">UC2</option>
+                  {enabledUcs.includes("uc1") && <option value="uc1">UC1</option>}
+                  {enabledUcs.includes("uc2") && <option value="uc2">UC2</option>}
                   <option value="not_processed">{t("clipAnalytics.ucFilter.notProcessed")}</option>
                 </select>
               </th>
@@ -2322,6 +2336,7 @@ type BatchMode = "skip_existing" | "all";
 
 function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
+  const enabledUcs = useEnabledUseCases();
   // New pipeline path — submit-all resolves clips server-side, applies
   // overwrite cleanup (when not skip_existing), and returns a batch_id
   // we poll for live per-UC progress.
@@ -2596,7 +2611,9 @@ function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
                 gap: 12,
               }}
             >
-              {UC_TILES.map((tile) => (
+              {UC_TILES.filter((tile) =>
+                (enabledUcs as readonly string[]).includes(tile.code),
+              ).map((tile) => (
                 <UseCaseCard
                   key={tile.code}
                   tile={tile}
@@ -4064,6 +4081,7 @@ function PickStep({
   error: string | null;
 }) {
   const { t } = useTranslation();
+  const enabledUcs = useEnabledUseCases();
   return (
     <>
       <ModalHeader clip={clip} title={t("clipAnalytics.identifyEvent")} />
@@ -4091,7 +4109,9 @@ function PickStep({
             gap: 12,
           }}
         >
-          {UC_TILES.map((tile) => (
+          {UC_TILES.filter((tile) =>
+            (enabledUcs as readonly string[]).includes(tile.code),
+          ).map((tile) => (
             <UseCaseCard
               key={tile.code}
               tile={tile}

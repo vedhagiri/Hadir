@@ -285,6 +285,29 @@ def _pipeline_rows(tenant_id: int) -> list[dict[str, Any]]:
 
     rows: list[dict[str, Any]] = []
     ucs = snap.get("config", {}).get("ucs", ["uc1", "uc2"])
+    # ``config.ucs`` is the process-wide env set (which stages exist).
+    # Narrow it to THIS tenant's enabled clip-processing use cases
+    # (Detection & Tracker → Clip processing) so the Workers tab shows
+    # only what's actually enabled. We're already inside the request's
+    # tenant_context (search_path set), so a direct read is correctly
+    # scoped. NULL / empty → keep all (matches the frontend fallback).
+    try:
+        from sqlalchemy import select as _select  # noqa: PLC0415
+
+        from maugood.db import get_engine as _get_engine  # noqa: PLC0415
+        from maugood.db import tenant_settings as _ts  # noqa: PLC0415
+
+        with _get_engine().begin() as conn:
+            _row = conn.execute(
+                _select(_ts.c.clip_pipeline_use_cases).where(
+                    _ts.c.tenant_id == tenant_id
+                )
+            ).first()
+        if _row is not None and _row.clip_pipeline_use_cases:
+            _enabled = set(_row.clip_pipeline_use_cases)
+            ucs = [u for u in ucs if u in _enabled]
+    except Exception:  # noqa: BLE001
+        pass
     cropping_by_uc = snap.get("cropping_by_uc", {}) or {}
     for uc in ucs:
         b = cropping_by_uc.get(uc) or {}
