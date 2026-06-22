@@ -1314,7 +1314,7 @@ export function ClipAnalyticsPage() {
               </th>
               <th
                 style={{
-                  width: 70,
+                  width: 120,
                   background: "var(--bg-elev)",
                   boxShadow: "inset 0 -1px 0 var(--border)",
                 }}
