@@ -1232,6 +1232,7 @@ class ClipPipeline:
                     clip_row = conn.execute(
                         sa_select(
                             person_clips.c.file_path,
+                            person_clips.c.filesize_bytes,
                         ).where(
                             person_clips.c.id == clip_id,
                             person_clips.c.tenant_id == scope.tenant_id,
@@ -1284,6 +1285,7 @@ class ClipPipeline:
                         after={
                             "clip_id": clip_id,
                             "file_path": str(clip_row.file_path),
+                            "filesize_bytes": int(clip_row.filesize_bytes or 0),
                         },
                     )
         except Exception as exc:  # noqa: BLE001

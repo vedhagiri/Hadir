@@ -92,3 +92,37 @@ export interface ClipRetentionSetting {
 export interface AutoDeleteSetting {
   auto_delete_clip_after_processing: boolean;
 }
+
+// ── Cleanup history (read of clip_cleanup.executed audit rows) ──────────────
+
+export type CleanupHistoryKind =
+  | "manual"
+  | "auto_retention"
+  | "auto_after_processing";
+
+export interface CleanupHistoryEntry {
+  id: number;
+  kind: CleanupHistoryKind;
+  executed_at: string; // ISO 8601 datetime
+  actor_user_id: number | null;
+  actor_email: string | null;
+  automatic: boolean; // true = no human actor (retention sweep / auto-delete)
+  mode: ClipCleanupMode | null;
+  older_than_hours: number | null;
+  older_than_days: number | null;
+  start_date: string | null; // YYYY-MM-DD
+  end_date: string | null; // YYYY-MM-DD
+  camera_id: number | null;
+  deleted_count: number;
+  bytes_freed: number;
+  files_unlinked: number;
+  files_missing: number;
+  files_failed: number;
+}
+
+export interface CleanupHistoryResponse {
+  items: CleanupHistoryEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+}

@@ -6,6 +6,7 @@ import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import type {
   AutoDeleteSetting,
+  CleanupHistoryResponse,
   ClipCleanupFilter,
   ClipCleanupPreviewResponse,
   ClipCleanupRunResponse,
@@ -76,6 +77,24 @@ export function useRunClipCleanup(): UseMutationResult<
       // Refresh the aggregate so the overview cards reflect the new state.
       void qc.invalidateQueries({ queryKey: ["storage-analytics"] });
     },
+  });
+}
+
+// Run-level log of past clip-video cleanups. Sourced from the audit log
+// server-side; the run-cleanup mutation invalidates the ["storage-analytics"]
+// prefix, so this list refreshes automatically after a manual cleanup.
+export function useClipCleanupHistory(
+  options: { enabled?: boolean; limit?: number } = {},
+): UseQueryResult<CleanupHistoryResponse, Error> {
+  const limit = options.limit ?? 50;
+  return useQuery({
+    queryKey: ["storage-analytics", "cleanup-history", limit],
+    queryFn: () =>
+      api<CleanupHistoryResponse>(
+        `/api/storage-analytics/cleanup-history?limit=${limit}`,
+      ),
+    staleTime: 30 * 1000,
+    enabled: options.enabled ?? true,
   });
 }
 

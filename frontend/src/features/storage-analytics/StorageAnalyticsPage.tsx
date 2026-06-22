@@ -15,11 +15,13 @@ import { extractApiError } from "../../api/client";
 import type { StorageAnalyticsFilters } from "./hooks";
 import {
   useAutoDeleteSetting,
+  useClipCleanupHistory,
   useStorageAnalytics,
   useUpdateAutoDeleteSetting,
 } from "./hooks";
 import type {
   CameraStorageRow,
+  CleanupHistoryEntry,
   DailyStorageRow,
   StorageWindowMode,
 } from "./types";
@@ -296,6 +298,194 @@ function DailyTable({ rows }: { rows: DailyStorageRow[] }) {
   );
 }
 
+// ── Cleanup history ─────────────────────────────────────────────────────────
+
+function fmtDateTime(iso: string, locale: string): string {
+  const d = new Date(iso);
+  return d.toLocaleString(locale, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function CleanupHistory({
+  cameraNameById,
+}: {
+  cameraNameById: (id: number) => string;
+}) {
+  const { t, i18n } = useTranslation();
+  const [open, setOpen] = useState(true);
+  const history = useClipCleanupHistory({ enabled: open });
+  const locale = i18n.language;
+  const items = history.data?.items ?? [];
+
+  const describeFilter = (e: CleanupHistoryEntry): string => {
+    if (e.kind === "auto_after_processing")
+      return t("clipCleanup.history.afterProcessing");
+    if (e.mode === "hours" && e.older_than_hours != null)
+      return t("clipCleanup.deleteOlderHours", { count: e.older_than_hours });
+    if (e.mode === "days" && e.older_than_days != null)
+      return t("clipCleanup.deleteOlderDays", { count: e.older_than_days });
+    if (e.mode === "range" && e.start_date && e.end_date)
+      return t("clipCleanup.history.rangeFilter", {
+        start: e.start_date,
+        end: e.end_date,
+      });
+    return "—";
+  };
+
+  const describeActor = (e: CleanupHistoryEntry) => {
+    if (e.kind === "manual")
+      return <span style={{ fontSize: 12.5 }}>{e.actor_email ?? "—"}</span>;
+    const label =
+      e.kind === "auto_after_processing"
+        ? t("clipCleanup.history.autoAfterProcessing")
+        : t("clipCleanup.history.automatic");
+    return <span className="pill pill-neutral">{label}</span>;
+  };
+
+  return (
+    <div className="card" style={{ marginTop: 16, overflow: "hidden" }}>
+      <div className="card-head">
+        <div
+          className="card-title"
+          style={{ display: "flex", alignItems: "center", gap: 8 }}
+        >
+          <Icon name="clock" size={15} style={{ color: "var(--text-tertiary)" }} />
+          {t("clipCleanup.history.title")}
+          {history.data ? ` (${history.data.total})` : ""}
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          {open && (
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => void history.refetch()}
+              disabled={history.isFetching}
+              aria-label={t("clipCleanup.history.refreshAria")}
+            >
+              <Icon name="refresh" size={12} />
+              {t("clipCleanup.history.refresh")}
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+          >
+            {open ? t("clipCleanup.history.hide") : t("clipCleanup.history.show")}
+          </button>
+        </div>
+      </div>
+
+      {open && (
+        <>
+          {history.isLoading && (
+            <div
+              style={{
+                padding: "32px 24px",
+                textAlign: "center",
+                color: "var(--text-tertiary)",
+                fontSize: 13,
+              }}
+            >
+              {t("storageAnalytics.loading")}
+            </div>
+          )}
+          {history.isError && (
+            <EmptyState message={t("clipCleanup.history.loadFailed")} />
+          )}
+          {!history.isLoading && !history.isError && items.length === 0 && (
+            <EmptyState message={t("clipCleanup.history.empty")} />
+          )}
+          {!history.isError && items.length > 0 && (
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>{t("clipCleanup.history.colWhen")}</th>
+                  <th>{t("clipCleanup.history.colBy")}</th>
+                  <th>{t("clipCleanup.history.colScope")}</th>
+                  <th>{t("clipCleanup.history.colFilter")}</th>
+                  <th style={{ textAlign: "end" }}>
+                    {t("clipCleanup.history.colCleared")}
+                  </th>
+                  <th style={{ textAlign: "end" }}>
+                    {t("clipCleanup.history.colFreed")}
+                  </th>
+                  <th style={{ textAlign: "end" }}>
+                    {t("clipCleanup.history.colIssues")}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((e) => {
+                  const issues: string[] = [];
+                  if (e.files_missing > 0)
+                    issues.push(
+                      t("clipCleanup.history.missing", { count: e.files_missing }),
+                    );
+                  if (e.files_failed > 0)
+                    issues.push(
+                      t("clipCleanup.history.failed", { count: e.files_failed }),
+                    );
+                  return (
+                    <tr key={e.id}>
+                      <td style={{ fontSize: 12.5, whiteSpace: "nowrap" }}>
+                        {fmtDateTime(e.executed_at, locale)}
+                      </td>
+                      <td>{describeActor(e)}</td>
+                      <td style={{ fontSize: 12.5 }}>
+                        {e.kind === "auto_after_processing"
+                          ? "—"
+                          : e.camera_id != null
+                            ? cameraNameById(e.camera_id)
+                            : t("clipCleanup.history.allCameras")}
+                      </td>
+                      <td style={{ fontSize: 12.5, color: "var(--text-secondary)" }}>
+                        {describeFilter(e)}
+                      </td>
+                      <td
+                        style={{
+                          textAlign: "end",
+                          fontVariantNumeric: "tabular-nums",
+                        }}
+                      >
+                        {e.deleted_count.toLocaleString()}
+                      </td>
+                      <td
+                        style={{
+                          textAlign: "end",
+                          fontVariantNumeric: "tabular-nums",
+                        }}
+                      >
+                        {fmtBytes(e.bytes_freed)}
+                      </td>
+                      <td
+                        style={{
+                          textAlign: "end",
+                          fontSize: 11.5,
+                          color: issues.length
+                            ? "var(--danger-text)"
+                            : "var(--text-tertiary)",
+                        }}
+                      >
+                        {issues.length ? issues.join(" · ") : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Stacked processing bar ────────────────────────────────────────────────────
 
 type BarSegment = { count: number; color: string; label: string };
@@ -379,6 +569,15 @@ export function StorageAnalyticsPage() {
 
   const cameras = useCameras();
   const analytics = useStorageAnalytics(filters, { enabled: !rangeInvalid });
+
+  // Resolve a camera id to its name for the cleanup-history scope column;
+  // falls back to "Camera #id" when the camera was deleted after a cleanup.
+  const cameraNameById = useMemo(() => {
+    const map = new Map<number, string>(
+      (cameras.data?.items ?? []).map((c) => [c.id, c.name]),
+    );
+    return (id: number) => map.get(id) ?? t("clipCleanup.history.cameraId", { id });
+  }, [cameras.data, t]);
 
   const ov = analytics.data?.overview;
   const matchRate = ov ? pct(ov.matched_face_crops, ov.total_face_crops) : 0;
@@ -832,6 +1031,9 @@ export function StorageAnalyticsPage() {
           <DailyTable rows={analytics.data?.daily ?? []} />
         )}
       </div>
+
+      {/* ── Cleanup history (run-level log of past clip-video cleanups) ── */}
+      <CleanupHistory cameraNameById={cameraNameById} />
     </div>
   );
 }

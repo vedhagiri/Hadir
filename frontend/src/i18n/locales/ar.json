@@ -4495,7 +4495,31 @@
     "statusAutoDeleteOn": "الحذف التلقائي مفعّل",
     "statusAutoDeleteOff": "الحذف التلقائي معطّل",
     "statusSweep": "المسح · {{days}} يوم",
-    "statusSweepOff": "المسح معطّل"
+    "statusSweepOff": "المسح معطّل",
+    "history": {
+      "title": "سجل التنظيف",
+      "empty": "لم يتم تشغيل أي عملية تنظيف بعد.",
+      "loadFailed": "تعذّر تحميل سجل التنظيف.",
+      "refresh": "تحديث",
+      "refreshAria": "تحديث سجل التنظيف",
+      "show": "إظهار",
+      "hide": "إخفاء",
+      "colWhen": "متى",
+      "colBy": "بواسطة",
+      "colScope": "النطاق",
+      "colFilter": "المُرشِّح",
+      "colCleared": "المقاطع المحذوفة",
+      "colFreed": "المساحة المُحرَّرة",
+      "colIssues": "مشكلات",
+      "automatic": "تلقائي (الاحتفاظ)",
+      "autoAfterProcessing": "تلقائي بعد المعالجة",
+      "afterProcessing": "بعد معالجة حالات الاستخدام",
+      "allCameras": "كل الكاميرات",
+      "cameraId": "الكاميرا رقم {{id}}",
+      "rangeFilter": "{{start}} ← {{end}}",
+      "missing": "{{count}} مفقود",
+      "failed": "{{count}} فشل"
+    }
   },
   "clipCleanupModal": {
     "aria": "تأكيد تنظيف المقاطع",

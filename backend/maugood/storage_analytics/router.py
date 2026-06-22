@@ -7,6 +7,7 @@ Endpoints:
   GET    /api/storage-analytics                    — Admin + HR
   POST   /api/storage-analytics/clip-cleanup/preview — Admin
   POST   /api/storage-analytics/clip-cleanup         — Admin
+  GET    /api/storage-analytics/cleanup-history      — Admin
   GET    /api/storage-analytics/clip-retention       — Admin
   PATCH  /api/storage-analytics/clip-retention       — Admin
 """
@@ -18,7 +19,7 @@ from datetime import date
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import insert, select, update
+from sqlalchemy import BigInteger, and_, cast, func, insert, select, update
 
 from maugood.auth.audit import write_audit
 from maugood.auth.dependencies import (
@@ -26,7 +27,7 @@ from maugood.auth.dependencies import (
     require_any_role,
     require_role,
 )
-from maugood.db import get_engine, tenant_settings
+from maugood.db import audit_log, get_engine, tenant_settings, users
 from maugood.storage_analytics.cleanup import (
     CLEANUP_CAP,
     CleanupFilterError,
@@ -39,6 +40,8 @@ from maugood.storage_analytics.repository import get_storage_analytics
 from maugood.storage_analytics.schemas import (
     AutoDeleteSettingPatchRequest,
     AutoDeleteSettingResponse,
+    CleanupHistoryEntry,
+    CleanupHistoryResponse,
     ClipCleanupFilterBody,
     ClipCleanupPreviewResponse,
     ClipCleanupRunResponse,
@@ -191,6 +194,162 @@ def clip_cleanup_execute(
         files_missing=result.files_missing,
         files_failed=result.files_failed,
         has_more=result.has_more,
+    )
+
+
+# ── Cleanup history ───────────────────────────────────────────────────────
+
+# Manual UI cleanups + the nightly retention sweep both route through
+# ``run_clip_cleanup``, which writes one ``clip_cleanup.executed`` audit row
+# per batch — distinguished by whether ``actor_user_id`` is set.
+_RUN_ACTION = "clip_cleanup.executed"
+# The "auto-delete after processing" toggle writes one row per clip; these are
+# aggregated by day so the table stays run-level rather than per-clip.
+_AUTO_AFTER_ACTION = "clip_cleanup.auto_deleted_after_processing"
+
+
+@router.get("/cleanup-history", response_model=CleanupHistoryResponse)
+def cleanup_history(
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    scope: TenantScope = Depends(get_tenant_scope),
+    _: CurrentUser = ADMIN_ONLY,
+) -> CleanupHistoryResponse:
+    """Log of past clip-video cleanups, newest first.
+
+    Sourced from the append-only ``audit_log`` — no separate history
+    table. Three kinds appear interleaved by time:
+
+    * ``manual`` / ``auto_retention`` — one entry per
+      ``clip_cleanup.executed`` batch (operator-run vs. retention sweep).
+    * ``auto_after_processing`` — the per-clip auto-delete rows, rolled
+      up to one entry per calendar day (UTC).
+    """
+
+    entries: list[CleanupHistoryEntry] = []
+
+    # Fetch the newest (limit + offset) of each source so the merged,
+    # re-sorted slice [offset : offset + limit] is exact.
+    fetch_n = limit + offset
+
+    run_base = (
+        select(
+            audit_log.c.id,
+            audit_log.c.created_at,
+            audit_log.c.actor_user_id,
+            users.c.email.label("actor_email"),
+            audit_log.c.after,
+        )
+        .select_from(
+            audit_log.outerjoin(
+                users,
+                and_(
+                    users.c.id == audit_log.c.actor_user_id,
+                    users.c.tenant_id == audit_log.c.tenant_id,
+                ),
+            )
+        )
+        .where(
+            audit_log.c.tenant_id == scope.tenant_id,
+            audit_log.c.action == _RUN_ACTION,
+        )
+    )
+
+    # Per-day rollup of the per-clip auto-delete rows. ``filesize_bytes``
+    # is only present on rows written after this feature shipped; older
+    # rows coalesce to 0 (so historical days show a partial total).
+    day = func.date_trunc("day", audit_log.c.created_at)
+    auto_base = (
+        select(
+            func.max(audit_log.c.id).label("id"),
+            func.max(audit_log.c.created_at).label("executed_at"),
+            func.count().label("cnt"),
+            func.coalesce(
+                func.sum(
+                    cast(audit_log.c.after["filesize_bytes"].astext, BigInteger)
+                ),
+                0,
+            ).label("bytes_freed"),
+        )
+        .where(
+            audit_log.c.tenant_id == scope.tenant_id,
+            audit_log.c.action == _AUTO_AFTER_ACTION,
+        )
+        .group_by(day)
+    )
+
+    with get_engine().begin() as conn:
+        run_total = int(
+            conn.execute(
+                select(func.count()).select_from(run_base.subquery())
+            ).scalar_one()
+        )
+        auto_total = int(
+            conn.execute(
+                select(func.count()).select_from(auto_base.subquery())
+            ).scalar_one()
+        )
+        run_rows = conn.execute(
+            run_base.order_by(audit_log.c.id.desc()).limit(fetch_n)
+        ).all()
+        auto_rows = conn.execute(
+            auto_base.order_by(func.max(audit_log.c.created_at).desc()).limit(
+                fetch_n
+            )
+        ).all()
+
+    for r in run_rows:
+        after = r.after or {}
+        filt = after.get("filter") or {}
+        automatic = r.actor_user_id is None
+        entries.append(
+            CleanupHistoryEntry(
+                id=int(r.id),
+                kind="auto_retention" if automatic else "manual",
+                executed_at=r.created_at,
+                actor_user_id=(
+                    int(r.actor_user_id) if r.actor_user_id is not None else None
+                ),
+                actor_email=(
+                    str(r.actor_email) if r.actor_email is not None else None
+                ),
+                automatic=automatic,
+                mode=filt.get("mode"),
+                older_than_hours=filt.get("older_than_hours"),
+                older_than_days=filt.get("older_than_days"),
+                start_date=filt.get("start_date"),
+                end_date=filt.get("end_date"),
+                camera_id=filt.get("camera_id"),
+                deleted_count=int(after.get("deleted_count") or 0),
+                bytes_freed=int(after.get("bytes_freed") or 0),
+                files_unlinked=int(after.get("files_unlinked") or 0),
+                files_missing=int(after.get("files_missing") or 0),
+                files_failed=int(after.get("files_failed") or 0),
+            )
+        )
+
+    for a in auto_rows:
+        entries.append(
+            CleanupHistoryEntry(
+                id=int(a.id),
+                kind="auto_after_processing",
+                executed_at=a.executed_at,
+                actor_user_id=None,
+                actor_email=None,
+                automatic=True,
+                deleted_count=int(a.cnt or 0),
+                bytes_freed=int(a.bytes_freed or 0),
+                files_unlinked=0,
+                files_missing=0,
+                files_failed=0,
+            )
+        )
+
+    entries.sort(key=lambda e: e.executed_at, reverse=True)
+    page = entries[offset : offset + limit]
+
+    return CleanupHistoryResponse(
+        items=page, total=run_total + auto_total, limit=limit, offset=offset
     )
 
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 
 from pydantic import BaseModel, Field, model_validator
@@ -136,3 +136,47 @@ class AutoDeleteSettingResponse(BaseModel):
 
 class AutoDeleteSettingPatchRequest(BaseModel):
     auto_delete_clip_after_processing: bool
+
+
+# ── Cleanup history (read of clip_cleanup.executed audit rows) ──────────────
+
+
+class CleanupHistoryEntry(BaseModel):
+    """One clip-cleanup event for the history table.
+
+    Three ``kind`` values, all reconstructed from ``audit_log``:
+
+    * ``manual`` — an operator ran the Clip Cleanup form. Carries an
+      ``actor_email`` and the filter that was applied.
+    * ``auto_retention`` — the nightly retention sweep (no human actor).
+      Carries the age filter it swept with.
+    * ``auto_after_processing`` — the "auto-delete after processing"
+      toggle. These fire once per clip, so they are **aggregated by
+      day** into a single entry (``deleted_count`` = clips that day,
+      ``bytes_freed`` = sum where recorded). No filter / camera scope.
+    """
+
+    id: int
+    kind: str  # manual | auto_retention | auto_after_processing
+    executed_at: datetime
+    actor_user_id: Optional[int] = None
+    actor_email: Optional[str] = None
+    automatic: bool
+    mode: Optional[str] = None  # hours | days | range
+    older_than_hours: Optional[int] = None
+    older_than_days: Optional[int] = None
+    start_date: Optional[str] = None  # YYYY-MM-DD
+    end_date: Optional[str] = None
+    camera_id: Optional[int] = None
+    deleted_count: int
+    bytes_freed: int
+    files_unlinked: int
+    files_missing: int
+    files_failed: int
+
+
+class CleanupHistoryResponse(BaseModel):
+    items: list[CleanupHistoryEntry]
+    total: int
+    limit: int
+    offset: int

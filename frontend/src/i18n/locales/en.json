@@ -4435,7 +4435,31 @@
     "statusAutoDeleteOn": "Auto-delete on",
     "statusAutoDeleteOff": "Auto-delete off",
     "statusSweep": "Sweep · {{days}}d",
-    "statusSweepOff": "Sweep off"
+    "statusSweepOff": "Sweep off",
+    "history": {
+      "title": "Cleanup history",
+      "empty": "No cleanups have run yet.",
+      "loadFailed": "Failed to load cleanup history.",
+      "refresh": "Refresh",
+      "refreshAria": "Refresh cleanup history",
+      "show": "Show",
+      "hide": "Hide",
+      "colWhen": "When",
+      "colBy": "By",
+      "colScope": "Scope",
+      "colFilter": "Filter",
+      "colCleared": "Clips cleared",
+      "colFreed": "Space freed",
+      "colIssues": "Issues",
+      "automatic": "Automatic (retention)",
+      "autoAfterProcessing": "Auto after processing",
+      "afterProcessing": "After UC processing",
+      "allCameras": "All cameras",
+      "cameraId": "Camera #{{id}}",
+      "rangeFilter": "{{start}} → {{end}}",
+      "missing": "{{count}} missing",
+      "failed": "{{count}} failed"
+    }
   },
   "clipCleanupModal": {
     "aria": "Clip cleanup confirmation",
