@@ -34,6 +34,53 @@ import type { AttendanceItem } from "./types";
 
 type ScopeMode = "company" | "department" | "team" | "individual";
 
+// The status buckets shown as stat cards (and now click-to-filter chips).
+type DayStatus = "present" | "late" | "absent" | "onLeave" | "pending" | "offDay";
+
+// Single source of truth for a row's status bucket. Used by BOTH the
+// stat-card counts and the click-to-filter logic, so a card's number is
+// always exactly the number of rows clicking it filters to. The order
+// mirrors the StatusPill priority: leave > off-day > pending > absent >
+// late > present.
+function classifyStatus(it: AttendanceItem): DayStatus | "other" {
+  if (it.absent && it.leave_type_id !== null) return "onLeave";
+  if (
+    !it.in_time &&
+    it.leave_type_id === null &&
+    (it.is_holiday || it.is_weekend)
+  )
+    return "offDay";
+  if (
+    it.pending &&
+    it.leave_type_id === null &&
+    !it.is_holiday &&
+    !it.is_weekend
+  )
+    return "pending";
+  if (
+    !it.in_time &&
+    it.leave_type_id === null &&
+    !it.pending &&
+    !it.is_holiday &&
+    !it.is_weekend
+  )
+    return "absent";
+  if (it.in_time && it.late) return "late";
+  if (it.in_time && !it.late) return "present";
+  return "other";
+}
+
+// Maps a status bucket to the existing stat-card label key, so the
+// filter chip reuses the same translated word as the card.
+const STAT_LABEL_KEY: Record<DayStatus, string> = {
+  present: "dailyAttendance.stat.present",
+  late: "dailyAttendance.stat.late",
+  absent: "dailyAttendance.stat.absent",
+  onLeave: "dailyAttendance.stat.onLeave",
+  pending: "dailyAttendance.stat.waiting",
+  offDay: "dailyAttendance.stat.offDay",
+};
+
 export function DailyAttendancePage() {
   const { t } = useTranslation();
   const me = useMe();
@@ -80,6 +127,14 @@ export function DailyAttendancePage() {
   // (stats below still reflect the full scope so the operator sees
   // accurate totals while narrowing the visible list).
   const [searchQuery, setSearchQuery] = useState<string>("");
+
+  // Click-to-filter on the stat cards. null = show everything (the
+  // "In scope" card). Clicking a status card narrows the table to that
+  // status; clicking the active card again clears it. The card counts
+  // always reflect the full scope so the operator keeps the totals.
+  const [statusFilter, setStatusFilter] = useState<DayStatus | null>(null);
+  const toggleStatus = (s: DayStatus) =>
+    setStatusFilter((cur) => (cur === s ? null : s));
 
   // Sticky-stack measurement. Four sticky regions stack on each other
   // (each with its own ``top`` = sum of the heights of everything above
@@ -184,57 +239,34 @@ export function DailyAttendancePage() {
 
   const stats = useMemo(() => {
     const items = list.data?.items ?? [];
-    // Match the StatusPill priority: leave > holiday > weekend >
-    // pending > absent (no in_time) > late > present.
-    const onLeave = items.filter(
-      (it) => it.absent && it.leave_type_id !== null,
-    ).length;
-    const offDay = items.filter(
-      (it) =>
-        !it.in_time &&
-        it.leave_type_id === null &&
-        (it.is_holiday || it.is_weekend),
-    ).length;
-    const pending = items.filter(
-      (it) =>
-        it.pending &&
-        it.leave_type_id === null &&
-        !it.is_holiday &&
-        !it.is_weekend,
-    ).length;
-    const absent = items.filter(
-      (it) =>
-        !it.in_time &&
-        it.leave_type_id === null &&
-        !it.pending &&
-        !it.is_holiday &&
-        !it.is_weekend,
-    ).length;
-    const late = items.filter((it) => !!it.in_time && it.late).length;
-    const present = items.filter((it) => !!it.in_time && !it.late).length;
-    return {
-      total: items.length,
-      present,
-      late,
-      absent,
-      onLeave,
-      pending,
-      offDay,
-    };
+    // One pass through the shared classifier so the counts can never
+    // drift from the click-to-filter result.
+    const c = { present: 0, late: 0, absent: 0, onLeave: 0, pending: 0, offDay: 0 };
+    for (const it of items) {
+      const s = classifyStatus(it);
+      if (s !== "other") c[s] += 1;
+    }
+    return { total: items.length, ...c };
   }, [list.data]);
 
-  // Apply the live search filter to the rendered rows only — stats stay
-  // on the unfiltered list so the "in scope" totals remain accurate.
+  // Apply the status-card filter + live search to the rendered rows
+  // only — stats stay on the unfiltered list so the "in scope" totals
+  // remain accurate while the visible list is narrowed.
   const filteredItems = useMemo(() => {
-    const items = list.data?.items ?? [];
+    let items = list.data?.items ?? [];
+    if (statusFilter) {
+      items = items.filter((it) => classifyStatus(it) === statusFilter);
+    }
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter(
-      (it) =>
-        it.full_name.toLowerCase().includes(q) ||
-        it.employee_code.toLowerCase().includes(q),
-    );
-  }, [list.data, searchQuery]);
+    if (q) {
+      items = items.filter(
+        (it) =>
+          it.full_name.toLowerCase().includes(q) ||
+          it.employee_code.toLowerCase().includes(q),
+      );
+    }
+    return items;
+  }, [list.data, searchQuery, statusFilter]);
 
   const onRegenerate = () => {
     setRegenInfo(null);
@@ -589,17 +621,57 @@ export function DailyAttendancePage() {
           marginBottom: 16,
         }}
       >
-        <StatTile label={t("dailyAttendance.stat.inScope")} value={stats.total} />
-        <StatTile label={t("dailyAttendance.stat.present")} value={stats.present} tone="success" />
-        <StatTile label={t("dailyAttendance.stat.late")} value={stats.late} tone="warning" />
-        <StatTile label={t("dailyAttendance.stat.absent")} value={stats.absent} tone="danger" />
+        <StatTile
+          label={t("dailyAttendance.stat.inScope")}
+          value={stats.total}
+          onClick={() => setStatusFilter(null)}
+          active={statusFilter === null}
+        />
+        <StatTile
+          label={t("dailyAttendance.stat.present")}
+          value={stats.present}
+          tone="success"
+          onClick={() => toggleStatus("present")}
+          active={statusFilter === "present"}
+        />
+        <StatTile
+          label={t("dailyAttendance.stat.late")}
+          value={stats.late}
+          tone="warning"
+          onClick={() => toggleStatus("late")}
+          active={statusFilter === "late"}
+        />
+        <StatTile
+          label={t("dailyAttendance.stat.absent")}
+          value={stats.absent}
+          tone="danger"
+          onClick={() => toggleStatus("absent")}
+          active={statusFilter === "absent"}
+        />
         {stats.pending > 0 && (
-          <StatTile label={t("dailyAttendance.stat.waiting")} value={stats.pending} tone="info" />
+          <StatTile
+            label={t("dailyAttendance.stat.waiting")}
+            value={stats.pending}
+            tone="info"
+            onClick={() => toggleStatus("pending")}
+            active={statusFilter === "pending"}
+          />
         )}
         {stats.offDay > 0 && (
-          <StatTile label={t("dailyAttendance.stat.offDay")} value={stats.offDay} />
+          <StatTile
+            label={t("dailyAttendance.stat.offDay")}
+            value={stats.offDay}
+            onClick={() => toggleStatus("offDay")}
+            active={statusFilter === "offDay"}
+          />
         )}
-        <StatTile label={t("dailyAttendance.stat.onLeave")} value={stats.onLeave} tone="info" />
+        <StatTile
+          label={t("dailyAttendance.stat.onLeave")}
+          value={stats.onLeave}
+          tone="info"
+          onClick={() => toggleStatus("onLeave")}
+          active={statusFilter === "onLeave"}
+        />
       </div>
 
       </div>{/* /top sticky wrapper — page-header + filter + stats end here */}
@@ -637,6 +709,40 @@ export function DailyAttendancePage() {
                   }}
                 >
                   · {t("dailyAttendance.matchFor", { count: filteredItems.length, query: searchQuery })}
+                </span>
+              )}
+              {statusFilter && (
+                <span
+                  style={{
+                    marginInlineStart: 8,
+                    fontSize: 12,
+                    color: "var(--text-tertiary)",
+                    fontWeight: 400,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                  }}
+                >
+                  · {t("dailyAttendance.statusFilter.showing", {
+                    label: t(STAT_LABEL_KEY[statusFilter]),
+                    count: filteredItems.length,
+                  })}
+                  <button
+                    type="button"
+                    onClick={() => setStatusFilter(null)}
+                    aria-label={t("dailyAttendance.statusFilter.clearAria")}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      color: "var(--accent)",
+                      cursor: "pointer",
+                      fontSize: 14,
+                      lineHeight: 1,
+                      padding: 2,
+                    }}
+                  >
+                    ×
+                  </button>
                 </span>
               )}
             </h3>
@@ -801,7 +907,8 @@ export function DailyAttendancePage() {
             {list.data &&
               list.data.items.length > 0 &&
               filteredItems.length === 0 &&
-              !list.isLoading && (
+              !list.isLoading &&
+              searchQuery && (
                 <tr>
                   <td
                     colSpan={8}
@@ -823,6 +930,40 @@ export function DailyAttendancePage() {
                       }}
                     >
                       {t("dailyAttendance.emptySearch.clear")}
+                    </button>
+                    .
+                  </td>
+                </tr>
+              )}
+            {list.data &&
+              list.data.items.length > 0 &&
+              filteredItems.length === 0 &&
+              !list.isLoading &&
+              !searchQuery &&
+              statusFilter && (
+                <tr>
+                  <td
+                    colSpan={8}
+                    className="text-sm text-dim"
+                    style={{ padding: 16 }}
+                  >
+                    {t("dailyAttendance.statusFilter.empty", {
+                      label: t(STAT_LABEL_KEY[statusFilter]),
+                    })}{" "}
+                    <button
+                      type="button"
+                      onClick={() => setStatusFilter(null)}
+                      style={{
+                        background: "transparent",
+                        border: "none",
+                        color: "var(--accent)",
+                        cursor: "pointer",
+                        padding: 0,
+                        font: "inherit",
+                        textDecoration: "underline",
+                      }}
+                    >
+                      {t("dailyAttendance.statusFilter.clear")}
                     </button>
                     .
                   </td>
@@ -1313,10 +1454,14 @@ function StatTile({
   label,
   value,
   tone,
+  onClick,
+  active,
 }: {
   label: string;
   value: number;
   tone?: "success" | "warning" | "danger" | "info";
+  onClick?: () => void;
+  active?: boolean;
 }) {
   const toneBg: Record<string, string> = {
     success: "var(--success-soft)",
@@ -1332,12 +1477,33 @@ function StatTile({
   };
   const bg = tone ? toneBg[tone] : "var(--bg-elev)";
   const labelColor = tone ? toneColor[tone] : "var(--text-tertiary)";
+  const clickable = !!onClick;
   return (
     <div
       className="stat"
+      onClick={onClick}
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      aria-pressed={clickable ? !!active : undefined}
+      onKeyDown={
+        clickable
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onClick?.();
+              }
+            }
+          : undefined
+      }
       style={{
         background: bg,
         border: tone ? "1px solid transparent" : undefined,
+        cursor: clickable ? "pointer" : undefined,
+        // Outline (not border) for the active ring so toggling it never
+        // shifts the tile's layout.
+        outline: active ? "2px solid var(--accent)" : undefined,
+        outlineOffset: active ? "-2px" : undefined,
+        position: "relative",
       }}
     >
       <div className="stat-label" style={{ color: labelColor }}>

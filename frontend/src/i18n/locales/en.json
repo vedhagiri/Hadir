@@ -2508,6 +2508,12 @@
       "prefix": "No employees match \"{{query}}\". Try a different name or code, or",
       "clear": "clear the search"
     },
+    "statusFilter": {
+      "showing": "Showing {{label}} ({{count}})",
+      "clearAria": "Show all employees",
+      "clear": "Show all",
+      "empty": "No employees are {{label}} for this date."
+    },
     "pill": {
       "onLeave": "On leave",
       "holiday": "Holiday",
