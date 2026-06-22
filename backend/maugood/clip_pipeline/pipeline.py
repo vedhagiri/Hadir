@@ -964,7 +964,7 @@ class ClipPipeline:
         from maugood.person_clips.reprocess import (  # noqa: PLC0415
             _run_detection,
             _sample_frames,
-            _save_face_crops_to_db,
+            _save_face_crops_uc1_best_per_track,
             _save_face_crops_uc2_best_per_track,
             _upsert_processing_result,
         )
@@ -1056,20 +1056,22 @@ class ClipPipeline:
 
                     # Both UCs now save crops in the cropping stage so
                     # MatchJob never holds frame arrays (memory-leak fix).
-                    # UC1: save with employee_id=NULL, backfill after match.
+                    # UC1: best-per-track save with employee_id=NULL, backfill after match.
                     # UC2: best-per-track save with employee_id=NULL, backfill after match.
                     initial_count = 0
                     crop_match_index: dict[tuple[int, int], int] = {}
                     if frame_results:
                         if job.use_case == "uc1":
-                            initial_count, crop_match_index = _save_face_crops_to_db(
+                            # Optimized UC1: one crop per face track (no
+                            # per-detection duplicates), UC1 crop style,
+                            # no quality/pose gates → no face dropped.
+                            initial_count, crop_match_index = _save_face_crops_uc1_best_per_track(
                                 engine, scope, job.clip_id, int(row.camera_id),
                                 frames, frame_results,
                                 row.clip_start,
                                 float(row.duration_seconds or 0.0),
                                 int(row.frame_count or 0),
                                 sample_interval,
-                                use_case=job.use_case,
                                 det_employee_map=None,
                                 max_crops_override=30,
                                 return_index=True,
