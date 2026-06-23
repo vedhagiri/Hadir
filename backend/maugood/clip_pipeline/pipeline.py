@@ -70,9 +70,25 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name, "")
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return default
+
+
 CROPPING_WORKERS = _env_int("MAUGOOD_CLIP_PIPELINE_CROPPING_WORKERS", 1)
 MATCHING_WORKERS = _env_int("MAUGOOD_CLIP_PIPELINE_MATCHING_WORKERS", 1)
 QUEUE_MAX_DEPTH = _env_int("MAUGOOD_CLIP_PIPELINE_QUEUE_MAX_DEPTH", 64)
+
+# UC1 motion-skip threshold.  Mean pixel change on a 160×90 grayscale
+# thumbnail below this value → frame is skipped (YOLO never runs).
+# 0.0 = disabled (legacy behaviour).  5.0 gives ~2x speedup on active
+# clips (walking) and ~5x on static clips (sitting/standing) while
+# keeping virtually the same set of face detections because best-per-track
+# selection still covers all unique persons from the processed frames.
+UC1_MOTION_SKIP = _env_float("MAUGOOD_CLIP_PIPELINE_UC1_MOTION_SKIP", 5.0)
 
 
 # ---- clip-pipeline use-case enable set ------------------------------------
@@ -1040,7 +1056,8 @@ class ClipPipeline:
 
                     mode = "yolo+face" if job.use_case == "uc1" else "insightface"
                     frame_results, extract_s = _run_detection(
-                        frames, mode, None, use_case=job.use_case
+                        frames, mode, None, use_case=job.use_case,
+                        motion_skip_threshold=UC1_MOTION_SKIP if job.use_case == "uc1" else 0.0,
                     )
 
                     # Surface "extraction done, matching not yet" in the

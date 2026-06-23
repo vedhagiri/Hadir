@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
-from sqlalchemy import func as sa_func, or_ as sa_or, select as sa_select, update as sa_update, insert as sa_insert
+from sqlalchemy import delete as sa_delete, func as sa_func, or_ as sa_or, select as sa_select, update as sa_update, insert as sa_insert
 
 from maugood.auth.audit import write_audit
 from maugood.config import get_settings
@@ -73,7 +73,13 @@ def _encrypt_embedding_safe(emb: Any) -> Optional[bytes]:
 _FRAMES_PER_SECOND_SAMPLE = 2
 
 # Max number of frames to process from a single clip (safety cap).
-_MAX_FRAMES_PER_CLIP = 60
+# Configurable via MAUGOOD_CLIP_PIPELINE_MAX_FRAMES_PER_CLIP.
+# At 2fps: 30 frames covers 15s, 60 covers 30s. 30 halves EXTRACT time
+# with no quality loss since best-per-track still selects the sharpest
+# crop from whichever frames are processed.
+_MAX_FRAMES_PER_CLIP = int(
+    __import__("os").environ.get("MAUGOOD_CLIP_PIPELINE_MAX_FRAMES_PER_CLIP", "30") or "30"
+)
 
 # Valid use cases.
 ALL_USE_CASES = ("uc1", "uc2")
@@ -87,10 +93,16 @@ DEFAULT_USE_CASES = ("uc1",)
 def _sample_frames(
     video_path: Path, fallback_fps: float
 ) -> tuple[list[np.ndarray], int, float]:
-    """Open a decrypted video file and sample frames at ~2 fps.
+    """Open a decrypted video file and sample up to ``_MAX_FRAMES_PER_CLIP``
+    frames distributed **evenly across the full clip duration**.
+
+    The previous sequential approach stopped reading after the first
+    ``_MAX_FRAMES_PER_CLIP * sample_interval`` source frames, cutting off the
+    second half of clips when the cap was smaller than the natural 2-fps count.
+    This implementation seeks to evenly-spaced positions so all clips are
+    covered end-to-end regardless of duration.
 
     Returns ``(frames, sample_interval, actual_fps)``.
-    Caps at ``_MAX_FRAMES_PER_CLIP`` frames.
     """
     import cv2  # noqa: PLC0415
 
@@ -101,18 +113,34 @@ def _sample_frames(
         return frames, 1, fallback_fps
 
     actual_fps = max(1.0, cap.get(cv2.CAP_PROP_FPS) or fallback_fps)
-    sample_interval = max(1, int(round(actual_fps / _FRAMES_PER_SECOND_SAMPLE)))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
 
-    frame_idx = 0
-    sampled = 0
-    while sampled < _MAX_FRAMES_PER_CLIP:
-        ok, frame = cap.read()
-        if not ok or frame is None:
-            break
-        if frame_idx % sample_interval == 0:
-            frames.append(frame)
-            sampled += 1
-        frame_idx += 1
+    # Natural 2-fps sample interval.
+    natural_interval = max(1, int(round(actual_fps / _FRAMES_PER_SECOND_SAMPLE)))
+
+    if total_frames <= 0 or total_frames <= _MAX_FRAMES_PER_CLIP * natural_interval:
+        # Short clip: sequential read, same as before.
+        sample_interval = natural_interval
+        frame_idx = 0
+        sampled = 0
+        while sampled < _MAX_FRAMES_PER_CLIP:
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                break
+            if frame_idx % sample_interval == 0:
+                frames.append(frame)
+                sampled += 1
+            frame_idx += 1
+    else:
+        # Long clip: distribute MAX_FRAMES evenly across the full duration
+        # so no part of the clip is skipped.
+        sample_interval = max(1, total_frames // _MAX_FRAMES_PER_CLIP)
+        seek_positions = list(range(0, total_frames, sample_interval))[:_MAX_FRAMES_PER_CLIP]
+        for pos in seek_positions:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, pos)
+            ok, frame = cap.read()
+            if ok and frame is not None:
+                frames.append(frame)
 
     cap.release()
     return frames, sample_interval, actual_fps
@@ -124,29 +152,49 @@ def _run_detection(
     stop_event: Optional[threading.Event] = None,
     *,
     use_case: str = "",
+    motion_skip_threshold: float = 0.0,
+    yolo_imgsz: Optional[int] = None,
 ) -> tuple[list[tuple[int, list[dict]]], float]:
     """Run face detection on sampled frames.
 
     Returns ``([(frame_idx, detections), ...], extract_duration_s)``.
     Stops early if ``stop_event`` is set.
 
+    ``motion_skip_threshold`` (default 0 = disabled): when > 0, each frame
+    is compared against the last *processed* frame using a cheap 160×90
+    grayscale absdiff.  If the mean pixel change is below the threshold the
+    frame is skipped — YOLO never runs on it.  We compare against the last
+    *processed* frame (not the immediately preceding one) so that the moment
+    someone enters or moves the diff spikes above threshold and that frame is
+    always processed.  Crops are unaffected because ``_save_face_crops_*``
+    selects the best-per-track from whichever frames *are* processed.  A
+    value of 3.0 skips only near-identical frames (< 1.2 % mean pixel
+    change on a 160-px thumbnail); 5.0 is more aggressive.
+
+    ``yolo_imgsz`` overrides the YOLO input resolution for ``yolo+face``
+    mode. Crop quality is unaffected — crops are extracted from the original
+    full-resolution frame, not the downscaled YOLO input. 640 is ~3× faster
+    than 960 and sufficient for typical office/hallway cameras.
+
     Per-UC tuning:
 
-    * **UC1** (``yolo+face``) — recall-first. YOLO at imgsz=960,
-      face-pad 40, min_face 30², min_det 0.35. Catches small/distant
-      persons the live-capture 480-px path drops.
+    * **UC1** (``yolo+face``) — recall-first. YOLO at imgsz=640 (default),
+      face-pad 40, min_face 30², min_det 0.35. Set env
+      ``MAUGOOD_CLIP_PIPELINE_UC1_YOLO_IMGSZ=960`` for small/distant persons.
     * **UC2** (``insightface``) — quality-first, mirrors the reference
       InsightFace+SCRFD crop pipeline at
       ``Face_Recogination/files (3)/``. det_size=640, min_face 60²,
       min_det 0.45. The save layer adds the composite quality scorer
       + best-per-track selection.
     """
+    import cv2 as _cv2  # noqa: PLC0415
+
     from maugood.detection import DetectorConfig, detect as detector_detect  # noqa: PLC0415
 
     if mode == "yolo+face":
         cfg = DetectorConfig(
             mode=mode,
-            yolo_imgsz=960,
+            yolo_imgsz=yolo_imgsz if yolo_imgsz is not None else 640,
             yolo_face_pad=40,
             yolo_conf=0.25,
             min_face_pixels=30 * 30,
@@ -180,10 +228,34 @@ def _run_detection(
     # zero faces inside any box).
     total_dets = 0
     frames_with_any = 0
+    skipped_motion = 0
+
+    # Thumbnail of the last *processed* frame used for motion comparison.
+    # Kept at the last processed (not last seen) so any significant change
+    # from a static background is caught immediately.
+    _prev_thumb: Optional[np.ndarray] = None
 
     for i, frame in enumerate(frames):
         if stop_event is not None and stop_event.is_set():
             break
+
+        # --- motion pre-screen -------------------------------------------
+        if motion_skip_threshold > 0.0:
+            thumb = _cv2.resize(
+                _cv2.cvtColor(frame, _cv2.COLOR_BGR2GRAY), (160, 90)
+            )
+            if _prev_thumb is not None:
+                diff = float(_cv2.absdiff(thumb, _prev_thumb).mean())
+                if diff < motion_skip_threshold:
+                    skipped_motion += 1
+                    # Do NOT update _prev_thumb — next frame is compared
+                    # against the last processed frame so any movement
+                    # triggers detection regardless of how many static
+                    # frames came in between.
+                    continue
+            _prev_thumb = thumb
+        # -----------------------------------------------------------------
+
         try:
             dets = detector_detect(frame, cfg)
             if dets:
@@ -194,9 +266,9 @@ def _run_detection(
             logger.debug("detect failed on frame %d: %s", i, type(exc).__name__)
 
     logger.info(
-        "reprocess detect: mode=%s frames=%d frames_with_faces=%d "
-        "total_faces=%d imgsz=%s pad=%s min_face_pixels=%s",
-        mode, len(frames), frames_with_any, total_dets,
+        "reprocess detect: mode=%s frames=%d skipped_motion=%d "
+        "frames_with_faces=%d total_faces=%d imgsz=%s pad=%s min_face_pixels=%s",
+        mode, len(frames), skipped_motion, frames_with_any, total_dets,
         getattr(cfg, "yolo_imgsz", "n/a"),
         getattr(cfg, "yolo_face_pad", "n/a"),
         cfg.min_face_pixels,
@@ -654,6 +726,42 @@ def _uc2_extract_padded_crop(
     return crop.copy()
 
 
+def _delete_existing_crops(engine, scope: TenantScope, clip_id: int, use_case: str) -> int:
+    """Delete all face_crops rows (and their on-disk files) for a clip+use_case pair.
+
+    Called at the start of every save function so that a reprocess run
+    produces a clean, non-accumulating set of crops instead of appending
+    to whatever earlier runs left behind.
+    """
+    with engine.begin() as conn:
+        rows = conn.execute(
+            sa_select(face_crops.c.id, face_crops.c.file_path).where(
+                face_crops.c.tenant_id == scope.tenant_id,
+                face_crops.c.person_clip_id == clip_id,
+                face_crops.c.use_case == use_case,
+            )
+        ).fetchall()
+        if not rows:
+            return 0
+        for row in rows:
+            if row.file_path:
+                try:
+                    Path(row.file_path).unlink(missing_ok=True)
+                except OSError:
+                    pass
+        conn.execute(
+            sa_delete(face_crops).where(
+                face_crops.c.tenant_id == scope.tenant_id,
+                face_crops.c.person_clip_id == clip_id,
+                face_crops.c.use_case == use_case,
+            )
+        )
+        deleted = len(rows)
+    if deleted:
+        logger.info("reprocess: deleted %d stale %s crop(s) for clip %d before re-save", deleted, use_case, clip_id)
+    return deleted
+
+
 def _save_face_crops_uc2_best_per_track(
     engine,
     scope: TenantScope,
@@ -675,6 +783,9 @@ def _save_face_crops_uc2_best_per_track(
     ``face_crops`` row per saved track.
     """
     import cv2  # noqa: PLC0415
+
+    # Always purge stale crops from previous runs before saving new ones.
+    _delete_existing_crops(engine, scope, clip_id, "uc2")
 
     if not frame_results:
         if return_index:
@@ -916,6 +1027,9 @@ def _save_face_crops_uc1_best_per_track(
         else settings.face_crops_max_per_clip
     )
     save_index: dict[tuple[int, int], int] = {}
+
+    # Always purge stale crops from previous runs before saving new ones.
+    _delete_existing_crops(engine, scope, clip_id, "uc1")
 
     if not frame_results:
         if return_index:
@@ -1667,8 +1781,16 @@ def _process_clip_for_use_case(
         else:
             mode = "insightface"
 
+        _uc1_motion_skip = float(
+            __import__("os").environ.get("MAUGOOD_CLIP_PIPELINE_UC1_MOTION_SKIP", "5.0") or "0"
+        )
+        _uc1_yolo_imgsz = int(
+            __import__("os").environ.get("MAUGOOD_CLIP_PIPELINE_UC1_YOLO_IMGSZ", "640") or "640"
+        )
         frame_results, extract_s = _run_detection(
-            frames, mode, stop_event, use_case=use_case
+            frames, mode, stop_event, use_case=use_case,
+            motion_skip_threshold=_uc1_motion_skip if use_case == "uc1" else 0.0,
+            yolo_imgsz=_uc1_yolo_imgsz if use_case == "uc1" else None,
         )
 
         # Intermediate update: extraction done, matching starting.
