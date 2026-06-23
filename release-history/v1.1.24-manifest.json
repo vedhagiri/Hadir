@@ -1,0 +1,21 @@
+{
+  "version": "1.1.24",
+  "previous_version": "1.1.23",
+  "commit_id": "083f98cb20527690468548917a9831e1183fa767",
+  "previous_commit_id": "d6d85ac0b420459c72a34f81f08cf4bedce30f70",
+  "all_new_install": false,
+  "new_migrations": [
+    "0085_tenant_settings_reconnect.py"
+  ],
+  "services_changed": {
+    "backend": true,
+    "frontend": true,
+    "nginx": false,
+    "postgres": false
+  },
+  "compose_changed": false,
+  "https_compose_changed": false,
+  "env_keys_added": [],
+  "env_keys_removed": [],
+  "upgrade_scripts": []
+}
