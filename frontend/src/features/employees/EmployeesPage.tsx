@@ -22,6 +22,7 @@ import { useSearchParams } from "react-router-dom";
 
 import { useMe } from "../../auth/AuthProvider";
 import { Icon } from "../../shell/Icon";
+import { Pagination } from "../../components/Pagination";
 import { useDepartments } from "../departments/hooks";
 import { BulkDeleteModal } from "./BulkDeleteModal";
 import { DeleteConfirmModal } from "./DeleteConfirmModal";
@@ -603,46 +604,19 @@ export function EmployeesPage() {
             strip entirely when there's no data. Empty state shouldn't
             advertise pages 1-3 with clickable Prev/Next buttons. */}
         {(list.data?.total ?? 0) > 0 && (
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              padding: "10px 14px",
-              borderTop: "1px solid var(--border)",
-              fontSize: 12,
-            }}
-          >
-            <span className="text-dim">
-              {t("employees.pageNumber", {
-                page,
-                totalPages,
-              }) as string}
-              {" · "}
-              {(list.data?.total ?? 0).toLocaleString()} total
-            </span>
-            <div style={{ display: "flex", gap: 6 }}>
-              <button
-                className="btn btn-sm"
-                // Belt-and-braces: also disable while a fetch is in
-                // flight so an impatient operator doesn't trigger a
-                // race against stale data.
-                disabled={page <= 1 || list.isFetching}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-              >
-                <Icon name="chevronLeft" size={11} />
-                {t("common.previous") as string}
-              </button>
-              <button
-                className="btn btn-sm"
-                disabled={page >= totalPages || list.isFetching}
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              >
-                {t("common.next") as string}
-                <Icon name="chevronRight" size={11} />
-              </button>
-            </div>
-          </div>
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            disabled={list.isFetching}
+            summary={
+              <>
+                {t("employees.pageNumber", { page, totalPages }) as string}
+                {" · "}
+                {(list.data?.total ?? 0).toLocaleString()} total
+              </>
+            }
+          />
         )}
       </div>
 

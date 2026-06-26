@@ -17,6 +17,7 @@ import { ModalShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
 import { dayBound, useTenantDateTime } from "../../util/datetime";
 import { DatePicker, todayIso } from "../../components/DatePicker";
+import { Pagination } from "../../components/Pagination";
 import type { IconName } from "../../shell/Icon";
 import { useCameras } from "../cameras/hooks";
 import {
@@ -1835,51 +1836,30 @@ export function ClipAnalyticsPage() {
           </tbody>
         </table>
 
-        {/* Pagination strip — mirrors EmployeesPage. Hidden when
-            empty so we don't advertise pages 1-N over a blank table. */}
+        {/* Pagination — shared component. Hidden when empty so we don't
+            advertise pages 1-N over a blank table. */}
         {total > 0 && (
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              padding: "10px 14px",
-              borderTop: "1px solid var(--border)",
-              fontSize: 12,
-            }}
-          >
-            <span className="text-dim">
-              {t("clipAnalytics.pager.pageOf", {
-                page,
-                total: totalPages,
-                totalCount: total.toLocaleString(),
-              })}
-              {selected.size > 0 && (
-                <>
-                  {" · "}
-                  {t("clipAnalytics.pager.selected", { count: selected.size })}
-                </>
-              )}
-            </span>
-            <div style={{ display: "flex", gap: 6 }}>
-              <button
-                className="btn btn-sm"
-                disabled={page <= 1 || list.isFetching}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-              >
-                <Icon name="chevronLeft" size={11} />
-                {t("common.previous")}
-              </button>
-              <button
-                className="btn btn-sm"
-                disabled={page >= totalPages || list.isFetching}
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              >
-                {t("common.next")}
-                <Icon name="chevronRight" size={11} />
-              </button>
-            </div>
-          </div>
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            disabled={list.isFetching}
+            summary={
+              <>
+                {t("clipAnalytics.pager.pageOf", {
+                  page,
+                  total: totalPages,
+                  totalCount: total.toLocaleString(),
+                })}
+                {selected.size > 0 && (
+                  <>
+                    {" · "}
+                    {t("clipAnalytics.pager.selected", { count: selected.size })}
+                  </>
+                )}
+              </>
+            }
+          />
         )}
       </div>
 

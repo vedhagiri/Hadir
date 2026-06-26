@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next";
 import { AnomalyInfoBanner } from "../../components/AnomalyNote";
 import { RelativeTime, relativeText } from "../../components/RelativeTime";
 import { Icon } from "../../shell/Icon";
+import { Pagination } from "../../components/Pagination";
 import { useTenantDateTime, type TenantDateTime } from "../../util/datetime";
 import { useCameraOptions, useDetectionEvents } from "./hooks";
 import type { DetectionEvent, DetectionEventFilters } from "./types";
@@ -526,42 +527,17 @@ export function CameraLogsPage() {
           </tbody>
         </table>
 
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            padding: "10px 14px",
-            borderTop: "1px solid var(--border)",
-            fontSize: 12,
-          }}
-        >
-          <span className="text-dim">
-            {t("cameraLogs.pageOf", { page: filters.page, total: totalPages })}
-          </span>
-          <div style={{ display: "flex", gap: 6 }}>
-            <button
-              className="btn btn-sm"
-              disabled={filters.page <= 1}
-              onClick={() =>
-                setFilters((prev) => ({ ...prev, page: prev.page - 1 }))
-              }
-            >
-              <Icon name="chevronLeft" size={11} />
-              {t("cameraLogs.prev")}
-            </button>
-            <button
-              className="btn btn-sm"
-              disabled={filters.page >= totalPages}
-              onClick={() =>
-                setFilters((prev) => ({ ...prev, page: prev.page + 1 }))
-              }
-            >
-              {t("cameraLogs.next")}
-              <Icon name="chevronRight" size={11} />
-            </button>
-          </div>
-        </div>
+        <Pagination
+          page={filters.page}
+          totalPages={totalPages}
+          onPageChange={(p) =>
+            setFilters((prev) => ({ ...prev, page: p }))
+          }
+          summary={t("cameraLogs.pageOf", {
+            page: filters.page,
+            total: totalPages,
+          })}
+        />
       </div>
     </>
   );

@@ -10,6 +10,7 @@ import type { UseQueryResult } from "@tanstack/react-query";
 
 import { api } from "../../api/client";
 import { DatePicker, todayIso } from "../../components/DatePicker";
+import { Pagination } from "../../components/Pagination";
 import { Icon } from "../../shell/Icon";
 import { dayBound } from "../../util/datetime";
 import { useCameraOptions } from "../person-clips/hooks";
@@ -301,36 +302,12 @@ export function ClipLogsPage() {
         </table>
 
         {total > 0 && (
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              padding: "10px 14px",
-              borderTop: "1px solid var(--border)",
-              fontSize: 12,
-            }}
-          >
-            <span className="text-dim">
-              Page {page} of {totalPages} · {total.toLocaleString()} rows
-            </span>
-            <div style={{ display: "flex", gap: 6 }}>
-              <button
-                className="btn btn-sm"
-                disabled={page <= 1}
-                onClick={() => setPage(page - 1)}
-              >
-                <Icon name="chevronLeft" size={11} /> Prev
-              </button>
-              <button
-                className="btn btn-sm"
-                disabled={page >= totalPages}
-                onClick={() => setPage(page + 1)}
-              >
-                Next <Icon name="chevronRight" size={11} />
-              </button>
-            </div>
-          </div>
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            summary={`Page ${page} of ${totalPages} · ${total.toLocaleString()} rows`}
+          />
         )}
       </div>
     </>
