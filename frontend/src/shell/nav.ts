@@ -37,6 +37,7 @@ export const NAV: Record<Role, NavItem[]> = {
     { id: "person-clips", label: "Person Clips", icon: "videocam" },
     { id: "clip-logs", label: "Clip Logs", icon: "clipboard" },
     { id: "clip-analytics", label: "Clip Analytics", icon: "fileText" },
+    { id: "pipeline-analytics", label: "Pipeline Analytics", icon: "activity" },
     { id: "storage-analytics", label: "Storage Analytics", icon: "database" },
     // { id: "face-crops", label: "Face Crops", icon: "user" },
     { section: "Workflow" },

@@ -43,6 +43,45 @@ logger = logging.getLogger(__name__)
 DetectorMode = Literal["insightface", "yolo+face"]
 
 
+# --- Per-thread detection-timing capture (Pipeline Analytics) ----------------
+#
+# Splits a clip's detection cost into "waiting for the shared _detect_lock"
+# vs "actually running YOLO/InsightFace after acquiring it". The lock is
+# process-wide (shared with live capture), so the same clip's detect calls
+# all run on the cropping-worker thread; a thread-local accumulator lets us
+# attribute exactly this thread's wait + compute to the clip without
+# counting other cameras' lock usage.
+
+_capture_local = threading.local()
+
+
+def begin_detect_capture() -> None:
+    """Start accumulating detect-lock wait + compute on this thread."""
+    _capture_local.active = True
+    _capture_local.wait_s = 0.0
+    _capture_local.compute_s = 0.0
+
+
+def end_detect_capture() -> tuple[float, float]:
+    """Stop and return ``(wait_ms, compute_ms)`` for this thread's detect
+    calls since ``begin_detect_capture``. Returns ``(0.0, 0.0)`` if no
+    capture was active."""
+    if not getattr(_capture_local, "active", False):
+        return 0.0, 0.0
+    _capture_local.active = False
+    return _capture_local.wait_s * 1000.0, _capture_local.compute_s * 1000.0
+
+
+def _accumulate_wait(seconds: float) -> None:
+    if getattr(_capture_local, "active", False):
+        _capture_local.wait_s += seconds
+
+
+def _accumulate_compute(seconds: float) -> None:
+    if getattr(_capture_local, "active", False):
+        _capture_local.compute_s += seconds
+
+
 class TimedLock:
     """``threading.Lock`` with rolling held-time stats for contention reporting.
 
@@ -70,8 +109,11 @@ class TimedLock:
         self._t_acquired_local = threading.local()
 
     def __enter__(self) -> "TimedLock":
+        t0 = time.time()
         self._lock.acquire()
-        self._t_acquired_local.t = time.time()
+        t1 = time.time()
+        self._t_acquired_local.t = t1
+        _accumulate_wait(t1 - t0)
         return self
 
     def __exit__(self, *exc: Any) -> None:  # type: ignore[override]
@@ -79,6 +121,7 @@ class TimedLock:
         if t is not None:
             held = time.time() - t
             self._held_times.append((t, held))
+            _accumulate_compute(held)
         self._lock.release()
 
     def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
@@ -86,9 +129,12 @@ class TimedLock:
         manager. The release timestamp is recorded only when ``release``
         is paired with this thread's prior ``acquire``."""
 
+        t0 = time.time()
         ok = self._lock.acquire(blocking, timeout)
         if ok:
-            self._t_acquired_local.t = time.time()
+            t1 = time.time()
+            self._t_acquired_local.t = t1
+            _accumulate_wait(t1 - t0)
         return ok
 
     def release(self) -> None:
@@ -96,6 +142,7 @@ class TimedLock:
         if t is not None:
             held = time.time() - t
             self._held_times.append((t, held))
+            _accumulate_compute(held)
         self._lock.release()
 
     def contention_pct_60s(self) -> float:

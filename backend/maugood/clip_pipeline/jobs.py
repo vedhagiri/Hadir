@@ -65,6 +65,22 @@ class MatchJob:
     crop_match_index: dict[tuple[int, int], int] = field(default_factory=dict)
     initial_face_crop_count: int = 0
     started_at: Optional[float] = None
+    # Pipeline Analytics metrics captured during the cropping stage and
+    # written to clip_processing_results when the matching stage finalises
+    # the row (migration 0086). None on the recovery-resume path.
+    queue_wait_ms: Optional[int] = None
+    face_crop_ms: Optional[int] = None
+    cpu_percent: Optional[float] = None
+    memory_mb: Optional[float] = None
+    # Gap-closing metrics (migration 0087).
+    clip_load_ms: Optional[int] = None
+    frame_decode_ms: Optional[int] = None
+    frames_sampled: Optional[int] = None
+    frames_motion_skipped: Optional[int] = None
+    frames_detected: Optional[int] = None
+    faces_detected: Optional[int] = None
+    detect_lock_wait_ms: Optional[int] = None
+    detect_compute_ms: Optional[int] = None
     # Boot-time recovery flag (P29). When True the cropping stage was
     # skipped — ``frame_results`` is empty and ``clip_meta`` carries
     # only the camera_id needed for attendance fan-out. The matching

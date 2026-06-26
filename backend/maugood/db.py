@@ -2543,6 +2543,22 @@ clip_processing_results = Table(
     Column("unknown_count", Integer, nullable=False, server_default="0"),
     Column("match_details", JSONB, nullable=True),
     Column("error", Text, nullable=True),
+    # Migration 0086 — Pipeline Analytics performance metrics (nullable;
+    # rows processed before that migration carry NULL).
+    Column("queue_wait_ms", Integer, nullable=True),
+    Column("face_crop_ms", Integer, nullable=True),
+    Column("cpu_percent", Float, nullable=True),
+    Column("memory_mb", Float, nullable=True),
+    # Migration 0087 — gap-closing metrics (clip load / decode / detection).
+    Column("clip_load_ms", Integer, nullable=True),
+    Column("frame_decode_ms", Integer, nullable=True),
+    Column("frames_sampled", Integer, nullable=True),
+    Column("frames_motion_skipped", Integer, nullable=True),
+    Column("frames_detected", Integer, nullable=True),
+    Column("faces_detected", Integer, nullable=True),
+    # Migration 0088 — detection lock-wait vs compute split.
+    Column("detect_lock_wait_ms", Integer, nullable=True),
+    Column("detect_compute_ms", Integer, nullable=True),
     # Migration 0062 — boot-time recovery counter. Incremented on every
     # successful atomic claim by the recovery flow; capped to prevent
     # poison-job loops.

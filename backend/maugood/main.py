@@ -59,6 +59,7 @@ from maugood.face_crops import router as face_crops_router
 from maugood.person_clips import router as person_clips_router
 from maugood.clip_pipeline.router import router as clip_pipeline_router
 from maugood.pipeline_monitor import router as pipeline_monitor_router
+from maugood.pipeline_analytics import router as pipeline_analytics_router
 from maugood.retention import retention_scheduler
 from maugood.scheduled_reports import (
     report_runner,
@@ -329,6 +330,7 @@ def create_app() -> FastAPI:
     app.include_router(person_clips_router)
     app.include_router(clip_pipeline_router)
     app.include_router(pipeline_monitor_router)
+    app.include_router(pipeline_analytics_router)
     app.include_router(face_crops_router)
     app.include_router(unidentified_faces_router)
     app.include_router(storage_analytics_router)

@@ -78,6 +78,22 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _host_cpu_mem_snapshot() -> tuple[Optional[float], Optional[float]]:
+    """Best-effort (host CPU%, backend RSS MB) sample for Pipeline
+    Analytics. Returns ``(None, None)`` if psutil is unavailable or the
+    sample fails — never raises into the hot path. ``cpu_percent`` is
+    host-wide since the previous call (non-blocking, interval=None)."""
+
+    try:
+        import psutil  # noqa: PLC0415
+
+        cpu = float(psutil.cpu_percent(interval=None))
+        rss_mb = float(psutil.Process().memory_info().rss) / (1024.0 * 1024.0)
+        return round(cpu, 1), round(rss_mb, 1)
+    except Exception:  # noqa: BLE001
+        return None, None
+
+
 CROPPING_WORKERS = _env_int("MAUGOOD_CLIP_PIPELINE_CROPPING_WORKERS", 1)
 MATCHING_WORKERS = _env_int("MAUGOOD_CLIP_PIPELINE_MATCHING_WORKERS", 1)
 QUEUE_MAX_DEPTH = _env_int("MAUGOOD_CLIP_PIPELINE_QUEUE_MAX_DEPTH", 64)
@@ -990,6 +1006,11 @@ class ClipPipeline:
         scope = job.scope
         engine = get_engine()
         t_total_start = time.time()
+        # Pipeline Analytics: ms this job waited in the cropping queue
+        # (submit → worker pickup). Captured here so a queue-delay
+        # bottleneck is visible separately from per-clip compute cost.
+        queue_wait_ms = max(0, int((job.started_at - job.submitted_at) * 1000))
+        face_crop_ms = 0
 
         try:
             with tenant_context(scope.tenant_schema):
@@ -1031,6 +1052,10 @@ class ClipPipeline:
                     )
                     return
 
+                # Pipeline Analytics: time the clip load (read encrypted
+                # MP4 + Fernet-decrypt + write temp) — a large slice of the
+                # previously-unattributed total on big clips.
+                _t_load_start = time.time()
                 encrypted = file_path.read_bytes()
                 plain = decrypt_bytes(encrypted)
                 with tempfile.NamedTemporaryFile(
@@ -1038,11 +1063,14 @@ class ClipPipeline:
                 ) as tmp:
                     tmp.write(plain)
                     tmp_path = Path(tmp.name)
+                clip_load_ms = int((time.time() - _t_load_start) * 1000)
 
                 try:
+                    _t_decode_start = time.time()
                     frames, sample_interval, actual_fps = _sample_frames(
                         tmp_path, 10.0
                     )
+                    frame_decode_ms = int((time.time() - _t_decode_start) * 1000)
                     if not frames:
                         _upsert_processing_result(
                             engine, scope, job.clip_id, job.use_case,
@@ -1055,7 +1083,7 @@ class ClipPipeline:
                         return
 
                     mode = "yolo+face" if job.use_case == "uc1" else "insightface"
-                    frame_results, extract_s = _run_detection(
+                    frame_results, extract_s, det_stats = _run_detection(
                         frames, mode, None, use_case=job.use_case,
                         motion_skip_threshold=UC1_MOTION_SKIP if job.use_case == "uc1" else 0.0,
                     )
@@ -1077,6 +1105,7 @@ class ClipPipeline:
                     # UC2: best-per-track save with employee_id=NULL, backfill after match.
                     initial_count = 0
                     crop_match_index: dict[tuple[int, int], int] = {}
+                    _t_crop_start = time.time()
                     if frame_results:
                         if job.use_case == "uc1":
                             # Optimized UC1: one crop per face track (no
@@ -1106,8 +1135,15 @@ class ClipPipeline:
                                 return_index=True,
                             )
                             initial_count, crop_match_index = result
+                    face_crop_ms = int((time.time() - _t_crop_start) * 1000)
                 finally:
                     tmp_path.unlink(missing_ok=True)
+
+                # Pipeline Analytics: best-effort host CPU% + process RSS
+                # sampled now (end of the CPU-heavy cropping stage). Workers
+                # are shared, so this is a host sample at the clip's
+                # processing moment, not a per-clip attribution.
+                cpu_percent, memory_mb = _host_cpu_mem_snapshot()
 
                 # All UCs now save crops in the cropping stage — frames not
                 # needed by MatchJob. Free the numpy arrays immediately so
@@ -1140,6 +1176,18 @@ class ClipPipeline:
                     },
                     crop_match_index=crop_match_index,
                     initial_face_crop_count=initial_count,
+                    queue_wait_ms=queue_wait_ms,
+                    face_crop_ms=face_crop_ms,
+                    cpu_percent=cpu_percent,
+                    memory_mb=memory_mb,
+                    clip_load_ms=clip_load_ms,
+                    frame_decode_ms=frame_decode_ms,
+                    frames_sampled=det_stats.get("frames_sampled"),
+                    frames_motion_skipped=det_stats.get("frames_motion_skipped"),
+                    frames_detected=det_stats.get("frames_detected"),
+                    faces_detected=det_stats.get("faces_detected"),
+                    detect_lock_wait_ms=det_stats.get("detect_lock_wait_ms"),
+                    detect_compute_ms=det_stats.get("detect_compute_ms"),
                 )
                 # Local frame reference already freed above.
                 del frame_results  # release local reference; MatchJob carries the list now
@@ -1378,6 +1426,7 @@ class ClipPipeline:
                         matched_employees=matched_list,
                         unknown_count=unknown_count,
                         match_details=match_details if match_details else None,
+                        queue_wait_ms=job.queue_wait_ms,
                     )
 
                     # Attendance fan-out — same as the regular path. The
@@ -1489,6 +1538,18 @@ class ClipPipeline:
                     matched_employees=matched_list,
                     unknown_count=unknown_count,
                     match_details=match_details if match_details else None,
+                    queue_wait_ms=job.queue_wait_ms,
+                    face_crop_ms=job.face_crop_ms,
+                    cpu_percent=job.cpu_percent,
+                    memory_mb=job.memory_mb,
+                    clip_load_ms=job.clip_load_ms,
+                    frame_decode_ms=job.frame_decode_ms,
+                    frames_sampled=job.frames_sampled,
+                    frames_motion_skipped=job.frames_motion_skipped,
+                    frames_detected=job.frames_detected,
+                    faces_detected=job.faces_detected,
+                    detect_lock_wait_ms=job.detect_lock_wait_ms,
+                    detect_compute_ms=job.detect_compute_ms,
                 )
 
                 # Legacy parity — UC1 owns the canonical matched_employees

@@ -38,6 +38,7 @@ import { FaceCropsPage } from "./features/face-crops/FaceCropsPage";
 import { PersonClipsPage } from "./features/person-clips/PersonClipsPage";
 import { ClipLogsPage } from "./features/clip-logs/ClipLogTable";
 import { ClipAnalyticsPage } from "./features/clip-analytics/ClipAnalyticsPage";
+import { PipelineAnalyticsPage } from "./features/pipeline-analytics/PipelineAnalyticsPage";
 import { StorageAnalyticsPage } from "./features/storage-analytics/StorageAnalyticsPage";
 import { DashboardRouter } from "./features/dashboard/DashboardRouter";
 import { EmployeesPage } from "./features/employees/EmployeesPage";
@@ -143,6 +144,7 @@ export function App() {
         <Route path="person-clips" element={<PersonClipsPage />} />
         <Route path="clip-logs" element={<AdminOnly><ClipLogsPage /></AdminOnly>} />
         <Route path="clip-analytics" element={<ClipAnalyticsPage />} />
+        <Route path="pipeline-analytics" element={<AdminOnly><PipelineAnalyticsPage /></AdminOnly>} />
         <Route path="storage-analytics" element={<AdminOnly><StorageAnalyticsPage /></AdminOnly>} />
         <Route path="face-crops" element={<FaceCropsPage />} />
         <Route path="system" element={<SystemPage />} />
@@ -228,6 +230,7 @@ export function App() {
             id !== "pipeline" &&
             id !== "api-docs" &&
             id !== "storage-analytics" &&
+            id !== "pipeline-analytics" &&
             id !== "bulk-photo-upload",
         ).map((id) => (
           <Route key={id} path={id} element={<Placeholder pageId={id} />} />

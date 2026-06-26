@@ -154,10 +154,13 @@ def _run_detection(
     use_case: str = "",
     motion_skip_threshold: float = 0.0,
     yolo_imgsz: Optional[int] = None,
-) -> tuple[list[tuple[int, list[dict]]], float]:
+) -> tuple[list[tuple[int, list[dict]]], float, dict[str, int]]:
     """Run face detection on sampled frames.
 
-    Returns ``([(frame_idx, detections), ...], extract_duration_s)``.
+    Returns ``([(frame_idx, detections), ...], extract_duration_s, stats)``
+    where ``stats`` carries the Pipeline Analytics detection counters
+    ``{frames_sampled, frames_motion_skipped, frames_detected,
+    faces_detected}``.
     Stops early if ``stop_event`` is set.
 
     ``motion_skip_threshold`` (default 0 = disabled): when > 0, each frame
@@ -190,6 +193,10 @@ def _run_detection(
     import cv2 as _cv2  # noqa: PLC0415
 
     from maugood.detection import DetectorConfig, detect as detector_detect  # noqa: PLC0415
+    from maugood.detection.detectors import (  # noqa: PLC0415
+        begin_detect_capture,
+        end_detect_capture,
+    )
 
     if mode == "yolo+face":
         cfg = DetectorConfig(
@@ -235,6 +242,9 @@ def _run_detection(
     # from a static background is caught immediately.
     _prev_thumb: Optional[np.ndarray] = None
 
+    # Split detect cost into lock-wait vs compute for this clip (thread-local).
+    begin_detect_capture()
+
     for i, frame in enumerate(frames):
         if stop_event is not None and stop_event.is_set():
             break
@@ -265,6 +275,8 @@ def _run_detection(
         except Exception as exc:  # noqa: BLE001
             logger.debug("detect failed on frame %d: %s", i, type(exc).__name__)
 
+    detect_lock_wait_ms, detect_compute_ms = end_detect_capture()
+
     logger.info(
         "reprocess detect: mode=%s frames=%d skipped_motion=%d "
         "frames_with_faces=%d total_faces=%d imgsz=%s pad=%s min_face_pixels=%s",
@@ -274,7 +286,15 @@ def _run_detection(
         cfg.min_face_pixels,
     )
 
-    return results, time.time() - t0
+    stats = {
+        "frames_sampled": len(frames),
+        "frames_motion_skipped": skipped_motion,
+        "frames_detected": frames_with_any,
+        "faces_detected": total_dets,
+        "detect_lock_wait_ms": int(round(detect_lock_wait_ms)),
+        "detect_compute_ms": int(round(detect_compute_ms)),
+    }
+    return results, time.time() - t0, stats
 
 
 def _match_detections(
@@ -1666,6 +1686,18 @@ def _upsert_processing_result(
     unknown_count: int = 0,
     match_details: Optional[list[dict]] = None,
     error: Optional[str] = None,
+    queue_wait_ms: Optional[int] = None,
+    face_crop_ms: Optional[int] = None,
+    cpu_percent: Optional[float] = None,
+    memory_mb: Optional[float] = None,
+    clip_load_ms: Optional[int] = None,
+    frame_decode_ms: Optional[int] = None,
+    frames_sampled: Optional[int] = None,
+    frames_motion_skipped: Optional[int] = None,
+    frames_detected: Optional[int] = None,
+    faces_detected: Optional[int] = None,
+    detect_lock_wait_ms: Optional[int] = None,
+    detect_compute_ms: Optional[int] = None,
 ) -> None:
     """INSERT or UPDATE a row in clip_processing_results."""
     from sqlalchemy.dialects.postgresql import insert as pg_insert  # noqa: PLC0415
@@ -1686,6 +1718,33 @@ def _upsert_processing_result(
         "match_details": match_details,
         "error": error,
     }
+    # Pipeline Analytics metrics (migration 0086). Only include when
+    # provided so a partial-progress upsert (e.g. the "processing"
+    # intermediate write) doesn't clobber an already-set value with NULL.
+    if queue_wait_ms is not None:
+        vals["queue_wait_ms"] = queue_wait_ms
+    if face_crop_ms is not None:
+        vals["face_crop_ms"] = face_crop_ms
+    if cpu_percent is not None:
+        vals["cpu_percent"] = cpu_percent
+    if memory_mb is not None:
+        vals["memory_mb"] = memory_mb
+    if clip_load_ms is not None:
+        vals["clip_load_ms"] = clip_load_ms
+    if frame_decode_ms is not None:
+        vals["frame_decode_ms"] = frame_decode_ms
+    if frames_sampled is not None:
+        vals["frames_sampled"] = frames_sampled
+    if frames_motion_skipped is not None:
+        vals["frames_motion_skipped"] = frames_motion_skipped
+    if frames_detected is not None:
+        vals["frames_detected"] = frames_detected
+    if faces_detected is not None:
+        vals["faces_detected"] = faces_detected
+    if detect_lock_wait_ms is not None:
+        vals["detect_lock_wait_ms"] = detect_lock_wait_ms
+    if detect_compute_ms is not None:
+        vals["detect_compute_ms"] = detect_compute_ms
     stmt = pg_insert(clip_processing_results).values(**vals)
     update_vals = {k: v for k, v in vals.items() if k not in ("tenant_id", "person_clip_id", "use_case")}
     stmt = stmt.on_conflict_do_update(
@@ -1787,7 +1846,7 @@ def _process_clip_for_use_case(
         _uc1_yolo_imgsz = int(
             __import__("os").environ.get("MAUGOOD_CLIP_PIPELINE_UC1_YOLO_IMGSZ", "640") or "640"
         )
-        frame_results, extract_s = _run_detection(
+        frame_results, extract_s, _det_stats = _run_detection(
             frames, mode, stop_event, use_case=use_case,
             motion_skip_threshold=_uc1_motion_skip if use_case == "uc1" else 0.0,
             yolo_imgsz=_uc1_yolo_imgsz if use_case == "uc1" else None,
