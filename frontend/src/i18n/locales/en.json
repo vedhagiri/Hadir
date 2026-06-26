@@ -65,7 +65,10 @@
     "tenantSlugLabel": "Workspace",
     "tenantSlugPlaceholder": "tenant-name",
     "oidcButton": "Sign in with Microsoft",
-    "oidcOrLocal": "or use a local account"
+    "oidcOrLocal": "or use a local account",
+    "googleButton": "Sign in with Google",
+    "ssoUnavailableTitle": "Sign-in unavailable",
+    "providerNotEnabled": "{{provider}} sign-in isn't enabled for this workspace yet. Ask your administrator to configure it under Settings → Authentication."
   },
   "topbar": {
     "logout": "Log out",

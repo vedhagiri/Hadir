@@ -65,7 +65,10 @@
     "tenantSlugLabel": "مساحة العمل",
     "tenantSlugPlaceholder": "tenant-name",
     "oidcButton": "تسجيل الدخول باستخدام مايكروسوفت",
-    "oidcOrLocal": "أو استخدم حساباً محلياً"
+    "oidcOrLocal": "أو استخدم حساباً محلياً",
+    "googleButton": "تسجيل الدخول باستخدام جوجل",
+    "ssoUnavailableTitle": "تسجيل الدخول غير متاح",
+    "providerNotEnabled": "تسجيل الدخول عبر {{provider}} غير مُفعّل لهذه المساحة بعد. اطلب من المسؤول إعداده من الإعدادات ← المصادقة."
   },
   "topbar": {
     "logout": "تسجيل الخروج",

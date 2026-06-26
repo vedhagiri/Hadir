@@ -8,6 +8,8 @@
 // will land here in production. For local dev the tenant slug comes
 // from a ?tenant=… query param or the workspace field on the form.
 
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useForm } from "react-hook-form";
 import type { Resolver } from "react-hook-form";
 import { useTranslation } from "react-i18next";
@@ -438,6 +440,10 @@ function CombinedLoginForm({
   serverError,
 }: CombinedFormProps) {
   const { t } = useTranslation();
+  // Provider-not-configured notice. Replaces the jarring native
+  // window.alert with an in-card styled popup so the message reads as
+  // part of the product, not a browser chrome dialog.
+  const [notice, setNotice] = useState<string | null>(null);
   const oidcUrl = tenantSlugValid
     ? `/api/auth/oidc/login?tenant=${encodeURIComponent(tenantSlug)}`
     : "";
@@ -567,7 +573,7 @@ function CombinedLoginForm({
           onClick={(e) => {
             if (!oidcEnabled || !oidcUrl) {
               e.preventDefault();
-              window.alert(
+              setNotice(
                 t("login.providerNotEnabled", {
                   provider: "Microsoft",
                   defaultValue:
@@ -592,7 +598,7 @@ function CombinedLoginForm({
             defaultValue: "Sign in with Google",
           })}
           onClick={() => {
-            window.alert(
+            setNotice(
               t("login.providerNotEnabled", {
                 provider: "Google",
                 defaultValue:
@@ -605,7 +611,126 @@ function CombinedLoginForm({
           <GoogleLogo size={22} />
         </button>
       </div>
+
+      {notice !== null && (
+        <ProviderNoticeModal
+          message={notice}
+          onClose={() => setNotice(null)}
+        />
+      )}
     </form>
+  );
+}
+
+// Styled "provider not configured" popup — a small centered modal that
+// matches the product surface instead of the native browser alert().
+// Esc or the backdrop or the OK button dismisses it.
+function ProviderNoticeModal({
+  message,
+  onClose,
+}: {
+  message: string;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return createPortal(
+    <div
+      role="presentation"
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 1000,
+        background: "rgba(0,0,0,0.45)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+      }}
+    >
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-label={t("login.ssoUnavailableTitle", {
+          defaultValue: "Sign-in unavailable",
+        })}
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "100%",
+          maxWidth: 380,
+          background: "var(--bg-elev)",
+          border: "1px solid var(--border)",
+          borderRadius: "var(--radius-md, 12px)",
+          boxShadow: "0 16px 48px rgba(0,0,0,0.25)",
+          padding: 22,
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span
+            aria-hidden="true"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 34,
+              height: 34,
+              flex: "0 0 auto",
+              borderRadius: "50%",
+              background: "var(--accent-soft, var(--bg-sunken))",
+              color: "var(--accent)",
+            }}
+          >
+            <Icon name="info" size={18} />
+          </span>
+          <h2
+            style={{
+              margin: 0,
+              fontSize: 15,
+              fontWeight: 600,
+              color: "var(--text)",
+            }}
+          >
+            {t("login.ssoUnavailableTitle", {
+              defaultValue: "Sign-in unavailable",
+            })}
+          </h2>
+        </div>
+
+        <p
+          style={{
+            margin: 0,
+            fontSize: 13,
+            lineHeight: 1.5,
+            color: "var(--text-secondary)",
+          }}
+        >
+          {message}
+        </p>
+
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={onClose}
+            autoFocus
+            style={{ justifyContent: "center", minWidth: 88 }}
+          >
+            {t("common.done", { defaultValue: "OK" })}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
