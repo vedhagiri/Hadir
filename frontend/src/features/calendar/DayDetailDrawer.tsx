@@ -133,6 +133,8 @@ export function DayDetailContent({
                 note={detail.data.escalation_note ?? null}
                 snapshot={detail.data.escalation_request ?? null}
               />
+            ) : detail.data.status === "leave" ? (
+              <LeaveDayContent detail={detail.data} isoDate={isoDate} />
             ) : detail.data.status === "weekend" ? (
               <WeekOffDayContent
                 detail={detail.data}
@@ -1799,6 +1801,147 @@ function NoRecordCard({
 // ---------------------------------------------------------------------------
 // HolidayDayContent — premium holiday state card
 // ---------------------------------------------------------------------------
+
+// Dedicated template for an approved-leave day. Distinct from the
+// weekend / holiday templates so an "On Leave" day reads as a deliberate
+// approved absence (leave type + paid/unpaid context) rather than a
+// generic week-off. Leave wins over weekend/holiday server-side, so this
+// renders whenever the day carries an approved leave.
+function LeaveDayContent({
+  detail,
+  isoDate,
+}: {
+  detail: import("./types").DayDetail;
+  isoDate: string;
+}) {
+  const { t } = useTranslation();
+  const dt = useTenantDateTime();
+
+  const leaveName =
+    detail.leave_name ??
+    (t("calendar.leave.unknownName", { defaultValue: "Approved leave" }) as string);
+  const parsedDate = dt.formatLocalDate(isoDate) || isoDate;
+  const workedOnLeave =
+    detail.in_time != null ||
+    (detail.total_minutes != null && detail.total_minutes > 0) ||
+    detail.timeline.length > 0;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div
+        style={{
+          background: "var(--bg-elev)",
+          border: "1px solid color-mix(in oklab, var(--info) 40%, var(--border))",
+          borderRadius: 14,
+          overflow: "hidden",
+        }}
+      >
+        <div aria-hidden style={{ height: 4, background: "var(--info)", opacity: 0.85 }} />
+        <div style={{ padding: "20px 20px 18px", display: "flex", gap: 16, alignItems: "flex-start" }}>
+          <div
+            aria-hidden
+            style={{
+              width: 54,
+              height: 54,
+              borderRadius: 14,
+              flexShrink: 0,
+              background: "color-mix(in oklab, var(--info) 12%, var(--bg-elev))",
+              border: "1.5px solid color-mix(in oklab, var(--info) 30%, var(--border))",
+              display: "grid",
+              placeItems: "center",
+              color: "var(--info)",
+            }}
+          >
+            <Icon name="calendar" size={26} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
+              <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)", lineHeight: 1.15, flex: 1, minWidth: 0 }}>
+                {leaveName}
+              </div>
+              <span
+                style={{
+                  padding: "3px 10px",
+                  borderRadius: 999,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  background: "color-mix(in oklab, var(--info) 14%, var(--bg-elev))",
+                  color: "var(--info-text)",
+                  border: "1px solid color-mix(in oklab, var(--info) 35%, transparent)",
+                  flexShrink: 0,
+                  whiteSpace: "nowrap",
+                  marginTop: 1,
+                }}
+              >
+                {t("calendar.leave.badge", { defaultValue: "On Leave" }) as string}
+              </span>
+            </div>
+            <div style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.6, marginBottom: 6 }}>
+              {t("calendar.leave.message", {
+                defaultValue:
+                  "On approved leave. No attendance is expected today; this day is excluded from the absent count.",
+              }) as string}
+            </div>
+            <div className="mono" style={{ fontSize: 11.5, color: "var(--text-tertiary)", display: "flex", alignItems: "center", gap: 5 }}>
+              <Icon name="calendar" size={11} aria-hidden />
+              {parsedDate}
+            </div>
+          </div>
+        </div>
+        {/* Footer fact strip — leave type + date, so the card reads as a
+            complete record without the (irrelevant) shift-policy ribbon. */}
+        <div
+          style={{
+            borderTop: "1px solid color-mix(in oklab, var(--info) 20%, var(--border))",
+            background: "color-mix(in oklab, var(--info) 5%, var(--bg-elev))",
+            padding: "12px 20px",
+            display: "flex",
+            gap: 28,
+            flexWrap: "wrap",
+          }}
+        >
+          <LeaveFact
+            label={t("calendar.leave.typeLabel", { defaultValue: "Leave type" }) as string}
+            value={leaveName}
+          />
+          <LeaveFact
+            label={t("calendar.leave.dateLabel", { defaultValue: "Date" }) as string}
+            value={parsedDate}
+          />
+          <LeaveFact
+            label={t("calendar.leave.attendanceLabel", { defaultValue: "Attendance" }) as string}
+            value={
+              workedOnLeave
+                ? (t("calendar.leave.activityRecorded", { defaultValue: "Activity recorded" }) as string)
+                : (t("calendar.leave.notExpected", { defaultValue: "Not expected" }) as string)
+            }
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LeaveFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0 }}>
+      <span
+        style={{
+          fontSize: 10,
+          fontWeight: 700,
+          textTransform: "uppercase",
+          letterSpacing: "0.05em",
+          color: "var(--text-tertiary)",
+        }}
+      >
+        {label}
+      </span>
+      <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+        {value}
+      </span>
+    </div>
+  );
+}
 
 function HolidayDayContent({
   detail,

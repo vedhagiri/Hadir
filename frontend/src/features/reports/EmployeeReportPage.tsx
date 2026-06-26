@@ -19,6 +19,7 @@ import { PdfOptionsModal } from "../../components/PdfOptionsModal";
 import { useConfidentialDownload } from "../../components/useConfidentialDownload";
 import { Icon } from "../../shell/Icon";
 import { useTenantDateTime } from "../../util/datetime";
+import { DayDetailDrawer } from "../calendar/DayDetailDrawer";
 import { useEmployeeList, useEmployeeDetail } from "../employees/hooks";
 import type { Employee } from "../employees/types";
 import { formatMinutes } from "../attendance/timeFormat";
@@ -125,6 +126,13 @@ export function EmployeeReportPage() {
     null,
   );
   const [showWeekends, setShowWeekends] = useState(false);
+  // Day-detail drawer — opened by clicking a day-by-day breakdown row.
+  // Reuses the shared calendar drawer (same template set, incl. leave).
+  const [openDayIso, setOpenDayIso] = useState<string | null>(null);
+  // Click-to-filter on the summary cards (mirrors Daily attendance).
+  const [statusFilter, setStatusFilter] = useState<ReportBucket | null>(null);
+  const toggleStatus = (s: ReportBucket) =>
+    setStatusFilter((cur) => (cur === s ? null : s));
   const [downloading, setDownloading] = useState<"xlsx" | "pdf" | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -175,8 +183,9 @@ export function EmployeeReportPage() {
       const it = itemByDate.get(d);
       if (!it) continue;
       // Leave wins over everything (an approved leave on a holiday
-      // is still leave, server resolves the priority).
-      if (it.absent && it.leave_type_id !== null) {
+      // is still leave, server resolves the priority). The engine
+      // clears ``absent`` on a leave day, so leave_type_id is the marker.
+      if (it.leave_type_id !== null) {
         leave += 1;
         continue;
       }
@@ -238,6 +247,40 @@ export function EmployeeReportPage() {
     () => new Map(items.map((it) => [it.date, it])),
     [items],
   );
+
+  // Per-day status bucket for the four clickable summary cards. Mutually
+  // exclusive (present excludes late) — mirrors Daily attendance so a
+  // card's number always equals the rows clicking it filters to.
+  const dayBuckets = useMemo(() => {
+    const m = new Map<string, ReportBucket | "other">();
+    for (const d of visibleDates) {
+      m.set(d, reportDayBucket(itemByDate.get(d) ?? null));
+    }
+    return m;
+  }, [visibleDates, itemByDate]);
+
+  const counts = useMemo(() => {
+    const c = { present: 0, late: 0, absent: 0, leave: 0 };
+    for (const b of dayBuckets.values()) {
+      if (b !== "other") c[b] += 1;
+    }
+    return c;
+  }, [dayBuckets]);
+
+  // Rows shown in the breakdown — narrowed to the active status filter.
+  const filteredDates = useMemo(
+    () =>
+      statusFilter
+        ? visibleDates.filter((d) => dayBuckets.get(d) === statusFilter)
+        : visibleDates,
+    [statusFilter, visibleDates, dayBuckets],
+  );
+
+  // Clear the filter when the employee or range changes so a stale filter
+  // doesn't leave the table looking empty.
+  useEffect(() => {
+    setStatusFilter(null);
+  }, [selectedEmployeeId, start, end]);
 
   const downloadXlsx = async () => {
     if (selectedEmployeeId === null) return;
@@ -568,19 +611,46 @@ export function EmployeeReportPage() {
               marginBottom: 14,
             }}
           >
-            <StatTile label={t("employeeReport.statWorkingDays")} value={stats.workingDays} />
+            <StatTile
+              label={t("employeeReport.statWorkingDays")}
+              value={stats.workingDays}
+              onClick={() => setStatusFilter(null)}
+              active={statusFilter === null}
+            />
             <StatTile
               label={t("employeeReport.statPresent")}
-              value={stats.present}
+              value={counts.present}
               tone="success"
+              onClick={() => toggleStatus("present")}
+              active={statusFilter === "present"}
               hint={
                 stats.workingDays > 0
-                  ? t("employeeReport.statPresentHint", { pct: stats.presentPct })
+                  ? t("employeeReport.statPresentHint", {
+                      pct: Math.round((counts.present / stats.workingDays) * 100),
+                    })
                   : undefined
               }
             />
-            <StatTile label={t("employeeReport.statLate")} value={stats.late} tone="warning" />
-            <StatTile label={t("employeeReport.statAbsent")} value={stats.absent} tone="danger" />
+            <StatTile
+              label={t("employeeReport.statLate")}
+              value={counts.late}
+              tone="warning"
+              onClick={() => toggleStatus("late")}
+              active={statusFilter === "late"}
+            />
+            <StatTile
+              label={t("employeeReport.statAbsent")}
+              value={counts.absent}
+              tone="danger"
+              onClick={() => toggleStatus("absent")}
+              active={statusFilter === "absent"}
+            />
+            <StatTile
+              label={t("employeeReport.statOnLeave", { defaultValue: "On Leave" })}
+              value={counts.leave}
+              onClick={() => toggleStatus("leave")}
+              active={statusFilter === "leave"}
+            />
             <StatTile
               label={t("employeeReport.statTotalHours")}
               value={stats.totalMinutes > 0 ? formatMinutes(stats.totalMinutes) : "—"}
@@ -672,10 +742,17 @@ export function EmployeeReportPage() {
                 )}
                 {!range.isLoading &&
                   !range.isError &&
-                  visibleDates.map((d) => {
+                  filteredDates.map((d) => {
                     const it = itemByDate.get(d) ?? null;
                     return (
-                      <tr key={d}>
+                      <tr
+                        key={d}
+                        onClick={() => setOpenDayIso(d)}
+                        style={{ cursor: "pointer" }}
+                        title={t("employeeReport.openDayDetail", {
+                          defaultValue: "View day detail",
+                        })}
+                      >
                         <td className="mono text-sm">{dt.formatLocalDate(d) || d}</td>
                         <td className="text-sm">{dayName(d)}</td>
                         <td>
@@ -710,6 +787,14 @@ export function EmployeeReportPage() {
             </table>
           </div>
         </>
+      )}
+
+      {openDayIso !== null && selectedEmployeeId !== null && (
+        <DayDetailDrawer
+          employeeId={selectedEmployeeId}
+          isoDate={openDayIso}
+          onClose={() => setOpenDayIso(null)}
+        />
       )}
 
       <PdfOptionsModal
@@ -879,18 +964,40 @@ function EmployeeSearch({
   );
 }
 
+// The four mutually-exclusive status buckets the summary cards filter on.
+type ReportBucket = "present" | "late" | "absent" | "leave";
+
+// Classify one day's row. "other" covers no-record / off-day / pending —
+// days that none of the four cards count or filter to. Mirrors the
+// summary loop + Daily attendance's classifyStatus priority.
+function reportDayBucket(
+  it: AttendanceItem | null,
+): ReportBucket | "other" {
+  if (!it) return "other";
+  if (it.leave_type_id !== null) return "leave";
+  if ((it.is_holiday || it.is_weekend) && !it.in_time) return "other";
+  if (it.pending) return "other";
+  if (!it.in_time) return "absent";
+  if (it.late) return "late";
+  return "present";
+}
+
 function StatTile({
   label,
   value,
   hint,
   hintTone,
   tone,
+  onClick,
+  active,
 }: {
   label: string;
   value: number | string;
   hint?: string | undefined;
   hintTone?: "success" | undefined;
   tone?: "success" | "warning" | "danger" | undefined;
+  onClick?: () => void;
+  active?: boolean;
 }) {
   const toneBg: Record<string, string> = {
     success: "var(--success-soft)",
@@ -904,12 +1011,36 @@ function StatTile({
   };
   const bg = tone ? toneBg[tone] : "var(--bg-elev)";
   const labelColor = tone ? toneColor[tone] : "var(--text-tertiary)";
+  const clickable = onClick !== undefined;
   return (
     <div
       className="stat"
+      onClick={onClick}
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      aria-pressed={clickable ? !!active : undefined}
+      onKeyDown={
+        clickable
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onClick?.();
+              }
+            }
+          : undefined
+      }
       style={{
         background: bg,
-        border: tone ? "1px solid transparent" : undefined,
+        border: active
+          ? "1.5px solid var(--accent)"
+          : tone
+            ? "1px solid transparent"
+            : "1px solid var(--border)",
+        cursor: clickable ? "pointer" : undefined,
+        boxShadow: active
+          ? "0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent)"
+          : undefined,
+        transition: "border-color 100ms ease, box-shadow 100ms ease",
       }}
     >
       <div className="stat-label" style={{ color: labelColor }}>
@@ -956,7 +1087,7 @@ function DayStatusPill({
       return <span className="pill pill-neutral">—</span>;
     return <span className="pill pill-neutral">{t("employeeReport.status.noRecord")}</span>;
   }
-  if (item.absent && item.leave_type_id !== null) {
+  if (item.leave_type_id !== null) {
     return <span className="pill pill-info">{t("employeeReport.status.onLeave")}</span>;
   }
   if (item.is_holiday && !item.in_time) {
@@ -985,7 +1116,7 @@ function DayStatusPill({
 
 function statusLabel(item: AttendanceItem | null): string {
   if (!item) return "No record";
-  if (item.absent && item.leave_type_id !== null) return "On leave";
+  if (item.leave_type_id !== null) return "On leave";
   if (item.is_holiday && !item.in_time) {
     return item.holiday_name
       ? `Holiday — ${item.holiday_name}`

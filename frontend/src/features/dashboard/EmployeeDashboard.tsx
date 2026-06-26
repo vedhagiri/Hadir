@@ -59,7 +59,7 @@ export function EmployeeDashboard() {
   const todayInTime = todayItem?.in_time ?? null;
   const todayOutTime = todayItem?.out_time ?? null;
   const todayStatus = todayItem
-    ? todayItem.absent && todayItem.leave_type_id !== null
+    ? todayItem.leave_type_id !== null
       ? { label: "On leave", color: "#6366f1" }
       : !todayItem.in_time
         ? todayItem.is_weekend

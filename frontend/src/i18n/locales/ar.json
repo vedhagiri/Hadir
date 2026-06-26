@@ -4282,6 +4282,7 @@
     "statPresentHint": "{{pct}}% من أيام العمل",
     "statLate": "متأخر",
     "statAbsent": "غائب",
+    "statOnLeave": "في إجازة",
     "statTotalHours": "إجمالي الساعات",
     "statOtHint": "+{{n}} إضافي",
     "breakdownTitle": "تفصيل يوم بيوم",

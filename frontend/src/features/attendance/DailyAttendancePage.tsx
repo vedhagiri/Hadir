@@ -43,7 +43,11 @@ type DayStatus = "present" | "late" | "absent" | "onLeave" | "pending" | "offDay
 // mirrors the StatusPill priority: leave > off-day > pending > absent >
 // late > present.
 function classifyStatus(it: AttendanceItem): DayStatus | "other" {
-  if (it.absent && it.leave_type_id !== null) return "onLeave";
+  // Leave is the highest-priority status. The engine clears ``absent``
+  // to false on a leave day (absent = no-leave AND not-holiday/weekend),
+  // so an "On Leave" row is leave_type_id set + absent=false — gating on
+  // ``absent`` here would never match and the row would fall through.
+  if (it.leave_type_id !== null) return "onLeave";
   if (
     !it.in_time &&
     it.leave_type_id === null &&
@@ -1519,7 +1523,7 @@ function StatusPill({ item }: { item: AttendanceItem }) {
   // Order matters: leave / holiday / weekend take priority over
   // workday verdicts so a row on a non-working day never reads as
   // "Absent" or falls through to "Present" with no in_time.
-  if (item.absent && item.leave_type_id !== null) {
+  if (item.leave_type_id !== null) {
     return <span className="pill pill-info">{t("dailyAttendance.pill.onLeave")}</span>;
   }
   if (item.is_holiday && !item.in_time) {
@@ -1646,7 +1650,7 @@ const selectStyle = {
 // (the AttendanceDrawer used to use it).
 export function FlagPills({ item }: { item: AttendanceItem }) {
   const { t } = useTranslation();
-  if (item.absent && item.leave_type_id !== null) {
+  if (item.leave_type_id !== null) {
     return <span className="pill pill-info">{t("dailyAttendance.pillLower.onLeave")}</span>;
   }
   if (item.pending) {

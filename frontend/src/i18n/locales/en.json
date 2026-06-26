@@ -4238,6 +4238,7 @@
     "statPresentHint": "{{pct}}% of working",
     "statLate": "Late",
     "statAbsent": "Absent",
+    "statOnLeave": "On Leave",
     "statTotalHours": "Total hours",
     "statOtHint": "+{{n}} OT",
     "breakdownTitle": "Day-by-day breakdown",

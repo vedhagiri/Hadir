@@ -490,16 +490,18 @@ def person_view(
         #    shift end passes.
         # 6. attendance flags: absent, late, present
         # 7. no_record (workday with neither attendance nor leave)
+        # Leave wins over holiday / weekend (see fetch_day_detail note) so
+        # the cell colour matches the day-detail drawer's leave template.
         if in_future:
             status = STATUS_FUTURE
-        elif hol_name is not None:
-            status = STATUS_HOLIDAY
-        elif weekend:
-            status = STATUS_WEEKEND
         elif ar is not None and ar.leave_type_id is not None:
             status = STATUS_LEAVE
         elif leave_name is not None and ar is None:
             status = STATUS_LEAVE
+        elif hol_name is not None:
+            status = STATUS_HOLIDAY
+        elif weekend:
+            status = STATUS_WEEKEND
         elif (
             ar is not None
             and bool(ar.absent)
@@ -1060,14 +1062,18 @@ def fetch_day_detail(
     # Status — mirrors person_view priority exactly, including the
     # "waiting" branch that was previously missing here (causing the
     # drawer to show "absent" when the Per-Person cell showed "waiting").
+    # Leave is the most specific, intentional status for an employee on a
+    # given day, so it wins over holiday / weekend — an approved leave the
+    # operator set must surface (and get its own template) rather than read
+    # as a generic "week off".
     if in_future:
         status = STATUS_FUTURE
+    elif ar is not None and ar.leave_type_id is not None:
+        status = STATUS_LEAVE
     elif hol_name is not None:
         status = STATUS_HOLIDAY
     elif weekend:
         status = STATUS_WEEKEND
-    elif ar is not None and ar.leave_type_id is not None:
-        status = STATUS_LEAVE
     elif (
         ar is not None
         and bool(ar.absent)

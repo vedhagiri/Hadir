@@ -62,10 +62,12 @@ function shortDay(iso: string): string {
 type Bucket = "present" | "late" | "absent" | "onLeave" | "off" | "pending";
 
 function classify(it: AttendanceItem): Bucket {
+  // Leave wins over everything — the engine clears ``absent`` on a leave
+  // day, so the marker is leave_type_id, not absent.
+  if (it.leave_type_id !== null) return "onLeave";
   if (it.is_holiday && !it.in_time) return "off";
   if (it.is_weekend && !it.in_time) return "off";
   if (it.pending) return "pending";
-  if (it.absent && it.leave_type_id !== null) return "onLeave";
   if (!it.in_time) return "absent";
   if (it.late) return "late";
   return "present";

@@ -678,7 +678,7 @@ function AttendancePreview({
 
 function DailyStatusPill({ item }: { item: AttendanceItem }) {
   const { t } = useTranslation();
-  if (item.absent && item.leave_type_id !== null) {
+  if (item.leave_type_id !== null) {
     return <span className="pill pill-info">{t("reports.status.onLeave")}</span>;
   }
   if (item.is_holiday && !item.in_time) {
@@ -1114,10 +1114,12 @@ interface DeptRow {
 type SummaryBucket = "present" | "late" | "absent" | "onLeave";
 
 function classifyForSummary(it: AttendanceItem): SummaryBucket | null {
+  // Leave wins — engine clears ``absent`` on a leave day, so the marker
+  // is leave_type_id, not absent.
+  if (it.leave_type_id !== null) return "onLeave";
   if (it.is_holiday && !it.in_time) return null;
   if (it.is_weekend && !it.in_time) return null;
   if (it.pending) return null;
-  if (it.absent && it.leave_type_id !== null) return "onLeave";
   if (!it.in_time) return "absent";
   if (it.late) return "late";
   return "present";
