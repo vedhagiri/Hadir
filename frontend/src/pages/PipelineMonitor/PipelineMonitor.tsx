@@ -20,6 +20,7 @@ import { Icon } from "../../shell/Icon";
 import { ALL_USE_CASE_CODES, useEnabledUseCases } from "../../hooks/useEnabledUseCases";
 import type { IconName } from "../../shell/Icon";
 import { ClearQueuesAction } from "./ClearQueuesAction";
+import { QueueHistoryAction } from "./QueueHistoryAction";
 import { ResourcesPanel } from "./ResourcesPanel";
 
 const POLL_INTERVAL_MS = 3000;
@@ -215,6 +216,7 @@ export function PipelineMonitor() {
             style={{ display: "inline-flex", gap: 8, alignItems: "center" }}
           >
             <ClearQueuesAction />
+            <QueueHistoryAction />
             <RestartAllWorkersAction />
           </div>
         )}

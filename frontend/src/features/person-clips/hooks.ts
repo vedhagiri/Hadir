@@ -301,6 +301,34 @@ export function useClipPipelineSubmitAll() {
   });
 }
 
+// Submit a specific set of clips (the checkbox selection) to the
+// pipeline — the "Identify selected" path, distinct from submit-all.
+export interface ClipPipelineSubmitResponse {
+  batch_id: string;
+  total_jobs: number;
+  queued_jobs: number;
+  skipped_jobs: number;
+}
+
+export function useClipPipelineSubmit() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      clip_ids: number[];
+      use_cases: string[];
+      skip_existing: boolean;
+    }) =>
+      api<ClipPipelineSubmitResponse>("/api/clip-pipeline/submit", {
+        method: "POST",
+        body,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["clip-analytics", "list"] });
+      qc.invalidateQueries({ queryKey: ["clip-pipeline", "status"] });
+    },
+  });
+}
+
 
 // Status of one batch — the modal polls this aggressively while the
 // batch is in flight so the operator sees jobs move from queued →

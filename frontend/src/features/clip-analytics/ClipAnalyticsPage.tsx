@@ -26,6 +26,7 @@ import {
   useDeletePersonClip,
   useClipPipelineBatch,
   useClipPipelineStatus,
+  useClipPipelineSubmit,
   useClipPipelineSubmitAll,
   useProcessedClipCounts,
   useReconcileNow,
@@ -905,6 +906,7 @@ export function ClipAnalyticsPage() {
   const [detailTarget, setDetailTarget] = useState<PersonClipOut | null>(null);
   const [liveTarget, setLiveTarget] = useState<PersonClipOut | null>(null);
   const [batchOpen, setBatchOpen] = useState(false);
+  const [identifySelectedOpen, setIdentifySelectedOpen] = useState(false);
   // ``Batch Process Status`` modal — surfaces the live progress of
   // any in-flight ``clip_pipeline`` batches (queue depth, completed
   // / skipped / failed counters, currently-processing clip/UC).
@@ -1205,6 +1207,27 @@ export function ClipAnalyticsPage() {
               deletes only those. The button label adapts so the
               operator can see exactly how many will be deleted before
               they click. */}
+          <button
+            type="button"
+            className="btn"
+            onClick={() => setIdentifySelectedOpen(true)}
+            disabled={selected.size === 0 || total === 0}
+            title={
+              selected.size === 0
+                ? "Tick clips to process just those"
+                : `Process ${selected.size} selected clip(s)`
+            }
+            style={
+              selected.size === 0 || total === 0
+                ? { opacity: 0.5, cursor: "not-allowed", pointerEvents: "none", marginInlineEnd: 8 }
+                : { marginInlineEnd: 8 }
+            }
+          >
+            <Icon name="sparkles" size={12} />
+            {selected.size === 0
+              ? "Identify selected"
+              : `Identify selected (${selected.size})`}
+          </button>
           <button
             // Always carry ``btn-danger`` so the matching
             // ``.btn-danger:disabled { opacity: 0.5; cursor:
@@ -1887,6 +1910,13 @@ export function ClipAnalyticsPage() {
       {batchOpen && (
         <BatchIdentifyEventModal onClose={() => setBatchOpen(false)} />
       )}
+      {identifySelectedOpen && (
+        <IdentifySelectedModal
+          clipIds={Array.from(selected)}
+          onClose={() => setIdentifySelectedOpen(false)}
+          onDone={() => setSelected(new Set())}
+        />
+      )}
       {statusOpen && (
         <BatchProcessStatusModal
           batches={activeBatches.concat(
@@ -2369,6 +2399,144 @@ const UC_TILES: readonly UseCaseTile[] = [
 // ---------------------------------------------------------------------------
 
 type BatchMode = "skip_existing" | "all";
+
+// Compact "Identify selected" — process ONLY the checkbox-selected
+// clips, instead of the all-tenant batch. Direct submit of the chosen
+// clip_ids; default mode is overwrite since the operator deliberately
+// picked these clips.
+function IdentifySelectedModal({
+  clipIds,
+  onClose,
+  onDone,
+}: {
+  clipIds: number[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const enabledUcs = useEnabledUseCases();
+  const submit = useClipPipelineSubmit();
+  const ucOptions = (["uc1", "uc2"] as const).filter((u) => enabledUcs.includes(u));
+  const [ucs, setUcs] = useState<Set<string>>(() => new Set(["uc1"]));
+  const [overwrite, setOverwrite] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+
+  const toggleUc = (u: string) =>
+    setUcs((s) => {
+      const next = new Set(s);
+      if (next.has(u)) next.delete(u);
+      else next.add(u);
+      return next;
+    });
+
+  async function run() {
+    setError(null);
+    if (ucs.size === 0) {
+      setError("Pick at least one use case.");
+      return;
+    }
+    try {
+      const res = await submit.mutateAsync({
+        clip_ids: clipIds,
+        use_cases: Array.from(ucs),
+        skip_existing: !overwrite,
+      });
+      setDone(
+        `Submitted ${res.queued_jobs} job(s) for ${clipIds.length} clip(s)` +
+          (res.skipped_jobs ? ` · ${res.skipped_jobs} skipped (already done).` : "."),
+      );
+      onDone();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not start processing.");
+    }
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Identify selected clips"
+      style={{
+        position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",
+        zIndex: 80, display: "grid", placeItems: "center", padding: 16,
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget && !submit.isPending) onClose(); }}
+    >
+      <div
+        style={{
+          background: "var(--bg-elev)", border: "1px solid var(--border)",
+          borderRadius: 14, width: 440, maxWidth: "calc(100vw - 32px)",
+          boxShadow: "0 24px 64px rgba(0,0,0,0.28)", overflow: "hidden",
+        }}
+      >
+        <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 10 }}>
+          <span aria-hidden style={{ width: 34, height: 34, borderRadius: 9, display: "grid", placeItems: "center", background: "var(--accent-soft, var(--bg-sunken))", color: "var(--accent)" }}>
+            <Icon name="sparkles" size={17} />
+          </span>
+          <div style={{ flex: 1 }}>
+            <h2 style={{ margin: 0, fontSize: 15.5, fontWeight: 700, color: "var(--text)" }}>Identify selected clips</h2>
+            <div style={{ fontSize: 12, color: "var(--text-tertiary)", marginTop: 1 }}>
+              Process only the {clipIds.length} clip(s) you ticked — not the whole tenant.
+            </div>
+          </div>
+          <button className="btn btn-sm" onClick={onClose} disabled={submit.isPending} aria-label="Close"><Icon name="x" size={12} /></button>
+        </div>
+
+        {done ? (
+          <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ fontSize: 13.5, color: "var(--text)" }}>{done}</div>
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button className="btn btn-primary" onClick={onClose}>Done</button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-tertiary)" }}>Use cases</span>
+              <div style={{ display: "flex", gap: 8 }}>
+                {ucOptions.map((u) => {
+                  const on = ucs.has(u);
+                  return (
+                    <button key={u} type="button" onClick={() => toggleUc(u)} aria-pressed={on}
+                      style={{ flex: 1, padding: "8px 0", fontSize: 13, fontWeight: on ? 700 : 500, borderRadius: 8,
+                        border: "1px solid " + (on ? "var(--accent)" : "var(--border)"),
+                        background: on ? "var(--accent)" : "var(--bg)", color: on ? "white" : "var(--text-secondary)", cursor: "pointer" }}>
+                      {u.toUpperCase()}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-tertiary)" }}>Mode</span>
+              <label style={{ display: "flex", gap: 9, alignItems: "flex-start", cursor: "pointer" }}>
+                <input type="radio" checked={overwrite} onChange={() => setOverwrite(true)} style={{ marginTop: 3 }} />
+                <span style={{ fontSize: 13, color: "var(--text)" }}>Reprocess (overwrite)
+                  <span style={{ display: "block", fontSize: 11.5, color: "var(--text-tertiary)" }}>Re-run these clips even if already processed.</span></span>
+              </label>
+              <label style={{ display: "flex", gap: 9, alignItems: "flex-start", cursor: "pointer" }}>
+                <input type="radio" checked={!overwrite} onChange={() => setOverwrite(false)} style={{ marginTop: 3 }} />
+                <span style={{ fontSize: 13, color: "var(--text)" }}>Skip already processed
+                  <span style={{ display: "block", fontSize: 11.5, color: "var(--text-tertiary)" }}>Only run the selected clips that have no result yet.</span></span>
+              </label>
+            </div>
+
+            {error && <div role="alert" style={{ fontSize: 12.5, color: "var(--danger-text)" }}>{error}</div>}
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button className="btn btn-sm" onClick={onClose} disabled={submit.isPending}>Cancel</button>
+              <button className="btn btn-primary" onClick={run} disabled={submit.isPending || ucs.size === 0}>
+                <Icon name="sparkles" size={12} />
+                {submit.isPending ? "Submitting…" : `Process ${clipIds.length} clip(s)`}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function BatchIdentifyEventModal({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();

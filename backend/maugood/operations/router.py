@@ -19,7 +19,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, select
 
@@ -854,6 +854,9 @@ class QueueSnapshotOut(BaseModel):
 
 class ClearQueueBody(BaseModel):
     queue: str = Field(..., min_length=1, max_length=24)
+    # Reason recorded on every cancelled row so Queue History shows why
+    # the backlog was cleared. Optional; defaults applied server-side.
+    reason: Optional[str] = Field(default=None, max_length=500)
 
 
 class ClearQueueOut(BaseModel):
@@ -985,6 +988,14 @@ def clear_queues(
     # 2. DB-side: mark the tenant's pending clip_processing_results
     #    rows as 'cancelled' so a recovery sweep doesn't pick them up
     #    later. Scoped per-tenant by the WHERE clause.
+    clear_reason = (body.reason or "").strip() or "cleared by admin"
+    cancel_values = {
+        "status": "cancelled",
+        "error": clear_reason,
+        "cleared_at": func.now(),
+        "cleared_by_user_id": user.id,
+        "clear_reason": clear_reason,
+    }
     db_cancelled = 0
     with get_engine().begin() as conn:
         # Match the UC filter to the queue chosen. ``all`` and
@@ -1002,7 +1013,7 @@ def clear_queues(
                     clip_processing_results.c.tenant_id == scope.tenant_id,
                     clip_processing_results.c.status == "pending",
                 )
-                .values(status="cancelled", error="cleared by admin")
+                .values(**cancel_values)
             )
             db_cancelled = int(res.rowcount or 0)
         elif queue_key.startswith("crop_"):
@@ -1014,7 +1025,7 @@ def clear_queues(
                     clip_processing_results.c.status == "pending",
                     clip_processing_results.c.use_case == uc,
                 )
-                .values(status="cancelled", error="cleared by admin")
+                .values(**cancel_values)
             )
             db_cancelled = int(res.rowcount or 0)
 
@@ -1030,6 +1041,7 @@ def clear_queues(
                 "cleared": cleared,
                 "cleared_total": cleared_total,
                 "db_cancelled": db_cancelled,
+                "reason": clear_reason,
             },
         )
 
@@ -1046,6 +1058,228 @@ def clear_queues(
         cleared=cleared,
         cleared_total=cleared_total,
         db_cancelled=db_cancelled,
+    )
+
+
+# --- Queue History (cleared/cancelled clips) -------------------------------
+
+
+class QueueHistoryRow(BaseModel):
+    clip_id: int
+    use_case: str
+    camera_id: Optional[int] = None
+    camera_name: Optional[str] = None
+    queued_at: Optional[str] = None
+    cleared_at: Optional[str] = None
+    cleared_by_user_id: Optional[int] = None
+    cleared_by_name: Optional[str] = None
+    reason: Optional[str] = None
+    reprocessable: bool = False
+
+
+class QueueHistoryOut(BaseModel):
+    items: list[QueueHistoryRow]
+    total: int
+    page: int
+    page_size: int
+
+
+@router.get("/operations/queues/history", response_model=QueueHistoryOut)
+def queue_history(
+    user: Annotated[CurrentUser, ADMIN],
+    use_case: Optional[str] = Query(default=None, pattern=r"^(uc1|uc2)$"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+) -> QueueHistoryOut:
+    """Clips that were removed from a queue via Clear Queues — the
+    cancelled ``clip_processing_results`` rows. The clip videos are NOT
+    deleted, so each row can be reprocessed later (off-peak/overnight).
+    """
+
+    from maugood.db import cameras, person_clips, users  # noqa: PLC0415
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    base = (
+        select(
+            clip_processing_results.c.person_clip_id.label("clip_id"),
+            clip_processing_results.c.use_case,
+            clip_processing_results.c.created_at.label("queued_at"),
+            clip_processing_results.c.cleared_at,
+            clip_processing_results.c.cleared_by_user_id,
+            clip_processing_results.c.clear_reason,
+            person_clips.c.camera_id,
+            person_clips.c.recording_status,
+            person_clips.c.file_path,
+            cameras.c.name.label("camera_name"),
+            users.c.full_name.label("cleared_by_name"),
+        )
+        .select_from(
+            clip_processing_results.join(
+                person_clips,
+                person_clips.c.id == clip_processing_results.c.person_clip_id,
+            )
+            .outerjoin(cameras, cameras.c.id == person_clips.c.camera_id)
+            .outerjoin(users, users.c.id == clip_processing_results.c.cleared_by_user_id)
+        )
+        .where(
+            clip_processing_results.c.tenant_id == scope.tenant_id,
+            clip_processing_results.c.status == "cancelled",
+        )
+    )
+    if use_case in ("uc1", "uc2"):
+        base = base.where(clip_processing_results.c.use_case == use_case)
+
+    with get_engine().begin() as conn:
+        total = conn.execute(
+            select(func.count()).select_from(base.subquery())
+        ).scalar_one()
+        rows = conn.execute(
+            base.order_by(clip_processing_results.c.cleared_at.desc().nullslast())
+            .limit(page_size)
+            .offset((page - 1) * page_size)
+        ).all()
+
+    items = [
+        QueueHistoryRow(
+            clip_id=int(r.clip_id),
+            use_case=r.use_case,
+            camera_id=int(r.camera_id) if r.camera_id is not None else None,
+            camera_name=r.camera_name,
+            queued_at=r.queued_at.isoformat() if r.queued_at else None,
+            cleared_at=r.cleared_at.isoformat() if r.cleared_at else None,
+            cleared_by_user_id=r.cleared_by_user_id,
+            cleared_by_name=r.cleared_by_name,
+            reason=r.clear_reason,
+            reprocessable=(
+                r.recording_status == "completed" and r.file_path is not None
+            ),
+        )
+        for r in rows
+    ]
+    return QueueHistoryOut(
+        items=items, total=int(total), page=page, page_size=page_size
+    )
+
+
+class QueueReprocessBody(BaseModel):
+    # Specific (clip_id, use_case) cancelled rows to reprocess. Empty →
+    # reprocess every reprocessable cancelled row for the tenant (capped).
+    clip_ids: list[int] = Field(default_factory=list)
+    use_case: Optional[str] = Field(default=None)
+    max_clips: int = Field(default=500, ge=1, le=5000)
+
+
+class QueueReprocessOut(BaseModel):
+    batch_id: str
+    clips_found: int
+    queued_jobs: int
+    skipped_jobs: int
+
+
+@router.post("/operations/queues/history/reprocess", response_model=QueueReprocessOut)
+def reprocess_cleared(
+    body: QueueReprocessBody,
+    user: Annotated[CurrentUser, ADMIN],
+) -> QueueReprocessOut:
+    """Re-submit cleared (cancelled) clips back into the pipeline. Deletes
+    the cancelled CPR rows for the selected clips/use-cases (so the
+    pipeline doesn't skip them) and submits a fresh batch — the
+    off-peak/overnight reprocess path.
+    """
+
+    from sqlalchemy import delete  # noqa: PLC0415
+
+    from maugood.clip_pipeline import clip_pipeline  # noqa: PLC0415
+    from maugood.db import person_clips, tenant_context  # noqa: PLC0415
+    from maugood.tenants.scope import resolve_tenant_schema_via_engine  # noqa: PLC0415
+
+    if not clip_pipeline._started:  # type: ignore[attr-defined]  # noqa: SLF001
+        raise HTTPException(status_code=503, detail="clip_pipeline not running")
+
+    use_cases = (
+        [body.use_case]
+        if body.use_case in ("uc1", "uc2")
+        else ["uc1", "uc2"]
+    )
+
+    engine = get_engine()
+    schema = resolve_tenant_schema_via_engine(engine, user.tenant_id)
+    scope = TenantScope(tenant_id=user.tenant_id, tenant_schema=schema)
+
+    with tenant_context(scope.tenant_schema):
+        with engine.begin() as conn:
+            sel = (
+                select(clip_processing_results.c.person_clip_id)
+                .distinct()
+                .join(
+                    person_clips,
+                    person_clips.c.id == clip_processing_results.c.person_clip_id,
+                )
+                .where(
+                    clip_processing_results.c.tenant_id == scope.tenant_id,
+                    clip_processing_results.c.status == "cancelled",
+                    clip_processing_results.c.use_case.in_(use_cases),
+                    person_clips.c.recording_status == "completed",
+                    person_clips.c.file_path.is_not(None),
+                )
+            )
+            if body.clip_ids:
+                sel = sel.where(
+                    clip_processing_results.c.person_clip_id.in_(body.clip_ids)
+                )
+            sel = sel.order_by(
+                clip_processing_results.c.person_clip_id.desc()
+            ).limit(body.max_clips)
+
+            clip_ids = [int(r.person_clip_id) for r in conn.execute(sel).all()]
+
+            if not clip_ids:
+                return QueueReprocessOut(
+                    batch_id="", clips_found=0, queued_jobs=0, skipped_jobs=0
+                )
+
+            # Drop the cancelled rows so submit_batch re-queues them.
+            conn.execute(
+                delete(clip_processing_results).where(
+                    clip_processing_results.c.tenant_id == scope.tenant_id,
+                    clip_processing_results.c.person_clip_id.in_(clip_ids),
+                    clip_processing_results.c.use_case.in_(use_cases),
+                    clip_processing_results.c.status == "cancelled",
+                )
+            )
+
+    batch = clip_pipeline.submit_batch(
+        scope=scope,
+        clip_ids=clip_ids,
+        use_cases=use_cases,
+        skip_existing=True,
+        submitted_by_user_id=user.id,
+        submitted_by_email=user.email,
+    )
+
+    with tenant_context(scope.tenant_schema):
+        with engine.begin() as conn:
+            write_audit(
+                conn,
+                tenant_id=scope.tenant_id,
+                actor_user_id=user.id,
+                action="queue.history_reprocessed",
+                entity_type="clip_pipeline_batch",
+                entity_id=batch.batch_id,
+                after={
+                    "clips_found": len(clip_ids),
+                    "use_cases": use_cases,
+                    "queued_jobs": batch.queued_jobs,
+                    "skipped_jobs": batch.skipped_jobs,
+                    "explicit_ids": bool(body.clip_ids),
+                },
+            )
+
+    return QueueReprocessOut(
+        batch_id=batch.batch_id,
+        clips_found=len(clip_ids),
+        queued_jobs=batch.queued_jobs,
+        skipped_jobs=batch.skipped_jobs,
     )
 
 

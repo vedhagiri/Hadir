@@ -2559,6 +2559,11 @@ clip_processing_results = Table(
     # Migration 0088 — detection lock-wait vs compute split.
     Column("detect_lock_wait_ms", Integer, nullable=True),
     Column("detect_compute_ms", Integer, nullable=True),
+    # Migration 0089 — queue-clear history (who/when/why a queued row was
+    # cancelled via Clear Queues; enables Queue History + reprocess).
+    Column("cleared_at", DateTime(timezone=True), nullable=True),
+    Column("cleared_by_user_id", Integer, nullable=True),
+    Column("clear_reason", Text, nullable=True),
     # Migration 0062 — boot-time recovery counter. Incremented on every
     # successful atomic claim by the recovery flow; capped to prevent
     # poison-job loops.

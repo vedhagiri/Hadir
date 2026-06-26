@@ -53,10 +53,10 @@ function useQueuesSnapshot(enabled: boolean) {
 function useClearQueue() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (queue: string) =>
+    mutationFn: (vars: { queue: string; reason: string }) =>
       api<ClearQueueResponse>("/api/operations/queues/clear", {
         method: "POST",
-        body: { queue },
+        body: { queue: vars.queue, reason: vars.reason },
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["operations", "queues", "snapshot"] });
@@ -147,9 +147,10 @@ function ClearQueuesModal({
   const clear = useClearQueue();
   const [confirmingKey, setConfirmingKey] = useState<string | null>(null);
   const [confirmingAll, setConfirmingAll] = useState(false);
+  const [reason, setReason] = useState("");
 
   function performClear(queue: string) {
-    clear.mutate(queue, {
+    clear.mutate({ queue, reason: reason.trim() }, {
       onSuccess: (r) => {
         onCleared(r);
         setConfirmingKey(null);
@@ -249,6 +250,43 @@ function ClearQueuesModal({
           {t("queueClear.modal.caveatBody")}
         </div>
 
+        {/* Reason — recorded on every cancelled row for Queue History so
+            the cleared clips can be reviewed + reprocessed later. */}
+        <label style={{ display: "block", marginBottom: 12 }}>
+          <span
+            style={{
+              display: "block",
+              fontSize: 11,
+              fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: "0.04em",
+              color: "var(--text-tertiary)",
+              marginBottom: 4,
+            }}
+          >
+            Reason (optional)
+          </span>
+          <input
+            type="text"
+            value={reason}
+            maxLength={500}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="e.g. backlog — reprocess overnight"
+            style={{
+              width: "100%",
+              padding: "7px 10px",
+              fontSize: 13,
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius-sm)",
+              background: "var(--bg-elev)",
+              color: "var(--text)",
+            }}
+          />
+          <span style={{ display: "block", fontSize: 11, color: "var(--text-tertiary)", marginTop: 4 }}>
+            Cleared clips are kept in Queue History and can be reprocessed later — they are not deleted.
+          </span>
+        </label>
+
         {q.isLoading && (
           <div
             className="text-sm text-dim"
@@ -288,7 +326,7 @@ function ClearQueuesModal({
                 {q.data.queues.map((row) => {
                   const isConfirming = confirmingKey === row.key;
                   const isClearing =
-                    clear.isPending && clear.variables === row.key;
+                    clear.isPending && clear.variables?.queue === row.key;
                   return (
                     <tr key={row.key}>
                       <td style={cellStyle}>
