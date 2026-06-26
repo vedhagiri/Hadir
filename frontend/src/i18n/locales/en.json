@@ -2909,7 +2909,10 @@
       "byEndDate": "Filter by end date",
       "byStatus": "Filter by processing status",
       "byProcessedUcs": "Filter by processed use cases",
-      "byRecordingMode": "Filter by recording mode"
+      "byRecordingMode": "Filter by recording mode",
+      "recordingModeLabel": "Recording mode",
+      "clear": "Clear",
+      "clearAria": "Clear all filters"
     },
     "recordingMode": {
       "all": "All modes",

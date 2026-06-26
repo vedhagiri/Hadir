@@ -2939,7 +2939,10 @@
       "byEndDate": "تصفية حسب تاريخ الانتهاء",
       "byStatus": "تصفية حسب حالة المعالجة",
       "byProcessedUcs": "تصفية حسب حالات الاستخدام المُعالجة",
-      "byRecordingMode": "تصفية حسب وضع التسجيل"
+      "byRecordingMode": "تصفية حسب وضع التسجيل",
+      "recordingModeLabel": "وضع التسجيل",
+      "clear": "مسح",
+      "clearAria": "مسح جميع عوامل التصفية"
     },
     "recordingMode": {
       "all": "كل الأوضاع",

@@ -28,6 +28,26 @@ const DEFAULT_TZ = "Asia/Muscat";
 const DEFAULT_DATE_FMT: DateFormat = "DD/MM/YYYY";
 const DEFAULT_TIME_FMT: TimeFormat = "24h";
 
+/**
+ * Build an ISO datetime for a date-only day ("YYYY-MM-DD") at the given
+ * wall-clock time, stamped with the viewer's LOCAL timezone offset
+ * (e.g. "2026-06-09T23:59:59+04:00").
+ *
+ * Used for clip date-range filters so the day boundaries sent to the API
+ * line up with the locally-rendered clip times — a plain naive bound is
+ * treated as UTC by the database, which leaks the next day's early-morning
+ * clips into a single-day filter.
+ */
+export function dayBound(day: string, time: string): string {
+  const d = new Date(`${day}T${time}`);
+  const mins = -d.getTimezoneOffset(); // minutes east of UTC (UTC+4 → 240)
+  const sign = mins >= 0 ? "+" : "-";
+  const abs = Math.abs(mins);
+  const hh = String(Math.floor(abs / 60)).padStart(2, "0");
+  const mm = String(abs % 60).padStart(2, "0");
+  return `${day}T${time}${sign}${hh}:${mm}`;
+}
+
 export interface TenantDateTime {
   timezone: string;
   dateFormat: DateFormat;

@@ -15,7 +15,8 @@ import { api } from "../../api/client";
 import { AnomalyInfoBanner } from "../../components/AnomalyNote";
 import { ModalShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
-import { useTenantDateTime } from "../../util/datetime";
+import { dayBound, useTenantDateTime } from "../../util/datetime";
+import { DatePicker, todayIso } from "../../components/DatePicker";
 import type { IconName } from "../../shell/Icon";
 import { useCameras } from "../cameras/hooks";
 import {
@@ -863,6 +864,30 @@ export function ClipAnalyticsPage() {
   const [processedUcFilter, setProcessedUcFilter] =
     useState<ProcessedUcFilter>("any");
 
+  // Whether any filter (server- or client-side) is currently narrowing
+  // the list — drives the "Clear" button visibility.
+  const hasActiveFilter =
+    cameraId !== null ||
+    processingFilter !== "all" ||
+    recordingMode !== "all" ||
+    startDate !== "" ||
+    endDate !== "" ||
+    clipIdQ !== "" ||
+    clipNameQ !== "" ||
+    processedUcFilter !== "any";
+
+  function clearFilters() {
+    setCameraId(null);
+    setProcessingFilter("all");
+    setRecordingMode("all");
+    setStartDate("");
+    setEndDate("");
+    setClipIdQ("");
+    setClipNameQ("");
+    setProcessedUcFilter("any");
+    setPage(1);
+  }
+
   // ---- selection + modals ----
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
   const [identifyTarget, setIdentifyTarget] = useState<PersonClipOut | null>(
@@ -991,8 +1016,14 @@ export function ClipAnalyticsPage() {
       p.set("recording_status", "completed");
     }
     if (recordingMode !== "all") p.set("recording_mode", recordingMode);
-    if (startDate) p.set("start", `${startDate}T00:00:00`);
-    if (endDate) p.set("end", `${endDate}T23:59:59`);
+    // Day bounds in the viewer's local timezone (see dayBound). A lone
+    // start date filters to ONLY that day; start+end is an inclusive range.
+    if (startDate) p.set("start", dayBound(startDate, "00:00:00"));
+    if (startDate && !endDate) {
+      p.set("end", dayBound(startDate, "23:59:59"));
+    } else if (endDate) {
+      p.set("end", dayBound(endDate, "23:59:59"));
+    }
     return p.toString();
   }, [page, cameraId, processingFilter, recordingMode, startDate, endDate]);
 
@@ -1271,6 +1302,61 @@ export function ClipAnalyticsPage() {
       />
 
       <div className="card">
+        {/* Filter toolbar — holds filters that don't map to a table
+            column (recording mode) plus the global Clear. Keeping them
+            here lets the per-column filter row line up 1:1 with the
+            column headers below. */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "flex-end",
+            gap: 12,
+            flexWrap: "wrap",
+            padding: "4px 2px 12px",
+          }}
+        >
+          <label
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              fontSize: 12.5,
+              color: "var(--text-secondary)",
+            }}
+          >
+            {t("clipAnalytics.filters.recordingModeLabel")}
+            <select
+              value={recordingMode}
+              onChange={(e) => {
+                setRecordingMode(
+                  e.target.value as "all" | "save_clips" | "logs_only",
+                );
+                setPage(1);
+              }}
+              style={filterControlStyle}
+              aria-label={t("clipAnalytics.filters.byRecordingMode")}
+            >
+              <option value="all">{t("clipAnalytics.recordingMode.all")}</option>
+              <option value="save_clips">
+                {t("clipAnalytics.recordingMode.saveClips")}
+              </option>
+              <option value="logs_only">
+                {t("clipAnalytics.recordingMode.logsOnly")}
+              </option>
+            </select>
+          </label>
+          {hasActiveFilter && (
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={clearFilters}
+              aria-label={t("clipAnalytics.filters.clearAria")}
+            >
+              <Icon name="x" size={11} /> {t("clipAnalytics.filters.clear")}
+            </button>
+          )}
+        </div>
         {/* Sticky thead is two rows: the column titles + a per-column
             filter row. Each <th>/<td> in the sticky region carries an
             opaque background so scrolling rows don't bleed through. */}
@@ -1482,12 +1568,13 @@ export function ClipAnalyticsPage() {
                   boxShadow: "inset 0 -1px 0 var(--border)",
                 }}
               >
-                <input
-                  type="date"
+                <DatePicker
                   value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  style={filterControlStyle}
-                  aria-label={t("clipAnalytics.filters.byStartDate")}
+                  onChange={(next) => setStartDate(next)}
+                  max={todayIso()}
+                  ariaLabel={t("clipAnalytics.filters.byStartDate")}
+                  placeholder={t("clipAnalytics.filters.byStartDate")}
+                  triggerStyle={filterControlStyle}
                 />
               </th>
               <th
@@ -1496,12 +1583,14 @@ export function ClipAnalyticsPage() {
                   boxShadow: "inset 0 -1px 0 var(--border)",
                 }}
               >
-                <input
-                  type="date"
+                <DatePicker
                   value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  style={filterControlStyle}
-                  aria-label={t("clipAnalytics.filters.byEndDate")}
+                  onChange={(next) => setEndDate(next)}
+                  {...(startDate ? { min: startDate } : {})}
+                  max={todayIso()}
+                  ariaLabel={t("clipAnalytics.filters.byEndDate")}
+                  placeholder={t("clipAnalytics.filters.byEndDate")}
+                  triggerStyle={filterControlStyle}
                 />
               </th>
               <th
@@ -1515,29 +1604,7 @@ export function ClipAnalyticsPage() {
                   background: "var(--bg-elev)",
                   boxShadow: "inset 0 -1px 0 var(--border)",
                 }}
-              >
-                <select
-                  value={recordingMode}
-                  onChange={(e) => {
-                    setRecordingMode(
-                      e.target.value as "all" | "save_clips" | "logs_only",
-                    );
-                    setPage(1);
-                  }}
-                  style={filterControlStyle}
-                  aria-label={t("clipAnalytics.filters.byRecordingMode")}
-                >
-                  <option value="all">
-                    {t("clipAnalytics.recordingMode.all")}
-                  </option>
-                  <option value="save_clips">
-                    {t("clipAnalytics.recordingMode.saveClips")}
-                  </option>
-                  <option value="logs_only">
-                    {t("clipAnalytics.recordingMode.logsOnly")}
-                  </option>
-                </select>
-              </th>
+              />
               <th
                 style={{
                   background: "var(--bg-elev)",

@@ -9,7 +9,9 @@ import { useQuery } from "@tanstack/react-query";
 import type { UseQueryResult } from "@tanstack/react-query";
 
 import { api } from "../../api/client";
+import { DatePicker, todayIso } from "../../components/DatePicker";
 import { Icon } from "../../shell/Icon";
+import { dayBound } from "../../util/datetime";
 import { useCameraOptions } from "../person-clips/hooks";
 import type { PersonClipListResponse, PersonClipOut } from "../person-clips/types";
 
@@ -36,8 +38,25 @@ function useClipLog(
   const params = new URLSearchParams();
   params.set("recording_mode", mode);
   if (cameraId !== null) params.set("camera_id", String(cameraId));
-  if (start) params.set("start", start);
-  if (end) params.set("end", end);
+  // The pickers are date-only (YYYY-MM-DD). Expand to full-day bounds in the
+  // viewer's LOCAL timezone (the table renders clip times in local time, so
+  // the filter must use the same day boundaries — otherwise a clip shown as
+  // "Jun 10 01:00 AM" local, stored as Jun 9 21:00 UTC, would leak into a
+  // Jun 9 filter). The local offset is appended so the backend compares the
+  // timestamptz column correctly.
+  // Behaviour:
+  //   * From only        → show ONLY that single day (start..end of day)
+  //   * From + To        → inclusive range (start of From .. end of To)
+  //   * To only          → everything up to the end of that day
+  const startDay = start && !start.includes("T") ? start : null;
+  const endDay = end && !end.includes("T") ? end : null;
+  if (start) params.set("start", startDay ? dayBound(startDay, "00:00:00") : start);
+  if (startDay && !end) {
+    // Single-day filter: cap the range at the end of the chosen start day.
+    params.set("end", dayBound(startDay, "23:59:59"));
+  } else if (end) {
+    params.set("end", endDay ? dayBound(endDay, "23:59:59") : end);
+  }
   params.set("page", String(page));
   params.set("page_size", String(PAGE_SIZE));
   const path = `/api/person-clips?${params.toString()}`;
@@ -130,27 +149,28 @@ export function ClipLogsPage() {
                 </option>
               ))}
             </select>
-            <input
-              type="datetime-local"
+            <DatePicker
               value={start ?? ""}
-              onChange={(e) => {
-                setStart(e.target.value || null);
+              onChange={(next) => {
+                setStart(next || null);
                 setPage(1);
               }}
-              style={selectStyle}
-              title="From"
-              aria-label="From"
+              max={todayIso()}
+              ariaLabel="From"
+              placeholder="From"
+              triggerStyle={selectStyle}
             />
-            <input
-              type="datetime-local"
+            <DatePicker
               value={end ?? ""}
-              onChange={(e) => {
-                setEnd(e.target.value || null);
+              onChange={(next) => {
+                setEnd(next || null);
                 setPage(1);
               }}
-              style={selectStyle}
-              title="To"
-              aria-label="To"
+              {...(start ? { min: start } : {})}
+              max={todayIso()}
+              ariaLabel="To"
+              placeholder="To"
+              triggerStyle={selectStyle}
             />
             {hasFilter && (
               <button
