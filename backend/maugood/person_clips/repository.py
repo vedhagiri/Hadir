@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import delete, func, insert, or_, select
+from sqlalchemy import delete, exists, func, insert, or_, select
 from sqlalchemy.engine import Engine, Row
 
 from maugood.db import cameras, clip_processing_results, employees, person_clips
@@ -26,6 +26,7 @@ def list_clips(
     recording_status: Optional[str] = None,
     matched_status: Optional[str] = None,
     recording_mode: Optional[str] = None,
+    processing_state: Optional[str] = None,
 ) -> tuple[list[Row], int]:
     """Return ``(rows, total_count)`` for the given filters.
 
@@ -134,6 +135,33 @@ def list_clips(
                 ("recording", "finalizing", "completed")
             )
         )
+
+    # Pipeline processing-state filter (Clip Analytics "Processing Status"
+    # dropdown). Derived from clip_processing_results rather than a column,
+    # so we apply it SERVER-SIDE here — that keeps the total count + page
+    # numbers correct (client-side narrowing only filtered the current
+    # page, leaving a stale "34 pages / 1698 total"). Mirrors the
+    # frontend processingStatusKey priority exactly.
+    if processing_state in ("processing", "queued", "saved", "processed"):
+
+        def _has(status: str):
+            return exists().where(
+                clip_processing_results.c.tenant_id == scope.tenant_id,
+                clip_processing_results.c.person_clip_id == person_clips.c.id,
+                clip_processing_results.c.status == status,
+            )
+
+        if processing_state == "processing":
+            base = base.where(_has("processing"))
+        elif processing_state == "queued":
+            # Pending in the queue, nothing actively processing.
+            base = base.where(_has("pending"), ~_has("processing"))
+        elif processing_state == "processed":
+            base = base.where(_has("completed"))
+        else:  # "saved" — completed recording, nothing run / queued / in-flight
+            base = base.where(
+                ~_has("completed"), ~_has("processing"), ~_has("pending")
+            )
 
     count_q = select(func.count()).select_from(base.subquery())
     total = conn.execute(count_q).scalar_one()

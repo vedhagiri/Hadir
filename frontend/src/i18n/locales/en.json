@@ -2928,6 +2928,7 @@
       "recording": "Recording",
       "finalizing": "Finalizing",
       "processing": "Processing",
+      "queued": "Queued",
       "saved": "Saved",
       "logsOnly": "Logs only",
       "processed": "Processed",

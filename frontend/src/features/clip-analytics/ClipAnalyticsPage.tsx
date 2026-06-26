@@ -52,6 +52,7 @@ type ProcessingFilter =
   | "recording"
   | "encoding"
   | "processing"
+  | "queued"
   | "saved"
   | "processed";
 
@@ -207,6 +208,9 @@ function processingStatusKey(c: PersonClipOut): string {
     case "completed":
     default:
       if ((c.processing_use_cases ?? []).length > 0) return "processing";
+      // Queued: submitted to the pipeline, waiting for a worker — distinct
+      // from "Processing" (actively running) and "Saved" (nothing queued).
+      if ((c.pending_use_cases ?? []).length > 0) return "queued";
       return c.processed_use_cases.length > 0 ? "processed" : "saved";
   }
 }
@@ -1010,11 +1014,14 @@ export function ClipAnalyticsPage() {
       processingFilter === "saved"
       || processingFilter === "processed"
       || processingFilter === "processing"
+      || processingFilter === "queued"
     ) {
-      // All three share recording_status='completed' — the client-side
-      // filter below splits them on processing_use_cases /
-      // processed_use_cases.
+      // These share recording_status='completed'; the pipeline state is
+      // filtered SERVER-SIDE via processing_state so the total count + page
+      // numbers stay correct (client-side narrowing only filtered the
+      // current page).
       p.set("recording_status", "completed");
+      p.set("processing_state", processingFilter);
     }
     if (recordingMode !== "all") p.set("recording_mode", recordingMode);
     // Day bounds in the viewer's local timezone (see dayBound). A lone
@@ -1044,28 +1051,9 @@ export function ClipAnalyticsPage() {
   //  * Processed-UC dropdown
   const items = useMemo(() => {
     let rows = list.data?.items ?? [];
-    if (processingFilter === "processing") {
-      rows = rows.filter(
-        (c) =>
-          c.recording_status === "completed" &&
-          (c.processing_use_cases ?? []).length > 0,
-      );
-    } else if (processingFilter === "saved") {
-      // Saved = completed recording, nothing in flight, nothing
-      // finished — i.e. just sitting waiting for the operator.
-      rows = rows.filter(
-        (c) =>
-          c.recording_status === "completed" &&
-          (c.processing_use_cases ?? []).length === 0 &&
-          c.processed_use_cases.length === 0,
-      );
-    } else if (processingFilter === "processed") {
-      rows = rows.filter(
-        (c) =>
-          c.recording_status === "completed" &&
-          c.processed_use_cases.length > 0,
-      );
-    }
+    // NOTE: processing / queued / saved / processed are filtered
+    // SERVER-SIDE (processing_state query param) so total + pagination are
+    // correct. Only the cheap, page-local refinements run client-side.
     const idQ = clipIdQ.trim();
     if (idQ) {
       rows = rows.filter((c) => String(c.id).includes(idQ));
@@ -1624,6 +1612,7 @@ export function ClipAnalyticsPage() {
                   <option value="recording">{t("clipAnalytics.status.recording")}</option>
                   <option value="encoding">{t("clipAnalytics.status.finalizing")}</option>
                   <option value="processing">{t("clipAnalytics.status.processing")}</option>
+                  <option value="queued">{t("clipAnalytics.status.queued")}</option>
                   <option value="saved">{t("clipAnalytics.status.saved")}</option>
                   <option value="processed">{t("clipAnalytics.status.processed")}</option>
                 </select>
@@ -5777,6 +5766,13 @@ function StatusPill({
         return {
           bg: "rgba(139,92,246,0.14)",
           fg: "#6d28d9",
+        };
+      case "queued":
+        // Waiting in the pipeline queue — amber, so it reads as
+        // "not started yet" distinct from the active purple Processing.
+        return {
+          bg: "rgba(245,158,11,0.14)",
+          fg: "#b45309",
         };
       case "saved":
         return { bg: "var(--success-soft)", fg: "var(--success-text)" };

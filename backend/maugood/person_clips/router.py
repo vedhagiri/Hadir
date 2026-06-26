@@ -240,6 +240,7 @@ def _row_to_out(
     processed_by_clip: dict[int, list[str]] | None = None,
     matched_crop_by_clip: dict[int, int] | None = None,
     processing_by_clip: dict[int, list[str]] | None = None,
+    pending_by_clip: dict[int, list[str]] | None = None,
 ) -> PersonClipOut:
     matched: list[int] = []
     raw = getattr(row, "matched_employees", None)
@@ -254,6 +255,9 @@ def _row_to_out(
     processing_ucs: list[str] = []
     if processing_by_clip is not None:
         processing_ucs = processing_by_clip.get(int(row.id), [])
+    pending_ucs: list[str] = []
+    if pending_by_clip is not None:
+        pending_ucs = pending_by_clip.get(int(row.id), [])
     return PersonClipOut(
         id=row.id,
         camera_id=row.camera_id,
@@ -287,6 +291,7 @@ def _row_to_out(
         ),
         processed_use_cases=processed_ucs,
         processing_use_cases=processing_ucs,
+        pending_use_cases=pending_ucs,
         clip_name=_derive_clip_name(row),
         matched_face_crop_id=(
             matched_crop_by_clip.get(int(row.id))
@@ -783,6 +788,17 @@ def list_person_clips(
         ),
         pattern=r"^(save_clips|logs_only)$",
     ),
+    processing_state: Optional[str] = Query(
+        default=None,
+        description=(
+            "Filter completed clips by pipeline processing state, derived "
+            "from clip_processing_results. One of 'processing' (a worker is "
+            "running), 'queued' (pending, none running), 'processed' (≥1 UC "
+            "completed), 'saved' (nothing run/queued/in-flight). Omitted = "
+            "no processing-state filter."
+        ),
+        pattern=r"^(processing|queued|processed|saved)$",
+    ),
 ) -> PersonClipListResponse:
     """List person clips, with optional filters.
 
@@ -852,6 +868,7 @@ def list_person_clips(
                 recording_status=recording_status,
                 matched_status=matched_status,
                 recording_mode=recording_mode,
+                processing_state=processing_state,
             )
     except Exception:
         logger.exception(
@@ -876,6 +893,7 @@ def list_person_clips(
     name_map: dict[int, str] = {}
     processed_by_clip: dict[int, list[str]] = {}
     processing_by_clip: dict[int, list[str]] = {}
+    pending_by_clip: dict[int, list[str]] = {}
     matched_crop_by_clip: dict[int, int] = {}
     clip_ids = [int(r.id) for r in rows]
 
@@ -917,17 +935,20 @@ def list_person_clips(
                     cid = int(cpr.person_clip_id)
                     uc = str(cpr.use_case).lower()
                     status = str(cpr.status).lower()
-                    target = (
-                        processed_by_clip
-                        if status == "completed"
-                        else processing_by_clip
-                    )
+                    if status == "completed":
+                        target = processed_by_clip
+                    elif status == "pending":
+                        target = pending_by_clip
+                    else:  # "processing"
+                        target = processing_by_clip
                     bucket = target.setdefault(cid, [])
                     if uc not in bucket:
                         bucket.append(uc)
                 for bucket in processed_by_clip.values():
                     bucket.sort()
                 for bucket in processing_by_clip.values():
+                    bucket.sort()
+                for bucket in pending_by_clip.values():
                     bucket.sort()
 
             # Per-clip best-quality face_crop for the requested
@@ -977,6 +998,7 @@ def list_person_clips(
             processed_by_clip,
             matched_crop_by_clip if matched_employee_id is not None else None,
             processing_by_clip,
+            pending_by_clip,
         )
         for r in rows
     ]

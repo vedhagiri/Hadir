@@ -41,10 +41,12 @@ export interface PersonClipOut {
   // by. Empty list = "Not Processed" — drives the Clip Analytics
   // table's "Processed Use Cases" column.
   processed_use_cases: string[];
-  // UCs currently mid-flight on the pipeline (status 'processing' or
-  // 'pending' in clip_processing_results). Non-empty → the Processing
-  // Status pill renders "Processing" instead of "Saved".
+  // UCs actively running on the pipeline (status 'processing'). Non-empty
+  // → the Processing Status pill renders "Processing".
   processing_use_cases: string[];
+  // UCs queued, waiting for a worker (status 'pending'). Non-empty (and
+  // nothing in processing_use_cases) → the pill renders "Queued".
+  pending_use_cases?: string[];
   // Display-friendly clip name. MP4 basename when finalized, or a
   // synthetic ``recording-YYYYMMDDTHHMMSS`` while still recording.
   clip_name: string;
