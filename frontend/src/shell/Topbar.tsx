@@ -22,7 +22,7 @@ import { NotificationBell } from "../notifications/NotificationBell";
 import type { MeResponse, Role } from "../types";
 import { Icon } from "./Icon";
 import { LanguageSwitcher } from "./LanguageSwitcher";
-import { CRUMBS } from "./nav";
+import { CRUMBS, CRUMB_TARGETS } from "./nav";
 
 
 function initialsFor(fullName: string): string {
@@ -62,20 +62,51 @@ export function Topbar({ pageId, role, me }: Props) {
   return (
     <div className="topbar">
       <div className="crumbs">
-        {crumbs.map((c, i) => (
-          <span
-            key={`${i}-${c}`}
-            className={i === crumbs.length - 1 ? "crumb-current" : ""}
-            style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
-          >
-            {i > 0 && (
-              <span className="crumb-sep">
-                <Icon name="chevronRight" size={11} />
-              </span>
-            )}
-            {translateCrumb(c)}
-          </span>
-        ))}
+        {crumbs.map((c, i) => {
+          const isLast = i === crumbs.length - 1;
+          // Clickable when the token resolves to exactly one route and it
+          // isn't the current page (last crumb). Otherwise plain text.
+          const target = isLast ? undefined : CRUMB_TARGETS[c];
+          return (
+            <span
+              key={`${i}-${c}`}
+              className={isLast ? "crumb-current" : ""}
+              style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+            >
+              {i > 0 && (
+                <span className="crumb-sep">
+                  <Icon name="chevronRight" size={11} />
+                </span>
+              )}
+              {target ? (
+                <button
+                  type="button"
+                  className="crumb-link"
+                  onClick={() => navigate(target)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    padding: 0,
+                    font: "inherit",
+                    color: "inherit",
+                    cursor: "pointer",
+                    textDecoration: "none",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.textDecoration = "underline";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.textDecoration = "none";
+                  }}
+                >
+                  {translateCrumb(c)}
+                </button>
+              ) : (
+                translateCrumb(c)
+              )}
+            </span>
+          );
+        })}
       </div>
 
       {/* Right-side group: bell, theme/density, language, user menu.

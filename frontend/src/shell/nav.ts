@@ -147,6 +147,28 @@ export const CRUMBS: Record<string, string[]> = {
   "frame-diagnostics": ["Maugood", "System", "Frame Diagnostics"],
 };
 
+// Breadcrumb → route targets. A crumb token becomes clickable when it
+// resolves to exactly one page. We map the *last* token of each CRUMBS
+// entry to that page's route (`/${id}`, matching App.tsx). Tokens that
+// are the last token of more than one page (e.g. "Attendance", shared by
+// my-attendance + team-attendance) are dropped so a crumb never links to
+// a surprising destination — those stay plain-text section labels. The
+// root "Maugood" crumb always goes home.
+export const CRUMB_TARGETS: Record<string, string> = (() => {
+  const owners: Record<string, string[]> = {};
+  for (const [id, tokens] of Object.entries(CRUMBS)) {
+    const last = tokens[tokens.length - 1];
+    if (!last) continue;
+    (owners[last] ??= []).push(id);
+  }
+  const out: Record<string, string> = { Maugood: "/dashboard" };
+  for (const [token, ids] of Object.entries(owners)) {
+    const only = ids.length === 1 ? ids[0] : undefined;
+    if (only) out[token] = `/${only}`;
+  }
+  return out;
+})();
+
 // The union of every route id across all roles — used by App.tsx so each
 // id has a placeholder page registered, even when the current role's
 // sidebar hides it.
