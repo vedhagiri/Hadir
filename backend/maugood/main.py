@@ -61,6 +61,7 @@ from maugood.clip_pipeline.router import router as clip_pipeline_router
 from maugood.pipeline_monitor import router as pipeline_monitor_router
 from maugood.pipeline_analytics import router as pipeline_analytics_router
 from maugood.retention import retention_scheduler
+from maugood.storage_analytics.daily_cleanup import daily_clip_cleanup_scheduler
 from maugood.scheduled_reports import (
     report_runner,
     router as scheduled_reports_router,
@@ -137,6 +138,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     report_runner.start()
     notification_worker.start()
     retention_scheduler.start()
+    daily_clip_cleanup_scheduler.start()
     lifecycle_scheduler.start()
     # P29 — host-resource ring buffer (CPU/mem/swap/I/O over time).
     from maugood.observability import timeseries as _ts  # noqa: PLC0415
@@ -171,6 +173,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         report_runner.stop()
         notification_worker.stop()
         retention_scheduler.stop()
+        daily_clip_cleanup_scheduler.stop()
         lifecycle_scheduler.stop()
         reconcile_scheduler.stop()
         clip_pipeline.stop()

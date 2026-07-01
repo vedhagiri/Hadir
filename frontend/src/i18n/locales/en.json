@@ -4398,6 +4398,17 @@
     "submitButton": "Submit Request",
     "submitFailed": "Failed to submit. Please try again."
   },
+  "dailyCleanup": {
+    "title": "Automatic daily clip cleanup",
+    "subtitle": "When enabled, at the configured time each day every clip created that day is deleted — even clips that are still pending or unprocessed. Helps control storage during long-running deployments. Face crops and attendance evidence are kept.",
+    "enableAria": "Automatic daily clip cleanup toggle",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "timeLabel": "Cleanup time",
+    "save": "Save",
+    "saving": "Saving…",
+    "lastRun": "Last automatic cleanup: {{date}}"
+  },
   "clipCleanup": {
     "title": "Clip Video Cleanup",
     "subtitle": "Reclaim raw video files. Face crops, attendance evidence and reference photos are unaffected.",

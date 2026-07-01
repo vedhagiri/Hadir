@@ -329,30 +329,33 @@ def _unlink_file(file_path_str: str) -> tuple[bool, bool]:
         return (True, True)
 
 
-def run_clip_cleanup(
+def _execute_cleanup_batch(
     conn: Connection,
     scope: TenantScope,
-    filt: ClipCleanupFilter,
     *,
-    actor_user_id: Optional[int] = None,
-    cap: int = CLEANUP_CAP,
-    now: Optional[datetime] = None,
+    start_at: datetime,
+    end_at: Optional[datetime],
+    camera_id: Optional[int],
+    cap: int,
+    actor_user_id: Optional[int],
+    audit_action: str,
+    audit_filter: dict,
 ) -> ClipCleanupResult:
-    """Soft-clear up to ``cap`` matching clip videos.
+    """Soft-clear up to ``cap`` clips matching the time window.
 
-    Pulls ``cap + 1`` IDs to detect whether more work remains; the
-    extra row is not processed. Unlinks disk files first (so a row
-    that survives a crash mid-unlink can still be retried via
-    ``file_path``), then UPDATEs the rows in a single statement to
+    Shared by the manual cleanup (``run_clip_cleanup``) and the
+    automatic daily cleanup (``run_daily_clip_cleanup``). Pulls
+    ``cap + 1`` IDs to detect whether more work remains; the extra
+    row is not processed. Unlinks disk files first (so a row that
+    survives a crash mid-unlink can still be retried via
+    ``file_path``), then UPDATEs the rows in one statement to
     ``clip_file_deleted_at = now()``, ``file_path = NULL``,
-    ``filesize_bytes = 0``. Writes one audit row summarising the
-    batch.
+    ``filesize_bytes = 0``. Writes one audit row per batch carrying
+    ``audit_filter`` verbatim so the deletion is reproducible.
     """
 
-    tz = _tenant_timezone(conn, scope)
-    start_at, end_at = resolve_cutoff(filt, tz=tz, now=now)
     clauses = _base_where(
-        scope, start_at=start_at, end_at=end_at, camera_id=filt.camera_id
+        scope, start_at=start_at, end_at=end_at, camera_id=camera_id
     )
     fetched = conn.execute(
         select(
@@ -409,32 +412,22 @@ def run_clip_cleanup(
         )
     )
 
-    # Audit row carries the filter shape verbatim so an operator can
-    # reproduce or audit-trail the deletion later.
-    audit_payload: dict = {
-        "filter": {
-            "mode": filt.mode(),
-            "older_than_hours": filt.older_than_hours,
-            "older_than_days": filt.older_than_days,
-            "start_date": filt.start_date.isoformat() if filt.start_date else None,
-            "end_date": filt.end_date.isoformat() if filt.end_date else None,
-            "camera_id": filt.camera_id,
-        },
-        "deleted_count": len(ids),
-        "bytes_freed": bytes_freed,
-        "files_unlinked": files_unlinked,
-        "files_missing": files_missing,
-        "files_failed": files_failed,
-        "has_more": has_more,
-    }
     write_audit(
         conn,
         tenant_id=scope.tenant_id,
         actor_user_id=actor_user_id,
-        action="clip_cleanup.executed",
+        action=audit_action,
         entity_type="person_clips",
         entity_id=str(scope.tenant_id),
-        after=audit_payload,
+        after={
+            "filter": audit_filter,
+            "deleted_count": len(ids),
+            "bytes_freed": bytes_freed,
+            "files_unlinked": files_unlinked,
+            "files_missing": files_missing,
+            "files_failed": files_failed,
+            "has_more": has_more,
+        },
     )
 
     return ClipCleanupResult(
@@ -444,6 +437,119 @@ def run_clip_cleanup(
         files_missing=files_missing,
         files_failed=files_failed,
         has_more=has_more,
+    )
+
+
+def run_clip_cleanup(
+    conn: Connection,
+    scope: TenantScope,
+    filt: ClipCleanupFilter,
+    *,
+    actor_user_id: Optional[int] = None,
+    cap: int = CLEANUP_CAP,
+    now: Optional[datetime] = None,
+) -> ClipCleanupResult:
+    """Soft-clear up to ``cap`` clips matching the operator filter.
+
+    Audited as ``clip_cleanup.executed`` with the filter shape
+    verbatim. See ``_execute_cleanup_batch`` for the mechanics.
+    """
+
+    tz = _tenant_timezone(conn, scope)
+    start_at, end_at = resolve_cutoff(filt, tz=tz, now=now)
+    return _execute_cleanup_batch(
+        conn,
+        scope,
+        start_at=start_at,
+        end_at=end_at,
+        camera_id=filt.camera_id,
+        cap=cap,
+        actor_user_id=actor_user_id,
+        audit_action="clip_cleanup.executed",
+        audit_filter={
+            "mode": filt.mode(),
+            "older_than_hours": filt.older_than_hours,
+            "older_than_days": filt.older_than_days,
+            "start_date": filt.start_date.isoformat() if filt.start_date else None,
+            "end_date": filt.end_date.isoformat() if filt.end_date else None,
+            "camera_id": filt.camera_id,
+        },
+    )
+
+
+# ────────────────────── automatic daily cleanup ──────────────────────
+
+
+@dataclass(frozen=True)
+class DailyCleanupConfig:
+    """Per-tenant automatic-daily-cleanup settings."""
+
+    enabled: bool
+    cleanup_time: str  # "HH:MM", 24h, tenant-local
+    last_run_on: Optional[date] = None
+
+
+def get_daily_cleanup_config(
+    conn: Connection, scope: TenantScope
+) -> DailyCleanupConfig:
+    """Read the per-tenant daily-cleanup config (disabled if no row)."""
+
+    row = conn.execute(
+        select(
+            tenant_settings.c.clip_daily_cleanup_enabled,
+            tenant_settings.c.clip_daily_cleanup_time,
+            tenant_settings.c.clip_daily_cleanup_last_run_on,
+        ).where(tenant_settings.c.tenant_id == scope.tenant_id)
+    ).first()
+    if row is None:
+        return DailyCleanupConfig(enabled=False, cleanup_time="00:00")
+    return DailyCleanupConfig(
+        enabled=bool(row.clip_daily_cleanup_enabled),
+        cleanup_time=str(row.clip_daily_cleanup_time or "00:00"),
+        last_run_on=row.clip_daily_cleanup_last_run_on,
+    )
+
+
+def run_daily_clip_cleanup(
+    conn: Connection,
+    scope: TenantScope,
+    *,
+    actor_user_id: Optional[int] = None,
+    cap: int = CLEANUP_CAP,
+    now: Optional[datetime] = None,
+) -> ClipCleanupResult:
+    """Soft-clear every clip created *before today* (tenant-local).
+
+    At the configured cleanup time each day this reclaims the whole
+    calendar day that just ended (plus any older residue), regardless
+    of processing state. The cutoff is local midnight of today, so a
+    clip whose ``clip_start`` falls on any prior local day matches.
+    Audited as ``clip_cleanup.daily_auto_executed``.
+    """
+
+    tz = _tenant_timezone(conn, scope)
+    now = now or datetime.now(tz=timezone.utc)
+    today_local = now.astimezone(tz).date()
+    start_of_today_utc = datetime.combine(
+        today_local, time.min, tzinfo=tz
+    ).astimezone(timezone.utc)
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    # ``end_at`` is inclusive in ``_base_where``; step back a tick so a
+    # clip starting exactly at local midnight today is NOT swept.
+    end_at = start_of_today_utc - timedelta(microseconds=1)
+    return _execute_cleanup_batch(
+        conn,
+        scope,
+        start_at=epoch,
+        end_at=end_at,
+        camera_id=None,
+        cap=cap,
+        actor_user_id=actor_user_id,
+        audit_action="clip_cleanup.daily_auto_executed",
+        audit_filter={
+            "mode": "daily_auto",
+            "before_local_date": today_local.isoformat(),
+        },
     )
 
 
@@ -470,8 +576,11 @@ __all__ = [
     "ClipCleanupFilter",
     "ClipCleanupPreview",
     "ClipCleanupResult",
+    "DailyCleanupConfig",
     "get_clip_retention_days",
+    "get_daily_cleanup_config",
     "preview_clip_cleanup",
     "resolve_cutoff",
     "run_clip_cleanup",
+    "run_daily_clip_cleanup",
 ]

@@ -178,6 +178,28 @@ def _neutralise_retention_scheduler() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True, scope="session")
+def _neutralise_daily_clip_cleanup_scheduler() -> Iterator[None]:
+    """Block the 60-second automatic-daily-clip-cleanup scan from
+    spinning up during TestClient lifespan entries. The dedicated
+    tests call ``run_daily_cleanup_scan`` / ``run_daily_clip_cleanup``
+    directly."""
+
+    from maugood.storage_analytics.daily_cleanup import (  # noqa: PLC0415
+        daily_clip_cleanup_scheduler as _dcc,
+    )
+
+    original_start = _dcc.start
+    original_stop = _dcc.stop
+    _dcc.start = lambda: None  # type: ignore[assignment]
+    _dcc.stop = lambda: None  # type: ignore[assignment]
+    try:
+        yield
+    finally:
+        _dcc.start = original_start  # type: ignore[assignment]
+        _dcc.stop = original_stop  # type: ignore[assignment]
+
+
+@pytest.fixture(autouse=True, scope="session")
 def _neutralise_capture_manager() -> Iterator[None]:
     """Prevent the singleton capture manager from spawning real workers.
 

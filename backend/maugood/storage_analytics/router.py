@@ -33,6 +33,7 @@ from maugood.storage_analytics.cleanup import (
     CleanupFilterError,
     ClipCleanupFilter,
     get_clip_retention_days,
+    get_daily_cleanup_config,
     preview_clip_cleanup,
     run_clip_cleanup,
 )
@@ -48,6 +49,8 @@ from maugood.storage_analytics.schemas import (
     ClipRetentionSettingPatchRequest,
     ClipRetentionSettingResponse,
     CleanupCameraImpact,
+    DailyCleanupSettingPatchRequest,
+    DailyCleanupSettingResponse,
     StorageAnalyticsResponse,
 )
 from maugood.tenants.scope import TenantScope, get_tenant_scope
@@ -472,3 +475,91 @@ def auto_delete_setting_patch(
             after={"auto_delete_clip_after_processing": new_value},
         )
     return AutoDeleteSettingResponse(auto_delete_clip_after_processing=new_value)
+
+
+# ── Automatic daily clip cleanup (migration 0090) ─────────────────────────
+
+
+@router.get("/daily-cleanup", response_model=DailyCleanupSettingResponse)
+def daily_cleanup_get(
+    scope: TenantScope = Depends(get_tenant_scope),
+    _: CurrentUser = ADMIN_ONLY,
+) -> DailyCleanupSettingResponse:
+    with get_engine().begin() as conn:
+        cfg = get_daily_cleanup_config(conn, scope)
+    return DailyCleanupSettingResponse(
+        enabled=cfg.enabled,
+        cleanup_time=cfg.cleanup_time,
+        last_run_on=cfg.last_run_on.isoformat() if cfg.last_run_on else None,
+    )
+
+
+@router.patch("/daily-cleanup", response_model=DailyCleanupSettingResponse)
+def daily_cleanup_patch(
+    payload: DailyCleanupSettingPatchRequest,
+    scope: TenantScope = Depends(get_tenant_scope),
+    user: CurrentUser = ADMIN_ONLY,
+) -> DailyCleanupSettingResponse:
+    """Enable/disable automatic daily clip cleanup + set the fire time.
+
+    Changing the time resets ``last_run_on`` to NULL so a newly-set
+    (earlier) time can fire the same day. Audited as
+    ``clip_cleanup.daily_setting_updated``."""
+
+    with get_engine().begin() as conn:
+        before = conn.execute(
+            select(
+                tenant_settings.c.clip_daily_cleanup_enabled,
+                tenant_settings.c.clip_daily_cleanup_time,
+                tenant_settings.c.clip_daily_cleanup_last_run_on,
+            ).where(tenant_settings.c.tenant_id == scope.tenant_id)
+        ).first()
+
+        prev_enabled = bool(before.clip_daily_cleanup_enabled) if before else False
+        prev_time = str(before.clip_daily_cleanup_time) if before else "00:00"
+        # A time change (or a fresh enable) clears the once-per-day guard
+        # so the new schedule can act today.
+        time_changed = prev_time != payload.cleanup_time
+        new_last_run = (
+            (before.clip_daily_cleanup_last_run_on if before else None)
+            if not time_changed
+            else None
+        )
+
+        values = {
+            "clip_daily_cleanup_enabled": payload.enabled,
+            "clip_daily_cleanup_time": payload.cleanup_time,
+            "clip_daily_cleanup_last_run_on": new_last_run,
+        }
+        if before is None:
+            conn.execute(
+                insert(tenant_settings).values(
+                    tenant_id=scope.tenant_id, **values
+                )
+            )
+        else:
+            conn.execute(
+                update(tenant_settings)
+                .where(tenant_settings.c.tenant_id == scope.tenant_id)
+                .values(**values)
+            )
+
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="clip_cleanup.daily_setting_updated",
+            entity_type="tenant_settings",
+            entity_id=str(scope.tenant_id),
+            before={"enabled": prev_enabled, "cleanup_time": prev_time},
+            after={
+                "enabled": payload.enabled,
+                "cleanup_time": payload.cleanup_time,
+            },
+        )
+
+    return DailyCleanupSettingResponse(
+        enabled=payload.enabled,
+        cleanup_time=payload.cleanup_time,
+        last_run_on=new_last_run.isoformat() if new_last_run else None,
+    )

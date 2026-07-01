@@ -11,6 +11,7 @@ import type {
   ClipCleanupPreviewResponse,
   ClipCleanupRunResponse,
   ClipRetentionSetting,
+  DailyCleanupSetting,
   StorageAnalyticsResponse,
 } from "./types";
 
@@ -157,6 +158,40 @@ export function useUpdateAutoDeleteSetting(): UseMutationResult<
     onSuccess: () => {
       void qc.invalidateQueries({
         queryKey: ["storage-analytics", "auto-delete-setting"],
+      });
+    },
+  });
+}
+
+// ── Automatic daily clip cleanup ───────────────────────────────────────────
+
+export function useDailyCleanupSetting(
+  options: { enabled?: boolean } = {},
+): UseQueryResult<DailyCleanupSetting, Error> {
+  return useQuery({
+    queryKey: ["storage-analytics", "daily-cleanup"],
+    queryFn: () =>
+      api<DailyCleanupSetting>("/api/storage-analytics/daily-cleanup"),
+    staleTime: 60 * 1000,
+    enabled: options.enabled ?? true,
+  });
+}
+
+export function useUpdateDailyCleanupSetting(): UseMutationResult<
+  DailyCleanupSetting,
+  Error,
+  { enabled: boolean; cleanup_time: string }
+> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload) =>
+      api<DailyCleanupSetting>("/api/storage-analytics/daily-cleanup", {
+        method: "PATCH",
+        body: payload,
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({
+        queryKey: ["storage-analytics", "daily-cleanup"],
       });
     },
   });

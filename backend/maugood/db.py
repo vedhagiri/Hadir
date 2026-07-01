@@ -621,6 +621,30 @@ tenant_settings = Table(
         nullable=False,
         server_default='{"enabled": true, "interval_seconds": 30}',
     ),
+    # Migration 0090 — automatic daily clip cleanup. Distinct from
+    # ``clip_retention_days`` (age-based) and
+    # ``auto_delete_clip_after_processing`` (post-processing): when
+    # enabled, at ``clip_daily_cleanup_time`` (tenant-local, HH:MM 24h)
+    # every day the raw video of every clip created *before today* is
+    # deleted, processed or not. ``last_run_on`` is per-day bookkeeping
+    # so the minute-scan fires exactly once per local day.
+    Column(
+        "clip_daily_cleanup_enabled",
+        Boolean,
+        nullable=False,
+        server_default="false",
+    ),
+    Column(
+        "clip_daily_cleanup_time",
+        Text,
+        nullable=False,
+        server_default="00:00",
+    ),
+    Column(
+        "clip_daily_cleanup_last_run_on",
+        Date,
+        nullable=True,
+    ),
     Column(
         "updated_at",
         DateTime(timezone=True),
@@ -639,6 +663,10 @@ tenant_settings = Table(
         "clip_retention_days IS NULL "
         "OR (clip_retention_days >= 1 AND clip_retention_days <= 3650)",
         name="ck_tenant_settings_clip_retention_days",
+    ),
+    CheckConstraint(
+        "clip_daily_cleanup_time ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'",
+        name="ck_tenant_settings_clip_daily_cleanup_time",
     ),
 )
 

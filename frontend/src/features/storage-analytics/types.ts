@@ -93,6 +93,14 @@ export interface AutoDeleteSetting {
   auto_delete_clip_after_processing: boolean;
 }
 
+// ── Automatic daily clip cleanup (migration 0090) ──────────────────────────
+
+export interface DailyCleanupSetting {
+  enabled: boolean;
+  cleanup_time: string; // "HH:MM", 24h, tenant-local
+  last_run_on: string | null; // YYYY-MM-DD
+}
+
 // ── Cleanup history (read of clip_cleanup.executed audit rows) ──────────────
 
 export type CleanupHistoryKind =

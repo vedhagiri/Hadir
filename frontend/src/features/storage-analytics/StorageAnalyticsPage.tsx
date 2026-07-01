@@ -4,7 +4,7 @@
 // Uses the design system's .stat, .card, .table, .pill, .tabs, .filter-bar,
 // and .seg classes throughout — no custom CSS beyond inline layout tweaks.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Icon } from "../../shell/Icon";
@@ -16,8 +16,10 @@ import type { StorageAnalyticsFilters } from "./hooks";
 import {
   useAutoDeleteSetting,
   useClipCleanupHistory,
+  useDailyCleanupSetting,
   useStorageAnalytics,
   useUpdateAutoDeleteSetting,
+  useUpdateDailyCleanupSetting,
 } from "./hooks";
 import type {
   CameraStorageRow,
@@ -875,6 +877,9 @@ export function StorageAnalyticsPage() {
         </div>
       )}
 
+      {/* ── Automatic daily clip cleanup ── */}
+      <DailyCleanupCard />
+
       {cleanupOpen && <ClipCleanupDialog onClose={() => setCleanupOpen(false)} />}
 
       {pendingAutoDelete !== null && (
@@ -1034,6 +1039,116 @@ export function StorageAnalyticsPage() {
 
       {/* ── Cleanup history (run-level log of past clip-video cleanups) ── */}
       <CleanupHistory cameraNameById={cameraNameById} />
+    </div>
+  );
+}
+
+// ── Automatic daily clip cleanup card ──────────────────────────────────────
+// Enable/disable + a configurable local time. When on, every clip created
+// before today (tenant-local) is deleted at the configured time each day,
+// processed or not. Distinct from the age-based retention sweep and the
+// auto-delete-after-processing toggle above.
+function DailyCleanupCard() {
+  const { t } = useTranslation();
+  const setting = useDailyCleanupSetting();
+  const update = useUpdateDailyCleanupSetting();
+
+  const [enabled, setEnabled] = useState(false);
+  const [time, setTime] = useState("00:00");
+
+  // Sync local editable state from the server whenever it (re)loads.
+  const serverEnabled = setting.data?.enabled ?? false;
+  const serverTime = setting.data?.cleanup_time ?? "00:00";
+  useEffect(() => {
+    setEnabled(serverEnabled);
+    setTime(serverTime);
+  }, [serverEnabled, serverTime]);
+
+  const dirty = enabled !== serverEnabled || time !== serverTime;
+
+  const save = () => {
+    update.mutate({ enabled, cleanup_time: time });
+  };
+
+  return (
+    <div
+      style={{
+        padding: "14px 16px",
+        marginBottom: 16,
+        borderRadius: 10,
+        background: "var(--bg-elev)",
+        border: "1px solid var(--border)",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, display: "flex", alignItems: "center", gap: 7 }}>
+            <Icon name="clock" size={15} style={{ color: "var(--text-tertiary)" }} />
+            {t("dailyCleanup.title")}
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--text-tertiary)", marginTop: 3, maxWidth: 640, lineHeight: 1.5 }}>
+            {t("dailyCleanup.subtitle")}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 14, flexShrink: 0, flexWrap: "wrap" }}>
+          <div className="seg" role="group" aria-label={t("dailyCleanup.enableAria")}>
+            <button
+              type="button"
+              className={`seg-btn${!enabled ? " active" : ""}`}
+              onClick={() => setEnabled(false)}
+              aria-pressed={!enabled}
+              disabled={setting.isLoading || update.isPending}
+            >
+              {t("dailyCleanup.disabled")}
+            </button>
+            <button
+              type="button"
+              className={`seg-btn${enabled ? " active" : ""}`}
+              onClick={() => setEnabled(true)}
+              aria-pressed={enabled}
+              disabled={setting.isLoading || update.isPending}
+            >
+              {t("dailyCleanup.enabled")}
+            </button>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <label htmlFor="daily-cleanup-time" style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+              {t("dailyCleanup.timeLabel")}
+            </label>
+            <input
+              id="daily-cleanup-time"
+              type="time"
+              className="input"
+              value={time}
+              onChange={(e) => setTime(e.target.value || "00:00")}
+              disabled={!enabled || setting.isLoading || update.isPending}
+              style={{ width: 120, padding: "5px 8px", fontSize: 12.5 }}
+            />
+          </div>
+
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={save}
+            disabled={!dirty || update.isPending}
+          >
+            {update.isPending ? t("dailyCleanup.saving") : t("dailyCleanup.save")}
+          </button>
+        </div>
+      </div>
+
+      {setting.data?.last_run_on && (
+        <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: 10 }}>
+          {t("dailyCleanup.lastRun", { date: setting.data.last_run_on })}
+        </div>
+      )}
+      {update.isError && (
+        <div role="alert" style={{ fontSize: 11.5, color: "var(--danger-text)", marginTop: 8 }}>
+          {extractApiError(update.error, t("clipCleanup.couldNotSave"))}
+        </div>
+      )}
     </div>
   );
 }

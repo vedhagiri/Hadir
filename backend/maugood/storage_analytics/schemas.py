@@ -138,6 +138,20 @@ class AutoDeleteSettingPatchRequest(BaseModel):
     auto_delete_clip_after_processing: bool
 
 
+class DailyCleanupSettingResponse(BaseModel):
+    enabled: bool
+    cleanup_time: str  # "HH:MM", 24h, tenant-local
+    last_run_on: Optional[str] = None  # YYYY-MM-DD
+
+
+class DailyCleanupSettingPatchRequest(BaseModel):
+    enabled: bool
+    # 24h HH:MM. Same regex the DB CHECK enforces (defence in depth).
+    cleanup_time: str = Field(
+        default="00:00", pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$"
+    )
+
+
 # ── Cleanup history (read of clip_cleanup.executed audit rows) ──────────────
 
 
