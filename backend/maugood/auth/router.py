@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from maugood.auth.audit import write_audit
+from maugood.auth.login_tracking import record_login
 from maugood.auth.dependencies import (
     CurrentUser,
     _load_current_user_bundle,
@@ -505,6 +506,12 @@ def login(
                 idle_minutes=settings.session_idle_minutes,
                 tenant_schema=target_schema,
                 active_role=initial_active,
+            )
+            record_login(
+                conn,
+                tenant_id=target_tenant_id,
+                user_id=int(user_row.id),
+                provider="password",
             )
             write_audit(
                 conn,

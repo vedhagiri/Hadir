@@ -75,6 +75,7 @@ from maugood.auth.oidc import (
     encrypt_secret,
     validate_id_token,
 )
+from maugood.auth.login_tracking import record_login
 from maugood.auth.sessions import create_session
 from maugood.auth.sso_error_page import sso_error_response
 from maugood.config import get_settings
@@ -644,6 +645,12 @@ def google_callback(
                 idle_minutes=settings.session_idle_minutes,
                 tenant_schema=schema,
                 active_role=initial_active,
+            )
+            record_login(
+                conn,
+                tenant_id=tenant_id,
+                user_id=int(user_row.id),
+                provider="google",
             )
             write_audit(
                 conn,

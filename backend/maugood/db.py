@@ -1399,6 +1399,20 @@ users = Table(
     # the enums.
     Column("preferred_theme", Text, nullable=True),
     Column("preferred_density", Text, nullable=True),
+    # Entra AD sync (0093). ``source`` marks local vs entra-provisioned;
+    # ``ms_object_id`` links to the Graph user object (partial-unique per
+    # tenant). ad_* fields are cached from the directory; last_login/
+    # login_count/auth_provider are bumped by the login success paths.
+    Column("source", Text, nullable=False, server_default="local"),
+    Column("ms_object_id", Text, nullable=True),
+    Column("upn", Text, nullable=True),
+    Column("job_title", Text, nullable=True),
+    Column("ad_department", Text, nullable=True),
+    Column("ad_status", Text, nullable=True),
+    Column("auth_provider", Text, nullable=True),
+    Column("last_login_at", DateTime(timezone=True), nullable=True),
+    Column("login_count", Integer, nullable=False, server_default="0"),
+    Column("last_synced_at", DateTime(timezone=True), nullable=True),
     Column(
         "created_at",
         DateTime(timezone=True),
@@ -1417,6 +1431,42 @@ users = Table(
     CheckConstraint(
         "preferred_density IS NULL OR preferred_density IN ('compact','comfortable')",
         name="ck_users_preferred_density",
+    ),
+    CheckConstraint("source IN ('local','entra')", name="ck_users_source"),
+)
+
+
+# Entra security-group → Maugood role mapping (0093). Admin-configured;
+# consulted during the AD sync to assign a role from group membership.
+# A deliberate, explicit, auditable exception to "roles never from
+# claims" — chosen per-tenant, and always manually overridable via the
+# user role editor.
+entra_group_role_map = Table(
+    "entra_group_role_map",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column("group_id", Text, nullable=False),
+    Column("group_name", Text, nullable=False, server_default=""),
+    Column("role_code", Text, nullable=False),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    UniqueConstraint(
+        "tenant_id", "group_id", name="uq_entra_group_role_tenant_group"
+    ),
+    CheckConstraint(
+        "role_code IN ('Admin','HR','Manager','Employee')",
+        name="ck_entra_group_role_code",
     ),
 )
 

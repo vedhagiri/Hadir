@@ -13,6 +13,7 @@ import { useMe } from "./auth/AuthProvider";
 import { ApiDocsPage } from "./features/api-docs/ApiDocsPage";
 import { PipelinePage } from "./features/pipeline/PipelinePage";
 import { AuthenticationPage } from "./auth-oidc/AuthenticationPage";
+import { AdUsersPage } from "./features/user-management/AdUsersPage";
 import { BrandingPage } from "./branding/BrandingPage";
 import { CustomFieldsPage } from "./custom-fields/CustomFieldsPage";
 import { DepartmentsPage } from "./settings/DepartmentsPage";
@@ -175,6 +176,7 @@ export function App() {
         <Route path="settings/workspace" element={<SettingsAdminOnly><WorkspacePage /></SettingsAdminOnly>} />
         <Route path="settings/branding" element={<SettingsAdminOnly><BrandingPage /></SettingsAdminOnly>} />
         <Route path="settings/authentication" element={<SettingsAdminOnly><AuthenticationPage /></SettingsAdminOnly>} />
+        <Route path="settings/users" element={<SettingsAdminOnly><AdUsersPage /></SettingsAdminOnly>} />
         <Route path="settings/departments" element={<DepartmentsPage />} />
         <Route path="settings/divisions" element={<DivisionsPage />} />
         <Route path="settings/sections" element={<SectionsPage />} />
