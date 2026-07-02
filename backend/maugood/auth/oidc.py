@@ -244,33 +244,31 @@ class OidcConfigRow:
     client_id: str
     has_secret: bool
     enabled: bool
+    redirect_uri: str
     updated_at: datetime
+
+
+_CFG_COLS = (
+    tenant_oidc_config.c.tenant_id,
+    tenant_oidc_config.c.entra_tenant_id,
+    tenant_oidc_config.c.client_id,
+    tenant_oidc_config.c.client_secret_encrypted,
+    tenant_oidc_config.c.enabled,
+    tenant_oidc_config.c.redirect_uri,
+    tenant_oidc_config.c.updated_at,
+)
 
 
 def get_config(conn: Connection, *, tenant_id: int) -> OidcConfigRow:
     row = conn.execute(
-        select(
-            tenant_oidc_config.c.tenant_id,
-            tenant_oidc_config.c.entra_tenant_id,
-            tenant_oidc_config.c.client_id,
-            tenant_oidc_config.c.client_secret_encrypted,
-            tenant_oidc_config.c.enabled,
-            tenant_oidc_config.c.updated_at,
-        ).where(tenant_oidc_config.c.tenant_id == tenant_id)
+        select(*_CFG_COLS).where(tenant_oidc_config.c.tenant_id == tenant_id)
     ).first()
     if row is None:
         # Lazy-create an empty disabled row so the API surface always
         # has something to return. Mirrors the branding pattern.
         conn.execute(insert(tenant_oidc_config).values(tenant_id=tenant_id))
         row = conn.execute(
-            select(
-                tenant_oidc_config.c.tenant_id,
-                tenant_oidc_config.c.entra_tenant_id,
-                tenant_oidc_config.c.client_id,
-                tenant_oidc_config.c.client_secret_encrypted,
-                tenant_oidc_config.c.enabled,
-                tenant_oidc_config.c.updated_at,
-            ).where(tenant_oidc_config.c.tenant_id == tenant_id)
+            select(*_CFG_COLS).where(tenant_oidc_config.c.tenant_id == tenant_id)
         ).first()
     assert row is not None
     return OidcConfigRow(
@@ -279,6 +277,7 @@ def get_config(conn: Connection, *, tenant_id: int) -> OidcConfigRow:
         client_id=str(row.client_id or ""),
         has_secret=bool(row.client_secret_encrypted),
         enabled=bool(row.enabled),
+        redirect_uri=str(row.redirect_uri or ""),
         updated_at=row.updated_at,
     )
 
@@ -478,9 +477,46 @@ def _resolve_tenant_by_slug(slug: str) -> Optional[tuple[int, str]]:
     return int(row.id), str(row.schema_name)
 
 
-def _redirect_uri() -> str:
+_CALLBACK_PATH = "/api/auth/oidc/callback"
+
+
+def _default_redirect_uri() -> str:
     base = get_settings().oidc_redirect_base_url.rstrip("/")
-    return f"{base}/api/auth/oidc/callback"
+    return f"{base}{_CALLBACK_PATH}"
+
+
+def _effective_redirect_uri(cfg: OidcConfigRow) -> str:
+    """The override if the Admin set one, else the env-computed default."""
+
+    return cfg.redirect_uri or _default_redirect_uri()
+
+
+def _validate_redirect_uri(value: str) -> str:
+    """Normalise + validate an operator-supplied redirect URI override.
+
+    Must be an absolute http/https URL whose path ends with the fixed
+    callback path — the provider has to redirect back to *our* callback,
+    so an arbitrary URL is rejected (closes an open-redirect footgun).
+    Empty string is allowed and means "use the computed default".
+    """
+
+    from urllib.parse import urlparse  # noqa: PLC0415
+
+    v = value.strip()
+    if not v:
+        return ""
+    parsed = urlparse(v)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise HTTPException(
+            status_code=400,
+            detail="redirect_uri must be an absolute http(s) URL",
+        )
+    if not parsed.path.endswith(_CALLBACK_PATH):
+        raise HTTPException(
+            status_code=400,
+            detail=f"redirect_uri must end with {_CALLBACK_PATH}",
+        )
+    return v
 
 
 # ---------------------------------------------------------------------------
@@ -558,7 +594,7 @@ def oidc_login(tenant: str, request: Request) -> Response:
         "ts": int(time.time()),
     }
     cookie = _sign_state(payload)
-    redirect_uri = _redirect_uri()
+    redirect_uri = _effective_redirect_uri(cfg)
 
     auth_url = (
         f"{doc.authorization_endpoint}"
@@ -684,7 +720,7 @@ def oidc_callback(
             code=code,
             client_id=cfg.client_id,
             client_secret=client_secret,
-            redirect_uri=_redirect_uri(),
+            redirect_uri=_effective_redirect_uri(cfg),
         )
     except Exception as exc:  # noqa: BLE001
         _audit_failure(
@@ -831,10 +867,11 @@ class ConfigResponse(BaseModel):
     has_secret: bool
     enabled: bool
     updated_at: str
-    # The exact redirect URI Entra must have registered — computed from
-    # ``MAUGOOD_OIDC_REDIRECT_BASE_URL`` so the operator copies the
-    # authoritative value, not the browser's guess at the origin.
+    # The exact redirect URI Entra must have registered. Effective value
+    # = the operator's override if set, else the env-computed default.
     redirect_uri: str
+    # The env-computed default, so the UI can offer "reset to default".
+    redirect_uri_default: str
 
 
 class ConfigPatchRequest(BaseModel):
@@ -845,6 +882,8 @@ class ConfigPatchRequest(BaseModel):
     # as the RTSP URL flow from pilot P7.
     client_secret: Optional[str] = Field(default=None, max_length=2048)
     enabled: Optional[bool] = None
+    # Optional redirect-URI override. Empty string resets to the default.
+    redirect_uri: Optional[str] = Field(default=None, max_length=500)
 
 
 def _to_response(cfg: OidcConfigRow) -> ConfigResponse:
@@ -855,7 +894,8 @@ def _to_response(cfg: OidcConfigRow) -> ConfigResponse:
         has_secret=cfg.has_secret,
         enabled=cfg.enabled,
         updated_at=cfg.updated_at.isoformat(),
-        redirect_uri=_redirect_uri(),
+        redirect_uri=_effective_redirect_uri(cfg),
+        redirect_uri_default=_default_redirect_uri(),
     )
 
 
@@ -920,6 +960,13 @@ def put_my_config(
         values["client_secret_encrypted"] = encrypt_secret(payload.client_secret)
     if payload.enabled is not None:
         values["enabled"] = payload.enabled
+    if payload.redirect_uri is not None:
+        # Store "" when it matches the computed default so the config
+        # keeps tracking env changes; otherwise store the override.
+        validated = _validate_redirect_uri(payload.redirect_uri)
+        values["redirect_uri"] = (
+            "" if validated == _default_redirect_uri() else validated
+        )
 
     with engine.begin() as conn:
         conn.execute(
@@ -951,5 +998,50 @@ def put_my_config(
                 "secret_rotated": payload.client_secret is not None
                 and payload.client_secret != "",
             },
+        )
+    return _to_response(after)
+
+
+@router.delete("/config")
+def delete_my_config(
+    request: Request,
+    user: Annotated[CurrentUser, Depends(require_role("Admin"))],
+) -> ConfigResponse:
+    """Clear the tenant's Entra config — client id/secret wiped, disabled.
+
+    The row is reset (not dropped) so the lazy-create contract holds;
+    the effect is that Microsoft sign-in disappears from the login page.
+    """
+
+    engine = get_engine()
+    with engine.begin() as conn:
+        before = get_config(conn, tenant_id=user.tenant_id)
+        conn.execute(
+            update(tenant_oidc_config)
+            .where(tenant_oidc_config.c.tenant_id == user.tenant_id)
+            .values(
+                entra_tenant_id="",
+                client_id="",
+                client_secret_encrypted=None,
+                enabled=False,
+                redirect_uri="",
+                updated_at=datetime.now(tz=timezone.utc),
+            )
+        )
+        after = get_config(conn, tenant_id=user.tenant_id)
+        write_audit(
+            conn,
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            action="auth.oidc.config_deleted",
+            entity_type="oidc",
+            entity_id=str(user.tenant_id),
+            before={
+                "entra_tenant_id": before.entra_tenant_id,
+                "client_id": before.client_id,
+                "has_secret": before.has_secret,
+                "enabled": before.enabled,
+            },
+            after={"cleared": True},
         )
     return _to_response(after)

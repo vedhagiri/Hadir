@@ -1242,6 +1242,8 @@ tenant_oidc_config = Table(
     Column("client_id", Text, nullable=False, server_default=""),
     Column("client_secret_encrypted", Text, nullable=True),
     Column("enabled", Boolean, nullable=False, server_default="false"),
+    # Optional redirect-URI override (empty = computed default). See 0092.
+    Column("redirect_uri", Text, nullable=False, server_default=""),
     Column(
         "updated_at",
         DateTime(timezone=True),
@@ -1270,6 +1272,8 @@ tenant_google_oidc_config = Table(
     Column("client_secret_encrypted", Text, nullable=True),
     Column("allowed_domain", Text, nullable=False, server_default=""),
     Column("enabled", Boolean, nullable=False, server_default="false"),
+    # Optional redirect-URI override (empty = computed default). See 0092.
+    Column("redirect_uri", Text, nullable=False, server_default=""),
     Column(
         "updated_at",
         DateTime(timezone=True),

@@ -547,3 +547,95 @@ def test_employee_role_cannot_read_config(
     assert resp.status_code == 200
     cfg = client.get("/api/auth/oidc/config")
     assert cfg.status_code == 403
+
+
+def test_delete_config_clears_and_disables(
+    client: TestClient, admin_user: dict, configured_oidc: dict, admin_engine: Engine
+) -> None:
+    resp = client.post(
+        "/api/auth/login",
+        json={"email": admin_user["email"], "password": admin_user["password"]},
+    )
+    assert resp.status_code == 200
+
+    out = client.delete("/api/auth/oidc/config")
+    assert out.status_code == 200, out.text
+    body = out.json()
+    assert body["enabled"] is False
+    assert body["client_id"] == ""
+    assert body["entra_tenant_id"] == ""
+    assert body["has_secret"] is False
+
+    assert client.get("/api/auth/oidc/status", params={"tenant": "main"}).json() == {
+        "enabled": False,
+        "has_config": False,
+    }
+
+    with admin_engine.begin() as conn:
+        from sqlalchemy import select  # noqa: PLC0415
+
+        rows = conn.execute(
+            select(audit_log.c.action)
+            .where(audit_log.c.action == "auth.oidc.config_deleted")
+            .order_by(audit_log.c.id.desc())
+            .limit(1)
+        ).all()
+    assert rows
+
+
+def test_employee_role_cannot_delete_config(
+    client: TestClient, employee_user: dict
+) -> None:
+    resp = client.post(
+        "/api/auth/login",
+        json={"email": employee_user["email"], "password": employee_user["password"]},
+    )
+    assert resp.status_code == 200
+    assert client.delete("/api/auth/oidc/config").status_code == 403
+
+
+def test_redirect_uri_override_used_in_login(
+    client: TestClient, admin_user: dict, fake_provider: FakeProvider
+) -> None:
+    resp = client.post(
+        "/api/auth/login",
+        json={"email": admin_user["email"], "password": admin_user["password"]},
+    )
+    assert resp.status_code == 200
+
+    custom = "https://sso.acme.test/api/auth/oidc/callback"
+    out = client.put(
+        "/api/auth/oidc/config",
+        json={
+            "entra_tenant_id": "test-entra",
+            "client_id": "test-client",
+            "client_secret": "s",
+            "redirect_uri": custom,
+            "enabled": True,
+        },
+    )
+    assert out.status_code == 200, out.text
+    assert out.json()["redirect_uri"] == custom
+
+    login = client.get(
+        "/api/auth/oidc/login", params={"tenant": "main"}, follow_redirects=False
+    )
+    assert login.status_code == 302
+    qs = parse_qs(urlparse(login.headers["location"]).query)
+    assert qs["redirect_uri"][0] == custom
+
+
+def test_redirect_uri_invalid_rejected(
+    client: TestClient, admin_user: dict
+) -> None:
+    resp = client.post(
+        "/api/auth/login",
+        json={"email": admin_user["email"], "password": admin_user["password"]},
+    )
+    assert resp.status_code == 200
+    bad = client.put(
+        "/api/auth/oidc/config",
+        json={"redirect_uri": "https://evil.example/steal"},
+    )
+    assert bad.status_code == 400
+    assert "redirect_uri" in bad.json()["detail"]

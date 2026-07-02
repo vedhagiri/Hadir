@@ -70,6 +70,17 @@ export function usePutMyOidcConfig() {
   });
 }
 
+export function useDeleteMyOidcConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (): Promise<OidcConfigResponse> =>
+      api<OidcConfigResponse>("/api/auth/oidc/config", { method: "DELETE" }),
+    onSuccess: (data) => {
+      qc.setQueryData(MY_CONFIG_KEY, data);
+    },
+  });
+}
+
 // --- Google Sign-In (OIDC) ------------------------------------------------
 
 /** Anonymous probe — does the named tenant have Google sign-in enabled? */
@@ -117,6 +128,19 @@ export function usePutMyGoogleConfig() {
       api<GoogleOidcConfigResponse>("/api/auth/google/config", {
         method: "PUT",
         body: input,
+      }),
+    onSuccess: (data) => {
+      qc.setQueryData(MY_GOOGLE_CONFIG_KEY, data);
+    },
+  });
+}
+
+export function useDeleteMyGoogleConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (): Promise<GoogleOidcConfigResponse> =>
+      api<GoogleOidcConfigResponse>("/api/auth/google/config", {
+        method: "DELETE",
       }),
     onSuccess: (data) => {
       qc.setQueryData(MY_GOOGLE_CONFIG_KEY, data);

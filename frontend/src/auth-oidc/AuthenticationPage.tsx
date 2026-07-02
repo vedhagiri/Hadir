@@ -22,6 +22,8 @@ import { Icon } from "../shell/Icon";
 import type { IconName } from "../shell/Icon";
 import { SettingsTabs } from "../settings/SettingsTabs";
 import {
+  useDeleteMyGoogleConfig,
+  useDeleteMyOidcConfig,
   useMyGoogleConfig,
   useMyOidcConfig,
   usePutMyGoogleConfig,
@@ -101,16 +103,19 @@ export function AuthenticationPage() {
 function MicrosoftCard({ onSaved }: { onSaved: (msg: string) => void }) {
   const { t } = useTranslation();
   const cfg = useMyOidcConfig();
+  const del = useDeleteMyOidcConfig();
   const [editing, setEditing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   const d = cfg.data ?? null;
   const configured = !!d && (!!d.client_id || d.has_secret);
+  const providerName = t("authPage.microsoft.title");
 
   return (
     <>
       <ProviderSummaryCard
         logo={<MicrosoftLogo size={20} />}
-        name={t("authPage.microsoft.title")}
+        name={providerName}
         subtitle={t("authPage.microsoft.subtitle")}
         loading={cfg.isLoading}
         loadError={cfg.error ? t("authPage.loadFailed") : null}
@@ -118,6 +123,7 @@ function MicrosoftCard({ onSaved }: { onSaved: (msg: string) => void }) {
         configured={configured}
         updatedAt={d?.updated_at ?? null}
         onEdit={() => setEditing(true)}
+        onRemove={configured ? () => setConfirming(true) : undefined}
         tiles={[
           {
             icon: "shield",
@@ -151,6 +157,19 @@ function MicrosoftCard({ onSaved }: { onSaved: (msg: string) => void }) {
           }}
         />
       )}
+      {confirming && (
+        <ConfirmRemoveModal
+          provider={providerName}
+          logo={<MicrosoftLogo size={20} />}
+          pending={del.isPending}
+          onCancel={() => setConfirming(false)}
+          onConfirm={async () => {
+            await del.mutateAsync();
+            setConfirming(false);
+            onSaved(t("authPage.removedProvider", { provider: providerName }));
+          }}
+        />
+      )}
     </>
   );
 }
@@ -171,6 +190,7 @@ function MicrosoftEditModal({
   const [clientId, setClientId] = useState(data.client_id);
   const [clientSecret, setClientSecret] = useState("");
   const [enabled, setEnabled] = useState(data.enabled);
+  const [redirectUri, setRedirectUri] = useState(data.redirect_uri);
   const [serverError, setServerError] = useState<string | null>(null);
 
   const onSave = async () => {
@@ -180,6 +200,7 @@ function MicrosoftEditModal({
         entra_tenant_id: entraTenant.trim(),
         client_id: clientId.trim(),
         enabled,
+        redirect_uri: redirectUri.trim(),
       };
       if (clientSecret.length > 0) payload.client_secret = clientSecret;
       await put.mutateAsync(payload);
@@ -189,11 +210,27 @@ function MicrosoftEditModal({
     }
   };
 
+  const requiredSatisfied =
+    !!entraTenant.trim() &&
+    !!clientId.trim() &&
+    (clientSecret.length > 0 || data.has_secret);
+  const dirty =
+    entraTenant !== data.entra_tenant_id ||
+    clientId !== data.client_id ||
+    clientSecret !== "" ||
+    enabled !== data.enabled ||
+    redirectUri !== data.redirect_uri;
+
   return (
     <EditModalShell
       logo={<MicrosoftLogo size={20} />}
       title={t("authPage.editProvider", { provider: t("authPage.microsoft.title") })}
-      redirectUri={data.redirect_uri}
+      redirectUri={redirectUri}
+      onRedirectUriChange={setRedirectUri}
+      redirectUriDefault={data.redirect_uri_default}
+      dirty={dirty}
+      canSave={requiredSatisfied}
+      requiredWarning={!requiredSatisfied ? t("authPage.requiredWarning") : null}
       onClose={onClose}
       onSave={onSave}
       saving={put.isPending}
@@ -202,6 +239,7 @@ function MicrosoftEditModal({
       <Field
         label={t("authPage.fields.entraTenantId")}
         hint={t("authPage.fields.entraTenantHint")}
+        required
       >
         <input
           className="input"
@@ -211,7 +249,11 @@ function MicrosoftEditModal({
           autoComplete="off"
         />
       </Field>
-      <Field label={t("authPage.fields.clientId")} hint={t("authPage.fields.clientIdHint")}>
+      <Field
+        label={t("authPage.fields.clientId")}
+        hint={t("authPage.fields.clientIdHint")}
+        required
+      >
         <input
           className="input"
           type="text"
@@ -222,6 +264,7 @@ function MicrosoftEditModal({
       </Field>
       <Field
         label={t("authPage.fields.clientSecret")}
+        required
         hint={
           data.has_secret
             ? t("authPage.fields.clientSecretStored")
@@ -254,16 +297,19 @@ function MicrosoftEditModal({
 function GoogleCard({ onSaved }: { onSaved: (msg: string) => void }) {
   const { t } = useTranslation();
   const cfg = useMyGoogleConfig();
+  const del = useDeleteMyGoogleConfig();
   const [editing, setEditing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   const d = cfg.data ?? null;
   const configured = !!d && (!!d.client_id || d.has_secret);
+  const providerName = t("authPage.google.title");
 
   return (
     <>
       <ProviderSummaryCard
         logo={<GoogleLogo size={20} />}
-        name={t("authPage.google.title")}
+        name={providerName}
         subtitle={t("authPage.google.subtitle")}
         loading={cfg.isLoading}
         loadError={cfg.error ? t("authPage.loadFailed") : null}
@@ -271,6 +317,7 @@ function GoogleCard({ onSaved }: { onSaved: (msg: string) => void }) {
         configured={configured}
         updatedAt={d?.updated_at ?? null}
         onEdit={() => setEditing(true)}
+        onRemove={configured ? () => setConfirming(true) : undefined}
         tiles={[
           {
             icon: "user",
@@ -310,6 +357,19 @@ function GoogleCard({ onSaved }: { onSaved: (msg: string) => void }) {
           }}
         />
       )}
+      {confirming && (
+        <ConfirmRemoveModal
+          provider={providerName}
+          logo={<GoogleLogo size={20} />}
+          pending={del.isPending}
+          onCancel={() => setConfirming(false)}
+          onConfirm={async () => {
+            await del.mutateAsync();
+            setConfirming(false);
+            onSaved(t("authPage.removedProvider", { provider: providerName }));
+          }}
+        />
+      )}
     </>
   );
 }
@@ -330,6 +390,7 @@ function GoogleEditModal({
   const [clientSecret, setClientSecret] = useState("");
   const [allowedDomain, setAllowedDomain] = useState(data.allowed_domain);
   const [enabled, setEnabled] = useState(data.enabled);
+  const [redirectUri, setRedirectUri] = useState(data.redirect_uri);
   const [serverError, setServerError] = useState<string | null>(null);
 
   const onSave = async () => {
@@ -339,6 +400,7 @@ function GoogleEditModal({
         client_id: clientId.trim(),
         allowed_domain: allowedDomain.trim(),
         enabled,
+        redirect_uri: redirectUri.trim(),
       };
       if (clientSecret.length > 0) payload.client_secret = clientSecret;
       await put.mutateAsync(payload);
@@ -348,17 +410,35 @@ function GoogleEditModal({
     }
   };
 
+  const requiredSatisfied =
+    !!clientId.trim() && (clientSecret.length > 0 || data.has_secret);
+  const dirty =
+    clientId !== data.client_id ||
+    clientSecret !== "" ||
+    allowedDomain !== data.allowed_domain ||
+    enabled !== data.enabled ||
+    redirectUri !== data.redirect_uri;
+
   return (
     <EditModalShell
       logo={<GoogleLogo size={20} />}
       title={t("authPage.editProvider", { provider: t("authPage.google.title") })}
-      redirectUri={data.redirect_uri}
+      redirectUri={redirectUri}
+      onRedirectUriChange={setRedirectUri}
+      redirectUriDefault={data.redirect_uri_default}
+      dirty={dirty}
+      canSave={requiredSatisfied}
+      requiredWarning={!requiredSatisfied ? t("authPage.requiredWarning") : null}
       onClose={onClose}
       onSave={onSave}
       saving={put.isPending}
       serverError={serverError}
     >
-      <Field label={t("authPage.google.clientId")} hint={t("authPage.google.clientIdHint")}>
+      <Field
+        label={t("authPage.google.clientId")}
+        hint={t("authPage.google.clientIdHint")}
+        required
+      >
         <input
           className="input"
           type="text"
@@ -369,6 +449,7 @@ function GoogleEditModal({
       </Field>
       <Field
         label={t("authPage.fields.clientSecret")}
+        required
         hint={
           data.has_secret
             ? t("authPage.fields.clientSecretStored")
@@ -427,6 +508,7 @@ function ProviderSummaryCard({
   configured,
   updatedAt,
   onEdit,
+  onRemove,
   tiles,
 }: {
   logo: React.ReactNode;
@@ -438,6 +520,7 @@ function ProviderSummaryCard({
   configured: boolean;
   updatedAt: string | null;
   onEdit: () => void;
+  onRemove?: (() => void) | undefined;
   tiles: Tile[];
 }) {
   const { t } = useTranslation();
@@ -510,24 +593,37 @@ function ProviderSummaryCard({
             </div>
           </div>
         </div>
-        <button
-          type="button"
-          className="btn btn-sm"
-          onClick={onEdit}
-          disabled={loading || !!loadError}
-          style={{ flexShrink: 0 }}
-        >
-          <Icon name={configured ? "edit" : "plus"} size={13} />
-          {configured ? t("authPage.edit") : t("authPage.configure")}
-        </button>
+        <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={onEdit}
+            disabled={loading || !!loadError}
+          >
+            <Icon name={configured ? "edit" : "plus"} size={13} />
+            {configured ? t("authPage.edit") : t("authPage.configure")}
+          </button>
+          {onRemove && (
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={onRemove}
+              aria-label={t("authPage.remove")}
+              style={{ color: "var(--danger-text)", borderColor: "var(--danger-border)" }}
+            >
+              <Icon name="trash" size={13} />
+              {t("authPage.remove")}
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Detail tiles */}
+      {/* Detail tiles / empty state */}
       {loading ? (
         <div style={{ padding: "18px 20px", fontSize: 13, color: "var(--text-tertiary)" }}>
           {t("authPage.loading")}
         </div>
-      ) : loadError ? null : (
+      ) : loadError ? null : configured ? (
         <div
           style={{
             display: "grid",
@@ -542,6 +638,33 @@ function ProviderSummaryCard({
             </ConfigTile>
           ))}
         </div>
+      ) : (
+        <div
+          style={{
+            padding: "26px 20px 28px",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 14,
+            textAlign: "center",
+          }}
+        >
+          <p
+            style={{
+              margin: 0,
+              fontSize: 13,
+              color: "var(--text-secondary)",
+              maxWidth: 400,
+              lineHeight: 1.55,
+            }}
+          >
+            {t("authPage.emptyState", { provider: name })}
+          </p>
+          <button type="button" className="btn btn-sm" onClick={onEdit}>
+            <Icon name="plus" size={13} />
+            {t("authPage.configure")}
+          </button>
+        </div>
       )}
     </div>
   );
@@ -555,6 +678,11 @@ function EditModalShell({
   logo,
   title,
   redirectUri,
+  onRedirectUriChange,
+  redirectUriDefault,
+  dirty,
+  canSave,
+  requiredWarning,
   onClose,
   onSave,
   saving,
@@ -564,6 +692,11 @@ function EditModalShell({
   logo: React.ReactNode;
   title: string;
   redirectUri: string;
+  onRedirectUriChange: (v: string) => void;
+  redirectUriDefault: string;
+  dirty: boolean;
+  canSave: boolean;
+  requiredWarning: string | null;
   onClose: () => void;
   onSave: () => void | Promise<void>;
   saving: boolean;
@@ -571,8 +704,16 @@ function EditModalShell({
   children: React.ReactNode;
 }) {
   const { t } = useTranslation();
+  const [discardOpen, setDiscardOpen] = useState(false);
+  // Closing with unsaved edits prompts a discard confirmation; a clean
+  // form closes immediately.
+  const requestClose = () => {
+    if (saving) return;
+    if (dirty) setDiscardOpen(true);
+    else onClose();
+  };
   return (
-    <ModalShell onClose={onClose}>
+    <ModalShell onClose={requestClose}>
       <form
         role="dialog"
         aria-label={title}
@@ -629,7 +770,7 @@ function EditModalShell({
             type="button"
             className="icon-btn"
             aria-label={t("authPage.close")}
-            onClick={onClose}
+            onClick={requestClose}
             style={{ fontSize: 18, lineHeight: 1 }}
           >
             ×
@@ -647,12 +788,63 @@ function EditModalShell({
             gap: 13,
           }}
         >
+          {requiredWarning && (
+            <div
+              role="status"
+              style={{
+                display: "flex",
+                gap: 8,
+                alignItems: "center",
+                background: "var(--warning-soft, #fef3c7)",
+                color: "var(--warning-text, #b45309)",
+                border: "1px solid var(--warning-border, #fde68a)",
+                padding: "9px 12px",
+                borderRadius: "var(--radius-sm)",
+                fontSize: 12.5,
+                lineHeight: 1.45,
+              }}
+            >
+              <Icon name="info" size={14} />
+              {requiredWarning}
+            </div>
+          )}
+
           {children}
 
           <div className="field" style={{ marginTop: 2 }}>
             <span className="field-label">{t("authPage.redirectUriLabel")}</span>
-            <CopyField value={redirectUri} />
-            <span className="field-help">{t("authPage.redirectUriHint")}</span>
+            <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+              <input
+                className="input mono"
+                type="text"
+                value={redirectUri}
+                onChange={(e) => onRedirectUriChange(e.target.value)}
+                spellCheck={false}
+                autoComplete="off"
+                style={{ flex: 1, fontSize: 12 }}
+              />
+              <CopyButton value={redirectUri} />
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+              <span className="field-help">{t("authPage.redirectUriEditHint")}</span>
+              {redirectUri.trim() !== redirectUriDefault && (
+                <button
+                  type="button"
+                  onClick={() => onRedirectUriChange(redirectUriDefault)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    padding: 0,
+                    cursor: "pointer",
+                    color: "var(--accent)",
+                    fontSize: 11.5,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {t("authPage.resetToDefault")}
+                </button>
+              )}
+            </div>
           </div>
 
           {serverError && (
@@ -683,14 +875,185 @@ function EditModalShell({
             gap: 8,
           }}
         >
-          <button type="button" className="btn" onClick={onClose} disabled={saving}>
+          <button type="button" className="btn" onClick={requestClose} disabled={saving}>
             {t("authPage.cancel")}
           </button>
-          <button type="submit" className="btn btn-primary" disabled={saving}>
+          <button
+            type="submit"
+            className="btn btn-primary"
+            disabled={saving || !canSave}
+          >
             {saving ? t("authPage.saving") : t("authPage.saveChanges")}
           </button>
         </div>
       </form>
+
+      {discardOpen && (
+        <div
+          role="alertdialog"
+          aria-label={t("authPage.discardTitle")}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 70,
+            background: "rgba(0,0,0,0.4)",
+            display: "grid",
+            placeItems: "center",
+            padding: 16,
+          }}
+          onClick={() => setDiscardOpen(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 380,
+              maxWidth: "94vw",
+              background: "var(--bg)",
+              border: "1px solid var(--border-strong)",
+              borderRadius: 14,
+              boxShadow: "0 24px 64px rgba(0,0,0,0.2)",
+              padding: 20,
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+            }}
+          >
+            <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>
+              {t("authPage.discardTitle")}
+            </h3>
+            <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+              {t("authPage.discardBody")}
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 2 }}>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => setDiscardOpen(false)}
+              >
+                {t("authPage.keepEditing")}
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => {
+                  setDiscardOpen(false);
+                  onClose();
+                }}
+                style={{
+                  background: "var(--danger-text)",
+                  borderColor: "var(--danger-text)",
+                  color: "#fff",
+                }}
+              >
+                {t("authPage.discard")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </ModalShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Confirm-remove modal
+// ---------------------------------------------------------------------------
+
+function ConfirmRemoveModal({
+  provider,
+  logo,
+  pending,
+  onCancel,
+  onConfirm,
+}: {
+  provider: string;
+  logo: React.ReactNode;
+  pending: boolean;
+  onCancel: () => void;
+  onConfirm: () => void | Promise<void>;
+}) {
+  const { t } = useTranslation();
+  return (
+    <ModalShell onClose={onCancel}>
+      <div
+        role="alertdialog"
+        aria-label={t("authPage.removeTitle", { provider })}
+        style={{
+          position: "fixed",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -50%)",
+          width: 440,
+          maxWidth: "94vw",
+          background: "var(--bg)",
+          border: "1px solid var(--border-strong)",
+          borderRadius: 16,
+          zIndex: 60,
+          boxShadow: "0 24px 64px rgba(0,0,0,0.18)",
+          padding: 22,
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
+          <span
+            style={{
+              width: 34,
+              height: 34,
+              borderRadius: 9,
+              background: "var(--bg-sunken)",
+              border: "1px solid var(--border)",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            {logo}
+          </span>
+          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>
+            {t("authPage.removeTitle", { provider })}
+          </h2>
+        </div>
+        <p
+          style={{
+            margin: 0,
+            fontSize: 13,
+            color: "var(--text-secondary)",
+            lineHeight: 1.55,
+          }}
+        >
+          {t("authPage.removeBody", { provider })}
+        </p>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: 8,
+            marginTop: 4,
+          }}
+        >
+          <button type="button" className="btn" onClick={onCancel} disabled={pending}>
+            {t("authPage.cancel")}
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => void onConfirm()}
+            disabled={pending}
+            style={{
+              background: "var(--danger-text)",
+              borderColor: "var(--danger-text)",
+              color: "#fff",
+              padding: "6px 14px",
+              fontSize: 13,
+            }}
+          >
+            {pending ? t("authPage.removing") : t("authPage.removeConfirm")}
+          </button>
+        </div>
+      </div>
     </ModalShell>
   );
 }
@@ -861,7 +1224,7 @@ function ToggleRow({
   );
 }
 
-function CopyField({ value }: { value: string }) {
+function CopyButton({ value }: { value: string }) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const onCopy = async () => {
@@ -874,41 +1237,37 @@ function CopyField({ value }: { value: string }) {
     }
   };
   return (
-    <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
-      <input
-        className="input mono"
-        type="text"
-        value={value}
-        readOnly
-        onFocusCapture={(e) => e.currentTarget.select()}
-        onClick={(e) => e.currentTarget.select()}
-        style={{ flex: 1, fontSize: 12, color: "var(--text-secondary)" }}
-      />
-      <button
-        type="button"
-        className="btn btn-sm"
-        onClick={onCopy}
-        style={{ whiteSpace: "nowrap" }}
-      >
-        <Icon name={copied ? "check" : "clipboard"} size={13} />
-        {copied ? t("authPage.copied") : t("authPage.copy")}
-      </button>
-    </div>
+    <button
+      type="button"
+      className="btn btn-sm"
+      onClick={onCopy}
+      style={{ whiteSpace: "nowrap" }}
+    >
+      <Icon name={copied ? "check" : "clipboard"} size={13} />
+      {copied ? t("authPage.copied") : t("authPage.copy")}
+    </button>
   );
 }
 
 function Field({
   label,
   hint,
+  required,
   children,
 }: {
   label: string;
   hint?: string;
+  required?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <label className="field">
-      <span className="field-label">{label}</span>
+      <span className="field-label">
+        {label}
+        {required && (
+          <span style={{ color: "var(--danger-text)", marginInlineStart: 3 }}>*</span>
+        )}
+      </span>
       {children}
       {hint && <span className="field-help">{hint}</span>}
     </label>

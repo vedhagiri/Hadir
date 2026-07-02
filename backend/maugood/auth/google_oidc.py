@@ -253,6 +253,7 @@ class GoogleConfigRow:
     has_secret: bool
     allowed_domain: str
     enabled: bool
+    redirect_uri: str
     updated_at: datetime
 
 
@@ -262,6 +263,7 @@ _CFG_COLS = (
     tenant_google_oidc_config.c.client_secret_encrypted,
     tenant_google_oidc_config.c.allowed_domain,
     tenant_google_oidc_config.c.enabled,
+    tenant_google_oidc_config.c.redirect_uri,
     tenant_google_oidc_config.c.updated_at,
 )
 
@@ -286,6 +288,7 @@ def get_config(conn: Connection, *, tenant_id: int) -> GoogleConfigRow:
         has_secret=bool(row.client_secret_encrypted),
         allowed_domain=str(row.allowed_domain or ""),
         enabled=bool(row.enabled),
+        redirect_uri=str(row.redirect_uri or ""),
         updated_at=row.updated_at,
     )
 
@@ -301,9 +304,40 @@ def _load_secret(conn: Connection, *, tenant_id: int) -> Optional[str]:
     return decrypt_secret(enc)
 
 
-def _redirect_uri() -> str:
+_CALLBACK_PATH = "/api/auth/google/callback"
+
+
+def _default_redirect_uri() -> str:
     base = get_settings().oidc_redirect_base_url.rstrip("/")
-    return f"{base}/api/auth/google/callback"
+    return f"{base}{_CALLBACK_PATH}"
+
+
+def _effective_redirect_uri(cfg: GoogleConfigRow) -> str:
+    """The override if the Admin set one, else the env-computed default."""
+
+    return cfg.redirect_uri or _default_redirect_uri()
+
+
+def _validate_redirect_uri(value: str) -> str:
+    """Validate an operator-supplied redirect URI override (empty = default)."""
+
+    from urllib.parse import urlparse  # noqa: PLC0415
+
+    v = value.strip()
+    if not v:
+        return ""
+    parsed = urlparse(v)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise HTTPException(
+            status_code=400,
+            detail="redirect_uri must be an absolute http(s) URL",
+        )
+    if not parsed.path.endswith(_CALLBACK_PATH):
+        raise HTTPException(
+            status_code=400,
+            detail=f"redirect_uri must end with {_CALLBACK_PATH}",
+        )
+    return v
 
 
 # ---------------------------------------------------------------------------
@@ -374,7 +408,7 @@ def google_login(tenant: str, request: Request) -> Response:
         "ts": int(time.time()),
     }
     cookie = _sign_state(payload)
-    redirect_uri = _redirect_uri()
+    redirect_uri = _effective_redirect_uri(cfg)
 
     auth_url = (
         f"{doc.authorization_endpoint}"
@@ -499,7 +533,7 @@ def google_callback(
             code=code,
             client_id=cfg.client_id,
             client_secret=client_secret,
-            redirect_uri=_redirect_uri(),
+            redirect_uri=_effective_redirect_uri(cfg),
         )
     except Exception as exc:  # noqa: BLE001
         _audit_failure(
@@ -671,10 +705,10 @@ class ConfigResponse(BaseModel):
     allowed_domain: str
     enabled: bool
     updated_at: str
-    # The exact redirect URI Google must have registered — computed
-    # from ``MAUGOOD_OIDC_REDIRECT_BASE_URL`` so the operator copies the
-    # authoritative value, not the browser's guess at the origin.
+    # Effective redirect URI (override if set, else env-computed default).
     redirect_uri: str
+    # The env-computed default, so the UI can offer "reset to default".
+    redirect_uri_default: str
 
 
 class ConfigPatchRequest(BaseModel):
@@ -684,6 +718,8 @@ class ConfigPatchRequest(BaseModel):
     client_secret: Optional[str] = Field(default=None, max_length=2048)
     allowed_domain: Optional[str] = Field(default=None, max_length=253)
     enabled: Optional[bool] = None
+    # Optional redirect-URI override. Empty string resets to the default.
+    redirect_uri: Optional[str] = Field(default=None, max_length=500)
 
 
 def _to_response(cfg: GoogleConfigRow) -> ConfigResponse:
@@ -694,7 +730,8 @@ def _to_response(cfg: GoogleConfigRow) -> ConfigResponse:
         allowed_domain=cfg.allowed_domain,
         enabled=cfg.enabled,
         updated_at=cfg.updated_at.isoformat(),
-        redirect_uri=_redirect_uri(),
+        redirect_uri=_effective_redirect_uri(cfg),
+        redirect_uri_default=_default_redirect_uri(),
     )
 
 
@@ -754,6 +791,11 @@ def put_my_config(
         values["allowed_domain"] = payload.allowed_domain.strip()
     if payload.enabled is not None:
         values["enabled"] = payload.enabled
+    if payload.redirect_uri is not None:
+        validated = _validate_redirect_uri(payload.redirect_uri)
+        values["redirect_uri"] = (
+            "" if validated == _default_redirect_uri() else validated
+        )
 
     with engine.begin() as conn:
         conn.execute(
@@ -784,5 +826,46 @@ def put_my_config(
                 "secret_rotated": payload.client_secret is not None
                 and payload.client_secret != "",
             },
+        )
+    return _to_response(after)
+
+
+@router.delete("/config")
+def delete_my_config(
+    request: Request,
+    user: Annotated[CurrentUser, Depends(require_role("Admin"))],
+) -> ConfigResponse:
+    """Clear the tenant's Google config — client id/secret wiped, disabled."""
+
+    engine = get_engine()
+    with engine.begin() as conn:
+        before = get_config(conn, tenant_id=user.tenant_id)
+        conn.execute(
+            update(tenant_google_oidc_config)
+            .where(tenant_google_oidc_config.c.tenant_id == user.tenant_id)
+            .values(
+                client_id="",
+                client_secret_encrypted=None,
+                allowed_domain="",
+                enabled=False,
+                redirect_uri="",
+                updated_at=datetime.now(tz=timezone.utc),
+            )
+        )
+        after = get_config(conn, tenant_id=user.tenant_id)
+        write_audit(
+            conn,
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            action="auth.google.config_deleted",
+            entity_type="google_oidc",
+            entity_id=str(user.tenant_id),
+            before={
+                "client_id": before.client_id,
+                "has_secret": before.has_secret,
+                "allowed_domain": before.allowed_domain,
+                "enabled": before.enabled,
+            },
+            after={"cleared": True},
         )
     return _to_response(after)

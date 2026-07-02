@@ -14,6 +14,7 @@ export interface OidcConfigResponse {
   enabled: boolean;
   updated_at: string;
   redirect_uri: string;
+  redirect_uri_default: string;
 }
 
 export interface OidcConfigPatchInput {
@@ -24,6 +25,8 @@ export interface OidcConfigPatchInput {
   // pattern from pilot P7.
   client_secret?: string;
   enabled?: boolean;
+  // Optional redirect-URI override. Empty string resets to the default.
+  redirect_uri?: string;
 }
 
 // --- Google Sign-In (OIDC) ------------------------------------------------
@@ -37,6 +40,7 @@ export interface GoogleOidcConfigResponse {
   enabled: boolean;
   updated_at: string;
   redirect_uri: string;
+  redirect_uri_default: string;
 }
 
 export interface GoogleOidcConfigPatchInput {
@@ -46,4 +50,6 @@ export interface GoogleOidcConfigPatchInput {
   // Optional Google Workspace hosted-domain restriction. Empty = any.
   allowed_domain?: string;
   enabled?: boolean;
+  // Optional redirect-URI override. Empty string resets to the default.
+  redirect_uri?: string;
 }
