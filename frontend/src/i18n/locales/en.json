@@ -68,7 +68,18 @@
     "oidcOrLocal": "or use a local account",
     "googleButton": "Sign in with Google",
     "ssoUnavailableTitle": "Sign-in unavailable",
-    "providerNotEnabled": "{{provider}} sign-in isn't enabled for this workspace yet. Ask your administrator to configure it under Settings → Authentication."
+    "providerNotEnabled": "{{provider}} sign-in isn't enabled for this workspace yet. Ask your administrator to configure it under Settings → Authentication.",
+    "enterWorkspaceFirst": "Enter your workspace name above first, then choose a sign-in provider.",
+    "ssoError": {
+      "not_registered": "Your {{provider}} account isn't registered in Maugood. Ask your administrator to add you, then try again.",
+      "email_not_verified": "Your {{provider}} email address isn't verified. Verify it with {{provider}} and try again.",
+      "domain_not_allowed": "Your account's domain isn't permitted for this workspace. Contact your administrator.",
+      "not_configured": "{{provider}} sign-in isn't fully configured for this workspace. Ask your administrator to finish setup under Settings → Authentication.",
+      "provider_error": "{{provider}} reported an error during sign-in. Please try again.",
+      "verify_failed": "We couldn't verify your {{provider}} sign-in. Please try again.",
+      "session_expired": "Your sign-in session expired before it completed. Please try again.",
+      "failed": "{{provider}} sign-in didn't complete. Please try again."
+    }
   },
   "topbar": {
     "logout": "Log out",
@@ -2228,10 +2239,39 @@
   },
   "authPage": {
     "title": "Authentication",
-    "subtitle": "Sign in with Microsoft (Entra ID OIDC). Users must already exist in Maugood — Maugood does not auto-provision from claims, and roles are managed only inside Maugood (BRD FR-AUTH-006).",
+    "subtitle": "Configure single sign-on for this tenant. Users must already exist in Maugood — Maugood does not auto-provision from provider claims, and roles are managed only inside Maugood (BRD FR-AUTH-006).",
     "loading": "Loading authentication settings…",
     "loadFailed": "Couldn't load authentication settings.",
     "signInRequired": "Sign in to manage authentication settings.",
+    "providersLabel": "Sign-in providers",
+    "updatedAt": "Updated {{when}}",
+    "edit": "Edit",
+    "configure": "Configure",
+    "cancel": "Cancel",
+    "close": "Close",
+    "notConfigured": "Not configured",
+    "notSet": "Not set",
+    "stored": "stored",
+    "anyDomain": "Any domain",
+    "savedProvider": "{{provider}} settings saved.",
+    "editProvider": "Edit {{provider}}",
+    "redirectUriLabel": "Redirect URI",
+    "redirectUriHint": "Register this exact URL as a redirect / callback URI in the provider console.",
+    "microsoft": {
+      "title": "Microsoft (Entra ID)",
+      "subtitle": "Sign in with a Microsoft work or school account."
+    },
+    "google": {
+      "title": "Google Sign-In",
+      "subtitle": "Sign in with a Google or Google Workspace account.",
+      "clientId": "Client ID",
+      "clientIdHint": "The OAuth 2.0 client ID from Google Cloud Console → APIs & Services → Credentials.",
+      "allowedDomain": "Allowed hosted domain (optional)",
+      "allowedDomainHint": "Restrict sign-in to one Google Workspace domain. Leave blank to allow any verified Google account that matches a Maugood user.",
+      "allowedDomainPlaceholder": "example.com",
+      "enableToggle": "Enable Google Sign-In for this tenant",
+      "enableHint": "When enabled, the \"Sign in with Google\" button on the login page starts a real sign-in. Users must already exist in Maugood — no auto-provisioning, no roles from Google claims."
+    },
     "fields": {
       "entraTenantId": "Entra tenant ID",
       "entraTenantHint": "GUID or verified domain. From Microsoft Entra admin centre → Identity → Overview.",
@@ -2241,8 +2281,13 @@
       "clientSecretStored": "Stored. Type a new secret only to rotate it.",
       "clientSecretRequired": "Required to enable OIDC."
     },
-    "enableToggle": "Enable OIDC for this tenant",
-    "enableHint": "When enabled, the login page shows \"Sign in with Microsoft\" as the primary action. Local password sign-in remains as a break-glass fallback labelled \"Use local account\".",
+    "enableToggle": "Enable Microsoft sign-in for this tenant",
+    "enableHint": "When enabled, the login page shows \"Sign in with Microsoft\". Local password sign-in remains as a break-glass fallback.",
+    "statusEnabled": "Enabled",
+    "statusDisabled": "Disabled",
+    "copy": "Copy",
+    "copied": "Copied",
+    "savedToast": "Saved",
     "saveChanges": "Save changes",
     "saving": "Saving…",
     "errSave": "Save failed.",

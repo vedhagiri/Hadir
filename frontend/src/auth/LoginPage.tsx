@@ -18,7 +18,7 @@ import { z } from "zod";
 
 import { ApiError } from "../api/client";
 import mtsLogo from "../assets/mts_logo.png";
-import { useOidcStatus } from "../auth-oidc/hooks";
+import { useGoogleStatus, useOidcStatus } from "../auth-oidc/hooks";
 import { APP_VERSION_FULL } from "../config";
 import { Icon } from "../shell/Icon";
 import { useLogin, useMe } from "./AuthProvider";
@@ -58,7 +58,7 @@ export function LoginPage() {
   const navigate = useNavigate();
   const login = useLogin();
   const { data: me, isLoading: meLoading } = useMe();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // Tenant slug — pulled from ?tenant=… and kept in form state. Drives
   // the OIDC probe so the Microsoft button renders only when the
@@ -81,6 +81,49 @@ export function LoginPage() {
 
   const oidcStatus = useOidcStatus(tenantSlugValid ? tenantSlug : null);
   const oidcEnabled = !!oidcStatus.data?.enabled;
+  const googleStatus = useGoogleStatus(tenantSlugValid ? tenantSlug : null);
+  const googleEnabled = !!googleStatus.data?.enabled;
+
+  // A failed SSO callback (Microsoft/Google) redirects back here with
+  // ``?sso_error=<code>&provider=<name>`` instead of dumping raw JSON.
+  // Map it to a friendly message shown in the login notice modal, then
+  // strip the params so a refresh doesn't re-show it.
+  const ssoErrorCode = searchParams.get("sso_error");
+  const ssoProviderRaw = searchParams.get("provider");
+  const ssoProviderName =
+    ssoProviderRaw === "google"
+      ? "Google"
+      : ssoProviderRaw === "microsoft"
+        ? "Microsoft"
+        : "SSO";
+  const SSO_ERROR_CODES = [
+    "not_registered",
+    "email_not_verified",
+    "domain_not_allowed",
+    "not_configured",
+    "provider_error",
+    "verify_failed",
+    "session_expired",
+  ];
+  const ssoNotice = ssoErrorCode
+    ? t(
+        `login.ssoError.${
+          SSO_ERROR_CODES.includes(ssoErrorCode) ? ssoErrorCode : "failed"
+        }`,
+        { provider: ssoProviderName },
+      )
+    : null;
+
+  useEffect(() => {
+    if (!ssoErrorCode) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete("sso_error");
+    next.delete("provider");
+    setSearchParams(next, { replace: true });
+    // Run once on mount — the notice message is already captured in
+    // ``ssoNotice`` and seeded into the form's local state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (meLoading) return null;
   if (me != null) return <Navigate to="/" replace />;
@@ -166,7 +209,9 @@ export function LoginPage() {
             tenantSlug={tenantSlug}
             tenantSlugValid={tenantSlugValid}
             oidcEnabled={oidcEnabled}
+            googleEnabled={googleEnabled}
             serverError={serverError}
+            initialNotice={ssoNotice}
           />
         </div>
 
@@ -425,7 +470,9 @@ interface CombinedFormProps {
   tenantSlug: string;
   tenantSlugValid: boolean;
   oidcEnabled: boolean;
+  googleEnabled: boolean;
   serverError: string | null;
+  initialNotice: string | null;
 }
 
 function CombinedLoginForm({
@@ -437,15 +484,21 @@ function CombinedLoginForm({
   tenantSlug,
   tenantSlugValid,
   oidcEnabled,
+  googleEnabled,
   serverError,
+  initialNotice,
 }: CombinedFormProps) {
   const { t } = useTranslation();
   // Provider-not-configured notice. Replaces the jarring native
   // window.alert with an in-card styled popup so the message reads as
-  // part of the product, not a browser chrome dialog.
-  const [notice, setNotice] = useState<string | null>(null);
+  // part of the product, not a browser chrome dialog. Seeded from a
+  // failed SSO callback's ``?sso_error`` when present.
+  const [notice, setNotice] = useState<string | null>(initialNotice);
   const oidcUrl = tenantSlugValid
     ? `/api/auth/oidc/login?tenant=${encodeURIComponent(tenantSlug)}`
+    : "";
+  const googleUrl = tenantSlugValid
+    ? `/api/auth/google/login?tenant=${encodeURIComponent(tenantSlug)}`
     : "";
   return (
     <form
@@ -571,8 +624,17 @@ function CombinedLoginForm({
           aria-label={t("login.oidcButton")}
           title={t("login.oidcButton")}
           onClick={(e) => {
+            e.preventDefault();
+            if (!tenantSlugValid) {
+              setNotice(
+                t("login.enterWorkspaceFirst", {
+                  defaultValue:
+                    "Enter your workspace name above first, then choose a sign-in provider.",
+                }),
+              );
+              return;
+            }
             if (!oidcEnabled || !oidcUrl) {
-              e.preventDefault();
               setNotice(
                 t("login.providerNotEnabled", {
                   provider: "Microsoft",
@@ -597,14 +659,28 @@ function CombinedLoginForm({
           title={t("login.googleButton", {
             defaultValue: "Sign in with Google",
           })}
-          onClick={() => {
-            setNotice(
-              t("login.providerNotEnabled", {
-                provider: "Google",
-                defaultValue:
-                  "Google sign-in isn't enabled for this workspace yet. Ask your administrator to configure it under Settings → Authentication.",
-              }),
-            );
+          onClick={(e) => {
+            e.preventDefault();
+            if (!tenantSlugValid) {
+              setNotice(
+                t("login.enterWorkspaceFirst", {
+                  defaultValue:
+                    "Enter your workspace name above first, then choose a sign-in provider.",
+                }),
+              );
+              return;
+            }
+            if (!googleEnabled || !googleUrl) {
+              setNotice(
+                t("login.providerNotEnabled", {
+                  provider: "Google",
+                  defaultValue:
+                    "Google sign-in isn't enabled for this workspace yet. Ask your administrator to configure it under Settings → Authentication.",
+                }),
+              );
+              return;
+            }
+            window.location.assign(googleUrl);
           }}
           style={ssoIconButtonStyle}
         >

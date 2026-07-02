@@ -24,6 +24,7 @@ from maugood.audit_log.router import router as audit_log_router
 from maugood.auth import get_rate_limiter
 from maugood.auth import router as auth_router
 from maugood.auth.oidc import router as oidc_router
+from maugood.auth.google_oidc import router as google_oidc_router
 from maugood.branding.router import (
     router as branding_router,
     super_admin_router as branding_super_admin_router,
@@ -314,6 +315,7 @@ def create_app() -> FastAPI:
     app.include_router(branding_router)
     app.include_router(branding_super_admin_router)
     app.include_router(oidc_router)
+    app.include_router(google_oidc_router)
     app.include_router(manager_assignments_router)
     app.include_router(policies_router)
     app.include_router(leave_calendar_router)

@@ -5,6 +5,8 @@ import type { UseQueryResult } from "@tanstack/react-query";
 
 import { ApiError, api } from "../api/client";
 import type {
+  GoogleOidcConfigPatchInput,
+  GoogleOidcConfigResponse,
   OidcConfigPatchInput,
   OidcConfigResponse,
   OidcStatusResponse,
@@ -12,6 +14,9 @@ import type {
 
 const STATUS_KEY = (slug: string) => ["oidc", "status", slug] as const;
 const MY_CONFIG_KEY = ["oidc", "config", "me"] as const;
+const GOOGLE_STATUS_KEY = (slug: string) =>
+  ["google-oidc", "status", slug] as const;
+const MY_GOOGLE_CONFIG_KEY = ["google-oidc", "config", "me"] as const;
 
 /**
  * Anonymous probe — does the named tenant have OIDC enabled? The login
@@ -61,6 +66,60 @@ export function usePutMyOidcConfig() {
       }),
     onSuccess: (data) => {
       qc.setQueryData(MY_CONFIG_KEY, data);
+    },
+  });
+}
+
+// --- Google Sign-In (OIDC) ------------------------------------------------
+
+/** Anonymous probe — does the named tenant have Google sign-in enabled? */
+export function useGoogleStatus(
+  slug: string | null,
+): UseQueryResult<OidcStatusResponse, Error> {
+  return useQuery({
+    queryKey:
+      slug == null ? ["google-oidc", "status", "none"] : GOOGLE_STATUS_KEY(slug),
+    queryFn: async () =>
+      api<OidcStatusResponse>(
+        `/api/auth/google/status?tenant=${encodeURIComponent(slug ?? "")}`,
+      ),
+    enabled: slug != null && slug.length > 0,
+    staleTime: 60 * 1000,
+    retry: false,
+  });
+}
+
+export function useMyGoogleConfig(): UseQueryResult<
+  GoogleOidcConfigResponse | null,
+  Error
+> {
+  return useQuery({
+    queryKey: MY_GOOGLE_CONFIG_KEY,
+    queryFn: async () => {
+      try {
+        return await api<GoogleOidcConfigResponse>("/api/auth/google/config");
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) return null;
+        throw err;
+      }
+    },
+    staleTime: 30 * 1000,
+    retry: false,
+  });
+}
+
+export function usePutMyGoogleConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (
+      input: GoogleOidcConfigPatchInput,
+    ): Promise<GoogleOidcConfigResponse> =>
+      api<GoogleOidcConfigResponse>("/api/auth/google/config", {
+        method: "PUT",
+        body: input,
+      }),
+    onSuccess: (data) => {
+      qc.setQueryData(MY_GOOGLE_CONFIG_KEY, data);
     },
   });
 }

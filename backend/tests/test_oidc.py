@@ -357,9 +357,10 @@ def test_callback_refuses_unknown_email_with_prescribed_message(
         params={"code": "test-code", "state": state},
         follow_redirects=False,
     )
+    # Failure renders the branded HTML error page (not raw JSON).
     assert resp.status_code == 403
-    assert "not registered in Maugood" in resp.json()["detail"]
-    assert "Contact your administrator" in resp.json()["detail"]
+    assert 'data-sso-error="not_registered"' in resp.text
+    assert "not registered in Maugood" in resp.text
     assert not client.cookies.get("maugood_session"), "must NOT set session"
 
     # Failure audit row written.
@@ -389,7 +390,7 @@ def test_callback_rejects_state_mismatch(
         follow_redirects=False,
     )
     assert resp.status_code == 400
-    assert resp.json()["detail"] == "oidc state mismatch"
+    assert 'data-sso-error="session_expired"' in resp.text
 
 
 def test_callback_rejects_missing_state_cookie(
@@ -401,6 +402,7 @@ def test_callback_rejects_missing_state_cookie(
         follow_redirects=False,
     )
     assert resp.status_code == 400
+    assert 'data-sso-error="session_expired"' in resp.text
 
 
 def test_callback_rejects_id_token_with_wrong_nonce(
@@ -421,6 +423,7 @@ def test_callback_rejects_id_token_with_wrong_nonce(
         follow_redirects=False,
     )
     assert resp.status_code == 400
+    assert 'data-sso-error="verify_failed"' in resp.text
 
 
 # ---------------------------------------------------------------------------

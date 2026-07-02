@@ -1251,6 +1251,34 @@ tenant_oidc_config = Table(
 )
 
 
+# Per-tenant Google Sign-In (OIDC) config — sibling of
+# ``tenant_oidc_config`` (Entra) above. Shares the same
+# ``MAUGOOD_AUTH_FERNET_KEY`` for the encrypted client secret. The
+# optional ``allowed_domain`` restricts sign-in to a single Google
+# Workspace hosted domain (empty = any verified account that matches a
+# Maugood user). See ``maugood/auth/google_oidc.py``.
+tenant_google_oidc_config = Table(
+    "tenant_google_oidc_config",
+    metadata,
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("client_id", Text, nullable=False, server_default=""),
+    Column("client_secret_encrypted", Text, nullable=True),
+    Column("allowed_domain", Text, nullable=False, server_default=""),
+    Column("enabled", Boolean, nullable=False, server_default="false"),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+)
+
+
 # --- Super-Admin global tables (P3) ----------------------------------------
 # All three live in ``public`` alongside ``tenants``. They are NOT per-tenant
 # and the provisioning CLI's create_all filter (``schema != 'public'``)

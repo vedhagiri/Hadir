@@ -62,7 +62,7 @@ from fastapi import (
     Response,
     status,
 )
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import insert, select, update
 from sqlalchemy.engine import Connection
@@ -75,6 +75,7 @@ from maugood.auth.dependencies import (
     require_role,
 )
 from maugood.auth.sessions import create_session
+from maugood.auth.sso_error_page import sso_error_response
 from maugood.config import get_settings
 from maugood.db import (
     _TENANT_SCHEMA_RE,
@@ -100,6 +101,17 @@ STATE_COOKIE_NAME = "maugood_oidc_state"
 _ENTRA_DISCOVERY_URL = (
     "https://login.microsoftonline.com/{tenant_id}/v2.0/.well-known/openid-configuration"
 )
+
+
+def _login_error_redirect(code: str) -> HTMLResponse:
+    """Render the branded SSO error page for a failed callback.
+
+    The callback is a top-level browser navigation, so raising an
+    HTTPException would show raw JSON. Instead we return a self-contained
+    styled page (see ``sso_error_page``) with a "Back to sign in" button
+    and the friendly message for ``code``."""
+
+    return sso_error_response(code, "microsoft")
 
 
 # ---------------------------------------------------------------------------
@@ -382,11 +394,25 @@ def exchange_code(
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
     if resp.status_code != 200:
-        # Don't include the response body in the exception message —
-        # Microsoft's error blobs sometimes echo the client_id which
-        # we don't want in logs even though it's not technically
-        # sensitive.
-        raise RuntimeError(f"token endpoint returned {resp.status_code}")
+        # Surface only the OAuth ``error`` CODE (e.g. invalid_client /
+        # invalid_grant) — it's safe and diagnostic. Never log the body
+        # or error_description: Microsoft's blobs can echo the client_id.
+        oauth_error = ""
+        try:
+            oauth_error = str(resp.json().get("error", ""))
+        except Exception:  # noqa: BLE001
+            pass
+        logger.warning(
+            "oidc token exchange failed: status=%s error=%s "
+            "(401/invalid_client → wrong client secret; "
+            "400/invalid_grant → redirect_uri or code issue)",
+            resp.status_code,
+            oauth_error or "unknown",
+        )
+        raise RuntimeError(
+            f"token endpoint returned {resp.status_code}"
+            + (f" ({oauth_error})" if oauth_error else "")
+        )
     return resp.json()
 
 
@@ -609,10 +635,10 @@ def oidc_callback(
 
     # 1. Validate the signed state cookie + match the ``state`` param.
     if maugood_oidc_state is None:
-        raise HTTPException(status_code=400, detail="missing oidc state cookie")
+        return _login_error_redirect("session_expired")
     state_payload = _verify_state(maugood_oidc_state)
     if state_payload is None:
-        raise HTTPException(status_code=400, detail="invalid or expired oidc state")
+        return _login_error_redirect("session_expired")
 
     # ``tenant_schema`` is signed-server-set state from /login;
     # ``_TENANT_SCHEMA_RE`` is the Postgres-identifier regex (correct
@@ -620,7 +646,7 @@ def oidc_callback(
     schema = str(state_payload.get("tenant_schema") or "")
     tenant_id = state_payload.get("tenant_id")
     if not isinstance(tenant_id, int) or not _TENANT_SCHEMA_RE.match(schema):
-        raise HTTPException(status_code=400, detail="malformed oidc state")
+        return _login_error_redirect("session_expired")
 
     if error:
         _audit_failure(
@@ -629,17 +655,14 @@ def oidc_callback(
             reason=f"entra_error:{error}",
             ip=ip,
         )
-        raise HTTPException(
-            status_code=400,
-            detail=f"entra returned error: {error}",
-        )
+        return _login_error_redirect("provider_error")
     if not code or not state:
-        raise HTTPException(status_code=400, detail="missing oidc code/state")
+        return _login_error_redirect("session_expired")
     if state != state_payload.get("state"):
         _audit_failure(
             tenant_id=tenant_id, schema=schema, reason="state_mismatch", ip=ip
         )
-        raise HTTPException(status_code=400, detail="oidc state mismatch")
+        return _login_error_redirect("session_expired")
 
     # 2. Load the tenant's OIDC config + secret.
     engine = get_engine()
@@ -651,7 +674,7 @@ def oidc_callback(
         _audit_failure(
             tenant_id=tenant_id, schema=schema, reason="config_disabled", ip=ip
         )
-        raise HTTPException(status_code=400, detail="oidc disabled or misconfigured")
+        return _login_error_redirect("not_configured")
 
     # 3. Discovery + token exchange.
     try:
@@ -670,14 +693,14 @@ def oidc_callback(
             reason=f"token_exchange_failed:{type(exc).__name__}",
             ip=ip,
         )
-        raise HTTPException(status_code=502, detail="oidc token exchange failed")
+        return _login_error_redirect("verify_failed")
 
     id_token = token.get("id_token")
     if not id_token:
         _audit_failure(
             tenant_id=tenant_id, schema=schema, reason="no_id_token", ip=ip
         )
-        raise HTTPException(status_code=502, detail="entra returned no id_token")
+        return _login_error_redirect("verify_failed")
 
     # 4. Validate the ID token.
     try:
@@ -696,7 +719,7 @@ def oidc_callback(
             reason=f"id_token_invalid:{type(exc).__name__}",
             ip=ip,
         )
-        raise HTTPException(status_code=400, detail="invalid id_token")
+        return _login_error_redirect("verify_failed")
 
     # 5. Email match. We accept ``email`` first, then fall back to
     #    ``preferred_username`` (Entra populates that with the user's
@@ -712,7 +735,7 @@ def oidc_callback(
         _audit_failure(
             tenant_id=tenant_id, schema=schema, reason="no_email_claim", ip=ip
         )
-        raise HTTPException(status_code=403, detail="entra response missing email")
+        return _login_error_redirect("verify_failed")
 
     with tenant_context(schema):
         with engine.begin() as conn:
@@ -736,14 +759,7 @@ def oidc_callback(
             email_attempted=email,
             ip=ip,
         )
-        # The exact prescribed message — operator-actionable.
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                "Your Microsoft account is not registered in Maugood. "
-                "Contact your administrator."
-            ),
-        )
+        return _login_error_redirect("not_registered")
 
     # 6. Create a Maugood session — identical shape to local login.
     with tenant_context(schema):
@@ -815,6 +831,10 @@ class ConfigResponse(BaseModel):
     has_secret: bool
     enabled: bool
     updated_at: str
+    # The exact redirect URI Entra must have registered — computed from
+    # ``MAUGOOD_OIDC_REDIRECT_BASE_URL`` so the operator copies the
+    # authoritative value, not the browser's guess at the origin.
+    redirect_uri: str
 
 
 class ConfigPatchRequest(BaseModel):
@@ -835,6 +855,7 @@ def _to_response(cfg: OidcConfigRow) -> ConfigResponse:
         has_secret=cfg.has_secret,
         enabled=cfg.enabled,
         updated_at=cfg.updated_at.isoformat(),
+        redirect_uri=_redirect_uri(),
     )
 
 

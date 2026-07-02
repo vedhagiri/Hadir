@@ -68,7 +68,18 @@
     "oidcOrLocal": "أو استخدم حساباً محلياً",
     "googleButton": "تسجيل الدخول باستخدام جوجل",
     "ssoUnavailableTitle": "تسجيل الدخول غير متاح",
-    "providerNotEnabled": "تسجيل الدخول عبر {{provider}} غير مُفعّل لهذه المساحة بعد. اطلب من المسؤول إعداده من الإعدادات ← المصادقة."
+    "providerNotEnabled": "تسجيل الدخول عبر {{provider}} غير مُفعّل لهذه المساحة بعد. اطلب من المسؤول إعداده من الإعدادات ← المصادقة.",
+    "enterWorkspaceFirst": "أدخل اسم مساحة العمل في الأعلى أولاً، ثم اختر مزوّد تسجيل الدخول.",
+    "ssoError": {
+      "not_registered": "حساب {{provider}} الخاص بك غير مسجَّل في Maugood. اطلب من المسؤول إضافتك ثم حاول مرة أخرى.",
+      "email_not_verified": "عنوان بريد {{provider}} غير موثَّق. وثِّقه لدى {{provider}} ثم حاول مرة أخرى.",
+      "domain_not_allowed": "نطاق حسابك غير مسموح به لهذه المساحة. تواصل مع المسؤول.",
+      "not_configured": "تسجيل الدخول عبر {{provider}} غير مكتمل الإعداد لهذه المساحة. اطلب من المسؤول إكمال الإعداد من الإعدادات ← المصادقة.",
+      "provider_error": "أبلغ {{provider}} عن خطأ أثناء تسجيل الدخول. حاول مرة أخرى.",
+      "verify_failed": "تعذّر التحقق من تسجيل الدخول عبر {{provider}}. حاول مرة أخرى.",
+      "session_expired": "انتهت صلاحية جلسة تسجيل الدخول قبل اكتمالها. حاول مرة أخرى.",
+      "failed": "لم يكتمل تسجيل الدخول عبر {{provider}}. حاول مرة أخرى."
+    }
   },
   "topbar": {
     "logout": "تسجيل الخروج",
@@ -2258,10 +2269,39 @@
   },
   "authPage": {
     "title": "المصادقة",
-    "subtitle": "سجّل الدخول بحساب Microsoft (Entra ID OIDC). يجب أن يكون المستخدمون موجودين مسبقاً في Maugood — لا يُنشئ Maugood حسابات تلقائياً من الادعاءات، وتُدار الأدوار داخل Maugood فقط (BRD FR-AUTH-006).",
+    "subtitle": "اضبط الدخول الموحّد لهذا المستأجر. يجب أن يكون المستخدمون موجودين مسبقاً في Maugood — لا يُنشئ Maugood حسابات تلقائياً من ادعاءات المزوّد، وتُدار الأدوار داخل Maugood فقط (BRD FR-AUTH-006).",
     "loading": "جارٍ تحميل إعدادات المصادقة…",
     "loadFailed": "تعذّر تحميل إعدادات المصادقة.",
     "signInRequired": "سجّل الدخول لإدارة إعدادات المصادقة.",
+    "providersLabel": "مزوّدو تسجيل الدخول",
+    "updatedAt": "آخر تحديث {{when}}",
+    "edit": "تعديل",
+    "configure": "إعداد",
+    "cancel": "إلغاء",
+    "close": "إغلاق",
+    "notConfigured": "غير مُعَدّ",
+    "notSet": "غير مُحدَّد",
+    "stored": "مخزَّن",
+    "anyDomain": "أي نطاق",
+    "savedProvider": "تم حفظ إعدادات {{provider}}.",
+    "editProvider": "تعديل {{provider}}",
+    "redirectUriLabel": "عنوان إعادة التوجيه",
+    "redirectUriHint": "سجّل هذا العنوان بالضبط كعنوان إعادة توجيه / رد اتصال في وحدة تحكّم المزوّد.",
+    "microsoft": {
+      "title": "Microsoft (Entra ID)",
+      "subtitle": "سجّل الدخول بحساب Microsoft للعمل أو الدراسة."
+    },
+    "google": {
+      "title": "الدخول بحساب Google",
+      "subtitle": "سجّل الدخول بحساب Google أو Google Workspace.",
+      "clientId": "معرّف العميل",
+      "clientIdHint": "معرّف عميل OAuth 2.0 من Google Cloud Console ← APIs & Services ← Credentials.",
+      "allowedDomain": "النطاق المسموح به (اختياري)",
+      "allowedDomainHint": "قصر تسجيل الدخول على نطاق Google Workspace واحد. اتركه فارغاً للسماح لأي حساب Google موثَّق يطابق مستخدماً في Maugood.",
+      "allowedDomainPlaceholder": "example.com",
+      "enableToggle": "تفعيل الدخول بحساب Google لهذا المستأجر",
+      "enableHint": "عند التفعيل، يبدأ زر «تسجيل الدخول بحساب Google» في صفحة الدخول عملية دخول فعلية. يجب أن يكون المستخدمون موجودين مسبقاً في Maugood — لا إنشاء تلقائي للحسابات، ولا أدوار من ادعاءات Google."
+    },
     "fields": {
       "entraTenantId": "معرّف مستأجر Entra",
       "entraTenantHint": "GUID أو نطاق موثَّق. من مركز إدارة Microsoft Entra ← Identity ← Overview.",
@@ -2271,8 +2311,13 @@
       "clientSecretStored": "مخزَّن. اكتب سراً جديداً فقط لتدويره.",
       "clientSecretRequired": "مطلوب لتفعيل OIDC."
     },
-    "enableToggle": "تفعيل OIDC لهذا المستأجر",
-    "enableHint": "عند التفعيل، تعرض صفحة تسجيل الدخول «تسجيل الدخول بحساب Microsoft» كإجراء رئيسي. ويبقى تسجيل الدخول بكلمة المرور المحلية متاحاً كحلٍّ احتياطي بعنوان «استخدام حساب محلي».",
+    "enableToggle": "تفعيل الدخول بحساب Microsoft لهذا المستأجر",
+    "enableHint": "عند التفعيل، تعرض صفحة تسجيل الدخول «تسجيل الدخول بحساب Microsoft». ويبقى تسجيل الدخول بكلمة المرور المحلية متاحاً كحلٍّ احتياطي.",
+    "statusEnabled": "مُفعّل",
+    "statusDisabled": "غير مُفعّل",
+    "copy": "نسخ",
+    "copied": "تم النسخ",
+    "savedToast": "تم الحفظ",
     "saveChanges": "حفظ التغييرات",
     "saving": "جارٍ الحفظ…",
     "errSave": "فشل الحفظ.",
