@@ -11,7 +11,6 @@ const TABS = [
   { to: "/settings/workspace", key: "workspace" },
   { to: "/settings/branding", key: "branding" },
   { to: "/settings/authentication", key: "authentication" },
-  { to: "/settings/users", key: "users" },
   { to: "/settings/divisions", key: "divisions" },
   { to: "/settings/departments", key: "departments" },
   { to: "/settings/sections", key: "sections" },

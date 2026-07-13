@@ -28,8 +28,22 @@ export function useAdUsers(): UseQueryResult<AdUserList, Error> {
 export function useSyncUsers() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (): Promise<SyncResult> =>
-      api<SyncResult>("/api/entra-sync/run", { method: "POST" }),
+    // `default_role` (e.g. "Employee") assigns that role to synced users
+    // no group mapping covers; null skips the fallback. `create_employees`
+    // also mirrors each user into a linked employee record.
+    mutationFn: async (
+      vars: { default_role: string | null; create_employees: boolean } = {
+        default_role: null,
+        create_employees: false,
+      },
+    ): Promise<SyncResult> =>
+      api<SyncResult>("/api/entra-sync/run", {
+        method: "POST",
+        body: {
+          default_role: vars.default_role,
+          create_employees: vars.create_employees,
+        },
+      }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: AD_USERS_KEY });
     },

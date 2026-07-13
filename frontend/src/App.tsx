@@ -13,7 +13,7 @@ import { useMe } from "./auth/AuthProvider";
 import { ApiDocsPage } from "./features/api-docs/ApiDocsPage";
 import { PipelinePage } from "./features/pipeline/PipelinePage";
 import { AuthenticationPage } from "./auth-oidc/AuthenticationPage";
-import { AdUsersPage } from "./features/user-management/AdUsersPage";
+import { UsersPage } from "./features/user-management/UsersPage";
 import { BrandingPage } from "./branding/BrandingPage";
 import { CustomFieldsPage } from "./custom-fields/CustomFieldsPage";
 import { DepartmentsPage } from "./settings/DepartmentsPage";
@@ -139,6 +139,7 @@ export function App() {
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<DashboardRouter />} />
         <Route path="employees" element={<EmployeesPage />} />
+        <Route path="users" element={<AdminOnly><UsersPage /></AdminOnly>} />
         <Route path="cameras" element={<CamerasPage />} />
         <Route path="camera-logs" element={<CameraLogsPage />} />
         <Route path="unidentified-faces" element={<UnidentifiedFacesPage />} />
@@ -176,7 +177,9 @@ export function App() {
         <Route path="settings/workspace" element={<SettingsAdminOnly><WorkspacePage /></SettingsAdminOnly>} />
         <Route path="settings/branding" element={<SettingsAdminOnly><BrandingPage /></SettingsAdminOnly>} />
         <Route path="settings/authentication" element={<SettingsAdminOnly><AuthenticationPage /></SettingsAdminOnly>} />
-        <Route path="settings/users" element={<SettingsAdminOnly><AdUsersPage /></SettingsAdminOnly>} />
+        {/* Users moved out of Settings to its own sidebar nav item (/users).
+            Bounce stale /settings/users bookmarks there. */}
+        <Route path="settings/users" element={<Navigate to="/users" replace />} />
         <Route path="settings/departments" element={<DepartmentsPage />} />
         <Route path="settings/divisions" element={<DivisionsPage />} />
         <Route path="settings/sections" element={<SectionsPage />} />
@@ -203,6 +206,7 @@ export function App() {
           (id) =>
             id !== "dashboard" &&
             id !== "employees" &&
+            id !== "users" &&
             id !== "my-team" &&
             id !== "my-profile" &&
             id !== "photo-approvals" &&

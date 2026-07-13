@@ -26,6 +26,7 @@ export const NAV: Record<Role, NavItem[]> = {
     // Pipeline Monitor's "Cameras" tab.
     { id: "pipeline-monitor", label: "Pipeline Monitor", icon: "activity" },
     { id: "employees", label: "Employees", icon: "users" },
+    { id: "users", label: "Users", icon: "user" },
     { id: "photo-approvals", label: "Photo approvals", icon: "shield" },
     { id: "bulk-photo-upload", label: "Bulk Photo Upload", icon: "camera" },
     { id: "policies", label: "Shift Policies", icon: "clock" },
@@ -113,6 +114,7 @@ export const CRUMBS: Record<string, string[]> = {
   dashboard: ["Maugood", "Dashboard"],
   cameras: ["Maugood", "Cameras"],
   employees: ["Maugood", "People", "Employees"],
+  users: ["Maugood", "People", "Users"],
   policies: ["Maugood", "Configuration", "Shift Policies"],
   approvals: ["Maugood", "Workflow", "Approvals"],
   reports: ["Maugood", "Reports"],

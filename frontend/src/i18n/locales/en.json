@@ -87,7 +87,21 @@
     "sync": "Sync Users",
     "syncing": "Syncing…",
     "syncResult": "Sync complete — {{added}} added, {{updated}} updated, {{failed}} failed",
+    "syncRoleAssigned": "{{n}} given the default role",
+    "syncEmployeesCreated": "{{n}} employee profiles created",
     "syncFailed": "Sync failed. Check the Entra config and Graph permissions.",
+    "syncModal": {
+      "title": "Sync users from Microsoft Entra?",
+      "subtitle": "Pulls the latest directory, then adds or updates users here.",
+      "defaultRoleLabel": "Default role for new users",
+      "defaultRoleHint": "Applied to synced users who don't match a group → role mapping. Mapped-group roles still win, and roles you set manually are never changed.",
+      "noDefaultRole": "— No default role —",
+      "createEmployeeTitle": "Add every synced user as an employee",
+      "createEmployeeHint": "Each synced user appears in the Employees module and can be managed like any other employee. Clicking a user opens their employee profile. No password is generated.",
+      "note": "Access stays off until you enable it per user. Nothing signs anyone in.",
+      "confirm": "Sync now",
+      "cancel": "Cancel"
+    },
     "updateFailed": "Couldn't update the user.",
     "loadFailed": "Couldn't load AD users.",
     "configureRoles": "Group → role mapping",
@@ -185,6 +199,7 @@
       "calendar": "Calendar",
       "cameras": "Cameras",
       "employees": "Employees",
+      "users": "Users",
       "policies": "Shift policies",
       "leave-policy": "Leave & calendar",
       "daily-attendance": "Daily attendance",
@@ -223,6 +238,7 @@
       "Cameras": "Cameras",
       "People": "People",
       "Employees": "Employees",
+      "Users": "Users",
       "Configuration": "Configuration",
       "Shift Policies": "Shift policies",
       "Workflow": "Workflow",
@@ -1617,7 +1633,8 @@
       "notLinkedHint": "Use Add Employee → Platform access on creation, or contact your admin to provision a login.",
       "userId": "User ID",
       "active": "Active",
-      "inactive": "Inactive"
+      "inactive": "Inactive",
+      "ssoOnly": "Microsoft SSO"
     },
     "toast": {
       "created": "{{name}} added.",

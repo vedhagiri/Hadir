@@ -18,6 +18,9 @@ export interface AdUser {
   auth_provider: string | null;
   last_synced_at: string | null;
   created_at: string;
+  // Linked attendance employee (by email), when one exists — the Users
+  // list opens the employee edit drawer for this id on row click.
+  employee_id: number | null;
 }
 
 export interface AdUserList {
@@ -31,6 +34,8 @@ export interface SyncResult {
   added: number;
   updated: number;
   failed: number;
+  default_role_assigned: number;
+  employees_created: number;
   errors: string[];
 }
 

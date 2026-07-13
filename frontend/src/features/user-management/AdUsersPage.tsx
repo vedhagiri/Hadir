@@ -1,6 +1,7 @@
-// Settings → Users (Admin). AD Users only — the directory synced from
-// Microsoft Entra. Sync button + filter/search + per-user access toggle
-// + role management via the details drawer.
+// Settings → Users → AD Users tab. The directory synced from Microsoft
+// Entra. Sync button + filter/search + per-user access toggle + role
+// management via the details drawer. The page chrome (settings tabs,
+// title, sub-tab switcher) lives in UsersPage — this is just the view.
 
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -8,8 +9,9 @@ import { useTranslation } from "react-i18next";
 import { ApiError } from "../../api/client";
 import { RelativeTime } from "../../components/RelativeTime";
 import { Icon } from "../../shell/Icon";
-import { SettingsTabs } from "../../settings/SettingsTabs";
+import { EmployeeDrawer } from "../employees/EmployeeDrawer";
 import { GroupRoleMappingModal } from "./GroupRoleMappingModal";
+import { SyncConfirmModal } from "./SyncConfirmModal";
 import { UserDetailsDrawer } from "./UserDetailsDrawer";
 import { AccessToggle, RoleBadges, avatarInitials, avatarColor } from "./shared";
 import { useAdUsers, usePatchUser, useSyncUsers } from "./hooks";
@@ -17,7 +19,7 @@ import type { AdUser } from "./types";
 
 type Filter = "all" | "enabled" | "disabled";
 
-export function AdUsersPage() {
+export function AdUsersView() {
   const { t } = useTranslation();
   const list = useAdUsers();
   const sync = useSyncUsers();
@@ -26,7 +28,11 @@ export function AdUsersPage() {
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [selected, setSelected] = useState<number | null>(null);
+  // When a user has a linked employee record, clicking the row opens the
+  // employee edit drawer instead of the user-details drawer.
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | null>(null);
   const [mappingOpen, setMappingOpen] = useState(false);
+  const [syncOpen, setSyncOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,19 +51,35 @@ export function AdUsersPage() {
     });
   }, [items, q, filter]);
 
-  const onSync = async () => {
+  const onSync = async (defaultRole: string | null, createEmployees: boolean) => {
     setError(null);
     setToast(null);
     try {
-      const r = await sync.mutateAsync();
-      setToast(
+      const r = await sync.mutateAsync({
+        default_role: defaultRole,
+        create_employees: createEmployees,
+      });
+      setSyncOpen(false);
+      const parts = [
         t("userManagement.syncResult", {
           added: r.added,
           updated: r.updated,
           failed: r.failed,
         }),
-      );
+      ];
+      if (r.default_role_assigned > 0) {
+        parts.push(
+          t("userManagement.syncRoleAssigned", { n: r.default_role_assigned }),
+        );
+      }
+      if (r.employees_created > 0) {
+        parts.push(
+          t("userManagement.syncEmployeesCreated", { n: r.employees_created }),
+        );
+      }
+      setToast(parts.join(" · "));
     } catch (err) {
+      setSyncOpen(false);
       setError(
         err instanceof ApiError && typeof (err.body as { detail?: unknown })?.detail === "string"
           ? String((err.body as { detail?: unknown }).detail)
@@ -79,23 +101,6 @@ export function AdUsersPage() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <SettingsTabs />
-      <header>
-        <h1
-          style={{
-            fontFamily: "var(--font-display)",
-            fontSize: 28,
-            margin: "0 0 4px 0",
-            fontWeight: 400,
-          }}
-        >
-          {t("userManagement.title")}
-        </h1>
-        <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 13 }}>
-          {t("userManagement.subtitle")}
-        </p>
-      </header>
-
       {toast && !error && (
         <div
           role="status"
@@ -197,7 +202,10 @@ export function AdUsersPage() {
           <button
             type="button"
             className="btn btn-primary btn-sm"
-            onClick={() => void onSync()}
+            onClick={() => {
+              setError(null);
+              setSyncOpen(true);
+            }}
             disabled={sync.isPending}
           >
             <Icon name="refresh" size={13} />
@@ -244,7 +252,11 @@ export function AdUsersPage() {
               {filtered.map((u) => (
                 <tr
                   key={u.id}
-                  onClick={() => setSelected(u.id)}
+                  onClick={() =>
+                    u.employee_id != null
+                      ? setSelectedEmployeeId(u.employee_id)
+                      : setSelected(u.id)
+                  }
                   style={{
                     borderTop: "1px solid var(--border)",
                     cursor: "pointer",
@@ -309,8 +321,24 @@ export function AdUsersPage() {
           onClose={() => setSelected(null)}
         />
       )}
+      {selectedEmployeeId != null && (
+        <EmployeeDrawer
+          employeeId={selectedEmployeeId}
+          onClose={() => setSelectedEmployeeId(null)}
+          onSaved={() => void list.refetch()}
+        />
+      )}
       {mappingOpen && (
         <GroupRoleMappingModal onClose={() => setMappingOpen(false)} />
+      )}
+      {syncOpen && (
+        <SyncConfirmModal
+          onClose={() => setSyncOpen(false)}
+          onConfirm={(defaultRole, createEmployees) =>
+            void onSync(defaultRole, createEmployees)
+          }
+          pending={sync.isPending}
+        />
       )}
     </div>
   );

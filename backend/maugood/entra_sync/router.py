@@ -19,6 +19,7 @@ from maugood.auth.dependencies import CurrentUser, require_role
 from maugood.auth.oidc import _load_secret as _load_oidc_secret
 from maugood.auth.oidc import get_config as _get_oidc_config
 from maugood.db import (
+    employees,
     entra_group_role_map,
     get_engine,
     roles,
@@ -69,10 +70,21 @@ def _iso(dt) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 
+class RunSyncIn(BaseModel):
+    # Optional fallback role for synced users a group mapping doesn't
+    # cover. The frontend sends the chosen role (default "Employee");
+    # null skips the fallback.
+    default_role: Optional[str] = None
+    # When true, also create a linked employee record per synced user.
+    create_employees: bool = False
+
+
 class SyncResultOut(BaseModel):
     added: int
     updated: int
     failed: int
+    default_role_assigned: int
+    employees_created: int
     errors: list[str]
 
 
@@ -99,8 +111,22 @@ def _graph_config_for_tenant(tenant_id: int) -> GraphConfig:
 
 
 @router.post("/run", response_model=SyncResultOut)
-def run_sync(user: Annotated[CurrentUser, ADMIN]) -> SyncResultOut:
-    """Pull directory users from Graph and provision/update Maugood users."""
+def run_sync(
+    user: Annotated[CurrentUser, ADMIN],
+    payload: Optional[RunSyncIn] = None,
+) -> SyncResultOut:
+    """Pull directory users from Graph and provision/update Maugood users.
+
+    Optional body ``{default_role}`` assigns that role to synced users
+    a group mapping doesn't cover (see ``sync_users``).
+    """
+
+    default_role = payload.default_role if payload else None
+    create_employees = payload.create_employees if payload else False
+    if default_role is not None and default_role not in _VALID_ROLE_CODES:
+        raise HTTPException(
+            status_code=422, detail=f"invalid default_role: {default_role}"
+        )
 
     config = _graph_config_for_tenant(user.tenant_id)
     client = build_directory_client(config)
@@ -119,7 +145,11 @@ def run_sync(user: Annotated[CurrentUser, ADMIN]) -> SyncResultOut:
     engine = get_engine()
     with engine.begin() as conn:
         result = sync_users(
-            conn, tenant_id=user.tenant_id, graph_users=graph_users
+            conn,
+            tenant_id=user.tenant_id,
+            graph_users=graph_users,
+            default_role=default_role,
+            create_employees=create_employees,
         )
         write_audit(
             conn,
@@ -132,19 +162,29 @@ def run_sync(user: Annotated[CurrentUser, ADMIN]) -> SyncResultOut:
                 "added": result.added,
                 "updated": result.updated,
                 "failed": result.failed,
+                "default_role": default_role,
+                "default_role_assigned": result.default_role_assigned,
+                "create_employees": create_employees,
+                "employees_created": result.employees_created,
             },
         )
     logger.info(
-        "entra sync by admin=%s: +%d ~%d !%d",
+        "entra sync by admin=%s: +%d ~%d !%d default_role=%s assigned=%d "
+        "employees_created=%d",
         user.id,
         result.added,
         result.updated,
         result.failed,
+        default_role or "-",
+        result.default_role_assigned,
+        result.employees_created,
     )
     return SyncResultOut(
         added=result.added,
         updated=result.updated,
         failed=result.failed,
+        default_role_assigned=result.default_role_assigned,
+        employees_created=result.employees_created,
         errors=result.errors[:20],
     )
 
@@ -288,6 +328,9 @@ class AdUserOut(BaseModel):
     auth_provider: Optional[str]
     last_synced_at: Optional[str]
     created_at: str
+    # Linked attendance employee (matched by email), when one exists —
+    # so the Users list can open the employee edit drawer on row click.
+    employee_id: Optional[int]
 
 
 class AdUserListOut(BaseModel):
@@ -316,7 +359,30 @@ def _roles_by_user(conn, tenant_id: int, user_ids: list[int]) -> dict[int, list[
     return out
 
 
-def _to_ad_user(row, role_codes: list[str]) -> AdUserOut:
+def _employee_ids_by_email(
+    conn, tenant_id: int, emails: list[str]
+) -> dict[str, int]:
+    """Map lower-cased email → employee id for the given emails."""
+
+    wanted = {e.lower() for e in emails if e}
+    if not wanted:
+        return {}
+    rows = conn.execute(
+        select(employees.c.id, employees.c.email).where(
+            employees.c.tenant_id == tenant_id,
+            func.lower(employees.c.email).in_(wanted),
+        )
+    ).all()
+    out: dict[str, int] = {}
+    for r in rows:
+        if r.email:
+            out.setdefault(str(r.email).lower(), int(r.id))
+    return out
+
+
+def _to_ad_user(
+    row, role_codes: list[str], employee_id: Optional[int] = None
+) -> AdUserOut:
     return AdUserOut(
         id=int(row.id),
         full_name=str(row.full_name),
@@ -334,6 +400,7 @@ def _to_ad_user(row, role_codes: list[str]) -> AdUserOut:
         auth_provider=(str(row.auth_provider) if row.auth_provider else None),
         last_synced_at=_iso(row.last_synced_at),
         created_at=row.created_at.isoformat(),
+        employee_id=employee_id,
     )
 
 
@@ -373,7 +440,15 @@ def list_ad_users(user: Annotated[CurrentUser, ADMIN]) -> AdUserListOut:
         roles_map = _roles_by_user(
             conn, user.tenant_id, [int(r.id) for r in rows]
         )
-    items = [_to_ad_user(r, roles_map.get(int(r.id), [])) for r in rows]
+        emp_map = _employee_ids_by_email(
+            conn, user.tenant_id, [str(r.email) for r in rows]
+        )
+    items = [
+        _to_ad_user(
+            r, roles_map.get(int(r.id), []), emp_map.get(str(r.email).lower())
+        )
+        for r in rows
+    ]
     enabled = sum(1 for i in items if i.is_active)
     return AdUserListOut(
         items=items,
@@ -397,7 +472,10 @@ def get_ad_user(
         if row is None:
             raise HTTPException(status_code=404, detail="user not found")
         roles_map = _roles_by_user(conn, user.tenant_id, [int(row.id)])
-    return _to_ad_user(row, roles_map.get(int(row.id), []))
+        emp_map = _employee_ids_by_email(conn, user.tenant_id, [str(row.email)])
+    return _to_ad_user(
+        row, roles_map.get(int(row.id), []), emp_map.get(str(row.email).lower())
+    )
 
 
 class LoginActivityOut(BaseModel):

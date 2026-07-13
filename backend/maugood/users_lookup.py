@@ -335,6 +335,11 @@ class UserDetailOut(BaseModel):
     full_name: str
     is_active: bool
     role_codes: list[str]
+    # 'entra' for AD-synced accounts (SSO-only, no local password), else
+    # 'local'. Lets the Edit-employee drawer hide the reset-password
+    # action for SSO users.
+    source: str
+    auth_provider: Optional[str]
 
 
 def _load_user_with_roles(conn, scope: TenantScope, user_id: int):
@@ -344,6 +349,8 @@ def _load_user_with_roles(conn, scope: TenantScope, user_id: int):
             users.c.email,
             users.c.full_name,
             users.c.is_active,
+            users.c.source,
+            users.c.auth_provider,
         ).where(
             users.c.tenant_id == scope.tenant_id, users.c.id == user_id
         )
@@ -364,6 +371,10 @@ def _load_user_with_roles(conn, scope: TenantScope, user_id: int):
         full_name=str(user_row.full_name),
         is_active=bool(user_row.is_active),
         role_codes=sorted(str(r.code) for r in role_rows),
+        source=str(user_row.source or "local"),
+        auth_provider=(
+            str(user_row.auth_provider) if user_row.auth_provider else None
+        ),
     )
 
 

@@ -230,6 +230,9 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
         full_name: string;
         is_active: boolean;
         role_codes: string[];
+        // 'entra' = AD-synced, SSO-only (no local password to reset).
+        source: string;
+        auth_provider: string | null;
       }>(`/api/users/by-email/${encodeURIComponent(linkedUserEmail)}`),
     enabled: !isAddMode && !!linkedUserEmail && (isAdmin || isHr),
     retry: false,
@@ -1078,7 +1081,9 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
                   <LinkedUserPanel
                     user={linkedUser.data}
                     canEditRoles={isAdmin}
-                    canResetPassword={isAdmin}
+                    // AD-synced accounts are SSO-only — no local password
+                    // to reset, so hide the action for them.
+                    canResetPassword={isAdmin && linkedUser.data.source !== "entra"}
                     availableRoles={rolesQuery.data?.items ?? []}
                     onChanged={() => {
                       void linkedUser.refetch();
@@ -2093,6 +2098,10 @@ interface LinkedUser {
   full_name: string;
   is_active: boolean;
   role_codes: string[];
+  // 'entra' = AD-synced (SSO-only). Optional so pre-existing callers
+  // that build a LinkedUser without it still typecheck.
+  source?: string;
+  auth_provider?: string | null;
 }
 
 // BUG-019 — "Enable Platform Access" inline form. Shown in the Edit
@@ -2455,6 +2464,25 @@ function LinkedUserPanel({
               <Icon name="settings" size={11} />
               {t("employees.action.editRoles") as string}
             </button>
+          )}
+          {user.source === "entra" && (
+            <span
+              className="text-xs"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+                padding: "3px 9px",
+                borderRadius: 999,
+                background: "color-mix(in srgb, #2563eb 10%, var(--bg))",
+                color: "#2563eb",
+                border: "1px solid color-mix(in srgb, #2563eb 30%, var(--border))",
+                whiteSpace: "nowrap",
+              }}
+            >
+              <Icon name="shield" size={11} />
+              {t("employees.login.ssoOnly") as string}
+            </span>
           )}
           {canResetPassword && (
             <button
