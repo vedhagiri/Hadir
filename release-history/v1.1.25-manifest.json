@@ -1,0 +1,28 @@
+{
+  "version": "1.1.25",
+  "previous_version": "1.1.24",
+  "commit_id": "1468ed9c5169e25ce829f23032759dae16983160",
+  "previous_commit_id": "083f98cb20527690468548917a9831e1183fa767",
+  "all_new_install": false,
+  "new_migrations": [
+    "0086_clip_perf_metrics.py",
+    "0087_clip_perf_gap_metrics.py",
+    "0088_clip_detect_lock_split.py",
+    "0089_queue_clear_history.py",
+    "0090_clip_daily_cleanup.py",
+    "0091_google_oidc_config.py",
+    "0092_oidc_redirect_uri_override.py",
+    "0093_entra_user_sync.py"
+  ],
+  "services_changed": {
+    "backend": true,
+    "frontend": true,
+    "nginx": false,
+    "postgres": false
+  },
+  "compose_changed": false,
+  "https_compose_changed": false,
+  "env_keys_added": [],
+  "env_keys_removed": [],
+  "upgrade_scripts": []
+}
