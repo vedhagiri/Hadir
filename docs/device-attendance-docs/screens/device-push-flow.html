@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Add Device &amp; Map Employees — Maugood · Muscat Tech Solutions</title>
+<style>
+  :root{
+    --navy:#0a1f6b;--navy-2:#0e2a86;--ink:#152238;--muted:#5a6a83;--faint:#8a97ad;
+    --cyan:#26c6e6;--blue:#1a52d0;--grad:linear-gradient(120deg,#26c6e6,#1a52d0);
+    --bg:#eef2f8;--panel:#fff;--panel-2:#f4f6fb;--line:#dbe2ee;--line-soft:#e7ecf4;
+    --ok:#1f9b62;--ok-t:#e4f4ec;--warn:#b7810f;--warn-t:#f8eed6;--bad:#cf4747;--bad-t:#fae4e4;
+    --shadow:0 1px 3px rgba(16,30,64,.07),0 14px 34px rgba(16,30,64,.09);
+    --shadow-sm:0 1px 2px rgba(16,30,64,.06);--r:12px;
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --navy:#7ea0ff;--navy-2:#93b0ff;--ink:#e6ecf6;--muted:#93a1ba;--faint:#6f7d93;
+    --cyan:#3fd2ef;--blue:#5b86ee;--bg:#0b0f17;--panel:#131b27;--panel-2:#1a2431;--line:#26313f;--line-soft:#202a37;
+    --ok:#45c082;--ok-t:#10321f;--warn:#e0ac3e;--warn-t:#33280c;--bad:#ec6a6a;--bad-t:#391b1b;
+    --shadow:0 1px 3px rgba(0,0,0,.4),0 16px 36px rgba(0,0,0,.5);--shadow-sm:0 1px 2px rgba(0,0,0,.3);
+  }}
+
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased;}
+  body.locked{overflow:hidden;}
+  .mono{font-family:ui-monospace,"SF Mono",Menlo,monospace;}
+  button{font:inherit;cursor:pointer;}
+
+  /* top bar */
+  .topbar{position:sticky;top:0;z-index:30;background:var(--panel);border-bottom:1px solid var(--line);box-shadow:var(--shadow-sm);}
+  .topbar .inner{max-width:1120px;margin:0 auto;display:flex;align-items:center;gap:16px;padding:11px clamp(14px,3vw,26px);}
+  .topbar img{height:34px;width:auto;}
+  .topbar .divider{width:1px;height:24px;background:var(--line);}
+  .topbar .app{font-size:13px;font-weight:600;color:var(--muted);}
+  .topbar .sp{flex:1;}
+  .topbar .who{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--muted);}
+  .topbar .av{width:30px;height:30px;border-radius:50%;background:color-mix(in srgb,var(--blue) 15%,transparent);color:var(--blue);display:grid;place-items:center;font-weight:700;font-size:12px;}
+  .brandstrip{height:3px;background:var(--grad);}
+
+  .wrap{max-width:1120px;margin:0 auto;padding:clamp(18px,3vw,30px) clamp(14px,3vw,26px) 80px;}
+  .crumb{font-size:12.5px;color:var(--faint);margin-bottom:14px;}
+  .crumb b{color:var(--muted);}
+  .pagehead h1{font-size:clamp(22px,3.4vw,29px);letter-spacing:-.02em;color:var(--navy);margin:0;}
+  .pagehead p{margin:5px 0 0;color:var(--muted);font-size:13.5px;max-width:70ch;}
+
+  /* stepper */
+  .stepper{display:flex;gap:8px;margin:24px 0 22px;flex-wrap:wrap;}
+  .stepper button{flex:1;min-width:170px;text-align:start;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:11px 14px;box-shadow:var(--shadow-sm);transition:.16s;color:inherit;position:relative;overflow:hidden;}
+  .stepper button .n{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);display:block;}
+  .stepper button .t{font-size:13.5px;font-weight:600;}
+  .stepper button[data-on="1"]{border-color:color-mix(in srgb,var(--blue) 55%,var(--line));}
+  .stepper button[data-on="1"]::before{content:"";position:absolute;inset:0 auto 0 0;width:4px;background:var(--grad);}
+  .stepper button[data-on="1"] .n{color:var(--blue);}
+  .stepper button:disabled{opacity:.45;cursor:not-allowed;}
+
+  .step{display:none;} .step.on{display:block;}
+
+  .layout{display:grid;grid-template-columns:1fr 330px;gap:20px;align-items:start;}
+  @media (max-width:900px){.layout{grid-template-columns:1fr;}}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow-sm);margin-bottom:18px;}
+  .card-h{padding:14px 20px;border-bottom:1px solid var(--line-soft);display:flex;align-items:center;gap:10px;}
+  .card-h .ci{width:30px;height:30px;border-radius:8px;background:color-mix(in srgb,var(--cyan) 16%,transparent);color:var(--blue);display:grid;place-items:center;font-size:15px;flex:none;}
+  .card-h h3{margin:0;font-size:15px;}
+  .card-h .sub{font-size:12px;color:var(--faint);margin-inline-start:auto;text-align:end;}
+  .card-b{padding:20px;}
+
+  .sectlabel{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin:22px 0 12px;}
+  .sectlabel:first-child{margin-top:0;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  @media (max-width:620px){.grid2{grid-template-columns:1fr;}}
+  .field label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px;}
+  .field label .req{color:var(--bad);}
+  .field input,.field select{width:100%;padding:10px 12px;border-radius:9px;border:1px solid var(--line);background:var(--panel-2);color:var(--ink);font:inherit;font-size:13.5px;transition:.15s;}
+  .field input:focus,.field select:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 18%,transparent);background:var(--panel);}
+  .field .hint{font-size:11px;color:var(--faint);margin-top:5px;}
+
+  .toggle{display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel-2);}
+  .toggle .tx{flex:1;} .toggle .tx b{display:block;font-size:13px;} .toggle .tx span{font-size:11.5px;color:var(--faint);}
+  .sw{width:40px;height:23px;border-radius:999px;background:var(--ok);position:relative;flex:none;}
+  .sw::after{content:"";position:absolute;top:2.5px;inset-inline-end:2.5px;width:18px;height:18px;border-radius:50%;background:#fff;}
+
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:10px 18px;border-radius:9px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-size:13.5px;font-weight:600;transition:.15s;}
+  .btn:hover{border-color:var(--blue);color:var(--blue);}
+  .btn.pri{background:var(--grad);border-color:transparent;color:#fff;box-shadow:0 3px 12px color-mix(in srgb,var(--blue) 30%,transparent);}
+  .btn.pri:hover{color:#fff;filter:brightness(1.06);}
+  .btn.sm{padding:6px 12px;font-size:12.5px;}
+  .btn.ghost{border-color:transparent;background:transparent;color:var(--muted);}
+  .actions{display:flex;gap:10px;align-items:center;padding:16px 20px;border-top:1px solid var(--line-soft);flex-wrap:wrap;}
+  .actions .sp{flex:1;}
+
+  .callout{display:flex;gap:11px;padding:12px 15px;border-radius:10px;font-size:12.8px;margin:14px 0;border:1px solid;line-height:1.5;}
+  .callout .ci{font-size:16px;flex:none;line-height:1.35;}
+  .callout.info{background:color-mix(in srgb,var(--blue) 8%,var(--panel));border-color:color-mix(in srgb,var(--blue) 28%,var(--line));}
+  .callout.tip{background:var(--ok-t);border-color:color-mix(in srgb,var(--ok) 30%,transparent);}
+  .callout.warn{background:var(--warn-t);border-color:color-mix(in srgb,var(--warn) 32%,transparent);}
+  .callout.bad{background:var(--bad-t);border-color:color-mix(in srgb,var(--bad) 32%,transparent);}
+  .callout b{color:var(--ink);}
+
+  .notask{list-style:none;padding:0;margin:0;}
+  .notask li{display:flex;gap:9px;align-items:center;font-size:12.8px;color:var(--faint);padding:7px 0;border-bottom:1px solid var(--line-soft);}
+  .notask li:last-child{border-bottom:0;}
+  .notask li .x{color:var(--bad);font-weight:700;flex:none;}
+
+  /* the one URL box */
+  .urlbox{border:1px solid color-mix(in srgb,var(--blue) 35%,var(--line));border-radius:11px;background:color-mix(in srgb,var(--blue) 5%,var(--panel-2));padding:16px 18px;}
+  .urlbox .lbl{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--blue);margin-bottom:9px;}
+  .urlbox .val{font-family:ui-monospace,Menlo,monospace;font-size:14px;line-height:1.7;word-break:break-all;color:var(--ink);}
+  .urlbox .val .tok{background:color-mix(in srgb,var(--cyan) 26%,transparent);border-radius:5px;padding:1px 4px;font-weight:700;}
+  .urlbox .row{display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap;}
+
+  .pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap;}
+  .pill.ok{background:var(--ok-t);color:var(--ok);}
+  .pill.warn{background:var(--warn-t);color:var(--warn);}
+  .pill.bad{background:var(--bad-t);color:var(--bad);}
+  .pill.new{background:color-mix(in srgb,var(--cyan) 18%,transparent);color:var(--blue);}
+  .pill.idle{background:var(--panel-2);color:var(--faint);}
+
+  table{width:100%;border-collapse:collapse;}
+  th,td{text-align:start;padding:10px 14px;font-size:13px;border-bottom:1px solid var(--line-soft);vertical-align:middle;}
+  thead th{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);font-weight:700;background:var(--panel-2);}
+  tbody tr:last-child td{border-bottom:0;}
+  .tablewrap{overflow-x:auto;}
+  td .sub{font-size:11px;color:var(--faint);}
+  td.num,th.num{text-align:end;font-variant-numeric:tabular-nums;}
+
+  /* clickable device rows */
+  tr.rowlink{cursor:pointer;transition:.13s;}
+  tr.rowlink:hover{background:color-mix(in srgb,var(--blue) 7%,transparent);}
+  tr.rowlink td:first-child{position:relative;}
+  tr.rowlink:hover td:first-child::before{content:"";position:absolute;inset:0 auto 0 0;width:3px;background:var(--grad);}
+  .chev{color:var(--faint);font-size:15px;}
+
+  pre{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:13px 15px;overflow-x:auto;font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.55;margin:0;}
+  pre .key{color:var(--blue);} pre .str{color:var(--ok);} pre .dim{color:var(--faint);}
+
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:16px;}
+  .tile{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;}
+  .tile .n{font-size:21px;font-weight:700;letter-spacing:-.02em;line-height:1.15;}
+  .tile .l{font-size:11px;color:var(--faint);margin-top:2px;}
+  .tile.ok .n{color:var(--ok);} .tile.warn .n{color:var(--warn);} .tile.blue .n{color:var(--blue);}
+
+  .mapsel{display:flex;gap:7px;align-items:center;}
+  .mapsel select{padding:7px 9px;border-radius:8px;border:1px solid var(--line);background:var(--panel-2);color:var(--ink);font:inherit;font-size:12.5px;max-width:200px;}
+
+  /* ===== DRAWER ===== */
+  .scrim{position:fixed;inset:0;background:rgba(10,20,45,.42);backdrop-filter:blur(2px);opacity:0;pointer-events:none;transition:.22s;z-index:60;}
+  .scrim.on{opacity:1;pointer-events:auto;}
+  .drawer{position:fixed;inset-block:0;inset-inline-end:0;width:min(760px,96vw);background:var(--bg);
+    border-inline-start:1px solid var(--line);box-shadow:-16px 0 44px rgba(10,20,45,.22);
+    transform:translateX(100%);transition:transform .26s cubic-bezier(.32,.72,0,1);z-index:70;display:flex;flex-direction:column;}
+  [dir="rtl"] .drawer{transform:translateX(-100%);}
+  .drawer.on{transform:translateX(0);}
+  .drawer-h{background:var(--panel);border-bottom:1px solid var(--line);padding:16px 22px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+  .drawer-h .dot{width:40px;height:40px;border-radius:11px;background:color-mix(in srgb,var(--cyan) 16%,transparent);color:var(--blue);display:grid;place-items:center;font-size:19px;flex:none;}
+  .drawer-h .nm{font-size:16px;font-weight:700;line-height:1.25;}
+  .drawer-h .lc{font-size:12px;color:var(--faint);}
+  .drawer-h .sp{flex:1;}
+  .drawer-h .x{width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:var(--panel);color:var(--muted);font-size:17px;line-height:1;}
+  .drawer-h .x:hover{border-color:var(--bad);color:var(--bad);}
+  .drawer-meta{background:var(--panel);border-bottom:1px solid var(--line);padding:0 22px 14px;display:flex;gap:26px;flex-wrap:wrap;}
+  .drawer-meta div{font-size:11.5px;color:var(--faint);}
+  .drawer-meta div b{display:block;font-size:12.5px;color:var(--ink);font-family:ui-monospace,Menlo,monospace;font-weight:600;margin-top:1px;}
+  .dtabs{background:var(--panel);border-bottom:1px solid var(--line);padding:0 22px;display:flex;gap:4px;}
+  .dtabs button{background:none;border:0;padding:11px 14px;font-size:13px;font-weight:600;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;}
+  .dtabs button.on{color:var(--blue);border-bottom-color:var(--blue);}
+  .dtabs button .cnt{background:var(--panel-2);border-radius:999px;padding:1px 7px;font-size:11px;margin-inline-start:6px;}
+  .dtabs button.on .cnt{background:color-mix(in srgb,var(--blue) 15%,transparent);color:var(--blue);}
+  .drawer-b{flex:1;overflow-y:auto;padding:20px 22px 40px;}
+  .dpane{display:none;} .dpane.on{display:block;}
+
+  .toast{position:fixed;inset-block-end:22px;inset-inline-start:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--bg);padding:12px 20px;border-radius:10px;font-size:13px;font-weight:600;box-shadow:0 10px 30px rgba(0,0,0,.28);opacity:0;pointer-events:none;transition:.25s;z-index:90;max-width:90vw;text-align:center;}
+  .toast.on{opacity:1;transform:translateX(-50%) translateY(0);}
+  .kbd{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;background:var(--panel-2);border:1px solid var(--line);border-radius:5px;padding:1px 6px;}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="inner">
+    <img src="../assets/logo.png" alt="Muscat Tech Solutions">
+    <div class="divider"></div>
+    <div class="app">Maugood · Attendance</div>
+    <div class="sp"></div>
+    <div class="who"><span>Admin</span><div class="av">A</div></div>
+  </div>
+</div>
+<div class="brandstrip"></div>
+
+<div class="wrap">
+  <div class="crumb">Settings &nbsp;›&nbsp; Capture &nbsp;›&nbsp; <b>Devices</b></div>
+  <div class="pagehead">
+    <h1>Add a device, then map its people</h1>
+    <p>The terminal sends its events to us, so registration needs no IP address, no port and no device
+       password. You give the device a name; Maugood gives you one URL to paste into it.</p>
+  </div>
+
+  <div class="stepper">
+    <button data-go="1" data-on="1"><span class="n">Step 1</span><span class="t">Add device</span></button>
+    <button data-go="2" disabled><span class="n">Step 2</span><span class="t">Paste the URL into it</span></button>
+    <button data-go="3" disabled><span class="n">Step 3</span><span class="t">Open device → events &amp; mapping</span></button>
+  </div>
+
+  <!-- ══════════ STEP 1 ══════════ -->
+  <section class="step on" id="s1">
+    <div class="layout">
+      <div>
+        <div class="card">
+          <div class="card-h">
+            <div class="ci">▣</div><h3>New device</h3>
+            <div class="sub">Admin only</div>
+          </div>
+          <div class="card-b">
+            <div class="sectlabel">Identity</div>
+            <div class="grid2">
+              <div class="field">
+                <label>Device name <span class="req">*</span></label>
+                <input id="f-name" value="Entrance" placeholder="e.g. Entrance">
+                <div class="hint">How it appears in reports and the device list.</div>
+              </div>
+              <div class="field">
+                <label>Branch / location</label>
+                <input id="f-branch" value="Head Office" placeholder="e.g. Head Office">
+                <div class="hint">Optional label. Groups devices in reports.</div>
+              </div>
+            </div>
+
+            <div class="sectlabel">Status</div>
+            <div class="toggle">
+              <div class="tx"><b>Enabled</b><span>Accept events from this terminal</span></div>
+              <div class="sw"></div>
+            </div>
+
+            <div class="callout info">
+              <div class="ci">↯</div>
+              <div>The device's <b>serial number, model and firmware</b> are read from the first event it
+                sends — we never ask an operator to type something the device can tell us itself.</div>
+            </div>
+          </div>
+          <div class="actions">
+            <div class="sp"></div>
+            <button class="btn">Cancel</button>
+            <button class="btn pri" id="btn-create">Create device &amp; generate URL</button>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <div class="card-h"><div class="ci">⊘</div><h3>What we no longer ask</h3></div>
+          <div class="card-b">
+            <ul class="notask">
+              <li><span class="x">✕</span>IP address</li>
+              <li><span class="x">✕</span>Port</li>
+              <li><span class="x">✕</span>Door number</li>
+              <li><span class="x">✕</span>Device username</li>
+              <li><span class="x">✕</span>Device password</li>
+            </ul>
+            <div class="callout tip" style="margin-bottom:0">
+              <div class="ci">✓</div>
+              <div>Because the <b>device connects to us</b>, it works on a branch network we cannot reach —
+                no VPN, no port forwarding, no fixed IP.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ STEP 2 ══════════ -->
+  <section class="step" id="s2">
+    <div class="callout tip">
+      <div class="ci">✓</div>
+      <div><b>Device created.</b> Paste this one URL into the terminal under
+        <span class="kbd">Configuration › Network › Network Service › HTTP Listening</span>.</div>
+    </div>
+
+    <div class="layout">
+      <div>
+        <div class="card">
+          <div class="card-h">
+            <div class="ci">⇄</div><h3>Terminal setup</h3>
+            <div class="sub">One value — nothing else to enter</div>
+          </div>
+          <div class="card-b">
+            <div class="urlbox">
+              <div class="lbl">Event push URL</div>
+              <div class="val" id="v-url">—</div>
+              <div class="row">
+                <button class="btn pri sm" data-copy="v-url">Copy URL</button>
+                <button class="btn sm" id="btn-regen">↻ Regenerate token</button>
+                <div style="flex:1"></div>
+                <span class="pill new" id="v-tok">token —</span>
+              </div>
+            </div>
+
+            <div class="callout info">
+              <div class="ci">i</div>
+              <div>The URL already carries everything the device needs — the address, this device's
+                <b>token</b>, and its name. There is no port or protocol to set separately.</div>
+            </div>
+          </div>
+          <div class="actions">
+            <div class="sp"></div>
+            <button class="btn pri" id="btn-done">Done — go to device list →</button>
+          </div>
+        </div>
+
+        <div class="callout bad">
+          <div class="ci">⚠</div>
+          <div><b>That URL is a password.</b> Anyone holding the token can post attendance into your
+            company. Don't paste it into tickets, screenshots or chat. If it leaks, press
+            <b>Regenerate token</b> — the old URL stops working immediately and the terminal must be
+            reconfigured.</div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <div class="card-h"><div class="ci">✽</div><h3>Before you leave the device</h3></div>
+          <div class="card-b">
+            <div class="callout warn" style="margin-top:0">
+              <div class="ci">🕐</div>
+              <div><b>Set the clock (NTP).</b> A terminal with an unset clock stamps events
+                <span class="mono">1970-01-01</span>. Attendance would be booked in 1970 and the employee
+                reads <b>absent today, forever</b>.</div>
+            </div>
+            <div class="callout info">
+              <div class="ci">🔒</div>
+              <div><b>A real certificate is required.</b> These terminals reject self-signed certificates
+                and fail <b>silently</b> — nothing appears on their screen.</div>
+            </div>
+            <div class="callout info" style="margin-bottom:0">
+              <div class="ci">👤</div>
+              <div><b>Enrol faces at the terminal.</b> With no route back to the device, Maugood cannot push
+                photos to it. Faces and fingerprints are enrolled on the device itself.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ STEP 3 ══════════ -->
+  <section class="step" id="s3">
+    <div class="card">
+      <div class="card-h">
+        <div class="ci">▤</div><h3>Devices</h3>
+        <div class="sub">Click a device to open it</div>
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr>
+            <th>Device</th><th>Branch</th><th>Status</th>
+            <th class="num">People</th><th class="num">Unmapped</th><th>Last event</th><th></th>
+          </tr></thead>
+          <tbody id="devtbl"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="callout info">
+      <div class="ci">↯</div>
+      <div>Because we never connect <i>to</i> the terminal, its people are <b>discovered from the events
+        themselves</b>. The first time someone taps, Maugood records the device ID and the name shown on
+        the device, then tries to match it to an employee code automatically.</div>
+    </div>
+
+    <div class="callout warn">
+      <div class="ci">⚠</div>
+      <div><b>Maugood never creates an employee from a device.</b> An unrecognised ID is parked, never
+        auto-enrolled — the same rule the photo importer follows. If a real person is missing, add them in
+        Employees first, then map.</div>
+    </div>
+  </section>
+</div>
+
+<!-- ══════════ DRAWER ══════════ -->
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" role="dialog" aria-label="Device detail">
+  <div class="drawer-h">
+    <div class="dot">▣</div>
+    <div>
+      <div class="nm" id="dw-name">Entrance</div>
+      <div class="lc" id="dw-loc">Head Office</div>
+    </div>
+    <div class="sp"></div>
+    <span class="pill ok" id="dw-health">● Online</span>
+    <button class="x" id="dw-close" aria-label="Close">✕</button>
+  </div>
+
+  <div class="drawer-meta">
+    <div>Serial<b id="dw-serial">F92714335</b></div>
+    <div>Model<b>DS-K1T671MF</b></div>
+    <div>Firmware<b>v6.4.1</b></div>
+    <div>Token<b id="dw-token">b1d1-9f3a7</b></div>
+    <div>Last event<b id="dw-last">15:42</b></div>
+  </div>
+
+  <div class="dtabs">
+    <button data-pane="p-events" class="on">Incoming events <span class="cnt" id="c-ev">8</span></button>
+    <button data-pane="p-people">Map to employees <span class="cnt" id="c-un">3</span></button>
+  </div>
+
+  <div class="drawer-b">
+
+    <!-- ---- pane: events ---- -->
+    <div class="dpane on" id="p-events">
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-h"><div class="ci">≡</div><h3>Incoming events</h3><div class="sub">Newest first · live</div></div>
+        <div class="tablewrap">
+          <table>
+            <thead><tr>
+              <th>Time</th><th>Employee no.</th><th>Name on device</th><th>Verify</th><th>Serial</th><th>Result</th>
+            </tr></thead>
+            <tbody id="feed"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="callout warn">
+        <div class="ci">⚠</div>
+        <div><b>One event arrived stamped 1970.</b> Maugood refused to book it in 1970 and used the receive
+          time instead, flagging the device. It is neither silently accepted nor silently dropped — both
+          would stay invisible until payroll.</div>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><div class="ci">{}</div><h3>What the device sends</h3></div>
+        <div class="card-b">
+<pre><span class="dim">POST /hik/b1d1-9f3a7?device_name=entrance</span>
+{
+  <span class="key">"dateTime"</span>: <span class="str">"2026-08-03T07:31:44+04:00"</span>,
+  <span class="key">"AccessControllerEvent"</span>: {
+    <span class="key">"employeeNoString"</span>: <span class="str">"OM00044"</span>,
+    <span class="key">"name"</span>: <span class="str">"Harikrishnan"</span>,
+    <span class="key">"attendanceStatus"</span>: <span class="str">"checkIn"</span>,
+    <span class="key">"currentVerifyMode"</span>: <span class="str">"faceOrFpOrCardOrPw"</span>,
+    <span class="key">"serialNo"</span>: <span class="str">168</span>
+  }
+}</pre>
+          <div class="callout info" style="margin-bottom:0">
+            <div class="ci">i</div>
+            <div>A post with <b>no <span class="mono">employeeNoString</span></b> is a keepalive. We answer
+              <b>200</b> and record liveness only — it never creates an attendance row. Unknown employee,
+              bad clock or duplicate also get <b>200</b>; any other reply makes the terminal retry in a
+              loop. Only an unknown or revoked token is refused.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---- pane: people ---- -->
+    <div class="dpane" id="p-people">
+      <div class="tiles">
+        <div class="tile blue"><div class="n" id="t-disc">4</div><div class="l">People seen</div></div>
+        <div class="tile ok"><div class="n" id="t-map">1</div><div class="l">Mapped</div></div>
+        <div class="tile warn"><div class="n" id="t-un">3</div><div class="l">Unmapped</div></div>
+        <div class="tile"><div class="n" id="t-held">5</div><div class="l">Taps held</div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-h">
+          <div class="ci">⇉</div><h3>People seen on this device</h3>
+          <div class="sub">Matched on employee code</div>
+        </div>
+        <div class="tablewrap">
+          <table>
+            <thead><tr>
+              <th>Device ID</th><th>Name on device</th><th class="num">Taps</th>
+              <th>Maugood employee</th><th style="width:130px">Status</th>
+            </tr></thead>
+            <tbody id="maptbl"></tbody>
+          </table>
+        </div>
+        <div class="actions">
+          <button class="btn sm" id="btn-auto">⚡ Auto-map by employee code</button>
+          <div class="sp"></div>
+          <span style="font-size:12px;color:var(--faint)" id="mapnote">3 people still unmapped</span>
+        </div>
+      </div>
+
+      <div class="callout info">
+        <div class="ci">↺</div>
+        <div>Taps that arrive <b>before</b> a person is mapped are held, not dropped. Mapping them
+          <b>replays those taps</b> and recalculates the affected days.</div>
+      </div>
+
+      <div class="card" id="resultcard" style="display:none">
+        <div class="card-h"><div class="ci">✓</div><h3>Attendance after mapping</h3><div class="sub">Held taps replayed</div></div>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Employee</th><th>Date</th><th>In</th><th>Out</th><th>Total</th><th>Flags</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><b>Harikrishnan</b><div class="sub">OM00044</div></td>
+                <td>03 Aug 2026</td><td class="mono">07:31</td><td class="mono">15:42</td>
+                <td class="mono">491 min</td><td><span class="pill ok">On time</span></td>
+              </tr>
+              <tr>
+                <td><b>Giri</b><div class="sub">OM00051</div></td>
+                <td>03 Aug 2026</td><td class="mono">08:14</td><td class="mono">17:02</td>
+                <td class="mono">528 min</td><td><span class="pill warn">Late</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card-b" style="border-top:1px solid var(--line-soft)">
+          <div class="callout tip" style="margin:0">
+            <div class="ci">✓</div>
+            <div><b>In is the first tap, out is the last tap.</b> The device's own
+              <span class="mono">checkIn</span>/<span class="mono">checkOut</span> label is stored for the
+              record but never used for the calculation — staff tap the wrong way round constantly, and
+              terminals mislabel after a reboot.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</aside>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  var HOST="getdata.mts-om.com";
+
+  var EMPLOYEES=[
+    {id:2066, code:"OM00044", name:"Harikrishnan"},
+    {id:2071, code:"OM00051", name:"Giri"},
+    {id:2074, code:"OM00052", name:"Fatma Al Balushi"},
+    {id:2080, code:"OM00060", name:"Said Al Hinai"}
+  ];
+
+  var PEOPLE=[
+    {dev:"OM00044", name:"Harikrishnan", taps:2, emp:2066, auto:true},
+    {dev:"1001",    name:"Giri",         taps:3, emp:null, auto:false},
+    {dev:"1002",    name:"Fatma",        taps:1, emp:null, auto:false},
+    {dev:"9931",    name:null,           taps:1, emp:null, auto:false}
+  ];
+
+  var FEED=[
+    {t:"07:31:44", no:"OM00044", nm:"Harikrishnan", vf:"Face", sn:168, st:"ok",   lbl:"Attendance"},
+    {t:"07:33:02", no:"1001",    nm:"Giri",         vf:"Face", sn:169, st:"warn", lbl:"Clock 1970 · corrected"},
+    {t:"08:14:57", no:"1001",    nm:"Giri",         vf:"Fingerprint", sn:170, st:"warn", lbl:"Held · unmapped"},
+    {t:"08:59:10", no:"1002",    nm:"Fatma",        vf:"Face", sn:171, st:"warn", lbl:"Held · unmapped"},
+    {t:"09:00:00", no:null,      nm:null,           vf:"—",    sn:172, st:"idle", lbl:"Keepalive · ignored"},
+    {t:"12:03:41", no:"9931",    nm:null,           vf:"Card", sn:173, st:"warn", lbl:"Held · unknown ID"},
+    {t:"15:42:19", no:"OM00044", nm:"Harikrishnan", vf:"Face", sn:174, st:"ok",   lbl:"Attendance"},
+    {t:"15:42:19", no:"OM00044", nm:"Harikrishnan", vf:"Face", sn:174, st:"idle", lbl:"Duplicate · ignored"}
+  ];
+
+  var device={name:"Entrance", branch:"Head Office", token:"b1d1-9f3a7"};
+
+  function $(id){ return document.getElementById(id); }
+  function toast(m){
+    var el=$("toast"); el.textContent=m; el.classList.add("on");
+    clearTimeout(el._t); el._t=setTimeout(function(){ el.classList.remove("on"); },2800);
+  }
+
+  /* ---- token: 4 hex + "-" + 5 hex, e.g. b1d1-9f3a7 ---- */
+  function hex(n){ var h="0123456789abcdef",s=""; for(var i=0;i<n;i++) s+=h[Math.floor(Math.random()*16)]; return s; }
+  function mintToken(){ return hex(4)+"-"+hex(5); }
+  function slug(v){ return (v||"device").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,""); }
+
+  function paintUrl(){
+    $("v-url").innerHTML="https://"+HOST+"/hik/<span class='tok'>"+device.token+
+      "</span>?device_name="+slug(device.name);
+    $("v-tok").textContent="token "+device.token;
+    $("dw-token").textContent=device.token;
+  }
+
+  /* ---- stepper ---- */
+  var maxStep=1;
+  function go(n){
+    ["s1","s2","s3"].forEach(function(id,i){ $(id).classList.toggle("on", i+1===n); });
+    document.querySelectorAll(".stepper button").forEach(function(b){
+      var k=+b.dataset.go; b.dataset.on=(k===n)?"1":"0"; b.disabled=k>maxStep;
+    });
+    window.scrollTo({top:0,behavior:"smooth"});
+  }
+  function unlock(n){ maxStep=Math.max(maxStep,n); go(n); }
+  document.querySelectorAll(".stepper button").forEach(function(b){
+    b.addEventListener("click",function(){ if(!b.disabled) go(+b.dataset.go); });
+  });
+
+  $("btn-create").addEventListener("click",function(){
+    var nm=$("f-name").value.trim();
+    if(!nm){ toast("Device name is required"); return; }
+    device.name=nm; device.branch=$("f-branch").value.trim()||"—";
+    device.token=mintToken(); paintUrl();
+    unlock(2); toast("Device created — URL generated");
+  });
+  $("btn-regen").addEventListener("click",function(){
+    device.token=mintToken(); paintUrl();
+    toast("New token issued — the old URL no longer works");
+  });
+  $("btn-done").addEventListener("click",function(){ renderDevices(); unlock(3); });
+
+  document.querySelectorAll("[data-copy]").forEach(function(b){
+    b.addEventListener("click",function(){
+      var txt=$(b.dataset.copy).textContent;
+      if(navigator.clipboard) navigator.clipboard.writeText(txt);
+      toast("Copied"); b.textContent="Copied ✓";
+      setTimeout(function(){ b.textContent="Copy URL"; },1400);
+    });
+  });
+
+  /* ---- device list ---- */
+  function counts(){
+    var mapped=PEOPLE.filter(function(p){return p.emp;}).length;
+    return {
+      people:PEOPLE.length, mapped:mapped, un:PEOPLE.length-mapped,
+      held:PEOPLE.filter(function(p){return !p.emp;}).reduce(function(a,p){return a+p.taps;},0)
+    };
+  }
+  function renderDevices(){
+    var c=counts();
+    $("devtbl").innerHTML=
+      "<tr class='rowlink' id='devrow'>"+
+        "<td><b>"+device.name+"</b><div class='sub mono'>"+device.token+"</div></td>"+
+        "<td>"+device.branch+"</td>"+
+        "<td><span class='pill ok'>● Online</span></td>"+
+        "<td class='num'>"+c.people+"</td>"+
+        "<td class='num'>"+(c.un?"<span class='pill warn'>"+c.un+"</span>":"<span style='color:var(--faint)'>0</span>")+"</td>"+
+        "<td class='mono'>15:42</td>"+
+        "<td class='chev'>›</td>"+
+      "</tr>"+
+      "<tr class='rowlink' style='opacity:.72'>"+
+        "<td><b>Gate 2</b><div class='sub mono'>c47a-1e9d2</div></td>"+
+        "<td>Warehouse</td>"+
+        "<td><span class='pill idle'>Waiting for first event</span></td>"+
+        "<td class='num'>0</td><td class='num' style='color:var(--faint)'>0</td>"+
+        "<td style='color:var(--faint)'>never</td><td class='chev'>›</td>"+
+      "</tr>";
+    $("devrow").addEventListener("click",openDrawer);
+  }
+
+  /* ---- drawer ---- */
+  function openDrawer(){
+    $("dw-name").textContent=device.name;
+    $("dw-loc").textContent=device.branch;
+    $("scrim").classList.add("on"); $("drawer").classList.add("on");
+    document.body.classList.add("locked");
+    renderFeed(); renderMap();
+  }
+  function closeDrawer(){
+    $("scrim").classList.remove("on"); $("drawer").classList.remove("on");
+    document.body.classList.remove("locked");
+  }
+  $("dw-close").addEventListener("click",closeDrawer);
+  $("scrim").addEventListener("click",closeDrawer);
+  document.addEventListener("keydown",function(e){ if(e.key==="Escape") closeDrawer(); });
+
+  document.querySelectorAll(".dtabs button").forEach(function(b){
+    b.addEventListener("click",function(){
+      document.querySelectorAll(".dtabs button").forEach(function(x){ x.classList.remove("on"); });
+      document.querySelectorAll(".dpane").forEach(function(x){ x.classList.remove("on"); });
+      b.classList.add("on"); $(b.dataset.pane).classList.add("on");
+    });
+  });
+
+  /* ---- events pane ---- */
+  var PILL={ok:"ok",warn:"warn",idle:"idle",bad:"bad"};
+  function renderFeed(){
+    $("feed").innerHTML=FEED.slice().reverse().map(function(e){
+      return "<tr>"+
+        "<td class='mono'>"+e.t+"</td>"+
+        "<td class='mono'>"+(e.no||"<span style='color:var(--faint)'>—</span>")+"</td>"+
+        "<td>"+(e.nm||"<span style='color:var(--faint)'>—</span>")+"</td>"+
+        "<td>"+e.vf+"</td><td class='mono'>"+e.sn+"</td>"+
+        "<td><span class='pill "+PILL[e.st]+"'>"+e.lbl+"</span></td></tr>";
+    }).join("");
+    $("c-ev").textContent=FEED.length;
+  }
+
+  /* ---- people pane ---- */
+  function opts(){
+    return "<option value=''>Select employee…</option>"+EMPLOYEES.map(function(e){
+      return "<option value='"+e.id+"'>"+e.name+" ("+e.code+")</option>";
+    }).join("");
+  }
+  function empName(id){
+    var e=EMPLOYEES.filter(function(x){return x.id===id;})[0];
+    return e ? "<b>"+e.name+"</b><div class='sub mono'>"+e.code+"</div>" : "—";
+  }
+  function renderMap(){
+    $("maptbl").innerHTML=PEOPLE.map(function(p,i){
+      var status=p.emp
+        ? "<span class='pill ok'>"+(p.auto?"Auto-matched":"Mapped")+"</span>"
+        : "<span class='pill warn'>Unmapped</span>";
+      var cell=p.emp ? empName(p.emp)
+        : "<div class='mapsel'><select data-i='"+i+"'>"+opts()+"</select>"+
+          "<button class='btn sm' data-map='"+i+"'>Map</button></div>";
+      return "<tr>"+
+        "<td class='mono'><b>"+p.dev+"</b></td>"+
+        "<td>"+(p.name||"<span style='color:var(--faint)'>not sent</span>")+"</td>"+
+        "<td class='num mono'>"+p.taps+"</td>"+
+        "<td>"+cell+"</td><td>"+status+"</td></tr>";
+    }).join("");
+
+    document.querySelectorAll("[data-map]").forEach(function(b){
+      b.addEventListener("click",function(){
+        var i=+b.dataset.map, sel=document.querySelector("select[data-i='"+i+"']");
+        if(!sel.value){ toast("Pick an employee first"); return; }
+        PEOPLE[i].emp=+sel.value; PEOPLE[i].auto=false;
+        toast(PEOPLE[i].taps+" held tap"+(PEOPLE[i].taps>1?"s":"")+" replayed — attendance recalculated");
+        renderMap(); renderDevices();
+      });
+    });
+    tally();
+  }
+  function tally(){
+    var c=counts();
+    $("t-disc").textContent=c.people; $("t-map").textContent=c.mapped;
+    $("t-un").textContent=c.un; $("t-held").textContent=c.held;
+    $("c-un").textContent=c.un;
+    $("mapnote").textContent=c.un ? c.un+" people still unmapped" : "Everyone mapped";
+    $("resultcard").style.display=(c.mapped>=2)?"":"none";
+  }
+  $("btn-auto").addEventListener("click",function(){
+    var hit=0;
+    PEOPLE.forEach(function(p){
+      if(p.emp) return;
+      var m=EMPLOYEES.filter(function(e){return e.code.toLowerCase()===p.dev.toLowerCase();})[0];
+      if(m){ p.emp=m.id; p.auto=true; hit++; }
+    });
+    renderMap(); renderDevices();
+    toast(hit ? hit+" matched by code" : "No further codes match — map these by hand");
+  });
+
+  paintUrl(); renderDevices(); go(1);
+})();
+</script>
+</body>
+</html>

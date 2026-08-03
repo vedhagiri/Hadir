@@ -31,6 +31,7 @@ import gzip
 import logging
 import logging.handlers
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -103,6 +104,45 @@ class GzipRotatingFileHandler(logging.handlers.TimedRotatingFileHandler):
                 )
 
 
+# Paths whose next segment is a live credential. Uvicorn's access logger
+# writes the full request line, so without this the device push token would
+# sit in plaintext in app.log and in ``docker logs`` — the exact leak the
+# "no secrets in logs" red line exists to prevent. Our own log statements
+# never carry the token; this covers the framework's.
+_SECRET_PATH_RE = re.compile(
+    r"(?P<prefix>/(?:hik|api/devices/ingest)/)(?P<secret>[^/?\s\"']+)"
+)
+
+
+def _redact_secret_paths(text: str) -> str:
+    return _SECRET_PATH_RE.sub(r"\g<prefix>***", text)
+
+
+class RedactSecretPathsFilter(logging.Filter):
+    """Strip credential-bearing URL segments from any log record.
+
+    Rewrites both the message and the positional args, because uvicorn
+    passes the request path as an arg and formats it later — redacting only
+    the pre-format message would miss it entirely.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, str) and "/" in record.msg:
+            record.msg = _redact_secret_paths(record.msg)
+        if record.args:
+            if isinstance(record.args, tuple):
+                record.args = tuple(
+                    _redact_secret_paths(a) if isinstance(a, str) else a
+                    for a in record.args
+                )
+            elif isinstance(record.args, dict):
+                record.args = {
+                    k: _redact_secret_paths(v) if isinstance(v, str) else v
+                    for k, v in record.args.items()
+                }
+        return True
+
+
 def configure_logging(
     *,
     log_dir: Path | None = None,
@@ -133,9 +173,19 @@ def configure_logging(
         root.removeHandler(h)
 
     formatter = logging.Formatter(_LINE_FORMAT)
+    redact = RedactSecretPathsFilter()
     stdout = logging.StreamHandler(sys.stdout)
     stdout.setFormatter(formatter)
+    stdout.addFilter(redact)
     root.addHandler(stdout)
+
+    # Uvicorn's access logger does not propagate to root by default, so the
+    # filter has to be attached to it directly as well.
+    for name in ("uvicorn.access", "uvicorn.error"):
+        access = logging.getLogger(name)
+        access.addFilter(redact)
+        for h in access.handlers:
+            h.addFilter(redact)
 
     if enable_files:
         try:
@@ -154,6 +204,7 @@ def configure_logging(
             str(log_dir / APP_LOG_NAME), backup_count=backup_count
         )
         app_handler.setFormatter(formatter)
+        app_handler.addFilter(redact)
         root.addHandler(app_handler)
 
     root.setLevel(logging.INFO)

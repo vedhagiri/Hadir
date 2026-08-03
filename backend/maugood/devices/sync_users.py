@@ -31,7 +31,20 @@ def sync_device_users(
     scope: TenantScope,
     device: repo.DeviceRow,
 ) -> tuple[int, int, bool]:
-    """Pull + upsert + auto-map. Returns ``(synced, unmapped, reachable)``."""
+    """Pull + upsert + auto-map. Returns ``(synced, unmapped, reachable)``.
+
+    Only meaningful for a ``pull``/``both`` device. A push device has no
+    address or credentials — we cannot reach it, and its people are
+    discovered from its events instead (see
+    ``repository.discover_device_user``).
+    """
+
+    if not device.credentials_encrypted or not device.host:
+        logger.info(
+            "device user sync skipped: device_id=%s is push-only", device.id
+        )
+        total, unmapped = repo.count_device_users(conn, scope, device.id)
+        return total, unmapped, False
 
     username, password = decrypt_credentials(device.credentials_encrypted)
 

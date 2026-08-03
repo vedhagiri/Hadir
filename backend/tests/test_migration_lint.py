@@ -57,6 +57,22 @@ _WHITELIST: frozenset[str] = frozenset(
         # migration is properly {schema}-parameterised.
         "0063_escalation_requests.py",
         "0064_escalation_categories_extra.py",
+        # 0094 / 0095 create the attendance-device tables, each with the
+        # same sanctioned FK target to the global registry
+        # (``public.tenants.id``) that 0037 and 0048 carry. Every per-tenant
+        # table must reference the registry cross-schema; the rest of both
+        # migrations is properly unqualified.
+        "0094_attendance_devices.py",
+        "0095_device_users_events.py",
+        # 0096 creates public.device_push_tokens — a global routing table
+        # mapping an attendance terminal's push token to its tenant. The
+        # ingest endpoint is anonymous (a terminal posts with no session
+        # and no tenant hint), so the token→tenant lookup *must* resolve
+        # before any schema can be chosen and therefore cannot live in a
+        # per-tenant schema. The table holds no attendance data. Creation
+        # is IF NOT EXISTS because the orchestrator runs each migration
+        # once per tenant schema.
+        "0096_device_push_tokens.py",
     }
 )
 

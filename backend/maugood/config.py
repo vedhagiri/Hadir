@@ -169,6 +169,14 @@ class Settings(BaseSettings):
     # Clock-skew tolerance when validating ID-token ``exp`` / ``nbf``.
     oidc_clock_skew_seconds: int = 60
 
+    # --- Attendance devices: push ingest -----------------------------------
+    # Public base URL that terminals post their events to. This is the only
+    # part of the generated push URL an operator cannot derive, so it must
+    # match the hostname on the TLS certificate the devices see — Hikvision
+    # terminals reject an untrusted certificate silently, with no error on
+    # their own screen.
+    device_push_base_url: str = "https://getdata.mts-om.com"
+
     # --- Request attachments (v1.0 P14) ------------------------------------
     # Max upload size in megabytes. Enforced server-side regardless of
     # what the client claims (the P14 red line). The client is told the

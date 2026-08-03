@@ -229,6 +229,37 @@ tenants = Table(
 )
 
 
+# 0096: the second globally-visible table. An attendance terminal posts its
+# events anonymously — no session cookie, no tenant hint — so the token must
+# resolve to a tenant BEFORE any schema can be selected, which is impossible
+# from inside a per-tenant schema. This table holds only the routing tuple
+# ``token → (tenant, device)``; no attendance data of any kind lives here.
+#
+# The token itself is never stored. ``token_hash`` is a SHA-256 of it, so a
+# database leak does not hand an attacker a working push URL.
+device_push_tokens = Table(
+    "device_push_tokens",
+    metadata,
+    Column("token_hash", Text, primary_key=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("tenant_schema", Text, nullable=False),
+    Column("device_id", Integer, nullable=False),
+    Column("revoked_at", DateTime(timezone=True), nullable=True),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    schema="public",
+)
+
+
 # --- Per-tenant branding (P4) ----------------------------------------------
 # One row per tenant. ``primary_color_key`` and ``font_key`` are both
 # constrained server-side via CHECK to the curated lists in
@@ -2031,13 +2062,17 @@ attendance_devices = Table(
     Column("name", Text, nullable=False),
     Column("location", Text, nullable=False, server_default=""),
     Column("driver", Text, nullable=False, server_default="hikvision"),
-    Column("host", Text, nullable=False),
-    Column("port", Integer, nullable=False, server_default="80"),
+    # --- pull-mode only (0096 relaxed these to NULL) ---------------------
+    # A push device has no address and no credentials: it dials us, so we
+    # never need to reach it.
+    Column("host", Text, nullable=True),
+    Column("port", Integer, nullable=True, server_default="80"),
     # Fernet-encrypted "username:password" token. Plaintext lives nowhere
     # else — not in logs, responses, audit rows, or errors.
-    Column("credentials_encrypted", Text, nullable=False),
-    # Read from the device (``/deviceInfo``) on create. Unique per tenant.
-    Column("serial_number", Text, nullable=False),
+    Column("credentials_encrypted", Text, nullable=True),
+    # Pull mode reads this from ``/deviceInfo`` on create; push mode learns
+    # it from the first event. Unique per tenant when present.
+    Column("serial_number", Text, nullable=True),
     Column("model", Text, nullable=True),
     Column("firmware", Text, nullable=True),
     Column("door_no", Text, nullable=True),
@@ -2047,6 +2082,18 @@ attendance_devices = Table(
     Column("users_synced", Integer, nullable=False, server_default="0"),
     Column("last_user_sync_at", DateTime(timezone=True), nullable=True),
     Column("last_seen_at", DateTime(timezone=True), nullable=True),
+    # --- push mode (0096) -------------------------------------------------
+    # SHA-256 of the push token — what ingest looks up. The Fernet copy
+    # exists only so an operator can re-read the URL when reconfiguring a
+    # replacement terminal; the plaintext is never stored.
+    Column("push_token_hash", Text, nullable=True),
+    Column("push_token_encrypted", Text, nullable=True),
+    Column("connection_mode", Text, nullable=False, server_default="push"),
+    # The ``?device_name=`` the terminal reports. A label for diagnostics —
+    # never used to identify the device (the token does that).
+    Column("reported_device_name", Text, nullable=True),
+    Column("last_event_at", DateTime(timezone=True), nullable=True),
+    Column("clock_suspect", Boolean, nullable=False, server_default="false"),
     Column(
         "created_at",
         DateTime(timezone=True),
@@ -2100,6 +2147,13 @@ device_users = Table(
     Column("active", Boolean, nullable=False, server_default="true"),
     Column("raw", JSONB, nullable=True),
     Column("synced_at", DateTime(timezone=True), nullable=True),
+    # --- discovery bookkeeping (0096) -------------------------------------
+    # Push devices never expose a user list, so their people are discovered
+    # from the events themselves: source='events'.
+    Column("first_seen_at", DateTime(timezone=True), nullable=True),
+    Column("last_seen_at", DateTime(timezone=True), nullable=True),
+    Column("taps_count", Integer, nullable=False, server_default="0"),
+    Column("source", Text, nullable=False, server_default="sync"),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     UniqueConstraint(
@@ -2135,9 +2189,16 @@ device_attendance_events = Table(
     ),
     Column("device_user_id", Text, nullable=False),
     Column("event_serial", Text, nullable=False),
+    # sha256(device_id|event_serial|occurred_at). The serial alone is not
+    # unique over time — a terminal's counter restarts at zero after a
+    # factory reset, and a serial-only key would then silently swallow
+    # every new event as a duplicate.
+    Column("dedup_key", Text, nullable=False),
     Column("occurred_at", DateTime(timezone=True), nullable=False),
     Column("verify_mode", Text, nullable=True),
     Column("direction", Text, nullable=True),
+    Column("person_name", Text, nullable=True),
+    Column("clock_suspect", Boolean, nullable=False, server_default="false"),
     Column("status", Text, nullable=False, server_default="pending"),
     Column("attempts", Integer, nullable=False, server_default="0"),
     Column("last_error", Text, nullable=True),
@@ -2163,9 +2224,8 @@ device_attendance_events = Table(
     ),
     UniqueConstraint(
         "tenant_id",
-        "device_id",
-        "event_serial",
-        name="uq_device_events_tenant_device_serial",
+        "dedup_key",
+        name="uq_device_events_tenant_dedup",
     ),
 )
 

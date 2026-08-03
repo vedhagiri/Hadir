@@ -17,7 +17,12 @@ from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Connection
 
-from maugood.db import attendance_devices, device_users, employees
+from maugood.db import (
+    attendance_devices,
+    device_attendance_events,
+    device_users,
+    employees,
+)
 from maugood.tenants.scope import TenantScope
 
 
@@ -27,10 +32,12 @@ class DeviceRow:
     name: str
     location: str
     driver: str
-    host: str
-    port: int
-    credentials_encrypted: str
-    serial_number: str
+    # Pull-mode only. A push device dials us, so it has no address and no
+    # credentials, and does not reveal its serial until the first event.
+    host: Optional[str]
+    port: Optional[int]
+    credentials_encrypted: Optional[str]
+    serial_number: Optional[str]
     model: Optional[str]
     firmware: Optional[str]
     door_no: Optional[str]
@@ -41,6 +48,13 @@ class DeviceRow:
     last_user_sync_at: Optional[datetime]
     last_seen_at: Optional[datetime]
     created_at: datetime
+    # Push mode (0096).
+    connection_mode: str
+    push_token_hash: Optional[str]
+    push_token_encrypted: Optional[str]
+    reported_device_name: Optional[str]
+    last_event_at: Optional[datetime]
+    clock_suspect: bool
 
 
 def _to_row(r: Any) -> DeviceRow:
@@ -63,6 +77,12 @@ def _to_row(r: Any) -> DeviceRow:
         last_user_sync_at=r.last_user_sync_at,
         last_seen_at=r.last_seen_at,
         created_at=r.created_at,
+        connection_mode=r.connection_mode,
+        push_token_hash=r.push_token_hash,
+        push_token_encrypted=r.push_token_encrypted,
+        reported_device_name=r.reported_device_name,
+        last_event_at=r.last_event_at,
+        clock_suspect=r.clock_suspect,
     )
 
 
@@ -128,6 +148,41 @@ def create_device(
     return int(new_id)
 
 
+def create_push_device(
+    conn: Connection,
+    scope: TenantScope,
+    *,
+    name: str,
+    location: str,
+    driver: str,
+    enabled: bool,
+    push_token_hash: str,
+    push_token_encrypted: str,
+) -> int:
+    """Register a push device. No host, no port, no credentials.
+
+    Everything the pull path reads off the wire — serial, model, firmware —
+    is learned from the first event this terminal posts.
+    """
+
+    new_id = conn.execute(
+        insert(attendance_devices)
+        .values(
+            tenant_id=scope.tenant_id,
+            name=name,
+            location=location,
+            driver=driver,
+            enabled=enabled,
+            connection_mode="push",
+            push_token_hash=push_token_hash,
+            push_token_encrypted=push_token_encrypted,
+            health_status="unknown",
+        )
+        .returning(attendance_devices.c.id)
+    ).scalar_one()
+    return int(new_id)
+
+
 def update_device(
     conn: Connection,
     scope: TenantScope,
@@ -169,6 +224,12 @@ class DeviceUserRow:
     mapping_status: str
     face_synced: bool
     synced_at: Optional[datetime]
+    first_seen_at: Optional[datetime] = None
+    last_seen_at: Optional[datetime] = None
+    taps_count: int = 0
+    source: str = "sync"
+    employee_code: Optional[str] = None
+    employee_name: Optional[str] = None
 
 
 def employee_id_for_code(
@@ -231,16 +292,108 @@ def upsert_device_user(
     )
 
 
+def discover_device_user(
+    conn: Connection,
+    scope: TenantScope,
+    *,
+    device_id: int,
+    device_user_id: str,
+    name: Optional[str],
+    seen_at: datetime,
+) -> Optional[int]:
+    """Record a person seen in an event; auto-map by employee code.
+
+    A push device never exposes a user list, so its people are discovered
+    from the traffic itself. Returns the mapped ``employee_id`` or ``None``.
+
+    An existing row's ``employee_id`` is never overwritten here — an
+    operator's manual mapping outranks a later auto-match attempt.
+    """
+
+    employee_id = employee_id_for_code(conn, scope, device_user_id)
+    mapping_status = "mapped" if employee_id is not None else "unmapped"
+
+    stmt = pg_insert(device_users).values(
+        tenant_id=scope.tenant_id,
+        device_id=device_id,
+        device_user_id=device_user_id,
+        name=name,
+        employee_id=employee_id,
+        mapping_status=mapping_status,
+        source="events",
+        first_seen_at=seen_at,
+        last_seen_at=seen_at,
+        taps_count=1,
+    )
+    row = conn.execute(
+        stmt.on_conflict_do_update(
+            constraint="uq_device_users_tenant_device_user",
+            set_={
+                # Keep the first non-null name we ever saw for this person.
+                "name": func.coalesce(device_users.c.name, stmt.excluded.name),
+                "last_seen_at": seen_at,
+                "taps_count": device_users.c.taps_count + 1,
+                "updated_at": func.now(),
+            },
+        ).returning(device_users.c.employee_id)
+    ).first()
+
+    return int(row.employee_id) if row is not None and row.employee_id else None
+
+
+def map_device_user(
+    conn: Connection,
+    scope: TenantScope,
+    *,
+    device_id: int,
+    device_user_id: str,
+    employee_id: Optional[int],
+) -> bool:
+    """Point a discovered device person at a Maugood employee (or clear it).
+
+    Returns False when the row doesn't exist for this tenant + device.
+    """
+
+    result = conn.execute(
+        update(device_users)
+        .where(
+            device_users.c.tenant_id == scope.tenant_id,
+            device_users.c.device_id == device_id,
+            device_users.c.device_user_id == device_user_id,
+        )
+        .values(
+            employee_id=employee_id,
+            mapping_status="mapped" if employee_id is not None else "unmapped",
+            updated_at=func.now(),
+        )
+    )
+    return bool(result.rowcount)
+
+
 def list_device_users(
     conn: Connection, scope: TenantScope, device_id: int
 ) -> list[DeviceUserRow]:
     rows = conn.execute(
-        select(device_users)
+        select(
+            device_users,
+            employees.c.employee_code.label("emp_code"),
+            employees.c.full_name.label("emp_name"),
+        )
+        .select_from(
+            device_users.outerjoin(
+                employees,
+                (employees.c.id == device_users.c.employee_id)
+                & (employees.c.tenant_id == device_users.c.tenant_id),
+            )
+        )
         .where(
             device_users.c.tenant_id == scope.tenant_id,
             device_users.c.device_id == device_id,
         )
-        .order_by(device_users.c.device_user_id.asc())
+        .order_by(
+            device_users.c.employee_id.is_(None).desc(),
+            device_users.c.device_user_id.asc(),
+        )
     ).all()
     return [
         DeviceUserRow(
@@ -252,6 +405,12 @@ def list_device_users(
             mapping_status=r.mapping_status,
             face_synced=r.face_synced,
             synced_at=r.synced_at,
+            first_seen_at=r.first_seen_at,
+            last_seen_at=r.last_seen_at,
+            taps_count=r.taps_count,
+            source=r.source,
+            employee_code=r.emp_code,
+            employee_name=r.emp_name,
         )
         for r in rows
     ]
@@ -280,3 +439,174 @@ def count_device_users(
         )
     ).scalar_one()
     return int(total), int(unmapped)
+
+
+# --- device_attendance_events (staging) -------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class DeviceEventRow:
+    id: int
+    device_id: int
+    device_user_id: str
+    person_name: Optional[str]
+    event_serial: str
+    occurred_at: datetime
+    received_at: datetime
+    verify_mode: Optional[str]
+    direction: Optional[str]
+    status: str
+    clock_suspect: bool
+    employee_id: Optional[int]
+
+
+def insert_tap(
+    conn: Connection,
+    scope: TenantScope,
+    *,
+    device_id: int,
+    device_user_id: str,
+    person_name: Optional[str],
+    event_serial: str,
+    dedup_key: str,
+    occurred_at: datetime,
+    verify_mode: Optional[str],
+    direction: Optional[str],
+    clock_suspect: bool,
+    employee_id: Optional[int],
+    raw: dict[str, Any],
+) -> Optional[int]:
+    """Stage one tap. Returns ``None`` when it was already stored.
+
+    Idempotent on ``(tenant_id, dedup_key)`` so a terminal re-posting after
+    a missed acknowledgement cannot double-count a person's day.
+    """
+
+    row = conn.execute(
+        pg_insert(device_attendance_events)
+        .values(
+            tenant_id=scope.tenant_id,
+            device_id=device_id,
+            device_user_id=device_user_id,
+            person_name=person_name,
+            event_serial=event_serial,
+            dedup_key=dedup_key,
+            occurred_at=occurred_at,
+            verify_mode=verify_mode,
+            direction=direction,
+            clock_suspect=clock_suspect,
+            employee_id=employee_id,
+            # An unmapped person's tap is parked, not dropped: mapping them
+            # later replays it (see processor.replay_for_device_user).
+            status="pending" if employee_id is not None else "skipped",
+            raw=raw,
+        )
+        .on_conflict_do_nothing(constraint="uq_device_events_tenant_dedup")
+        .returning(device_attendance_events.c.id)
+    ).first()
+    return int(row.id) if row is not None else None
+
+
+def list_device_events(
+    conn: Connection, scope: TenantScope, device_id: int, *, limit: int = 100
+) -> list[DeviceEventRow]:
+    rows = conn.execute(
+        select(device_attendance_events)
+        .where(
+            device_attendance_events.c.tenant_id == scope.tenant_id,
+            device_attendance_events.c.device_id == device_id,
+        )
+        .order_by(device_attendance_events.c.received_at.desc())
+        .limit(limit)
+    ).all()
+    return [
+        DeviceEventRow(
+            id=r.id,
+            device_id=r.device_id,
+            device_user_id=r.device_user_id,
+            person_name=r.person_name,
+            event_serial=r.event_serial,
+            occurred_at=r.occurred_at,
+            received_at=r.received_at,
+            verify_mode=r.verify_mode,
+            direction=r.direction,
+            status=r.status,
+            clock_suspect=r.clock_suspect,
+            employee_id=r.employee_id,
+        )
+        for r in rows
+    ]
+
+
+def note_event_received(
+    conn: Connection,
+    scope: TenantScope,
+    *,
+    device_id: int,
+    at: datetime,
+    reported_device_name: Optional[str],
+    clock_suspect: bool,
+) -> None:
+    """Liveness bookkeeping. Also called for keepalives, which carry no tap.
+
+    ``clock_suspect`` latches on: once a terminal has reported a nonsense
+    timestamp the operator needs to see that until they fix and it reports
+    a good one, which clears it on the next healthy event.
+    """
+
+    values: dict[str, Any] = {
+        "last_event_at": at,
+        "last_seen_at": at,
+        "health_status": "online",
+        "clock_suspect": clock_suspect,
+        "updated_at": func.now(),
+    }
+    if reported_device_name:
+        values["reported_device_name"] = reported_device_name
+
+    conn.execute(
+        update(attendance_devices)
+        .where(
+            attendance_devices.c.id == device_id,
+            attendance_devices.c.tenant_id == scope.tenant_id,
+        )
+        .values(**values)
+    )
+
+
+def learn_device_identity(
+    conn: Connection,
+    scope: TenantScope,
+    *,
+    device_id: int,
+    serial_number: Optional[str],
+    model: Optional[str],
+    firmware: Optional[str],
+) -> None:
+    """Fill in hardware facts the first time a device reveals them.
+
+    Only writes columns that are still NULL — a terminal that starts
+    reporting a different serial must not silently rewrite the registry
+    entry an operator already verified.
+    """
+
+    values: dict[str, Any] = {}
+    if serial_number:
+        values["serial_number"] = func.coalesce(
+            attendance_devices.c.serial_number, serial_number
+        )
+    if model:
+        values["model"] = func.coalesce(attendance_devices.c.model, model)
+    if firmware:
+        values["firmware"] = func.coalesce(attendance_devices.c.firmware, firmware)
+    if not values:
+        return
+
+    conn.execute(
+        update(attendance_devices)
+        .where(
+            attendance_devices.c.id == device_id,
+            attendance_devices.c.tenant_id == scope.tenant_id,
+        )
+        .values(**values)
+    )

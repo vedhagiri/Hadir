@@ -22,6 +22,10 @@ export const NAV: Record<Role, NavItem[]> = {
     { id: "calendar", label: "Calendar", icon: "calendar" },
     { section: "Operations" },
     { id: "cameras", label: "Cameras", icon: "camera" },
+    // Attendance terminals. Sits beside Cameras because they are the two
+    // sources of "person seen" events, but it gets its own nav entry —
+    // burying it as a tab inside Cameras made it hard to find.
+    { id: "devices", label: "Devices", icon: "shield" },
     // Worker monitoring retired — its per-camera view moved into
     // Pipeline Monitor's "Cameras" tab.
     { id: "pipeline-monitor", label: "Pipeline Monitor", icon: "activity" },
@@ -113,6 +117,7 @@ export const NAV: Record<Role, NavItem[]> = {
 export const CRUMBS: Record<string, string[]> = {
   dashboard: ["Maugood", "Dashboard"],
   cameras: ["Maugood", "Cameras"],
+  devices: ["Maugood", "Devices"],
   employees: ["Maugood", "People", "Employees"],
   users: ["Maugood", "People", "Users"],
   policies: ["Maugood", "Configuration", "Shift Policies"],
