@@ -35,6 +35,7 @@ import { MyAttendancePage } from "./features/attendance/MyAttendancePage";
 import { CameraLogsPage } from "./features/camera-logs/CameraLogsPage";
 import { UnidentifiedFacesPage } from "./features/unidentified-faces/UnidentifiedFacesPage";
 import { CamerasPage } from "./features/cameras/CamerasPage";
+import { DevicesPage } from "./features/devices/DevicesPage";
 import { FaceCropsPage } from "./features/face-crops/FaceCropsPage";
 import { PersonClipsPage } from "./features/person-clips/PersonClipsPage";
 import { ClipLogsPage } from "./features/clip-logs/ClipLogTable";
@@ -141,6 +142,7 @@ export function App() {
         <Route path="employees" element={<EmployeesPage />} />
         <Route path="users" element={<AdminOnly><UsersPage /></AdminOnly>} />
         <Route path="cameras" element={<CamerasPage />} />
+        <Route path="devices" element={<AdminOnly><DevicesPage /></AdminOnly>} />
         <Route path="camera-logs" element={<CameraLogsPage />} />
         <Route path="unidentified-faces" element={<UnidentifiedFacesPage />} />
         <Route path="person-clips" element={<PersonClipsPage />} />

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Attendance Device Integration — Muscat Tech Solutions</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="inner">
+    <img class="logo" src="assets/logo.png" alt="Muscat Tech Solutions">
+    <span class="divider"></span>
+    <span class="doctitle">Maugood · Attendance Device Integration</span>
+    <nav>
+      <a href="index.html" class="active">Overview</a>
+      <a href="full-process.html">Full Process</a>
+      <a href="tables.html">Table Design</a>
+      <a href="matching-workflow.html">Matching &amp; Attendance</a>
+    </nav>
+  </div>
+</header>
+<div class="brandstrip"></div>
+
+<div class="cover">
+  <img class="biglogo" src="assets/logo.png" alt="Muscat Tech Solutions">
+  <div class="eyebrow">Technical Documentation</div>
+  <h1>Attendance Device Integration</h1>
+  <p class="lede">How Maugood integrates face-recognition attendance terminals — from adding a single device to a finished attendance record — including every database table, data syncing, matching, and the end-to-end workflow.</p>
+  <div class="meta">Maugood v1.1.x · Prepared by Muscat Tech Solutions for Omran · Confidential</div>
+</div>
+
+<div class="page" style="padding-top:0">
+
+  <section style="margin-top:8px">
+    <h2>In this documentation</h2>
+    <div class="toc">
+      <a href="full-process.html">
+        <div class="n">Document 1</div>
+        <h3>Full Process for a Single Device</h3>
+        <p>One device followed end to end — register → sync users → push faces → capture → process → attendance, with the real table rows at every stage.</p>
+      </a>
+      <a href="tables.html">
+        <div class="n">Document 2</div>
+        <h3>Database Table Design</h3>
+        <p>All 5 tables with full columns + real example data (employee OM00044, tenant inaisys). Re-sync, per-day taps, face + fingerprint, in/out calculation.</p>
+      </a>
+      <a href="matching-workflow.html">
+        <div class="n">Document 3</div>
+        <h3>Matching &amp; Attendance Workflow</h3>
+        <p>How face matching works in the existing engine (embeddings, cosine, 0.45 threshold) and how the device path plugs into it.</p>
+      </a>
+    </div>
+  </section>
+
+  <section>
+    <h2>What this covers</h2>
+    <p>Maugood computes attendance from a stream of <em>“person seen at time T”</em> events. Today those events come from IP cameras, where the server detects and matches every face. This project adds a second source — <strong>face-recognition terminals</strong> that match on-device and report the result — controlled by a per-tenant <strong>Attendance Source</strong> switch so only one pipeline runs at a time.</p>
+
+    <div class="flow">
+      <div class="fn"><span class="fi">➕</span>Register device</div>
+      <div class="fa">→</div>
+      <div class="fn"><span class="fi">🔄</span>Sync users</div>
+      <div class="fa">→</div>
+      <div class="fn"><span class="fi">📸</span>Push faces</div>
+      <div class="fa">→</div>
+      <div class="fn"><span class="fi">🎯</span>Match</div>
+      <div class="fa">→</div>
+      <div class="fn"><span class="fi">✅</span>Attendance</div>
+    </div>
+
+    <div class="callout key"><span class="ci">🔑</span><div>The attendance engine only reads <span class="mono">(employee_id, captured_at)</span> — it never knows whether a camera or a terminal produced the event. That is why the existing workflow continues unchanged when devices are added.</div></div>
+  </section>
+
+  <section>
+    <h2>Tables involved</h2>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Table</th><th>Status</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">attendance_devices</td><td><span class="pill new">new</span></td><td>Device registry — one row per terminal, unique serial, encrypted credentials.</td></tr>
+        <tr><td class="mono">device_users</td><td><span class="pill new">new</span></td><td>Synced device users mapped to Maugood employees.</td></tr>
+        <tr><td class="mono">device_attendance_events</td><td><span class="pill new">new</span></td><td>Raw event staging with retry / idempotency.</td></tr>
+        <tr><td class="mono">detection_events</td><td><span class="pill idle">reused</span></td><td>Shared “person seen” stream — device rows tagged <span class="mono">source=device</span>.</td></tr>
+        <tr><td class="mono">attendance_records</td><td><span class="pill idle">reused</span></td><td>Final daily record — unchanged.</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <div class="pager">
+    <span></span>
+    <a href="full-process.html"><span class="s">Next →</span>Full Process for a Single Device</a>
+  </div>
+</div>
+
+<footer class="site-footer">
+  <div class="inner">
+    <img src="assets/logo.png" alt="Muscat Tech Solutions">
+    <span class="txt"><b>Muscat Tech Solutions</b> · Maugood Attendance Platform · Confidential</span>
+    <span class="sp"></span>
+    <span class="txt">© 2026</span>
+  </div>
+</footer>
+</body>
+</html>

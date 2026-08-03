@@ -2012,6 +2012,164 @@ cameras = Table(
 )
 
 
+# --- Attendance devices (0094) ---------------------------------------------
+# Face-recognition terminals that match on-device and report attendance.
+# The device analogue of ``cameras``: credentials are Fernet-encrypted
+# (username:password), and responses never expose them — only host/port
+# and the device-read serial. See docs/design/device-attendance-integration.md.
+attendance_devices = Table(
+    "attendance_devices",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column("name", Text, nullable=False),
+    Column("location", Text, nullable=False, server_default=""),
+    Column("driver", Text, nullable=False, server_default="hikvision"),
+    Column("host", Text, nullable=False),
+    Column("port", Integer, nullable=False, server_default="80"),
+    # Fernet-encrypted "username:password" token. Plaintext lives nowhere
+    # else — not in logs, responses, audit rows, or errors.
+    Column("credentials_encrypted", Text, nullable=False),
+    # Read from the device (``/deviceInfo``) on create. Unique per tenant.
+    Column("serial_number", Text, nullable=False),
+    Column("model", Text, nullable=True),
+    Column("firmware", Text, nullable=True),
+    Column("door_no", Text, nullable=True),
+    Column("enrollment_scope", Text, nullable=False, server_default="all"),
+    Column("enabled", Boolean, nullable=False, server_default="true"),
+    Column("health_status", Text, nullable=False, server_default="unknown"),
+    Column("users_synced", Integer, nullable=False, server_default="0"),
+    Column("last_user_sync_at", DateTime(timezone=True), nullable=True),
+    Column("last_seen_at", DateTime(timezone=True), nullable=True),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    UniqueConstraint(
+        "tenant_id", "serial_number", name="uq_attendance_devices_tenant_serial"
+    ),
+)
+
+
+# --- Device users (0095) ----------------------------------------------------
+# People known to a terminal, synced from the device and mapped to Maugood
+# employees. Re-sync upserts on (tenant_id, device_id, device_user_id).
+device_users = Table(
+    "device_users",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "device_id",
+        Integer,
+        ForeignKey("attendance_devices.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column("device_user_id", Text, nullable=False),
+    Column("name", Text, nullable=True),
+    Column("card_no", Text, nullable=True),
+    Column(
+        "employee_id",
+        Integer,
+        ForeignKey("employees.id", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    Column("mapping_status", Text, nullable=False, server_default="unmapped"),
+    Column("face_synced", Boolean, nullable=False, server_default="false"),
+    Column("active", Boolean, nullable=False, server_default="true"),
+    Column("raw", JSONB, nullable=True),
+    Column("synced_at", DateTime(timezone=True), nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    UniqueConstraint(
+        "tenant_id",
+        "device_id",
+        "device_user_id",
+        name="uq_device_users_tenant_device_user",
+    ),
+)
+
+
+# --- Device attendance events (0095) ----------------------------------------
+# Raw taps reported by a terminal (face / fingerprint). Ingest is idempotent
+# on (tenant_id, device_id, event_serial); a processor maps them to employees
+# and writes detection_events (source='device').
+device_attendance_events = Table(
+    "device_attendance_events",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "tenant_id",
+        Integer,
+        ForeignKey("public.tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "device_id",
+        Integer,
+        ForeignKey("attendance_devices.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column("device_user_id", Text, nullable=False),
+    Column("event_serial", Text, nullable=False),
+    Column("occurred_at", DateTime(timezone=True), nullable=False),
+    Column("verify_mode", Text, nullable=True),
+    Column("direction", Text, nullable=True),
+    Column("status", Text, nullable=False, server_default="pending"),
+    Column("attempts", Integer, nullable=False, server_default="0"),
+    Column("last_error", Text, nullable=True),
+    Column("next_retry_at", DateTime(timezone=True), nullable=True),
+    Column(
+        "employee_id",
+        Integer,
+        ForeignKey("employees.id", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    Column(
+        "detection_event_id",
+        Integer,
+        ForeignKey("detection_events.id", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    Column("raw", JSONB, nullable=True),
+    Column("received_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column("processed_at", DateTime(timezone=True), nullable=True),
+    CheckConstraint(
+        "status IN ('pending', 'processed', 'failed', 'skipped')",
+        name="ck_device_events_status",
+    ),
+    UniqueConstraint(
+        "tenant_id",
+        "device_id",
+        "event_serial",
+        name="uq_device_events_tenant_device_serial",
+    ),
+)
+
+
 # --- Capture (P8) -----------------------------------------------------------
 # detection_events: one row per *track entry* (not per frame), so the table
 # doesn't explode. P9 fills in ``embedding`` + ``employee_id`` + ``confidence``
@@ -2027,12 +2185,22 @@ detection_events = Table(
         nullable=False,
         index=True,
     ),
+    # Migration 0095 — relaxed to NULL: a device-sourced row has no camera.
     Column(
         "camera_id",
         Integer,
         ForeignKey("cameras.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True,
+    ),
+    # Migration 0095 — event source: 'camera' (default) | 'device'.
+    Column("source", Text, nullable=False, server_default="camera"),
+    # Migration 0095 — set on device-sourced rows (null for camera rows).
+    Column(
+        "device_id",
+        Integer,
+        ForeignKey("attendance_devices.id", ondelete="SET NULL"),
+        nullable=True,
     ),
     Column(
         "captured_at",

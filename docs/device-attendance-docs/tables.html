@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Database Table Design — Muscat Tech Solutions</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="inner">
+    <img class="logo" src="assets/logo.png" alt="Muscat Tech Solutions">
+    <span class="divider"></span>
+    <span class="doctitle">Maugood · Attendance Device Integration</span>
+    <nav>
+      <a href="index.html">Overview</a>
+      <a href="full-process.html">Full Process</a>
+      <a href="tables.html" class="active">Table Design</a>
+      <a href="matching-workflow.html">Matching &amp; Attendance</a>
+    </nav>
+  </div>
+</header>
+<div class="brandstrip"></div>
+
+<div class="page">
+  <h1 class="doc">Database Table Design — Device Attendance</h1>
+  <p class="doc-sub">The complete table design for device-based attendance, with real example data
+    (tenant <b>inaisys</b>, employee <b>Harikrishnan · OM00044</b>). For review &amp; approval.</p>
+
+  <div class="callout info"><span class="ci">📌</span><div>
+    All examples use the live records: tenant <b>inaisys</b> → <span class="mono">tenant_id = 2</span>,
+    employee <b>Harikrishnan</b> → <span class="mono">employee_id = 2066</span>, code <span class="mono">OM00044</span>.
+    Timezone: Asia/Kolkata (IST = UTC + 5:30).
+  </div></div>
+
+  <section>
+    <h2>Overview — 5 tables</h2>
+    <div class="flow">
+      <div class="fn"><span class="fi">🚪</span><b>attendance_devices</b><br><span class="pill new">new</span></div>
+      <div class="fa">→</div>
+      <div class="fn"><span class="fi">👥</span><b>device_users</b><br><span class="pill new">new</span></div>
+      <div class="fa">→</div>
+      <div class="fn"><span class="fi">📥</span><b>device_attendance_events</b><br><span class="pill new">new</span></div>
+      <div class="fa">→</div>
+      <div class="fn"><span class="fi">👁️</span><b>detection_events</b><br><span class="pill idle">reused</span></div>
+      <div class="fa">→</div>
+      <div class="fn"><span class="fi">✅</span><b>attendance_records</b><br><span class="pill idle">reused</span></div>
+    </div>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Table</th><th>Status</th><th>Purpose</th><th>Uniqueness (prevents duplicates)</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">attendance_devices</td><td><span class="pill new">new</span></td><td>Device registry</td><td class="mono">(tenant_id, serial_number)</td></tr>
+        <tr><td class="mono">device_users</td><td><span class="pill new">new</span></td><td>Synced device people → mapped to employees</td><td class="mono">(tenant_id, device_id, device_user_id)</td></tr>
+        <tr><td class="mono">device_attendance_events</td><td><span class="pill new">new</span></td><td>Raw taps (face / fingerprint)</td><td class="mono">(tenant_id, device_id, event_serial)</td></tr>
+        <tr><td class="mono">detection_events</td><td><span class="pill idle">reused</span></td><td>"Person seen" — shared with cameras</td><td>—</td></tr>
+        <tr><td class="mono">attendance_records</td><td><span class="pill idle">reused</span></td><td>Final daily record</td><td class="mono">(tenant_id, employee_id, date)</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <!-- TABLE 1 -->
+  <section>
+    <h2><span class="step-badge">1</span>attendance_devices</h2>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Column</th><th>Type</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">id</td><td>int PK</td><td>auto</td></tr>
+        <tr><td class="mono">tenant_id</td><td>int FK</td><td>tenant isolation → <b>2</b></td></tr>
+        <tr><td class="mono">name</td><td>text</td><td>Main Gate Terminal</td></tr>
+        <tr><td class="mono">location</td><td>text</td><td></td></tr>
+        <tr><td class="mono">driver</td><td>text</td><td>hikvision</td></tr>
+        <tr><td class="mono">host / port</td><td>text / int</td><td>192.168.1.64 / 80</td></tr>
+        <tr><td class="mono">credentials_encrypted</td><td>text</td><td><b>Fernet-encrypted</b> user:pass 🔒</td></tr>
+        <tr><td class="mono">serial_number</td><td>text</td><td>read from device; unique per tenant</td></tr>
+        <tr><td class="mono">model / firmware</td><td>text</td><td>DS-K1T671MF / V3.2.40</td></tr>
+        <tr><td class="mono">door_no</td><td>text</td><td></td></tr>
+        <tr><td class="mono">enrollment_scope</td><td>text</td><td>all / department / zone</td></tr>
+        <tr><td class="mono">enabled</td><td>bool</td><td></td></tr>
+        <tr><td class="mono">health_status</td><td>text</td><td>online / unreachable / unknown</td></tr>
+        <tr><td class="mono">users_synced</td><td>int</td><td></td></tr>
+        <tr><td class="mono">last_user_sync_at / last_seen_at</td><td>timestamptz</td><td></td></tr>
+        <tr><td class="mono">created_at / updated_at</td><td>timestamptz</td><td></td></tr>
+      </tbody>
+    </table></div>
+    <p><b>Constraint:</b> <span class="mono">UNIQUE (tenant_id, serial_number)</span> — the same physical terminal can't be registered twice.</p>
+    <h3>Example row</h3>
+    <div class="tablewrap"><table>
+      <thead><tr><th>id</th><th>tenant_id</th><th>name</th><th>serial_number</th><th>host:port</th><th>enabled</th><th>health</th></tr></thead>
+      <tbody><tr><td>1</td><td><b>2</b></td><td>Main Gate Terminal</td><td class="mono">DS7K1T-INAISYS01</td><td class="mono">192.168.1.64:80</td><td>true</td><td><span class="pill">online</span></td></tr></tbody>
+    </table></div>
+  </section>
+
+  <!-- TABLE 2 -->
+  <section>
+    <h2><span class="step-badge">2</span>device_users</h2>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Column</th><th>Type</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">id</td><td>int PK</td><td></td></tr>
+        <tr><td class="mono">tenant_id / device_id</td><td>int FK</td><td>2 / 1</td></tr>
+        <tr><td class="mono">device_user_id</td><td>text</td><td>the terminal's person id = employee code</td></tr>
+        <tr><td class="mono">name</td><td>text</td><td>as stored on device</td></tr>
+        <tr><td class="mono">card_no</td><td>text</td><td>optional (M1 card)</td></tr>
+        <tr><td class="mono">employee_id</td><td>int FK (nullable)</td><td><b>the mapping to Maugood</b></td></tr>
+        <tr><td class="mono">mapping_status</td><td>text</td><td>mapped / unmapped / ambiguous</td></tr>
+        <tr><td class="mono">face_synced</td><td>bool</td><td>face pushed to device?</td></tr>
+        <tr><td class="mono">active</td><td>bool</td><td></td></tr>
+        <tr><td class="mono">raw</td><td>jsonb</td><td>full device payload</td></tr>
+        <tr><td class="mono">synced_at / created_at / updated_at</td><td>timestamptz</td><td></td></tr>
+      </tbody>
+    </table></div>
+    <p><b>Constraint:</b> <span class="mono">UNIQUE (tenant_id, device_id, device_user_id)</span> — re-syncing the same person <b>updates</b> the row, never duplicates it.</p>
+    <h3>Example row (Harikrishnan)</h3>
+    <div class="tablewrap"><table>
+      <thead><tr><th>id</th><th>tenant_id</th><th>device_id</th><th>device_user_id</th><th>name</th><th>employee_id</th><th>mapping_status</th><th>face_synced</th></tr></thead>
+      <tbody><tr><td>1</td><td><b>2</b></td><td>1</td><td class="mono">OM00044</td><td>Harikrishnan</td><td><b>2066</b></td><td><span class="pill">mapped</span></td><td>true</td></tr></tbody>
+    </table></div>
+    <div class="callout tip"><span class="ci">🔁</span><div><b>Sync the same employee many times → still one row.</b> A second sync only refreshes <span class="mono">synced_at</span> (and any changed name/card). Sync 100× → 1 row.</div></div>
+  </section>
+
+  <!-- TABLE 3 -->
+  <section>
+    <h2><span class="step-badge">3</span>device_attendance_events</h2>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Column</th><th>Type</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">id</td><td>int PK</td><td></td></tr>
+        <tr><td class="mono">tenant_id / device_id</td><td>int FK</td><td>2 / 1</td></tr>
+        <tr><td class="mono">device_user_id</td><td>text</td><td>who the device recognized (OM00044)</td></tr>
+        <tr><td class="mono">event_serial</td><td>text</td><td>device's unique event id</td></tr>
+        <tr><td class="mono">occurred_at</td><td>timestamptz</td><td>device time → stored UTC</td></tr>
+        <tr><td class="mono">verify_mode</td><td>text</td><td><b>face / fingerprint</b> / card / pin / qr</td></tr>
+        <tr><td class="mono">direction</td><td>text</td><td>in / out / unknown (label only — see calc)</td></tr>
+        <tr><td class="mono">status</td><td>text</td><td>pending / processed / failed / skipped</td></tr>
+        <tr><td class="mono">attempts / last_error / next_retry_at</td><td>int / text / ts</td><td>retry bookkeeping</td></tr>
+        <tr><td class="mono">employee_id</td><td>int FK (nullable)</td><td>resolved at processing → 2066</td></tr>
+        <tr><td class="mono">detection_event_id</td><td>int FK (nullable)</td><td>the produced detection row</td></tr>
+        <tr><td class="mono">raw</td><td>jsonb</td><td>full payload</td></tr>
+        <tr><td class="mono">received_at / processed_at</td><td>timestamptz</td><td></td></tr>
+      </tbody>
+    </table></div>
+    <p><b>Constraint:</b> <span class="mono">UNIQUE (tenant_id, device_id, event_serial)</span> — the same tap can't be counted twice (push + pull dedupe).</p>
+    <h3>Example — Harikrishnan's taps on 2026-08-03 (face + fingerprint)</h3>
+    <div class="tablewrap"><table>
+      <thead><tr><th>id</th><th>tenant_id</th><th>device_user_id</th><th>event_serial</th><th>occurred_at (UTC)</th><th>verify_mode</th><th>direction</th><th>employee_id</th></tr></thead>
+      <tbody>
+        <tr><td>5001</td><td>2</td><td class="mono">OM00044</td><td class="mono">EVT-88121</td><td class="mono">03:42:00Z</td><td><span class="pill">face</span></td><td>in</td><td>2066</td></tr>
+        <tr><td>5002</td><td>2</td><td class="mono">OM00044</td><td class="mono">EVT-88300</td><td class="mono">07:30:00Z</td><td><span class="pill">fingerprint</span></td><td>out</td><td>2066</td></tr>
+        <tr><td>5003</td><td>2</td><td class="mono">OM00044</td><td class="mono">EVT-88355</td><td class="mono">08:15:00Z</td><td><span class="pill">fingerprint</span></td><td>in</td><td>2066</td></tr>
+        <tr><td>5004</td><td>2</td><td class="mono">OM00044</td><td class="mono">EVT-88490</td><td class="mono">13:00:00Z</td><td><span class="pill">face</span></td><td>out</td><td>2066</td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout key"><span class="ci">✌️</span><div><b>Two methods, one identity.</b> Face and fingerprint are both attached to the same <span class="mono">employeeNo = OM00044</span>, so every event maps to employee 2066 regardless of method. <span class="mono">verify_mode</span> is stored only to show <i>how</i> each check-in happened. <b>Face</b> is pushed by Maugood; <b>fingerprint</b> is enrolled once on the device.</div></div>
+  </section>
+
+  <!-- TABLE 4 -->
+  <section>
+    <h2><span class="step-badge">4</span>detection_events <span class="pill idle" style="vertical-align:middle">reused</span></h2>
+    <p>The shared "person seen" table (also used by cameras). Device rows are tagged <span class="mono">source='device'</span> with <span class="mono">camera_id</span> null.</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Column</th><th>Type</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">id</td><td>int PK</td><td></td></tr>
+        <tr><td class="mono">tenant_id</td><td>int FK</td><td>2</td></tr>
+        <tr><td class="mono">source</td><td>text <span class="pill new">new col</span></td><td>camera / <b>device</b></td></tr>
+        <tr><td class="mono">device_id</td><td>int FK <span class="pill new">new col</span></td><td>1 (null for camera rows)</td></tr>
+        <tr><td class="mono">camera_id</td><td>int FK</td><td>null for device rows</td></tr>
+        <tr><td class="mono">employee_id</td><td>int FK</td><td>2066</td></tr>
+        <tr><td class="mono">captured_at</td><td>timestamptz</td><td>UTC</td></tr>
+        <tr><td class="mono">confidence</td><td>float</td><td>device's score</td></tr>
+      </tbody>
+    </table></div>
+    <h3>Example — one row per tap</h3>
+    <div class="tablewrap"><table>
+      <thead><tr><th>id</th><th>tenant_id</th><th>source</th><th>device_id</th><th>camera_id</th><th>employee_id</th><th>captured_at (UTC)</th></tr></thead>
+      <tbody>
+        <tr><td>90231</td><td>2</td><td>device</td><td>1</td><td>null</td><td>2066</td><td class="mono">03:42:00Z</td></tr>
+        <tr><td>90232</td><td>2</td><td>device</td><td>1</td><td>null</td><td>2066</td><td class="mono">07:30:00Z</td></tr>
+        <tr><td>90233</td><td>2</td><td>device</td><td>1</td><td>null</td><td>2066</td><td class="mono">08:15:00Z</td></tr>
+        <tr><td>90234</td><td>2</td><td>device</td><td>1</td><td>null</td><td>2066</td><td class="mono">13:00:00Z</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <!-- TABLE 5 -->
+  <section>
+    <h2><span class="step-badge">5</span>attendance_records <span class="pill idle" style="vertical-align:middle">reused</span></h2>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Column</th><th>Type</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">tenant_id / employee_id</td><td>int FK</td><td>2 / 2066</td></tr>
+        <tr><td class="mono">date</td><td>date</td><td>2026-08-03</td></tr>
+        <tr><td class="mono">in_time / out_time</td><td>time</td><td>first tap / last tap</td></tr>
+        <tr><td class="mono">total_minutes</td><td>int</td><td>out − in</td></tr>
+        <tr><td class="mono">late / early_out / short_hours / absent</td><td>bool</td><td>from shift policy</td></tr>
+        <tr><td class="mono">overtime_minutes</td><td>int</td><td>max(0, total − required)</td></tr>
+        <tr><td class="mono">source</td><td>text</td><td>camera / device</td></tr>
+      </tbody>
+    </table></div>
+    <p><b>Constraint:</b> <span class="mono">UNIQUE (tenant_id, employee_id, date)</span> — exactly <b>one row per employee per day</b>.</p>
+    <h3>Example — one row for the day</h3>
+    <div class="tablewrap"><table>
+      <thead><tr><th>tenant_id</th><th>employee_id</th><th>date</th><th>in_time</th><th>out_time</th><th>total_min</th><th>overtime</th><th>source</th></tr></thead>
+      <tbody><tr><td>2</td><td>2066</td><td class="mono">2026-08-03</td><td><b>09:12</b></td><td><b>18:30</b></td><td>558</td><td>78</td><td>device</td></tr></tbody>
+    </table></div>
+  </section>
+
+  <!-- CALC -->
+  <section>
+    <h2>How in_time &amp; out_time are calculated</h2>
+    <p>The engine converts each event UTC → local (IST), sorts by time, then takes the <b>first</b> and <b>last</b> tap. The <span class="mono">direction</span> label is <b>ignored</b> — in/out are decided purely by time.</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th>event</th><th>occurred_at (UTC)</th><th>→ IST (local)</th><th>role</th></tr></thead>
+      <tbody>
+        <tr><td>5001</td><td class="mono">03:42:00Z</td><td><b>09:12</b></td><td>← first → <b>in_time</b></td></tr>
+        <tr><td>5002</td><td class="mono">07:30:00Z</td><td>13:00</td><td>middle (lunch — ignored)</td></tr>
+        <tr><td>5003</td><td class="mono">08:15:00Z</td><td>13:45</td><td>middle (lunch — ignored)</td></tr>
+        <tr><td>5004</td><td class="mono">13:00:00Z</td><td><b>18:30</b></td><td>← last → <b>out_time</b></td></tr>
+      </tbody>
+    </table></div>
+    <p><span class="mono">in_time = 09:12 · out_time = 18:30 · total = 558 min</span>. Break (13:00→13:45) is <b>not</b> deducted — total is the full span (first→last).</p>
+    <div class="callout warn"><span class="ci">📝</span><div><b>For manager review:</b> confirm whether lunch/break time should be <b>subtracted</b> from the total. Current design = full span (first tap → last tap). Break deduction is a policy add-on if required.</div></div>
+  </section>
+
+  <!-- DEDUP SUMMARY -->
+  <section>
+    <h2>Duplicate protection (per day, per employee)</h2>
+    <div class="tablewrap"><table>
+      <thead><tr><th>What</th><th>Table</th><th>Rows for Harikrishnan / 1 day</th><th>Why no duplicates</th></tr></thead>
+      <tbody>
+        <tr><td>Device identity</td><td class="mono">device_users</td><td><b>1</b></td><td>upsert on (tenant, device, device_user_id)</td></tr>
+        <tr><td>Every tap</td><td class="mono">device_attendance_events</td><td><b>N</b> (4)</td><td>unique event_serial</td></tr>
+        <tr><td>Every "seen"</td><td class="mono">detection_events</td><td><b>N</b> (4)</td><td>one per staged event</td></tr>
+        <tr><td>The attendance</td><td class="mono">attendance_records</td><td><b>1</b></td><td>unique (tenant, employee, date)</td></tr>
+      </tbody>
+    </table></div>
+    <p><b>N taps per day → N events → 1 attendance row.</b> Sync repeatedly, tap repeatedly — the design never double-counts.</p>
+  </section>
+
+  <div class="pager">
+    <a href="full-process.html"><span class="s">← Back</span>Full Process</a>
+    <a href="matching-workflow.html"><span class="s">Next →</span>Matching &amp; Attendance</a>
+  </div>
+</div>
+
+<footer class="site-footer">
+  <div class="inner">
+    <img src="assets/logo.png" alt="Muscat Tech Solutions">
+    <span class="txt"><b>Muscat Tech Solutions</b> · Maugood Attendance Platform · Confidential</span>
+    <span class="sp"></span>
+    <span class="txt">© 2026</span>
+  </div>
+</footer>
+</body>
+</html>

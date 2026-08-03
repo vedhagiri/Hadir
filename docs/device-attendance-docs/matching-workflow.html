@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Matching &amp; Attendance Workflow — Muscat Tech Solutions</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="inner">
+    <img class="logo" src="assets/logo.png" alt="Muscat Tech Solutions">
+    <span class="divider"></span>
+    <span class="doctitle">Maugood · Attendance Device Integration</span>
+    <nav>
+      <a href="index.html">Overview</a>
+      <a href="full-process.html">Full Process</a>
+      <a href="tables.html">Table Design</a>
+      <a href="matching-workflow.html" class="active">Matching &amp; Attendance</a>
+    </nav>
+  </div>
+</header>
+<div class="brandstrip"></div>
+
+<div class="page">
+  <h1 class="doc">Matching &amp; Attendance Workflow</h1>
+  <p class="doc-sub">How face matching works in the existing engine — and how the device path plugs into it. Grounded in the live code (<span class="mono">matcher.py</span>, <span class="mono">enrollment.py</span>, <span class="mono">attendance/</span>).</p>
+
+  <section>
+    <h2>The workflow in three phases</h2>
+    <div class="flow">
+      <div class="fn"><span class="fi">🧬</span><b>A. Enrollment</b><br>build the gallery once</div>
+      <div class="fa">→</div>
+      <div class="fn"><span class="fi">🎯</span><b>B. Capture + Match</b><br>per face seen</div>
+      <div class="fa">→</div>
+      <div class="fn"><span class="fi">✅</span><b>C. Attendance</b><br>batch, every 15 min</div>
+    </div>
+    <div class="callout key"><span class="ci">🔑</span><div>The device source joins at the boundary between <b>B</b> and <b>C</b>: it replaces phase B (matching) and reuses phase C (attendance) verbatim.</div></div>
+  </section>
+
+  <section>
+    <h2>A · Enrollment — building the face gallery</h2>
+    <p>Before anyone can be recognized, their reference photos become <strong>embeddings</strong> in the in-memory matcher.</p>
+    <div class="flow">
+      <div class="fn"><span class="fi">🖼️</span>Reference photo<br><span class="mono" style="font-size:10px">employee_photos</span></div>
+      <div class="fa">→</div>
+      <div class="fn"><span class="fi">🧬</span>InsightFace<br><span class="mono" style="font-size:10px">buffalo_l</span></div>
+      <div class="fa">→</div>
+      <div class="fn"><span class="fi">📐</span>512-d embedding<br>L2-normalized</div>
+      <div class="fa">→</div>
+      <div class="fn"><span class="fi">🔐</span>Fernet-encrypt<br>→ MatcherCache</div>
+    </div>
+    <h3>When enrollment runs</h3>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Trigger</th><th>Action</th></tr></thead>
+      <tbody>
+        <tr><td>Photo upload (drawer / bulk)</td><td><span class="mono">enroll_photo</span> immediately</td></tr>
+        <tr><td>Photo delete</td><td><span class="mono">invalidate_employee</span> — surgical, only that employee reloads</td></tr>
+        <tr><td>App startup</td><td><span class="mono">enroll_missing</span> on a daemon thread</td></tr>
+        <tr><td>On demand</td><td><span class="mono">POST /api/identification/reembed</span> (Admin)</td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout info"><span class="ci">📦</span><div><b>Cost:</b> the gallery scales with <b>enrolled employees × angles</b>, not cameras. ~1,000 employees × 3 angles × 512 × 4 B ≈ <b>~6 MB</b> in RAM.</div></div>
+  </section>
+
+  <section>
+    <h2>B · Capture + face matching — the recognition loop</h2>
+    <h3>B1 · Capture (camera source)</h3>
+    <p><span class="mono">reader.py</span> runs <strong>two threads per camera</strong>: a <strong>reader</strong> at native fps and an <strong>analyzer</strong> at ≤ 3 fps with <strong>motion-skip</strong> (skips detection when nothing moved; <span class="mono">force_detect_every_s = 3.0</span> safety net). It emits <strong>one <span class="mono">detection_events</span> row per new track</strong>, not per frame. Detection runs behind a global <span class="mono">_detect_lock</span> — serialized across all cameras (the throughput ceiling).</p>
+
+    <h3>B2 · Matching — how a face becomes an employee</h3>
+    <div class="flow">
+      <div class="fn"><span class="fi">👤</span>Probe face</div>
+      <div class="fa">→</div>
+      <div class="fn"><span class="fi">📐</span>512-d embedding</div>
+      <div class="fa">→</div>
+      <div class="fn"><span class="fi">📊</span>Cosine vs every enrolled vector</div>
+      <div class="fa">→</div>
+      <div class="fn"><span class="fi">Σ</span>Mean of top-k (k=1)</div>
+      <div class="fa">→</div>
+      <div class="fn"><span class="fi">🎯</span>Highest ≥ 0.45?</div>
+    </div>
+    <ol>
+      <li>The detected face carries a <strong>512-d probe embedding</strong> (InsightFace).</li>
+      <li><strong>Cosine similarity</strong> against every enrolled angle vector (both L2-normalized, so dot = cosine).</li>
+      <li>Per-employee score = <strong>mean of the top-k (k = 1)</strong> — best angle wins.</li>
+      <li>Assign the highest scorer <strong>only if ≥ <span class="mono">MAUGOOD_MATCH_THRESHOLD</span> (0.45)</strong>. The threshold is <strong>hard</strong>, never advisory.</li>
+      <li>Below threshold → <span class="mono">employee_id</span> stays <strong>NULL = Unknown</strong>.</li>
+    </ol>
+    <h3>Lifecycle classification (P28.7)</h3>
+    <div class="tablewrap"><table>
+      <thead><tr><th>State</th><th>Condition</th><th>Result</th></tr></thead>
+      <tbody>
+        <tr><td><span class="pill ok">active</span></td><td>active + today within joining/relieving</td><td><span class="mono">employee_id</span> set → attendance flows</td></tr>
+        <tr><td><span class="pill warn">inactive</span></td><td>inactive, or past relieving_date</td><td><span class="mono">former_employee_match=true</span>, employee_id NULL (security signal)</td></tr>
+        <tr><td><span class="pill idle">future</span></td><td>active but before joining_date</td><td>treated as Unknown (lets HR pre-enroll)</td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout tip"><span class="ci">🔒</span><div><b>Write-before-INSERT invariant:</b> the crop is Fernet-encrypted, written to disk, and verified <em>before</em> the <span class="mono">detection_events</span> row is inserted — a row never points at a missing file.</div></div>
+  </section>
+
+  <section>
+    <h2>C · Attendance — events into records</h2>
+    <p><strong>The engine is pure</strong> — it reads <span class="mono">(employee_id, captured_at)</span> events and never knows which source produced them.</p>
+    <ol>
+      <li><strong>Scheduler</strong> — every <span class="mono">MAUGOOD_ATTENDANCE_RECOMPUTE_MINUTES</span> (default 15). <span class="mono">recompute_for(...)</span> handles single employee/date.</li>
+      <li><strong>Load context</strong> — tenant timezone, weekend days, holidays; active employees for today.</li>
+      <li><strong>Resolve policy</strong> — cascade <span class="mono">Custom &gt; Ramadan &gt; employee &gt; department &gt; tenant &gt; legacy</span> (one policy per employee/date).</li>
+      <li><strong><span class="mono">events_for</span></strong> — selects the day's events, converts <strong>UTC → tenant local timezone</strong> (load-bearing red line).</li>
+      <li><strong><span class="mono">engine.compute()</span></strong> — pure: in / out / late / early-out / short-hours / overtime / absent, with leave + holiday + weekend handling.</li>
+      <li><strong><span class="mono">upsert_attendance</span></strong> — <span class="mono">ON CONFLICT (tenant_id, employee_id, date)</span>. Idempotent, self-healing.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>How the device source plugs in</h2>
+    <p>A terminal does its own detection + matching <strong>on-device</strong>, so it replaces phase <strong>B</strong> only — phase <strong>C</strong> is reused unchanged.</p>
+    <h3>Identity mapping = the device's equivalent of matching</h3>
+    <p>The device reports <span class="mono">employeeNoString</span>; the <span class="mono">device_users</span> table maps it to <span class="mono">employee_id</span> (synced in advance by employee code). “The device recognized OM0097” resolves to “employee Anya Kesh”.</p>
+    <h3>Two ways the device uses the matching engine</h3>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Mode</th><th>What happens</th><th>Uses MatcherCache?</th></tr></thead>
+      <tbody>
+        <tr><td><b>A — Trust the device</b> <span class="pill new">default</span></td><td>Terminal already matched on-board → Maugood maps <span class="mono">device_user → employee</span></td><td>No — engine skipped, lowest CPU</td></tr>
+        <tr><td><b>B — Re-match in Maugood</b></td><td>Terminal sends the captured face → Maugood runs the exact B2 engine</td><td>Yes — identical to a camera</td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout key"><span class="ci">🔁</span><div>Either way the result is the same <span class="mono">detection_events</span> row (<span class="mono">source=device</span>) → and the same attendance. Nothing downstream changes.</div></div>
+  </section>
+
+  <section>
+    <h2>Key parameters (real values)</h2>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Parameter</th><th>Value</th><th>Where</th></tr></thead>
+      <tbody>
+        <tr><td>Embedding model</td><td>InsightFace <span class="mono">buffalo_l</span></td><td>enrollment + analyzer</td></tr>
+        <tr><td>Embedding dim</td><td>512 float32, L2-normalized</td><td class="mono">embeddings.py</td></tr>
+        <tr><td>Similarity</td><td>cosine (dot of normalized)</td><td class="mono">matcher.py</td></tr>
+        <tr><td>Per-employee score</td><td>mean of top-k, <b>k = 1</b></td><td class="mono">matcher.py</td></tr>
+        <tr><td>Match threshold</td><td><b>0.45</b>, hard</td><td class="mono">MAUGOOD_MATCH_THRESHOLD</td></tr>
+        <tr><td>Detector serialization</td><td>global <span class="mono">_detect_lock</span></td><td class="mono">detectors.py</td></tr>
+        <tr><td>Analyzer fps</td><td><span class="mono">analyzer_max_fps = 3.0</span></td><td class="mono">reader.py</td></tr>
+        <tr><td>Event granularity</td><td>1 row per new track</td><td class="mono">reader.py</td></tr>
+        <tr><td>Recompute cadence</td><td>every 15 min + <span class="mono">recompute_for</span></td><td class="mono">scheduler.py</td></tr>
+        <tr><td>Attendance key</td><td><span class="mono">ON CONFLICT (tenant_id, employee_id, date)</span></td><td class="mono">repository.py</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <div class="pager">
+    <a href="full-process.html"><span class="s">← Back</span>Full Process for a Single Device</a>
+    <a href="index.html"><span class="s">Home</span>Overview</a>
+  </div>
+</div>
+
+<footer class="site-footer">
+  <div class="inner">
+    <img src="assets/logo.png" alt="Muscat Tech Solutions">
+    <span class="txt"><b>Muscat Tech Solutions</b> · Maugood Attendance Platform · Confidential</span>
+    <span class="sp"></span>
+    <span class="txt">© 2026</span>
+  </div>
+</footer>
+</body>
+</html>

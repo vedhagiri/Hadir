@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Add Device — Maugood · Muscat Tech Solutions</title>
+<style>
+  :root{
+    --navy:#0a1f6b;--navy-2:#0e2a86;--ink:#152238;--muted:#5a6a83;--faint:#8a97ad;
+    --cyan:#26c6e6;--blue:#1a52d0;--grad:linear-gradient(120deg,#26c6e6,#1a52d0);
+    --bg:#eef2f8;--panel:#fff;--panel-2:#f4f6fb;--line:#dbe2ee;--line-soft:#e7ecf4;
+    --ok:#1f9b62;--ok-t:#e4f4ec;--warn:#b7810f;--warn-t:#f8eed6;--bad:#cf4747;--bad-t:#fae4e4;
+    --shadow:0 1px 3px rgba(16,30,64,.07),0 14px 34px rgba(16,30,64,.09);
+    --shadow-sm:0 1px 2px rgba(16,30,64,.06);--r:12px;
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --navy:#7ea0ff;--navy-2:#93b0ff;--ink:#e6ecf6;--muted:#93a1ba;--faint:#6f7d93;
+    --cyan:#3fd2ef;--blue:#5b86ee;--bg:#0b0f17;--panel:#131b27;--panel-2:#1a2431;--line:#26313f;--line-soft:#202a37;
+    --ok:#45c082;--ok-t:#10321f;--warn:#e0ac3e;--warn-t:#33280c;--bad:#ec6a6a;--bad-t:#391b1b;
+    --shadow:0 1px 3px rgba(0,0,0,.4),0 16px 36px rgba(0,0,0,.5);--shadow-sm:0 1px 2px rgba(0,0,0,.3);
+  }}
+  :root[data-theme="light"]{--navy:#0a1f6b;--ink:#152238;--muted:#5a6a83;--faint:#8a97ad;--cyan:#26c6e6;--blue:#1a52d0;--bg:#eef2f8;--panel:#fff;--panel-2:#f4f6fb;--line:#dbe2ee;--line-soft:#e7ecf4;--ok:#1f9b62;--ok-t:#e4f4ec;--warn:#b7810f;--warn-t:#f8eed6;--bad:#cf4747;--bad-t:#fae4e4;}
+  :root[data-theme="dark"]{--navy:#7ea0ff;--ink:#e6ecf6;--muted:#93a1ba;--faint:#6f7d93;--cyan:#3fd2ef;--blue:#5b86ee;--bg:#0b0f17;--panel:#131b27;--panel-2:#1a2431;--line:#26313f;--line-soft:#202a37;--ok:#45c082;--ok-t:#10321f;--warn:#e0ac3e;--warn-t:#33280c;--bad:#ec6a6a;--bad-t:#391b1b;}
+
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased;}
+  .mono{font-family:ui-monospace,"SF Mono",Menlo,monospace;}
+  button{font:inherit;cursor:pointer;}
+
+  /* top bar with logo */
+  .topbar{position:sticky;top:0;z-index:30;background:var(--panel);border-bottom:1px solid var(--line);box-shadow:var(--shadow-sm);}
+  .topbar .inner{max-width:1080px;margin:0 auto;display:flex;align-items:center;gap:16px;padding:11px clamp(14px,3vw,26px);}
+  .topbar img{height:34px;width:auto;}
+  .topbar .divider{width:1px;height:24px;background:var(--line);}
+  .topbar .app{font-size:13px;font-weight:600;color:var(--muted);}
+  .topbar .sp{flex:1;}
+  .topbar .who{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--muted);}
+  .topbar .av{width:30px;height:30px;border-radius:50%;background:color-mix(in srgb,var(--blue) 15%,transparent);color:var(--blue);display:grid;place-items:center;font-weight:700;font-size:12px;}
+  .topbar .icon{width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:var(--panel);color:var(--muted);}
+  .brandstrip{height:3px;background:var(--grad);}
+
+  .wrap{max-width:1080px;margin:0 auto;padding:clamp(18px,3vw,30px) clamp(14px,3vw,26px) 70px;}
+  .crumb{font-size:12.5px;color:var(--faint);margin-bottom:14px;}
+  .crumb b{color:var(--muted);}
+  .pagehead{display:flex;align-items:flex-end;gap:14px;margin-bottom:22px;flex-wrap:wrap;}
+  .pagehead h1{font-size:clamp(22px,3.4vw,28px);letter-spacing:-.02em;color:var(--navy);margin:0;}
+  .pagehead p{margin:4px 0 0;color:var(--muted);font-size:13.5px;}
+
+  .layout{display:grid;grid-template-columns:1fr 320px;gap:20px;align-items:start;}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow-sm);}
+  .card-h{padding:15px 20px;border-bottom:1px solid var(--line-soft);display:flex;align-items:center;gap:10px;}
+  .card-h .ci{width:30px;height:30px;border-radius:8px;background:color-mix(in srgb,var(--cyan) 16%,transparent);color:var(--blue);display:grid;place-items:center;font-size:15px;}
+  .card-h h3{margin:0;font-size:15px;}
+  .card-h .sub{font-size:12px;color:var(--faint);margin-inline-start:auto;}
+  .card-b{padding:20px;}
+
+  .sectlabel{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin:22px 0 12px;}
+  .sectlabel:first-child{margin-top:0;}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  .field{margin-bottom:2px;} .field.full{grid-column:1 / -1;}
+  .field label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px;}
+  .field label .req{color:var(--bad);}
+  .field input,.field select{width:100%;padding:10px 12px;border-radius:9px;border:1px solid var(--line);background:var(--panel-2);color:var(--ink);font:inherit;font-size:13.5px;transition:.15s;}
+  .field input:focus,.field select:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 18%,transparent);background:var(--panel);}
+  .field input.err{border-color:var(--bad);box-shadow:0 0 0 3px var(--bad-t);}
+  .field .hint{font-size:11px;color:var(--faint);margin-top:5px;}
+  .field .locked{background:var(--panel-2);color:var(--faint);cursor:not-allowed;}
+  .pw{position:relative;} .pw button{position:absolute;inset-inline-end:8px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--faint);font-size:12px;padding:4px;}
+
+  .toggle-row{display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel-2);margin-top:4px;}
+  .toggle-row .t-txt{flex:1;} .toggle-row .t-txt b{font-size:13px;} .toggle-row .t-txt span{font-size:11.5px;color:var(--faint);display:block;}
+  .switch{width:42px;height:24px;border-radius:999px;background:var(--line);position:relative;border:0;flex:none;transition:.2s;}
+  .switch::after{content:"";position:absolute;top:2px;inset-inline-start:2px;width:20px;height:20px;border-radius:50%;background:#fff;transition:.2s;box-shadow:0 1px 2px rgba(0,0,0,.25);}
+  .switch.on{background:var(--ok);} .switch.on::after{inset-inline-start:20px;}
+
+  .card-f{padding:15px 20px;border-top:1px solid var(--line-soft);display:flex;gap:10px;align-items:center;}
+  .card-f .sp{flex:1;}
+  .btn{display:inline-flex;align-items:center;gap:9px;padding:11px 20px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-weight:600;font-size:13.5px;}
+  .btn:hover{border-color:var(--muted);}
+  .btn.primary{background:var(--blue);border-color:var(--blue);color:#fff;}
+  .btn.primary:hover{filter:brightness(1.06);}
+  .btn.primary:disabled{opacity:.6;cursor:default;filter:none;}
+  .btn .spin{width:15px;height:15px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  /* side help */
+  .side{display:flex;flex-direction:column;gap:16px;}
+  .help{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow-sm);padding:16px 18px;}
+  .help h4{margin:0 0 12px;font-size:13px;color:var(--navy);}
+  .steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px;}
+  .steps li{display:flex;gap:11px;font-size:12.5px;color:var(--muted);}
+  .steps .n{width:22px;height:22px;border-radius:50%;background:var(--grad);color:#fff;display:grid;place-items:center;font-size:11px;font-weight:700;flex:none;}
+  .secure{background:color-mix(in srgb,var(--cyan) 10%,var(--panel));border:1px solid color-mix(in srgb,var(--cyan) 35%,var(--line));border-radius:var(--r);padding:14px 16px;font-size:12.5px;color:var(--muted);display:flex;gap:10px;}
+  .secure b{color:var(--ink);}
+
+  /* registered list */
+  .listcard{margin-top:22px;}
+  .tablewrap{overflow-x:auto;}
+  table{width:100%;border-collapse:collapse;min-width:560px;}
+  th,td{text-align:start;padding:11px 16px;font-size:13px;border-bottom:1px solid var(--line-soft);}
+  thead th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#fff;background:var(--navy);font-weight:700;}
+  tbody tr:last-child td{border-bottom:0;}
+  tbody tr.new-row{animation:rowin .5s ease both;}
+  @keyframes rowin{from{opacity:0;transform:translateY(8px);background:var(--ok-t);}to{opacity:1;transform:none;}}
+  td .nm{font-weight:600;} td .sn{font-size:11px;color:var(--faint);}
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;padding:3px 10px;border-radius:999px;}
+  .pill .d{width:6px;height:6px;border-radius:50%;background:currentColor;}
+  .pill.ok{background:var(--ok-t);color:var(--ok);}
+  .empty{padding:34px 20px;text-align:center;color:var(--faint);font-size:13px;}
+
+  /* toast */
+  .toast{position:fixed;inset-block-end:24px;inset-inline:0;margin:auto;width:max-content;max-width:92vw;background:var(--navy);color:#fff;padding:12px 18px;border-radius:11px;font-size:13px;font-weight:500;box-shadow:var(--shadow);z-index:60;display:flex;align-items:center;gap:10px;opacity:0;transform:translateY(12px);pointer-events:none;transition:.28s;}
+  .toast.show{opacity:1;transform:none;}
+  .toast .tk{color:#7ff0c0;}
+
+  @media (max-width:820px){.layout{grid-template-columns:1fr;} .side{order:-1;}}
+  @media (max-width:520px){.grid{grid-template-columns:1fr;}}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="inner">
+    <img src="../assets/logo.png" alt="Muscat Tech Solutions">
+    <span class="divider"></span>
+    <span class="app">Maugood · Devices</span>
+    <span class="sp"></span>
+    <button class="icon" id="themeBtn" aria-label="Toggle theme">◐</button>
+    <span class="who"><span class="av">AD</span> Admin</span>
+  </div>
+</div>
+<div class="brandstrip"></div>
+
+<div class="wrap">
+  <div class="crumb"><b>Settings</b> › <b>Devices</b> › Add device</div>
+  <div class="pagehead">
+    <div>
+      <h1>Add attendance device</h1>
+      <p>Register a face-recognition terminal. Maugood reads its serial and encrypts the credentials on save.</p>
+    </div>
+  </div>
+
+  <div class="layout">
+    <!-- FORM -->
+    <form class="card" id="deviceForm" autocomplete="off">
+      <div class="card-h"><span class="ci">🚪</span><h3>Device details</h3><span class="sub">all fields marked <span style="color:var(--bad)">*</span> required</span></div>
+      <div class="card-b">
+
+        <div class="sectlabel">Identity</div>
+        <div class="grid">
+          <div class="field full"><label>Device name <span class="req">*</span></label><input id="f-name" placeholder="e.g. Main Gate Terminal" value="Main Gate Terminal"></div>
+          <div class="field full"><label>Location</label><input id="f-loc" placeholder="e.g. Building A – Entrance" value="Building A – Entrance"></div>
+        </div>
+
+        <div class="sectlabel">Connection</div>
+        <div class="grid">
+          <div class="field"><label>Driver <span class="req">*</span></label>
+            <select id="f-driver"><option value="hikvision">Hikvision (ISAPI)</option><option value="dahua">Dahua</option><option value="generic">Generic webhook</option></select></div>
+          <div class="field"><label>Door number</label><input id="f-door" value="1"></div>
+          <div class="field"><label>Host / IP <span class="req">*</span></label><input id="f-host" placeholder="192.168.1.64" value="192.168.1.64"></div>
+          <div class="field"><label>Port <span class="req">*</span></label><input id="f-port" value="80"></div>
+        </div>
+
+        <div class="sectlabel">Credentials</div>
+        <div class="grid">
+          <div class="field"><label>Username <span class="req">*</span></label><input id="f-user" value="admin"></div>
+          <div class="field"><label>Password <span class="req">*</span></label>
+            <div class="pw"><input id="f-pass" type="password" value="password"><button type="button" id="pwToggle">show</button></div></div>
+          <div class="field full"><label>Serial number</label><input class="locked" id="f-serial" value="🔒 read from device on save" disabled><div class="hint">Auto-detected via <span class="mono">/deviceInfo</span>. Unique per tenant — prevents double-registration.</div></div>
+        </div>
+
+        <div class="sectlabel">Options</div>
+        <div class="grid">
+          <div class="field full"><label>Enrollment scope</label>
+            <select id="f-scope"><option>All active employees</option><option>By department…</option><option>By zone…</option></select>
+            <div class="hint">Which employees' faces get pushed to this terminal.</div></div>
+          <div class="field full">
+            <div class="toggle-row"><div class="t-txt"><b>Enabled</b><span>Accept events &amp; run sync for this device.</span></div>
+              <button type="button" class="switch on" id="f-enabled" role="switch" aria-checked="true" aria-label="Enabled"></button></div>
+          </div>
+        </div>
+      </div>
+      <div class="card-f">
+        <button type="button" class="btn" onclick="location.reload()">Cancel</button>
+        <span class="sp"></span>
+        <button type="submit" class="btn primary" id="submitBtn"><span id="btnLabel">Connect &amp; register device</span></button>
+      </div>
+    </form>
+
+    <!-- SIDE HELP -->
+    <aside class="side">
+      <div class="help">
+        <h4>What happens on save</h4>
+        <ol class="steps">
+          <li><span class="n">1</span><div>Maugood connects to the device at <span class="mono">host:port</span>.</div></li>
+          <li><span class="n">2</span><div>Reads the <b>serial number</b>, model &amp; firmware from <span class="mono">/deviceInfo</span>.</div></li>
+          <li><span class="n">3</span><div><b>Fernet-encrypts</b> the username &amp; password.</div></li>
+          <li><span class="n">4</span><div>Inserts one row into <span class="mono">attendance_devices</span>.</div></li>
+        </ol>
+      </div>
+      <div class="secure">🔐<div><b>Credentials are encrypted at rest</b> and never shown again after saving. They never appear in logs, audit rows, or API responses.</div></div>
+    </aside>
+  </div>
+
+  <!-- REGISTERED DEVICES -->
+  <div class="card listcard">
+    <div class="card-h"><span class="ci">🗂️</span><h3>Registered devices</h3><span class="sub" id="devCount">0 devices</span></div>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Device</th><th>Serial</th><th>Host</th><th>Driver</th><th>Status</th></tr></thead>
+      <tbody id="devBody">
+        <tr id="emptyRow"><td colspan="5"><div class="empty">No devices yet — fill the form above and register your first terminal.</div></td></tr>
+      </tbody>
+    </table></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"><span class="tk">✔</span><span id="toastMsg"></span></div>
+
+<script>
+  // theme
+  document.getElementById('themeBtn').addEventListener('click',()=>{
+    const c=document.documentElement.getAttribute('data-theme');
+    document.documentElement.setAttribute('data-theme',c==='dark'?'light':(c==='light'?'dark':(matchMedia('(prefers-color-scheme: dark)').matches?'light':'dark')));
+  });
+  // password show/hide
+  document.getElementById('pwToggle').addEventListener('click',function(){
+    const p=document.getElementById('f-pass'); const s=p.type==='password'; p.type=s?'text':'password'; this.textContent=s?'hide':'show';
+  });
+  // enabled toggle
+  const sw=document.getElementById('f-enabled');
+  sw.addEventListener('click',()=>{const on=sw.classList.toggle('on');sw.setAttribute('aria-checked',on);});
+
+  // toast
+  let tt;
+  function toast(m){document.getElementById('toastMsg').textContent=m;const t=document.getElementById('toast');t.classList.add('show');clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('show'),3000);}
+
+  // fake serial generator (deterministic-ish from host)
+  let seq=0;
+  const serials=['DS7K1T-A1B2C3','DS3K1T-D4E5F6','DS7K1T-G7H8I9','DSXK1T-J0K1L2'];
+  function nextSerial(){return serials[seq % serials.length] || ('DSXK1T-'+(1000+seq));}
+
+  const req=['f-name','f-host','f-port','f-user','f-pass'];
+  function validate(){
+    let ok=true;
+    req.forEach(id=>{const el=document.getElementById(id);if(!el.value.trim()){el.classList.add('err');ok=false;}else el.classList.remove('err');});
+    return ok;
+  }
+
+  document.getElementById('deviceForm').addEventListener('submit',e=>{
+    e.preventDefault();
+    if(!validate()){toast('Please fill the required fields');return;}
+    const btn=document.getElementById('submitBtn'), lbl=document.getElementById('btnLabel');
+    btn.disabled=true; lbl.innerHTML='<span class="spin"></span> Connecting…';
+
+    // simulate connect → read serial → encrypt → insert
+    setTimeout(()=>{ lbl.innerHTML='<span class="spin"></span> Reading serial…'; }, 700);
+    setTimeout(()=>{
+      const serial=nextSerial(); seq++;
+      document.getElementById('f-serial').value='✅ '+serial;
+      addRow(serial);
+      btn.disabled=false; lbl.textContent='Connect & register device';
+      toast('Device connected · serial '+serial+' · credentials encrypted · saved');
+    }, 1500);
+  });
+
+  function addRow(serial){
+    const body=document.getElementById('devBody');
+    const empty=document.getElementById('emptyRow'); if(empty) empty.remove();
+    const name=document.getElementById('f-name').value.trim();
+    const loc=document.getElementById('f-loc').value.trim();
+    const host=document.getElementById('f-host').value.trim()+':'+document.getElementById('f-port').value.trim();
+    const driver=document.getElementById('f-driver').selectedOptions[0].text;
+    const tr=document.createElement('tr'); tr.className='new-row';
+    tr.innerHTML=`<td><div class="nm">${name}</div><div class="sn">${loc||'&nbsp;'}</div></td>
+      <td class="mono">${serial}</td><td class="mono">${host}</td><td>${driver}</td>
+      <td><span class="pill ok"><span class="d"></span>online</span></td>`;
+    body.appendChild(tr);
+    const n=body.querySelectorAll('tr').length;
+    document.getElementById('devCount').textContent=n+' device'+(n===1?'':'s');
+  }
+</script>
+</body>
+</html>

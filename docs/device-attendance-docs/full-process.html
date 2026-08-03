@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Full Process for a Single Device — Muscat Tech Solutions</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="inner">
+    <img class="logo" src="assets/logo.png" alt="Muscat Tech Solutions">
+    <span class="divider"></span>
+    <span class="doctitle">Maugood · Attendance Device Integration</span>
+    <nav>
+      <a href="index.html">Overview</a>
+      <a href="full-process.html" class="active">Full Process</a>
+      <a href="tables.html">Table Design</a>
+      <a href="matching-workflow.html">Matching &amp; Attendance</a>
+    </nav>
+  </div>
+</header>
+<div class="brandstrip"></div>
+
+<div class="page">
+  <h1 class="doc">Full Process for a Single Device</h1>
+  <p class="doc-sub">One device followed end to end — every table generated, the data that flows into each, how syncing works, and how attendance is produced.</p>
+
+  <section>
+    <h2>1 · The device we follow</h2>
+    <div class="tablewrap"><table>
+      <tbody>
+        <tr><th>Name</th><td>Main Gate Terminal</td></tr>
+        <tr><th>Model</th><td>Hikvision DS-K1T671MF</td></tr>
+        <tr><th>Serial</th><td class="mono">DS7K1T-A1B2C3</td></tr>
+        <tr><th>Host</th><td class="mono">192.168.1.64:80</td></tr>
+        <tr><th>Tenant</th><td>Omran (tenant_id = 1)</td></tr>
+        <tr><th>Employees behind it</th><td>Anya Kesh <span class="mono">OM0097</span>, Bilal Ahmed <span class="mono">OM0102</span>, Dawit Bekele <span class="mono">OM0121</span></td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <h2>2 · Process map</h2>
+    <div class="flow">
+      <div class="fn"><span class="fi">➕</span>Register<br><span class="mono" style="font-size:10px">attendance_devices</span></div>
+      <div class="fa">→</div>
+      <div class="fn"><span class="fi">🔄</span>Sync users<br><span class="mono" style="font-size:10px">device_users</span></div>
+      <div class="fa">→</div>
+      <div class="fn"><span class="fi">📸</span>Push faces</div>
+      <div class="fa">→</div>
+      <div class="fn"><span class="fi">🚪</span>Capture<br><span class="mono" style="font-size:10px">device_attendance_events</span></div>
+      <div class="fa">→</div>
+      <div class="fn"><span class="fi">📥</span>Process<br><span class="mono" style="font-size:10px">detection_events</span></div>
+      <div class="fa">→</div>
+      <div class="fn"><span class="fi">✅</span>Attendance<br><span class="mono" style="font-size:10px">attendance_records</span></div>
+    </div>
+    <p><strong>Five tables are involved.</strong> Two new registries (<span class="mono">attendance_devices</span>, <span class="mono">device_users</span>), one new staging queue (<span class="mono">device_attendance_events</span>), and two existing tables reused unchanged (<span class="mono">detection_events</span>, <span class="mono">attendance_records</span>).</p>
+  </section>
+
+  <section>
+    <h2><span class="step-badge">1</span>Register the device → <span class="mono">attendance_devices</span></h2>
+    <p><strong>Operator action:</strong> Settings → Devices → <strong>Add Device</strong>. Enter name, host, port, username/password, driver, door number.</p>
+    <p><strong>Automatically on save,</strong> Maugood connects to <span class="mono">/ISAPI/System/deviceInfo</span>, reads the <strong>serial number</strong> + model + firmware, <strong>Fernet-encrypts</strong> the credentials, and inserts one row.</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th>id</th><th>tenant_id</th><th>name</th><th>serial_number</th><th>host</th><th>credentials</th><th>status</th></tr></thead>
+      <tbody><tr><td>1</td><td>1</td><td>Main Gate Terminal</td><td class="mono">DS7K1T-A1B2C3</td><td class="mono">192.168.1.64</td><td class="mono">gAAAAAB… 🔒</td><td><span class="pill ok">online</span></td></tr></tbody>
+    </table></div>
+    <div class="callout info"><span class="ci">🆔</span><div><b>Why the serial matters:</b> <span class="mono">UNIQUE (tenant_id, serial_number)</span> stops the same physical terminal being registered twice and identifies a re-IP'd device as the same unit. The serial is read from the device, never typed.</div></div>
+    <p><strong>Audit:</strong> <span class="mono">device.created</span> — host + serial only, never the password.</p>
+  </section>
+
+  <section>
+    <h2><span class="step-badge">2</span>Sync device users → <span class="mono">device_users</span></h2>
+    <p><strong>Operator action:</strong> click <strong>Sync users</strong> (or it runs on schedule). Maugood pulls the terminal's person list and writes each person into a separate table, mapping each to a Maugood employee by <strong>employee code</strong> (<span class="mono">device_user_id == employees.code</span>).</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th>id</th><th>device_id</th><th>device_user_id</th><th>name</th><th>employee_id</th><th>mapping</th><th>face_synced</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>1</td><td class="mono">OM0097</td><td>Anya Kesh</td><td>97</td><td><span class="pill ok">mapped</span></td><td>false</td></tr>
+        <tr><td>2</td><td>1</td><td class="mono">OM0102</td><td>Bilal Ahmed</td><td>102</td><td><span class="pill ok">mapped</span></td><td>false</td></tr>
+        <tr><td>3</td><td>1</td><td class="mono">OM0121</td><td>Dawit Bekele</td><td>121</td><td><span class="pill ok">mapped</span></td><td>false</td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout key"><span class="ci">🔗</span><div><b>This is the load-bearing table.</b> It is what lets a device event (“person OM0097 seen”) resolve to a Maugood employee (Anya Kesh, employee_id 97). Without a mapped row, the event is unidentified. <span class="mono">UNIQUE (tenant_id, device_id, device_user_id)</span> keeps re-syncs idempotent.</div></div>
+    <p><strong>Audit:</strong> <span class="mono">device.users_synced</span> (added / updated / unmapped counts).</p>
+  </section>
+
+  <section>
+    <h2><span class="step-badge">3</span>Push enrollment — faces onto the device</h2>
+    <p>The terminal recognizes faces <strong>on-device</strong>, so each employee's face must live <strong>inside the terminal</strong>. Maugood takes each mapped employee's reference photo from <span class="mono">employee_photos</span> (Fernet-encrypted), decrypts it, and pushes person + face to the device, keyed by <span class="mono">employeeNoString = employee code</span>. Then <span class="mono">face_synced</span> flips to <strong>true</strong>.</p>
+    <div class="callout tip"><span class="ci">💡</span><div><b>This is the one extra step cameras don't need.</b> A camera keeps faces in Maugood and matches server-side; a terminal needs the faces loaded into it. On employee delete / PDPL erasure, Maugood also calls <span class="mono">delete_person</span> on the device so erasure reaches the terminal.</div></div>
+    <p><strong>Audit:</strong> <span class="mono">device.enrollment_synced</span>.</p>
+  </section>
+
+  <section>
+    <h2><span class="step-badge">4</span>Switch attendance source to Device</h2>
+    <p><strong>Operator action:</strong> Settings → <strong>Attendance Source</strong> → choose <strong>Device-Based</strong> → confirm. Stored as <span class="mono">tenant_settings.attendance_source = 'device'</span>.</p>
+    <ul>
+      <li>The <strong>camera pipeline stops</strong> — all capture workers shut down, so the server does no face detection (near-zero CPU).</li>
+      <li>The <strong>device pipeline enables</strong> — user sync, event ingest, and processing start for this tenant.</li>
+    </ul>
+    <div class="callout info"><span class="ci">ℹ️</span><div>Only one mode runs at a time by design (CPU + cost). The switch is <b>reversible and non-destructive</b> — devices, users, and history are kept. <strong>Audit:</strong> <span class="mono">settings.attendance_source_changed</span>.</div></div>
+  </section>
+
+  <section>
+    <h2><span class="step-badge">5</span>Capture events → <span class="mono">device_attendance_events</span></h2>
+    <p>An employee looks at the terminal. It matches them on-board, opens the door, and reports the event by <strong>push</strong> (real-time webhook <span class="mono">POST /api/devices/events</span>) and/or <strong>pull</strong> (scheduler backstop since the last cursor). Both land in the same staging table.</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th>id</th><th>device_user_id</th><th>event_serial</th><th>occurred_at (UTC)</th><th>direction</th><th>status</th><th class="num">attempts</th></tr></thead>
+      <tbody>
+        <tr><td>5001</td><td class="mono">OM0097</td><td class="mono">EVT-88121</td><td class="mono">2026-08-03 03:31:04Z</td><td>in</td><td><span class="pill warn">pending</span></td><td class="num">0</td></tr>
+        <tr><td>5002</td><td class="mono">OM0097</td><td class="mono">EVT-88490</td><td class="mono">2026-08-03 11:34:12Z</td><td>out</td><td><span class="pill warn">pending</span></td><td class="num">0</td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout info"><span class="ci">♻️</span><div><span class="mono">UNIQUE (tenant_id, device_id, event_serial)</span> is the <b>idempotency key</b> — if the same event arrives by both push and pull, the second insert is a no-op, so nothing double-counts. Times are stored UTC; Omran is UTC+4, so 07:31 local = 03:31Z.</div></div>
+  </section>
+
+  <section>
+    <h2><span class="step-badge">6</span>Process events → <span class="mono">detection_events</span></h2>
+    <p>A processor runs each tick. For every <span class="mono">pending</span> (or retry-due) row it resolves <span class="mono">device_user_id → device_users.employee_id</span> (<span class="mono">OM0097 → 97</span>), inserts one <span class="mono">detection_events</span> row with <span class="mono">source='device'</span>, links it back, marks the staging row <span class="mono">processed</span>, and calls <span class="mono">recompute_for(employee, date)</span>.</p>
+    <p><strong>Table reused: <span class="mono">detection_events</span></strong> — device rows sit beside camera rows in one table (<span class="mono">camera_id</span> null, <span class="mono">source=device</span>):</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th>id</th><th>source</th><th>device_id</th><th>camera_id</th><th>employee_id</th><th>captured_at (UTC)</th><th class="num">confidence</th></tr></thead>
+      <tbody>
+        <tr><td>90231</td><td><span class="pill new">device</span></td><td>1</td><td>NULL</td><td>97</td><td class="mono">03:31:04Z</td><td class="num">0.91</td></tr>
+        <tr><td>90232</td><td><span class="pill new">device</span></td><td>1</td><td>NULL</td><td>97</td><td class="mono">11:34:12Z</td><td class="num">0.93</td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout tip"><span class="ci">🛠️</span><div><b>Why staging + processing are separate:</b> ingest is fast &amp; idempotent; processing does the mapping + attendance. A mapping problem or transient error retries on the staging row without losing the event.</div></div>
+  </section>
+
+  <section>
+    <h2><span class="step-badge">7</span>How matching resolves the person</h2>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Mode</th><th>Where matching happens</th><th>Uses Maugood's engine?</th></tr></thead>
+      <tbody>
+        <tr><td><b>A — Trust the device</b> <span class="pill new">default</span></td><td>On the terminal (on-board face DB). Maugood maps <span class="mono">device_user → employee</span>.</td><td>No — lowest CPU</td></tr>
+        <tr><td><b>B — Re-match in Maugood</b></td><td>Device sends the captured face; Maugood runs its existing matcher.</td><td>Yes</td></tr>
+      </tbody>
+    </table></div>
+    <p>Mode B uses the <strong>same engine the camera pipeline uses</strong>: 512-d InsightFace <span class="mono">buffalo_l</span> embedding → cosine similarity vs every enrolled vector → mean of top-k (k=1) → assign only if <strong>≥ 0.45 (hard threshold)</strong>, else Unknown. For this device (Mode A) the “match” is the <span class="mono">device_users</span> lookup; the stored confidence (0.91) is the device's own score. <a href="matching-workflow.html">See the matching workflow →</a></p>
+  </section>
+
+  <section>
+    <h2><span class="step-badge">8</span>Compute attendance → <span class="mono">attendance_records</span></h2>
+    <p>The <strong>existing</strong> engine runs unchanged. Every 15 minutes (and immediately via <span class="mono">recompute_for</span>) for Anya on 2026-08-03: load tenant timezone/weekends/holidays → resolve her shift policy → <span class="mono">events_for</span> converts <strong>UTC → local</strong> (03:31Z → 07:31, 11:34Z → 15:34) → pure <span class="mono">engine.compute()</span> → upsert.</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th>tenant_id</th><th>employee_id</th><th>date</th><th>in</th><th>out</th><th class="num">total_min</th><th>late</th><th class="num">overtime</th><th>source</th></tr></thead>
+      <tbody><tr><td>1</td><td>97</td><td class="mono">2026-08-03</td><td>07:31</td><td>15:34</td><td class="num">483</td><td>false</td><td class="num">4</td><td><span class="pill new">device</span></td></tr></tbody>
+    </table></div>
+    <div class="callout key"><span class="ci">🎉</span><div><b>Done.</b> The terminal did the recognition; Maugood just recorded the result and computed attendance with its existing engine — no camera, no server-side face matching. The record is identical in shape to a camera-sourced one and feeds the dashboard, calendar, and reports.</div></div>
+  </section>
+
+  <section>
+    <h2>All tables in one place</h2>
+    <p>Migration <span class="mono">0094_attendance_devices</span> — schema-agnostic; <span class="mono">tenant_id NOT NULL</span> on every table; <span class="mono">maugood_app</span> CRUD grants.</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Table</th><th>Key columns</th><th>Unique constraint</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">attendance_devices <span class="pill new">new</span></td><td>name, serial_number, host, port, credentials_encrypted (Fernet), webhook_secret_encrypted, model, enabled, health_status, last_event_cursor</td><td>(tenant_id, serial_number)</td></tr>
+        <tr><td class="mono">device_users <span class="pill new">new</span></td><td>device_id, device_user_id, name, employee_id, mapping_status, face_synced, active</td><td>(tenant_id, device_id, device_user_id)</td></tr>
+        <tr><td class="mono">device_attendance_events <span class="pill new">new</span></td><td>device_user_id, event_serial, occurred_at, direction, status, attempts, next_retry_at, employee_id, detection_event_id</td><td>(tenant_id, device_id, event_serial)</td></tr>
+        <tr><td class="mono">tenant_settings.attendance_source <span class="pill new">new col</span></td><td>text DEFAULT 'camera' CHECK IN (camera, device)</td><td>—</td></tr>
+        <tr><td class="mono">detection_events <span class="pill idle">changed</span></td><td>camera_id → nullable; + device_id, + source (camera/device)</td><td>—</td></tr>
+        <tr><td class="mono">attendance_records <span class="pill idle">reused</span></td><td>no schema change</td><td>(tenant_id, employee_id, date)</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <h2>Data syncing — how, when, and recovery</h2>
+    <p>All syncing runs on one 60-second scheduler tick, <strong>gated by <span class="mono">attendance_source = 'device'</span></strong> (a camera-mode tenant is skipped entirely).</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Sync</th><th>What it does</th><th>Cadence</th><th>Idempotency</th></tr></thead>
+      <tbody>
+        <tr><td>User sync</td><td>Pull device person list → upsert <span class="mono">device_users</span> + auto-map</td><td>~15 min + on-demand</td><td>unique upsert</td></tr>
+        <tr><td>Enrollment push</td><td>Push employee faces → device</td><td>employee lifecycle + on-demand</td><td>overwrites person</td></tr>
+        <tr><td>Event pull</td><td>Pull events since <span class="mono">last_event_cursor</span> → stage</td><td>60 s</td><td>unique event_serial</td></tr>
+        <tr><td>Event push</td><td>Device POSTs to webhook → stage</td><td>real-time</td><td>same key</td></tr>
+        <tr><td>Processing</td><td>Staging → <span class="mono">detection_events</span> → recompute</td><td>60 s</td><td>one event per staged row</td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout info"><span class="ci">🛟</span><div><b>Cursor-based recovery:</b> each device stores <span class="mono">last_event_cursor</span>. If Maugood is down or the network drops, the terminal buffers events; the next pull resumes from the cursor and backfills the gap — no events lost. Push + pull = at-least-once; the unique event key makes it effectively exactly-once.</div></div>
+  </section>
+
+  <section>
+    <h2>Error handling &amp; retries</h2>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Failure</th><th>Response</th><th>Recovery</th></tr></thead>
+      <tbody>
+        <tr><td>Device unreachable</td><td><span class="mono">health_status='unreachable'</span> + notification (deduped)</td><td>cursor backfills on return</td></tr>
+        <tr><td>Bad credentials</td><td>surfaced on device row; sync paused</td><td>edit password → re-test</td></tr>
+        <tr><td>Duplicate event</td><td>second insert no-op</td><td>automatic (unique key)</td></tr>
+        <tr><td>Unmapped user</td><td>staging row <span class="pill idle">skipped</span> + reason</td><td>map user → Retry</td></tr>
+        <tr><td>Transient error</td><td><span class="mono">attempts++</span>, exponential backoff</td><td>auto-retry; dead-letter after N</td></tr>
+        <tr><td>Poison event</td><td><span class="pill bad">failed</span>, shown in Events tab</td><td>operator Retry or Skip</td></tr>
+        <tr><td>Maugood downtime</td><td>none lost — cursor gap</td><td>resumes from <span class="mono">last_event_cursor</span></td></tr>
+      </tbody>
+    </table></div>
+    <p>Because <span class="mono">recompute_for</span> is idempotent, even a re-processed event yields the same attendance row.</p>
+  </section>
+
+  <section>
+    <h2>End-to-end worked example — one employee's day</h2>
+    <p>Anya Kesh, 2026-08-03, seen only by Main Gate Terminal. The same fact moves through all five tables:</p>
+    <pre>07:31 local  Anya taps IN
+   attendance_devices        device 1 online
+   device_users              OM0097 -> employee 97 (mapped, face_synced)
+   device_attendance_events  5001  EVT-88121  in   03:31Z  pending -> processed
+   detection_events          90231 source=device  employee 97  03:31Z  conf 0.91
+15:34 local  Anya taps OUT
+   device_attendance_events  5002  EVT-88490  out  11:34Z  pending -> processed
+   detection_events          90232 source=device  employee 97  11:34Z  conf 0.93
+15:45  (next 15-min tick) engine recomputes
+   attendance_records        emp 97  2026-08-03  in 07:31  out 15:34  483 min  OT +4  source=device</pre>
+    <p>One tap → one staged row → one detection event → folded into one attendance record. That is the complete life of a single device event.</p>
+  </section>
+
+  <div class="pager">
+    <a href="index.html"><span class="s">← Back</span>Overview</a>
+    <a href="matching-workflow.html"><span class="s">Next →</span>Matching &amp; Attendance Workflow</a>
+  </div>
+</div>
+
+<footer class="site-footer">
+  <div class="inner">
+    <img src="assets/logo.png" alt="Muscat Tech Solutions">
+    <span class="txt"><b>Muscat Tech Solutions</b> · Maugood Attendance Platform · Confidential</span>
+    <span class="sp"></span>
+    <span class="txt">© 2026</span>
+  </div>
+</footer>
+</body>
+</html>

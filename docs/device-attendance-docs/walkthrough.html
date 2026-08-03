@@ -1,0 +1,427 @@
+<title>Device-Based Attendance — End-to-End Walkthrough</title>
+<style>
+  :root{
+    --bg:#eef1f6; --panel:#fff; --panel-2:#f4f6fa; --ink:#182231; --muted:#63718a; --faint:#8a97ad;
+    --line:#dde3ec; --line-soft:#e8ecf3;
+    --dev:#c07716; --dev-ink:#fff; --dev-tint:#f8edda; --dev-deep:#a9640f;
+    --brand:#4b53d6; --brand-tint:#e9eafb;
+    --ok:#1f9b62; --ok-tint:#e2f4ea; --warn:#c98a12; --warn-tint:#f7edd6; --bad:#cf4747;
+    --shadow-sm:0 1px 2px rgba(24,34,49,.06);
+    --shadow:0 1px 3px rgba(24,34,49,.07),0 12px 30px rgba(24,34,49,.09);
+    --r:14px;
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --bg:#0c1017; --panel:#141b25; --panel-2:#1a2330; --ink:#e7edf6; --muted:#93a1b6; --faint:#6f7d92;
+    --line:#26313f; --line-soft:#202a37;
+    --dev:#e5a24e; --dev-ink:#1a1305; --dev-tint:#362810; --dev-deep:#f0b968;
+    --brand:#8186f2; --brand-tint:#21234a;
+    --ok:#45c082; --ok-tint:#10321f; --warn:#e0ac3e; --warn-tint:#35290c; --bad:#ec6a6a;
+    --shadow-sm:0 1px 2px rgba(0,0,0,.3); --shadow:0 1px 3px rgba(0,0,0,.4),0 14px 34px rgba(0,0,0,.45);
+  }}
+  :root[data-theme="light"]{--bg:#eef1f6;--panel:#fff;--panel-2:#f4f6fa;--ink:#182231;--muted:#63718a;--faint:#8a97ad;--line:#dde3ec;--line-soft:#e8ecf3;--dev:#c07716;--dev-ink:#fff;--dev-tint:#f8edda;--dev-deep:#a9640f;--brand:#4b53d6;--brand-tint:#e9eafb;--ok:#1f9b62;--ok-tint:#e2f4ea;--warn:#c98a12;--warn-tint:#f7edd6;--bad:#cf4747;}
+  :root[data-theme="dark"]{--bg:#0c1017;--panel:#141b25;--panel-2:#1a2330;--ink:#e7edf6;--muted:#93a1b6;--faint:#6f7d92;--line:#26313f;--line-soft:#202a37;--dev:#e5a24e;--dev-ink:#1a1305;--dev-tint:#362810;--dev-deep:#f0b968;--brand:#8186f2;--brand-tint:#21234a;--ok:#45c082;--ok-tint:#10321f;--warn:#e0ac3e;--warn-tint:#35290c;--bad:#ec6a6a;}
+
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased;}
+  .mono{font-family:ui-monospace,"SF Mono",Menlo,monospace;}
+  button{font:inherit;cursor:pointer;}
+  .wrap{max-width:920px;margin:0 auto;padding:clamp(18px,3vw,34px) clamp(14px,3vw,24px) 60px;}
+
+  header.top{display:flex;align-items:center;gap:12px;margin-bottom:6px;}
+  .chip{display:inline-flex;align-items:center;gap:7px;background:var(--dev-tint);color:var(--dev-deep);font-weight:700;font-size:12px;padding:6px 12px;border-radius:999px;}
+  h1{font-size:clamp(22px,3.4vw,30px);letter-spacing:-.02em;margin:10px 0 4px;text-wrap:balance;}
+  .sub{color:var(--muted);margin:0 0 22px;font-size:14.5px;}
+  .themebtn{margin-inline-start:auto;width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:var(--panel);color:var(--muted);}
+
+  /* stepper */
+  .stepper{display:flex;align-items:flex-start;gap:0;margin:0 0 22px;overflow-x:auto;padding-bottom:4px;}
+  .st{flex:1;min-width:96px;display:flex;flex-direction:column;align-items:center;text-align:center;position:relative;background:none;border:0;padding:0;}
+  .st .num{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:14px;background:var(--panel);border:2px solid var(--line);color:var(--faint);transition:.25s;z-index:2;}
+  .st .lbl{font-size:11.5px;color:var(--faint);margin-top:8px;font-weight:600;max-width:100px;transition:.25s;}
+  .st::before{content:"";position:absolute;top:16px;inset-inline-start:-50%;width:100%;height:2px;background:var(--line);z-index:1;}
+  .st:first-child::before{display:none;}
+  .st.done .num{background:var(--dev);border-color:var(--dev);color:var(--dev-ink);}
+  .st.done::before{background:var(--dev);}
+  .st.active .num{background:var(--panel);border-color:var(--dev);color:var(--dev-deep);box-shadow:0 0 0 4px var(--dev-tint);}
+  .st.active .lbl{color:var(--dev-deep);}
+  .st.done .lbl{color:var(--muted);}
+
+  /* stage card */
+  .stage-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);overflow:hidden;}
+  .stage-head{padding:18px 22px;border-bottom:1px solid var(--line-soft);display:flex;gap:14px;align-items:flex-start;}
+  .stage-head .kn{width:40px;height:40px;border-radius:11px;background:var(--dev-tint);color:var(--dev-deep);display:grid;place-items:center;font-size:20px;flex:none;}
+  .stage-head h2{margin:0;font-size:18px;letter-spacing:-.01em;}
+  .stage-head p{margin:3px 0 0;color:var(--muted);font-size:13px;}
+  .stage-body{padding:22px;}
+  .stage{display:none;}
+  .stage.is-active{display:block;}
+
+  .note{background:var(--dev-tint);border:1px solid color-mix(in srgb,var(--dev) 30%,transparent);color:var(--dev-deep);border-radius:10px;padding:11px 14px;font-size:12.5px;display:flex;gap:9px;margin-top:16px;}
+  .note.brand{background:var(--brand-tint);border-color:color-mix(in srgb,var(--brand) 30%,transparent);color:color-mix(in srgb,var(--brand) 88%,var(--ink));}
+
+  /* form */
+  .field{margin-bottom:13px;} .field.row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .field label{display:block;font-size:11.5px;font-weight:600;color:var(--muted);margin-bottom:5px;}
+  .field input,.field select{width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--line);background:var(--panel-2);color:var(--ink);font:inherit;font-size:13px;}
+  .field .locked{color:var(--faint);}
+  .hint{font-size:11px;color:var(--faint);margin-top:5px;}
+
+  /* db table */
+  .dbtag{display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:var(--muted);margin-bottom:10px;}
+  .dbtag .mono{background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:2px 8px;color:var(--ink);}
+  .tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:11px;}
+  table{width:100%;border-collapse:collapse;min-width:520px;background:var(--panel);}
+  th,td{text-align:start;padding:10px 13px;font-size:12.5px;border-bottom:1px solid var(--line-soft);white-space:nowrap;}
+  thead th{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--panel-2);font-weight:700;}
+  tbody tr:last-child td{border-bottom:0;}
+  tr.pop{animation:pop .5s ease both;}
+  tr.pop:nth-child(2){animation-delay:.12s;} tr.pop:nth-child(3){animation-delay:.24s;} tr.pop:nth-child(4){animation-delay:.36s;}
+  @keyframes pop{from{opacity:0;transform:translateY(8px);background:var(--dev-tint);}to{opacity:1;transform:none;}}
+  .flash{background:color-mix(in srgb,var(--dev-tint) 60%,transparent);}
+
+  /* device mock */
+  .device{max-width:280px;margin:0 auto;background:#0e1420;border:8px solid #222c3a;border-radius:26px;padding:14px;box-shadow:var(--shadow);}
+  .device .screen{background:linear-gradient(160deg,#16324a,#0c1c2c);border-radius:14px;padding:16px;min-height:230px;position:relative;color:#dbe7f2;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;}
+  .device .brandline{position:absolute;top:10px;inset-inline:0;text-align:center;font-size:10px;letter-spacing:.15em;color:#6f8aa5;text-transform:uppercase;}
+  .scan{width:120px;height:120px;border-radius:16px;border:2px solid #3ec3a3;position:relative;display:grid;place-items:center;font-size:52px;}
+  .scan::after{content:"";position:absolute;inset-inline:6px;height:2px;background:#3ec3a3;box-shadow:0 0 10px #3ec3a3;top:8px;animation:scanline 2s linear infinite;}
+  @keyframes scanline{0%{top:8px}50%{top:104px}100%{top:8px}}
+  .device .cap{margin-top:14px;font-size:12px;color:#8fb8d6;}
+  .device .ok{color:#3ec3a3;font-weight:700;}
+
+  /* face cards */
+  .faces{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:6px;}
+  .face{width:86px;background:var(--panel-2);border:1px solid var(--line);border-radius:11px;padding:10px 8px;text-align:center;animation:pop .45s ease both;}
+  .face:nth-child(2){animation-delay:.12s;} .face:nth-child(3){animation-delay:.24s;} .face:nth-child(4){animation-delay:.36s;}
+  .av{width:44px;height:44px;border-radius:50%;margin:0 auto 7px;display:grid;place-items:center;font-weight:700;color:#fff;font-size:15px;}
+  .face .fn{font-size:11.5px;font-weight:600;} .face .fc{font-size:10px;color:var(--faint);}
+
+  /* sync arrows */
+  .synccols{display:grid;grid-template-columns:1fr auto 1.3fr;gap:14px;align-items:center;}
+  .syncbox{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:14px;}
+  .syncbox h4{margin:0 0 10px;font-size:12.5px;display:flex;align-items:center;gap:7px;}
+  .syncarrow{font-size:26px;color:var(--dev);text-align:center;animation:slide 1.4s ease-in-out infinite;}
+  @keyframes slide{0%,100%{transform:translateX(-3px);opacity:.6;}50%{transform:translateX(3px);opacity:1;}}
+  .miniuser{display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid var(--line-soft);font-size:12.5px;}
+  .miniuser:last-child{border-bottom:0;}
+  .miniuser .av{width:28px;height:28px;font-size:11px;margin:0;}
+
+  /* matching */
+  .match{display:grid;grid-template-columns:1fr auto 1.4fr;gap:16px;align-items:center;}
+  .probe{background:var(--panel-2);border:1px dashed var(--dev);border-radius:12px;padding:18px;text-align:center;}
+  .probe .av{width:70px;height:70px;font-size:24px;background:var(--dev);}
+  .vs{text-align:center;color:var(--faint);}
+  .vs .eq{font-size:22px;}
+  .gallery{display:flex;flex-direction:column;gap:8px;}
+  .cand{display:flex;align-items:center;gap:11px;background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:9px 12px;position:relative;overflow:hidden;}
+  .cand .av{width:34px;height:34px;font-size:12px;margin:0;}
+  .cand .meter{flex:1;height:7px;border-radius:4px;background:var(--line);overflow:hidden;}
+  .cand .meter i{display:block;height:100%;border-radius:4px;background:var(--faint);width:0;animation:fill 1s ease forwards;}
+  .cand .sc{font-weight:700;font-variant-numeric:tabular-nums;font-size:12.5px;width:44px;text-align:end;}
+  .cand.win{border-color:var(--ok);background:var(--ok-tint);}
+  .cand.win .meter i{background:var(--ok);}
+  .cand.win .sc{color:var(--ok);}
+  @keyframes fill{from{width:0;}}
+  .thresh{font-size:12px;color:var(--muted);margin-top:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  .thresh b{color:var(--ok);}
+
+  /* matching engine step */
+  .engine-lbl{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--dev-deep);margin-bottom:10px;}
+  .pipe{display:flex;align-items:stretch;gap:8px;flex-wrap:wrap;}
+  .pnode{flex:1;min-width:110px;background:var(--panel-2);border:1px solid var(--line);border-radius:11px;padding:12px 10px;text-align:center;font-size:12px;line-height:1.35;display:flex;flex-direction:column;justify-content:center;gap:3px;animation:pop .4s ease both;}
+  .pnode .pi{font-size:22px;margin-bottom:2px;}
+  .pnode.win{background:var(--ok-tint);border-color:color-mix(in srgb,var(--ok) 35%,transparent);}
+  .parw{align-self:center;color:var(--dev);font-size:18px;font-weight:700;}
+  .vec{display:flex;gap:4px;flex-wrap:wrap;justify-content:center;margin-top:5px;}
+  .vec b{font-family:ui-monospace,Menlo,monospace;background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:10px;color:var(--muted);font-weight:500;}
+  .vec b.more{color:var(--faint);border-style:dashed;}
+  .modes{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .mode{border-radius:12px;padding:14px 15px;border:1px solid;font-size:12.5px;}
+  .mode .mt{font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:7px;flex-wrap:wrap;}
+  .mode p{margin:0;color:var(--muted);}
+  .mode .tagd{font-size:9.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:2px 7px;border-radius:999px;background:var(--dev);color:var(--dev-ink);}
+  .mode.a{background:var(--dev-tint);border-color:color-mix(in srgb,var(--dev) 30%,transparent);}
+  .mode.a .mt{color:var(--dev-deep);}
+  .mode.b{background:var(--brand-tint);border-color:color-mix(in srgb,var(--brand) 30%,transparent);}
+  .mode.b .mt{color:color-mix(in srgb,var(--brand) 90%,var(--ink));}
+
+  /* attendance result */
+  .attcard{background:linear-gradient(135deg,var(--ok-tint),var(--panel));border:1px solid color-mix(in srgb,var(--ok) 30%,var(--line));border-radius:14px;padding:20px;}
+  .att-emp{display:flex;align-items:center;gap:12px;margin-bottom:16px;}
+  .att-emp .av{width:46px;height:46px;font-size:16px;background:var(--brand);margin:0;}
+  .att-emp .n{font-weight:700;font-size:16px;} .att-emp .c{font-size:12px;color:var(--muted);}
+  .att-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+  .att-grid .cell{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 12px;text-align:center;}
+  .att-grid .cl{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700;}
+  .att-grid .cv{font-size:18px;font-weight:700;margin-top:4px;font-variant-numeric:tabular-nums;}
+  .att-grid .cv.ok{color:var(--ok);}
+
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;}
+  .pill.ok{background:var(--ok-tint);color:var(--ok);} .pill.dev{background:var(--dev-tint);color:var(--dev-deep);}
+
+  /* controls */
+  .controls{display:flex;align-items:center;gap:10px;margin-top:20px;}
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:11px 18px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-weight:600;font-size:13.5px;}
+  .btn:hover{border-color:var(--muted);}
+  .btn.primary{background:var(--dev);border-color:var(--dev);color:var(--dev-ink);}
+  .btn.primary:hover{filter:brightness(1.05);}
+  .btn:disabled{opacity:.4;cursor:default;}
+  .controls .spacer{flex:1;}
+  .stepcount{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;}
+
+  @media (max-width:640px){
+    .synccols,.match,.modes{grid-template-columns:1fr;}
+    .syncarrow{transform:rotate(90deg);} .vs{transform:rotate(90deg);}
+    .att-grid{grid-template-columns:repeat(2,1fr);}
+    .parw{transform:rotate(90deg);}
+  }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <span class="chip">🚪 Device-Based Attendance</span>
+    <button class="themebtn" id="themeBtn" aria-label="Toggle theme">◐</button>
+  </header>
+  <h1>How a face-recognition terminal produces attendance</h1>
+  <p class="sub">A step-by-step walkthrough with dummy data — from adding the device to a finished attendance record.</p>
+
+  <!-- STEPPER -->
+  <div class="stepper" id="stepper">
+    <button class="st active" data-go="0"><span class="num">1</span><span class="lbl">Add device</span></button>
+    <button class="st" data-go="1"><span class="num">2</span><span class="lbl">Saved to DB</span></button>
+    <button class="st" data-go="2"><span class="num">3</span><span class="lbl">Face capture</span></button>
+    <button class="st" data-go="3"><span class="num">4</span><span class="lbl">Sync to table</span></button>
+    <button class="st" data-go="4"><span class="num">5</span><span class="lbl">Match</span></button>
+    <button class="st" data-go="5"><span class="num">6</span><span class="lbl">Match engine</span></button>
+    <button class="st" data-go="6"><span class="num">7</span><span class="lbl">Attendance</span></button>
+  </div>
+
+  <div class="stage-card">
+    <!-- ===== STEP 1 — ADD DEVICE ===== -->
+    <div class="stage is-active" data-step="0">
+      <div class="stage-head"><div class="kn">➕</div><div><h2>Step 1 · Add the device</h2><p>Admin registers the terminal — host, login, and driver. The serial is read from the device itself.</p></div></div>
+      <div class="stage-body">
+        <div class="field"><label>Device name</label><input value="Main Gate Terminal"></div>
+        <div class="field row">
+          <div><label>Driver</label><select><option>Hikvision (ISAPI)</option></select></div>
+          <div><label>Door no.</label><input value="1"></div>
+        </div>
+        <div class="field row">
+          <div><label>Host / IP</label><input value="192.168.1.64"></div>
+          <div><label>Port</label><input value="80"></div>
+        </div>
+        <div class="field row">
+          <div><label>Username</label><input value="admin"></div>
+          <div><label>Password</label><input type="password" value="password"></div>
+        </div>
+        <div class="field"><label>Serial number</label><input class="locked" value="🔒 auto-read from device on save" disabled><div class="hint">Unique per tenant — the device's own fingerprint.</div></div>
+        <div class="note"><span>🔐</span><div>Username &amp; password are <b>Fernet-encrypted</b> before saving — never stored or shown in plain text.</div></div>
+      </div>
+    </div>
+
+    <!-- ===== STEP 2 — SAVED TO DB ===== -->
+    <div class="stage" data-step="1">
+      <div class="stage-head"><div class="kn">🗄️</div><div><h2>Step 2 · Registered in the database</h2><p>Maugood connected to the terminal, read its serial, encrypted the credentials, and stored one row.</p></div></div>
+      <div class="stage-body">
+        <div class="dbtag">TABLE <span class="mono">attendance_devices</span></div>
+        <div class="tablewrap"><table>
+          <thead><tr><th>id</th><th>name</th><th>serial_number</th><th>host</th><th>credentials</th><th>status</th></tr></thead>
+          <tbody><tr class="pop flash">
+            <td class="mono">1</td><td>Main Gate Terminal</td><td class="mono">DS7K1T-A1B2C3</td>
+            <td class="mono">192.168.1.64</td><td class="mono" style="color:var(--faint)">gAAAAAB…🔒</td>
+            <td><span class="pill ok">online</span></td>
+          </tr></tbody>
+        </table></div>
+        <div class="note"><span>🆔</span><div>The <b>serial number</b> is the unique key — <span class="mono">UNIQUE(tenant_id, serial_number)</span> stops the same physical device being registered twice.</div></div>
+      </div>
+    </div>
+
+    <!-- ===== STEP 3 — FACE CAPTURE ===== -->
+    <div class="stage" data-step="2">
+      <div class="stage-head"><div class="kn">📸</div><div><h2>Step 3 · The device captures faces</h2><p>Employees enroll at the terminal. The device stores each face in its own on-board database (dummy data below).</p></div></div>
+      <div class="stage-body">
+        <div style="display:grid;grid-template-columns:auto 1fr;gap:24px;align-items:center">
+          <div class="device">
+            <div class="screen"><div class="brandline">Hikvision · Face</div>
+              <div class="scan">🙂</div>
+              <div class="cap">Capturing… <span class="ok">✓ face stored</span></div>
+            </div>
+          </div>
+          <div>
+            <div class="dbtag" style="margin-bottom:12px">CAPTURED ON DEVICE</div>
+            <div class="faces">
+              <div class="face"><div class="av" style="background:#4b53d6">AK</div><div class="fn">Anya K.</div><div class="fc mono">OM0097</div></div>
+              <div class="face"><div class="av" style="background:#0c8a99">BA</div><div class="fn">Bilal A.</div><div class="fc mono">OM0102</div></div>
+              <div class="face"><div class="av" style="background:#c07716">DB</div><div class="fn">Dawit B.</div><div class="fc mono">OM0121</div></div>
+            </div>
+            <div class="note" style="margin-top:16px"><span>💡</span><div>The terminal does the recognition itself — so each employee's face must live <b>inside the device</b>. This is the one extra step cameras don't need.</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== STEP 4 — SYNC TO TABLE ===== -->
+    <div class="stage" data-step="3">
+      <div class="stage-head"><div class="kn">🔄</div><div><h2>Step 4 · Sync device users into Maugood</h2><p>Maugood pulls the device's user list and writes each one into a dedicated table, mapped to a Maugood employee.</p></div></div>
+      <div class="stage-body">
+        <div class="synccols">
+          <div class="syncbox">
+            <h4>🚪 On the device</h4>
+            <div class="miniuser"><div class="av" style="background:#4b53d6">AK</div><div><b>Anya K.</b> · <span class="mono" style="color:var(--faint)">OM0097</span></div></div>
+            <div class="miniuser"><div class="av" style="background:#0c8a99">BA</div><div><b>Bilal A.</b> · <span class="mono" style="color:var(--faint)">OM0102</span></div></div>
+            <div class="miniuser"><div class="av" style="background:#c07716">DB</div><div><b>Dawit B.</b> · <span class="mono" style="color:var(--faint)">OM0121</span></div></div>
+          </div>
+          <div class="syncarrow">⇒</div>
+          <div>
+            <div class="dbtag">TABLE <span class="mono">device_users</span></div>
+            <div class="tablewrap"><table>
+              <thead><tr><th>device_user_id</th><th>employee</th><th>mapping</th><th>face</th></tr></thead>
+              <tbody>
+                <tr class="pop"><td class="mono">OM0097</td><td>Anya Kesh</td><td><span class="pill ok">mapped</span></td><td>✅</td></tr>
+                <tr class="pop"><td class="mono">OM0102</td><td>Bilal Ahmed</td><td><span class="pill ok">mapped</span></td><td>✅</td></tr>
+                <tr class="pop"><td class="mono">OM0121</td><td>Dawit Bekele</td><td><span class="pill ok">mapped</span></td><td>✅</td></tr>
+              </tbody>
+            </table></div>
+          </div>
+        </div>
+        <div class="note brand"><span>🔗</span><div>Each device user is matched to a Maugood employee by <span class="mono">employee code</span>. Now the system knows <b>“device person OM0097 = employee Anya Kesh.”</b></div></div>
+      </div>
+    </div>
+
+    <!-- ===== STEP 5 — MATCHING ===== -->
+    <div class="stage" data-step="4">
+      <div class="stage-head"><div class="kn">🎯</div><div><h2>Step 5 · A face is matched</h2><p>Someone looks at the terminal at 07:31. The device recognizes them and reports the result — Maugood resolves it to an employee.</p></div></div>
+      <div class="stage-body">
+        <div class="match">
+          <div class="probe">
+            <div class="av">👤</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:8px">Seen at gate<br><b class="mono" style="color:var(--ink)">07:31:04</b></div>
+          </div>
+          <div class="vs"><div class="eq">≈</div><div style="font-size:11px">compare</div></div>
+          <div>
+            <div class="gallery">
+              <div class="cand win"><div class="av" style="background:#4b53d6">AK</div><div style="flex:1"><div style="font-size:12.5px;font-weight:600">Anya Kesh <span class="mono" style="color:var(--faint)">OM0097</span></div><div class="meter"><i style="width:91%"></i></div></div><div class="sc">0.91</div></div>
+              <div class="cand"><div class="av" style="background:#0c8a99">BA</div><div style="flex:1"><div style="font-size:12.5px;font-weight:600">Bilal Ahmed <span class="mono" style="color:var(--faint)">OM0102</span></div><div class="meter"><i style="width:22%"></i></div></div><div class="sc">0.22</div></div>
+              <div class="cand"><div class="av" style="background:#c07716">DB</div><div style="flex:1"><div style="font-size:12.5px;font-weight:600">Dawit Bekele <span class="mono" style="color:var(--faint)">OM0121</span></div><div class="meter"><i style="width:14%"></i></div></div><div class="sc">0.14</div></div>
+            </div>
+            <div class="thresh"><span>Threshold ≥ 0.45 →</span> <b>Matched: Anya Kesh ✓</b></div>
+          </div>
+        </div>
+        <div class="note brand"><span>📥</span><div>Maugood writes one row into the shared <span class="mono">detection_events</span> table: <span class="mono">employee OM0097 · seen 07:31 · source=device</span>. This is the exact same table the camera pipeline writes to. <b>Next: how your existing engine does this same matching.</b></div></div>
+      </div>
+    </div>
+
+    <!-- ===== STEP 6 — MATCHING ENGINE (existing workflow) ===== -->
+    <div class="stage" data-step="5">
+      <div class="stage-head"><div class="kn">🧠</div><div><h2>Step 6 · Inside your existing matching engine</h2><p>This is the exact face-matching your camera pipeline already runs — <span class="mono">MatcherCache</span>, cosine similarity, hard 0.45 threshold. The device path reuses it.</p></div></div>
+      <div class="stage-body">
+
+        <div class="engine-lbl">① Enrollment — run once per employee photo</div>
+        <div class="pipe">
+          <div class="pnode"><div class="pi">🖼️</div>Reference<br>photo</div>
+          <div class="parw">→</div>
+          <div class="pnode"><div class="pi">🧬</div>InsightFace<br><span class="mono" style="font-size:10.5px;color:var(--faint)">buffalo_l</span></div>
+          <div class="parw">→</div>
+          <div class="pnode"><div class="pi">📐</div>512-d embedding<br>L2-normalized
+            <div class="vec"><b>0.12</b><b>-0.98</b><b>0.03</b><b>0.44</b><b class="more">+508</b></div>
+          </div>
+          <div class="parw">→</div>
+          <div class="pnode"><div class="pi">🔐</div>Fernet-encrypt<br>→ <span class="mono" style="font-size:10.5px">MatcherCache</span></div>
+        </div>
+
+        <div class="engine-lbl" style="margin-top:20px">② Recognition — run for every face seen</div>
+        <div class="pipe">
+          <div class="pnode"><div class="pi">👤</div>Probe<br>face</div>
+          <div class="parw">→</div>
+          <div class="pnode"><div class="pi">📐</div>512-d<br>embedding</div>
+          <div class="parw">→</div>
+          <div class="pnode"><div class="pi">📊</div>Cosine vs every<br>enrolled vector</div>
+          <div class="parw">→</div>
+          <div class="pnode"><div class="pi">Σ</div>Mean of<br>top-k per emp.</div>
+          <div class="parw">→</div>
+          <div class="pnode win"><div class="pi">🎯</div>Highest ≥ 0.45?<br><b style="color:var(--ok)">OM0097 · 0.91 ✓</b></div>
+        </div>
+        <div class="thresh" style="margin-top:12px"><span>Below 0.45 →</span> <b style="color:var(--muted)">Unknown</b> <span style="color:var(--faint)">· the threshold is hard, never advisory</span></div>
+
+        <div class="engine-lbl" style="margin-top:22px">How the device connects to this engine</div>
+        <div class="modes">
+          <div class="mode a">
+            <div class="mt">🚪 Mode A — Trust the device <span class="tagd">default</span></div>
+            <p>The terminal already matched on-board. Maugood just maps <span class="mono">device_user → employee</span> (from Step 4). Your engine is <b>skipped</b> — lightest CPU.</p>
+          </div>
+          <div class="mode b">
+            <div class="mt">🧠 Mode B — Re-match in Maugood</div>
+            <p>The device sends the captured face. Maugood runs <b>this exact engine</b> — identical to a camera. Use it when Maugood must be the single source of identity truth.</p>
+          </div>
+        </div>
+        <div class="note"><span>🔁</span><div>Either way, the result is the same row in <span class="mono">detection_events</span> → and the same attendance. Your workflow downstream never changes.</div></div>
+      </div>
+    </div>
+
+    <!-- ===== STEP 7 — ATTENDANCE ===== -->
+    <div class="stage" data-step="6">
+      <div class="stage-head"><div class="kn">✅</div><div><h2>Step 6 · Attendance is computed</h2><p>The existing engine reads the events (in the morning + out in the evening) and builds the day — unchanged from the camera flow.</p></div></div>
+      <div class="stage-body">
+        <div class="attcard">
+          <div class="att-emp"><div class="av">AK</div><div><div class="n">Anya Kesh</div><div class="c mono">OM0097 · Sunday 3 Aug · <span class="pill dev">source: device</span></div></div></div>
+          <div class="att-grid">
+            <div class="cell"><div class="cl">In</div><div class="cv">07:31</div></div>
+            <div class="cell"><div class="cl">Out</div><div class="cv">15:34</div></div>
+            <div class="cell"><div class="cl">Total</div><div class="cv">8h 03m</div></div>
+            <div class="cell"><div class="cl">Status</div><div class="cv ok">On&nbsp;time</div></div>
+          </div>
+        </div>
+        <div class="dbtag" style="margin:18px 0 10px">TABLE <span class="mono">attendance_records</span></div>
+        <div class="tablewrap"><table>
+          <thead><tr><th>employee</th><th>date</th><th>in</th><th>out</th><th>overtime</th><th>source</th></tr></thead>
+          <tbody><tr class="pop flash"><td>Anya Kesh</td><td class="mono">2026-08-03</td><td>07:31</td><td>15:34</td><td>+4 min</td><td><span class="pill dev">device</span></td></tr></tbody>
+        </table></div>
+        <div class="note"><span>🎉</span><div><b>Done.</b> The terminal did the recognition; Maugood just recorded the result and computed attendance with its existing engine — no camera, no server-side face matching.</div></div>
+      </div>
+    </div>
+
+    <!-- CONTROLS -->
+    <div class="stage-body" style="padding-top:0">
+      <div class="controls">
+        <button class="btn" id="backBtn">← Back</button>
+        <button class="btn primary" id="nextBtn">Next step →</button>
+        <div class="spacer"></div>
+        <button class="btn" id="playBtn">▶ Auto-play</button>
+        <span class="stepcount"><b id="curNum">1</b> / 7</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const stages=[...document.querySelectorAll('.stage[data-step]')];
+  const steps=[...document.querySelectorAll('.st')];
+  let cur=0, playing=false, timer=null;
+
+  function render(i){
+    cur=Math.max(0,Math.min(stages.length-1,i));
+    stages.forEach(s=>s.classList.toggle('is-active',+s.dataset.step===cur));
+    steps.forEach((s,idx)=>{s.classList.toggle('active',idx===cur);s.classList.toggle('done',idx<cur);});
+    document.getElementById('curNum').textContent=cur+1;
+    document.getElementById('backBtn').disabled=cur===0;
+    document.getElementById('nextBtn').textContent=cur===stages.length-1?'Restart ↻':'Next step →';
+    window.scrollTo({top:0,behavior:'smooth'});
+  }
+  document.getElementById('nextBtn').addEventListener('click',()=>{ render(cur>=stages.length-1?0:cur+1); });
+  document.getElementById('backBtn').addEventListener('click',()=>render(cur-1));
+  steps.forEach(s=>s.addEventListener('click',()=>{stopPlay();render(+s.dataset.go);}));
+
+  function stopPlay(){playing=false;clearInterval(timer);document.getElementById('playBtn').textContent='▶ Auto-play';}
+  document.getElementById('playBtn').addEventListener('click',()=>{
+    if(playing){stopPlay();return;}
+    playing=true;document.getElementById('playBtn').textContent='⏸ Pause';
+    timer=setInterval(()=>{ if(cur>=stages.length-1){stopPlay();return;} render(cur+1); },2600);
+  });
+
+  document.getElementById('themeBtn').addEventListener('click',()=>{
+    const c=document.documentElement.getAttribute('data-theme');
+    document.documentElement.setAttribute('data-theme', c==='dark'?'light':(c==='light'?'dark':(matchMedia('(prefers-color-scheme: dark)').matches?'light':'dark')));
+  });
+  document.addEventListener('keydown',e=>{if(e.key==='ArrowRight'){stopPlay();render(cur+1);}if(e.key==='ArrowLeft'){stopPlay();render(cur-1);}});
+  render(0);
+</script>

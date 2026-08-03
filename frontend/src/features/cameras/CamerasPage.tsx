@@ -11,6 +11,7 @@ import { extractApiError } from "../../api/client";
 import { ModalShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
 import { BrandLogo } from "./BrandLogo";
+import { CaptureTabs } from "./CaptureTabs";
 import { CameraDrawer } from "./CameraDrawer";
 import { CameraImportModal } from "./CameraImportModal";
 import { PreviewModal } from "./PreviewModal";
@@ -197,6 +198,8 @@ export function CamerasPage() {
   };
   return (
     <>
+      <CaptureTabs active="cameras" />
+
       <div className="page-header">
         <div>
           <h1 className="page-title">{t("cameras.page.title")}</h1>

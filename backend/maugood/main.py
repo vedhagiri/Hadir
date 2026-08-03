@@ -32,6 +32,7 @@ from maugood.branding.router import (
 )
 from maugood.attendance_calendar import router as attendance_calendar_router
 from maugood.cameras.router import router as cameras_router
+from maugood.devices.router import router as devices_router
 from maugood.capture import capture_manager
 from maugood.config import get_settings
 from maugood.custom_fields import router as custom_fields_router
@@ -298,6 +299,7 @@ def create_app() -> FastAPI:
     app.include_router(employees_router)
     app.include_router(delete_requests_router)
     app.include_router(cameras_router)
+    app.include_router(devices_router)
     app.include_router(identification_router)
     app.include_router(attendance_router)
     app.include_router(attendance_email_router)
