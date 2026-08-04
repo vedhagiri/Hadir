@@ -30,16 +30,12 @@ import threading
 import time as time_mod
 from collections import defaultdict, deque
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
-from maugood.db import get_engine, tenant_context
-from maugood.devices import ingest as ingest_parser
-from maugood.devices import processor
-from maugood.devices import repository as repo
+from maugood.devices import ingest_service
 from maugood.devices import tokens
-from maugood.tenants.scope import TenantScope
 
 logger = logging.getLogger(__name__)
 
@@ -109,20 +105,12 @@ async def _read_payload(request: Request) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def _resolve(token: str) -> Optional[tokens.TokenRoute]:
-    """Look the token up in the global registry (no tenant context yet)."""
-
-    with tenant_context("public"):
-        with get_engine().begin() as conn:
-            return tokens.resolve(conn, token)
-
-
 @router.post("/hik/{token}")
 @router.post("/api/devices/ingest/{token}")
 async def ingest_event(token: str, request: Request) -> dict[str, str]:
     _rate_limit(tokens.hash_token(token))
 
-    route = _resolve(token)
+    route = ingest_service.resolve_token(token)
     if route is None:
         # Deliberately identical for unknown and revoked. Logged without
         # the token so a stale terminal is still diagnosable by IP.
@@ -135,113 +123,11 @@ async def ingest_event(token: str, request: Request) -> dict[str, str]:
 
     payload = await _read_payload(request)
     received_at = datetime.now(tz=timezone.utc)
-    reported_name = request.query_params.get("device_name")
 
-    scope = TenantScope(
-        tenant_id=route.tenant_id, tenant_schema=route.tenant_schema
-    )
-    tap = ingest_parser.normalise(payload, received_at=received_at)
-
-    with tenant_context(route.tenant_schema):
-        with get_engine().begin() as conn:
-            device = repo.get_device(conn, scope, route.device_id)
-            if device is None or not device.enabled:
-                # Registry says this token is live but the device row is
-                # gone or switched off. Acknowledge so the terminal stops
-                # retrying; an operator sees it in the device list.
-                logger.info(
-                    "device ingest ignored: device_id=%s missing_or_disabled",
-                    route.device_id,
-                )
-                return {"status": "ok"}
-
-            repo.note_event_received(
-                conn,
-                scope,
-                device_id=route.device_id,
-                at=received_at,
-                reported_device_name=reported_name,
-                clock_suspect=bool(tap and tap.clock_suspect),
-            )
-            # Hardware facts only if the payload actually carries them.
-            # Hikvision's access event does not reliably include a device
-            # serial, so this usually no-ops — better than inventing a
-            # value from ``serialNo``, which is the *event* counter.
-            event_block = payload.get("AccessControllerEvent")
-            event_block = event_block if isinstance(event_block, dict) else {}
-            repo.learn_device_identity(
-                conn,
-                scope,
-                device_id=route.device_id,
-                serial_number=_str_or_none(
-                    payload.get("deviceSerialNo")
-                    or event_block.get("deviceSerialNo")
-                    or payload.get("macAddress")
-                ),
-                model=_str_or_none(
-                    payload.get("deviceModel") or event_block.get("deviceName")
-                ),
-                firmware=_str_or_none(payload.get("firmwareVersion")),
-            )
-
-            if tap is None:
-                # Keepalive, door-held, tamper — a real post with no person.
-                return {"status": "ok"}
-
-            employee_id = repo.discover_device_user(
-                conn,
-                scope,
-                device_id=route.device_id,
-                device_user_id=tap.device_user_id,
-                name=tap.person_name,
-                seen_at=received_at,
-            )
-
-            staged_id = repo.insert_tap(
-                conn,
-                scope,
-                device_id=route.device_id,
-                device_user_id=tap.device_user_id,
-                person_name=tap.person_name,
-                event_serial=tap.event_serial,
-                dedup_key=ingest_parser.dedup_key(
-                    device_id=route.device_id,
-                    event_serial=tap.event_serial,
-                    occurred_at=tap.occurred_at,
-                ),
-                occurred_at=tap.occurred_at,
-                verify_mode=tap.verify_mode,
-                direction=tap.direction,
-                clock_suspect=tap.clock_suspect,
-                employee_id=employee_id,
-                raw=tap.raw,
-            )
-
-    if staged_id is None:
-        # Already stored — a re-post after a missed acknowledgement.
-        return {"status": "ok"}
-
-    if employee_id is not None:
-        # Small and synchronous: one detection row + one recompute. The
-        # 30-second drainer is the safety net for anything that fails here.
-        try:
-            processor.drain_pending(scope, limit=50)
-        except Exception:  # noqa: BLE001
-            logger.exception(
-                "inline drain failed after ingest: device_id=%s", route.device_id
-            )
-
-    logger.info(
-        "device tap: device_id=%s person=%s mapped=%s clock_suspect=%s",
-        route.device_id,
-        tap.device_user_id,
-        employee_id is not None,
-        tap.clock_suspect,
+    ingest_service.handle_tap(
+        route,
+        payload,
+        received_at=received_at,
+        reported_device_name=request.query_params.get("device_name"),
     )
     return {"status": "ok"}
-
-
-def _str_or_none(value: Any) -> Optional[str]:
-    if value in (None, ""):
-        return None
-    return str(value).strip() or None

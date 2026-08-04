@@ -21,6 +21,7 @@ import {
   useDeviceEvents,
   useDeviceUsers,
   useMapDeviceUser,
+  useResyncDevice,
 } from "./hooks";
 import type { Device, DeviceEvent, DeviceUser } from "./types";
 
@@ -40,6 +41,42 @@ export function DeviceDetailDrawer({ device, onClose, onShowSetup }: Props) {
 
   const events = useDeviceEvents(device.id);
   const users = useDeviceUsers(device.id);
+  const resync = useResyncDevice(device.id);
+
+  const runResync = async () => {
+    setError(null);
+    setMsg(null);
+    try {
+      const r = await resync.mutateAsync();
+      // Report the real outcome, including "nothing was stuck" — a silent
+      // success is indistinguishable from a broken button.
+      const moved = r.adopted + r.retried + r.processed;
+      setMsg(
+        moved === 0
+          ? r.still_unmapped > 0
+            ? t("devices.resync.onlyUnmapped", {
+                count: r.still_unmapped,
+                defaultValue: `Nothing to sync — ${r.still_unmapped} tap(s) are waiting for their person to be mapped.`,
+              })
+            : t("devices.resync.upToDate", {
+                defaultValue: "Already up to date — nothing was waiting.",
+              })
+          : t("devices.resync.done", {
+              processed: r.processed,
+              adopted: r.adopted,
+              retried: r.retried,
+              defaultValue: `Synced — ${r.processed} tap(s) written to attendance (${r.adopted} newly mapped, ${r.retried} retried).`,
+            }),
+      );
+    } catch (err) {
+      setError(
+        extractApiError(
+          err,
+          t("devices.resync.failed", { defaultValue: "Sync failed." }),
+        ),
+      );
+    }
+  };
 
   const unmappedCount = useMemo(
     () => (users.data?.items ?? []).filter((u) => u.employee_id === null).length,
@@ -92,8 +129,17 @@ export function DeviceDetailDrawer({ device, onClose, onShowSetup }: Props) {
             label={t("devices.fields.model", { defaultValue: "Model" })}
             value={device.model}
           />
+          {/* Arrival time of the last POST, keepalives included — this is
+              the liveness signal, NOT the newest row in the events tab
+              (those carry the time the device claims the tap happened).
+              Labelled "Last seen" so the two aren't read as the same
+              number. */}
           <Meta
-            label={t("devices.detail.lastEvent", { defaultValue: "Last event" })}
+            label={t("devices.detail.lastSeen", { defaultValue: "Last seen" })}
+            title={t("devices.detail.lastSeenHint", {
+              defaultValue:
+                "When this terminal last contacted the server, including keepalives. Event times below are what the device reported.",
+            })}
             value={
               device.last_event_at
                 ? new Date(device.last_event_at).toLocaleString()
@@ -101,6 +147,20 @@ export function DeviceDetailDrawer({ device, onClose, onShowSetup }: Props) {
             }
           />
           <div style={{ flex: 1 }} />
+          <button
+            className="btn btn-sm"
+            onClick={runResync}
+            disabled={resync.isPending}
+            title={t("devices.resync.hint", {
+              defaultValue:
+                "Re-process taps already received that haven't become attendance yet. This does not contact the terminal — a push device can't be polled.",
+            })}
+          >
+            <Icon name="refresh" size={12} />
+            {resync.isPending
+              ? t("devices.resync.running", { defaultValue: "Syncing…" })
+              : t("devices.resync.action", { defaultValue: "Sync now" })}
+          </button>
           <button className="btn btn-sm" onClick={onShowSetup}>
             <Icon name="clipboard" size={12} />
             {t("devices.detail.showUrl", { defaultValue: "Show push URL" })}
@@ -644,9 +704,17 @@ function TabButton({
   );
 }
 
-function Meta({ label, value }: { label: string; value: string | null }) {
+function Meta({
+  label,
+  value,
+  title,
+}: {
+  label: string;
+  value: string | null;
+  title?: string;
+}) {
   return (
-    <div>
+    <div {...(title ? { title } : {})}>
       <div className="text-xs text-dim">{label}</div>
       <div className="mono" style={{ fontSize: 12.5, fontWeight: 600 }}>
         {value ?? "—"}

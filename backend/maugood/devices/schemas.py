@@ -126,6 +126,19 @@ class SyncUsersResult(BaseModel):
     reachable: bool
 
 
+class ResyncResult(BaseModel):
+    """Outcome of "Sync now" on a push device.
+
+    ``still_unmapped`` is not a failure — those taps are parked waiting for
+    an operator to map their person, and only mapping can clear them.
+    """
+
+    adopted: int
+    retried: int
+    processed: int
+    still_unmapped: int
+
+
 class DeviceUserOut(BaseModel):
     id: int
     device_user_id: str

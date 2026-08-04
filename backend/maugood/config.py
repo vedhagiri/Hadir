@@ -177,6 +177,16 @@ class Settings(BaseSettings):
     # their own screen.
     device_push_base_url: str = "https://getdata.mts-om.com"
 
+    # --- Collector polling --------------------------------------------------
+    # Terminals post to a public collector because Maugood has no public
+    # address. Maugood fetches from the same per-device URL the terminal is
+    # registered with — the push token is the credential, so there is no
+    # extra key to configure. An empty URL disables the poller entirely; a
+    # direct-to-Maugood deployment needs nothing here.
+    collector_url: str = ""
+    collector_poll_seconds: int = 30
+    collector_timeout_seconds: float = 20.0
+
     # --- Request attachments (v1.0 P14) ------------------------------------
     # Max upload size in megabytes. Enforced server-side regardless of
     # what the client claims (the P14 red line). The client is told the

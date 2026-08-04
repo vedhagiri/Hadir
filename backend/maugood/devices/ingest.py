@@ -38,6 +38,10 @@ class DeviceTap:
     direction: Optional[str]
     clock_suspect: bool
     raw: dict[str, Any]
+    # What the dedup key hashes instead of ``occurred_at``. For a healthy
+    # tap the two are identical. For a clock-broken one they differ, and
+    # that difference is load-bearing — see ``dedup_key``.
+    dedup_stamp: str
 
 
 def _first(d: dict[str, Any], *keys: str) -> Optional[Any]:
@@ -86,17 +90,26 @@ def resolve_occurred_at(
     return reported, False
 
 
-def dedup_key(*, device_id: int, event_serial: str, occurred_at: datetime) -> str:
+def dedup_key(*, device_id: int, event_serial: str, stamp: str) -> str:
     """Stable identity for one tap.
 
-    Deliberately includes ``occurred_at``. A terminal's ``serialNo`` counter
+    Deliberately includes a timestamp. A terminal's ``serialNo`` counter
     restarts at zero after a factory reset or an event-log clear, so a
     serial-only key would collide with old rows and silently swallow every
     subsequent event — attendance would simply look thin, with nothing
     logged and nothing to notice until payroll.
+
+    ``stamp`` is the **device-reported** time, not the stored
+    ``occurred_at``. They are the same for a healthy tap. They diverge for
+    a clock-broken one, where ``occurred_at`` is the substituted receive
+    time — and substituting means the value changes on every read. Hashing
+    that would make a 1970 tap un-dedupable: re-reading the collector after
+    a restart would insert it again, and again, each time as a new
+    attendance event. The reported value is wrong but *constant*, which is
+    exactly what identity needs.
     """
 
-    material = f"{device_id}|{event_serial}|{occurred_at.isoformat()}"
+    material = f"{device_id}|{event_serial}|{stamp}"
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
@@ -122,11 +135,22 @@ def normalise(payload: dict[str, Any], *, received_at: datetime) -> Optional[Dev
         return None
 
     serial = _first(event, "serialNo", "serial_no", "event_serial")
-    reported = parse_datetime(
-        _first(payload, "dateTime", "event_time", "time")
-        or _first(event, "dateTime", "event_time", "time")
+    reported_raw = _first(payload, "dateTime", "event_time", "time") or _first(
+        event, "dateTime", "event_time", "time"
     )
+    reported = parse_datetime(reported_raw)
     occurred_at, suspect = resolve_occurred_at(reported, received_at=received_at)
+
+    # Identity uses what the device said, so re-reading the same event
+    # always produces the same key. Falling back to occurred_at only when
+    # the device sent no timestamp at all — such an event has no stable
+    # identity to offer, and there is nothing better available.
+    if reported is not None:
+        dedup_stamp = reported.isoformat()
+    elif isinstance(reported_raw, str) and reported_raw.strip():
+        dedup_stamp = reported_raw.strip()
+    else:
+        dedup_stamp = occurred_at.isoformat()
 
     name = _first(event, "name", "employeeName", "person_name")
 
@@ -149,4 +173,5 @@ def normalise(payload: dict[str, Any], *, received_at: datetime) -> Optional[Dev
         ),
         clock_suspect=suspect,
         raw=payload,
+        dedup_stamp=dedup_stamp,
     )

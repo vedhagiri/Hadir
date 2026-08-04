@@ -144,6 +144,11 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     retention_scheduler.start()
     daily_clip_cleanup_scheduler.start()
     lifecycle_scheduler.start()
+    # Pulls attendance events off the collector server. Self-disables when
+    # no collector is configured, so a direct-to-Maugood deployment is
+    # unaffected.
+    from maugood.devices.collector_poll import collector_poller  # noqa: PLC0415
+    collector_poller.start()
     # P29 — host-resource ring buffer (CPU/mem/swap/I/O over time).
     from maugood.observability import timeseries as _ts  # noqa: PLC0415
     _ts.start()
@@ -179,6 +184,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         retention_scheduler.stop()
         daily_clip_cleanup_scheduler.stop()
         lifecycle_scheduler.stop()
+        collector_poller.stop()
         reconcile_scheduler.stop()
         clip_pipeline.stop()
         from maugood.observability import timeseries as _ts_stop  # noqa: PLC0415

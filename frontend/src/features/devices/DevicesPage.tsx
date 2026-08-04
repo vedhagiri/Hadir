@@ -155,8 +155,10 @@ export function DevicesPage() {
               <th style={{ width: 100, textAlign: "end" }}>
                 {t("devices.page.colUnmapped", { defaultValue: "Unmapped" })}
               </th>
+              {/* last_event_at is arrival time of the last POST (keepalives
+                  included), not the device-reported tap time. */}
               <th>
-                {t("devices.page.colLastEvent", { defaultValue: "Last event" })}
+                {t("devices.page.colLastSeen", { defaultValue: "Last seen" })}
               </th>
               <th style={{ textAlign: "right" }}>
                 {t("devices.page.colActions", { defaultValue: "Actions" })}

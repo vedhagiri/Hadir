@@ -13,6 +13,7 @@ import type {
   DevicePatchInput,
   DeviceUserListResponse,
   MapDeviceUserResult,
+  ResyncResult,
 } from "./types";
 
 const LIST_KEY = ["devices", "list"] as const;
@@ -131,6 +132,21 @@ export function useAutoMapDeviceUsers(deviceId: number) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: usersKey(deviceId) });
       qc.invalidateQueries({ queryKey: eventsKey(deviceId) });
+      qc.invalidateQueries({ queryKey: LIST_KEY });
+    },
+  });
+}
+
+export function useResyncDevice(deviceId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      api<ResyncResult>(`/api/devices/${deviceId}/resync`, { method: "POST" }),
+    onSuccess: () => {
+      // A resync can move taps out of "skipped" and write attendance, so
+      // both device-scoped lists and the row's counters are stale.
+      qc.invalidateQueries({ queryKey: eventsKey(deviceId) });
+      qc.invalidateQueries({ queryKey: usersKey(deviceId) });
       qc.invalidateQueries({ queryKey: LIST_KEY });
     },
   });

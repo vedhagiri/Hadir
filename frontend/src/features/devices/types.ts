@@ -122,6 +122,19 @@ export interface AutoMapResult {
   replayed: number;
 }
 
+// "Sync now". A push terminal can't be polled, so this re-drives what we
+// already received rather than fetching from the device.
+export interface ResyncResult {
+  // Taps whose person was mapped after the tap arrived.
+  adopted: number;
+  // Taps that previously errored and were re-armed.
+  retried: number;
+  // Taps turned into attendance by this run.
+  processed: number;
+  // Still parked waiting on a mapping — not a failure.
+  still_unmapped: number;
+}
+
 // --- raw taps ---------------------------------------------------------------
 
 export interface DeviceEvent {

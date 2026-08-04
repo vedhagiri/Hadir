@@ -115,9 +115,9 @@ def test_far_future_timestamp_is_rejected():
 
 
 def test_same_tap_twice_produces_one_key():
-    at = NOW
-    a = ingest.dedup_key(device_id=7, event_serial="168", occurred_at=at)
-    b = ingest.dedup_key(device_id=7, event_serial="168", occurred_at=at)
+    stamp = NOW.isoformat()
+    a = ingest.dedup_key(device_id=7, event_serial="168", stamp=stamp)
+    b = ingest.dedup_key(device_id=7, event_serial="168", stamp=stamp)
     assert a == b
 
 
@@ -131,16 +131,55 @@ def test_serial_counter_reset_does_not_collide_with_history():
     """
 
     old = ingest.dedup_key(
-        device_id=7, event_serial="168", occurred_at=NOW - timedelta(days=30)
+        device_id=7,
+        event_serial="168",
+        stamp=(NOW - timedelta(days=30)).isoformat(),
     )
-    after_reset = ingest.dedup_key(device_id=7, event_serial="168", occurred_at=NOW)
+    after_reset = ingest.dedup_key(
+        device_id=7, event_serial="168", stamp=NOW.isoformat()
+    )
     assert old != after_reset
 
 
 def test_same_serial_on_two_devices_does_not_collide():
-    a = ingest.dedup_key(device_id=7, event_serial="1", occurred_at=NOW)
-    b = ingest.dedup_key(device_id=8, event_serial="1", occurred_at=NOW)
+    a = ingest.dedup_key(device_id=7, event_serial="1", stamp=NOW.isoformat())
+    b = ingest.dedup_key(device_id=8, event_serial="1", stamp=NOW.isoformat())
     assert a != b
+
+
+def test_clock_broken_tap_keeps_one_identity_across_re_reads():
+    """The bug this guards: a 1970 tap must not multiply on every read.
+
+    ``occurred_at`` for a clock-broken tap is the substituted receive time,
+    which is different every time the collector serves the record again.
+    Hashing that produced a fresh dedup key per read, so a Maugood restart
+    re-inserted every 1970 tap as a new attendance event. The key must come
+    from what the device reported — wrong, but constant.
+    """
+
+    payload = _hik(dateTime="1970-01-01T01:16:27+04:00")
+
+    first = ingest.normalise(payload, received_at=NOW)
+    later = ingest.normalise(payload, received_at=NOW + timedelta(hours=3))
+
+    assert first is not None and later is not None
+    # The stored timestamps differ — that is the fallback working.
+    assert first.occurred_at != later.occurred_at
+    assert first.clock_suspect and later.clock_suspect
+    # The identity does not.
+    assert ingest.dedup_key(
+        device_id=7, event_serial=first.event_serial, stamp=first.dedup_stamp
+    ) == ingest.dedup_key(
+        device_id=7, event_serial=later.event_serial, stamp=later.dedup_stamp
+    )
+
+
+def test_healthy_tap_stamp_matches_its_occurred_at():
+    """No behaviour change for the normal case — same key as before."""
+
+    tap = ingest.normalise(_hik(), received_at=NOW)
+    assert tap is not None
+    assert tap.dedup_stamp == tap.occurred_at.isoformat()
 
 
 # --- normalisation ----------------------------------------------------------

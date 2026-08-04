@@ -40,6 +40,7 @@ from maugood.devices.schemas import (
     DeviceUserOut,
     MapDeviceUserIn,
     MapDeviceUserResult,
+    ResyncResult,
     SyncUsersResult,
 )
 from maugood.tenants.scope import TenantScope
@@ -453,6 +454,43 @@ def sync_users_endpoint(
         reachable,
     )
     return SyncUsersResult(synced=synced, unmapped=unmapped, reachable=reachable)
+
+
+@router.post("/{device_id}/resync", response_model=ResyncResult)
+def resync_device_endpoint(
+    device_id: int,
+    user: Annotated[CurrentUser, ADMIN],
+) -> ResyncResult:
+    """"Sync now" — re-drive everything received but not yet in attendance.
+
+    A push terminal cannot be polled, so this does not reach out to the
+    device. It adopts taps whose person has since been mapped, retries
+    failed ones, and drains the result into ``detection_events`` +
+    attendance. Safe to run repeatedly; a no-op when nothing is stuck.
+    """
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    with get_engine().begin() as conn:
+        if repo.get_device(conn, scope, device_id) is None:
+            # 404, not 403 — a 403 would confirm the device exists in
+            # another tenant.
+            raise HTTPException(status_code=404, detail="device not found")
+
+    result = processor.resync_device(scope, device_id=device_id)
+
+    with get_engine().begin() as conn:
+        still_unmapped = repo.count_skipped_taps(conn, scope, device_id)
+        write_audit(
+            conn,
+            tenant_id=scope.tenant_id,
+            actor_user_id=user.id,
+            action="device.resynced",
+            entity_type="device",
+            entity_id=str(device_id),
+            after={**result, "still_unmapped": still_unmapped},
+        )
+
+    return ResyncResult(**result, still_unmapped=still_unmapped)
 
 
 @router.get("/{device_id}/users", response_model=DeviceUserListOut)

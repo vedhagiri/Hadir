@@ -441,6 +441,24 @@ def count_device_users(
     return int(total), int(unmapped)
 
 
+def count_skipped_taps(
+    conn: Connection, scope: TenantScope, device_id: int
+) -> int:
+    """Taps parked because their person is not mapped to an employee yet."""
+
+    return int(
+        conn.execute(
+            select(func.count())
+            .select_from(device_attendance_events)
+            .where(
+                device_attendance_events.c.tenant_id == scope.tenant_id,
+                device_attendance_events.c.device_id == device_id,
+                device_attendance_events.c.status == "skipped",
+            )
+        ).scalar_one()
+    )
+
+
 # --- device_attendance_events (staging) -------------------------------------
 
 
