@@ -6,44 +6,21 @@
 // The push URL is a credential, so it only ever appears inside the setup
 // panel — never in the table.
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { extractApiError } from "../../api/client";
 import { ModalShell } from "../../components/DrawerShell";
+import { RelativeTime } from "../../components/RelativeTime";
 import { Icon } from "../../shell/Icon";
 import { DeviceDetailDrawer } from "./DeviceDetailDrawer";
 import { AddDeviceWizard } from "./AddDeviceWizard";
 import { DeviceDrawer } from "./DeviceDrawer";
 import { DeviceSetupPanel } from "./DeviceSetupPanel";
+import { livenessOf, StatusDot, StatusPill } from "./DeviceStatus";
+import { deviceSubtitle } from "./format";
 import { useDeleteDevice, useDevices } from "./hooks";
 import { type Device } from "./types";
-
-function StatusPill({ device }: { device: Device }) {
-  const { t } = useTranslation();
-
-  // A push device cannot be pinged, so "online" means it has actually sent
-  // us something — not that a probe succeeded.
-  if (!device.last_event_at) {
-    return (
-      <span className="pill pill-neutral">
-        {t("devices.health.waiting", { defaultValue: "Waiting for first event" })}
-      </span>
-    );
-  }
-  if (device.health_status === "unreachable") {
-    return (
-      <span className="pill pill-danger">
-        {t("devices.health.unreachable", { defaultValue: "Unreachable" })}
-      </span>
-    );
-  }
-  return (
-    <span className="pill pill-success">
-      {t("devices.health.online", { defaultValue: "Online" })}
-    </span>
-  );
-}
 
 export function DevicesPage() {
   const { t } = useTranslation();
@@ -58,6 +35,24 @@ export function DevicesPage() {
   const [rowError, setRowError] = useState<string | null>(null);
 
   const items = list.data?.items ?? [];
+
+  // Header summary. The counts an operator opens this page to check —
+  // "is everything reporting, and is anyone stuck unmapped?" — rather
+  // than a bare device count.
+  const summary = useMemo(() => {
+    let online = 0;
+    let waiting = 0;
+    let unreachable = 0;
+    let unmapped = 0;
+    for (const d of items) {
+      const state = livenessOf(d);
+      if (state === "online") online += 1;
+      else if (state === "waiting") waiting += 1;
+      else unreachable += 1;
+      unmapped += d.users_unmapped;
+    }
+    return { online, waiting, unreachable, unmapped };
+  }, [items]);
 
   // Re-read the live row so the drawers reflect polled updates instead of
   // the snapshot captured when they were opened.
@@ -98,12 +93,61 @@ export function DevicesPage() {
             {t("devices.page.title", { defaultValue: "Devices" })}
           </h1>
           <p className="page-sub">
-            {list.data
-              ? t("devices.page.sub", {
-                  count: items.length,
-                  defaultValue: `${items.length} attendance devices`,
-                })
-              : "—"}
+            {!list.data ? (
+              "—"
+            ) : items.length === 0 ? (
+              t("devices.page.subEmpty", {
+                defaultValue: "No attendance devices registered",
+              })
+            ) : (
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  flexWrap: "wrap",
+                }}
+              >
+                <span>
+                  {t("devices.page.sub", {
+                    count: items.length,
+                    defaultValue: `${items.length} attendance devices`,
+                  })}
+                </span>
+                {summary.online > 0 && (
+                  <span className="pill pill-success">
+                    {t("devices.page.summaryOnline", {
+                      count: summary.online,
+                      defaultValue: `${summary.online} online`,
+                    })}
+                  </span>
+                )}
+                {summary.unreachable > 0 && (
+                  <span className="pill pill-danger">
+                    {t("devices.page.summaryUnreachable", {
+                      count: summary.unreachable,
+                      defaultValue: `${summary.unreachable} unreachable`,
+                    })}
+                  </span>
+                )}
+                {summary.waiting > 0 && (
+                  <span className="pill pill-neutral">
+                    {t("devices.page.summaryWaiting", {
+                      count: summary.waiting,
+                      defaultValue: `${summary.waiting} not reporting yet`,
+                    })}
+                  </span>
+                )}
+                {summary.unmapped > 0 && (
+                  <span className="pill pill-warning">
+                    {t("devices.page.summaryUnmapped", {
+                      count: summary.unmapped,
+                      defaultValue: `${summary.unmapped} people unmapped`,
+                    })}
+                  </span>
+                )}
+              </span>
+            )}
           </p>
         </div>
         <div className="page-actions">
@@ -145,22 +189,18 @@ export function DevicesPage() {
           <thead>
             <tr>
               <th>{t("devices.page.colName", { defaultValue: "Device" })}</th>
-              <th>{t("devices.page.colBranch", { defaultValue: "Branch" })}</th>
-              <th style={{ width: 150 }}>
+              <th style={{ width: 190 }}>
                 {t("devices.page.colStatus", { defaultValue: "Status" })}
               </th>
-              <th style={{ width: 90, textAlign: "end" }}>
+              <th style={{ width: 170 }}>
                 {t("devices.page.colPeople", { defaultValue: "People" })}
-              </th>
-              <th style={{ width: 100, textAlign: "end" }}>
-                {t("devices.page.colUnmapped", { defaultValue: "Unmapped" })}
               </th>
               {/* last_event_at is arrival time of the last POST (keepalives
                   included), not the device-reported tap time. */}
-              <th>
+              <th style={{ width: 150 }}>
                 {t("devices.page.colLastSeen", { defaultValue: "Last seen" })}
               </th>
-              <th style={{ textAlign: "right" }}>
+              <th style={{ width: 120, textAlign: "end" }}>
                 {t("devices.page.colActions", { defaultValue: "Actions" })}
               </th>
             </tr>
@@ -168,7 +208,7 @@ export function DevicesPage() {
           <tbody>
             {list.isLoading && (
               <tr>
-                <td colSpan={7} className="text-sm text-dim" style={{ padding: 16 }}>
+                <td colSpan={5} className="text-sm text-dim" style={{ padding: 16 }}>
                   {t("devices.page.loading", { defaultValue: "Loading devices…" })}
                 </td>
               </tr>
@@ -176,103 +216,181 @@ export function DevicesPage() {
 
             {!list.isLoading && items.length === 0 && (
               <tr>
-                <td
-                  colSpan={7}
-                  className="text-sm text-dim"
-                  style={{ padding: 24, textAlign: "center" }}
-                >
-                  {t("devices.page.empty", {
-                    defaultValue: "No devices yet — add your first terminal.",
-                  })}
-                </td>
-              </tr>
-            )}
-
-            {items.map((d) => (
-              <tr
-                key={d.id}
-                onClick={() => setDetailTarget(d)}
-                style={{ cursor: "pointer" }}
-              >
-                <td>
-                  <div style={{ fontWeight: 600 }}>{d.name}</div>
-                  {d.serial_number && (
-                    <div className="text-xs text-dim mono">{d.serial_number}</div>
-                  )}
-                </td>
-                <td>{d.location || <span className="text-dim">—</span>}</td>
-                <td>
-                  <StatusPill device={d} />
-                  {d.clock_suspect && (
+                <td colSpan={5} style={{ padding: 0 }}>
+                  <div className="empty" style={{ padding: "36px 20px" }}>
                     <div
-                      className="text-xs"
-                      style={{ color: "var(--warning-text, var(--text))" }}
-                      title={t("devices.page.clockHint", {
-                        defaultValue:
-                          "The terminal reported an implausible timestamp — set its clock via NTP.",
-                      })}
+                      style={{
+                        fontSize: 14,
+                        fontWeight: 600,
+                        color: "var(--text)",
+                        marginBottom: 6,
+                      }}
                     >
-                      {t("devices.page.clockSuspect", {
-                        defaultValue: "clock not set",
+                      {t("devices.page.emptyTitle", {
+                        defaultValue: "No devices yet",
                       })}
                     </div>
-                  )}
-                </td>
-                <td
-                  style={{ textAlign: "end", fontVariantNumeric: "tabular-nums" }}
-                >
-                  {d.users_total}
-                </td>
-                <td style={{ textAlign: "end" }}>
-                  {d.users_unmapped > 0 ? (
-                    <span className="pill pill-warning">{d.users_unmapped}</span>
-                  ) : (
-                    <span className="text-dim">0</span>
-                  )}
-                </td>
-                <td className="text-xs text-dim">
-                  {d.last_event_at
-                    ? new Date(d.last_event_at).toLocaleString()
-                    : t("devices.page.never", { defaultValue: "never" })}
-                </td>
-                <td onClick={(e) => e.stopPropagation()}>
-                  <div
-                    style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}
-                  >
-                    <button
-                      className="btn btn-sm"
-                      onClick={() => {
-                        setSetupTarget(d);
-                      }}
-                      title={t("devices.page.showUrl", {
-                        defaultValue: "Show push URL",
+                    <div style={{ maxWidth: "48ch", margin: "0 auto 14px" }}>
+                      {t("devices.page.empty", {
+                        defaultValue:
+                          "Register a terminal here, then paste the push URL we generate into the device. It starts reporting the moment someone uses it.",
                       })}
-                      aria-label={t("devices.page.showUrl", {
-                        defaultValue: "Show push URL",
+                    </div>
+                    <button className="btn btn-primary" onClick={openAdd}>
+                      <Icon name="plus" size={12} />
+                      {t("devices.page.addDevice", {
+                        defaultValue: "Add device",
                       })}
-                    >
-                      <Icon name="clipboard" size={12} />
-                    </button>
-                    <button
-                      className="btn btn-sm"
-                      onClick={() => openEdit(d)}
-                      title={t("common.edit")}
-                      aria-label={t("common.edit")}
-                    >
-                      <Icon name="edit" size={12} />
-                    </button>
-                    <button
-                      className="btn btn-sm"
-                      onClick={() => setDeleteTarget(d)}
-                      title={t("common.delete")}
-                      aria-label={t("common.delete")}
-                    >
-                      <Icon name="trash" size={12} />
                     </button>
                   </div>
                 </td>
               </tr>
-            ))}
+            )}
+
+            {items.map((d) => {
+              const subtitle = deviceSubtitle([
+                d.location,
+                d.reported_device_name,
+                d.serial_number,
+              ]);
+              return (
+                <tr
+                  key={d.id}
+                  onClick={() => setDetailTarget(d)}
+                  style={{ cursor: "pointer" }}
+                >
+                  <td>
+                    <div
+                      style={{ display: "flex", alignItems: "center", gap: 10 }}
+                    >
+                      <StatusDot device={d} />
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 600 }}>{d.name}</div>
+                        {subtitle && (
+                          <div className="text-xs text-dim">{subtitle}</div>
+                        )}
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <StatusPill device={d} />
+                    {/* A device that has never reported is not broken — it
+                        just hasn't been pointed at us yet, and the push URL
+                        is the fix. Offer it right where the problem shows. */}
+                    {!d.last_event_at && (
+                      <div style={{ marginTop: 5 }}>
+                        <button
+                          className="btn btn-sm btn-ghost"
+                          style={{ padding: "1px 4px" }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSetupTarget(d);
+                          }}
+                        >
+                          {t("devices.page.setUp", {
+                            defaultValue: "Set up →",
+                          })}
+                        </button>
+                      </div>
+                    )}
+                    {d.clock_suspect && (
+                      <div
+                        className="text-xs"
+                        style={{
+                          marginTop: 4,
+                          color: "var(--warning-text, var(--text))",
+                        }}
+                        title={t("devices.page.clockHint", {
+                          defaultValue:
+                            "The terminal reported an implausible timestamp — set its clock via NTP.",
+                        })}
+                      >
+                        {t("devices.page.clockSuspect", {
+                          defaultValue: "clock not set",
+                        })}
+                      </div>
+                    )}
+                  </td>
+                  <td>
+                    {d.users_total === 0 ? (
+                      <span className="text-xs text-dim">
+                        {t("devices.page.noPeople", {
+                          defaultValue: "nobody seen yet",
+                        })}
+                      </span>
+                    ) : (
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                          {t("devices.page.peopleSeen", {
+                            count: d.users_total,
+                            defaultValue: `${d.users_total} seen`,
+                          })}
+                        </span>
+                        {d.users_unmapped > 0 && (
+                          <span className="pill pill-warning">
+                            {t("devices.page.unmappedCount", {
+                              count: d.users_unmapped,
+                              defaultValue: `${d.users_unmapped} unmapped`,
+                            })}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </td>
+                  <td className="text-xs text-dim">
+                    {d.last_event_at ? (
+                      <RelativeTime iso={d.last_event_at} />
+                    ) : (
+                      t("devices.page.never", { defaultValue: "never" })
+                    )}
+                  </td>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <div
+                      className="row-actions"
+                      style={{ justifyContent: "flex-end", width: "100%" }}
+                    >
+                      <button
+                        className="btn btn-sm btn-ghost"
+                        onClick={() => {
+                          setSetupTarget(d);
+                        }}
+                        title={t("devices.page.showUrl", {
+                          defaultValue: "Show push URL",
+                        })}
+                        aria-label={t("devices.page.showUrl", {
+                          defaultValue: "Show push URL",
+                        })}
+                      >
+                        <Icon name="clipboard" size={13} />
+                      </button>
+                      <button
+                        className="btn btn-sm btn-ghost"
+                        onClick={() => openEdit(d)}
+                        title={t("common.edit")}
+                        aria-label={t("common.edit")}
+                      >
+                        <Icon name="edit" size={13} />
+                      </button>
+                      <button
+                        className="btn btn-sm btn-ghost danger"
+                        onClick={() => setDeleteTarget(d)}
+                        title={t("common.delete")}
+                        aria-label={t("common.delete")}
+                      >
+                        <Icon name="trash" size={13} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

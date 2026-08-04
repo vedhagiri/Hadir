@@ -9,13 +9,17 @@
 // before a mapping exists are held rather than dropped, and mapping replays
 // them into attendance.
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { extractApiError } from "../../api/client";
 import { DrawerShell } from "../../components/DrawerShell";
+import { RelativeTime } from "../../components/RelativeTime";
 import { Icon } from "../../shell/Icon";
+import { useTenantDateTime } from "../../util/datetime";
 import { useEmployeeList } from "../employees/hooks";
+import { StatusPill } from "./DeviceStatus";
+import { deviceSubtitle, verifyModeLabel } from "./format";
 import {
   useAutoMapDeviceUsers,
   useDeviceEvents,
@@ -83,23 +87,34 @@ export function DeviceDetailDrawer({ device, onClose, onShowSetup }: Props) {
     [users.data],
   );
 
+  // The name the operator gave it, then the name the device calls itself
+  // — those differ often enough that seeing both prevents a "wrong
+  // device" mix-up during setup.
+  const subtitle = deviceSubtitle([device.location, device.reported_device_name]);
+
   return (
     <DrawerShell onClose={onClose}>
       <div className="drawer" style={{ width: "min(820px, 96vw)" }}>
         <div className="drawer-head">
-          <div style={{ flex: 1 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <div className="mono text-xs text-dim">
               {t("devices.label", { defaultValue: "DEVICE" })}
             </div>
-            <div style={{ fontSize: 16, fontWeight: 600, marginTop: 2 }}>
-              {device.name}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                flexWrap: "wrap",
+                marginTop: 2,
+              }}
+            >
+              <span style={{ fontSize: 16, fontWeight: 600 }}>
+                {device.name}
+              </span>
+              <StatusPill device={device} />
             </div>
-            <div className="text-xs text-dim">
-              {device.location || "—"}
-              {device.reported_device_name
-                ? ` · ${device.reported_device_name}`
-                : ""}
-            </div>
+            {subtitle && <div className="text-xs text-dim">{subtitle}</div>}
           </div>
           <button
             className="icon-btn"
@@ -110,25 +125,20 @@ export function DeviceDetailDrawer({ device, onClose, onShowSetup }: Props) {
           </button>
         </div>
 
-        {/* Hardware facts, learned from the events themselves. */}
+        {/* Liveness + hardware facts. Serial / model are learned from the
+            events themselves, so a device that hasn't reported has none —
+            we omit those rather than print a row of dashes. */}
         <div
           style={{
             display: "flex",
-            gap: 22,
+            gap: 20,
             flexWrap: "wrap",
+            alignItems: "center",
             padding: "10px 16px",
             borderBottom: "1px solid var(--border)",
             background: "var(--bg-sunken)",
           }}
         >
-          <Meta
-            label={t("devices.fields.serial", { defaultValue: "Serial" })}
-            value={device.serial_number}
-          />
-          <Meta
-            label={t("devices.fields.model", { defaultValue: "Model" })}
-            value={device.model}
-          />
           {/* Arrival time of the last POST, keepalives included — this is
               the liveness signal, NOT the newest row in the events tab
               (those carry the time the device claims the tap happened).
@@ -140,49 +150,51 @@ export function DeviceDetailDrawer({ device, onClose, onShowSetup }: Props) {
               defaultValue:
                 "When this terminal last contacted the server, including keepalives. Event times below are what the device reported.",
             })}
-            value={
-              device.last_event_at
-                ? new Date(device.last_event_at).toLocaleString()
-                : t("devices.page.never", { defaultValue: "never" })
-            }
-          />
-          <div style={{ flex: 1 }} />
-          <button
-            className="btn btn-sm"
-            onClick={runResync}
-            disabled={resync.isPending}
-            title={t("devices.resync.hint", {
-              defaultValue:
-                "Re-process taps already received that haven't become attendance yet. This does not contact the terminal — a push device can't be polled.",
-            })}
           >
-            <Icon name="refresh" size={12} />
-            {resync.isPending
-              ? t("devices.resync.running", { defaultValue: "Syncing…" })
-              : t("devices.resync.action", { defaultValue: "Sync now" })}
-          </button>
-          <button className="btn btn-sm" onClick={onShowSetup}>
-            <Icon name="clipboard" size={12} />
-            {t("devices.detail.showUrl", { defaultValue: "Show push URL" })}
-          </button>
+            {device.last_event_at ? (
+              <RelativeTime iso={device.last_event_at} />
+            ) : (
+              t("devices.page.never", { defaultValue: "never" })
+            )}
+          </Meta>
+          {device.serial_number && (
+            <Meta
+              label={t("devices.fields.serial", { defaultValue: "Serial" })}
+            >
+              {device.serial_number}
+            </Meta>
+          )}
+          {device.model && (
+            <Meta label={t("devices.fields.model", { defaultValue: "Model" })}>
+              {device.model}
+            </Meta>
+          )}
+          <div style={{ flex: 1 }} />
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              className="btn btn-sm"
+              onClick={runResync}
+              disabled={resync.isPending}
+              title={t("devices.resync.hint", {
+                defaultValue:
+                  "Re-process taps already received that haven't become attendance yet. This does not contact the terminal — a push device can't be polled.",
+              })}
+            >
+              <Icon name="refresh" size={12} />
+              {resync.isPending
+                ? t("devices.resync.running", { defaultValue: "Syncing…" })
+                : t("devices.resync.action", { defaultValue: "Sync now" })}
+            </button>
+            <button className="btn btn-sm" onClick={onShowSetup}>
+              <Icon name="clipboard" size={12} />
+              {t("devices.detail.showUrl", { defaultValue: "Show push URL" })}
+            </button>
+          </div>
         </div>
 
-        {device.clock_suspect && (
-          <Banner tone="warn">
-            {t("devices.detail.clockSuspect", {
-              defaultValue:
-                "This terminal reported a timestamp we could not believe (usually an unset clock). Those taps were recorded using their arrival time. Set the device clock via NTP.",
-            })}
-          </Banner>
-        )}
-
         <div
-          style={{
-            display: "flex",
-            gap: 4,
-            padding: "0 16px",
-            borderBottom: "1px solid var(--border)",
-          }}
+          className="tabs"
+          style={{ padding: "0 16px", marginBottom: 0, gap: 2 }}
         >
           <TabButton
             active={tab === "events"}
@@ -206,6 +218,15 @@ export function DeviceDetailDrawer({ device, onClose, onShowSetup }: Props) {
         <div className="drawer-body">
           {msg && <Banner tone="ok">{msg}</Banner>}
           {error && <Banner tone="danger">{error}</Banner>}
+
+          {device.clock_suspect && (
+            <Banner tone="warn">
+              {t("devices.detail.clockSuspect", {
+                defaultValue:
+                  "This terminal reported a timestamp we could not believe (usually an unset clock). Those taps were recorded using their arrival time. Set the device clock via NTP.",
+              })}
+            </Banner>
+          )}
 
           {tab === "events" ? (
             <EventsTab
@@ -235,6 +256,11 @@ export function DeviceDetailDrawer({ device, onClose, onShowSetup }: Props) {
 
 // --- events -----------------------------------------------------------------
 
+/** A tap that did not become attendance is what an operator hunts for. */
+function needsAttention(e: DeviceEvent): boolean {
+  return e.clock_suspect || e.status === "skipped" || e.status === "failed";
+}
+
 function EventsTab({
   items,
   loading,
@@ -243,6 +269,27 @@ function EventsTab({
   loading: boolean;
 }) {
   const { t } = useTranslation();
+  const dt = useTenantDateTime();
+  const [onlyProblems, setOnlyProblems] = useState(false);
+
+  const problemCount = useMemo(
+    () => items.filter(needsAttention).length,
+    [items],
+  );
+
+  // The API returns taps in arrival order, but the column an operator
+  // reads is the time the device says the tap happened. Those disagree
+  // whenever a terminal buffers offline and posts a backlog, and the
+  // result looks like a randomly-ordered list. Sort by what we display.
+  const rows = useMemo(() => {
+    const filtered = onlyProblems ? items.filter(needsAttention) : items;
+    return [...filtered].sort((a, b) => {
+      const d =
+        new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime();
+      if (d !== 0) return d;
+      return new Date(b.received_at).getTime() - new Date(a.received_at).getTime();
+    });
+  }, [items, onlyProblems]);
 
   if (loading) {
     return (
@@ -265,76 +312,232 @@ function EventsTab({
     );
   }
 
+  const today = dt.formatDate(new Date());
+  const yesterday = dt.formatDate(new Date(Date.now() - 86_400_000));
+
+  let lastDay: string | null = null;
+
   return (
-    <div className="tablewrap">
-      <table className="table">
-        <thead>
-          <tr>
-            <th>{t("devices.detail.colTime", { defaultValue: "Time" })}</th>
-            <th>
-              {t("devices.detail.colEmployeeNo", {
-                defaultValue: "Employee no.",
+    <>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          flexWrap: "wrap",
+          marginBottom: 10,
+        }}
+      >
+        <div className="seg" role="group">
+          <button
+            className={`seg-btn${onlyProblems ? "" : " active"}`}
+            aria-pressed={!onlyProblems}
+            onClick={() => setOnlyProblems(false)}
+          >
+            {t("devices.detail.filterAll", { defaultValue: "All" })}
+            <span className="text-dim">{items.length}</span>
+          </button>
+          <button
+            className={`seg-btn${onlyProblems ? " active" : ""}`}
+            aria-pressed={onlyProblems}
+            onClick={() => setOnlyProblems(true)}
+            disabled={problemCount === 0}
+            // .seg-btn is not .btn, so it inherits no disabled styling —
+            // without this the filter looks clickable when it isn't.
+            style={
+              problemCount === 0
+                ? { opacity: 0.45, cursor: "default" }
+                : undefined
+            }
+          >
+            {t("devices.detail.filterProblems", {
+              defaultValue: "Needs attention",
+            })}
+            <span className={problemCount > 0 ? "" : "text-dim"}>
+              {problemCount}
+            </span>
+          </button>
+        </div>
+        <div style={{ flex: 1 }} />
+        <span className="text-xs text-dim">
+          {t("devices.detail.timesAreDeviceReported", {
+            defaultValue: "Times are what the device reported",
+          })}
+        </span>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="empty">
+          {t("devices.detail.noProblems", {
+            defaultValue: "Every tap became attendance — nothing needs a look.",
+          })}
+        </div>
+      ) : (
+        <div className="tablewrap">
+          <table className="table">
+            <thead>
+              <tr>
+                {/* Widths hold a 12-hour clock and the longest verify
+                    combination on one line — wrapped cells double the row
+                    height and make a long tap list hard to scan. */}
+                <th style={{ width: 108 }}>
+                  {t("devices.detail.colTime", { defaultValue: "Time" })}
+                </th>
+                <th>
+                  {t("devices.detail.colPerson", { defaultValue: "Person" })}
+                </th>
+                <th style={{ width: 172 }}>
+                  {t("devices.detail.colVerify", { defaultValue: "Verified by" })}
+                </th>
+                <th style={{ width: 130 }}>
+                  {t("devices.detail.colResult", { defaultValue: "Result" })}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((e) => {
+                const day = dt.formatDate(e.occurred_at);
+                const newDay = day !== lastDay;
+                lastDay = day;
+                const dayLabel =
+                  day === today
+                    ? t("devices.detail.today", { defaultValue: "Today" })
+                    : day === yesterday
+                      ? t("devices.detail.yesterday", {
+                          defaultValue: "Yesterday",
+                        })
+                      : day;
+                return (
+                  <Fragment key={e.id}>
+                    {newDay && (
+                      <tr>
+                        <td
+                          colSpan={4}
+                          style={{
+                            padding: "7px 12px",
+                            background: "var(--bg-sunken)",
+                            fontSize: 11,
+                            fontWeight: 600,
+                            letterSpacing: "0.04em",
+                            textTransform: "uppercase",
+                            color: "var(--text-tertiary)",
+                          }}
+                        >
+                          {dayLabel}
+                          {dayLabel === day ? "" : ` · ${day}`}
+                        </td>
+                      </tr>
+                    )}
+                    <tr>
+                      <td
+                        className="mono text-xs"
+                        style={{ whiteSpace: "nowrap" }}
+                        title={t("devices.detail.arrivedAt", {
+                          time: dt.formatDateTime(e.received_at),
+                          defaultValue: `Arrived ${dt.formatDateTime(e.received_at)}`,
+                        })}
+                      >
+                        {dt.formatTimeWithSeconds(e.occurred_at)}
+                      </td>
+                      <td>
+                        <div style={{ fontWeight: 500 }}>
+                          {e.person_name ?? (
+                            <span className="text-dim">
+                              {t("devices.detail.unknownPerson", {
+                                defaultValue: "unnamed",
+                              })}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs text-dim mono">
+                          {t("devices.detail.idAndSerial", {
+                            id: e.device_user_id,
+                            serial: e.event_serial || "—",
+                            defaultValue: `ID ${e.device_user_id} · #${e.event_serial || "—"}`,
+                          })}
+                        </div>
+                      </td>
+                      <td className="text-xs" style={{ whiteSpace: "nowrap" }}>
+                        {verifyModeLabel(e.verify_mode, t)}
+                      </td>
+                      <td>
+                        <EventStatus event={e} />
+                      </td>
+                    </tr>
+                  </Fragment>
+                );
               })}
-            </th>
-            <th>{t("devices.detail.colName", { defaultValue: "Name on device" })}</th>
-            <th>{t("devices.detail.colVerify", { defaultValue: "Verify" })}</th>
-            <th>{t("devices.detail.colSerial", { defaultValue: "Serial" })}</th>
-            <th>{t("devices.detail.colResult", { defaultValue: "Result" })}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((e) => (
-            <tr key={e.id}>
-              <td className="mono text-xs">
-                {new Date(e.occurred_at).toLocaleString()}
-              </td>
-              <td className="mono text-xs">{e.device_user_id}</td>
-              <td>{e.person_name ?? <span className="text-dim">—</span>}</td>
-              <td className="text-xs">{e.verify_mode ?? "—"}</td>
-              <td className="mono text-xs">{e.event_serial || "—"}</td>
-              <td>
-                <EventStatus event={e} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
   );
 }
 
+// Every pill carries a hover explanation. "Held" and "Clock corrected"
+// are Maugood vocabulary, not something an operator can be expected to
+// infer from two words.
 function EventStatus({ event }: { event: DeviceEvent }) {
   const { t } = useTranslation();
   if (event.clock_suspect) {
     return (
-      <span className="pill pill-warning">
+      <span
+        className="pill pill-warning"
+        title={t("devices.detail.statusClockHint", {
+          defaultValue:
+            "The device reported a time we could not believe, so the tap was recorded when it arrived instead. Set the terminal clock via NTP.",
+        })}
+      >
         {t("devices.detail.statusClock", { defaultValue: "Clock corrected" })}
       </span>
     );
   }
   if (event.status === "skipped") {
     return (
-      <span className="pill pill-warning">
+      <span
+        className="pill pill-warning"
+        title={t("devices.detail.statusHeldHint", {
+          defaultValue:
+            "Kept, not counted — this device ID is not mapped to an employee yet. Map them in the next tab and this tap is replayed into attendance.",
+        })}
+      >
         {t("devices.detail.statusHeld", { defaultValue: "Held · unmapped" })}
       </span>
     );
   }
   if (event.status === "failed") {
     return (
-      <span className="pill pill-danger">
+      <span
+        className="pill pill-danger"
+        title={t("devices.detail.statusFailedHint", {
+          defaultValue:
+            "This tap could not be turned into attendance. Use Sync now to retry it.",
+        })}
+      >
         {t("devices.detail.statusFailed", { defaultValue: "Failed" })}
       </span>
     );
   }
   if (event.status === "processed") {
     return (
-      <span className="pill pill-success">
+      <span
+        className="pill pill-success"
+        title={t("devices.detail.statusAttendanceHint", {
+          defaultValue: "Counted — this tap is part of the employee's day.",
+        })}
+      >
         {t("devices.detail.statusAttendance", { defaultValue: "Attendance" })}
       </span>
     );
   }
   return (
-    <span className="pill pill-neutral">
+    <span
+      className="pill pill-neutral"
+      title={t("devices.detail.statusPendingHint", {
+        defaultValue: "Received, waiting to be processed into attendance.",
+      })}
+    >
       {t("devices.detail.statusPending", { defaultValue: "Pending" })}
     </span>
   );
@@ -463,14 +666,7 @@ function PeopleTab({
 
   return (
     <>
-      <div
-        style={{
-          display: "flex",
-          gap: 10,
-          flexWrap: "wrap",
-          marginBottom: 12,
-        }}
-      >
+      <div className="grid grid-4" style={{ gap: 10, marginBottom: 12 }}>
         <Tile
           n={items.length}
           label={t("devices.detail.tilePeople", { defaultValue: "People seen" })}
@@ -488,7 +684,53 @@ function PeopleTab({
         <Tile
           n={held}
           label={t("devices.detail.tileHeld", { defaultValue: "Taps held" })}
+          title={t("devices.detail.tileHeldHint", {
+            defaultValue:
+              "Taps kept but not counted, because the person who made them is not mapped to an employee yet.",
+          })}
+          {...(held > 0 ? { tone: "warn" as const } : {})}
         />
+      </div>
+
+      {/* The action sits above the table it acts on — an operator who
+          sees "3 unmapped" should not have to scroll past the problem to
+          find the button that fixes it. */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          flexWrap: "wrap",
+          marginBottom: 10,
+        }}
+      >
+        <button
+          className="btn btn-sm"
+          onClick={doAutoMap}
+          disabled={autoMap.isPending || unmapped === 0}
+          title={t("devices.detail.autoMapHint", {
+            defaultValue:
+              "Link every device ID that exactly matches an employee code. Existing mappings are left alone.",
+          })}
+        >
+          <Icon name="zap" size={12} />
+          {autoMap.isPending
+            ? t("devices.detail.autoMapping", { defaultValue: "Matching…" })
+            : t("devices.detail.autoMap", {
+                defaultValue: "Auto-map by employee code",
+              })}
+        </button>
+        <div style={{ flex: 1 }} />
+        <span
+          className={unmapped > 0 ? "pill pill-warning" : "pill pill-success"}
+        >
+          {unmapped > 0
+            ? t("devices.detail.stillUnmapped", {
+                count: unmapped,
+                defaultValue: `${unmapped} people still unmapped`,
+              })
+            : t("devices.detail.allMapped", { defaultValue: "Everyone mapped" })}
+        </span>
       </div>
 
       <div className="tablewrap">
@@ -608,36 +850,6 @@ function PeopleTab({
 
       <div
         style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          marginTop: 12,
-          flexWrap: "wrap",
-        }}
-      >
-        <button
-          className="btn btn-sm"
-          onClick={doAutoMap}
-          disabled={autoMap.isPending || unmapped === 0}
-        >
-          <Icon name="zap" size={12} />
-          {t("devices.detail.autoMap", {
-            defaultValue: "Auto-map by employee code",
-          })}
-        </button>
-        <div style={{ flex: 1 }} />
-        <span className="text-xs text-dim">
-          {unmapped > 0
-            ? t("devices.detail.stillUnmapped", {
-                count: unmapped,
-                defaultValue: `${unmapped} people still unmapped`,
-              })
-            : t("devices.detail.allMapped", { defaultValue: "Everyone mapped" })}
-        </span>
-      </div>
-
-      <div
-        style={{
           marginTop: 14,
           padding: "10px 12px",
           background: "var(--bg-sunken)",
@@ -677,19 +889,10 @@ function TabButton({
 }) {
   return (
     <button
+      className={`tab${active ? " active" : ""}`}
       onClick={onClick}
       aria-pressed={active}
-      style={{
-        background: "none",
-        border: 0,
-        padding: "10px 12px",
-        fontSize: 13,
-        fontWeight: 600,
-        cursor: "pointer",
-        color: active ? "var(--accent-text, var(--text))" : "var(--text-secondary)",
-        borderBottom: `2px solid ${active ? "var(--accent, var(--text))" : "transparent"}`,
-        marginBottom: -1,
-      }}
+      style={{ padding: "10px 12px" }}
     >
       {label}
       {count > 0 && (
@@ -706,18 +909,18 @@ function TabButton({
 
 function Meta({
   label,
-  value,
   title,
+  children,
 }: {
   label: string;
-  value: string | null;
   title?: string;
+  children: React.ReactNode;
 }) {
   return (
     <div {...(title ? { title } : {})}>
       <div className="text-xs text-dim">{label}</div>
       <div className="mono" style={{ fontSize: 12.5, fontWeight: 600 }}>
-        {value ?? "—"}
+        {children}
       </div>
     </div>
   );
@@ -727,31 +930,29 @@ function Tile({
   n,
   label,
   tone,
+  title,
 }: {
   n: number;
   label: string;
   tone?: "ok" | "warn";
+  title?: string;
 }) {
+  // A zero count is neutral whatever the tone — "0 unmapped" is good
+  // news and should not be painted as a warning.
   const color =
-    tone === "ok"
-      ? "var(--success-text, var(--text))"
-      : tone === "warn"
-        ? "var(--warning-text, var(--text))"
-        : "var(--text)";
+    n === 0
+      ? "var(--text)"
+      : tone === "ok"
+        ? "var(--success-text, var(--text))"
+        : tone === "warn"
+          ? "var(--warning-text, var(--text))"
+          : "var(--text)";
   return (
-    <div
-      style={{
-        flex: "1 1 110px",
-        border: "1px solid var(--border)",
-        borderRadius: "var(--radius-sm)",
-        padding: "10px 12px",
-        background: "var(--bg-sunken)",
-      }}
-    >
-      <div style={{ fontSize: 20, fontWeight: 700, color, lineHeight: 1.15 }}>
+    <div className="stat" {...(title ? { title } : {})}>
+      <div className="stat-label">{label}</div>
+      <div className="stat-value" style={{ color }}>
         {n}
       </div>
-      <div className="text-xs text-dim">{label}</div>
     </div>
   );
 }
