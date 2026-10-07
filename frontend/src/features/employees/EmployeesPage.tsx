@@ -434,6 +434,14 @@ export function EmployeesPage() {
                 direction={sortDir}
                 onClick={onSortClick}
               />
+              <th
+                style={{
+                  background: "var(--bg-elev)",
+                  boxShadow: "inset 0 -1px 0 var(--border)",
+                }}
+              >
+                {t("employees.col.email") as string}
+              </th>
               <SortableHeader
                 column="department"
                 label={t("employees.col.department") as string}
@@ -473,7 +481,7 @@ export function EmployeesPage() {
           <tbody>
             {list.isLoading && (
               <tr>
-                <td colSpan={7} className="text-sm text-dim" style={{ padding: 16 }}>
+                <td colSpan={8} className="text-sm text-dim" style={{ padding: 16 }}>
                   {t("common.loading") as string}
                 </td>
               </tr>
@@ -481,7 +489,7 @@ export function EmployeesPage() {
             {list.isError && (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={8}
                   className="text-sm"
                   style={{ padding: 16, color: "var(--danger-text)" }}
                 >
@@ -534,6 +542,13 @@ export function EmployeesPage() {
                         </div>
                       </div>
                     </div>
+                  </td>
+                  <td className="text-sm">
+                    {e.email ? (
+                      <span className="mono text-xs">{e.email}</span>
+                    ) : (
+                      <span className="text-xs text-dim">—</span>
+                    )}
                   </td>
                   <td className="text-sm">{e.department.name}</td>
                   <td>
@@ -592,7 +607,7 @@ export function EmployeesPage() {
             })}
             {!list.isLoading && visibleItems.length === 0 && (
               <tr>
-                <td colSpan={7} className="text-sm text-dim" style={{ padding: 16 }}>
+                <td colSpan={8} className="text-sm text-dim" style={{ padding: 16 }}>
                   {t("employees.empty") as string}
                 </td>
               </tr>
