@@ -1,0 +1,531 @@
+<!doctype html>
+<!--
+  Maugood — Attendance dashboard redesign v2 (mock, Oct 2026).
+  Report-first layout for Admin / HR: what happened today, what needs
+  action, how the trend is moving, and one-click reports.
+  Self-contained (no network). Data is seeded sample data for 175
+  employees / 34 departments so the numbers are internally consistent.
+  Status colours validated with the dataviz palette checker
+  (green / amber / red / blue all PASS; amber is <3:1 on white so every
+  amber mark also carries a text label and each chart has a table view).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Maugood — Attendance dashboard (v2 mock)</title>
+<style>
+  :root{
+    --bg:#f5f7fa; --surface:#ffffff; --sunken:#f0f3f7; --line:#e3e8ef; --line-2:#eef2f6;
+    --ink:#14213d; --ink-2:#4a5a72; --ink-3:#8593a8;
+    --accent:#0f766e; --accent-2:#14867c; --accent-soft:#e6f4f2;
+    --ok:#1a9e5a; --late:#e8a317; --abs:#d03b3b; --leave:#2a6fdb; --pend:#a7b1c2;
+    --ok-s:#e7f6ee; --late-s:#fdf4e1; --abs-s:#fbe9e9; --leave-s:#e8f0fc;
+    --radius:12px; --shadow:0 1px 2px rgba(20,33,61,.05),0 4px 14px rgba(20,33,61,.04);
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.45 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  button{font:inherit;cursor:pointer}
+  .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+  /* ---------- shell ---------- */
+  .app{display:grid;grid-template-columns:232px 1fr;min-height:100vh}
+  .side{background:#fff;border-right:1px solid var(--line);padding:16px 12px;display:flex;flex-direction:column;gap:2px;position:sticky;top:0;height:100vh}
+  .brand{display:flex;align-items:center;gap:8px;padding:4px 8px 16px;font-weight:700;letter-spacing:-.2px}
+  .brand i{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#12b8d4,#1d6ed5);display:inline-block}
+  .side h6{margin:14px 8px 4px;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);font-weight:600}
+  .side a{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;color:var(--ink-2);text-decoration:none;font-weight:500}
+  .side a.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+  .side a .dot{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.5}
+  .side a .badge{margin-left:auto;background:var(--abs);color:#fff;font-size:10.5px;border-radius:10px;padding:0 6px;font-weight:600}
+  .main{padding:0 28px 40px;min-width:0}
+  .topbar{display:flex;align-items:center;gap:10px;height:58px;border-bottom:1px solid var(--line);margin:0 -28px 20px;padding:0 28px;background:#fff;position:sticky;top:0;z-index:5}
+  .crumb{color:var(--ink-3)} .crumb b{color:var(--ink);font-weight:600}
+  .topbar .sp{flex:1}
+  .avatar{width:30px;height:30px;border-radius:50%;background:#2f7f84;color:#fff;display:grid;place-items:center;font-size:11px;font-weight:700}
+
+  /* ---------- page header + filters ---------- */
+  .ph{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:16px}
+  .ph h1{margin:0;font-size:22px;letter-spacing:-.4px}
+  .ph p{margin:2px 0 0;color:var(--ink-2)}
+  .ph .sp{flex:1}
+  .filters{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .seg{display:inline-flex;background:var(--sunken);border:1px solid var(--line);border-radius:9px;padding:2px}
+  .seg button{border:0;background:transparent;padding:6px 12px;border-radius:7px;color:var(--ink-2);font-weight:500}
+  .seg button[aria-pressed="true"]{background:#fff;color:var(--ink);box-shadow:0 1px 2px rgba(20,33,61,.12);font-weight:600}
+  select,.btn{height:32px;border:1px solid var(--line);background:#fff;border-radius:8px;padding:0 10px;color:var(--ink);font:inherit}
+  .btn{display:inline-flex;align-items:center;gap:6px;font-weight:500}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.sm{height:26px;padding:0 8px;font-size:12px}
+  .btn.ghost{border-color:transparent;background:transparent;color:var(--accent);padding:0 4px}
+
+  /* ---------- cards ---------- */
+  .grid{display:grid;gap:16px}
+  .g-kpi{grid-template-columns:repeat(6,minmax(0,1fr))}
+  .g-21{grid-template-columns:minmax(0,2fr) minmax(0,1fr)}
+  .g-11{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);min-width:0}
+  .card-h{display:flex;align-items:flex-start;gap:10px;padding:14px 16px 0}
+  .card-h h3{margin:0;font-size:14px;letter-spacing:-.1px}
+  .card-h p{margin:2px 0 0;color:var(--ink-3);font-size:12px}
+  .card-h .sp{flex:1}
+  .card-b{padding:12px 16px 16px}
+  .section-gap{height:16px}
+  .link{color:var(--accent);text-decoration:none;font-weight:600;font-size:12px}
+
+  /* KPI tiles */
+  .kpi{padding:14px 16px;display:flex;flex-direction:column;gap:6px;border-top:3px solid var(--line);cursor:pointer;transition:transform .12s, box-shadow .12s}
+  .kpi:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(20,33,61,.08)}
+  .kpi.ok{border-top-color:var(--ok)} .kpi.late{border-top-color:var(--late)} .kpi.abs{border-top-color:var(--abs)} .kpi.leave{border-top-color:var(--leave)} .kpi.acc{border-top-color:var(--accent)}
+  .kpi .lb{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);font-weight:600;display:flex;align-items:center;gap:6px}
+  .kpi .v{font:600 26px/1 var(--mono);letter-spacing:-.5px}
+  .kpi .v small{font-size:13px;color:var(--ink-3);font-weight:500;margin-left:4px}
+  .kpi .h{font-size:12px;color:var(--ink-2);display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  .delta{font-family:var(--mono);font-size:11.5px;font-weight:600;border-radius:5px;padding:0 5px}
+  .delta.good{color:#11703f;background:var(--ok-s)} .delta.bad{color:#a12a2a;background:var(--abs-s)} .delta.flat{color:var(--ink-3);background:var(--sunken)}
+  .spark{display:block;margin-top:2px}
+
+  /* status bar */
+  .stack{display:flex;height:14px;border-radius:7px;overflow:hidden;gap:2px;background:var(--surface)}
+  .stack i{display:block;height:100%}
+  .legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:10px;font-size:12px;color:var(--ink-2)}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .sw{width:10px;height:10px;border-radius:3px;display:inline-block}
+  .statlist{margin-top:12px;display:grid;gap:2px}
+  .statrow{display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;padding:7px 8px;border-radius:8px;cursor:pointer}
+  .statrow:hover{background:var(--sunken)}
+  .statrow .n{font-family:var(--mono);font-weight:600}
+  .statrow .pc{font-family:var(--mono);color:var(--ink-3);width:40px;text-align:right}
+
+  /* attention list */
+  .att{display:grid;gap:8px}
+  .att-item{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:10px 12px;border:1px solid var(--line-2);border-radius:10px;background:#fff}
+  .att-ic{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;font-weight:700;font-size:14px}
+  .att-item b{display:block;font-size:13px}
+  .att-item span{color:var(--ink-3);font-size:12px}
+  .att-n{font:600 18px var(--mono);margin-right:6px}
+
+  /* tables */
+  table{width:100%;border-collapse:collapse}
+  th{font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);font-weight:600;text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap;cursor:pointer;user-select:none}
+  th.r,td.r{text-align:right}
+  th[aria-sort] .ar{opacity:1} th .ar{opacity:.25;font-size:10px;margin-left:3px}
+  td{padding:9px 10px;border-bottom:1px solid var(--line-2);vertical-align:middle}
+  tr:last-child td{border-bottom:0}
+  tbody tr:hover td{background:#fafbfd}
+  .bar{height:6px;border-radius:3px;background:var(--sunken);overflow:hidden;min-width:90px}
+  .bar i{display:block;height:100%;background:var(--accent-2);border-radius:3px}
+  .pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap}
+  .pill.ok{background:var(--ok-s);color:#11703f} .pill.late{background:var(--late-s);color:#8a5a00} .pill.abs{background:var(--abs-s);color:#a12a2a} .pill.leave{background:var(--leave-s);color:#1d4fa3} .pill.pend{background:var(--sunken);color:var(--ink-2)}
+  .av{width:26px;height:26px;border-radius:50%;display:inline-grid;place-items:center;color:#fff;font-size:10px;font-weight:700;margin-right:8px;vertical-align:middle}
+  .who{display:flex;align-items:center} .who small{display:block;color:var(--ink-3);font-size:11.5px}
+
+  /* reports */
+  .reports{display:grid;gap:8px}
+  .rep{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:10px 12px;border:1px solid var(--line-2);border-radius:10px}
+  .rep-ic{width:34px;height:34px;border-radius:9px;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;font-weight:700}
+  .rep b{display:block} .rep span{color:var(--ink-3);font-size:12px}
+  .rep .acts{display:flex;gap:6px}
+
+  /* charts */
+  .chart-wrap{position:relative}
+  .tip{position:absolute;pointer-events:none;background:#14213d;color:#fff;border-radius:8px;padding:8px 10px;font-size:12px;box-shadow:0 8px 24px rgba(20,33,61,.25);white-space:nowrap;opacity:0;transform:translateY(4px);transition:opacity .08s;z-index:3}
+  .tip b{font-family:var(--mono)} .tip .r{display:flex;align-items:center;gap:6px}
+  .axis text{fill:var(--ink-3);font-size:11px;font-family:var(--mono)}
+  .grid-l{stroke:var(--line-2);stroke-width:1}
+  .tbl-toggle{font-size:12px}
+  .hidden{display:none}
+
+  /* health strip */
+  .health{display:flex;gap:10px;flex-wrap:wrap}
+  .hchip{display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-size:12px;color:var(--ink-2)}
+  .hchip b{color:var(--ink);font-family:var(--mono)}
+  .led{width:8px;height:8px;border-radius:50%}
+
+  @media (max-width:1280px){.g-kpi{grid-template-columns:repeat(3,minmax(0,1fr))}.g-21{grid-template-columns:1fr}}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- ===== sidebar (matches the shipped LPA-style white sidebar) ===== -->
+  <nav class="side" aria-label="Main">
+    <div class="brand"><i></i>Maugood</div>
+    <h6>Overview</h6>
+    <a class="on" href="#"><span class="dot"></span>Dashboard</a>
+    <a href="#"><span class="dot"></span>Calendar</a>
+    <h6>Attendance</h6>
+    <a href="#"><span class="dot"></span>Daily attendance</a>
+    <a href="#"><span class="dot"></span>Camera logs</a>
+    <a href="#"><span class="dot"></span>Unidentified faces</a>
+    <h6>Workflow</h6>
+    <a href="#"><span class="dot"></span>Approvals<span class="badge">6</span></a>
+    <a href="#"><span class="dot"></span>Reports</a>
+    <a href="#"><span class="dot"></span>Employee report</a>
+    <h6>Operations</h6>
+    <a href="#"><span class="dot"></span>Cameras</a>
+    <a href="#"><span class="dot"></span>Employees</a>
+    <a href="#"><span class="dot"></span>Shift policies</a>
+  </nav>
+
+  <main class="main">
+    <div class="topbar">
+      <span class="crumb">Maugood › <b>Dashboard</b></span>
+      <span class="sp"></span>
+      <span class="crumb">Thu, 8 Oct 2026 · 10:42</span>
+      <span class="avatar">HA</span>
+    </div>
+
+    <!-- ===== header + filters ===== -->
+    <div class="ph">
+      <div>
+        <h1>Attendance overview</h1>
+        <p id="ph-sub">Today · all departments · live from cameras and terminals</p>
+      </div>
+      <span class="sp"></span>
+      <div class="filters">
+        <div class="seg" role="group" aria-label="Period">
+          <button aria-pressed="true" data-period="today">Today</button>
+          <button aria-pressed="false" data-period="week">This week</button>
+          <button aria-pressed="false" data-period="month">This month</button>
+        </div>
+        <select aria-label="Department" id="dept-filter"><option>All departments</option></select>
+        <button class="btn">⇩ Excel</button>
+        <button class="btn primary">⇩ PDF report</button>
+      </div>
+    </div>
+
+    <!-- ===== KPI tiles ===== -->
+    <section class="grid g-kpi" aria-label="Key figures" id="kpis"></section>
+
+    <div class="section-gap"></div>
+
+    <!-- ===== arrivals + status ===== -->
+    <section class="grid g-21">
+      <div class="card">
+        <div class="card-h">
+          <div><h3>Arrivals this morning</h3><p>First recognised sighting per employee, 10-minute buckets · shift 07:30, grace to 07:45</p></div>
+          <span class="sp"></span>
+          <button class="btn ghost tbl-toggle" data-target="arr">View as table</button>
+        </div>
+        <div class="card-b">
+          <div class="chart-wrap" id="arr-chart"></div>
+          <div class="legend"><span><i class="sw" style="background:var(--ok)"></i>On time</span><span><i class="sw" style="background:var(--late)"></i>Late</span></div>
+          <div id="arr-table" class="hidden"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-h">
+          <div><h3>Where everyone is</h3><p id="status-sub">175 active employees · right now</p></div>
+        </div>
+        <div class="card-b">
+          <div class="stack" id="status-stack" role="img"></div>
+          <div class="statlist" id="status-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <div class="section-gap"></div>
+
+    <!-- ===== needs attention + reports ===== -->
+    <section class="grid g-21">
+      <div class="card">
+        <div class="card-h">
+          <div><h3>Needs your attention</h3><p>Items that change payroll or need a decision today</p></div>
+          <span class="sp"></span><a class="link" href="#">Open approvals →</a>
+        </div>
+        <div class="card-b"><div class="att" id="attention"></div></div>
+      </div>
+      <div class="card">
+        <div class="card-h">
+          <div><h3>Reports</h3><p>One click, current filters applied</p></div>
+          <span class="sp"></span><a class="link" href="#">Schedules →</a>
+        </div>
+        <div class="card-b"><div class="reports" id="reports"></div></div>
+      </div>
+    </section>
+
+    <div class="section-gap"></div>
+
+    <!-- ===== 30-day trend ===== -->
+    <section class="card">
+      <div class="card-h">
+        <div><h3>Attendance rate · last 30 days</h3><p>Present ÷ expected on each working day · weekends and holidays skipped · target 90%</p></div>
+        <span class="sp"></span>
+        <button class="btn ghost tbl-toggle" data-target="trend">View as table</button>
+      </div>
+      <div class="card-b">
+        <div class="chart-wrap" id="trend-chart"></div>
+        <div id="trend-table" class="hidden"></div>
+      </div>
+    </section>
+
+    <div class="section-gap"></div>
+
+    <!-- ===== departments + repeat latecomers ===== -->
+    <section class="grid g-21">
+      <div class="card">
+        <div class="card-h">
+          <div><h3>Departments</h3><p>Click a column to sort · lowest presence first by default</p></div>
+          <span class="sp"></span><a class="link" href="#">Full report →</a>
+        </div>
+        <div class="card-b" style="padding-top:6px">
+          <table id="dept-table" aria-label="Department attendance">
+            <thead><tr>
+              <th data-k="name">Department<span class="ar">↕</span></th>
+              <th class="r" data-k="head">Staff<span class="ar">↕</span></th>
+              <th class="r" data-k="present">Present<span class="ar">↕</span></th>
+              <th class="r" data-k="late">Late<span class="ar">↕</span></th>
+              <th class="r" data-k="absent">Absent<span class="ar">↕</span></th>
+              <th data-k="pct" aria-sort="ascending">Presence<span class="ar">↑</span></th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h">
+          <div><h3>Repeat late arrivals</h3><p>This month · 3 or more late days</p></div>
+          <span class="sp"></span><a class="link" href="#">Late report →</a>
+        </div>
+        <div class="card-b" style="padding-top:6px">
+          <table aria-label="Repeat late arrivals"><thead><tr><th>Employee</th><th class="r">Days</th><th class="r">Avg late</th></tr></thead><tbody id="late-table"></tbody></table>
+        </div>
+      </div>
+    </section>
+
+    <div class="section-gap"></div>
+
+    <!-- ===== data health ===== -->
+    <section class="health" aria-label="Data sources">
+      <span class="hchip"><i class="led" style="background:var(--ok)"></i>Cameras online <b>3 / 3</b></span>
+      <span class="hchip"><i class="led" style="background:var(--ok)"></i>Last recognition <b>1 min ago</b></span>
+      <span class="hchip"><i class="led" style="background:var(--late)"></i>Unidentified faces today <b>115</b> <a class="link" href="#">Review</a></span>
+      <span class="hchip"><i class="led" style="background:var(--ok)"></i>Attendance recomputed <b>10:30</b></span>
+    </section>
+  </main>
+</div>
+
+<script>
+(() => {
+  // ---------- seeded sample data ----------
+  let seed = 2026;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const DEPTS = ["Administration","Asset Management","Information and Communication Technology","Financial Control and Reporting","CEO Office","Business Support","Supply Chain","Human Capital Group CoE","Development","Legal Affairs","Internal Audit","Treasury","Procurement","Engineering"];
+  const NAMES = ["Ahmed Al Lawati","Salim Al Rashdi","Fatma Al Balushi","Maryam Al Hinai","Khalid Al Harthy","Aisha Al Kindi","Yousuf Al Maskari","Huda Al Abri","Said Al Busaidi","Noor Al Zadjali","Hamed Al Farsi","Laila Al Amri"];
+  const COLORS = ["#2f7f84","#0f766e","#6d28d9","#b45309","#be123c","#1d4ed8","#4d7c0f","#9d174d"];
+  const ini = n => n.split(" ").filter(Boolean).map(p => p[0]).slice(0,1).concat(n.split(" ").slice(-1)[0][0]).join("");
+
+  const PERIODS = {
+    today: { label: "Today", sub: "Today · all departments · live from cameras and terminals",
+      kpi: { expected:175, present:150, late:12, absent:13, leave:7, notyet:5, ot:9.9, dPresent:+4, dLate:-3, dAbsent:+2, avgLate:19 } },
+    week:  { label: "This week", sub: "4 – 8 Oct 2026 · 5 working days · all departments",
+      kpi: { expected:875, present:768, late:51, absent:71, leave:36, notyet:0, ot:41.5, dPresent:+12, dLate:-9, dAbsent:+6, avgLate:17 } },
+    month: { label: "This month", sub: "1 – 8 Oct 2026 · 6 working days · all departments",
+      kpi: { expected:1050, present:913, late:66, absent:89, leave:48, notyet:0, ot:52.0, dPresent:+1, dLate:-4, dAbsent:-2, avgLate:18 } },
+  };
+  let period = "today";
+
+  // ---------- KPI tiles ----------
+  function spark(vals, color) {
+    const w = 120, h = 26, max = Math.max(...vals), min = Math.min(...vals);
+    const pts = vals.map((v,i) => `${(i/(vals.length-1))*w},${h-2-((v-min)/((max-min)||1))*(h-6)}`).join(" ");
+    return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  }
+  function delta(v, goodWhenUp, unit="") {
+    if (!v) return `<span class="delta flat">±0${unit}</span>`;
+    const good = goodWhenUp ? v > 0 : v < 0;
+    return `<span class="delta ${good ? "good" : "bad"}">${v > 0 ? "▲" : "▼"} ${Math.abs(v)}${unit}</span>`;
+  }
+  function renderKpis() {
+    const k = PERIODS[period].kpi, pct = Math.round(100*k.present/k.expected);
+    const vs = period === "today" ? "vs yesterday" : "vs previous";
+    const s = n => Array.from({length:10},(_,i)=>n*(0.85+0.3*rnd()));
+    document.getElementById("kpis").innerHTML = [
+      `<div class="card kpi acc" tabindex="0"><span class="lb">Expected</span><span class="v num">${k.expected}</span><span class="h">${period==="today"?"active employees on shift":"employee-days scheduled"}</span></div>`,
+      `<div class="card kpi ok" tabindex="0"><span class="lb">✓ Present</span><span class="v num">${k.present}<small>${pct}%</small></span><span class="h">${delta(k.dPresent,true)} ${vs}</span>${spark(s(k.present),"var(--ok)")}</div>`,
+      `<div class="card kpi late" tabindex="0"><span class="lb">◷ Late</span><span class="v num">${k.late}</span><span class="h">${delta(k.dLate,false)} avg ${k.avgLate} min</span>${spark(s(k.late),"var(--late)")}</div>`,
+      `<div class="card kpi abs" tabindex="0"><span class="lb">✕ Absent</span><span class="v num">${k.absent}</span><span class="h">${delta(k.dAbsent,false)} ${period==="today"?"9 without a request":"no leave on file"}</span>${spark(s(k.absent),"var(--abs)")}</div>`,
+      `<div class="card kpi leave" tabindex="0"><span class="lb">▭ On leave</span><span class="v num">${k.leave}</span><span class="h">approved leave${period==="today"?" · 2 start tomorrow":""}</span></div>`,
+      `<div class="card kpi" tabindex="0" style="border-top-color:#6a4bc4"><span class="lb">＋ Overtime</span><span class="v num">${k.ot.toFixed(1)}<small>h</small></span><span class="h">${period==="today"?"11 employees · yesterday":"across 18 employees"}</span></div>`,
+    ].join("");
+  }
+
+  // ---------- status (where everyone is) ----------
+  function renderStatus() {
+    const k = PERIODS.today.kpi;
+    const ontime = k.present - k.late;
+    const rows = [
+      ["ok","On time",ontime,"var(--ok)"],["late","Late",k.late,"var(--late)"],
+      ["abs","Absent",k.absent,"var(--abs)"],["leave","On leave",k.leave,"var(--leave)"],["pend","Not in yet",k.notyet,"var(--pend)"],
+    ];
+    const tot = rows.reduce((a,r)=>a+r[2],0);
+    const st = document.getElementById("status-stack");
+    st.innerHTML = rows.filter(r=>r[2]).map(r=>`<i title="${r[1]}: ${r[2]}" style="width:${100*r[2]/tot}%;background:${r[3]}"></i>`).join("");
+    st.setAttribute("aria-label", rows.map(r=>`${r[1]} ${r[2]}`).join(", "));
+    document.getElementById("status-list").innerHTML = rows.map(r =>
+      `<div class="statrow" tabindex="0"><span class="pill ${r[0]}">${r[1]}</span><span></span><span class="n">${r[2]}</span><span class="pc">${Math.round(100*r[2]/tot)}%</span></div>`).join("")
+      + `<div style="margin-top:6px;font-size:12px;color:var(--ink-3)">Not in yet = expected today, no sighting so far and shift has not ended.</div>`;
+  }
+
+  // ---------- arrivals histogram ----------
+  const BUCKETS = []; for (let m = 6*60+40; m < 9*60; m += 10) BUCKETS.push(m);
+  const hm = m => `${String(Math.floor(m/60)).padStart(2,"0")}:${String(m%60).padStart(2,"0")}`;
+  const ARR = BUCKETS.map(m => {
+    const peak = Math.exp(-Math.pow((m-(7*60+25))/16,2));
+    const total = Math.round(2 + 38*peak + (m>=7*60+45 && m<8*60+40 ? 3 : 0));
+    const late = m >= 7*60+45 ? total : 0;
+    return { m, ontime: total - late, late };
+  });
+  function renderArrivals() {
+    const el = document.getElementById("arr-chart");
+    const W = el.clientWidth || 700, H = 220, L = 34, R = 10, T = 10, B = 26;
+    const max = Math.ceil(Math.max(...ARR.map(d=>d.ontime+d.late))/10)*10;
+    const bw = (W-L-R)/ARR.length, y = v => T + (H-T-B)*(1-v/max);
+    let svg = `<svg width="${W}" height="${H}" role="img" aria-label="Arrivals per 10 minutes">`;
+    for (let g=0; g<=max; g+=10) svg += `<line class="grid-l" x1="${L}" x2="${W-R}" y1="${y(g)}" y2="${y(g)}"/><g class="axis"><text x="${L-6}" y="${y(g)+4}" text-anchor="end">${g}</text></g>`;
+    const xOf = m => L + ((m - BUCKETS[0])/10)*bw;
+    // Shift-start label sits left of its line, grace label right of its
+    // line, so the two never collide.
+    [[7*60+30,"Shift start","end",-4],[7*60+45,"Grace ends","start",4]].forEach(([m,t,anchor,dx])=>{
+      svg += `<line x1="${xOf(m)}" x2="${xOf(m)}" y1="${T}" y2="${H-B}" stroke="var(--ink-3)" stroke-dasharray="3 3"/><text x="${xOf(m)+dx}" y="${T+10}" text-anchor="${anchor}" font-size="11" fill="var(--ink-2)">${t} ${hm(m)}</text>`;
+    });
+    ARR.forEach((d,i) => {
+      const x = L + i*bw + 2, w = bw - 4;
+      if (d.ontime) svg += `<rect x="${x}" y="${y(d.ontime)}" width="${w}" height="${y(0)-y(d.ontime)}" rx="3" fill="var(--ok)"/>`;
+      if (d.late) svg += `<rect x="${x}" y="${y(d.ontime+d.late)}" width="${w}" height="${y(d.ontime)-y(d.ontime+d.late)-2}" rx="3" fill="var(--late)"/>`;
+      if (i % 3 === 0) svg += `<g class="axis"><text x="${L+i*bw+bw/2}" y="${H-8}" text-anchor="middle">${hm(d.m)}</text></g>`;
+      svg += `<rect data-i="${i}" x="${L+i*bw}" y="${T}" width="${bw}" height="${H-T-B}" fill="transparent"/>`;
+    });
+    svg += `</svg><div class="tip" id="arr-tip"></div>`;
+    el.innerHTML = svg;
+    const tip = el.querySelector("#arr-tip");
+    el.querySelectorAll("rect[data-i]").forEach(r => {
+      r.addEventListener("mouseenter", () => {
+        const d = ARR[+r.dataset.i];
+        tip.innerHTML = `<div style="margin-bottom:4px;color:#c9d3e3">${hm(d.m)} – ${hm(d.m+10)}</div>`
+          + `<div class="r"><i class="sw" style="background:var(--ok)"></i>On time <b>${d.ontime}</b></div>`
+          + `<div class="r"><i class="sw" style="background:var(--late)"></i>Late <b>${d.late}</b></div>`;
+        tip.style.left = Math.min(+r.getAttribute("x") + bw, W - 140) + "px"; tip.style.top = "20px"; tip.style.opacity = 1;
+        r.setAttribute("fill","rgba(20,33,61,.05)");
+      });
+      r.addEventListener("mouseleave", () => { tip.style.opacity = 0; r.setAttribute("fill","transparent"); });
+    });
+    document.getElementById("arr-table").innerHTML = `<table><thead><tr><th>Window</th><th class="r">On time</th><th class="r">Late</th></tr></thead><tbody>${
+      ARR.filter(d=>d.ontime+d.late).map(d=>`<tr><td class="num">${hm(d.m)}–${hm(d.m+10)}</td><td class="r num">${d.ontime}</td><td class="r num">${d.late}</td></tr>`).join("")}</tbody></table>`;
+  }
+
+  // ---------- 30-day trend ----------
+  const TREND = []; (() => {
+    const end = new Date(2026,9,8);
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(end); d.setDate(end.getDate() - i);
+      const wd = d.getDay(); const off = wd === 5 || wd === 6 || (d.getMonth()===9 && d.getDate()===6);
+      TREND.push({ d, off, v: off ? null : Math.round(82 + 9*rnd() + (i<10?2:0)) });
+    }
+  })();
+  const fmtD = d => d.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});
+  function renderTrend() {
+    const el = document.getElementById("trend-chart");
+    const W = el.clientWidth || 1000, H = 220, L = 38, R = 14, T = 12, B = 26;
+    const lo = 70, hi = 100, y = v => T + (H-T-B)*(1-(v-lo)/(hi-lo));
+    const x = i => L + (W-L-R)*i/(TREND.length-1);
+    let svg = `<svg width="${W}" height="${H}" role="img" aria-label="Attendance rate per working day, last 30 days">`;
+    [70,80,90,100].forEach(g => svg += `<line class="grid-l" x1="${L}" x2="${W-R}" y1="${y(g)}" y2="${y(g)}"/><g class="axis"><text x="${L-6}" y="${y(g)+4}" text-anchor="end">${g}%</text></g>`);
+    svg += `<line x1="${L}" x2="${W-R}" y1="${y(90)}" y2="${y(90)}" stroke="var(--ink-2)" stroke-dasharray="5 4"/><text x="${L+6}" y="${y(90)-6}" font-size="11" fill="var(--ink-2)">Target 90%</text>`;
+    TREND.forEach((p,i) => { if (p.off) svg += `<rect x="${x(i)-6}" y="${T}" width="12" height="${H-T-B}" fill="var(--sunken)" opacity=".7"/>`; });
+    // line broken across off days
+    let path = "", pen = false;
+    TREND.forEach((p,i) => { if (p.v == null) { pen = false; return; } path += `${pen ? "L" : "M"}${x(i)},${y(p.v)} `; pen = true; });
+    // connect across gaps with a faint segment so the trend reads continuously
+    const work = TREND.map((p,i)=>({...p,i})).filter(p=>p.v!=null);
+    svg += `<path d="${work.map((p,k)=>`${k?"L":"M"}${x(p.i)},${y(p.v)}`).join(" ")}" fill="none" stroke="var(--accent-2)" stroke-width="2" stroke-opacity=".25"/>`;
+    svg += `<path d="${path}" fill="none" stroke="var(--accent-2)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    const last = work[work.length-1];
+    svg += `<circle cx="${x(last.i)}" cy="${y(last.v)}" r="4.5" fill="var(--accent-2)" stroke="#fff" stroke-width="2"/><text x="${x(last.i)-8}" y="${y(last.v)-10}" text-anchor="end" font-size="12" font-weight="600" fill="var(--ink)">${last.v}% today</text>`;
+    TREND.forEach((p,i) => { if (i % 5 === 0 || i === TREND.length-1) svg += `<g class="axis"><text x="${x(i)}" y="${H-8}" text-anchor="middle">${p.d.getDate()}/${p.d.getMonth()+1}</text></g>`; });
+    svg += `<line id="xh" y1="${T}" y2="${H-B}" stroke="var(--ink-3)" opacity="0"/><circle id="xd" r="5" fill="var(--accent-2)" stroke="#fff" stroke-width="2" opacity="0"/>`;
+    svg += `<rect id="hit" x="${L}" y="${T}" width="${W-L-R}" height="${H-T-B}" fill="transparent"/></svg><div class="tip" id="trend-tip"></div>`;
+    el.innerHTML = svg;
+    const hit = el.querySelector("#hit"), tip = el.querySelector("#trend-tip"), xh = el.querySelector("#xh"), xd = el.querySelector("#xd");
+    hit.addEventListener("mousemove", e => {
+      const rx = e.offsetX; const i = Math.max(0, Math.min(TREND.length-1, Math.round((rx-L)/((W-L-R)/(TREND.length-1)))));
+      const p = TREND[i];
+      xh.setAttribute("x1", x(i)); xh.setAttribute("x2", x(i)); xh.setAttribute("opacity", 1);
+      if (p.v != null) { xd.setAttribute("cx", x(i)); xd.setAttribute("cy", y(p.v)); xd.setAttribute("opacity", 1); } else xd.setAttribute("opacity", 0);
+      tip.innerHTML = `<div style="color:#c9d3e3;margin-bottom:3px">${fmtD(p.d)}</div>` + (p.v == null ? "Weekend / holiday" : `Attendance <b>${p.v}%</b> · ${Math.round(p.v*1.75)} of 175`);
+      tip.style.left = Math.min(x(i)+12, W-190) + "px"; tip.style.top = "14px"; tip.style.opacity = 1;
+    });
+    hit.addEventListener("mouseleave", () => { tip.style.opacity = 0; xh.setAttribute("opacity",0); xd.setAttribute("opacity",0); });
+    document.getElementById("trend-table").innerHTML = `<table><thead><tr><th>Date</th><th class="r">Attendance</th></tr></thead><tbody>${
+      TREND.map(p=>`<tr><td>${fmtD(p.d)}</td><td class="r num">${p.v==null?"—":p.v+"%"}</td></tr>`).join("")}</tbody></table>`;
+  }
+
+  // ---------- needs attention ----------
+  document.getElementById("attention").innerHTML = [
+    ["abs","!",9,"Absent with no leave or request","Payroll will treat these as unpaid unless resolved","Notify managers"],
+    ["late","◷",4,"Late 3+ times this week","Policy says a written warning on the 4th late","View list"],
+    ["pend","⇥",3,"Seen in, never seen out (yesterday)","Hours can't be finalised — confirm check-out","Review"],
+    ["leave","⧗",6,"Requests waiting on you","2 are past the 48-hour SLA","Open approvals"],
+  ].map(([c,ic,n,t,s,a]) => `<div class="att-item"><span class="att-ic pill ${c}" style="border-radius:9px;padding:0;justify-content:center">${ic}</span><div><b><span class="att-n">${n}</span>${t}</b><span>${s}</span></div><button class="btn sm">${a}</button></div>`).join("");
+
+  // ---------- reports ----------
+  document.getElementById("reports").innerHTML = [
+    ["D","Daily attendance","Everyone, one date · with photos optional"],
+    ["W","Weekly / date range","Totals per employee and department"],
+    ["E","Employee report","One person, any range · for HR files"],
+    ["L","Late & absent","Exceptions only · for line managers"],
+    ["O","Overtime","Hours beyond policy · for payroll"],
+  ].map(([ic,t,s]) => `<div class="rep"><span class="rep-ic">${ic}</span><div><b>${t}</b><span>${s}</span></div><div class="acts"><button class="btn sm">PDF</button><button class="btn sm">Excel</button></div></div>`).join("");
+
+  // ---------- departments (sortable) ----------
+  const DROWS = DEPTS.map(n => {
+    const head = 3 + Math.floor(rnd()*14); const absent = Math.floor(rnd()*Math.max(1,head*0.25)); const leave = rnd()<.3?1:0;
+    const present = head - absent - leave; const late = Math.floor(rnd()*Math.min(3,present));
+    return { name:n, head, present, late, absent, pct: Math.round(100*present/head) };
+  });
+  let sortK = "pct", sortDir = 1;
+  function renderDepts() {
+    const rows = [...DROWS].sort((a,b) => (a[sortK] > b[sortK] ? 1 : a[sortK] < b[sortK] ? -1 : 0) * sortDir);
+    document.querySelector("#dept-table tbody").innerHTML = rows.map(r => `<tr>
+      <td>${r.name}</td><td class="r num">${r.head}</td><td class="r num">${r.present}</td>
+      <td class="r num">${r.late || '<span style="color:var(--ink-3)">0</span>'}</td>
+      <td class="r num">${r.absent ? `<span class="pill abs">${r.absent}</span>` : '<span style="color:var(--ink-3)">0</span>'}</td>
+      <td><div style="display:flex;align-items:center;gap:8px"><div class="bar" style="flex:1"><i style="width:${r.pct}%"></i></div><span class="num" style="width:38px;text-align:right">${r.pct}%</span></div></td></tr>`).join("");
+    document.querySelectorAll("#dept-table th").forEach(th => {
+      const on = th.dataset.k === sortK;
+      th.toggleAttribute("aria-sort", on); if (on) th.setAttribute("aria-sort", sortDir > 0 ? "ascending" : "descending");
+      th.querySelector(".ar").textContent = on ? (sortDir > 0 ? "↑" : "↓") : "↕";
+    });
+  }
+  document.querySelectorAll("#dept-table th").forEach(th => th.addEventListener("click", () => {
+    if (sortK === th.dataset.k) sortDir *= -1; else { sortK = th.dataset.k; sortDir = th.dataset.k === "name" ? 1 : -1; }
+    renderDepts();
+  }));
+  const sel = document.getElementById("dept-filter"); DEPTS.forEach(d => sel.insertAdjacentHTML("beforeend", `<option>${d}</option>`));
+
+  // ---------- repeat latecomers ----------
+  document.getElementById("late-table").innerHTML = NAMES.slice(0,7).map((n,i) => {
+    const days = 7 - Math.floor(i*0.7), avg = 12 + Math.floor(rnd()*25);
+    return `<tr><td><div class="who"><span class="av" style="background:${COLORS[i%COLORS.length]}">${ini(n)}</span><div>${n}<small>${DEPTS[i+2]}</small></div></div></td><td class="r"><span class="pill late num">${days}</span></td><td class="r num">${avg} min</td></tr>`;
+  }).join("");
+
+  // ---------- wiring ----------
+  document.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => {
+    document.querySelectorAll(".seg button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+    period = b.dataset.period; document.getElementById("ph-sub").textContent = PERIODS[period].sub; renderKpis();
+  }));
+  document.querySelectorAll(".tbl-toggle").forEach(b => b.addEventListener("click", () => {
+    const t = b.dataset.target, tbl = document.getElementById(t+"-table"), ch = document.getElementById(t+"-chart");
+    const showTable = tbl.classList.contains("hidden");
+    tbl.classList.toggle("hidden", !showTable); ch.classList.toggle("hidden", showTable);
+    b.textContent = showTable ? "View as chart" : "View as table";
+  }));
+  const draw = () => { renderKpis(); renderStatus(); renderArrivals(); renderTrend(); renderDepts(); };
+  draw(); let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { renderArrivals(); renderTrend(); }, 120); });
+})();
+</script>
+</body>
+</html>
