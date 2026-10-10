@@ -1,6 +1,7 @@
 // Manager-scoped team list. Mirrors the structure of EmployeesPage —
-// avatar + photo-count column + click-to-open EmployeeViewDrawer with
-// Details / Attendance / Camera events / Team Members tabs — but
+// avatar + photo-count column; a row opens the full employee profile
+// page (/employees/:id — Details / Attendance / Camera events / Matched
+// clips / Team tabs; Edit hidden for Managers) — but
 // strips the admin-only actions (Add / Edit / Delete / Import /
 // Export / Re-match). Backed by ``GET /api/employees/my-team`` so the
 // rows are already narrowed to the manager's team via the team-rule
@@ -8,12 +9,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
 import { api } from "../../api/client";
 import { Icon } from "../../shell/Icon";
 import { useDepartments } from "../departments/hooks";
-import { EmployeeViewDrawer } from "./EmployeeViewDrawer";
 import {
   avatarBg,
   initials,
@@ -50,7 +51,8 @@ export function MyTeamPage() {
   const [debouncedQ, setDebouncedQ] = useState("");
   const [departmentId, setDepartmentId] = useState<number | null>(null);
   const [page, setPage] = useState(1);
-  const [viewId, setViewId] = useState<number | null>(null);
+  const navigate = useNavigate();
+  const openProfile = (id: number) => navigate(`/employees/${id}`);
   const [view, setView] = useViewMode("maugood.myTeam.view");
 
   useEffect(() => {
@@ -107,7 +109,7 @@ export function MyTeamPage() {
   const openOnKey = (id: number) => (ev: React.KeyboardEvent) => {
     if (ev.key === "Enter" || ev.key === " ") {
       ev.preventDefault();
-      setViewId(id);
+      openProfile(id);
     }
   };
 
@@ -273,7 +275,7 @@ export function MyTeamPage() {
                       defaultValue: "Open {{name}}",
                       name: e.full_name,
                     }) as string}
-                    onClick={() => setViewId(e.id)}
+                    onClick={() => openProfile(e.id)}
                     onKeyDown={openOnKey(e.id)}
                     className={`card clickable${inactive ? " pp-card-muted" : ""}`}
                     style={{ ...gridCardStyle, cursor: "pointer" }}
@@ -357,7 +359,7 @@ export function MyTeamPage() {
                   <tr
                     key={e.id}
                     tabIndex={0}
-                    onClick={() => setViewId(e.id)}
+                    onClick={() => openProfile(e.id)}
                     onKeyDown={openOnKey(e.id)}
                     className={`pp-row-link${inactive ? " pp-row-muted" : ""}`}
                   >
@@ -412,18 +414,6 @@ export function MyTeamPage() {
         )}
       </div>
 
-      {/* Read-only drawer — Manager isn't authorised for the Edit
-          path so we pass a no-op onEdit (the drawer shows the
-          button, but Manager has no Edit drawer to open). */}
-      {viewId !== null && (
-        <EmployeeViewDrawer
-          employeeId={viewId}
-          onClose={() => setViewId(null)}
-          onEdit={() => {
-            // no-op for Manager — Edit lives on the Admin/HR drawer
-          }}
-        />
-      )}
     </>
   );
 }

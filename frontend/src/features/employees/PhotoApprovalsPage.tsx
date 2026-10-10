@@ -10,8 +10,10 @@
 // * POST   /api/employees/photos/{id}/approve      — flip to approved
 // * POST   /api/employees/photos/{id}/reject       — drop file + row
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "../../api/client";
@@ -19,7 +21,6 @@ import { Icon } from "../../shell/Icon";
 import { toast } from "../../shell/Toaster";
 import { SkeletonCards, SkeletonGrid } from "../../components/Skeleton";
 import {
-  CardGrid,
   EmptyPanel,
   FilterSelect,
   ResetButton,
@@ -28,7 +29,9 @@ import {
   Toolbar,
 } from "../../components/ListPageUi";
 import { DotPill, LoadErrorPanel, PEOPLE_ICON, StatTile } from "./peopleUi";
-import { rolePillClass } from "./EmployeesPage";
+import { avatarBg, employeeThumbUrl, initials, rolePillClass } from "./EmployeesPage";
+import { useTenantDateTime } from "../../util/datetime";
+import { PhotoViewer, PhotoViewerFact } from "./PhotoViewer";
 
 interface PendingPhoto {
   photo_id: number;
@@ -252,8 +255,9 @@ export function PhotoApprovalsPage() {
             items={pendingShown}
             hasAny={pendingItems.length > 0}
             onClear={resetFilters}
-            onApprove={(id) => decide.mutate({ id, action: "approve" })}
-            onReject={(id) => decide.mutate({ id, action: "reject" })}
+            onDecide={(id, action, onDone) =>
+              decide.mutate({ id, action }, onDone ? { onSuccess: onDone } : undefined)
+            }
             decidingId={
               decide.isPending ? decide.variables?.id ?? null : null
             }
@@ -303,14 +307,30 @@ function TabButton({
   );
 }
 
+type AnyPhoto = PendingPhoto | Partial<ApprovedPhoto>;
+
+/** Group photos by employee, keeping first-appearance order. The flat
+ *  list (group order) drives the viewer's prev/next. */
+function groupByEmployee<P extends PendingPhoto>(items: P[]): { groups: { employee_id: number; items: P[] }[]; flat: P[] } {
+  const map = new Map<number, P[]>();
+  for (const p of items) {
+    const g = map.get(p.employee_id);
+    if (g) g.push(p);
+    else map.set(p.employee_id, [p]);
+  }
+  const groups = Array.from(map, ([employee_id, list]) => ({ employee_id, items: list }));
+  return { groups, flat: groups.flatMap((g) => g.items) };
+}
+
+const fullImageUrl = (p: PendingPhoto) => `/api/employees/${p.employee_id}/photos/${p.photo_id}/image`;
+
 function PendingPanel({
   isLoading,
   isError,
   items,
   hasAny,
   onClear,
-  onApprove,
-  onReject,
+  onDecide,
   decidingId,
   onRetry,
 }: {
@@ -319,8 +339,7 @@ function PendingPanel({
   items: PendingPhoto[];
   hasAny: boolean;
   onClear: () => void;
-  onApprove: (id: number) => void;
-  onReject: (id: number) => void;
+  onDecide: (id: number, action: "approve" | "reject", onDone?: () => void) => void;
   decidingId: number | null;
   onRetry: () => void;
 }) {
@@ -351,19 +370,7 @@ function PendingPanel({
       />
     );
   }
-  return (
-    <CardGrid minWidth={210}>
-      {items.map((p) => (
-        <PendingTile
-          key={p.photo_id}
-          p={p}
-          onApprove={() => onApprove(p.photo_id)}
-          onReject={() => onReject(p.photo_id)}
-          busy={decidingId === p.photo_id}
-        />
-      ))}
-    </CardGrid>
-  );
+  return <PhotoGallery mode="pending" items={items} onDecide={onDecide} decidingId={decidingId} />;
 }
 
 function ApprovedPanel({
@@ -405,82 +412,361 @@ function ApprovedPanel({
       />
     );
   }
+  return <PhotoGallery mode="approved" items={items} decidingId={null} />;
+}
+
+/** Employee-grouped gallery + the shared viewer. Pending mode adds
+ *  Approve / Reject to each card and to the viewer (which advances to
+ *  the next photo after a successful decision). */
+function PhotoGallery({
+  mode,
+  items,
+  onDecide,
+  decidingId,
+}: {
+  mode: "pending" | "approved";
+  items: AnyPhoto[] & PendingPhoto[];
+  onDecide?: (id: number, action: "approve" | "reject", onDone?: () => void) => void;
+  decidingId: number | null;
+}) {
+  const { t } = useTranslation();
+  const dt = useTenantDateTime();
+  const { groups, flat } = useMemo(() => groupByEmployee(items), [items]);
+  const [viewId, setViewId] = useState<number | null>(null);
+  const viewIndex = viewId === null ? -1 : flat.findIndex((p) => p.photo_id === viewId);
+
+  const angleLabel = (a: PendingPhoto["angle"]) => t(`employees.photos.angles.${a}`, { defaultValue: a }) as string;
+  const openLabel = (p: PendingPhoto) =>
+    t("photoApprovals.viewer.open", {
+      defaultValue: "Open {{angle}} photo of {{name}}",
+      angle: angleLabel(p.angle),
+      name: p.employee_full_name,
+    }) as string;
+
+  const approvedInfo = (p: AnyPhoto) => p as Partial<ApprovedPhoto>;
+  // Short card date: relative within a week, else the tenant date only.
+  const shortWhen = (iso: string) =>
+    Date.now() - new Date(iso).getTime() < 7 * 86_400_000 ? dt.formatRelative(iso) : dt.formatDate(iso);
+
+  /** Short caption line + full tooltip for a card. */
+  const cardMeta = (p: PendingPhoto): { text: string; title: string } => {
+    const a = approvedInfo(p);
+    if (mode === "approved" && a.approved_at) {
+      const role = a.approved_by_role ?? (t("photoApprovals.unknownRole") as string);
+      return {
+        text: t("photoApprovals.card.approvedBy", {
+          defaultValue: "{{role}} · {{when}}",
+          role,
+          when: shortWhen(a.approved_at),
+        }) as string,
+        title: t("photoApprovals.card.approvedTitle", {
+          defaultValue: "Approved by {{who}} on {{when}}",
+          who: a.approved_by_email ?? role,
+          when: dt.formatDateTime(a.approved_at),
+        }) as string,
+      };
+    }
+    return {
+      text: t("photoApprovals.card.uploaded", {
+        defaultValue: "Uploaded {{when}}",
+        when: shortWhen(p.uploaded_at),
+      }) as string,
+      title: t("photoApprovals.card.uploadedTitle", {
+        defaultValue: "Uploaded by {{who}} on {{when}}",
+        who: p.uploaded_by_email ?? "—",
+        when: dt.formatDateTime(p.uploaded_at),
+      }) as string,
+    };
+  };
+
+  const decideButtons = (p: PendingPhoto, inViewer: boolean) => {
+    if (mode !== "pending" || !onDecide) return null;
+    const busy = decidingId === p.photo_id;
+    const advance = () => {
+      if (!inViewer) return;
+      const i = flat.findIndex((x) => x.photo_id === p.photo_id);
+      const next = flat[i + 1] ?? flat[i - 1] ?? null;
+      setViewId(next ? next.photo_id : null);
+    };
+    return (
+      <>
+        <button
+          type="button"
+          className={`btn btn-sm${inViewer ? " btn-primary" : ""}`}
+          onClick={() => onDecide(p.photo_id, "approve", advance)}
+          disabled={busy}
+        >
+          <Icon name="check" size={11} /> {t("photoApprovals.approve") as string}
+        </button>
+        <button
+          type="button"
+          className="btn btn-sm btn-danger"
+          onClick={() => onDecide(p.photo_id, "reject", advance)}
+          disabled={busy}
+        >
+          <Icon name="x" size={11} /> {t("photoApprovals.reject") as string}
+        </button>
+      </>
+    );
+  };
+
+  const statusPill = (
+    <DotPill tone={mode === "pending" ? "warning" : "success"}>
+      {mode === "pending"
+        ? (t("photoApprovals.pendingPill") as string)
+        : (t("photoApprovals.approvedPill") as string)}
+    </DotPill>
+  );
+
   return (
-    <CardGrid minWidth={210}>
-      {items.map((p) => (
-        <ApprovedTile key={p.photo_id} p={p} />
-      ))}
-    </CardGrid>
+    <div className="pp-pa">
+      <ul className="pp-pa-grid">
+        {groups.map((g) => (
+          <EmployeeSlideCard
+            key={g.employee_id}
+            items={g.items}
+            mode={mode}
+            statusPill={statusPill}
+            angleLabel={angleLabel}
+            openLabel={openLabel}
+            cardMeta={cardMeta}
+            onOpen={(id) => setViewId(id)}
+            decideButtons={(p) => decideButtons(p, false)}
+          />
+        ))}
+      </ul>
+
+
+      {viewIndex >= 0 && (
+        <PhotoViewer
+          photos={flat}
+          index={viewIndex}
+          onIndex={(i) => setViewId(flat[i]?.photo_id ?? null)}
+          onClose={() => setViewId(null)}
+          title={flat[viewIndex]!.employee_full_name}
+          getKey={(p) => p.photo_id}
+          getSrc={fullImageUrl}
+          getThumbSrc={(p) => employeeThumbUrl(p.employee_id, p.photo_id)}
+          getAlt={(p) => `${p.angle} reference for ${p.employee_full_name}`}
+          getLabel={openLabel}
+          getStatus={() => mode}
+          renderInfo={(p) => <ViewerInfo p={p} mode={mode} angle={angleLabel(p.angle)} />}
+          {...(mode === "pending" ? { actions: (p: PendingPhoto) => decideButtons(p, true) } : {})}
+        />
+      )}
+    </div>
   );
 }
 
-function PendingTile({
-  p,
-  onApprove,
-  onReject,
-  busy,
+/** One card per employee: a photo slider (arrows, dots, counter) over
+ *  the employee's photos, then name / ID / photo count and the current
+ *  photo's angle + time. Clicking the photo opens the shared viewer. */
+function EmployeeSlideCard({
+  items,
+  mode,
+  statusPill,
+  angleLabel,
+  openLabel,
+  cardMeta,
+  onOpen,
+  decideButtons,
 }: {
-  p: PendingPhoto;
-  onApprove: () => void;
-  onReject: () => void;
-  busy: boolean;
+  items: PendingPhoto[];
+  mode: "pending" | "approved";
+  statusPill: ReactNode;
+  angleLabel: (a: PendingPhoto["angle"]) => string;
+  openLabel: (p: PendingPhoto) => string;
+  cardMeta: (p: PendingPhoto) => { text: string; title: string };
+  onOpen: (photoId: number) => void;
+  decideButtons: (p: PendingPhoto) => ReactNode;
 }) {
   const { t } = useTranslation();
+  const [idx, setIdx] = useState(0);
+  const count = items.length;
+  // Keep the index valid when a photo leaves the list (approve/reject/filter).
+  useEffect(() => {
+    if (idx > count - 1) setIdx(Math.max(count - 1, 0));
+  }, [count, idx]);
+  const cur = items[Math.min(idx, count - 1)]!;
+  const first = items[0]!;
+  const meta = cardMeta(cur);
+  const go = (d: number) => setIdx((i) => (i + d + count) % count);
+
   return (
-    <div className="pp-tile">
-      <div className="pp-tile-img">
-        <img
-          src={`/api/employees/${p.employee_id}/photos/${p.photo_id}/image`}
-          alt={`${p.angle} reference for ${p.employee_full_name}`}
-          loading="lazy"
-        />
-        <span className="pp-tile-badge">
-          <DotPill tone="warning">{t("photoApprovals.pendingPill") as string}</DotPill>
-        </span>
+    <li className={`pp-pa-card is-${mode}`}>
+      <div
+        className="pp-pa-slider"
+        role="group"
+        aria-roledescription="carousel"
+        aria-label={first.employee_full_name}
+        onKeyDown={(e) => {
+          if (count < 2) return;
+          const rtl = document.documentElement.dir === "rtl";
+          if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+            e.preventDefault();
+            go((e.key === "ArrowRight") !== rtl ? 1 : -1);
+          }
+        }}
+      >
+        <div className="pp-pa-track" style={{ ["--i" as string]: Math.min(idx, count - 1) } as React.CSSProperties}>
+          {items.map((p, i) => (
+            <button
+              key={p.photo_id}
+              type="button"
+              className="pp-pa-slide"
+              onClick={() => onOpen(p.photo_id)}
+              aria-label={openLabel(p)}
+              aria-hidden={i !== idx}
+              tabIndex={i === idx ? 0 : -1}
+            >
+              <img src={fullImageUrl(p)} alt={`${p.angle} reference for ${p.employee_full_name}`} loading="lazy" />
+            </button>
+          ))}
+        </div>
+        <span className="pp-pa-status">{statusPill}</span>
+        <span className="pp-pa-angle">{angleLabel(cur.angle)}</span>
+        {count > 1 && (
+          <>
+            <span className="pp-pa-counter">
+              {idx + 1}/{count}
+            </span>
+            <button
+              type="button"
+              className="pp-pa-arrow is-prev"
+              onClick={() => go(-1)}
+              aria-label={t("myProfile.viewer.prev", { defaultValue: "Previous photo" }) as string}
+            >
+              <Icon name="chevronLeft" size={16} />
+            </button>
+            <button
+              type="button"
+              className="pp-pa-arrow is-next"
+              onClick={() => go(1)}
+              aria-label={t("myProfile.viewer.next", { defaultValue: "Next photo" }) as string}
+            >
+              <Icon name="chevronRight" size={16} />
+            </button>
+            <div className="pp-pa-dots">
+              {items.map((p, i) => (
+                <button
+                  key={p.photo_id}
+                  type="button"
+                  className={`pp-pa-dot${i === idx ? " is-active" : ""}`}
+                  onClick={() => setIdx(i)}
+                  aria-label={t("photoApprovals.slider.goTo", {
+                    defaultValue: "Show photo {{n}}",
+                    n: i + 1,
+                  }) as string}
+                  aria-current={i === idx}
+                />
+              ))}
+            </div>
+          </>
+        )}
       </div>
-      <div className="pp-tile-body">
-        <div className="pp-tile-title pp-truncate" title={p.employee_full_name}>
-          {p.employee_full_name}
-        </div>
-        <div className="pp-tile-meta">
-          <span className="mono">{p.employee_code}</span>
-          <span>· {t(`employees.photos.angles.${p.angle}`) as string}</span>
-        </div>
-        <div className="pp-tile-meta" title={new Date(p.uploaded_at).toLocaleString()}>
-          <Icon name="clock" size={10} />
-          <span>
-            {t("photoApprovals.uploadedAt", { defaultValue: "Uploaded" }) as string}{" "}
-            <span className="mono">{new Date(p.uploaded_at).toLocaleString()}</span>
+      <div className="pp-pa-body">
+        <div className="pp-pa-who">
+          <span className="pp-pa-avatar" aria-hidden style={{ background: avatarBg(first.employee_full_name) }}>
+            {initials(first.employee_full_name)}
           </span>
+          <div className="pp-pa-who-text">
+            <Link to={`/employees/${first.employee_id}`} className="pp-pa-name" title={first.employee_full_name}>
+              {first.employee_full_name}
+            </Link>
+            <span className="pp-pa-code">
+              <span className="mono">{first.employee_code}</span>
+              <span aria-hidden> · </span>
+              {t("photoApprovals.group.count", {
+                count,
+                defaultValue: count === 1 ? "1 photo" : `${count} photos`,
+              }) as string}
+            </span>
+          </div>
         </div>
-        {p.uploaded_by_email && (
-          <div className="pp-tile-meta" title={p.uploaded_by_email}>
-            <Icon name="user" size={10} />
-            <span>{p.uploaded_by_email}</span>
+        <div className="pp-pa-meta" title={meta.title}>
+          <Icon name={mode === "approved" ? "check" : "clock"} size={12} />
+          <span>{meta.text}</span>
+        </div>
+        {mode === "pending" && <div className="pp-pa-actions">{decideButtons(cur)}</div>}
+      </div>
+    </li>
+  );
+}
+
+function ViewerInfo({ p, mode, angle }: { p: AnyPhoto & PendingPhoto; mode: "pending" | "approved"; angle: string }) {
+  const { t } = useTranslation();
+  const dt = useTenantDateTime();
+  const a = p as Partial<ApprovedPhoto>;
+  const When = ({ iso }: { iso: string }): ReactNode => (
+    <span className="pp-pa-when" title={dt.formatDateTime(iso)}>
+      {dt.formatDateTime(iso)}
+    </span>
+  );
+  return (
+    <>
+      <dl className="pp-pv-facts">
+        <PhotoViewerFact label={t("photoApprovals.viewer.employee", { defaultValue: "Employee" }) as string}>
+          <Link to={`/employees/${p.employee_id}`}>{p.employee_full_name}</Link>
+        </PhotoViewerFact>
+        <PhotoViewerFact label={t("employees.field.code", { defaultValue: "Employee ID" }) as string}>
+          <span className="mono">{p.employee_code}</span>
+        </PhotoViewerFact>
+        <PhotoViewerFact label={t("photoApprovals.filters.angle", { defaultValue: "Angle" }) as string}>
+          {angle}
+        </PhotoViewerFact>
+        <PhotoViewerFact label={t("employees.col.status", { defaultValue: "Status" }) as string}>
+          <DotPill tone={mode === "pending" ? "warning" : "success"}>
+            {mode === "pending"
+              ? (t("photoApprovals.pendingPill") as string)
+              : (t("photoApprovals.approvedPill") as string)}
+          </DotPill>
+        </PhotoViewerFact>
+      </dl>
+      <div className="pp-pa-trail">
+        <div className="pp-pa-trail-row">
+          <span className="pp-pa-trail-icon" aria-hidden>
+            <Icon name="upload" size={12} />
+          </span>
+          <div className="pp-pa-trail-text">
+            <span className="pp-pa-trail-label">{t("photoApprovals.uploadedAt", { defaultValue: "Uploaded" }) as string}</span>
+            <When iso={p.uploaded_at} />
+            {p.uploaded_by_email && (
+              <span className="pp-pa-trail-who" title={p.uploaded_by_email}>
+                {p.uploaded_by_email}
+              </span>
+            )}
+          </div>
+        </div>
+        {mode === "approved" && a.approved_at && (
+          <div className="pp-pa-trail-row">
+            <span className="pp-pa-trail-icon is-ok" aria-hidden>
+              <Icon name="check" size={12} />
+            </span>
+            <div className="pp-pa-trail-text">
+              <span className="pp-pa-trail-label">
+                {t("photoApprovals.approvedAt") as string}
+                {a.approved_by_role && (
+                  <span className={`pill ${rolePillClass(a.approved_by_role)} pp-pa-role`}>{a.approved_by_role}</span>
+                )}
+              </span>
+              <When iso={a.approved_at} />
+              {a.approved_by_email && (
+                <span className="pp-pa-trail-who" title={a.approved_by_email}>
+                  {a.approved_by_email}
+                </span>
+              )}
+            </div>
           </div>
         )}
-        <div className="pp-tile-actions">
-          <button
-            type="button"
-            className="btn btn-sm"
-            onClick={onApprove}
-            disabled={busy}
-          >
-            <Icon name="check" size={11} />{" "}
-            {t("photoApprovals.approve") as string}
-          </button>
-          <button
-            type="button"
-            className="btn btn-sm btn-danger"
-            onClick={onReject}
-            disabled={busy}
-          >
-            <Icon name="x" size={11} />{" "}
-            {t("photoApprovals.reject") as string}
-          </button>
-        </div>
       </div>
-    </div>
+      {mode === "pending" && (
+        <p className="pp-pv-help">
+          {t("photoApprovals.viewer.pendingHelp", {
+            defaultValue: "Approve to use this photo for face recognition. Rejecting deletes it.",
+          }) as string}
+        </p>
+      )}
+    </>
   );
 }
 
@@ -502,49 +788,5 @@ function NoMatch({ onClear }: { onClear: () => void }) {
         </button>
       }
     />
-  );
-}
-
-function ApprovedTile({ p }: { p: ApprovedPhoto }) {
-  const { t } = useTranslation();
-  return (
-    <div className="pp-tile">
-      <div className="pp-tile-img">
-        <img
-          src={`/api/employees/${p.employee_id}/photos/${p.photo_id}/image`}
-          alt={`${p.angle} reference for ${p.employee_full_name}`}
-          loading="lazy"
-        />
-        <span className="pp-tile-badge">
-          <DotPill tone="success">{t("photoApprovals.approvedPill") as string}</DotPill>
-        </span>
-      </div>
-      <div className="pp-tile-body">
-        <div className="pp-tile-title pp-truncate" title={p.employee_full_name}>
-          {p.employee_full_name}
-        </div>
-        <div className="pp-tile-meta">
-          <span className="mono">{p.employee_code}</span>
-          <span>· {t(`employees.photos.angles.${p.angle}`) as string}</span>
-        </div>
-        {p.approved_by_email && (
-          <div className="pp-tile-meta" style={{ marginTop: 8 }} title={p.approved_by_email}>
-            <span className={`pill ${rolePillClass(p.approved_by_role ?? "")}`}>
-              {p.approved_by_role ?? (t("photoApprovals.unknownRole") as string)}
-            </span>
-            <span>{p.approved_by_email}</span>
-          </div>
-        )}
-        {p.approved_at && (
-          <div className="pp-tile-meta" title={new Date(p.approved_at).toLocaleString()}>
-            <Icon name="check" size={10} />
-            <span>
-              {t("photoApprovals.approvedAt") as string}{" "}
-              <span className="mono">{new Date(p.approved_at).toLocaleString()}</span>
-            </span>
-          </div>
-        )}
-      </div>
-    </div>
   );
 }

@@ -339,3 +339,202 @@
 .at-roll-pills { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; }
 .at-inline-empty { display: flex; align-items: center; gap: 10px; padding: 14px 0; color: var(--text-secondary); font-size: 13px; }
 .at-inline-empty svg { color: var(--text-tertiary); flex: none; }
+
+/* ── My attendance (Oct 2026 redesign) · prefix at-me- ───────────── */
+.at-me-block { margin-bottom: 20px; }
+.at-me-muted { color: var(--text-tertiary); font-size: 12.5px; }
+.at-me-pad { padding: 4px 20px 20px; }
+.at-me-section-head { margin-block: 4px 12px; }
+.at-me-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px 12px;
+}
+.at-me-card-head .card-title { margin: 0; }
+.at-me-card-head .card-sub { margin: 2px 0 0; }
+
+/* Today hero */
+.at-me-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 20px 24px;
+  margin-bottom: 24px;
+  background:
+    linear-gradient(135deg, color-mix(in oklab, var(--accent-soft) 70%, transparent), transparent 55%),
+    var(--bg-elev);
+}
+.at-me-hero-main {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(0, 2.4fr);
+  gap: 28px;
+  align-items: center;
+}
+.at-me-hero-id { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.at-me-hero-date {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  color: var(--text);
+}
+.at-me-hero-status { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+.at-me-hero-note { margin: 0; font-size: 12.5px; color: var(--text-secondary); }
+.at-me-hero-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.at-me-fact {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-xs);
+  min-width: 0;
+}
+.at-me-fact-value {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.at-me-progress {
+  display: block;
+  block-size: 6px;
+  margin-block: 6px 2px;
+  border-radius: 999px;
+  background: var(--bg-sunken);
+  overflow: hidden;
+}
+.at-me-progress-bar {
+  display: block;
+  block-size: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: inline-size var(--dur) var(--ease-out);
+}
+.at-me-progress-bar.is-done { background: var(--success); }
+.at-me-hero-foot {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(0, 2.4fr) auto;
+  gap: 28px;
+  align-items: center;
+  padding-block-start: 16px;
+  border-block-start: 1px solid var(--border);
+}
+.at-me-shift { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; color: var(--text-secondary); min-width: 0; }
+.at-me-shift-name { font-weight: 600; color: var(--text); }
+.at-me-shift-window {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text);
+}
+.at-me-ruler-wrap { min-width: 0; }
+.at-me-ruler-legend { margin-block-start: 8px; }
+
+/* Overtime tile: StatCard look with a duration value */
+.at-me-stat-ot { --tone-fg: var(--accent-text); --tone-bg: var(--accent-soft); }
+
+/* Recent days + mini calendar */
+.at-me-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: 20px;
+  align-items: start;
+  margin-bottom: 20px;
+}
+@media (max-width: 1180px) {
+  .at-me-split { grid-template-columns: 1fr; }
+  .at-me-hero-main, .at-me-hero-foot { grid-template-columns: 1fr; gap: 16px; }
+}
+.at-me-recent { overflow: hidden; }
+.at-me-table th, .at-me-table td { white-space: nowrap; }
+.at-me-table .at-me-num { text-align: end; }
+.at-me-table tr.at-me-row-off td { background: color-mix(in oklab, var(--bg-sunken) 55%, var(--bg-elev)); }
+.at-me-date-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  text-align: start;
+}
+span.at-me-date-btn { cursor: default; }
+.at-me-date { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.at-me-weekday { font-size: 12px; color: var(--text-tertiary); }
+.at-me-flags { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.at-me-flags .pill { font-size: 11px; }
+
+.at-pill.at-me-pill-holiday {
+  --at-dot: var(--co-holiday-dot);
+  background: var(--co-holiday-soft);
+  color: var(--co-holiday-fg);
+  border-color: color-mix(in oklab, var(--co-holiday-dot) 24%, transparent);
+}
+
+.at-me-cal { padding-block-end: 16px; }
+.at-me-cal .cal-legend { padding-inline: 20px; margin-block-start: 14px; flex-wrap: wrap; }
+.at-me-cal > .at-me-muted { padding-inline: 20px; }
+.at-me-mini { padding-inline: 20px; }
+.at-me-mini-row,
+.at-me-mini-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.at-me-mini-row { margin-block-end: 6px; }
+.at-me-mini-dow {
+  text-align: center;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.at-me-mini-pad { aspect-ratio: 1; }
+.at-me-mini-day {
+  appearance: none;
+  position: relative;
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elev);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: transform var(--dur-fast) ease, box-shadow var(--dur-fast) ease, opacity var(--dur-fast) ease;
+}
+.at-me-mini-day:hover:not(:disabled) { transform: translateY(-1px); box-shadow: var(--shadow-sm); border-color: var(--border-strong); }
+.at-me-mini-day.is-today { box-shadow: 0 0 0 2px var(--accent); border-color: transparent; }
+.at-me-mini-day.is-future { cursor: default; opacity: 0.45; background: transparent; }
+.at-me-mini-day.is-dim { opacity: 0.25; }
+.at-me-mini-day.is-hit { box-shadow: 0 0 0 2px currentColor; }
+.at-me-mini-dot {
+  position: absolute;
+  inset-block-end: 6px;
+  inset-inline-start: 50%;
+  translate: -50% 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+[dir="rtl"] .at-me-mini-dot { translate: 50% 0; }

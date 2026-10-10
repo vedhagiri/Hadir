@@ -1,0 +1,398 @@
+/* Camera Logs page — prefix ``cl-log-``. Uses modern.css tokens only. */
+
+.cl-log-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.cl-log-dim { color: var(--text-tertiary); }
+.cl-log-nowrap { white-space: nowrap; }
+.cl-log-break { word-break: break-all; }
+.cl-log-stats-sk { margin-bottom: 20px; }
+
+/* ── Toolbar ─────────────────────────────────────────────────────── */
+.cl-log-seg { display: inline-flex; align-items: center; height: var(--control-h); }
+.cl-log-seg .seg-btn { white-space: nowrap; }
+.cl-log-custom { display: inline-flex; align-items: center; gap: 8px; }
+
+/* ── Card head ───────────────────────────────────────────────────── */
+.cl-log-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-block: 12px;
+  padding-inline: 20px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.cl-log-card-title { display: inline-flex; align-items: center; gap: 6px; margin-inline-end: auto; }
+.cl-log-card-title .card-title { margin: 0; }
+.cl-log-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+.cl-log-live {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--success) 20%, transparent);
+}
+
+/* ⓘ hint */
+.cl-log-hint { position: relative; display: inline-flex; }
+.cl-log-hint-btn {
+  appearance: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
+}
+.cl-log-hint-btn:hover, .cl-log-hint-btn[aria-expanded="true"] { background: var(--bg-sunken); color: var(--accent); }
+.cl-log-hint-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  inset-inline-start: -8px;
+  z-index: 30;
+  width: 340px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-lg);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  animation: mg-fade-in 140ms ease-out both;
+}
+
+/* ── Table ───────────────────────────────────────────────────────── */
+.cl-log-table { width: 100%; }
+.cl-log-table td { vertical-align: middle; padding-block: 10px; }
+.cl-log-col-crop { width: 76px; }
+.cl-log-col-time { width: 150px; }
+.cl-log-col-status { width: 150px; }
+.cl-log-col-conf { width: 130px; }
+.cl-log-col-track { width: 130px; }
+.cl-log-col-more { width: 76px; text-align: end; }
+
+.cl-log-row { cursor: pointer; }
+.cl-log-row.is-expanded td { background: color-mix(in oklab, var(--accent) 4%, var(--bg-elev)); }
+.cl-log-child td { background: var(--bg-sunken); padding-block: 8px; }
+.cl-log-child-thumb { display: inline-flex; padding-inline-start: 12px; }
+
+.cl-log-dayrow td,
+.table tr.cl-log-dayrow:hover td {
+  padding: 0;
+  background: var(--bg-elev);
+  cursor: default;
+}
+.cl-log-day {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  padding: 14px 16px 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+.cl-log-day-label {
+  font-family: var(--font-display);
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.cl-log-day-date { color: var(--text-secondary); }
+.cl-log-day-count::before { content: "·"; margin-inline-end: 8px; color: var(--text-quaternary); }
+
+.cl-log-time {
+  font-family: var(--font-num, var(--font-mono));
+  font-variant-numeric: tabular-nums;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.cl-log-time.is-child { font-weight: 500; color: var(--text-secondary); }
+.cl-log-sub { margin-top: 2px; font-size: 11.5px; color: var(--text-tertiary); white-space: nowrap; }
+.cl-log-cam { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); }
+.cl-log-cam svg { color: var(--text-tertiary); }
+
+/* Crop thumb + hover preview */
+.cl-log-thumb {
+  display: inline-grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  flex: none;
+  transition: box-shadow var(--dur-fast) ease, border-color var(--dur-fast) ease;
+}
+.cl-log-thumb.is-sm { width: 36px; height: 36px; border-radius: 8px; }
+.cl-log-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cl-log-thumb:not(.cl-log-thumb-empty):hover { border-color: var(--accent); box-shadow: var(--ring); }
+.cl-log-thumb-empty { color: var(--text-quaternary); border-style: dashed; }
+.cl-log-preview {
+  position: fixed;
+  z-index: 200;
+  width: 168px;
+  height: 168px;
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  pointer-events: none;
+  animation: mg-modal-in 160ms var(--ease-out) both;
+}
+.cl-log-preview img { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; display: block; }
+
+/* Person */
+.cl-log-person { display: inline-flex; align-items: center; gap: 10px; min-width: 0; max-width: 100%; }
+.cl-log-avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.cl-log-avatar.is-former { background: var(--danger-soft); color: var(--danger-text); }
+.cl-log-avatar.is-unknown {
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  color: var(--text-quaternary);
+}
+.cl-log-person-text { display: flex; flex-direction: column; min-width: 0; }
+.cl-log-person-name {
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-decoration: none;
+}
+a.cl-log-person-name:hover { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; }
+.cl-log-person-name.is-archived { text-decoration: line-through; color: var(--text-secondary); }
+.cl-log-person-name.is-muted { color: var(--text-secondary); }
+.cl-log-person-name.is-unknown { font-weight: 500; color: var(--text-tertiary); }
+.cl-log-person-sub {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 1px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+.cl-log-mini-pill { height: 18px; padding: 0 7px; font-size: 10.5px; }
+
+/* Confidence */
+.cl-log-conf { display: inline-flex; align-items: center; gap: 8px; --cl-tone: var(--accent); }
+.cl-log-conf.tone-success { --cl-tone: var(--success); }
+.cl-log-conf.tone-warning { --cl-tone: var(--warning); }
+.cl-log-conf.tone-accent { --cl-tone: var(--accent); }
+.cl-log-conf-track {
+  width: 56px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-sunken);
+  box-shadow: inset 0 0 0 1px var(--border);
+  overflow: hidden;
+}
+.cl-log-conf-fill { display: block; height: 100%; border-radius: inherit; background: var(--cl-tone); }
+.cl-log-conf-val { font-variant-numeric: tabular-nums; font-size: 12.5px; font-weight: 600; color: var(--text-secondary); }
+
+/* Track chip */
+.cl-log-track {
+  display: inline-block;
+  max-width: 110px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
+/* Row-end affordances */
+.cl-log-expand {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in oklab, var(--accent) 30%, var(--border));
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background var(--dur-fast) ease;
+}
+.cl-log-expand svg { transition: transform var(--dur) var(--ease-out); }
+.cl-log-expand.is-open svg { transform: rotate(180deg); }
+.cl-log-expand:hover { background: color-mix(in oklab, var(--accent) 14%, var(--bg-elev)); }
+.cl-log-open-hint { display: inline-flex; color: var(--text-quaternary); opacity: 0; transition: opacity var(--dur-fast) ease; }
+.cl-log-row:hover .cl-log-open-hint, .cl-log-row:focus-visible .cl-log-open-hint { opacity: 1; }
+
+.cl-log-foot { padding: 10px 16px; border-top: 1px solid var(--border); }
+
+/* ── Grid view ───────────────────────────────────────────────────── */
+.cl-log-grid-wrap { padding: 4px 16px 16px; }
+.cl-log-grid-wrap > [role="status"] { padding-top: 12px; }
+.cl-log-grid-day .cl-log-day { padding-inline: 0; }
+.cl-log-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+  gap: 14px;
+}
+.cl-log-tile {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-xs);
+  overflow: hidden;
+  text-align: start;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: transform var(--dur) var(--ease-out), box-shadow var(--dur) var(--ease-out), border-color var(--dur-fast) ease;
+}
+.cl-log-tile:hover { transform: translateY(-2px); box-shadow: var(--shadow); border-color: var(--border-strong); }
+.cl-log-tile-media {
+  position: relative;
+  display: block;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  background: var(--bg-sunken);
+}
+.cl-log-tile-media img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; transition: transform var(--dur) var(--ease-out); }
+.cl-log-tile:hover .cl-log-tile-media img { transform: scale(1.04); }
+.cl-log-tile-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-quaternary);
+}
+.cl-log-tile-badge {
+  position: absolute;
+  top: 8px;
+  inset-inline-end: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--bg-elev) 92%, transparent);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+.cl-log-tile-body { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px 12px; min-width: 0; }
+.cl-log-tile-top { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; min-width: 0; }
+.cl-log-tile-time { font-size: 13.5px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cl-log-tile-rel { font-size: 11px; color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cl-log-tile-status { position: absolute; bottom: 8px; inset-inline-start: 8px; }
+.cl-log-tile-status .at-pill { height: 20px; padding: 0 8px; font-size: 10.5px; gap: 5px; box-shadow: var(--shadow-sm); }
+.cl-log-tile-cam {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cl-log-tile .cl-log-avatar { width: 24px; height: 24px; font-size: 10px; }
+.cl-log-tile .cl-log-person { gap: 8px; font-size: 12.5px; }
+
+/* ── Detail drawer ───────────────────────────────────────────────── */
+.cl-log-drawer { width: min(560px, 100vw); }
+.cl-log-drawer-body { display: flex; flex-direction: column; gap: 18px; }
+.cl-log-detail-crop {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4 / 3;
+  max-height: 360px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  overflow: hidden;
+}
+.cl-log-detail-crop img { max-width: 100%; max-height: 100%; width: 100%; height: 100%; object-fit: contain; display: block; }
+.cl-log-detail-crop.is-empty { gap: 8px; color: var(--text-quaternary); font-size: 13px; align-content: center; }
+.cl-log-callout {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in oklab, var(--warning) 28%, var(--border));
+  background: var(--warning-soft);
+}
+.cl-log-callout-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--bg-elev);
+  color: var(--warning-text);
+}
+.cl-log-callout-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; font-size: 12.5px; color: var(--text-secondary); }
+.cl-log-callout-text strong { color: var(--text); font-size: 13px; }
+.cl-log-callout .btn { white-space: nowrap; }
+.cl-log-facts { margin: 0; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.cl-log-fact {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.cl-log-fact:last-child { border-bottom: 0; }
+.cl-log-fact dt { color: var(--text-tertiary); font-size: 12.5px; }
+.cl-log-fact dd { margin: 0; min-width: 0; color: var(--text); }
+.cl-log-drawer-foot { justify-content: space-between; }
+.cl-log-drawer-nav { display: inline-flex; gap: 8px; }

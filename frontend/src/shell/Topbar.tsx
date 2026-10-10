@@ -48,10 +48,14 @@ export function Topbar({ pageId, role, me }: Props) {
   const logout = useLogout();
   const { t } = useTranslation();
   // Detail routes (``employees/123``) reuse the list's trail + "Profile".
+  // Managers arrive from My Team (they can't open the Admin/HR list), so
+  // their trail runs through "My Team" instead of "Employees".
+  const profileTrail =
+    role === "Manager" ? CRUMBS["my-team"] : CRUMBS.employees;
   const crumbs =
     CRUMBS[pageId] ??
-    (pageId.startsWith("employees/") && CRUMBS.employees
-      ? [...CRUMBS.employees, "Profile"]
+    (pageId.startsWith("employees/") && profileTrail
+      ? [...profileTrail, "Profile"]
       : ["Maugood", pageId]);
 
   const onLogout = () => {

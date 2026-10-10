@@ -101,3 +101,57 @@ button.dsh-legend-row:hover { background: var(--bg-hover); }
 @media (max-width: 720px) {
   .dsh-storage-pct .mg-stat-value { font-size: 28px; }
 }
+
+/* ---- Manager dashboard (Oct 2026) ------------------------------------ */
+.mgr-of { font-size: 0.55em; font-weight: 600; color: var(--text-tertiary); letter-spacing: 0; }
+
+.mgr-trend-facts { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+.mgr-trend-facts > div { padding: 10px 12px; border-radius: var(--radius); background: var(--bg-sunken); }
+.mgr-fact-value { font-family: var(--font-display); font-size: 20px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: var(--text); }
+.mgr-fact-label { font-size: 11.5px; color: var(--text-tertiary); margin-top: 2px; }
+
+.mgr-bars { display: flex; align-items: flex-end; gap: 4px; block-size: 150px; padding-bottom: 2px; }
+.mgr-bar-col { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; block-size: 100%; }
+.mgr-bar-track { flex: 1; inline-size: 100%; display: flex; align-items: flex-end; border-radius: 4px; background: var(--bg-sunken); overflow: hidden; }
+.mgr-bar { inline-size: 100%; border-radius: 4px 4px 0 0; transition: block-size var(--dur) var(--ease-out); }
+.mgr-bar.is-good { background: var(--success); }
+.mgr-bar.is-mid { background: var(--warning); }
+.mgr-bar.is-low { background: var(--danger); }
+.mgr-bar-col.is-off .mgr-bar-track { background: repeating-linear-gradient(135deg, var(--bg-sunken) 0 4px, var(--border) 4px 6px); }
+.mgr-bar-col.is-future .mgr-bar-track { background: transparent; border: 1px dashed var(--border); }
+.mgr-bar-day { font-size: 10px; color: var(--text-quaternary); font-variant-numeric: tabular-nums; }
+.mgr-bar-col.is-today .mgr-bar-day { color: var(--accent-text); font-weight: 700; }
+.mgr-bar-col.is-today .mgr-bar-track { box-shadow: 0 0 0 2px var(--accent); }
+
+.mgr-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 12px; font-size: 11.5px; color: var(--text-tertiary); }
+.mgr-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.mgr-legend i { inline-size: 10px; block-size: 10px; border-radius: 3px; display: inline-block; }
+.mgr-legend i.is-good { background: var(--success); }
+.mgr-legend i.is-mid { background: var(--warning); }
+.mgr-legend i.is-low { background: var(--danger); }
+.mgr-legend i.is-off { background: repeating-linear-gradient(135deg, var(--bg-sunken) 0 3px, var(--border-strong) 3px 5px); }
+
+.mgr-attn { display: flex; flex-direction: column; gap: 16px; }
+.mgr-attn-group + .mgr-attn-group { padding-top: 14px; border-top: 1px solid var(--border); }
+.mgr-attn-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.mgr-attn-count { font-family: var(--font-display); font-size: 16px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.mgr-attn-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.mgr-attn-item {
+  appearance: none; border: 0; background: transparent; font: inherit; color: inherit; cursor: pointer;
+  inline-size: 100%; display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; text-align: start;
+  transition: background var(--dur-fast) ease;
+}
+.mgr-attn-item:hover { background: var(--bg-hover); }
+.mgr-attn-name { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mgr-attn-detail { font-size: 12px; color: var(--text-tertiary); white-space: nowrap; }
+.mgr-attn-more { margin-top: 4px; }
+
+.mgr-avatar { inline-size: 28px; block-size: 28px; flex: none; font-size: 10.5px; color: #fff; box-shadow: none; }
+.mgr-person { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.mgr-person-text { display: flex; flex-direction: column; min-width: 0; }
+.mgr-row { cursor: pointer; }
+.mgr-ot { color: var(--accent-text); font-weight: 600; }
+
+@media (max-width: 1365px) {
+  .mgr-trend-facts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}

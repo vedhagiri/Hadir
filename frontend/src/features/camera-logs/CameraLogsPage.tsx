@@ -1,23 +1,51 @@
 // Admin Camera Logs page (P11).
-// Paginated table of detection_events with filters and live thumbnails
-// (each <img> hits the auth-gated /crop endpoint, which decrypts on the
-// fly and writes a detection_event.crop_viewed audit row per fetch).
+// Paginated detection_events feed with filters, a summary strip, list
+// and grid views, and a read-only detail drawer. Every crop <img> hits
+// the auth-gated /crop endpoint, which decrypts on the fly and writes a
+// detection_event.crop_viewed audit row per fetch.
 
 import { Fragment, useEffect, useMemo, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 
 import { extractApiError } from "../../api/client";
-import { AnomalyInfoBanner } from "../../components/AnomalyNote";
-import { RelativeTime, relativeText } from "../../components/RelativeTime";
-import { Icon } from "../../shell/Icon";
+import { DatePicker } from "../../components/DatePicker";
+import {
+  EmptyPanel,
+  FilterSelect,
+  ResetButton,
+  StatCard,
+  StatGrid,
+  Toolbar,
+  ViewToggle,
+  pct,
+  useViewMode,
+} from "../../components/ListPageUi";
 import { Pagination } from "../../components/Pagination";
+import { relativeText } from "../../components/RelativeTime";
+import { SkeletonCards, SkeletonGrid, SkeletonLine } from "../../components/Skeleton";
+import { Icon } from "../../shell/Icon";
 import { useTenantDateTime, type TenantDateTime } from "../../util/datetime";
-import { useCameraOptions, useDetectionEvents } from "./hooks";
+import { ATT_ICON, StrokeIcon, fieldDateStyle } from "../attendance/attendanceUi";
+import {
+  addDaysIso,
+  ConfidenceBar,
+  CropThumb,
+  EventStatusPill,
+  InfoHint,
+  PersonCell,
+  TrackChip,
+  cropUrl,
+  presetDays,
+  tenantBound,
+  tenantDayKey,
+  useDayGrouping,
+  type RangePreset,
+} from "./clUi";
+import { EventDetailDrawer } from "./EventDetailDrawer";
+import { useCameraOptions, useDetectionEventCounts, useDetectionEvents, type CountFilter } from "./hooks";
 import type { DetectionEvent, DetectionEventFilters } from "./types";
-import { SkeletonRows } from "../../components/Skeleton";
-import { EmptyPanel, FilterSelect, ResetButton, Toolbar } from "../../components/ListPageUi";
-import { ATT_ICON, DotPill, FieldGroup, StrokeIcon } from "../attendance/attendanceUi";
 
 const PAGE_SIZE = 100;
 
@@ -83,18 +111,19 @@ function groupEvents(events: DetectionEvent[]): EventGroup[] {
   return groups;
 }
 
-function formatTimeRange(group: EventGroup, now: number): string {
-  // Always relative for the table cell. Tooltip carries the exact
-  // tenant-local times (see formatRangeTooltip).
-  return relativeText(group.lastAt, now);
+function formatRangeTooltip(group: EventGroup, dt: TenantDateTime): string {
+  if (group.children.length === 1) return `${dt.formatDate(group.lastAt)} ${dt.formatTimeWithSeconds(group.lastAt)}`;
+  return `${dt.formatTimeWithSeconds(group.firstAt)} → ${dt.formatTimeWithSeconds(group.lastAt)}`;
 }
 
-function formatRangeTooltip(group: EventGroup, dt: TenantDateTime): string {
-  if (group.children.length === 1) return dt.formatTimeWithSeconds(group.lastAt);
-  return `${dt.formatTimeWithSeconds(group.firstAt)} → ${dt.formatTimeWithSeconds(
-    group.lastAt,
-  )}`;
-}
+type StatusValue = "" | "identified" | "unidentified" | "former";
+
+const STAT_ICON = {
+  total: ATT_ICON.camera,
+  identified: ATT_ICON.present,
+  unknown: ATT_ICON.unknown,
+  former: ATT_ICON.shield,
+};
 
 export function CameraLogsPage() {
   const { t } = useTranslation();
@@ -107,19 +136,25 @@ export function CameraLogsPage() {
     page: 1,
     page_size: PAGE_SIZE,
   });
-  // P28.7: client-side toggle wired through to the new
-  // ``former_only=true`` query param.
+  // P28.7: former-employee matches, wired through to the
+  // ``former_only=true`` query param (now the "Former employees"
+  // option of the Status filter).
   const [formerOnly, setFormerOnly] = useState(false);
-  // Migration 0068 — tenant tz + format for the row tooltip.
+  // Migration 0068 — tenant tz + format for times + day boundaries.
   const dt = useTenantDateTime();
-  // Grouping: which group ids are currently expanded. Resets on
-  // filter change (the group ids are derived from primary event id,
-  // so a fresh page reset clears stale entries naturally).
-  const [expandedGroups, setExpandedGroups] = useState<Set<number>>(
-    () => new Set(),
-  );
-  // Shared 30 s ticker drives every group-row's relative-time
-  // label so they advance in lockstep without one timer per row.
+  const tz = dt.timezone;
+  const [view, setView] = useViewMode("maugood.cameraLogs.view");
+
+  // Date range: a preset or a custom day span, sent to the API as
+  // tenant-local start/end-of-day datetimes.
+  const [preset, setPreset] = useState<RangePreset>("all");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+
+  // Grouping: which group ids are currently expanded.
+  const [expandedGroups, setExpandedGroups] = useState<Set<number>>(() => new Set());
+  // Shared 30 s ticker drives every row's relative-time label so they
+  // advance in lockstep without one timer per row.
   const [nowTick, setNowTick] = useState(() => Date.now());
   useEffect(() => {
     const id = window.setInterval(() => setNowTick(Date.now()), 30_000);
@@ -133,42 +168,149 @@ export function CameraLogsPage() {
       return next;
     });
 
+  const [selected, setSelected] = useState<DetectionEvent | null>(null);
+
   const cameras = useCameraOptions();
   const events = useDetectionEvents(filters, { formerOnly });
-  const groupedEvents = useMemo(
-    () => groupEvents(events.data?.items ?? []),
-    [events.data],
-  );
+  const items = useMemo(() => events.data?.items ?? [], [events.data]);
+  const groupedEvents = useMemo(() => groupEvents(items), [items]);
+  const groupOf = useMemo(() => {
+    const m = new Map<number, EventGroup>();
+    for (const g of groupedEvents) for (const c of g.children) m.set(c.id, g);
+    return m;
+  }, [groupedEvents]);
+  const groupByDay = useDayGrouping();
+  const days = useMemo(() => groupByDay(groupedEvents, (g) => g.lastAt), [groupByDay, groupedEvents]);
 
   const totalPages = useMemo(() => {
     if (!events.data) return 1;
     return Math.max(1, Math.ceil(events.data.total / events.data.page_size));
   }, [events.data]);
 
-  const update = (patch: Partial<DetectionEventFilters>) =>
-    setFilters((prev) => ({ ...prev, page: 1, ...patch }));
+  const update = (patch: Partial<DetectionEventFilters>) => setFilters((prev) => ({ ...prev, page: 1, ...patch }));
 
-  const statusValue =
-    filters.identified === null
+  // ── Summary counts (count-only GETs, status filter excluded so the
+  //    cards keep showing the whole picture for the camera + range). ──
+  const base = { camera_id: filters.camera_id, start: filters.start, end: filters.end };
+  const statQueries = useDetectionEventCounts([
+    { ...base, identified: null, formerOnly: false },
+    { ...base, identified: true, formerOnly: false },
+    { ...base, identified: false, formerOnly: false },
+    { ...base, identified: null, formerOnly: true },
+  ]);
+  const [qTotal, qIdent, qUnident, qFormer] = statQueries;
+  const statsLoading = statQueries.some((q) => q.isLoading);
+  const nTotal = qTotal?.data ?? 0;
+  const nIdent = qIdent?.data ?? 0;
+  const nUnident = qUnident?.data ?? 0;
+  const nFormer = qFormer?.data ?? 0;
+
+  // ── Per-day totals for the day headers (count-only, current filters). ──
+  const dayFilters: CountFilter[] = days
+    .filter((d) => d.key !== "unknown")
+    .map((d) => ({
+      camera_id: filters.camera_id,
+      identified: filters.identified,
+      formerOnly,
+      start: tenantBound(d.key, "00:00:00", tz),
+      end: tenantBound(d.key, "23:59:59", tz),
+    }));
+  const dayCountQueries = useDetectionEventCounts(dayFilters);
+  const dayCount = new Map<string, number>();
+  dayFilters.forEach((f, i) => {
+    const n = dayCountQueries[i]?.data;
+    if (n !== undefined && f.start) dayCount.set(f.start.slice(0, 10), n);
+  });
+
+  const statusValue: StatusValue = formerOnly
+    ? "former"
+    : filters.identified === null
       ? ""
       : filters.identified
         ? "identified"
         : "unidentified";
-  const filtersActive =
-    filters.camera_id !== null ||
-    filters.identified !== null ||
-    !!filters.start ||
-    !!filters.end ||
-    formerOnly;
+  const setStatus = (v: StatusValue) => {
+    setFormerOnly(v === "former");
+    update({ identified: v === "identified" ? true : v === "unidentified" ? false : null });
+  };
+
+  const todayKey = tenantDayKey(tz, new Date(nowTick));
+  const applyRange = (p: RangePreset, from?: string, to?: string) => {
+    setPreset(p);
+    if (p === "all") {
+      update({ start: null, end: null });
+      return;
+    }
+    let span: { from: string; to: string };
+    if (p === "custom") {
+      const f = from || customFrom || presetDays("7d", todayKey).from;
+      const tt = to || customTo || todayKey;
+      span = { from: f, to: tt < f ? f : tt };
+      setCustomFrom(span.from);
+      setCustomTo(span.to);
+    } else {
+      span = presetDays(p, todayKey);
+    }
+    update({ start: tenantBound(span.from, "00:00:00", tz), end: tenantBound(span.to, "23:59:59", tz) });
+  };
+
+  const filtersActive = filters.camera_id !== null || filters.identified !== null || !!filters.start || !!filters.end || formerOnly;
   const resetFilters = () => {
     setFormerOnly(false);
+    setPreset("all");
     update({ camera_id: null, identified: null, start: null, end: null });
   };
-  const showEmpty =
-    !!events.data && events.data.items.length === 0 && !events.isLoading;
-
+  const showEmpty = !!events.data && events.data.items.length === 0 && !events.isLoading;
   const noRecordsAtAll = showEmpty && !filtersActive;
   const noResults = showEmpty && filtersActive;
+
+  // Detail drawer navigation walks the page in feed order.
+  const selIndex = selected ? items.findIndex((e) => e.id === selected.id) : -1;
+  const prevEv = selIndex > 0 ? items[selIndex - 1] : undefined;
+  const nextEv = selIndex >= 0 && selIndex < items.length - 1 ? items[selIndex + 1] : undefined;
+  const selGroup = selected ? groupOf.get(selected.id) : undefined;
+
+  const openOnKey = (ev: DetectionEvent) => (e: ReactKeyboardEvent) => {
+    if (e.target !== e.currentTarget) return;
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      setSelected(ev);
+    }
+  };
+
+  const dayHeader = (d: { key: string; label: string; items: EventGroup[] }) => {
+    const n = dayCount.get(d.key);
+    const onPage = d.items.reduce((s, g) => s + g.children.length, 0);
+    return (
+      <>
+        <span className="cl-log-day-label">{d.label}</span>
+        {(d.key === todayKey || d.key === addDaysIso(todayKey, -1)) && (
+          <span className="cl-log-day-date">{dt.formatLocalDate(d.key)}</span>
+        )}
+        <span className="cl-log-day-count">
+          {n !== undefined
+            ? t("cameraLogs.day.events", { count: n, formatted: n.toLocaleString(), defaultValue: `${n.toLocaleString()} events` })
+            : t("cameraLogs.day.events", { count: onPage, formatted: onPage.toLocaleString(), defaultValue: `${onPage.toLocaleString()} events` })}
+        </span>
+      </>
+    );
+  };
+
+  const statusOptions: Array<[string, string]> = [
+    ["", t("cameraLogs.statusFilter.all")],
+    ["identified", t("cameraLogs.statusFilter.identified")],
+    ["unidentified", t("cameraLogs.statusFilter.unidentified")],
+    ["former", t("cameraLogs.statusFilter.former", { defaultValue: "Former employees" })],
+  ];
+  const presets: Array<[RangePreset, string]> = [
+    ["all", t("cameraLogs.range.all", { defaultValue: "All time" })],
+    ["today", t("cameraLogs.range.today", { defaultValue: "Today" })],
+    ["yesterday", t("cameraLogs.range.yesterday", { defaultValue: "Yesterday" })],
+    ["7d", t("cameraLogs.range.last7", { defaultValue: "Last 7 days" })],
+    ["custom", t("cameraLogs.range.custom", { defaultValue: "Custom" })],
+  ];
+  const cameraCount = cameras.data?.items.length ?? 0;
+  const rangeLabel = presets.find(([p]) => p === preset)?.[1] ?? "";
 
   return (
     <>
@@ -204,7 +346,9 @@ export function CameraLogsPage() {
             tone="accent"
             icon={<StrokeIcon>{ATT_ICON.camera}</StrokeIcon>}
             title={t("cameraLogs.emptyState.noneTitle", { defaultValue: "No detections yet" })}
-            body={t("cameraLogs.emptyState.noneBody", { defaultValue: "Detections appear here as cameras see faces. Make sure at least one camera is enabled and reachable." })}
+            body={t("cameraLogs.emptyState.noneBody", {
+              defaultValue: "Detections appear here as cameras see faces. Make sure at least one camera is enabled and reachable.",
+            })}
             actions={
               <Link to="/cameras" className="btn">
                 <Icon name="camera" size={13} />
@@ -215,6 +359,61 @@ export function CameraLogsPage() {
         </div>
       ) : (
         <>
+          {statsLoading && !qTotal?.data ? (
+            <div className="cl-log-stats-sk">
+              <SkeletonCards count={4} minWidth={210} />
+            </div>
+          ) : (
+            <StatGrid>
+              <StatCard
+                tone="info"
+                icon={STAT_ICON.total}
+                label={t("cameraLogs.stats.total", { defaultValue: "Total events" })}
+                value={nTotal}
+                sub={t("cameraLogs.stats.totalSub", {
+                  range: rangeLabel,
+                  count: cameraCount,
+                  defaultValue: `${rangeLabel} · ${cameraCount} cameras`,
+                })}
+                active={statusValue === ""}
+                onClick={() => setStatus("")}
+              />
+              <StatCard
+                tone="success"
+                icon={STAT_ICON.identified}
+                label={t("cameraLogs.stats.identified", { defaultValue: "Identified" })}
+                value={nIdent}
+                sub={t("cameraLogs.stats.identifiedSub", {
+                  pct: pct(nIdent, nTotal),
+                  defaultValue: `${pct(nIdent, nTotal)}% identification rate`,
+                })}
+                active={statusValue === "identified"}
+                onClick={() => setStatus(statusValue === "identified" ? "" : "identified")}
+              />
+              <StatCard
+                tone="warning"
+                icon={STAT_ICON.unknown}
+                label={t("cameraLogs.stats.unidentified", { defaultValue: "Unidentified" })}
+                value={nUnident}
+                sub={t("cameraLogs.stats.unidentifiedSub", {
+                  pct: pct(nUnident, nTotal),
+                  defaultValue: `${pct(nUnident, nTotal)}% of events · no match`,
+                })}
+                active={statusValue === "unidentified"}
+                onClick={() => setStatus(statusValue === "unidentified" ? "" : "unidentified")}
+              />
+              <StatCard
+                tone="danger"
+                icon={STAT_ICON.former}
+                label={t("cameraLogs.stats.former", { defaultValue: "Former employees" })}
+                value={nFormer}
+                sub={t("cameraLogs.stats.formerSub", { defaultValue: "Matched an inactive employee" })}
+                active={statusValue === "former"}
+                onClick={() => setStatus(statusValue === "former" ? "" : "former")}
+              />
+            </StatGrid>
+          )}
+
           <Toolbar>
             <FilterSelect
               label={t("cameraLogs.filter.camera", { defaultValue: "Camera" })}
@@ -222,75 +421,77 @@ export function CameraLogsPage() {
               onChange={(v) => update({ camera_id: v === "" ? null : Number(v) })}
               options={[
                 ["", t("cameraLogs.allCameras")],
-                ...(cameras.data?.items ?? []).map(
-                  (c) => [String(c.id), c.name] as [string, string],
-                ),
+                ...(cameras.data?.items ?? []).map((c) => [String(c.id), c.name] as [string, string]),
               ]}
             />
             <FilterSelect
               label={t("cameraLogs.filter.status", { defaultValue: "Status" })}
               value={statusValue}
-              onChange={(v) =>
-                update({ identified: v === "" ? null : v === "identified" })
-              }
-              options={[
-                ["", t("cameraLogs.statusFilter.all")],
-                ["identified", t("cameraLogs.statusFilter.identified")],
-                ["unidentified", t("cameraLogs.statusFilter.unidentified")],
-              ]}
+              onChange={(v) => setStatus(v as StatusValue)}
+              options={statusOptions}
             />
-            <button
-              type="button"
-              aria-pressed={formerOnly}
-              className="at-toggle tone-danger"
-              onClick={() => {
-                setFormerOnly((v) => !v);
-                update({});
-              }}
-            >
-              <span aria-hidden className="at-toggle-box">
-                {formerOnly && <Icon name="check" size={10} />}
-              </span>
-              {t("cameraLogs.formerOnly")}
-            </button>
-            <FieldGroup label={t("cameraLogs.from")}>
-              <input
-                type="datetime-local"
-                className="at-control"
-                value={filters.start ?? ""}
-                onChange={(e) => update({ start: e.target.value || null })}
-                title={t("cameraLogs.from")}
-                aria-label={t("cameraLogs.from")}
-              />
-            </FieldGroup>
-            <FieldGroup label={t("cameraLogs.to")}>
-              <input
-                type="datetime-local"
-                className="at-control"
-                value={filters.end ?? ""}
-                onChange={(e) => update({ end: e.target.value || null })}
-                title={t("cameraLogs.to")}
-                aria-label={t("cameraLogs.to")}
-              />
-            </FieldGroup>
-            <ResetButton
-              active={filtersActive}
-              label={t("cameraLogs.filter.reset", { defaultValue: "Reset" })}
-              onClick={resetFilters}
-            />
+            <div className="seg cl-log-seg" role="group" aria-label={t("cameraLogs.range.label", { defaultValue: "Date range" })}>
+              {presets.map(([p, label]) => (
+                <button
+                  key={p}
+                  type="button"
+                  aria-pressed={preset === p}
+                  className={`seg-btn${preset === p ? " active" : ""}`}
+                  onClick={() => applyRange(p)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {preset === "custom" && (
+              <div className="cl-log-custom">
+                <DatePicker
+                  value={customFrom}
+                  max={customTo || todayKey}
+                  onChange={(v) => applyRange("custom", v, customTo)}
+                  ariaLabel={t("cameraLogs.from")}
+                  triggerStyle={fieldDateStyle}
+                />
+                <span className="cl-log-dim" aria-hidden>
+                  →
+                </span>
+                <DatePicker
+                  value={customTo}
+                  min={customFrom}
+                  max={todayKey}
+                  onChange={(v) => applyRange("custom", customFrom, v)}
+                  ariaLabel={t("cameraLogs.to")}
+                  triggerStyle={fieldDateStyle}
+                />
+              </div>
+            )}
+            <ResetButton active={filtersActive} label={t("cameraLogs.filter.reset", { defaultValue: "Reset" })} onClick={resetFilters} />
           </Toolbar>
 
-          <div className="card">
-            <div className="at-card-head">
-              <h3 className="card-title">{t("cameraLogs.detectionEvents")}</h3>
-              <span className="text-xs text-dim at-nowrap">
+          <div className="card cl-log-card">
+            <div className="cl-log-card-head">
+              <div className="cl-log-card-title">
+                <h3 className="card-title">{t("cameraLogs.detectionEvents")}</h3>
+                <InfoHint label={t("cameraLogs.hintLabel", { defaultValue: "About missed detections" })}>
+                  {t("cameraLogs.anomalyNote")}
+                </InfoHint>
+              </div>
+              <span className="cl-log-count">
                 {events.data
-                  ? t("cameraLogs.matchingCount", { count: events.data.total })
-                  : "—"}
+                  ? t("cameraLogs.matchingCountFmt", {
+                      count: events.data.total,
+                      formatted: events.data.total.toLocaleString(),
+                      defaultValue: `${events.data.total.toLocaleString()} events matching filters`,
+                    })
+                  : ""}
+                {events.isFetching && events.data && <span className="cl-log-live" aria-hidden />}
               </span>
-            </div>
-            <div className="at-card-body" style={{ paddingBottom: 0 }}>
-              <AnomalyInfoBanner message={t("cameraLogs.anomalyNote")} />
+              <ViewToggle
+                value={view}
+                onChange={setView}
+                listLabel={t("cameraLogs.view.list", { defaultValue: "List view" })}
+                gridLabel={t("cameraLogs.view.grid", { defaultValue: "Grid view" })}
+              />
             </div>
 
             {noResults ? (
@@ -298,7 +499,9 @@ export function CameraLogsPage() {
                 tone="neutral"
                 icon={<Icon name="filter" size={28} />}
                 title={t("cameraLogs.emptyState.filtersTitle", { defaultValue: "No detections match these filters" })}
-                body={t("cameraLogs.emptyState.filtersBody", { defaultValue: "Try another camera, status or time range, or clear the filters." })}
+                body={t("cameraLogs.emptyState.filtersBody", {
+                  defaultValue: "Try another camera, status or time range, or clear the filters.",
+                })}
                 actions={
                   <button type="button" className="btn" onClick={resetFilters}>
                     <Icon name="refresh" size={12} />
@@ -306,202 +509,219 @@ export function CameraLogsPage() {
                   </button>
                 }
               />
+            ) : view === "grid" ? (
+              <div className="cl-log-grid-wrap">
+                {events.isLoading ? (
+                  <SkeletonGrid count={14} minWidth={176} />
+                ) : (
+                  days.map((d) => (
+                    <section key={d.key} className="cl-log-grid-day">
+                      <h4 className="cl-log-day">{dayHeader(d)}</h4>
+                      <div className="cl-log-grid">
+                        {d.items.map((g) => {
+                          const ev = g.primary;
+                          const size = g.children.length;
+                          return (
+                            <button
+                              key={ev.id}
+                              type="button"
+                              className="cl-log-tile"
+                              onClick={() => setSelected(ev)}
+                              title={formatRangeTooltip(g, dt)}
+                            >
+                              <span className="cl-log-tile-media">
+                                {ev.has_crop ? (
+                                  <img src={cropUrl(ev.id)} alt="" loading="lazy" />
+                                ) : (
+                                  <span className="cl-log-tile-empty">
+                                    <Icon name="eyeOff" size={18} />
+                                    {t("cameraLogs.cropUnavailable")}
+                                  </span>
+                                )}
+                                {size > 1 && <span className="cl-log-tile-badge">×{size}</span>}
+                                <span className="cl-log-tile-status">
+                                  <EventStatusPill ev={ev} />
+                                </span>
+                              </span>
+                              <span className="cl-log-tile-body">
+                                <span className="cl-log-tile-top">
+                                  <span className="cl-log-tile-time">{dt.formatTimeWithSeconds(ev.captured_at)}</span>
+                                  <span className="cl-log-tile-rel">{relativeText(ev.captured_at, nowTick)}</span>
+                                </span>
+                                <span className="cl-log-tile-cam">
+                                  <Icon name="camera" size={11} />
+                                  {ev.camera_name}
+                                </span>
+                                <PersonCell ev={ev} compact linked={false} />
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  ))
+                )}
+              </div>
             ) : (
-              <div className="at-scroll-x">
-                <table className="table">
+              <div className="cl-log-table-wrap">
+                <table className="table cl-log-table">
                   <thead>
                     <tr>
-                      <th style={{ width: 88 }}>{t("cameraLogs.col.crop")}</th>
-                      <th>{t("cameraLogs.col.captured")}</th>
+                      <th className="cl-log-col-crop">{t("cameraLogs.col.crop")}</th>
+                      <th className="cl-log-col-time">{t("cameraLogs.col.captured")}</th>
                       <th>{t("cameraLogs.col.camera")}</th>
-                      <th style={{ width: 120 }}>{t("cameraLogs.col.status")}</th>
+                      <th className="cl-log-col-status">{t("cameraLogs.col.status")}</th>
                       <th>{t("cameraLogs.col.person")}</th>
-                      <th style={{ width: 80 }}>{t("cameraLogs.col.confidence")}</th>
-                      <th>{t("cameraLogs.col.track")}</th>
+                      <th className="cl-log-col-conf">{t("cameraLogs.col.confidence")}</th>
+                      <th className="cl-log-col-track">{t("cameraLogs.col.track")}</th>
+                      <th className="cl-log-col-more">
+                        <span className="cl-log-sr">{t("cameraLogs.col.sightings", { defaultValue: "Sightings" })}</span>
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
-                    {events.isLoading && <SkeletonRows cols={7} />}
-                    {groupedEvents.map((group) => {
-                      const ev = group.primary;
-                      const groupSize = group.children.length;
-                      const isGrouped = groupSize > 1;
-                      const isExpanded = isGrouped && expandedGroups.has(ev.id);
-                      const rowClass = [isGrouped ? "at-row-clickable" : "", isExpanded ? "at-row-expanded" : ""].filter(Boolean).join(" ") || undefined;
-                      return (
-                        <Fragment key={`group-${ev.id}`}>
-                          <tr
-                            onClick={isGrouped ? () => toggleGroup(ev.id) : undefined}
-                            className={rowClass}
-                            title={
-                              isGrouped
-                                ? t("cameraLogs.groupTooltip", { count: groupSize })
-                                : undefined
-                            }
-                          >
-                            <td>
-                              {ev.has_crop ? (
-                                <img
-                                  src={`/api/detection-events/${ev.id}/crop`}
-                                  alt={`crop ${ev.id}`}
-                                  loading="lazy"
-                                  className="at-thumb"
-                                />
-                              ) : (
-                                <div
-                                  title={t("cameraLogs.cropUnavailable")}
-                                  aria-label={t("cameraLogs.cropUnavailable")}
-                                  className="at-thumb-empty"
-                                >
-                                  {t("cameraLogs.cropUnavailable")}
-                                </div>
-                              )}
-                            </td>
-                            <td className="mono text-sm at-nowrap">
-                              <div className="at-row" style={{ gap: 6, flexWrap: "nowrap" }}>
-                                {isGrouped && (
-                                  <Icon
-                                    name={isExpanded ? "chevronDown" : "chevronRight"}
-                                    size={11}
-                                  />
-                                )}
-                                <span title={formatRangeTooltip(group, dt)}>
-                                  {formatTimeRange(group, nowTick)}
-                                </span>
-                                {isGrouped && (
-                                  <span className="pill pill-accent">×{groupSize}</span>
-                                )}
-                              </div>
-                              {ev.detection_metadata ? (
-                                <div
-                                  className="mono text-xs text-dim"
-                                  title={JSON.stringify(
-                                    ev.detection_metadata,
-                                    null,
-                                    2,
-                                  )}
-                                >
-                                  {ev.detection_metadata.detector_mode}
-                                  {ev.detection_metadata.insightface_version
-                                    ? ` · ${ev.detection_metadata.detector_pack} · v${ev.detection_metadata.insightface_version}`
-                                    : ` · ${ev.detection_metadata.detector_pack}`}
-                                </div>
-                              ) : null}
-                            </td>
-                            <td className="text-sm at-nowrap">{ev.camera_name}</td>
-                            <td>
-                              <EventStatusPill ev={ev} />
-                            </td>
-                            <td className="text-sm">
-                              {ev.employee_id ? (
-                                <span>
-                                  <span
-                                    className={ev.employee_status === "inactive" ? "at-muted" : undefined}
-                                    style={{
-                                      fontWeight: 500,
-                                      textDecoration:
-                                        ev.employee_status === "inactive"
-                                          ? "line-through"
-                                          : undefined,
-                                    }}
-                                  >
-                                    {ev.employee_name}
-                                  </span>{" "}
-                                  {ev.employee_status === "inactive" && (
-                                    <span className="pill pill-neutral" style={{ marginInlineEnd: 4 }}>
-                                      {t("cameraLogs.archived")}
+                    {events.isLoading && <ListSkeletonRows />}
+                    {days.map((d) => (
+                      <Fragment key={d.key}>
+                        <tr className="cl-log-dayrow">
+                          <td colSpan={8}>
+                            <div className="cl-log-day">{dayHeader(d)}</div>
+                          </td>
+                        </tr>
+                        {d.items.map((group) => {
+                          const ev = group.primary;
+                          const groupSize = group.children.length;
+                          const isGrouped = groupSize > 1;
+                          const isExpanded = isGrouped && expandedGroups.has(ev.id);
+                          return (
+                            <Fragment key={`group-${ev.id}`}>
+                              <tr
+                                className={`cl-log-row${isExpanded ? " is-expanded" : ""}`}
+                                onClick={() => setSelected(ev)}
+                                onKeyDown={openOnKey(ev)}
+                                tabIndex={0}
+                                aria-label={t("cameraLogs.openEvent", {
+                                  time: dt.formatTimeWithSeconds(ev.captured_at),
+                                  camera: ev.camera_name,
+                                  defaultValue: `Open event at ${dt.formatTimeWithSeconds(ev.captured_at)}, ${ev.camera_name}`,
+                                })}
+                              >
+                                <td>
+                                  <CropThumb ev={ev} />
+                                </td>
+                                <td className="cl-log-nowrap">
+                                  <div className="cl-log-time" title={formatRangeTooltip(group, dt)}>
+                                    {dt.formatTimeWithSeconds(ev.captured_at)}
+                                  </div>
+                                  <div className="cl-log-sub">
+                                    {relativeText(group.lastAt, nowTick)}
+                                    {isGrouped && (
+                                      <>
+                                        {" · "}
+                                        {t("cameraLogs.since", {
+                                          time: dt.formatTimeWithSeconds(group.firstAt),
+                                          defaultValue: `since ${dt.formatTimeWithSeconds(group.firstAt)}`,
+                                        })}
+                                      </>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="cl-log-nowrap">
+                                  <span className="cl-log-cam">
+                                    <Icon name="camera" size={12} />
+                                    {ev.camera_name}
+                                  </span>
+                                </td>
+                                <td>
+                                  <EventStatusPill ev={ev} />
+                                </td>
+                                <td>
+                                  <PersonCell ev={ev} />
+                                </td>
+                                <td>
+                                  <ConfidenceBar value={ev.confidence} />
+                                </td>
+                                <td>
+                                  <TrackChip id={ev.track_id} />
+                                </td>
+                                <td className="cl-log-col-more">
+                                  {isGrouped ? (
+                                    <button
+                                      type="button"
+                                      className={`cl-log-expand${isExpanded ? " is-open" : ""}`}
+                                      aria-expanded={isExpanded}
+                                      aria-label={t("cameraLogs.groupTooltip", { count: groupSize })}
+                                      title={t("cameraLogs.groupTooltip", { count: groupSize })}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        toggleGroup(ev.id);
+                                      }}
+                                    >
+                                      ×{groupSize}
+                                      <Icon name="chevronDown" size={12} />
+                                    </button>
+                                  ) : (
+                                    <span className="cl-log-open-hint" aria-hidden>
+                                      <Icon name="chevronRight" size={14} />
                                     </span>
                                   )}
-                                  <span className="mono text-xs text-dim">
-                                    {ev.employee_code}
-                                  </span>
-                                </span>
-                              ) : ev.former_employee_match ? (
-                                <span
-                                  title={
-                                    ev.former_match_employee_name
-                                      ? t("cameraLogs.formerNamed", { name: ev.former_match_employee_name })
-                                      : t("cameraLogs.pill.former")
-                                  }
-                                >
-                                  <span className="at-muted" style={{ fontWeight: 500 }}>
-                                    {ev.former_match_employee_name ?? t("cameraLogs.unknown")}
-                                  </span>{" "}
-                                  <span className="mono text-xs text-dim">
-                                    {ev.former_match_employee_code ?? "—"}
-                                  </span>
-                                </span>
-                              ) : (
-                                <span className="text-dim">—</span>
-                              )}
-                            </td>
-                            <td className="mono text-sm">
-                              {ev.confidence !== null
-                                ? `${(ev.confidence * 100).toFixed(0)}%`
-                                : "—"}
-                            </td>
-                            <td className="mono text-xs text-dim at-nowrap">
-                              {ev.track_id.slice(0, 12)}
-                            </td>
-                          </tr>
-                          {isExpanded &&
-                            group.children.slice(1).map((child) => (
-                              <tr key={child.id} className="at-row-child">
-                                <td>
-                                  {child.has_crop ? (
-                                    <img
-                                      src={`/api/detection-events/${child.id}/crop`}
-                                      alt={`crop ${child.id}`}
-                                      loading="lazy"
-                                      className="at-thumb sm"
-                                      style={{ marginInlineStart: 14 }}
-                                    />
-                                  ) : (
-                                    <div className="at-thumb-empty sm" style={{ marginInlineStart: 14 }} />
-                                  )}
-                                </td>
-                                <td className="mono text-sm text-dim at-indent">
-                                  <RelativeTime iso={child.captured_at} />
-                                </td>
-                                <td className="text-sm text-dim">
-                                  {child.camera_name}
-                                </td>
-                                <td>
-                                  <EventStatusPill ev={child} />
-                                </td>
-                                <td className="text-sm text-dim">
-                                  {child.employee_id
-                                    ? (child.employee_name ?? t("cameraLogs.empFallback", { id: child.employee_id }))
-                                    : child.former_employee_match
-                                      ? (child.former_match_employee_name ?? t("cameraLogs.pill.former"))
-                                      : "—"}
-                                </td>
-                                <td className="mono text-sm text-dim">
-                                  {child.confidence !== null
-                                    ? `${(child.confidence * 100).toFixed(0)}%`
-                                    : "—"}
-                                </td>
-                                <td className="mono text-xs text-dim">
-                                  {child.track_id.slice(0, 12)}
                                 </td>
                               </tr>
-                            ))}
-                        </Fragment>
-                      );
-                    })}
+                              {isExpanded &&
+                                group.children.slice(1).map((child) => (
+                                  <tr
+                                    key={child.id}
+                                    className="cl-log-row cl-log-child"
+                                    onClick={() => setSelected(child)}
+                                    onKeyDown={openOnKey(child)}
+                                    tabIndex={0}
+                                    aria-label={t("cameraLogs.openEvent", {
+                                      time: dt.formatTimeWithSeconds(child.captured_at),
+                                      camera: child.camera_name,
+                                      defaultValue: `Open event at ${dt.formatTimeWithSeconds(child.captured_at)}, ${child.camera_name}`,
+                                    })}
+                                  >
+                                    <td>
+                                      <span className="cl-log-child-thumb">
+                                        <CropThumb ev={child} size="sm" />
+                                      </span>
+                                    </td>
+                                    <td className="cl-log-nowrap">
+                                      <div className="cl-log-time is-child">{dt.formatTimeWithSeconds(child.captured_at)}</div>
+                                      <div className="cl-log-sub">{relativeText(child.captured_at, nowTick)}</div>
+                                    </td>
+                                    <td className="cl-log-nowrap cl-log-dim">{child.camera_name}</td>
+                                    <td>
+                                      <EventStatusPill ev={child} />
+                                    </td>
+                                    <td>
+                                      <PersonCell ev={child} compact />
+                                    </td>
+                                    <td>
+                                      <ConfidenceBar value={child.confidence} />
+                                    </td>
+                                    <td>
+                                      <TrackChip id={child.track_id} />
+                                    </td>
+                                    <td />
+                                  </tr>
+                                ))}
+                            </Fragment>
+                          );
+                        })}
+                      </Fragment>
+                    ))}
                   </tbody>
                 </table>
               </div>
             )}
 
             {!noResults && (
-              <div className="at-table-foot">
+              <div className="cl-log-foot">
                 <Pagination
                   page={filters.page}
                   totalPages={totalPages}
-                  onPageChange={(p) =>
-                    setFilters((prev) => ({ ...prev, page: p }))
-                  }
+                  onPageChange={(p) => setFilters((prev) => ({ ...prev, page: p }))}
                   summary={t("cameraLogs.pageOf", {
                     page: filters.page,
                     total: totalPages,
@@ -512,13 +732,55 @@ export function CameraLogsPage() {
           </div>
         </>
       )}
+
+      {selected && (
+        <EventDetailDrawer
+          ev={selected}
+          group={selGroup ? { size: selGroup.children.length, firstAt: selGroup.firstAt, lastAt: selGroup.lastAt } : null}
+          onClose={() => setSelected(null)}
+          onPrev={prevEv ? () => setSelected(prevEv) : null}
+          onNext={nextEv ? () => setSelected(nextEv) : null}
+        />
+      )}
     </>
   );
 }
 
-function EventStatusPill({ ev }: { ev: DetectionEvent }) {
-  const { t } = useTranslation();
-  if (ev.employee_id) return <DotPill tone="success">{t("cameraLogs.pill.identified")}</DotPill>;
-  if (ev.former_employee_match) return <DotPill tone="danger">{t("cameraLogs.pill.former")}</DotPill>;
-  return <DotPill tone="warning">{t("cameraLogs.pill.unidentified")}</DotPill>;
+/** Loading rows shaped like the real ones: thumb, time + relative,
+ *  camera, pill, avatar + name, bar, chip. */
+function ListSkeletonRows() {
+  return (
+    <>
+      {Array.from({ length: 8 }, (_, i) => (
+        <tr key={i} aria-hidden style={{ opacity: Math.max(0.3, 1 - i * 0.09) }}>
+          <td>
+            <SkeletonLine width={48} height={48} radius={10} />
+          </td>
+          <td>
+            <SkeletonLine width={70} height={12} />
+            <SkeletonLine width={52} height={9} style={{ marginTop: 6 }} />
+          </td>
+          <td>
+            <SkeletonLine width={110} height={11} />
+          </td>
+          <td>
+            <SkeletonLine width={88} height={20} radius={999} />
+          </td>
+          <td>
+            <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <SkeletonLine width={30} height={30} radius="50%" />
+              <SkeletonLine width={120} height={11} />
+            </span>
+          </td>
+          <td>
+            <SkeletonLine width={80} height={8} radius={999} />
+          </td>
+          <td>
+            <SkeletonLine width={76} height={18} radius={6} />
+          </td>
+          <td />
+        </tr>
+      ))}
+    </>
+  );
 }

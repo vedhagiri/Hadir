@@ -101,13 +101,19 @@ export function EmployeeProfilePage() {
 
   // Back target: the list URL we came from (when it carried filters in
   // its query string), else plain /employees.
+  // Managers reach this page from My Team / their dashboard and can't
+  // open the Admin/HR employees list, so their default target is My Team.
+  const listPath = canEdit ? "/employees" : "/my-team";
+  const listLabel = canEdit
+    ? (t("employeeProfile.back", { defaultValue: "Employees" }) as string)
+    : (t("employeeProfile.backMyTeam", { defaultValue: "My team" }) as string);
   const fromState = (location.state as { from?: string } | null)?.from;
-  const backTo = fromState && fromState.startsWith("/employees") ? fromState : "/employees";
+  const backTo = fromState && fromState.startsWith(listPath) ? fromState : listPath;
 
   const backLink = (
     <Link to={backTo} className="pp-prof-back">
       <Icon name="chevronLeft" size={13} />
-      {t("employeeProfile.back", { defaultValue: "Employees" }) as string}
+      {listLabel}
     </Link>
   );
 
@@ -128,7 +134,7 @@ export function EmployeeProfilePage() {
               defaultValue: "This employee doesn't exist or isn't visible to you. They may have been deleted.",
             }) as string}
             actions={
-              <Link to="/employees" className="btn">
+              <Link to={listPath} className="btn">
                 <Icon name="chevronLeft" size={12} />
                 {t("employeeProfile.notFound.action", { defaultValue: "Back to employees" }) as string}
               </Link>
