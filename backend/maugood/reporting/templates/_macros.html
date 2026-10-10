@@ -1,0 +1,93 @@
+{#
+  Shared Jinja macros for the Template 1 attendance PDFs.
+  Every value rendered here is HTML-escaped by the environment's
+  autoescape; image sources are data: URLs built by pdf.py.
+#}
+
+{% macro mast(tenant, branding, kicker, title, period, box) -%}
+<div class="mast">
+  <div>
+    <div class="brand">
+      {% if branding.logo_data_url %}
+        <div class="tlogo"><img src="{{ branding.logo_data_url }}" alt="{{ tenant.name }}" /></div>
+      {% else %}
+        <div class="logo">{{ tenant.name[:1] | upper }}</div>
+        <div class="tn">{{ tenant.name }}</div>
+      {% endif %}
+      <div class="pr">{{ kicker }}</div>
+    </div>
+    <h1>{{ title }}</h1>
+    <div class="period">{{ period }}</div>
+  </div>
+  <div class="box">
+    <table>
+      {% for k, v, cls in box %}
+      <tr><td class="k">{{ k }}</td><td class="v {{ cls }}">{{ v }}</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+</div>
+{%- endmacro %}
+
+{% macro kpi(label, value, hint, cls="", small="") -%}
+<div class="kpi {{ cls }}"><b>{{ label }}</b><div class="v">{{ value }}{% if small %}<small> {{ small }}</small>{% endif %}</div><div class="h">{{ hint }}</div></div>
+{%- endmacro %}
+
+{% set PILL = {
+  "present": ("ok", "Present"),
+  "late": ("late", "Late"),
+  "early": ("late", "Early out"),
+  "absent": ("bad", "Absent"),
+  "leave": ("lv", "Leave"),
+  "weekend": ("we", "Weekend"),
+  "holiday": ("hol", "Holiday"),
+  "pending": ("pend", "No record"),
+  "short": ("short", "Short hours"),
+  "full": ("ok", "Full"),
+  "flags": ("late", "Flags"),
+  "absences": ("bad", "Absences"),
+} %}
+
+{% macro pill(status, label=None) -%}
+{% set p = PILL.get(status, ("pend", status)) %}<span class="pill {{ p[0] }}">{{ label or p[1] }}</span>
+{%- endmacro %}
+
+{% macro flags(items, empty="—") -%}
+{% if items %}{% for cls, text in items %}<span class="flag {{ cls }}">{{ text }}</span>{% endfor %}{% else %}<span class="dim">{{ empty }}</span>{% endif %}
+{%- endmacro %}
+
+{% macro photo(url) -%}
+{% if url %}<img class="ph" src="{{ url }}" alt="" />{% else %}<span class="ph none"></span>{% endif %}
+{%- endmacro %}
+
+{% macro avatar(row) -%}
+<span class="av" style="background:{{ row.avatar_color }}">{{ row.initials }}</span>
+{%- endmacro %}
+
+{% macro bar(pct) -%}
+<div class="bar"><i class="{% if pct < 60 %}vlo{% elif pct < 80 %}lo{% endif %}" style="width:{{ pct }}%"></i></div>
+{%- endmacro %}
+
+{% macro t(value) -%}
+{% if value %}<span class="num">{{ value }}</span>{% else %}<span class="num dim">—</span>{% endif %}
+{%- endmacro %}
+
+{% macro hours(value) -%}
+{% if value is not none %}{{ "%.1f" | format(value) }}{% else %}<span class="dim">—</span>{% endif %}
+{%- endmacro %}
+
+{% macro timeline(segments, big=False) -%}
+<div class="tl{% if big %} big{% endif %}">{% for cls, left, width in segments %}<i class="{{ cls }}" style="left:{{ "%.1f" | format(left) }}%;width:{{ "%.1f" | format(width) }}%"></i>{% endfor %}</div>
+{%- endmacro %}
+
+{% macro copyright(tenant, year, mts_logo) -%}
+<div class="copy">{% if mts_logo %}<img src="{{ mts_logo }}" alt="Muscat Tech Solutions" />{% endif %}<span>© {{ year }} Muscat Tech Solutions. All rights reserved. Maugood is a product of Muscat Tech Solutions, Oman. This report was prepared for {{ tenant.name }}, contains personal data and is intended for the named organisation only.</span></div>
+{%- endmacro %}
+
+{% macro sign(employee_name, manager_name) -%}
+<div class="sign">
+  <div>Employee · {{ employee_name }}</div>
+  <div>Line manager{% if manager_name %} · {{ manager_name }}{% endif %}</div>
+  <div>HR</div>
+</div>
+{%- endmacro %}

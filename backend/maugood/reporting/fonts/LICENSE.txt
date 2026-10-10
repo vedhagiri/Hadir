@@ -1,0 +1,8 @@
+Fonts bundled for the Maugood PDF reports (rendered offline by WeasyPrint).
+All three families are licensed under the SIL Open Font License 1.1
+(https://openfontlicense.org). Files are Latin subsets produced with
+fontTools' pyftsubset from the Google Fonts static builds.
+
+  Inter (400/500/600/700)   Copyright 2016 The Inter Project Authors (rsms.me/inter)
+  Instrument Serif (400)    Copyright 2022 The Instrument Serif Project Authors
+  JetBrains Mono (500/600)  Copyright 2020 The JetBrains Mono Project Authors

@@ -324,6 +324,32 @@ holidays, cameras, attendance, approvals, reports,
 notifications, metrics). **v1.0 M3 hardening complete +
 sign-off run done. M4 launch next.**
 
+## PDF reports — Template 1 (approved 8 Oct 2026)
+
+`maugood/reporting/pdf.py` renders the four approved "Classic"
+layouts (`templates/attendance_daily.html`, `attendance_range.html`,
+`employee_range.html`, `employee_daily.html`) through WeasyPrint.
+The layout is picked from the request body — `employee_id` set →
+employee report, `start == end` → single-day — so the endpoint
+`POST /api/reports/attendance.pdf`, the scheduled runner and the
+frontend are unchanged. Shared stylesheet `templates/report.css`;
+fonts are Latin subsets of Inter / Instrument Serif / JetBrains Mono
+bundled under `reporting/fonts/` (OFL) so the renderer never opens a
+network socket; the MTS logo lives in `reporting/assets/`. Branding
+`primary_color_key` maps to `HEX_PALETTE` (accent / accent_2 / soft);
+the tenant logo + face crops + reference photo are embedded as
+`data:` URLs. Sightings (first/last crop, source camera, counts) come
+from **one** aggregated query over `detection_events` bucketed by the
+**tenant** timezone — never the server's. Attendance figures are the
+engine's rows verbatim; late/early minute counts are decoration
+derived from the policy thresholds. Tables use `table-layout: fixed`
+with explicit column widths (WeasyPrint's auto layout overflows A4
+with many nowrap columns). Exceptions cap at 300 rows, employee-daily
+sightings at 120 (middle collapsed). The employee layouts render only
+when the employee exists in the tenant **and** inside the caller's
+department scope; otherwise the company layout renders (no profile
+leak). Tests: `tests/test_p17_pdf_reports.py`.
+
 ## Tenant routing (v1.0 P1)
 **Approach chosen: SQLAlchemy `checkout` event + Python ContextVar**,
 not a per-route DI dependency. Documented here per the v1.0 P1

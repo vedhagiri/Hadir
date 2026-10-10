@@ -1,0 +1,177 @@
+/* Maugood PDF reports — "Template 1 / Classic" stylesheet (approved 8 Oct 2026).
+
+   Shared by the four attendance report layouts rendered by
+   maugood/reporting/pdf.py through WeasyPrint:
+
+     attendance_daily.html   company-wide, one date
+     attendance_range.html   company-wide, date range
+     employee_range.html     one employee, date range
+     employee_daily.html     one employee, one date
+
+   Fonts are bundled Latin subsets under ../fonts/ (OFL — see
+   fonts/LICENSE.txt) so the renderer never opens a network socket.
+   Accent colours come from tenant branding: the template writes
+   --teal / --teal-2 / --teal-soft on :root before this file is applied.
+   Physical (not logical) properties on purpose — WeasyPrint's support
+   for *-inline-* properties is incomplete and the reports are LTR. */
+
+@font-face{font-family:'Inter';font-weight:400;font-style:normal;src:url('../fonts/Inter-400.ttf')}
+@font-face{font-family:'Inter';font-weight:500;font-style:normal;src:url('../fonts/Inter-500.ttf')}
+@font-face{font-family:'Inter';font-weight:600;font-style:normal;src:url('../fonts/Inter-600.ttf')}
+@font-face{font-family:'Inter';font-weight:700;font-style:normal;src:url('../fonts/Inter-700.ttf')}
+@font-face{font-family:'Instrument Serif';font-weight:400;font-style:normal;src:url('../fonts/InstrumentSerif-400.ttf')}
+@font-face{font-family:'JetBrains Mono';font-weight:500;font-style:normal;src:url('../fonts/JetBrainsMono-500.ttf')}
+@font-face{font-family:'JetBrains Mono';font-weight:600;font-style:normal;src:url('../fonts/JetBrainsMono-600.ttf')}
+
+:root{
+  --teal:#1d5c60; --teal-2:#2f7f84; --teal-soft:#e6f1f1;
+  --ink:#15211f; --ink2:#4f5f5c; --ink3:#8a9693; --line:#dfe6e4; --bg:#f4f7f6;
+  --ok:#2a8a5c; --ok-s:#e4f3ea; --warn:#b4791a; --warn-s:#fbf0d9; --bad:#c0392b; --bad-s:#fbe7e4;
+  --info:#2b6cb0; --info-s:#e5eefb; --vio:#6a4bc4; --vio-s:#eee8fa;
+}
+*{box-sizing:border-box}
+html,body{margin:0;color:var(--ink);font:9.5pt/1.45 'Inter','Liberation Sans',Arial,sans-serif;background:#fff}
+.num,.mono{font-family:'JetBrains Mono','Liberation Mono',monospace;font-variant-numeric:tabular-nums}
+.page{padding:0 14mm 6mm}
+img{max-width:100%}
+
+/* ---- masthead ---- */
+.mast{background:var(--teal);color:#fff;padding:11mm 14mm 9mm;display:flex;justify-content:space-between;align-items:flex-end;position:relative}
+.mast::after{content:"";position:absolute;left:0;right:0;bottom:-3pt;height:3pt;background:linear-gradient(90deg,var(--teal-2),#8fd0d3)}
+.mast .brand{display:flex;align-items:center;gap:12pt;margin-bottom:12pt}
+.mast .logo{width:30pt;height:30pt;border-radius:7pt;background:#fff;color:var(--teal);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13pt}
+.mast .tlogo{background:#fff;border-radius:7pt;padding:6pt 10pt;display:inline-block}
+.mast .tlogo img{height:30pt;width:auto;display:block}
+.mast .tn{font-size:12pt;font-weight:600;letter-spacing:.01em}
+.mast .pr{font-size:7.5pt;opacity:.8;text-transform:uppercase;letter-spacing:.12em}
+.mast h1{margin:0;font:400 30pt/1.05 'Instrument Serif','Liberation Serif',Georgia,serif;letter-spacing:-.005em}
+.mast .period{font-size:12pt;margin-top:5pt;opacity:.95}
+.mast .box{border:1px solid rgba(255,255,255,.28);border-radius:7pt;padding:8pt 11pt;font-size:8pt;min-width:170pt;max-width:230pt;background:rgba(255,255,255,.06)}
+.mast .box table{width:100%;border-collapse:collapse;font-size:8pt}
+.mast .box td{padding:1.5pt 0;border:0;background:transparent;vertical-align:top;color:#fff}
+.mast .box td.k{opacity:.7;padding-right:10pt;white-space:nowrap}
+.mast .box td.v{font-weight:500}
+.mast .box td.v.mono{font-size:7.2pt;word-break:break-all}
+body.compact .mast{padding:8mm 14mm 6mm}
+body.compact .mast h1{font-size:24pt}
+
+/* ---- section titles ---- */
+h2{display:flex;align-items:baseline;gap:9pt;margin:16pt 0 8pt;font:400 15pt/1.2 'Instrument Serif','Liberation Serif',Georgia,serif;color:var(--ink)}
+h2 small{font:500 8pt 'Inter',sans-serif;color:var(--ink3);letter-spacing:.02em}
+h2::after{content:"";flex:1;height:1px;background:var(--line);margin-left:6pt}
+body.compact h2{margin:12pt 0 6pt}
+
+/* ---- summary: KPI tiles + side panel ---- */
+.summary{display:flex;gap:12pt;margin-top:14pt;align-items:stretch}
+.summary .kpis{flex:1.25 1 0;min-width:0}
+.summary .panel{flex:1 1 0;min-width:0;overflow:hidden}
+.summary .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8pt;margin:0}
+.kpi{background:var(--bg);border-radius:8pt;padding:9pt 11pt;border-left:3pt solid var(--teal-2)}
+.kpi b{display:block;font-size:7pt;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);font-weight:600}
+.kpi .v{font:600 18pt/1.1 'JetBrains Mono','Liberation Mono',monospace;margin:4pt 0 2pt;color:var(--ink)}
+.kpi .v small{font-size:8.5pt;color:var(--ink3);font-weight:500}
+.kpi .h{font-size:7.5pt;color:var(--ink2)}
+.kpi.ok{border-color:var(--ok)} .kpi.warn{border-color:var(--warn)} .kpi.bad{border-color:var(--bad)} .kpi.info{border-color:var(--info)} .kpi.vio{border-color:var(--vio)}
+.panel{border:1px solid var(--line);border-radius:8pt;padding:10pt 12pt}
+.panel h3{margin:0 0 2pt;font-size:9.5pt;font-weight:600}
+.panel .sub{font-size:7.5pt;color:var(--ink3);margin-bottom:8pt}
+body.compact .summary{margin-top:8pt;gap:10pt}
+body.compact .summary .kpis{gap:6pt}
+body.compact .kpi{padding:7pt 9pt}
+body.compact .kpi .v{font-size:15pt;margin:3pt 0 1pt}
+
+/* status breakdown: stacked bar + table */
+.stack{display:flex;height:11pt;border-radius:4pt;overflow:hidden;margin:4pt 0 8pt;background:#edf0ef}
+.stack i{display:block;height:100%}
+table.sbt{font-size:8pt}
+table.sbt thead th{background:transparent;color:var(--ink3);border-bottom:1px solid var(--line);padding:3pt 4pt;border-radius:0}
+table.sbt td{padding:3.5pt 4pt;border-bottom:1px solid #eef2f1}
+table.sbt tbody tr:nth-child(even) td{background:transparent}
+.sw{display:inline-block;width:8pt;height:8pt;border-radius:2pt;margin-right:6pt;vertical-align:-1pt}
+td.up{color:var(--ok)} td.dn{color:var(--bad)}
+
+/* ---- tables ---- */
+table{width:100%;border-collapse:collapse;font-size:8.3pt}
+thead th{background:var(--teal);color:#fff;font-size:6.8pt;letter-spacing:.09em;text-transform:uppercase;text-align:left;padding:5pt 6pt;font-weight:600}
+thead th:first-child{border-radius:5pt 0 0 0} thead th:last-child{border-radius:0 5pt 0 0}
+td{padding:4.5pt 6pt;border-bottom:1px solid var(--line);vertical-align:middle}
+tbody tr:nth-child(even) td{background:#fafcfb}
+th.r,td.r{text-align:right}
+.dim{color:var(--ink3)}
+td.nw,td.num,.pill,.flag{white-space:nowrap}
+td.name{font-weight:500}
+tr.group td{background:var(--teal-soft);color:var(--teal);font-weight:600;font-size:7.5pt;letter-spacing:.08em;text-transform:uppercase;padding:4pt 6pt;border-bottom:0}
+tr.group td span{font-weight:500;opacity:.8;margin-left:4pt;letter-spacing:0;text-transform:none}
+tr.total td{font-weight:600;background:var(--bg);border-top:1.5pt solid var(--teal)}
+tr.more td{color:var(--ink3);font-style:italic;text-align:center}
+body.compact td{padding:3pt 5pt}
+.rank{display:inline-block;width:14pt;height:14pt;line-height:14pt;text-align:center;border-radius:50%;background:var(--bg);color:var(--ink2);font:600 7pt 'JetBrains Mono',monospace;margin-right:5pt}
+
+/* status pills + flag chips */
+.pill{display:inline-block;padding:1.5pt 7pt;border-radius:3pt;font-size:7pt;font-weight:600;letter-spacing:.03em;text-transform:uppercase}
+.pill.ok{background:var(--ok-s);color:var(--ok)} .pill.late{background:var(--warn-s);color:var(--warn)} .pill.bad{background:var(--bad-s);color:var(--bad)}
+.pill.lv{background:var(--info-s);color:var(--info)} .pill.hol{background:var(--vio-s);color:var(--vio)} .pill.we{background:#edf0ef;color:var(--ink3)}
+.pill.short{background:var(--bad-s);color:var(--bad)} .pill.pend{background:#edf0ef;color:var(--ink2)}
+.flag{display:inline-block;padding:1pt 5pt;border-radius:3pt;font-size:6.8pt;font-weight:600;margin-right:3pt;border:1px solid;background:#fff}
+.flag.late{color:var(--warn);border-color:#ead9b4} .flag.early{color:var(--warn);border-color:#ead9b4}
+.flag.ot{color:var(--vio);border-color:#d8cdf1} .flag.short{color:var(--bad);border-color:#f0c8c2}
+
+/* presence bar */
+.bar{height:6pt;border-radius:3pt;background:#e9eeec;overflow:hidden;min-width:70pt}
+.bar i{display:block;height:100%;background:var(--teal-2)}
+.bar i.lo{background:var(--warn)} .bar i.vlo{background:var(--bad)}
+
+/* avatar initials */
+.av{display:inline-block;width:15pt;height:15pt;line-height:15pt;text-align:center;border-radius:50%;background:var(--teal-2);color:#fff;font-size:6.5pt;font-weight:700;margin-right:5pt;vertical-align:middle}
+
+/* face-crop thumbnails (first / last sighting) */
+.ph{width:22pt;height:22pt;border-radius:4pt;background:#cfd8d6;display:inline-block;vertical-align:middle;object-fit:cover}
+.ph.none{background:#f1f4f3;border:1px dashed #d4dbd9}
+td.pc{padding-top:3pt;padding-bottom:3pt}
+body.compact .ph{width:23pt;height:23pt}
+body.compact td.pc{padding:1.5pt 5pt}
+.legend{display:flex;gap:12pt;font-size:7.5pt;color:var(--ink3);margin:8pt 0 0}
+.legend span{display:inline-flex;align-items:center;gap:4pt}
+.legend i{display:inline-block;width:8pt;height:8pt;border-radius:2pt}
+
+/* day timeline ribbon */
+.tl{position:relative;height:6pt;border-radius:3pt;background:#e6ebe9;min-width:60pt}
+.tl i{position:absolute;top:0;bottom:0;background:var(--teal-2);border-radius:2pt}
+.tl i.ot{background:var(--vio)} .tl i.gap{background:var(--warn)}
+.tl.big{height:10pt}
+.axis{display:flex;justify-content:space-between;font-family:'JetBrains Mono',monospace;font-size:7pt;color:var(--ink3);margin-top:3pt}
+
+/* employee profile card */
+.profile{display:flex;gap:12pt;align-items:center;border:1px solid var(--line);border-radius:8pt;padding:10pt 12pt;margin-top:14pt;background:#fff}
+.profile .pp{width:50pt;height:50pt;border-radius:50%;background:linear-gradient(135deg,#9cc6c9,var(--teal));display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:17pt;flex:0 0 50pt;object-fit:cover}
+.profile .who{flex:1}
+.profile .n{font:400 17pt/1.1 'Instrument Serif','Liberation Serif',Georgia,serif}
+.profile .d{color:var(--ink2);margin-top:1pt}
+.profile .c{font-size:7.5pt;color:var(--ink3);margin-top:4pt}
+.profile table.facts{width:auto;font-size:8pt;background:var(--bg);border-radius:6pt;padding:8pt 10pt;border-collapse:separate;border-spacing:0}
+.profile table.facts td{padding:1.5pt 6pt;border:0;background:transparent}
+.profile table.facts td.k{color:var(--ink3)} .profile table.facts td.v{font-weight:600}
+body.compact .profile{padding:8pt 12pt;margin-top:10pt}
+
+/* ---- misc ---- */
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:12pt}
+body.compact .cols{gap:10pt}
+.note{font-size:7.5pt;color:var(--ink3);margin-top:8pt;line-height:1.45}
+ul.ins{list-style:none;margin:0;padding:0}
+ul.ins li{font-size:7.5pt;padding:2pt 0;border-bottom:1px solid var(--line);color:var(--ink2)}
+.sign{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16pt;margin-top:24pt}
+.sign div{border-top:1px solid var(--ink3);padding-top:4pt;font-size:7.5pt;color:var(--ink3)}
+.copy{display:flex;align-items:center;gap:10pt;margin-top:16pt;padding-top:10pt;border-top:1px solid var(--line);font-size:7.5pt;color:var(--ink3)}
+.copy img{height:16pt;width:auto;flex:0 0 auto}
+.empty{color:var(--ink3);font-style:italic;padding:8pt 0}
+svg.chart{display:block}
+
+table.fixed{table-layout:fixed}
+table.fixed td,table.fixed th{overflow:hidden;padding-left:4pt;padding-right:4pt}
+table.fixed td.nw{white-space:normal}
+table.fixed td.num{font-size:7.5pt}
+
+/* pagination */
+h2,thead{page-break-after:avoid}
+.summary,.profile,.cols,.sign,.panel{page-break-inside:avoid}
+tr{page-break-inside:avoid}

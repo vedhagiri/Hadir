@@ -1,0 +1,43 @@
+{#
+  Base layout for the Template 1 attendance PDFs (WeasyPrint).
+
+  The stylesheet (report.css) is attached by pdf.py as a separate
+  CSS object so font URLs resolve against the templates directory;
+  this <style> block only carries the per-render values: tenant accent
+  colours and the running header/footer strings. Strings inside CSS
+  content() go through the ``cssq`` filter (escapes quotes/backslashes
+  and marks the result safe) because HTML autoescaping would leave
+  ``&#34;`` entities that the CSS parser does not decode.
+#}
+{% import "_macros.html" as m %}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ title }}</title>
+<style>
+  :root { --teal: {{ branding.accent_hex }}; --teal-2: {{ branding.accent_2_hex }}; --teal-soft: {{ branding.accent_soft_hex }}; }
+  @page {
+    size: A4;
+    margin: 14mm 0 16mm 0;
+    @top-left { content: {{ running_head | cssq }}; font-family: 'Inter'; font-size: 7.5pt; color: #8a9693; margin-left: 14mm; vertical-align: bottom; padding-bottom: 4pt; }
+    @top-right { content: {{ tenant.name | cssq }}; font-family: 'Inter'; font-size: 7.5pt; font-weight: 600; color: #8a9693; margin-right: 14mm; vertical-align: bottom; padding-bottom: 4pt; }
+    @bottom-left { content: {{ ("Confidential — contains personal data · Generated " ~ generated_at_label ~ " by " ~ generated_by_email) | cssq }}; font-family: 'Inter'; font-size: 7.5pt; color: #8a9693; margin-left: 14mm; }
+    @bottom-right { content: "Page " counter(page) " of " counter(pages); font-family: 'JetBrains Mono'; font-size: 7.5pt; color: #8a9693; margin-right: 14mm; }
+  }
+  @page :first {
+    margin-top: 0;
+    @top-left { content: none; }
+    @top-right { content: none; }
+  }
+</style>
+</head>
+<body class="{{ body_class }}">
+{% block mast %}{% endblock %}
+<div class="page">
+{% block content %}{% endblock %}
+{{ m.copyright(tenant, year, mts_logo_data_url) }}
+{% block note %}{% endblock %}
+</div>
+</body>
+</html>
