@@ -1,18 +1,25 @@
-// Drawer with the full day detail — status, summary tiles, policy
-// applied, day timeline ribbon, evidence crops, and a "Submit
-// exception" CTA the request flow (P14) plugs into.
+// Day detail — one employee, one date. Shared by the Calendar drawer,
+// Daily attendance (AttendanceDrawer), My Attendance, the Employee
+// report and the employee profile Attendance tab (DayDetailContent).
+//
+// Layout (Oct 2026 redesign):
+//   1. Status hero — one distinct look per status, headline + one-line
+//      meaning, flags, and the status' call to action.
+//   2. Key numbers — In · Out · Hours vs required · Overtime (or a
+//      single "No detections" line when there is nothing to count).
+//   3. Timeline — shift window shaded behind presence + detections.
+//   4. Policy & schedule — compact policy facts + 7-day week row.
+//   5. Evidence — face-crop gallery with click-to-preview.
+// Pure status logic lives in dayDetailModel.ts; styles in day-detail.css.
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 
-import { BsXCircleFill, BsClipboard2PlusFill, BsChevronRight, BsBoxArrowInRight, BsBoxArrowRight, BsClockFill } from "react-icons/bs";
-
-import { api, extractApiError } from "../../api/client";
-import { AnomalyInfoBanner } from "../../components/AnomalyNote";
+import { extractApiError } from "../../api/client";
 import { DrawerShell } from "../../components/DrawerShell";
-import { LateBadge } from "../../components/LateBadge";
+import { SkeletonLine } from "../../components/Skeleton";
 import { Icon } from "../../shell/Icon";
 import { InlineAlert } from "../cameras/coreUi";
 import { useTenantDateTime } from "../../util/datetime";
@@ -20,15 +27,28 @@ import { useMe } from "../../auth/AuthProvider";
 import { primaryRole } from "../../types";
 import { useRegenerateAttendanceForEmployee } from "../attendance/hooks";
 import { formatMinutes } from "../attendance/timeFormat";
+import { DOW_KEYS, avatarBg, initials } from "./calendarUi";
 import { EscalationDrawer } from "./EscalationDrawer";
 import { useDayDetail } from "./hooks";
-import { calcLateMinutes, fmtMinutes } from "./PersonView";
-import type {
-  DayDetail,
-  EscalationRequestSnapshot,
-  EvidenceCrop,
-} from "./types";
-import { SkeletonLines } from "../../components/Skeleton";
+import {
+  buildDayView,
+  heroOffersSubmit,
+  policyBands,
+  toMinutes,
+  type DayKind,
+  type DayView,
+} from "./dayDetailModel";
+import { DayDetailTimeline } from "./DayDetailTimeline";
+import { EvidenceGallery, bestConfidence } from "./DayDetailEvidence";
+import {
+  AbsentChecklist,
+  ApprovedAbsenceCard,
+  EscalationDetails,
+  RequestPendingCard,
+} from "./DayDetailRequests";
+import type { DayDetail } from "./types";
+
+import "./day-detail.css";
 
 interface Props {
   employeeId: number;
@@ -37,10 +57,31 @@ interface Props {
   onSubmitException?: (isoDate: string) => void;
 }
 
+const WEEKDAYS_EN = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
+
+function useHeaderDate(): (iso: string) => string {
+  const { i18n } = useTranslation();
+  const locale = i18n.language === "ar" ? "ar-OM" : "en-GB";
+  return (iso) => {
+    const d = new Date(`${iso}T00:00:00`);
+    if (Number.isNaN(d.getTime())) return iso;
+    const part = (o: Intl.DateTimeFormatOptions) => d.toLocaleDateString(locale, o);
+    // "Fri, 9 Oct 2026"
+    return `${part({ weekday: "short" })}, ${part({ day: "numeric" })} ${part({ month: "short" })} ${part({ year: "numeric" })}`;
+  };
+}
+
+function useWeekdayName(): (iso: string) => string {
+  const { i18n } = useTranslation();
+  const locale = i18n.language === "ar" ? "ar-OM" : "en-GB";
+  return (iso) => {
+    const d = new Date(`${iso}T00:00:00`);
+    return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString(locale, { weekday: "long" });
+  };
+}
+
 // ---------------------------------------------------------------------------
-// DayDetailContent — the reusable body. Used directly by DayDetailDrawer
-// and by the Employee profile Attendance tab so both surfaces show the
-// exact same UI without duplication.
+// DayDetailContent — the reusable body (drawer + embedded profile tab).
 // ---------------------------------------------------------------------------
 
 export function DayDetailContent({
@@ -54,6 +95,7 @@ export function DayDetailContent({
 }) {
   const { t } = useTranslation();
   const detail = useDayDetail(employeeId, isoDate);
+  const headerDate = useHeaderDate();
 
   const [highlightedEventId, setHighlightedEventId] = useState<number | null>(null);
   const [showEscalation, setShowEscalation] = useState(false);
@@ -71,9 +113,11 @@ export function DayDetailContent({
     void qc.refetchQueries({ queryKey: ["calendar", "person", employeeId, month], exact: true });
   }, [qc, isoDate, employeeId]);
 
-  const dt = useTenantDateTime();
-
   const evidenceRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const registerRef = useCallback((eventId: number, el: HTMLDivElement | null) => {
+    if (el) evidenceRefs.current.set(eventId, el);
+    else evidenceRefs.current.delete(eventId);
+  }, []);
   const onTimelineEventActivate = useCallback((eventId: number) => {
     const el = evidenceRefs.current.get(eventId);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -81,157 +125,133 @@ export function DayDetailContent({
     window.setTimeout(() => setHighlightedEventId(null), 2500);
   }, []);
 
-  return (
-    <>
-      {detail.isLoading && (
-        <SkeletonLines lines={6} />
-      )}
-      {detail.isError && (
-        <div className="text-sm" style={{ color: "var(--danger-text)" }}>
-          {t("calendar.loadFailed") as string}
-        </div>
-      )}
+  if (detail.isLoading) return <DayDetailSkeleton />;
 
-      {detail.data && (
-        <>
-          {/* Header chip line — always shown */}
-          <div className="flex items-center gap-2" style={{ marginBottom: 16, flexWrap: "wrap" }}>
-            <span className="pill pill-neutral">{detail.data.employee_code}</span>
-            <span className="pill pill-neutral">{detail.data.department_name}</span>
-            <StatusPill status={detail.data.status} detail={detail.data} />
-            {detail.data.holiday_name && (
-              <span className="pill pill-info">{detail.data.holiday_name}</span>
-            )}
-            {detail.data.leave_name && (
-              <span className="pill pill-info">{detail.data.leave_name}</span>
+  if (detail.isError || !detail.data) {
+    return (
+      <div className="dd-error" role="alert">
+        <Icon name="info" size={16} />
+        <span>{t("dayDetail.loadFailed", { defaultValue: "Couldn't load this day." }) as string}</span>
+        <button type="button" className="btn btn-sm" onClick={() => void detail.refetch()} disabled={detail.isFetching}>
+          <Icon name="refresh" size={12} />
+          {t("common.retry", { defaultValue: "Retry" }) as string}
+        </button>
+      </div>
+    );
+  }
+
+  const d = detail.data;
+  const view = buildDayView(d);
+  const raiseEscalation = isEmployee ? () => setShowEscalation(true) : null;
+  // The shift window only means something on a working day — shading it
+  // on a week off / holiday / leave would imply a shift was expected.
+  const bands = view.overtimeDay || view.kind === "leave" || view.kind === "weekend" || view.kind === "holiday" ? [] : policyBands(d);
+  const shiftLabel =
+    !view.isFlex && d.policy_shift_start && d.policy_shift_end
+      ? (t("dayDetail.shiftRange", { defaultValue: "Shift {{start}} – {{end}}", start: d.policy_shift_start, end: d.policy_shift_end }) as string)
+      : null;
+
+  // Nothing detected → the summary already states the expected shift;
+  // an empty shaded bar would only repeat it.
+  const showTimeline = view.worked;
+  const showEvidence = d.evidence.length > 0 || view.kind === "present" || view.kind === "late";
+  const showPolicy = view.kind !== "future" && view.kind !== "no_record";
+
+  return (
+    <div className="dd">
+      <div className="dd-ident">
+        <span className="mono">{d.employee_code}</span>
+        {d.department_name && (
+          <>
+            <span aria-hidden className="dd-sep">·</span>
+            <span>{d.department_name}</span>
+          </>
+        )}
+        <span className="dd-ident-date">
+          <span aria-hidden className="dd-sep">·</span>
+          {headerDate(isoDate)}
+        </span>
+      </div>
+
+      <div className="dd-cols">
+        <div className="dd-col">
+          <section className={`dd-summary dd-tone-${view.tone}`}>
+            <StatusHero
+              detail={d}
+              view={view}
+              isoDate={isoDate}
+              onSubmitException={onSubmitException ?? null}
+              onRaiseEscalation={raiseEscalation}
+            />
+            <KeyFacts detail={d} view={view} />
+          </section>
+
+          {view.kind === "escalation" && (
+            <EscalationDetails note={d.escalation_note ?? null} snapshot={d.escalation_request ?? null} />
+          )}
+          {view.absentSub === "pending" && (
+            <RequestPendingCard detail={d} currentRole={currentRole} onDecisionMade={onDecisionMade} />
+          )}
+          {view.absentSub === "approved" && <ApprovedAbsenceCard detail={d} />}
+          {view.kind === "absent" && (
+            <AbsentChecklist
+              detail={d}
+              hint={
+                isEmployee
+                  ? (t("calendar.absent.escalationHint", { defaultValue: "If you were present but the system missed you, submit an escalation request for manager and HR review." }) as string)
+                  : (t("dayDetail.absent.noRequestSub", { defaultValue: "Nobody has raised an exception or escalation for this day yet." }) as string)
+              }
+            />
+          )}
+
+          {showTimeline && (
+            <DdSection title={t("calendar.dayTimeline", { defaultValue: "Day timeline" }) as string}>
+              <DayDetailTimeline
+                intervals={d.timeline}
+                evidence={d.evidence}
+                inTime={d.in_time ?? null}
+                outTime={d.out_time ?? null}
+                totalMinutes={d.total_minutes ?? null}
+                bands={bands}
+                windowLabel={shiftLabel}
+                onEventActivate={onTimelineEventActivate}
+              />
+            </DdSection>
+          )}
+        </div>
+
+        {(showPolicy || showEvidence) && (
+          <div className="dd-col dd-col-side">
+            {showPolicy && <PolicyScheduleCard detail={d} isoDate={isoDate} />}
+            {showEvidence && (
+              <EvidenceSection
+                detail={d}
+                isoDate={isoDate}
+                highlightedEventId={highlightedEventId}
+                registerRef={registerRef}
+              />
             )}
           </div>
-
-          {detail.data.status === "late" && <LateBreakdownCard detail={detail.data} />}
-
-          {detail.data.status === "absent" && (
-            <AbsentStateCard
-              detail={detail.data}
-              isoDate={isoDate}
-              onSubmitException={onSubmitException ?? null}
-              onRaiseEscalation={isEmployee ? () => setShowEscalation(true) : null}
-              currentRole={currentRole}
-              onDecisionMade={onDecisionMade}
-            />
-          )}
-
-          {detail.data.status === "waiting" && (
-            <AbsentWaitingCard
-              isoDate={isoDate}
-              detail={detail.data}
-              onSubmitException={onSubmitException ?? null}
-              onRaiseEscalation={isEmployee ? () => setShowEscalation(true) : null}
-            />
-          )}
-
-          {detail.data.status !== "absent" && detail.data.status !== "waiting" && (
-            detail.data.escalation_confirmed ? (
-              <EscalationConfirmedCard
-                note={detail.data.escalation_note ?? null}
-                snapshot={detail.data.escalation_request ?? null}
-              />
-            ) : detail.data.status === "leave" ? (
-              <LeaveDayContent detail={detail.data} isoDate={isoDate} />
-            ) : detail.data.status === "weekend" ? (
-              <WeekOffDayContent
-                detail={detail.data}
-                isoDate={isoDate}
-                highlightedEventId={highlightedEventId}
-                onEventActivate={onTimelineEventActivate}
-                registerRef={(eventId, el) => {
-                  if (el) evidenceRefs.current.set(eventId, el);
-                  else evidenceRefs.current.delete(eventId);
-                }}
-              />
-            ) : detail.data.status === "holiday" ? (
-              <HolidayDayContent
-                detail={detail.data}
-                isoDate={isoDate}
-                highlightedEventId={highlightedEventId}
-                onEventActivate={onTimelineEventActivate}
-                registerRef={(eventId, el) => {
-                  if (el) evidenceRefs.current.set(eventId, el);
-                  else evidenceRefs.current.delete(eventId);
-                }}
-              />
-            ) : detail.data.status === "no_record" || detail.data.status === "future" ? (
-              <NoRecordCard
-                isoDate={isoDate}
-                isFuture={detail.data.status === "future"}
-              />
-            ) : (
-              <>
-                <div className="grid grid-4" style={{ gap: 10, marginBottom: 16 }}>
-                  <Tile label={t("calendar.inTime")   as string} value={dt.formatLocalTime(detail.data.in_time ?? null) || "—"} />
-                  <Tile label={t("calendar.outTime")  as string} value={dt.formatLocalTime(detail.data.out_time ?? null) || "—"} />
-                  <Tile label={t("calendar.total")    as string} value={formatMinutes(detail.data.total_minutes)} />
-                  <Tile label={t("calendar.overtime") as string} value={detail.data.overtime_minutes > 0 ? formatMinutes(detail.data.overtime_minutes) : "—"} />
-                </div>
-
-                <Section label={t("calendar.dayTimeline") as string}>
-                  <DayTimelineRibbon
-                    intervals={detail.data.timeline}
-                    evidence={detail.data.evidence}
-                    inTime={detail.data.in_time ?? null}
-                    outTime={detail.data.out_time ?? null}
-                    totalMinutes={detail.data.total_minutes ?? null}
-                    onEventActivate={onTimelineEventActivate}
-                  />
-                  {detail.data.timeline.length === 0 && (
-                    <div className="text-xs text-dim" style={{ marginTop: 6 }}>
-                      {t("calendar.noTimeline") as string}
-                    </div>
-                  )}
-                </Section>
-
-                <Section label={t("calendar.policyApplied") as string}>
-                  <PolicyAppliedCard detail={detail.data} />
-                </Section>
-
-                <Section
-                  label={`${t("calendar.evidence") as string}${
-                    detail.data.evidence.length > 0 ? ` · ${detail.data.evidence.length}` : ""
-                  }`}
-                >
-                  <EvidenceGallery
-                    evidence={detail.data.evidence}
-                    status={detail.data.status}
-                    highlightedEventId={highlightedEventId}
-                    isoDate={isoDate}
-                    registerRef={(eventId, el) => {
-                      if (el) evidenceRefs.current.set(eventId, el);
-                      else evidenceRefs.current.delete(eventId);
-                    }}
-                  />
-                </Section>
-              </>
-            )
-          )}
-        </>
-      )}
+        )}
+      </div>
 
       {/* EscalationDrawer portals to #drawer-root via DrawerShell — safe
           even when DayDetailContent is rendered inside another drawer. */}
-      {showEscalation && isEmployee && detail.data && (
+      {showEscalation && isEmployee && (
         <EscalationDrawer
-          employeeCode={detail.data.employee_code}
-          fullName={detail.data.full_name}
+          employeeCode={d.employee_code}
+          fullName={d.full_name}
           isoDate={isoDate}
           onClose={() => setShowEscalation(false)}
           onSubmitted={onDecisionMade}
         />
       )}
-    </>
+    </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// DayDetailDrawer — thin wrapper: DrawerShell + header + DayDetailContent.
+// DayDetailDrawer — DrawerShell + header + DayDetailContent.
 // ---------------------------------------------------------------------------
 
 export function DayDetailDrawer({
@@ -241,9 +261,9 @@ export function DayDetailDrawer({
   onSubmitException,
 }: Props) {
   const { t } = useTranslation();
-  // Same cache key as DayDetailContent — TanStack Query deduplicates; no
-  // extra network request. Used only for the drawer header employee name.
+  // Same cache key as DayDetailContent — TanStack Query deduplicates.
   const detail = useDayDetail(employeeId, isoDate);
+  const headerDate = useHeaderDate();
   const regen = useRegenerateAttendanceForEmployee();
   const [regenInfo, setRegenInfo] = useState<{
     tone: "ok" | "err";
@@ -287,22 +307,56 @@ export function DayDetailDrawer({
     );
   };
 
+  const d = detail.data;
+  const view = d ? buildDayView(d) : null;
+  const worked = d != null && (
+    d.in_time != null ||
+    (d.total_minutes != null && d.total_minutes > 0) ||
+    d.timeline.length > 0
+  );
+  const disableExport =
+    !d ||
+    d.status === "no_record" ||
+    d.status === "future" ||
+    d.status === "absent" ||
+    d.status === "waiting" ||
+    (d.status === "weekend" && !worked) ||
+    (d.status === "holiday" && !worked);
+
   return (
     <DrawerShell onClose={onClose}>
-      <div className="drawer">
-        <div className="drawer-head">
-          <div>
-            <div className="text-xs text-dim">
-              {t("calendar.dayDetail") as string}
+      <div className="drawer dd-drawer" aria-label={t("calendar.dayDetail", { defaultValue: "Day detail" }) as string}>
+        <div className="drawer-head dd-head">
+          <span aria-hidden className="dd-avatar" style={d ? { background: avatarBg(d.full_name) } : undefined}>
+            {d ? initials(d.full_name) : ""}
+          </span>
+          <div className="dd-head-main">
+            <div className="dd-head-row">
+              <h2 className="dd-head-name">
+                {d?.full_name ?? <SkeletonLine width={160} height={18} />}
+              </h2>
+              {view && <DayStatusPill kind={view.kind} />}
             </div>
-            <div className="co-dd-title">
-              {detail.data?.full_name ?? ""} · <span className="mono">{isoDate}</span>
+            <div className="dd-head-sub">
+              <span>{headerDate(isoDate)}</span>
+              {d && (
+                <>
+                  <span aria-hidden className="dd-sep">·</span>
+                  <span className="mono">{d.employee_code}</span>
+                  {d.department_name && (
+                    <>
+                      <span aria-hidden className="dd-sep">·</span>
+                      <span>{d.department_name}</span>
+                    </>
+                  )}
+                </>
+              )}
             </div>
           </div>
-          <div className="co-dd-actions">
+          <div className="co-dd-actions dd-actions">
             <button
               type="button"
-              className="btn btn-sm btn-ghost"
+              className={`btn btn-sm dd-act${regen.isPending ? " is-busy" : ""}`}
               onClick={triggerRegen}
               disabled={regen.isPending}
               title={
@@ -321,33 +375,29 @@ export function DayDetailDrawer({
                     defaultValue: "Regenerate",
                   }) as string)}
             </button>
-            {(() => {
-              const d = detail.data;
-              const worked = d != null && (
-                d.in_time != null ||
-                (d.total_minutes != null && d.total_minutes > 0) ||
-                d.timeline.length > 0
-              );
-              const disableExport =
-                !d ||
-                d.status === "no_record" ||
-                d.status === "future"  ||
-                d.status === "absent"  ||
-                d.status === "waiting" ||
-                (d.status === "weekend" && !worked) ||
-                (d.status === "holiday" && !worked);
-              return disableExport ? (
-                <span className="btn btn-sm btn-ghost" aria-disabled="true">
-                  <Icon name="download" size={12} />
-                  {t("calendar.export") as string}
-                </span>
-              ) : (
-                <a className="btn btn-sm btn-ghost" href={exportHref} target="_blank" rel="noopener noreferrer">
-                  <Icon name="download" size={12} />
-                  {t("calendar.export") as string}
-                </a>
-              );
-            })()}
+            {disableExport ? (
+              <button
+                type="button"
+                className="btn btn-sm dd-act"
+                disabled
+                title={t("dayDetail.exportNothing", { defaultValue: "Nothing to export — no time was recorded on this day" }) as string}
+              >
+                <Icon name="download" size={12} />
+                {t("calendar.export") as string}
+              </button>
+            ) : (
+              <a
+                className="btn btn-sm dd-act"
+                href={exportHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={t("dayDetail.exportTitle", { defaultValue: "Download this day's attendance" }) as string}
+              >
+                <Icon name="download" size={12} />
+                {t("calendar.export") as string}
+              </a>
+            )}
+            <span aria-hidden className="dd-act-sep" />
             <button
               className="icon-btn"
               onClick={onClose}
@@ -374,14 +424,17 @@ export function DayDetailDrawer({
           />
         </div>
 
-        {onSubmitException && (
+        {/* The hero carries "Submit exception" on absent / waiting days;
+            every other status keeps it here in the footer. */}
+        {onSubmitException && d && !heroOffersSubmit(d) && (
           <div className="drawer-foot">
             <button
               type="button"
-              className="btn btn-primary"
+              className="btn"
               onClick={() => onSubmitException(isoDate)}
             >
-              + {t("calendar.submitException") as string}
+              <Icon name="plus" size={12} />
+              {t("calendar.submitException") as string}
             </button>
           </div>
         )}
@@ -391,4283 +444,572 @@ export function DayDetailDrawer({
 }
 
 // ---------------------------------------------------------------------------
-// Evidence / Face Crops gallery
+// Status pill (header) + hero
 // ---------------------------------------------------------------------------
 
-function EvidenceGallery({
-  evidence,
-  status,
-  highlightedEventId,
-  registerRef,
-  isoDate,
-}: {
-  evidence: EvidenceCrop[];
-  status: string;
-  highlightedEventId: number | null;
-  registerRef?: (eventId: number, el: HTMLDivElement | null) => void;
-  isoDate: string;
-}) {
+const KIND_TONE: Record<DayKind, string> = {
+  present: "present",
+  escalation: "present",
+  late: "late",
+  absent: "absent",
+  waiting: "waiting",
+  leave: "leave",
+  weekend: "weekoff",
+  weekend_worked: "worked",
+  holiday: "holiday",
+  holiday_worked: "holiday",
+  future: "muted",
+  no_record: "muted",
+};
+
+function useKindLabel(): (k: DayKind) => string {
   const { t } = useTranslation();
-  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  return (k) => {
+    switch (k) {
+      case "present": return t("calendar.status.present", { defaultValue: "Present" }) as string;
+      case "escalation": return t("calendar.status.escalation_present", { defaultValue: "Present via Escalation" }) as string;
+      case "late": return t("calendar.status.late", { defaultValue: "Late" }) as string;
+      case "absent": return t("calendar.status.absent", { defaultValue: "Absent" }) as string;
+      case "waiting": return t("dayDetail.pill.waiting", { defaultValue: "Not in yet" }) as string;
+      case "leave": return t("dailyAttendance.pill.onLeave", { defaultValue: "On leave" }) as string;
+      case "weekend": return t("dayDetail.pill.weekOff", { defaultValue: "Week off" }) as string;
+      case "weekend_worked": return t("dayDetail.pill.weekOffWorked", { defaultValue: "Worked on week off" }) as string;
+      case "holiday": return t("calendar.status.holiday", { defaultValue: "Holiday" }) as string;
+      case "holiday_worked": return t("dayDetail.pill.holidayWorked", { defaultValue: "Worked on holiday" }) as string;
+      case "future": return t("calendar.status.future", { defaultValue: "Future" }) as string;
+      default: return t("calendar.status.no_record", { defaultValue: "No record" }) as string;
+    }
+  };
+}
 
-  if (evidence.length === 0) {
-    return <EvidenceEmptyState status={status} />;
-  }
-
-  const bestConfidence = evidence.reduce<number | null>((acc, e) => {
-    if (e.confidence == null) return acc;
-    return acc == null || e.confidence > acc ? e.confidence : acc;
-  }, null);
-
+function DayStatusPill({ kind }: { kind: DayKind }) {
+  const label = useKindLabel();
   return (
-    <div>
-      <AnomalyInfoBanner message="If the camera misses certain events due to camera positioning, capture limitations, lighting, or brightness conditions, those cases should be treated as possible anomalies." />
-
-      {/* Summary line */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap", fontSize: 11.5, color: "var(--text-tertiary)" }}>
-        <span>
-          {t("calendar.evidenceCount", { count: evidence.length, defaultValue: `${evidence.length} face crops` })}
-        </span>
-        {bestConfidence != null && (
-          <span>
-            ·{" "}
-            {t("calendar.bestConfidence", { defaultValue: "Best match" })}{" "}
-            <span className="mono" style={{ color: "var(--text)", fontWeight: 600 }}>
-              {(bestConfidence * 100).toFixed(0)}%
-            </span>
-          </span>
-        )}
-        <span style={{ marginInlineStart: "auto", fontSize: 11, opacity: 0.7 }}>
-          {t("calendar.clickToExpand", { defaultValue: "Click any crop to preview" })}
-        </span>
-      </div>
-
-      {/* Gallery grid — padding creates room for the flash ring so it
-          isn't clipped by the scroll container's overflow boundary. */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 10, maxHeight: "55vh", overflowY: "auto", padding: "4px", margin: "-4px" }}>
-        {evidence.map((ev, idx) => (
-          <EvidenceCard
-            key={ev.detection_event_id}
-            item={ev}
-            index={idx}
-            total={evidence.length}
-            flashing={ev.detection_event_id === highlightedEventId}
-            registerRef={(el) => registerRef?.(ev.detection_event_id, el)}
-            onOpen={() => setLightboxIndex(idx)}
-          />
-        ))}
-      </div>
-
-      {lightboxIndex != null && (
-        <EvidenceLightbox
-          evidence={evidence}
-          initialIndex={lightboxIndex}
-          isoDate={isoDate}
-          onClose={() => setLightboxIndex(null)}
-        />
-      )}
-    </div>
+    <span className={`dd-pill dd-tone-${KIND_TONE[kind]}`}>
+      <span aria-hidden className="dd-pill-dot" />
+      {label(kind)}
+    </span>
   );
 }
 
-function EvidenceCard({
-  item,
-  index,
-  total,
-  flashing,
-  registerRef,
-  onOpen,
-}: {
-  item: EvidenceCrop;
-  index: number;
-  total: number;
-  flashing: boolean;
-  registerRef?: (el: HTMLDivElement | null) => void;
-  onOpen: () => void;
-}) {
-  const { t } = useTranslation();
-  const [imgStatus, setImgStatus] = useState<"loading" | "loaded" | "broken">("loading");
-  const [hovered, setHovered] = useState(false);
+const HERO_ICON: Record<DayKind, ReactNode> = {
+  present: <><circle cx="12" cy="12" r="9" /><path d="M8 12.5l2.7 2.7L16 9.8" /></>,
+  escalation: <><path d="M12 3l7 3v5.5c0 4.2-3 7.8-7 9.5-4-1.7-7-5.3-7-9.5V6z" /><path d="M8.8 12.2l2.2 2.2 4.3-4.4" /></>,
+  late: <><circle cx="12" cy="13" r="8" /><path d="M12 9v4l2.5 2M5 3L2 6M19 3l3 3" /></>,
+  absent: <><circle cx="12" cy="12" r="9" /><path d="M15 9l-6 6M9 9l6 6" /></>,
+  waiting: <><path d="M7 3h10M7 21h10M8 3c0 4 8 5 8 9s-8 5-8 9M16 3c0 4-8 5-8 9s8 5 8 9" /></>,
+  leave: <><rect x="5" y="3" width="14" height="18" rx="2" /><path d="M9 8h6M9 12h6M9 16h4" /></>,
+  weekend: <><rect x="3" y="4" width="18" height="17" rx="2" /><path d="M3 9h18M8 2v4M16 2v4M8 13h2M14 13h2M8 17h2" /></>,
+  weekend_worked: <><rect x="3" y="4" width="18" height="17" rx="2" /><path d="M3 9h18M8 2v4M16 2v4M8.5 15l2.5 2.5 4.5-4.5" /></>,
+  holiday: <path d="M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6 6.6 19.5l1.2-6-4.5-4.2 6.1-.7z" />,
+  holiday_worked: <path d="M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6 6.6 19.5l1.2-6-4.5-4.2 6.1-.7z" />,
+  future: <><rect x="3" y="4" width="18" height="17" rx="2" /><path d="M3 9h18M8 2v4M16 2v4" /><circle cx="8" cy="14.5" r="0.6" /><circle cx="12" cy="14.5" r="0.6" /><circle cx="16" cy="14.5" r="0.6" /></>,
+  no_record: <><circle cx="12" cy="12" r="9" strokeDasharray="3 3" /><path d="M9.6 9.5a2.5 2.5 0 1 1 3.4 2.3c-.6.3-1 .8-1 1.5v.3M12 16.8v.2" /></>,
+};
 
-  const confColor = item.confidence != null
-    ? item.confidence >= 0.75 ? "var(--success-text, #1a7a4a)" : item.confidence >= 0.5 ? "var(--warning-text, #92500a)" : "var(--danger-text, #a12b2b)"
-    : undefined;
-
-  return (
-    <div
-      ref={registerRef}
-      data-event-id={item.detection_event_id}
-      style={{
-        position: "relative",
-        border: `2px solid ${flashing ? "var(--accent)" : hovered ? "var(--border-hover, var(--border))" : "var(--border)"}`,
-        borderRadius: 12,
-        overflow: "hidden",
-        background: "var(--bg-elev)",
-        boxShadow: flashing
-          ? "0 0 0 4px var(--accent), 0 4px 18px rgba(0,0,0,0.18)"
-          : hovered ? "0 6px 20px rgba(0,0,0,0.12)" : "var(--shadow-sm)",
-        transition: flashing
-          ? "none"
-          : "box-shadow 180ms ease, border-color 180ms ease, transform 150ms ease",
-        transform: flashing ? "scale(1.04)" : hovered ? "translateY(-3px)" : "scale(1)",
-        zIndex: flashing ? 2 : "auto",
-        display: "flex",
-        flexDirection: "column",
-        cursor: "pointer",
-        animation: flashing ? "evidenceFlash 0.35s ease-out forwards" : "none",
-      }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
-      <button
-        type="button"
-        onClick={onOpen}
-        aria-label={`${t("calendar.openEvidence", { defaultValue: "Open larger view" })} — ${item.captured_at.slice(0, 5)} ${item.camera_code}`}
-        style={{ position: "relative", width: "100%", aspectRatio: "3 / 4", background: "var(--bg-sunken)", border: "none", padding: 0, margin: 0, cursor: "pointer", display: "block", overflow: "hidden" }}
-      >
-        {imgStatus !== "broken" && (
-          <img
-            src={item.crop_url}
-            alt={`${item.captured_at} ${item.camera_code}`}
-            loading="lazy"
-            onLoad={() => setImgStatus("loaded")}
-            onError={() => setImgStatus("broken")}
-            style={{ display: "block", width: "100%", height: "100%", objectFit: "cover", opacity: imgStatus === "loaded" ? 1 : 0, transition: "opacity 160ms ease" }}
-          />
-        )}
-        {imgStatus === "loading" && (
-          <div aria-hidden style={{ position: "absolute", inset: 0, background: "linear-gradient(90deg, var(--bg-sunken) 0%, var(--bg-hover) 50%, var(--bg-sunken) 100%)", backgroundSize: "200% 100%", animation: "evidenceShimmer 1.2s linear infinite" }} />
-        )}
-        {imgStatus === "broken" && (
-          <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "var(--text-tertiary)", fontSize: 10.5, textAlign: "center", padding: 8, gap: 4 }}>
-            <Icon name="info" size={18} />
-            <span>{t("calendar.evidenceUnavailable", { defaultValue: "Crop unavailable" }) as string}</span>
-          </div>
-        )}
-
-        {/* Confidence chip */}
-        {item.confidence != null && (
-          <span className="mono" style={{ position: "absolute", top: 7, insetInlineEnd: 7, background: "rgba(0,0,0,0.62)", color: "#fff", fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 20, backdropFilter: "blur(3px)", letterSpacing: "0.02em" }}>
-            {(item.confidence * 100).toFixed(0)}%
-          </span>
-        )}
-
-        {/* Hover expand overlay */}
-        <div aria-hidden style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.28)", display: "grid", placeItems: "center", opacity: hovered ? 1 : 0, transition: "opacity 160ms ease" }}>
-          <div style={{ width: 40, height: 40, borderRadius: "50%", background: "rgba(255,255,255,0.22)", border: "1.5px solid rgba(255,255,255,0.5)", display: "grid", placeItems: "center", color: "#fff", backdropFilter: "blur(4px)" }}>
-            <Icon name="search" size={16} />
-          </div>
-        </div>
-
-        {/* Bottom gradient + time/camera */}
-        <div aria-hidden style={{ position: "absolute", insetInline: 0, bottom: 0, height: 60, background: "linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.68) 100%)", pointerEvents: "none" }} />
-        <div style={{ position: "absolute", insetInline: 8, bottom: 7, color: "#fff", textShadow: "0 1px 3px rgba(0,0,0,0.7)" }}>
-          <div className="mono" style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.2 }}>{item.captured_at.slice(0, 5)}</div>
-          <div style={{ fontSize: 10.5, opacity: 0.9, lineHeight: 1.2, display: "flex", alignItems: "center", gap: 3 }}>
-            <Icon name="camera" size={9} />
-            <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.camera_code}</span>
-          </div>
-        </div>
-      </button>
-
-      {/* Footer strip */}
-      <div style={{ padding: "6px 10px", display: "flex", alignItems: "center", justifyContent: "space-between", borderTop: "1px solid var(--border)", background: "var(--bg)", flexShrink: 0 }}>
-        <span className="mono" style={{ fontSize: 10, color: "var(--text-tertiary)" }}>{index + 1}/{total}</span>
-        {item.confidence != null ? (
-          <span style={{ fontSize: 10, fontWeight: 700, color: confColor }}>{(item.confidence * 100).toFixed(0)}% match</span>
-        ) : (
-          <span style={{ fontSize: 10, color: "var(--text-tertiary)" }}>—</span>
-        )}
-      </div>
-
-      <style>{`
-        @keyframes evidenceShimmer {
-          0%   { background-position: 200% 0; }
-          100% { background-position: -200% 0; }
-        }
-        @keyframes evidenceFlash {
-          0%   { transform: scale(1);    box-shadow: 0 0 0 0   var(--accent), 0 4px 18px rgba(0,0,0,0.18); border-color: var(--accent); }
-          40%  { transform: scale(1.06); box-shadow: 0 0 0 6px var(--accent), 0 6px 24px rgba(0,0,0,0.22); border-color: var(--accent); }
-          100% { transform: scale(1.04); box-shadow: 0 0 0 4px var(--accent), 0 4px 18px rgba(0,0,0,0.18); border-color: var(--accent); }
-        }
-      `}</style>
-    </div>
-  );
-}
-
-// Split-panel lightbox for evidence face crops.
-// Portals out of .drawer to escape its fixed containing block.
-function EvidenceLightbox({
-  evidence,
-  initialIndex,
+function StatusHero({
+  detail: d,
+  view,
   isoDate,
-  onClose,
+  onSubmitException,
+  onRaiseEscalation,
 }: {
-  evidence: EvidenceCrop[];
-  initialIndex: number;
+  detail: DayDetail;
+  view: DayView;
   isoDate: string;
-  onClose: () => void;
+  onSubmitException: ((isoDate: string) => void) | null;
+  onRaiseEscalation: (() => void) | null;
 }) {
   const { t } = useTranslation();
-  const [idx, setIdx] = useState(initialIndex);
-  const total = evidence.length;
-  const item = evidence[idx]!;
+  const dt = useTenantDateTime();
+  const weekday = useWeekdayName();
+  const time = (s: string | null | undefined) => dt.formatLocalTime(s ?? null) || "—";
 
-  const prev = () => setIdx((i) => (i - 1 + total) % total);
-  const next = () => setIdx((i) => (i + 1) % total);
-
-  useEffectOnMount(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose(); }
-      else if (e.key === "ArrowLeft") { e.preventDefault(); e.stopPropagation(); prev(); }
-      else if (e.key === "ArrowRight") { e.preventDefault(); e.stopPropagation(); next(); }
-    };
-    document.addEventListener("keydown", onKey, true);
-    return () => document.removeEventListener("keydown", onKey, true);
-  });
-
-  const timeStr = item.captured_at.length >= 8 ? item.captured_at.slice(0, 8) : item.captured_at;
-  const confPct = item.confidence != null ? `${(item.confidence * 100).toFixed(1)}%` : null;
-  const confBarColor = item.confidence != null
-    ? item.confidence >= 0.75 ? "var(--success-text, #1a7a4a)" : item.confidence >= 0.5 ? "var(--warning-text, #92500a)" : "var(--danger-text, #a12b2b)"
-    : "var(--accent)";
-
-  const portalTarget = typeof document !== "undefined"
-    ? (document.getElementById("drawer-root") ?? document.body)
+  const chips: Array<{ tone: string; text: string; title?: string }> = [];
+  const ot = d.overtime_minutes;
+  const singleDetection = d.in_time != null && d.out_time == null;
+  // On-time cutoff: shift start + grace (Fixed) / end of arrival window (Flex).
+  const cutoffMin = view.expectedIn ? toMinutes(view.expectedIn) : null;
+  const cutoff = cutoffMin != null
+    ? dt.formatLocalTime(`${String(Math.floor(((cutoffMin + view.graceMinutes) % 1440) / 60)).padStart(2, "0")}:${String((cutoffMin + view.graceMinutes) % 60).padStart(2, "0")}`)
     : null;
 
-  const modal = (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={t("calendar.lightboxAria", { defaultValue: "Face crop preview" }) as string}
-      style={{ position: "fixed", inset: 0, zIndex: 100000, background: "rgba(0,0,0,0.78)", display: "grid", placeItems: "center", padding: 24 }}
-      onClick={onClose}
-    >
-      {/* Card — click inside doesn't close */}
-      <div
-        style={{ display: "flex", width: "min(860px, 95vw)", maxHeight: "90vh", borderRadius: 16, overflow: "hidden", boxShadow: "0 32px 80px rgba(0,0,0,0.6)" }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* ── Left: dark image pane ── */}
-        <div style={{ flex: 1, minWidth: 0, background: "#0d0d0d", display: "flex", flexDirection: "column", position: "relative", overflow: "hidden" }}>
-          {/* Image stage */}
-          <div style={{ flex: 1, minHeight: 0, display: "grid", placeItems: "center", padding: "32px 52px 12px" }}>
-            <img
-              key={item.detection_event_id}
-              src={item.crop_url}
-              alt={`${timeStr} ${item.camera_code}`}
-              style={{ maxWidth: "100%", maxHeight: "calc(90vh - 140px)", width: "auto", height: "auto", objectFit: "contain", borderRadius: 10, boxShadow: "0 8px 32px rgba(0,0,0,0.6)", display: "block" }}
-            />
-          </div>
+  let title: string;
+  let meaning: string;
 
-          {/* Prev / Next arrows */}
-          {total > 1 && (
-            <>
-              <button type="button" onClick={prev} aria-label={t("calendar.lightboxPrev", { defaultValue: "Previous" }) as string}
-                style={{ position: "absolute", insetInlineStart: 10, top: "50%", transform: "translateY(-50%)", width: 40, height: 40, borderRadius: "50%", border: "1.5px solid rgba(255,255,255,0.25)", background: "rgba(0,0,0,0.45)", color: "#fff", cursor: "pointer", display: "grid", placeItems: "center", fontSize: 20, lineHeight: 1 }}>
-                ‹
-              </button>
-              <button type="button" onClick={next} aria-label={t("calendar.lightboxNext", { defaultValue: "Next" }) as string}
-                style={{ position: "absolute", insetInlineEnd: 10, top: "50%", transform: "translateY(-50%)", width: 40, height: 40, borderRadius: "50%", border: "1.5px solid rgba(255,255,255,0.25)", background: "rgba(0,0,0,0.45)", color: "#fff", cursor: "pointer", display: "grid", placeItems: "center", fontSize: 20, lineHeight: 1 }}>
-                ›
-              </button>
-            </>
-          )}
+  switch (view.kind) {
+    case "present":
+      title = t("dayDetail.hero.present.title", { defaultValue: "Present · on time" }) as string;
+      meaning = cutoff
+        ? (t("dayDetail.hero.present.meaning", { defaultValue: "Arrived {{in}} · on-time cutoff {{cutoff}}", in: time(d.in_time), cutoff }) as string)
+        : (t("dayDetail.hero.present.meaningNoPolicy", { defaultValue: "Arrived {{in}}", in: time(d.in_time) }) as string);
+      break;
+    case "late":
+      title = view.lateByMinutes != null && view.lateByMinutes > 0
+        ? (t("dayDetail.hero.late.title", { defaultValue: "Late by {{dur}}", dur: formatMinutes(view.lateByMinutes) }) as string)
+        : (t("calendar.status.late", { defaultValue: "Late" }) as string);
+      meaning = !view.expectedIn
+        ? (t("dayDetail.hero.present.meaningNoPolicy", { defaultValue: "Arrived {{in}}", in: time(d.in_time) }) as string)
+        : view.isFlex
+          ? (t("dayDetail.hero.late.meaningFlex", { defaultValue: "Must arrive by {{by}} · arrived {{in}}", by: time(view.expectedIn), in: time(d.in_time) }) as string)
+          : view.graceMinutes > 0
+            ? (t("dayDetail.hero.late.meaningGrace", { defaultValue: "Expected by {{by}} ({{start}} + {{grace}} min grace) · arrived {{in}}", by: cutoff ?? "—", start: time(view.expectedIn), grace: view.graceMinutes, in: time(d.in_time) }) as string)
+            : (t("dayDetail.hero.late.meaning", { defaultValue: "Expected by {{by}} · arrived {{in}}", by: time(view.expectedIn), in: time(d.in_time) }) as string);
+      break;
+    case "escalation":
+      title = t("dayDetail.hero.escalation.title", { defaultValue: "Present · confirmed by escalation" }) as string;
+      meaning = t("escalation.confirmedSub", { defaultValue: "An escalation was raised, reviewed by Manager and HR, and approved. Attendance is marked as Present." }) as string;
+      break;
+    case "absent":
+      title = t("calendar.status.absent", { defaultValue: "Absent" }) as string;
+      if (view.absentSub === "approved") {
+        meaning = d.approved_request?.request_type === "leave"
+          ? (t("calendar.absent.approvedTitleLeave", { defaultValue: "Leave approved — absence on record" }) as string)
+          : (t("calendar.absent.approvedTitleException", { defaultValue: "Exception approved — absence on record" }) as string);
+        chips.push({ tone: "present", text: t("dayDetail.chip.approved", { defaultValue: "Request approved" }) as string });
+      } else {
+        meaning = t("dayDetail.hero.absent.meaning", { defaultValue: "No detection and no approved leave for this day." }) as string;
+        if (view.absentSub === "pending") chips.push({ tone: "waiting", text: t("dayDetail.chip.pending", { defaultValue: "Request under review" }) as string });
+        if (view.absentSub === "camera_offline") chips.push({ tone: "muted", text: t("dayDetail.chip.cameraOffline", { defaultValue: "Camera offline during the day" }) as string });
+      }
+      break;
+    case "waiting":
+      title = t("dayDetail.hero.waiting.title", { defaultValue: "Shift still open · not detected yet" }) as string;
+      meaning = d.policy_shift_end
+        ? (t("dayDetail.hero.waiting.meaning", { defaultValue: "The shift runs until {{end}}. This updates as soon as a camera detects them.", end: time(d.policy_shift_end) }) as string)
+        : (t("calendar.waitingSubtitle", { defaultValue: "The shift window is still open. Attendance will update as detections come in." }) as string);
+      break;
+    case "leave":
+      title = d.leave_name
+        ? (t("dayDetail.hero.leave.titleNamed", { defaultValue: "On leave · {{name}}", name: d.leave_name }) as string)
+        : (t("dailyAttendance.pill.onLeave", { defaultValue: "On leave" }) as string);
+      meaning = t("dayDetail.hero.leave.meaning", { defaultValue: "Approved leave covers this day." }) as string;
+      if (view.worked) chips.push({ tone: "late", text: t("dayDetail.chip.detectedOnLeave", { defaultValue: "Detected while on leave" }) as string });
+      break;
+    case "weekend":
+      title = t("dayDetail.hero.weekend.title", { defaultValue: "Weekly off" }) as string;
+      meaning = t("dayDetail.hero.weekend.meaning", { defaultValue: "{{day}} · no attendance expected.", day: weekday(isoDate) }) as string;
+      break;
+    case "weekend_worked":
+      title = t("dayDetail.hero.weekendWorked.title", { defaultValue: "Worked on a weekly off day" }) as string;
+      meaning = t("dayDetail.hero.weekendWorked.meaning", { defaultValue: "{{day}} is a weekly off · time worked is counted as overtime.", day: weekday(isoDate) }) as string;
+      break;
+    case "holiday":
+      title = d.holiday_name
+        ? (t("dayDetail.hero.holiday.titleNamed", { defaultValue: "Public holiday · {{name}}", name: d.holiday_name }) as string)
+        : (t("dayDetail.hero.holiday.title", { defaultValue: "Public holiday" }) as string);
+      meaning = t("dayDetail.hero.holiday.meaning", { defaultValue: "No attendance expected." }) as string;
+      break;
+    case "holiday_worked":
+      title = t("dayDetail.hero.holidayWorked.title", { defaultValue: "Worked on a public holiday" }) as string;
+      meaning = d.holiday_name
+        ? (t("dayDetail.hero.holidayWorked.meaningNamed", { defaultValue: "{{name}} · time worked is counted as overtime.", name: d.holiday_name }) as string)
+        : (t("dayDetail.hero.holidayWorked.meaning", { defaultValue: "Time worked on a public holiday is counted as overtime." }) as string);
+      break;
+    case "future":
+      title = t("dayDetail.hero.future.title", { defaultValue: "Upcoming day" }) as string;
+      meaning = t("dayDetail.hero.future.meaning", { defaultValue: "Attendance is computed once this day arrives and cameras report detections." }) as string;
+      break;
+    default:
+      title = t("calendar.noRecord.fact1Title", { defaultValue: "No attendance record" }) as string;
+      meaning = t("calendar.noRecord.note", { defaultValue: "This may indicate the employee was absent, the camera was offline, or this date predates the system setup." }) as string;
+  }
 
-          {/* Counter badge */}
-          <div className="mono" style={{ position: "absolute", bottom: total > 1 ? 68 : 12, left: "50%", transform: "translateX(-50%)", background: "rgba(0,0,0,0.5)", color: "rgba(255,255,255,0.85)", padding: "3px 14px", borderRadius: 999, fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}>
-            {idx + 1} / {total}
-          </div>
+  // Engine flags on a regular working day (Present / Late).
+  if (view.earlyOut) {
+    chips.push({ tone: "late", text: t("dayDetail.chip.earlyOut", { defaultValue: "Early out · left {{out}}", out: time(d.out_time) }) as string });
+  }
+  if (view.shortHours && view.requiredMinutes != null) {
+    chips.push({
+      tone: "late",
+      text: t("dayDetail.chip.shortHours", {
+        defaultValue: "Short hours · {{worked}} of {{required}}",
+        worked: formatMinutes(d.total_minutes),
+        required: formatMinutes(view.requiredMinutes),
+      }) as string,
+    });
+  }
+  if (ot > 0 && view.kind !== "absent") {
+    chips.push({ tone: "worked", text: t("dayDetail.chip.overtime", { defaultValue: "+{{dur}} overtime", dur: formatMinutes(ot) }) as string });
+  }
+  if (view.overtimeDay && singleDetection) {
+    chips.push({ tone: "muted", text: t("dayDetail.chip.singleDetection", { defaultValue: "Single detection · no hours to count" }) as string });
+  }
 
-          {/* Filmstrip — only when >1 crop */}
-          {total > 1 && (
-            <div style={{ display: "flex", gap: 6, padding: "8px 14px", overflowX: "auto", background: "rgba(0,0,0,0.5)", borderTop: "1px solid rgba(255,255,255,0.08)", flexShrink: 0, alignItems: "center" }}>
-              {evidence.map((ev, i) => (
-                <button
-                  key={ev.detection_event_id}
-                  type="button"
-                  onClick={() => setIdx(i)}
-                  aria-label={`Crop ${i + 1}`}
-                  style={{ width: 46, height: 54, flexShrink: 0, padding: 0, border: i === idx ? "2.5px solid var(--accent)" : "2px solid rgba(255,255,255,0.12)", borderRadius: 7, overflow: "hidden", cursor: "pointer", background: "#111", opacity: i === idx ? 1 : 0.5, transition: "opacity 150ms, border-color 150ms", transform: i === idx ? "scale(1.08)" : "scale(1)", outline: "none" }}
-                >
-                  <img src={ev.crop_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+  const showSubmit = heroOffersSubmit(d) && onSubmitException != null;
+  const showEscalate = onRaiseEscalation != null && (view.kind === "waiting" || (view.kind === "absent" && view.absentSub !== "approved" && view.absentSub !== "pending"));
 
-        {/* ── Right: metadata pane ── */}
-        <div style={{ width: 280, flexShrink: 0, background: "var(--bg)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          {/* Header */}
-          <div style={{ padding: "12px 14px 10px", display: "flex", alignItems: "center", gap: 8, borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-            <span className="pill pill-neutral" style={{ fontSize: 10.5, fontWeight: 700, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              <Icon name="camera" size={9} /> {item.camera_code}
-            </span>
-            <div style={{ flex: 1 }} />
-            <button type="button" onClick={onClose} aria-label={t("calendar.lightboxClose", { defaultValue: "Close preview" }) as string}
-              style={{ width: 28, height: 28, borderRadius: "50%", border: "1px solid var(--border)", background: "transparent", cursor: "pointer", display: "grid", placeItems: "center", color: "var(--text)", flexShrink: 0 }}>
-              <Icon name="x" size={13} />
-            </button>
-          </div>
-
-          {/* Capture time — large display */}
-          <div style={{ padding: "16px 16px 0", flexShrink: 0 }}>
-            <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-tertiary)", marginBottom: 4 }}>
-              {t("calendar.captureTime", { defaultValue: "Capture time" })}
-            </div>
-            <div className="mono" style={{ fontSize: 26, fontWeight: 800, color: "var(--text)", lineHeight: 1.1, letterSpacing: "-0.01em" }}>
-              {item.captured_at.slice(0, 5)}
-            </div>
-            <div style={{ fontSize: 12, color: "var(--text-secondary, var(--text-tertiary))", marginTop: 2 }}>
-              {isoDate}
-            </div>
-          </div>
-
-          {/* Confidence bar */}
-          {item.confidence != null && (
-            <div style={{ padding: "14px 16px 0", flexShrink: 0 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text-tertiary)", marginBottom: 5 }}>
-                <span>{t("calendar.matchConfidence", { defaultValue: "Match confidence" })}</span>
-                <span className="mono" style={{ fontWeight: 700, color: "var(--text)" }}>{confPct}</span>
-              </div>
-              <div style={{ height: 7, borderRadius: 4, background: "var(--border)", overflow: "hidden" }}>
-                <div style={{ height: "100%", width: `${Math.min(100, (item.confidence ?? 0) * 100)}%`, background: confBarColor, borderRadius: 4, transition: "width 350ms ease" }} />
-              </div>
-            </div>
-          )}
-
-          {/* Metadata grid */}
-          <div style={{ padding: "14px 16px 0", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, overflowY: "auto", flex: 1 }}>
-            <EvidenceMetaCard label={t("calendar.meta.camera", { defaultValue: "Camera" })} value={item.camera_code} />
-            <EvidenceMetaCard label={t("calendar.meta.eventId", { defaultValue: "Event ID" })} value={`#${item.detection_event_id}`} />
-            <EvidenceMetaCard label={t("calendar.meta.seconds", { defaultValue: "Full time" })} value={timeStr} />
-            <EvidenceMetaCard label={t("calendar.meta.confidence", { defaultValue: "Confidence" })} value={confPct ?? "—"} />
-          </div>
-
-          {/* Keyboard hint */}
-          <div style={{ padding: "10px 14px", borderTop: "1px solid var(--border)", fontSize: 11, color: "var(--text-tertiary)", flexShrink: 0, lineHeight: 1.5 }}>
-            {t("calendar.lightboxHint", { defaultValue: "← → to navigate · Esc to close" })}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  return portalTarget ? createPortal(modal, portalTarget) : modal;
-}
-
-function EvidenceMetaCard({ label, value }: { label: string; value: string }) {
   return (
-    <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px", background: "var(--bg-elev)" }}>
-      <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--text-tertiary)", marginBottom: 4 }}>
-        {label}
-      </div>
-      <div className="mono" style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)", wordBreak: "break-all" }}>
-        {value}
+    <div className="dd-hero" aria-live="polite">
+      <span aria-hidden className={`dd-hero-icon${view.kind === "waiting" ? " is-live" : ""}`}>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          {HERO_ICON[view.kind]}
+        </svg>
+      </span>
+      <div className="dd-hero-body">
+        <h3 className="dd-hero-title">{title}</h3>
+        <p className="dd-hero-meaning">{meaning}</p>
+        {chips.length > 0 && (
+          <div className="dd-hero-chips">
+            {chips.map((c, i) => (
+              <span key={i} className={`dd-chip dd-tone-${c.tone}`}>{c.text}</span>
+            ))}
+          </div>
+        )}
+        {(showSubmit || showEscalate) && (
+          <div className="dd-hero-actions">
+            {showSubmit && (
+              <button type="button" className="btn btn-sm btn-primary" onClick={() => onSubmitException?.(isoDate)}>
+                <Icon name="plus" size={12} />
+                {t("calendar.submitException", { defaultValue: "Submit exception" }) as string}
+              </button>
+            )}
+            {showEscalate && (
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={onRaiseEscalation ?? undefined}
+                title={t("escalation.actionSub", { defaultValue: "If you believe the camera missed you, raise an escalation. It routes to your manager then HR, and updates your attendance automatically when approved." }) as string}
+              >
+                <Icon name="zap" size={12} />
+                {t("escalation.raiseButton", { defaultValue: "Raise escalation" }) as string}
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-/** Tiny helper — equivalent of useEffect with no deps, but
- *  expressed in a way that doesn't trigger
- *  ``react-hooks/exhaustive-deps`` for a deliberately mount-only
- *  effect. Local to this file. */
-function useEffectOnMount(fn: () => void | (() => void)): void {
-  const fnRef = useRef(fn);
-  fnRef.current = fn;
-  useEffectStub(() => fnRef.current());
-}
+// ---------------------------------------------------------------------------
+// Key numbers
+// ---------------------------------------------------------------------------
 
-// Re-export React's useEffect under a private name to satisfy
-// `useEffectOnMount`. Avoids polluting the imports — the file
-// otherwise doesn't need useEffect directly.
-// eslint-disable-next-line react-hooks/rules-of-hooks
-const useEffectStub: typeof useEffect = useEffect;
-
-function EvidenceEmptyState({ status }: { status: string }) {
+function KeyFacts({ detail: d, view }: { detail: DayDetail; view: DayView }) {
   const { t } = useTranslation();
+  const dt = useTenantDateTime();
 
-  // Status-specific empty copy. The fallback is the original
-  // generic "no crops" line so an unrecognised status still gets
-  // a sensible message instead of a dangling key.
-  const copy: { title: string; sub: string; icon: "info" | "calendar" | "clock" } = (() => {
-    switch (status) {
-      case "present":
-      case "late":
-        return {
-          icon: "info",
-          title: t("calendar.emptyEvidencePresent.title", {
-            defaultValue: "No face crops retained for this day",
-          }) as string,
-          sub: t("calendar.emptyEvidencePresent.sub", {
-            defaultValue:
-              "Crops may have been swept by the retention policy. Detection events are still recorded.",
-          }) as string,
-        };
-      case "absent":
-        return {
-          icon: "info",
-          title: t("calendar.emptyEvidenceAbsent.title", {
-            defaultValue: "No face was captured",
-          }) as string,
-          sub: t("calendar.emptyEvidenceAbsent.sub", {
-            defaultValue:
-              "No detection events were recorded on this date.",
-          }) as string,
-        };
-      case "waiting":
-        return {
-          icon: "clock",
-          title: t("calendar.emptyEvidenceWaiting.title", {
-            defaultValue: "Awaiting completion of the day",
-          }) as string,
-          sub: t("calendar.emptyEvidenceWaiting.sub", {
-            defaultValue:
-              "Face crops appear here as detections come in.",
-          }) as string,
-        };
-      case "leave":
-        return {
-          icon: "calendar",
-          title: t("calendar.emptyEvidenceLeave.title", {
-            defaultValue: "Marked as leave",
-          }) as string,
-          sub: t("calendar.emptyEvidenceLeave.sub", {
-            defaultValue: "No face captures expected for this day.",
-          }) as string,
-        };
-      case "holiday":
-        return {
-          icon: "calendar",
-          title: t("calendar.emptyEvidenceHoliday.title", {
-            defaultValue: "Marked as holiday",
-          }) as string,
-          sub: t("calendar.emptyEvidenceHoliday.sub", {
-            defaultValue: "No face captures expected for this day.",
-          }) as string,
-        };
-      case "weekend":
-        return {
-          icon: "calendar",
-          title: t("calendar.emptyEvidenceWeekend.title", {
-            defaultValue: "Weekend",
-          }) as string,
-          sub: t("calendar.emptyEvidenceWeekend.sub", {
-            defaultValue: "No face captures expected for this day.",
-          }) as string,
-        };
-      case "future":
-        return {
-          icon: "calendar",
-          title: t("calendar.emptyEvidenceFuture.title", {
-            defaultValue: "Future date",
-          }) as string,
-          sub: t("calendar.emptyEvidenceFuture.sub", {
-            defaultValue:
-              "Face crops will appear here after detections are captured.",
-          }) as string,
-        };
-      default:
-        return {
-          icon: "info",
-          title: t("calendar.emptyEvidenceGeneric.title", {
-            defaultValue: "No face crops to show",
-          }) as string,
-          sub: t("calendar.emptyEvidenceGeneric.sub", {
-            defaultValue:
-              "Either no detections were captured, or this day has no attendance record.",
-          }) as string,
-        };
+  if (view.kind === "future" || view.kind === "no_record") return null;
+
+  if (!view.worked) {
+    // Nothing to count — show the day's context instead of four dashes.
+    const time = (x: string | null | undefined) => dt.formatLocalTime(x ?? null) || "—";
+    const ctx: Array<{ label: string; value: string }> = [];
+    if (view.kind === "absent" || view.kind === "waiting" || view.kind === "escalation") {
+      if (view.isFlex && d.policy_in_window_start && d.policy_in_window_end) {
+        ctx.push({ label: t("dayDetail.fact.arrivalWindow", { defaultValue: "Arrival window" }) as string, value: `${time(d.policy_in_window_start)} – ${time(d.policy_in_window_end)}` });
+      } else if (d.policy_shift_start && d.policy_shift_end) {
+        ctx.push({ label: t("dayDetail.fact.expectedShift", { defaultValue: "Expected shift" }) as string, value: `${time(d.policy_shift_start)} – ${time(d.policy_shift_end)}` });
+      }
+      if (view.requiredMinutes != null) {
+        ctx.push({ label: t("dayDetail.fact.required", { defaultValue: "Required" }) as string, value: formatMinutes(view.requiredMinutes) });
+      }
+    } else if (view.kind === "weekend") {
+      const names = (d.weekend_days ?? [])
+        .map((w) => WEEKDAYS_EN.findIndex((x) => x.toLowerCase() === w.toLowerCase()))
+        .filter((i) => i >= 0)
+        .sort((a, b) => a - b)
+        .map((i) => t(`calendar.dow.${DOW_KEYS[i]}`) as string);
+      ctx.push({ label: t("dayDetail.fact.weeklyOff", { defaultValue: "Weekly off days" }) as string, value: names.join(", ") || "—" });
+    } else if (view.kind === "holiday") {
+      ctx.push({ label: t("dayDetail.fact.holiday", { defaultValue: "Holiday" }) as string, value: d.holiday_name ?? "—" });
+    } else if (view.kind === "leave") {
+      ctx.push({ label: t("calendar.leave.typeLabel", { defaultValue: "Leave type" }) as string, value: d.leave_name ?? "—" });
     }
-  })();
+    ctx.push({
+      label: t("dayDetail.fact.detections", { defaultValue: "Detections" }) as string,
+      value: view.kind === "waiting"
+        ? (t("dayDetail.fact.noneYet", { defaultValue: "None yet" }) as string)
+        : (t("dayDetail.fact.none", { defaultValue: "None" }) as string),
+    });
+    return (
+      <div className="dd-facts" role="group" aria-label={t("dayDetail.keyNumbers", { defaultValue: "Key numbers" }) as string} style={{ ["--dd-cols" as string]: ctx.length }}>
+        {ctx.map((c, i) => (
+          <Fact key={i} label={c.label} value={c.value} small />
+        ))}
+      </div>
+    );
+  }
+
+  const total = d.total_minutes ?? null;
+  const req = view.overtimeDay || view.kind === "leave" ? null : view.requiredMinutes;
+  const progress = total != null && req ? Math.min(100, Math.round((total / req) * 100)) : null;
+  const ot = d.overtime_minutes;
 
   return (
-    <div
-      style={{
-        border: "1px dashed var(--border)",
-        borderRadius: 10,
-        padding: 16,
-        background: "var(--bg-sunken)",
-        display: "flex",
-        gap: 12,
-        alignItems: "flex-start",
-      }}
-    >
-      <div
-        aria-hidden
-        style={{
-          width: 36,
-          height: 36,
-          flexShrink: 0,
-          borderRadius: "50%",
-          background: "var(--bg-elev)",
-          display: "grid",
-          placeItems: "center",
-          color: "var(--text-tertiary)",
-          boxShadow: "var(--shadow-sm)",
-        }}
-      >
-        <Icon name={copy.icon} size={16} />
-      </div>
-      <div style={{ minWidth: 0 }}>
-        <div
-          style={{
-            fontSize: 13,
-            fontWeight: 600,
-            color: "var(--text)",
-            marginBottom: 2,
-          }}
-        >
-          {copy.title}
-        </div>
-        <div
-          style={{
-            fontSize: 12,
-            color: "var(--text-tertiary)",
-            lineHeight: 1.5,
-          }}
-        >
-          {copy.sub}
-        </div>
-      </div>
+    <div className="dd-facts" role="group" aria-label={t("dayDetail.keyNumbers", { defaultValue: "Key numbers" }) as string}>
+      <Fact label={t("calendar.inTime", { defaultValue: "In time" }) as string} value={dt.formatLocalTime(d.in_time ?? null) || "—"} />
+      <Fact
+        label={t("calendar.outTime", { defaultValue: "Out time" }) as string}
+        value={dt.formatLocalTime(d.out_time ?? null) || "—"}
+        muted={d.out_time == null}
+        sub={d.in_time != null && d.out_time == null ? (t("dayDetail.singleDetection", { defaultValue: "Single detection" }) as string) : null}
+      />
+      <Fact
+        label={t("dayDetail.hoursWorked", { defaultValue: "Hours worked" }) as string}
+        value={total != null ? formatMinutes(total) : "—"}
+        muted={total == null}
+        suffix={req ? `/ ${formatMinutes(req)}` : null}
+        sub={view.overtimeDay && total != null ? (t("dayDetail.allOvertime", { defaultValue: "All counted as overtime" }) as string) : null}
+        progress={progress}
+        progressTone={view.shortHours ? "late" : "present"}
+      />
+      <Fact
+        label={t("calendar.overtime", { defaultValue: "Overtime" }) as string}
+        value={ot > 0 ? `+${formatMinutes(ot)}` : "—"}
+        muted={ot <= 0}
+        accent={ot > 0}
+      />
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Late breakdown card — rendered above summary tiles when status === "late"
-// ---------------------------------------------------------------------------
-
-function LateBreakdownCard({ detail }: { detail: DayDetail }) {
-  const { t } = useTranslation();
-
-  // Determine the reference "expected" time and label.
-  // Fixed / Ramadan / Custom-Fixed → policy_shift_start (+ grace)
-  // Flex → policy_in_window_end (last moment to arrive without being late)
-  const isFlexType =
-    detail.policy_type === "Flex" ||
-    (detail.policy_type === "Custom" &&
-      detail.policy_custom_inner_type === "Flex");
-
-  const expectedTime: string | null = isFlexType
-    ? (detail.policy_in_window_end ?? null)
-    : (detail.policy_shift_start ?? null);
-
-  const graceMinutes = isFlexType ? 0 : (detail.policy_grace_minutes ?? 0);
-
-  const lateByMins =
-    detail.in_time && expectedTime
-      ? calcLateMinutes(detail.in_time, expectedTime, graceMinutes)
-      : null;
-
-  // Always show the card for late status even when we can't compute
-  // late-by (policy data missing) — the arrival time alone is useful.
-  const showExpected = expectedTime != null;
-  const showLateBy = lateByMins != null && lateByMins > 0;
-
-  const friendlyTime = (hhmm: string | null | undefined): string => {
-    if (!hhmm) return "—";
-    const parts = hhmm.split(":");
-    const h = parseInt(parts[0] ?? "", 10);
-    const m = parts[1] ?? "00";
-    if (Number.isNaN(h)) return hhmm.slice(0, 5);
-    const suffix = h >= 12 ? "PM" : "AM";
-    const h12 = h % 12 === 0 ? 12 : h % 12;
-    return `${h12}:${m} ${suffix}`;
-  };
-
-  // Grace suffix shown on the expected-time tile for Fixed-type policies
-  // so the reader immediately understands the grace window.
-  const graceLabel =
-    !isFlexType && graceMinutes > 0
-      ? ` + ${graceMinutes}${t("calendar.minutesShort", { defaultValue: "min" }) as string} grace`
-      : null;
-
-  return (
-    <div
-      style={{
-        background: "var(--warning-soft)",
-        border: "1px solid var(--warning)",
-        borderRadius: 12,
-        padding: "14px 16px",
-        marginBottom: 16,
-        display: "flex",
-        flexDirection: "column",
-        gap: 12,
-      }}
-    >
-      {/* Header */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-        }}
-      >
-        <Icon name="clock" size={14} style={{ color: "var(--warning-text)" }} />
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 700,
-            textTransform: "uppercase",
-            letterSpacing: "0.06em",
-            color: "var(--warning-text)",
-          }}
-        >
-          {t("calendar.lateBreakdown.title", {
-            defaultValue: "Late arrival details",
-          }) as string}
-        </span>
-      </div>
-
-      {/* Three-column grid: Expected / Arrived / Late By */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: showExpected && showLateBy
-            ? "1fr 1fr 1fr"
-            : showExpected || showLateBy
-              ? "1fr 1fr"
-              : "1fr",
-          gap: 8,
-        }}
-      >
-        {showExpected && (
-          <LateFactTile
-            label={
-              isFlexType
-                ? (t("calendar.lateBreakdown.mustArriveBy", {
-                    defaultValue: "Must arrive by",
-                  }) as string)
-                : (t("calendar.lateBreakdown.expectedIn", {
-                    defaultValue: "Expected in-time",
-                  }) as string)
-            }
-            value={friendlyTime(expectedTime)}
-            sub={graceLabel}
-            highlight={false}
-          />
-        )}
-
-        <LateFactTile
-          label={
-            t("calendar.lateBreakdown.arrivedAt", {
-              defaultValue: "Employee arrived",
-            }) as string
-          }
-          value={friendlyTime(detail.in_time)}
-          highlight
-        />
-
-        {showLateBy && (
-          <LateFactTile
-            label={
-              t("calendar.lateBreakdown.lateBy", {
-                defaultValue: "Late by",
-              }) as string
-            }
-            value={`+ ${fmtMinutes(lateByMins)}`}
-            danger
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function LateFactTile({
+function Fact({
   label,
   value,
-  sub,
-  highlight = false,
-  danger = false,
+  sub = null,
+  suffix = null,
+  muted = false,
+  accent = false,
+  progress = null,
+  progressTone = "present",
+  small = false,
 }: {
   label: string;
   value: string;
   sub?: string | null;
-  highlight?: boolean;
-  danger?: boolean;
+  suffix?: string | null;
+  muted?: boolean;
+  accent?: boolean;
+  progress?: number | null;
+  progressTone?: string;
+  small?: boolean;
 }) {
-  const fg = danger
-    ? "var(--danger-text)"
-    : highlight
-      ? "var(--warning-text)"
-      : "var(--text)";
   return (
-    <div
-      style={{
-        background: "var(--bg-elev)",
-        borderRadius: 9,
-        padding: "10px 12px",
-        display: "flex",
-        flexDirection: "column",
-        gap: 4,
-      }}
-    >
-      <div
-        style={{
-          fontSize: 10,
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-          color: "var(--text-tertiary)",
-          fontWeight: 600,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        className="mono"
-        style={{
-          fontSize: 14,
-          fontWeight: 700,
-          color: fg,
-          lineHeight: 1,
-        }}
-      >
+    <div className="dd-fact">
+      <div className="dd-label">{label}</div>
+      <div className={`dd-fact-value${muted ? " is-muted" : ""}${accent ? " is-accent" : ""}${small ? " is-small" : ""}`}>
         {value}
+        {suffix && <span className="dd-fact-suffix">{suffix}</span>}
       </div>
-      {sub && (
-        <div style={{ fontSize: 10, color: "var(--text-tertiary)" }}>
-          {sub}
+      {progress != null && (
+        <div className={`dd-bar dd-tone-${progressTone}`} role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100}>
+          <span style={{ width: `${progress}%` }} />
         </div>
       )}
+      {sub && <div className="dd-fact-sub">{sub}</div>}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Policy applied card
+// Policy & weekly schedule
 // ---------------------------------------------------------------------------
 
-const SHIFT_TYPE_ACCENT: Record<string, { bg: string; fg: string }> = {
-  Fixed: { bg: "#E8F0FE", fg: "#1B4F8C" },
-  Flex: { bg: "#E7F6EC", fg: "#1F6B3F" },
-  Ramadan: { bg: "#FDEEDC", fg: "#9A4E14" },
-  Custom: { bg: "#EDE7F6", fg: "#4A2E83" },
-};
-
-/** Format an ISO ``YYYY-MM-DD`` to a friendly short date in the
- *  browser locale — e.g. "13 Feb 2026". Falls back to the raw
- *  string when parsing fails. */
-/**
- * Migration 0068 — hook factory replaces the old module-level
- * formatShortDate. Apply the tenant's date format to a bare
- * YYYY-MM-DD string (no tz conversion needed; the input is a
- * calendar date).
- */
-function useFormatShortDate(): (iso: string | null | undefined) => string {
-  const dt = useTenantDateTime();
-  return (iso) => (iso ? dt.formatLocalDate(iso) : "");
-}
-
-
-function PolicyAppliedCard({ detail }: { detail: DayDetail }) {
+function PolicyScheduleCard({ detail: d, isoDate }: { detail: DayDetail; isoDate: string }) {
   const { t } = useTranslation();
-  const formatShortDate = useFormatShortDate();
+  const dt = useTenantDateTime();
+  const time = (s: string | null | undefined) => dt.formatLocalTime(s ?? null) || "—";
 
-  if (!detail.policy_name) {
-    return (
-      <div
-        style={{
-          padding: 12,
-          border: "1px dashed var(--border)",
-          borderRadius: 10,
-          color: "var(--text-tertiary)",
-          fontSize: 12.5,
-        }}
-      >
-        {t("calendar.noPolicy", {
-          defaultValue: "No policy applied for this day.",
-        }) as string}
-      </div>
-    );
+  const isFlex = d.policy_type === "Flex" || (d.policy_type === "Custom" && d.policy_custom_inner_type === "Flex");
+  const isDefault = ["tenant-default", "legacy"].includes((d.policy_scope ?? "").toLowerCase());
+
+  const facts: Array<{ label: string; value: string }> = [];
+  if (isFlex) {
+    if (d.policy_in_window_start && d.policy_in_window_end) {
+      facts.push({ label: t("dayDetail.policy.arrive", { defaultValue: "Arrive" }) as string, value: `${time(d.policy_in_window_start)} – ${time(d.policy_in_window_end)}` });
+    }
+    if (d.policy_out_window_start && d.policy_out_window_end) {
+      facts.push({ label: t("dayDetail.policy.leave", { defaultValue: "Leave" }) as string, value: `${time(d.policy_out_window_start)} – ${time(d.policy_out_window_end)}` });
+    }
+  } else if (d.policy_shift_start && d.policy_shift_end) {
+    facts.push({ label: t("dayDetail.policy.shift", { defaultValue: "Shift" }) as string, value: `${time(d.policy_shift_start)} – ${time(d.policy_shift_end)}` });
+  }
+  if (d.policy_required_hours != null) {
+    facts.push({ label: t("dayDetail.fact.required", { defaultValue: "Required" }) as string, value: t("dayDetail.policy.hours", { defaultValue: "{{hours}} h", hours: d.policy_required_hours }) as string });
+  }
+  if (!isFlex && d.policy_grace_minutes != null && d.policy_grace_minutes > 0) {
+    facts.push({ label: t("dayDetail.policy.grace", { defaultValue: "Grace" }) as string, value: t("dayDetail.policy.minutes", { defaultValue: "{{min}} min", min: d.policy_grace_minutes }) as string });
+  }
+  if (d.policy_range_start || d.policy_range_end) {
+    facts.push({
+      label: t("calendar.policyActiveRange", { defaultValue: "Active range" }) as string,
+      value: `${dt.formatLocalDate(d.policy_range_start ?? null) || "…"} – ${dt.formatLocalDate(d.policy_range_end ?? null) || "…"}`,
+    });
   }
 
-  const layoutType: "Fixed" | "Flex" =
-    detail.policy_type === "Custom"
-      ? detail.policy_custom_inner_type === "Flex"
-        ? "Flex"
-        : "Fixed"
-      : detail.policy_type === "Flex"
-        ? "Flex"
-        : "Fixed";
-
-  const typeKey = detail.policy_type ?? "Fixed";
-  const accent = SHIFT_TYPE_ACCENT[typeKey] ?? SHIFT_TYPE_ACCENT["Fixed"]!;
-
-  const isDefault = ["tenant-default", "legacy"].includes(
-    (detail.policy_scope ?? "").toLowerCase(),
-  );
-
-  const dateRangeLabel =
-    detail.policy_range_start || detail.policy_range_end
-      ? `${formatShortDate(detail.policy_range_start)} – ${formatShortDate(
-          detail.policy_range_end,
-        )}`
-      : null;
+  const offDays = new Set((d.weekend_days ?? []).map((x) => x.toLowerCase()));
+  const dow = new Date(`${isoDate}T00:00:00`).getDay();
 
   return (
-    <div
-      style={{
-        border: "1px solid var(--border)",
-        borderRadius: 12,
-        background: "var(--bg-elev)",
-        boxShadow: "var(--shadow-sm)",
-        overflow: "hidden",
-      }}
-    >
-      {/* Header — policy name + type badge + DEFAULT badge */}
-      <div style={{ padding: "14px 16px 0 16px" }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            flexWrap: "wrap",
-          }}
-        >
-          <span
-            style={{
-              fontSize: 17,
-              fontWeight: 700,
-              color: "var(--text)",
-              lineHeight: 1.3,
-              wordBreak: "break-word",
-            }}
-          >
-            {detail.policy_name}
-          </span>
-          <span
-            style={{
-              background: accent.bg,
-              color: accent.fg,
-              padding: "3px 9px",
-              borderRadius: 999,
-              fontSize: 11,
-              fontWeight: 700,
-              letterSpacing: "0.02em",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {typeKey}
-          </span>
-          {isDefault && (
-            <span
-              style={{
-                background: accent.bg,
-                color: accent.fg,
-                padding: "3px 9px",
-                borderRadius: 999,
-                fontSize: 10.5,
-                fontWeight: 700,
-                letterSpacing: "0.06em",
-                textTransform: "uppercase",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {t("calendar.policyDefault", { defaultValue: "Default" }) as string}
-            </span>
-          )}
-        </div>
-        {/* "Must complete X hours" subtitle */}
-        <div
-          style={{
-            fontSize: 12.5,
-            color: "var(--text-tertiary)",
-            marginTop: 5,
-            marginBottom: 14,
-          }}
-        >
-          {detail.policy_required_hours != null
-            ? t("calendar.mustComplete", {
-                hours: detail.policy_required_hours,
-                defaultValue: `Must complete ${detail.policy_required_hours} hours`,
-              })
-            : t("calendar.policyApplied", { defaultValue: "Policy applied" })}
-        </div>
-      </div>
-
-      <div style={{ padding: "0 16px 16px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
-        {/* Date range (Ramadan / Custom only) */}
-        {dateRangeLabel && (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              background: "var(--bg-sunken)",
-              padding: "8px 10px",
-              borderRadius: 8,
-              fontSize: 12.5,
-              color: "var(--text-secondary)",
-            }}
-          >
-            <Icon name="calendar" size={12} />
-            <span style={{ fontWeight: 500 }}>
-              {t("calendar.policyActiveRange", { defaultValue: "Active range" }) as string}:
-            </span>
-            <span>{dateRangeLabel}</span>
-          </div>
-        )}
-
-        {/* SHIFT WINDOW section label + ribbon */}
-        <div>
-          <div
-            style={{
-              fontSize: 10.5,
-              fontWeight: 600,
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
-              color: "var(--text-tertiary)",
-              marginBottom: 8,
-            }}
-          >
-            {t("calendar.shiftWindowLabel", { defaultValue: "Shift window" }) as string}
-          </div>
-          <PolicyShiftRibbon detail={detail} layoutType={layoutType} />
-        </div>
-
-        {/* Optional description */}
-        {detail.policy_description && (
-          <div
-            style={{
-              fontSize: 12.5,
-              color: "var(--text-secondary)",
-              lineHeight: 1.5,
-              paddingTop: 4,
-              borderTop: "1px dashed var(--border)",
-            }}
-          >
-            {detail.policy_description}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// PolicyShiftRibbon — visual timeline strip (06:00–20:00) showing shift bands
-// ---------------------------------------------------------------------------
-
-function PolicyShiftRibbon({
-  detail,
-  layoutType,
-}: {
-  detail: DayDetail;
-  layoutType: "Fixed" | "Flex";
-}) {
-  const HOURS_START = 6;
-  const HOURS_END = 20;
-  const TOTAL_MIN = (HOURS_END - HOURS_START) * 60;
-
-  const minutesOf = (hhmm: string | null | undefined): number | null => {
-    if (!hhmm) return null;
-    const parts = hhmm.split(":");
-    const h = parseInt(parts[0] ?? "", 10);
-    const m = parseInt(parts[1] ?? "0", 10);
-    if (isNaN(h) || isNaN(m)) return null;
-    return h * 60 + m;
-  };
-
-  const pct = (mm: number) =>
-    Math.max(0, Math.min(100, ((mm - HOURS_START * 60) / TOTAL_MIN) * 100));
-
-  type Band = {
-    label: string;
-    start: number;
-    end: number;
-    fill: string;
-    accent?: boolean;
-  };
-  const bands: Band[] = [];
-
-  if (layoutType === "Flex") {
-    const inS = minutesOf(detail.policy_in_window_start);
-    const inE = minutesOf(detail.policy_in_window_end);
-    const outS = minutesOf(detail.policy_out_window_start);
-    const outE = minutesOf(detail.policy_out_window_end);
-    if (inS !== null && inE !== null) {
-      bands.push({ label: "arrive", start: inS, end: inE, fill: "var(--info-soft)" });
-    }
-    if (inE !== null && outS !== null && inE < outS) {
-      bands.push({
-        label: `${detail.policy_required_hours ?? 8}h work`,
-        start: inE,
-        end: outS,
-        fill: "var(--accent-soft)",
-        accent: true,
-      });
-    }
-    if (outS !== null && outE !== null) {
-      bands.push({ label: "depart", start: outS, end: outE, fill: "var(--info-soft)" });
-    }
-  } else {
-    const s = minutesOf(detail.policy_shift_start);
-    const e = minutesOf(detail.policy_shift_end);
-    if (s !== null && e !== null) {
-      bands.push({
-        label: `${detail.policy_required_hours ?? 8}h shift`,
-        start: s,
-        end: e,
-        fill: "var(--accent-soft)",
-        accent: true,
-      });
-    }
-  }
-
-  const tickHours = [6, 8, 10, 12, 14, 16, 18, 20];
-
-  return (
-    <div
-      style={{
-        position: "relative",
-        height: 56,
-        background: "var(--bg-sunken)",
-        border: "1px solid var(--border)",
-        borderRadius: 8,
-        overflow: "hidden",
-      }}
-      aria-hidden
-    >
-      {/* Hour grid ticks */}
-      {Array.from({ length: HOURS_END - HOURS_START + 1 }).map((_, i) => {
-        const hour = HOURS_START + i;
-        const left = (i / (HOURS_END - HOURS_START)) * 100;
-        return (
-          <div
-            key={hour}
-            style={{
-              position: "absolute",
-              insetInlineStart: `${left}%`,
-              top: 0,
-              bottom: 16,
-              width: 1,
-              background: "var(--border)",
-              opacity: hour % 2 === 0 ? 0.6 : 0.2,
-            }}
-          />
-        );
-      })}
-      {/* Colored shift bands */}
-      {bands.map((b, i) => {
-        const left = pct(b.start);
-        const width = pct(b.end) - left;
-        return (
-          <div
-            key={i}
-            style={{
-              position: "absolute",
-              insetInlineStart: `${left}%`,
-              width: `${width}%`,
-              top: 6,
-              bottom: 20,
-              background: b.fill,
-              border: b.accent
-                ? "1px solid var(--accent)"
-                : "1px solid transparent",
-              borderRadius: 4,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 10.5,
-              color: b.accent ? "var(--accent-text)" : "var(--text-secondary)",
-              fontWeight: 500,
-              overflow: "hidden",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {b.label}
-          </div>
-        );
-      })}
-      {/* Hour labels along the bottom */}
-      <div
-        style={{
-          position: "absolute",
-          insetInlineStart: 0,
-          insetInlineEnd: 0,
-          bottom: 3,
-          display: "flex",
-          justifyContent: "space-between",
-          fontSize: 9,
-          color: "var(--text-tertiary)",
-          fontFamily: "var(--font-mono)",
-          padding: "0 2px",
-        }}
-      >
-        {tickHours.map((h) => (
-          <span key={h}>{String(h).padStart(2, "0")}:00</span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Week Off day content — dedicated UI for weekend status
-// ---------------------------------------------------------------------------
-
-// All 7 canonical weekday names in ISO order (Monday-first).
-const ISO_WEEK_DAYS = [
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
-  "Sunday",
-] as const;
-
-// Short abbreviations for the weekly schedule strip.
-const DAY_ABBR: Record<string, string> = {
-  Monday: "Mon",
-  Tuesday: "Tue",
-  Wednesday: "Wed",
-  Thursday: "Thu",
-  Friday: "Fri",
-  Saturday: "Sat",
-  Sunday: "Sun",
-};
-
-// ---------------------------------------------------------------------------
-// No-record / future state card
-// ---------------------------------------------------------------------------
-
-function NoRecordCard({
-  isoDate,
-  isFuture,
-}: {
-  isoDate: string;
-  isFuture: boolean;
-}) {
-  const { t } = useTranslation();
-  const dt = useTenantDateTime();
-
-  // Migration 0068 — tenant date format. The drawer used to render a
-  // long localised "Wednesday, May 28, 2026" via toLocaleDateString;
-  // operators reported confusion when the same date appeared in two
-  // formats across the app. Switching to the tenant format keeps
-  // every surface consistent.
-  const parsedDate = dt.formatLocalDate(isoDate) || isoDate;
-  const shortDate = parsedDate;
-
-  if (isFuture) {
-    return (
-      <div style={{ borderRadius: 16, border: "1px solid var(--border)", overflow: "hidden", background: "var(--bg-elev)" }}>
-        <div aria-hidden style={{ height: 3, background: "var(--accent)" }} />
-        <div style={{
-          padding: "32px 24px 22px",
-          display: "flex", flexDirection: "column", alignItems: "center",
-          gap: 14, textAlign: "center",
-          background: "linear-gradient(180deg, color-mix(in oklab, var(--accent) 5%, var(--bg-elev)) 0%, var(--bg-elev) 100%)",
-        }}>
-          {/* Illustration ring */}
-          <div style={{ position: "relative", marginBottom: 4 }}>
-            <div aria-hidden style={{
-              position: "absolute", inset: -10,
-              borderRadius: "50%",
-              border: "1.5px dashed color-mix(in oklab, var(--accent) 35%, var(--border))",
-            }} />
-            <div style={{
-              width: 74, height: 74, borderRadius: "50%",
-              background: "color-mix(in oklab, var(--accent) 9%, var(--bg-elev))",
-              border: "1.5px solid color-mix(in oklab, var(--accent) 28%, var(--border))",
-              display: "grid", placeItems: "center",
-            }}>
-              <svg width="40" height="40" viewBox="0 0 40 40" fill="none" aria-hidden>
-                <rect x="4" y="9" width="32" height="28" rx="4"
-                  style={{ fill: "none", stroke: "var(--accent-text)", strokeWidth: "1.7" }} />
-                <line x1="4" y1="17" x2="36" y2="17"
-                  style={{ stroke: "var(--accent-text)", strokeWidth: "1.5" }} />
-                <rect x="12" y="5" width="4" height="8" rx="2" style={{ fill: "var(--accent-text)" }} />
-                <rect x="24" y="5" width="4" height="8" rx="2" style={{ fill: "var(--accent-text)" }} />
-                {/* Three future dots */}
-                <circle cx="13" cy="26" r="2" style={{ fill: "var(--accent-text)", opacity: 0.35 }} />
-                <circle cx="20" cy="26" r="2" style={{ fill: "var(--accent-text)", opacity: 0.65 }} />
-                <circle cx="27" cy="26" r="2" style={{ fill: "var(--accent-text)" }} />
-              </svg>
+    <section className="dd-card dd-policy" aria-label={t("calendar.policyApplied", { defaultValue: "Policy applied" }) as string}>
+      <div className="dd-policy-main">
+        <div className="dd-label">{t("calendar.policyApplied", { defaultValue: "Policy applied" }) as string}</div>
+        {d.policy_name ? (
+          <>
+            <div className="dd-policy-name">
+              <span>{d.policy_name}</span>
+              {d.policy_type && <span className={`dd-type dd-type-${d.policy_type.toLowerCase()}`}>{d.policy_type}</span>}
+              {isDefault && <span className="dd-type">{t("calendar.policyDefault", { defaultValue: "Default" }) as string}</span>}
             </div>
-          </div>
-
-          <div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text)", marginBottom: 5 }}>
-              {t("calendar.noRecord.futureTitle", { defaultValue: "Future Date" }) as string}
-            </div>
-            <div style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
-              <Icon name="calendar" size={12} aria-hidden />
-              {parsedDate}
-            </div>
-          </div>
-        </div>
-
-        <div style={{
-          padding: "13px 20px 15px",
-          borderTop: "1px solid color-mix(in oklab, var(--accent) 14%, var(--border))",
-          background: "color-mix(in oklab, var(--accent) 4%, var(--bg-sunken))",
-          display: "flex", gap: 10, alignItems: "flex-start",
-        }}>
-          <div style={{
-            width: 26, height: 26, borderRadius: 7, flexShrink: 0,
-            background: "color-mix(in oklab, var(--accent) 14%, var(--bg-elev))",
-            border: "1px solid color-mix(in oklab, var(--accent) 22%, var(--border))",
-            display: "grid", placeItems: "center",
-          }}>
-            <Icon name="clock" size={13} style={{ color: "var(--accent-text)" }} aria-hidden />
-          </div>
-          <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.65, fontFamily: "var(--font-sans)" }}>
-            {t("calendar.noRecord.futureSub", {
-              defaultValue: "Attendance monitoring will begin once this date arrives. Check back then to see detections, face crops, and the computed record.",
-            }) as string}
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  // ── no_record state ────────────────────────────────────────────────────────
-  return (
-    <div style={{ borderRadius: 16, border: "1px solid var(--border)", overflow: "hidden", background: "var(--bg-elev)" }}>
-      <div aria-hidden style={{ height: 3, background: "color-mix(in oklab, var(--text-tertiary) 45%, var(--border))" }} />
-
-      {/* Illustration + title */}
-      <div style={{
-        padding: "32px 24px 22px",
-        display: "flex", flexDirection: "column", alignItems: "center",
-        gap: 14, textAlign: "center",
-        background: "linear-gradient(180deg, color-mix(in oklab, var(--text-tertiary) 4%, var(--bg-elev)) 0%, var(--bg-elev) 100%)",
-      }}>
-        <div style={{ position: "relative", marginBottom: 4 }}>
-          <div aria-hidden style={{
-            position: "absolute", inset: -10,
-            borderRadius: "50%",
-            border: "1.5px dashed color-mix(in oklab, var(--text-tertiary) 30%, var(--border))",
-          }} />
-          <div style={{
-            width: 74, height: 74, borderRadius: "50%",
-            background: "color-mix(in oklab, var(--text-tertiary) 7%, var(--bg-elev))",
-            border: "1.5px solid color-mix(in oklab, var(--text-tertiary) 18%, var(--border))",
-            display: "grid", placeItems: "center",
-          }}>
-            {/* Camera body with question-mark lens */}
-            <svg width="40" height="40" viewBox="0 0 40 40" fill="none" aria-hidden>
-              <rect x="4" y="14" width="32" height="21" rx="3.5"
-                style={{ stroke: "var(--text-tertiary)", strokeWidth: "1.7", fill: "none" }} />
-              <path d="M15 14V12a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2"
-                style={{ stroke: "var(--text-tertiary)", strokeWidth: "1.5", fill: "none" }} />
-              <circle cx="20" cy="24.5" r="6.5"
-                style={{ stroke: "var(--text-tertiary)", strokeWidth: "1.5", fill: "none" }} />
-              <text x="20" y="28.5" textAnchor="middle"
-                style={{ fill: "var(--text-tertiary)", fontSize: "10px", fontWeight: 700, fontFamily: "sans-serif" }}>
-                ?
-              </text>
-            </svg>
-          </div>
-        </div>
-
-        <div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text)", marginBottom: 5 }}>
-            {t("calendar.noRecord.title", { defaultValue: "No Data for This Day" }) as string}
-          </div>
-          <div style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
-            <Icon name="calendar" size={12} aria-hidden />
-            {parsedDate}
-          </div>
-        </div>
-
-        <span style={{
-          display: "inline-flex", alignItems: "center",
-          padding: "4px 12px", borderRadius: 999,
-          background: "var(--bg-sunken)", border: "1px solid var(--border)",
-        }}>
-          <span style={{ fontSize: 11.5, fontWeight: 500, color: "var(--text-tertiary)" }}>{shortDate}</span>
-        </span>
-      </div>
-
-      {/* Three fact rows */}
-      <div style={{
-        borderTop: "1px solid var(--border)",
-        background: "var(--bg-sunken)",
-        padding: "14px 18px",
-        display: "flex", flexDirection: "column", gap: 12,
-      }}>
-        {/* Fact 1 — No attendance record */}
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 11 }}>
-          <div style={{
-            width: 28, height: 28, borderRadius: 8, flexShrink: 0,
-            background: "var(--bg-elev)", border: "1px solid var(--border)",
-            display: "grid", placeItems: "center", color: "var(--text-tertiary)",
-          }}>
-            <Icon name="clipboard" size={13} aria-hidden />
-          </div>
-          <div style={{ paddingTop: 3 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)", lineHeight: 1.3, marginBottom: 2 }}>
-              {t("calendar.noRecord.fact1Title", { defaultValue: "No attendance record" }) as string}
-            </div>
-            <div style={{ fontSize: 11.5, color: "var(--text-tertiary)", lineHeight: 1.55 }}>
-              {t("calendar.noRecord.fact1Sub", { defaultValue: "The attendance engine found no data to process for this date." }) as string}
-            </div>
-          </div>
-        </div>
-
-        {/* Fact 2 — No detections */}
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 11 }}>
-          <div style={{
-            width: 28, height: 28, borderRadius: 8, flexShrink: 0,
-            background: "var(--bg-elev)", border: "1px solid var(--border)",
-            display: "grid", placeItems: "center", color: "var(--text-tertiary)",
-          }}>
-            <Icon name="camera" size={13} aria-hidden />
-          </div>
-          <div style={{ paddingTop: 3 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)", lineHeight: 1.3, marginBottom: 2 }}>
-              {t("calendar.noRecord.fact2Title", { defaultValue: "No detections available" }) as string}
-            </div>
-            <div style={{ fontSize: 11.5, color: "var(--text-tertiary)", lineHeight: 1.55 }}>
-              {t("calendar.noRecord.fact2Sub", { defaultValue: "No camera detection events were recorded on this date." }) as string}
-            </div>
-          </div>
-        </div>
-
-        {/* Fact 3 — No face crops */}
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 11 }}>
-          <div style={{
-            width: 28, height: 28, borderRadius: 8, flexShrink: 0,
-            background: "var(--bg-elev)", border: "1px solid var(--border)",
-            display: "grid", placeItems: "center", color: "var(--text-tertiary)",
-          }}>
-            <Icon name="user" size={13} aria-hidden />
-          </div>
-          <div style={{ paddingTop: 3 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)", lineHeight: 1.3, marginBottom: 2 }}>
-              {t("calendar.noRecord.fact3Title", { defaultValue: "No face crops captured" }) as string}
-            </div>
-            <div style={{ fontSize: 11.5, color: "var(--text-tertiary)", lineHeight: 1.55 }}>
-              {t("calendar.noRecord.fact3Sub", { defaultValue: "The system did not capture or store any face images for this date." }) as string}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Bottom note */}
-      <div style={{
-        padding: "11px 18px 13px",
-        borderTop: "1px solid var(--border)",
-        background: "var(--bg-elev)",
-        display: "flex", gap: 9, alignItems: "flex-start",
-      }}>
-        <Icon name="info" size={13} style={{ color: "var(--text-tertiary)", flexShrink: 0, marginTop: 2 }} aria-hidden />
-        <p style={{ margin: 0, fontSize: 12, color: "var(--text-tertiary)", lineHeight: 1.65, fontFamily: "var(--font-sans)" }}>
-          {t("calendar.noRecord.note", {
-            defaultValue: "This may indicate the employee was absent, the camera was offline, or this date predates the system setup.",
-          }) as string}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// HolidayDayContent — premium holiday state card
-// ---------------------------------------------------------------------------
-
-// Dedicated template for an approved-leave day. Distinct from the
-// weekend / holiday templates so an "On Leave" day reads as a deliberate
-// approved absence (leave type + paid/unpaid context) rather than a
-// generic week-off. Leave wins over weekend/holiday server-side, so this
-// renders whenever the day carries an approved leave.
-function LeaveDayContent({
-  detail,
-  isoDate,
-}: {
-  detail: import("./types").DayDetail;
-  isoDate: string;
-}) {
-  const { t } = useTranslation();
-  const dt = useTenantDateTime();
-
-  const leaveName =
-    detail.leave_name ??
-    (t("calendar.leave.unknownName", { defaultValue: "Approved leave" }) as string);
-  const parsedDate = dt.formatLocalDate(isoDate) || isoDate;
-  const workedOnLeave =
-    detail.in_time != null ||
-    (detail.total_minutes != null && detail.total_minutes > 0) ||
-    detail.timeline.length > 0;
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <div
-        style={{
-          background: "var(--bg-elev)",
-          border: "1px solid color-mix(in oklab, var(--info) 40%, var(--border))",
-          borderRadius: 14,
-          overflow: "hidden",
-        }}
-      >
-        <div aria-hidden style={{ height: 4, background: "var(--info)", opacity: 0.85 }} />
-        <div style={{ padding: "20px 20px 18px", display: "flex", gap: 16, alignItems: "flex-start" }}>
-          <div
-            aria-hidden
-            style={{
-              width: 54,
-              height: 54,
-              borderRadius: 14,
-              flexShrink: 0,
-              background: "color-mix(in oklab, var(--info) 12%, var(--bg-elev))",
-              border: "1.5px solid color-mix(in oklab, var(--info) 30%, var(--border))",
-              display: "grid",
-              placeItems: "center",
-              color: "var(--info)",
-            }}
-          >
-            <Icon name="calendar" size={26} />
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
-              <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)", lineHeight: 1.15, flex: 1, minWidth: 0 }}>
-                {leaveName}
-              </div>
-              <span
-                style={{
-                  padding: "3px 10px",
-                  borderRadius: 999,
-                  fontSize: 11,
-                  fontWeight: 700,
-                  background: "color-mix(in oklab, var(--info) 14%, var(--bg-elev))",
-                  color: "var(--info-text)",
-                  border: "1px solid color-mix(in oklab, var(--info) 35%, transparent)",
-                  flexShrink: 0,
-                  whiteSpace: "nowrap",
-                  marginTop: 1,
-                }}
-              >
-                {t("calendar.leave.badge", { defaultValue: "On Leave" }) as string}
-              </span>
-            </div>
-            <div style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.6, marginBottom: 6 }}>
-              {t("calendar.leave.message", {
-                defaultValue:
-                  "On approved leave. No attendance is expected today; this day is excluded from the absent count.",
-              }) as string}
-            </div>
-            <div className="mono" style={{ fontSize: 11.5, color: "var(--text-tertiary)", display: "flex", alignItems: "center", gap: 5 }}>
-              <Icon name="calendar" size={11} aria-hidden />
-              {parsedDate}
-            </div>
-          </div>
-        </div>
-        {/* Footer fact strip — leave type + date, so the card reads as a
-            complete record without the (irrelevant) shift-policy ribbon. */}
-        <div
-          style={{
-            borderTop: "1px solid color-mix(in oklab, var(--info) 20%, var(--border))",
-            background: "color-mix(in oklab, var(--info) 5%, var(--bg-elev))",
-            padding: "12px 20px",
-            display: "flex",
-            gap: 28,
-            flexWrap: "wrap",
-          }}
-        >
-          <LeaveFact
-            label={t("calendar.leave.typeLabel", { defaultValue: "Leave type" }) as string}
-            value={leaveName}
-          />
-          <LeaveFact
-            label={t("calendar.leave.dateLabel", { defaultValue: "Date" }) as string}
-            value={parsedDate}
-          />
-          <LeaveFact
-            label={t("calendar.leave.attendanceLabel", { defaultValue: "Attendance" }) as string}
-            value={
-              workedOnLeave
-                ? (t("calendar.leave.activityRecorded", { defaultValue: "Activity recorded" }) as string)
-                : (t("calendar.leave.notExpected", { defaultValue: "Not expected" }) as string)
-            }
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function LeaveFact({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0 }}>
-      <span
-        style={{
-          fontSize: 10,
-          fontWeight: 700,
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
-          color: "var(--text-tertiary)",
-        }}
-      >
-        {label}
-      </span>
-      <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function HolidayDayContent({
-  detail,
-  isoDate,
-  highlightedEventId,
-  onEventActivate,
-  registerRef,
-}: {
-  detail: import("./types").DayDetail;
-  isoDate: string;
-  highlightedEventId: number | null;
-  onEventActivate: (eventId: number) => void;
-  registerRef: (eventId: number, el: HTMLDivElement | null) => void;
-}) {
-  const { t } = useTranslation();
-  const dt = useTenantDateTime();
-
-  const workedOnHoliday =
-    detail.in_time != null ||
-    (detail.total_minutes != null && detail.total_minutes > 0) ||
-    detail.timeline.length > 0;
-
-  const holidayName = detail.holiday_name ?? t("calendar.holiday.unknownName", { defaultValue: "Public Holiday" }) as string;
-
-  // Migration 0068 — tenant date format.
-  const parsedDate = dt.formatLocalDate(isoDate) || isoDate;
-  const shortDate = parsedDate;
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-
-      {/* ── Hero banner ── */}
-      <div style={{
-        background: "var(--bg-elev)",
-        border: "1px solid color-mix(in oklab, var(--info) 40%, var(--border))",
-        borderRadius: 14,
-        overflow: "hidden",
-      }}>
-        {/* Accent top bar */}
-        <div aria-hidden style={{ height: 4, background: "var(--info)", opacity: 0.85 }} />
-
-        <div style={{ padding: "20px 20px 18px", display: "flex", gap: 16, alignItems: "flex-start" }}>
-          {/* Star illustration */}
-          <div aria-hidden style={{
-            width: 54, height: 54, borderRadius: 14, flexShrink: 0,
-            background: "color-mix(in oklab, var(--info) 12%, var(--bg-elev))",
-            border: "1.5px solid color-mix(in oklab, var(--info) 30%, var(--border))",
-            display: "grid", placeItems: "center",
-          }}>
-            <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden>
-              <path
-                d="M14 2l2.94 6.26L24 9.27l-5 5.14 1.18 7.1L14 18.26l-6.18 3.25L9 14.41l-5-5.14 7.06-1.01L14 2z"
-                fill="var(--info)"
-                fillOpacity="0.85"
-                stroke="var(--info)"
-                strokeWidth="1"
-                strokeLinejoin="round"
-              />
-              {/* inner sparkle dots */}
-              <circle cx="14" cy="14" r="2.5" fill="var(--bg-elev)" />
-              <circle cx="6" cy="5" r="1.2" fill="var(--info)" fillOpacity="0.45" />
-              <circle cx="22" cy="5" r="1.2" fill="var(--info)" fillOpacity="0.45" />
-              <circle cx="4" cy="15" r="1" fill="var(--info)" fillOpacity="0.3" />
-              <circle cx="24" cy="15" r="1" fill="var(--info)" fillOpacity="0.3" />
-            </svg>
-          </div>
-
-          {/* Text block */}
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
-              <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)", lineHeight: 1.15, flex: 1, minWidth: 0 }}>
-                {holidayName}
-              </div>
-              <span style={{
-                padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700,
-                background: "color-mix(in oklab, var(--info) 14%, var(--bg-elev))",
-                color: "var(--info-text)",
-                border: "1px solid color-mix(in oklab, var(--info) 35%, transparent)",
-                flexShrink: 0, whiteSpace: "nowrap", marginTop: 1,
-              }}>
-                {t("calendar.holiday.officialBadge", { defaultValue: "Official Holiday" }) as string}
-              </span>
-            </div>
-            <div style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.6, marginBottom: 6 }}>
-              {t("calendar.holiday.noAttendanceMessage", { defaultValue: "No attendance is expected today. This day is excluded from the absent count." }) as string}
-            </div>
-            <div className="mono" style={{ fontSize: 11.5, color: "var(--text-tertiary)", display: "flex", alignItems: "center", gap: 5 }}>
-              <Icon name="calendar" size={11} aria-hidden />
-              {parsedDate}
-            </div>
-          </div>
-        </div>
-
-        {/* Date chip row */}
-        <div style={{
-          borderTop: "1px solid color-mix(in oklab, var(--info) 20%, var(--border))",
-          background: "color-mix(in oklab, var(--info) 5%, var(--bg-elev))",
-          padding: "10px 20px",
-          display: "flex", alignItems: "center", gap: 10,
-        }}>
-          <span style={{
-            display: "inline-flex", alignItems: "center", gap: 5,
-            padding: "4px 12px", borderRadius: 999,
-            background: "color-mix(in oklab, var(--info) 13%, var(--bg-elev))",
-            border: "1px solid color-mix(in oklab, var(--info) 25%, var(--border))",
-          }}>
-            <Icon name="calendar" size={11} style={{ color: "var(--info-text)" }} aria-hidden />
-            <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--info-text)" }}>{shortDate}</span>
-          </span>
-          {!workedOnHoliday && (
-            <span style={{
-              display: "inline-flex", alignItems: "center", gap: 5,
-              padding: "4px 12px", borderRadius: 999,
-              background: "color-mix(in oklab, var(--success) 10%, var(--bg-elev))",
-              border: "1px solid color-mix(in oklab, var(--success) 25%, var(--border))",
-            }}>
-              <span aria-hidden style={{ fontSize: 10, color: "var(--success-text)" }}>✓</span>
-              <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--success-text)" }}>
-                {t("calendar.holiday.noActivityChip", { defaultValue: "No activity" }) as string}
-              </span>
-            </span>
-          )}
-          {workedOnHoliday && detail.overtime_minutes > 0 && (
-            <span style={{
-              display: "inline-flex", alignItems: "center", gap: 5,
-              padding: "4px 12px", borderRadius: 999,
-              background: "color-mix(in oklab, var(--warning) 12%, var(--bg-elev))",
-              border: "1px solid color-mix(in oklab, var(--warning) 30%, var(--border))",
-            }}>
-              <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--warning-text)" }}>
-                +{formatMinutes(detail.overtime_minutes)} OT
-              </span>
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* ── If NOT worked: 3 informational fact rows ── */}
-      {!workedOnHoliday && (
-        <div style={{
-          background: "var(--bg-elev)",
-          border: "1px solid var(--border)",
-          borderRadius: 12,
-          overflow: "hidden",
-        }}>
-          <div style={{
-            padding: "10px 16px 8px",
-            fontSize: 10.5, fontWeight: 700, textTransform: "uppercase",
-            letterSpacing: "0.06em", color: "var(--text-tertiary)",
-            borderBottom: "1px solid var(--border)",
-            background: "var(--bg-sunken)",
-          }}>
-            {t("calendar.holiday.detailsLabel", { defaultValue: "Holiday details" }) as string}
-          </div>
-
-          <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
-            {/* Fact 1 */}
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-              <div style={{
-                width: 32, height: 32, borderRadius: 9, flexShrink: 0,
-                background: "color-mix(in oklab, var(--success) 12%, var(--bg-elev))",
-                border: "1px solid color-mix(in oklab, var(--success) 25%, var(--border))",
-                display: "grid", placeItems: "center",
-              }}>
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
-                  <path d="M2.5 7l3 3 6-6" stroke="var(--success-text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </div>
-              <div style={{ paddingTop: 2 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", lineHeight: 1.3, marginBottom: 2 }}>
-                  {t("calendar.holiday.fact1Title", { defaultValue: "No attendance required" }) as string}
-                </div>
-                <div style={{ fontSize: 12, color: "var(--text-tertiary)", lineHeight: 1.55 }}>
-                  {t("calendar.holiday.fact1Sub", { defaultValue: "Employees are not expected to work on this official holiday." }) as string}
-                </div>
-              </div>
-            </div>
-
-            {/* Fact 2 */}
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-              <div style={{
-                width: 32, height: 32, borderRadius: 9, flexShrink: 0,
-                background: "color-mix(in oklab, var(--info) 10%, var(--bg-elev))",
-                border: "1px solid color-mix(in oklab, var(--info) 22%, var(--border))",
-                display: "grid", placeItems: "center",
-              }}>
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
-                  <rect x="1.5" y="3" width="11" height="9" rx="1.5" stroke="var(--info-text)" strokeWidth="1.4" />
-                  <path d="M1.5 6h11" stroke="var(--info-text)" strokeWidth="1.4" />
-                  <path d="M4.5 1.5v3M9.5 1.5v3" stroke="var(--info-text)" strokeWidth="1.4" strokeLinecap="round" />
-                </svg>
-              </div>
-              <div style={{ paddingTop: 2 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", lineHeight: 1.3, marginBottom: 2 }}>
-                  {t("calendar.holiday.fact2Title", { defaultValue: "Record stays clean" }) as string}
-                </div>
-                <div style={{ fontSize: 12, color: "var(--text-tertiary)", lineHeight: 1.55 }}>
-                  {t("calendar.holiday.fact2Sub", { defaultValue: "Absence on a public holiday is not counted against the employee's attendance record." }) as string}
-                </div>
-              </div>
-            </div>
-
-            {/* Fact 3 */}
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-              <div style={{
-                width: 32, height: 32, borderRadius: 9, flexShrink: 0,
-                background: "color-mix(in oklab, var(--warning) 10%, var(--bg-elev))",
-                border: "1px solid color-mix(in oklab, var(--warning) 22%, var(--border))",
-                display: "grid", placeItems: "center",
-              }}>
-                <BsClockFill style={{ fontSize: 13, color: "var(--warning-text)" }} aria-hidden />
-              </div>
-              <div style={{ paddingTop: 2 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", lineHeight: 1.3, marginBottom: 2 }}>
-                  {t("calendar.holiday.fact3Title", { defaultValue: "Overtime applies if worked" }) as string}
-                </div>
-                <div style={{ fontSize: 12, color: "var(--text-tertiary)", lineHeight: 1.55 }}>
-                  {t("calendar.holiday.fact3Sub", { defaultValue: "Any hours logged by the camera on this day are treated as overtime per the assigned shift policy." }) as string}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── If worked: show worked-on-holiday warning banner + data ── */}
-      {workedOnHoliday && (
-        <>
-          {/* Warning card */}
-          <div style={{
-            background: "var(--warning-soft)",
-            border: "1px solid var(--warning)",
-            borderRadius: 12,
-            overflow: "hidden",
-          }}>
-            <div aria-hidden style={{ height: 4, background: "var(--warning)" }} />
-            <div style={{ padding: "14px 16px", display: "flex", gap: 12, alignItems: "flex-start" }}>
-              <div aria-hidden style={{
-                width: 36, height: 36, borderRadius: 9,
-                background: "var(--warning)", color: "#fff",
-                display: "grid", placeItems: "center", fontSize: 17, flexShrink: 0,
-              }}>⚠</div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "var(--warning-text)", marginBottom: 3 }}>
-                  {t("calendar.holiday.workedTitle", { defaultValue: "Worked on a public holiday" }) as string}
-                </div>
-                <div style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.5 }}>
-                  {t("calendar.holiday.workedSubtitle", {
-                    name: holidayName,
-                    defaultValue: `Camera detections were recorded on ${holidayName}. Hours are counted as overtime per policy.`,
-                  }) as string}
-                </div>
-              </div>
-              {detail.overtime_minutes > 0 && (
-                <span style={{
-                  padding: "3px 10px", borderRadius: 999, fontSize: 11.5, fontWeight: 700,
-                  background: "var(--warning)", color: "#fff", flexShrink: 0, whiteSpace: "nowrap",
-                }}>
-                  +{formatMinutes(detail.overtime_minutes)} OT
-                </span>
-              )}
-            </div>
-          </div>
-
-          {/* Summary tiles */}
-          <div className="grid grid-4" style={{ gap: 10 }}>
-            <Tile label={t("calendar.inTime") as string} value={dt.formatLocalTime(detail.in_time ?? null) || "—"} />
-            <Tile label={t("calendar.outTime") as string} value={dt.formatLocalTime(detail.out_time ?? null) || "—"} />
-            <Tile
-              label={t("calendar.total") as string}
-              value={formatMinutes(detail.total_minutes)}
-            />
-            <Tile
-              label={t("calendar.overtime") as string}
-              value={detail.overtime_minutes > 0 ? `+${formatMinutes(detail.overtime_minutes)}` : "—"}
-            />
-          </div>
-
-          {/* Timeline */}
-          <Section label={t("calendar.dayTimeline") as string}>
-            <DayTimelineRibbon
-              intervals={detail.timeline}
-              evidence={detail.evidence}
-              inTime={detail.in_time ?? null}
-              outTime={detail.out_time ?? null}
-              totalMinutes={detail.total_minutes ?? null}
-              onEventActivate={onEventActivate}
-            />
-            {detail.timeline.length === 0 && (
-              <div className="text-xs text-dim" style={{ marginTop: 6 }}>
-                {t("calendar.noTimeline") as string}
-              </div>
-            )}
-          </Section>
-
-          {/* Policy */}
-          {detail.policy_name && (
-            <Section label={t("calendar.policyApplied") as string}>
-              <PolicyAppliedCard detail={detail} />
-            </Section>
-          )}
-
-          {/* Evidence */}
-          <Section label={`${t("calendar.evidence") as string}${detail.evidence.length > 0 ? ` · ${detail.evidence.length}` : ""}`}>
-            <EvidenceGallery
-              evidence={detail.evidence}
-              status={detail.status}
-              highlightedEventId={highlightedEventId}
-              isoDate={isoDate}
-              registerRef={registerRef}
-            />
-          </Section>
-        </>
-      )}
-
-      {/* ── Assigned policy (not-worked path) ── */}
-      {!workedOnHoliday && detail.policy_name && (
-        <Section label={t("calendar.weekOff.shiftPolicy", { defaultValue: "Assigned shift policy" }) as string}>
-          <PolicyAppliedCard detail={detail} />
-        </Section>
-      )}
-
-      {/* ── Bottom note ── */}
-      {!workedOnHoliday && (
-        <div style={{
-          display: "flex", gap: 10, alignItems: "flex-start",
-          padding: "11px 14px",
-          background: "var(--bg-sunken)",
-          border: "1px solid var(--border)",
-          borderRadius: 8, borderStyle: "dashed",
-        }}>
-          <span aria-hidden style={{
-            width: 20, height: 20, borderRadius: "50%",
-            background: "var(--text-tertiary)", color: "var(--bg)",
-            fontSize: 11, fontWeight: 700, display: "grid", placeItems: "center",
-            flexShrink: 0, marginTop: 1,
-          }}>i</span>
-          <span style={{ fontSize: 12, color: "var(--text-tertiary)", lineHeight: 1.6 }}>
-            {t("calendar.holiday.note", {
-              defaultValue: "If this day should have been a working day, contact your HR team to update the holiday schedule.",
-            }) as string}
-          </span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function WeekOffDayContent({
-  detail,
-  isoDate,
-  highlightedEventId,
-  onEventActivate,
-  registerRef,
-}: {
-  detail: import("./types").DayDetail;
-  isoDate: string;
-  highlightedEventId: number | null;
-  onEventActivate: (eventId: number) => void;
-  registerRef: (eventId: number, el: HTMLDivElement | null) => void;
-}) {
-  const { t } = useTranslation();
-
-  const workedOnWeekOff =
-    detail.in_time != null ||
-    (detail.total_minutes != null && detail.total_minutes > 0) ||
-    detail.timeline.length > 0;
-
-  // Day-of-week name derived from the ISO date string (locale-independent
-  // — we pass `en-US` for the comparison set only; display uses default).
-  const dayName = (() => {
-    try {
-      return new Date(`${isoDate}T00:00:00`).toLocaleDateString(undefined, {
-        weekday: "long",
-      });
-    } catch {
-      return isoDate;
-    }
-  })();
-
-  // Canonical English name of this day (used for schedule strip matching).
-  const currentDayEn = (() => {
-    try {
-      return new Date(`${isoDate}T00:00:00`).toLocaleDateString("en-US", {
-        weekday: "long",
-      });
-    } catch {
-      return "";
-    }
-  })();
-
-  const offDaySet = new Set(
-    (detail.weekend_days ?? []).map((d) => d.toLowerCase()),
-  );
-  const offDayCount = offDaySet.size;
-
-  // Weekly schedule strip — Mon … Sun with current day and off-day marking.
-  const weeklyStrip = (
-    <div style={{ display: "flex", gap: 6 }}>
-      {ISO_WEEK_DAYS.map((day) => {
-        const isOff = offDaySet.has(day.toLowerCase());
-        const isCurrent = day.toLowerCase() === currentDayEn.toLowerCase();
-        const abbr = DAY_ABBR[day] ?? day.slice(0, 3);
-
-        return (
-          <div
-            key={day}
-            title={day}
-            style={{
-              flex: 1,
-              minWidth: 0,
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: 4,
-              padding: "8px 4px 7px",
-              borderRadius: 8,
-              border: isCurrent
-                ? "2px solid var(--accent)"
-                : "1px solid var(--border)",
-              background: isCurrent
-                ? "var(--accent-soft)"
-                : isOff
-                  ? "var(--bg-sunken)"
-                  : "var(--bg-elev)",
-              transition: "none",
-            }}
-          >
-            {/* Day abbreviation */}
-            <span
-              style={{
-                fontSize: 10.5,
-                fontWeight: isCurrent ? 700 : 500,
-                color: isCurrent
-                  ? "var(--accent-text)"
-                  : "var(--text-secondary)",
-                textTransform: "uppercase",
-                letterSpacing: "0.03em",
-                lineHeight: 1,
-              }}
-            >
-              {abbr}
-            </span>
-            {/* Status indicator dot */}
-            <span
-              aria-hidden
-              style={{
-                width: 7,
-                height: 7,
-                borderRadius: "50%",
-                background: isOff
-                  ? isCurrent
-                    ? "var(--accent)"
-                    : "var(--text-tertiary)"
-                  : "var(--success)",
-                opacity: isCurrent ? 1 : 0.65,
-              }}
-            />
-            {/* Work / Off label */}
-            <span
-              style={{
-                fontSize: 9.5,
-                fontWeight: 600,
-                color: isOff
-                  ? isCurrent
-                    ? "var(--accent-text)"
-                    : "var(--text-tertiary)"
-                  : "var(--success-text)",
-                textTransform: "uppercase",
-                letterSpacing: "0.04em",
-                lineHeight: 1,
-              }}
-            >
-              {isOff
-                ? t("calendar.weekOff.stripOff", { defaultValue: "Off" })
-                : t("calendar.weekOff.stripWork", { defaultValue: "Work" })}
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
-
-  // ── Pure rest day (no detections) ─────────────────────────────────────────
-  if (!workedOnWeekOff) {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-
-        {/* Status card with accent top bar */}
-        <div
-          style={{
-            background: "var(--bg-elev)",
-            border: "1px solid var(--border)",
-            borderRadius: 12,
-            overflow: "hidden",
-          }}
-        >
-          {/* Accent stripe */}
-          <div
-            aria-hidden
-            style={{ height: 4, background: "var(--info)", opacity: 0.7 }}
-          />
-          <div
-            style={{
-              padding: "16px 18px 18px",
-              display: "flex",
-              gap: 14,
-              alignItems: "flex-start",
-            }}
-          >
-            {/* Icon */}
-            <div
-              aria-hidden
-              style={{
-                width: 42,
-                height: 42,
-                borderRadius: 10,
-                background: "var(--info-soft)",
-                border: "1px solid var(--info)",
-                display: "grid",
-                placeItems: "center",
-                flexShrink: 0,
-                fontSize: 20,
-              }}
-            >
-              🗓
-            </div>
-
-            {/* Text */}
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div
-                style={{
-                  fontSize: 15,
-                  fontWeight: 700,
-                  color: "var(--text)",
-                  marginBottom: 4,
-                }}
-              >
-                {t("calendar.weekOff.title", {
-                  defaultValue: "Official Week Off",
-                }) as string}
-              </div>
-              <div
-                style={{
-                  fontSize: 12.5,
-                  color: "var(--text-secondary)",
-                  lineHeight: 1.55,
-                }}
-              >
-                {t("calendar.weekOff.subtitle", {
-                  day: dayName,
-                  defaultValue: `${dayName} is a scheduled weekly off day. No attendance is expected today.`,
-                }) as string}
-              </div>
-            </div>
-
-            {/* Badge */}
-            <span
-              style={{
-                padding: "3px 10px",
-                borderRadius: 999,
-                fontSize: 11,
-                fontWeight: 700,
-                background: "var(--info-soft)",
-                color: "var(--info-text)",
-                border: "1px solid var(--info)",
-                flexShrink: 0,
-                whiteSpace: "nowrap",
-              }}
-            >
-              {t("calendar.weekOff.badge", {
-                defaultValue: "Week Off",
-              }) as string}
-            </span>
-          </div>
-        </div>
-
-        {/* Summary stat tiles */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
-            gap: 10,
-          }}
-        >
-          {/* Off days per week */}
-          <div
-            style={{
-              padding: "10px 12px",
-              background: "var(--bg-sunken)",
-              borderRadius: 8,
-              border: "1px solid var(--border)",
-            }}
-          >
-            <div
-              className="text-xs text-dim"
-              style={{
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-                fontWeight: 500,
-                marginBottom: 4,
-              }}
-            >
-              {t("calendar.weekOff.statOffDays", {
-                defaultValue: "Off days / week",
-              }) as string}
-            </div>
-            <div
-              className="mono"
-              style={{
-                fontSize: 22,
-                fontWeight: 700,
-                color: "var(--text)",
-                lineHeight: 1,
-              }}
-            >
-              {offDayCount}
-            </div>
-            <div
-              className="text-xs text-dim"
-              style={{ marginTop: 3 }}
-            >
-              {t("calendar.weekOff.statWorkDays", {
-                count: 7 - offDayCount,
-                defaultValue: `${7 - offDayCount} working days`,
-              }) as string}
-            </div>
-          </div>
-
-          {/* Selected day */}
-          <div
-            style={{
-              padding: "10px 12px",
-              background: "var(--accent-soft)",
-              borderRadius: 8,
-              border: "1px solid var(--accent)",
-            }}
-          >
-            <div
-              style={{
-                fontSize: 15,
-                fontWeight: 700,
-                color: "var(--accent-text)",
-                lineHeight: 1,
-              }}
-            >
-              {dayName}
-            </div>
-            <div
-              className="mono text-xs"
-              style={{ marginTop: 4, color: "var(--accent-text)", opacity: 0.75 }}
-            >
-              {isoDate}
-            </div>
-          </div>
-
-          {/* Detections */}
-          <div
-            style={{
-              padding: "10px 12px",
-              background: "var(--bg-sunken)",
-              borderRadius: 8,
-              border: "1px solid var(--border)",
-            }}
-          >
-            <div
-              className="text-xs text-dim"
-              style={{
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-                fontWeight: 500,
-                marginBottom: 4,
-              }}
-            >
-              {t("calendar.weekOff.statDetections", {
-                defaultValue: "Detections",
-              }) as string}
-            </div>
-            <div
-              className="mono"
-              style={{
-                fontSize: 22,
-                fontWeight: 700,
-                color: "var(--text-tertiary)",
-                lineHeight: 1,
-              }}
-            >
-              0
-            </div>
-            <div className="text-xs text-dim" style={{ marginTop: 3 }}>
-              {t("calendar.weekOff.statNoActivity", {
-                defaultValue: "No activity recorded",
-              }) as string}
-            </div>
-          </div>
-        </div>
-
-        {/* Weekly schedule strip */}
-        <Section
-          label={
-            t("calendar.weekOff.weeklySchedule", {
-              defaultValue: "Weekly schedule",
-            }) as string
-          }
-        >
-          {weeklyStrip}
-        </Section>
-
-        {/* Assigned shift policy */}
-        {detail.policy_name && (
-          <Section
-            label={
-              t("calendar.weekOff.shiftPolicy", {
-                defaultValue: "Assigned shift policy",
-              }) as string
-            }
-          >
-            <PolicyAppliedCard detail={detail} />
-          </Section>
-        )}
-
-        {/* Informational note */}
-        <div
-          style={{
-            display: "flex",
-            gap: 10,
-            alignItems: "flex-start",
-            padding: "11px 14px",
-            background: "var(--bg-sunken)",
-            border: "1px solid var(--border)",
-            borderRadius: 8,
-            borderStyle: "dashed",
-          }}
-        >
-          <span
-            aria-hidden
-            style={{
-              width: 20,
-              height: 20,
-              borderRadius: "50%",
-              background: "var(--text-tertiary)",
-              color: "var(--bg)",
-              fontSize: 11,
-              fontWeight: 700,
-              display: "grid",
-              placeItems: "center",
-              flexShrink: 0,
-              marginTop: 1,
-            }}
-          >
-            i
-          </span>
-          <span
-            style={{
-              fontSize: 12,
-              color: "var(--text-tertiary)",
-              lineHeight: 1.6,
-            }}
-          >
-            {t("calendar.weekOff.note", {
-              defaultValue:
-                "If you believe this day should be a working day, contact your HR team to update the weekly off schedule.",
-            }) as string}
-          </span>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Worked on a week-off day (detections recorded) ────────────────────────
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-
-      {/* Warning card with accent top bar */}
-      <div
-        style={{
-          background: "var(--warning-soft)",
-          border: "1px solid var(--warning)",
-          borderRadius: 12,
-          overflow: "hidden",
-        }}
-      >
-        <div aria-hidden style={{ height: 4, background: "var(--warning)" }} />
-        <div
-          style={{
-            padding: "14px 16px",
-            display: "flex",
-            gap: 12,
-            alignItems: "flex-start",
-          }}
-        >
-          <div
-            aria-hidden
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: 9,
-              background: "var(--warning)",
-              color: "#fff",
-              display: "grid",
-              placeItems: "center",
-              fontSize: 17,
-              flexShrink: 0,
-            }}
-          >
-            ⚠
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div
-              style={{
-                fontSize: 14,
-                fontWeight: 700,
-                color: "var(--warning-text)",
-                marginBottom: 3,
-              }}
-            >
-              {t("calendar.weekOff.workedTitle", {
-                defaultValue: "Worked on Week Off",
-              }) as string}
-            </div>
-            <div
-              style={{
-                fontSize: 12.5,
-                color: "var(--text-secondary)",
-                lineHeight: 1.5,
-              }}
-            >
-              {t("calendar.weekOff.workedSubtitle", {
-                day: dayName,
-                defaultValue: `${dayName} is a weekly off day. Detections recorded — overtime may apply per policy.`,
-              }) as string}
-            </div>
-          </div>
-          {detail.overtime_minutes > 0 && (
-            <span
-              style={{
-                padding: "3px 10px",
-                borderRadius: 999,
-                fontSize: 11.5,
-                fontWeight: 700,
-                background: "var(--warning)",
-                color: "#fff",
-                flexShrink: 0,
-                whiteSpace: "nowrap",
-              }}
-            >
-              +{formatMinutes(detail.overtime_minutes)} OT
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Summary tiles */}
-      <div className="grid grid-4" style={{ gap: 10 }}>
-        <Tile
-          label={t("calendar.inTime") as string}
-          value={detail.in_time?.slice(0, 5) ?? "—"}
-        />
-        <Tile
-          label={t("calendar.outTime") as string}
-          value={detail.out_time?.slice(0, 5) ?? "—"}
-        />
-        <Tile
-          label={t("calendar.total") as string}
-          value={formatMinutes(detail.total_minutes)}
-        />
-        <Tile
-          label={t("calendar.overtime") as string}
-          value={
-            detail.overtime_minutes > 0
-              ? `+${formatMinutes(detail.overtime_minutes)}`
-              : "—"
-          }
-        />
-      </div>
-
-      {/* Weekly schedule strip — shows context for why this was unexpected */}
-      <Section
-        label={
-          t("calendar.weekOff.weeklySchedule", {
-            defaultValue: "Weekly schedule",
-          }) as string
-        }
-      >
-        {weeklyStrip}
-      </Section>
-
-      {/* Timeline */}
-      <Section label={t("calendar.dayTimeline") as string}>
-        <DayTimelineRibbon
-          intervals={detail.timeline}
-          evidence={detail.evidence}
-          inTime={detail.in_time ?? null}
-          outTime={detail.out_time ?? null}
-          totalMinutes={detail.total_minutes ?? null}
-          onEventActivate={onEventActivate}
-        />
-        {detail.timeline.length === 0 && (
-          <div className="text-xs text-dim" style={{ marginTop: 6 }}>
-            {t("calendar.noTimeline") as string}
-          </div>
-        )}
-      </Section>
-
-      {/* Policy */}
-      {detail.policy_name && (
-        <Section label={t("calendar.policyApplied") as string}>
-          <PolicyAppliedCard detail={detail} />
-        </Section>
-      )}
-
-      {/* Evidence */}
-      <Section
-        label={`${t("calendar.evidence") as string}${
-          detail.evidence.length > 0 ? ` · ${detail.evidence.length}` : ""
-        }`}
-      >
-        <EvidenceGallery
-          evidence={detail.evidence}
-          status={detail.status}
-          highlightedEventId={highlightedEventId}
-          isoDate={isoDate}
-          registerRef={registerRef}
-        />
-      </Section>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Escalation-confirmed present card
-// ---------------------------------------------------------------------------
-
-function EscalationConfirmedCard({
-  note,
-  snapshot,
-}: {
-  note: string | null;
-  snapshot: EscalationRequestSnapshot | null;
-}) {
-  const { t } = useTranslation();
-  const dt = useTenantDateTime();
-
-  const fmtDt = (iso: string | null | undefined) =>
-    iso ? dt.formatDateTime(iso) : null;
-
-  // Parse employee-submitted timings from the encoded reason_text.
-  const parsedTimings = parseEscalationTimes(snapshot?.reason_text);
-  const hasTimings = parsedTimings.inTime !== null || parsedTimings.outTime !== null;
-  // Show only the plain comment in the chain step, not the encoded prefix line.
-  const submittedComment = hasTimings
-    ? (parsedTimings.comment || (snapshot?.reason_category ?? null))
-    : (snapshot?.reason_text ?? snapshot?.reason_category ?? null);
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      {/* Success banner */}
-      <div
-        style={{
-          background: "var(--success-soft)",
-          border: "1px solid var(--success)",
-          borderRadius: 12,
-          padding: "14px 16px",
-          display: "flex",
-          gap: 14,
-          alignItems: "flex-start",
-        }}
-      >
-        <span
-          style={{
-            width: 38,
-            height: 38,
-            borderRadius: "50%",
-            background: "var(--success)",
-            color: "#fff",
-            display: "grid",
-            placeItems: "center",
-            fontSize: 18,
-            flexShrink: 0,
-          }}
-        >
-          ✓
-        </span>
-        <div>
-          <div style={{ fontSize: 15, fontWeight: 700, color: "var(--success-text)", marginBottom: 4 }}>
-            {t("escalation.confirmedTitle", { defaultValue: "Present confirmed by escalation" }) as string}
-          </div>
-          <div style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.55 }}>
-            {t("escalation.confirmedSub", {
-              defaultValue:
-                "An escalation was raised, reviewed by Manager and HR, and approved. Attendance is marked as Present.",
-            }) as string}
-          </div>
-          {note && (
-            <div
-              style={{
-                marginTop: 8,
-                padding: "6px 10px",
-                background: "var(--bg-elev)",
-                borderRadius: 7,
-                fontSize: 12,
-                color: "var(--text-tertiary)",
-              }}
-            >
-              <b style={{ color: "var(--text)" }}>
-                {t("escalation.confirmedReason", { defaultValue: "Reason:" }) as string}{" "}
-              </b>
-              {note}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Employee-submitted timings (parsed from reason_text) */}
-      {snapshot && hasTimings && (
-        <EscalationTimingCard
-          inTime={parsedTimings.inTime}
-          outTime={parsedTimings.outTime}
-        />
-      )}
-
-      {/* Approval chain */}
-      {snapshot && (
-        <div
-          style={{
-            background: "var(--bg-elev)",
-            border: "1px solid var(--border)",
-            borderRadius: 10,
-            padding: "12px 14px",
-          }}
-        >
-          <div
-            style={{
-              fontSize: 10.5,
-              fontWeight: 700,
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-              color: "var(--text-tertiary)",
-              marginBottom: 12,
-            }}
-          >
-            {t("escalation.approvalChain", { defaultValue: "Approval chain" }) as string}
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <ChainStep
-              label={t("escalation.chainSubmitted", { defaultValue: "Submitted" }) as string}
-              actor={null}
-              meta={fmtDt(snapshot.submitted_at)}
-              comment={submittedComment}
-              done
-            />
-            <ChainStep
-              label={t("escalation.chainManager", { defaultValue: "Manager reviewed" }) as string}
-              actor={snapshot.manager_name}
-              meta={fmtDt(snapshot.manager_decision_at)}
-              comment={snapshot.manager_comment}
-              done={!!snapshot.manager_decision_at}
-            />
-            <ChainStep
-              label={t("escalation.chainHR", { defaultValue: "HR approved — present confirmed" }) as string}
-              actor={snapshot.hr_name}
-              meta={fmtDt(snapshot.hr_decision_at)}
-              comment={snapshot.hr_comment}
-              done={!!snapshot.hr_decision_at}
-              highlight
-            />
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ChainStep({
-  label,
-  actor,
-  meta,
-  comment,
-  done,
-  highlight = false,
-}: {
-  label: string;
-  actor: string | null | undefined;
-  meta: string | null | undefined;
-  comment: string | null | undefined;
-  done: boolean;
-  highlight?: boolean;
-}) {
-  return (
-    <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-      <div
-        style={{
-          width: 20,
-          height: 20,
-          borderRadius: "50%",
-          background: done
-            ? highlight
-              ? "var(--success)"
-              : "var(--success)"
-            : "var(--bg-sunken)",
-          border: done ? "none" : "1.5px dashed var(--border-strong)",
-          display: "grid",
-          placeItems: "center",
-          flexShrink: 0,
-          marginTop: 2,
-        }}
-      >
-        {done && (
-          <Icon name="check" size={10} style={{ color: "#fff" }} />
-        )}
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: highlight ? "var(--success-text)" : "var(--text)" }}>
-          {label}
-          {actor && (
-            <span style={{ fontWeight: 400, color: "var(--text-secondary)", marginInlineStart: 6 }}>
-              · {actor}
-            </span>
-          )}
-        </div>
-        {meta && (
-          <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: 1 }}>
-            {meta}
-          </div>
-        )}
-        {comment && (
-          <div
-            style={{
-              marginTop: 5,
-              padding: "5px 9px",
-              background: "var(--bg-sunken)",
-              borderRadius: 6,
-              fontSize: 12,
-              color: "var(--text-secondary)",
-            }}
-          >
-            "{comment}"
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Absent state system — 5 sub-states replacing the old single absent card
-// ---------------------------------------------------------------------------
-
-interface AbsentCardProps {
-  detail: DayDetail;
-  isoDate: string;
-  onSubmitException: ((isoDate: string) => void) | null;
-  onRaiseEscalation: (() => void) | null;
-  currentRole: string | null;
-  onDecisionMade: () => void;
-}
-
-/** Dispatches to one of the absent sub-state card components. */
-function AbsentStateCard({
-  detail,
-  isoDate,
-  onRaiseEscalation,
-  currentRole,
-  onDecisionMade,
-}: AbsentCardProps) {
-  const sub = getAbsentSubState(detail);
-  if (sub === "approved") return <ApprovedAbsenceCard detail={detail} />;
-  if (sub === "pending") return (
-    <RequestPendingCard
-      detail={detail}
-      currentRole={currentRole}
-      onDecisionMade={onDecisionMade}
-    />
-  );
-  return <SimpleAbsentCard isoDate={isoDate} onRaiseEscalation={onRaiseEscalation} />;
-}
-
-// ─ Simple absent card — shown for all absent sub-states without a pending/approved request ─
-
-function SimpleAbsentCard({
-  isoDate,
-  onRaiseEscalation,
-}: {
-  isoDate: string;
-  onRaiseEscalation: (() => void) | null;
-}) {
-  const { t } = useTranslation();
-  const dt = useTenantDateTime();
-  const [hovered, setHovered] = useState(false);
-
-  // Migration 0068 — tenant date format.
-  const parsedDate = dt.formatLocalDate(isoDate) || isoDate;
-  const shortDate = parsedDate;
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      {/* ── Main illustrated absent-state card ── */}
-      <div style={{
-        borderRadius: 16,
-        border: "1px solid var(--danger)",
-        overflow: "hidden",
-        background: "var(--bg-elev)",
-      }}>
-        {/* Accent top bar */}
-        <div aria-hidden style={{ height: 3, background: "var(--danger-text)" }} />
-
-        {/* Illustration + title section */}
-        <div style={{
-          padding: "32px 24px 22px",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: 16,
-          textAlign: "center",
-          background: "linear-gradient(180deg, color-mix(in oklab, var(--danger-text) 5%, var(--bg-elev)) 0%, var(--bg-elev) 100%)",
-        }}>
-          {/* Illustration ring + icon */}
-          <div style={{ position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-            {/* Outer dashed ring */}
-            <div aria-hidden style={{
-              position: "absolute",
-              width: 92,
-              height: 92,
-              borderRadius: "50%",
-              border: "1.5px dashed color-mix(in oklab, var(--danger-text) 20%, transparent)",
-            }} />
-            {/* Main icon circle */}
-            <div style={{
-              width: 74,
-              height: 74,
-              borderRadius: "50%",
-              background: "color-mix(in oklab, var(--danger-text) 9%, var(--bg-elev))",
-              border: "1.5px solid color-mix(in oklab, var(--danger-text) 18%, transparent)",
-              display: "grid",
-              placeItems: "center",
-            }}>
-              {/* Calendar + X SVG illustration */}
-              <svg
-                width="40"
-                height="40"
-                viewBox="0 0 40 40"
-                fill="none"
-                aria-hidden="true"
-              >
-                {/* Calendar body */}
-                <rect
-                  x="4" y="9" width="32" height="28" rx="4"
-                  style={{ fill: "none", stroke: "var(--danger-text)", strokeWidth: "1.7" }}
-                />
-                {/* Header divider line */}
-                <line
-                  x1="4" y1="17" x2="36" y2="17"
-                  style={{ stroke: "var(--danger-text)", strokeWidth: "1.5" }}
-                />
-                {/* Ring pin — left */}
-                <rect
-                  x="12" y="5" width="4" height="8" rx="2"
-                  style={{ fill: "var(--danger-text)" }}
-                />
-                {/* Ring pin — right */}
-                <rect
-                  x="24" y="5" width="4" height="8" rx="2"
-                  style={{ fill: "var(--danger-text)" }}
-                />
-                {/* X cross — left-to-right diagonal */}
-                <line
-                  x1="13" y1="23" x2="27" y2="32"
-                  style={{ stroke: "var(--danger-text)", strokeWidth: "2.3", strokeLinecap: "round" }}
-                />
-                {/* X cross — right-to-left diagonal */}
-                <line
-                  x1="27" y1="23" x2="13" y2="32"
-                  style={{ stroke: "var(--danger-text)", strokeWidth: "2.3", strokeLinecap: "round" }}
-                />
-              </svg>
-            </div>
-          </div>
-
-          {/* Title */}
-          <div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text)", marginBottom: 5 }}>
-              {t("calendar.absent.noRecordTitle", { defaultValue: "No Attendance Recorded" }) as string}
-            </div>
-            <div style={{
-              fontSize: 12.5,
-              color: "var(--text-secondary)",
-              lineHeight: 1.5,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 5,
-            }}>
-              <Icon name="calendar" size={12} aria-hidden />
-              {parsedDate}
-            </div>
-          </div>
-
-          {/* Status + date chips */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
-            <span style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 5,
-              padding: "4px 11px",
-              borderRadius: 999,
-              background: "color-mix(in oklab, var(--danger-text) 10%, transparent)",
-              border: "1px solid color-mix(in oklab, var(--danger-text) 22%, transparent)",
-            }}>
-              <span aria-hidden style={{
-                width: 6,
-                height: 6,
-                borderRadius: "50%",
-                background: "var(--danger-text)",
-                flexShrink: 0,
-              }} />
-              <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--danger-text)", letterSpacing: ".03em" }}>
-                {t("calendar.statusAbsent", { defaultValue: "Absent" }) as string}
-              </span>
-            </span>
-            <span style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 5,
-              padding: "4px 11px",
-              borderRadius: 999,
-              background: "var(--bg-sunken)",
-              border: "1px solid var(--border)",
-            }}>
-              <span style={{ fontSize: 11.5, fontWeight: 500, color: "var(--text-tertiary)", letterSpacing: ".01em" }}>
-                {shortDate}
-              </span>
-            </span>
-          </div>
-        </div>
-
-        {/* Guidance strip */}
-        <div style={{
-          padding: "12px 20px 16px",
-          borderTop: "1px solid color-mix(in oklab, var(--danger-text) 10%, var(--border))",
-          background: "color-mix(in oklab, var(--danger-text) 3%, var(--bg-elev))",
-          display: "flex",
-          gap: 9,
-          alignItems: "flex-start",
-        }}>
-          <BsXCircleFill
-            aria-hidden
-            style={{ flexShrink: 0, fontSize: 14, color: "var(--danger-text)", marginTop: 2, opacity: 0.7 }}
-          />
-          <p style={{
-            margin: 0,
-            fontSize: 12.5,
-            color: "var(--text-secondary)",
-            lineHeight: 1.65,
-            fontFamily: "var(--font-sans)",
-          }}>
-            {onRaiseEscalation
-              ? t("calendar.absent.escalationHint", {
-                  defaultValue: "If you were present but the system missed you, submit an escalation request for manager and HR review.",
-                }) as string
-              : t("calendar.absent.noRequestSubmitted", {
-                  defaultValue: "No escalation request was submitted for this day. The employee may have been on leave or may not have reported the attendance issue.",
-                }) as string}
-          </p>
-        </div>
-      </div>
-
-      {/* ── Escalation CTA — Employee role only ── */}
-      {onRaiseEscalation && (
-        <button
-          type="button"
-          onClick={onRaiseEscalation}
-          onMouseEnter={() => setHovered(true)}
-          onMouseLeave={() => setHovered(false)}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            padding: "13px 16px",
-            borderRadius: 10,
-            background: "var(--bg-elev)",
-            border: `1.5px solid ${hovered ? "var(--accent)" : "var(--border)"}`,
-            boxShadow: hovered ? "0 2px 12px rgba(0,0,0,0.09)" : "var(--shadow-sm)",
-            cursor: "pointer",
-            textAlign: "start",
-            width: "100%",
-            transition: "border-color 150ms ease, box-shadow 150ms ease",
-            fontFamily: "var(--font-sans)",
-          }}
-        >
-          <div
-            aria-hidden
-            style={{
-              flexShrink: 0,
-              width: 38,
-              height: 38,
-              borderRadius: 10,
-              background: hovered
-                ? "color-mix(in oklab, var(--accent) 14%, var(--bg-elev))"
-                : "var(--bg-sunken)",
-              display: "grid",
-              placeItems: "center",
-              transition: "background 150ms ease",
-            }}
-          >
-            <BsClipboard2PlusFill
-              style={{
-                fontSize: 18,
-                color: hovered ? "var(--accent)" : "var(--text-secondary)",
-                transition: "color 150ms ease",
-              }}
-            />
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text)" }}>
-              {t("calendar.absent.submitExceptionTitle", { defaultValue: "Submit Escalation Request" }) as string}
-            </div>
-            <div style={{ fontSize: 12, color: "var(--text-tertiary)", marginTop: 2, lineHeight: 1.4 }}>
-              {t("calendar.absent.submitExceptionSub", {
-                defaultValue: "Explain your situation — manager and HR will review and update your status if approved.",
-              }) as string}
-            </div>
-          </div>
-          <BsChevronRight aria-hidden style={{ flexShrink: 0, fontSize: 13, color: "var(--text-tertiary)" }} />
-        </button>
-      )}
-    </div>
-  );
-}
-
-// ─ Escalation time parser ─────────────────────────────────────────────────────
-// The EscalationDrawer bakes in/out times into reason_text as:
-// "Estimated time present — In: HH:MM  |  Out: HH:MM\n<comment>"
-// We parse them out here so they can be shown in a structured timing card.
-
-function parseEscalationTimes(reasonText: string | null | undefined): {
-  inTime: string | null;
-  outTime: string | null;
-  comment: string;
-} {
-  if (!reasonText) return { inTime: null, outTime: null, comment: "" };
-  const lines = reasonText.split("\n");
-  const first = lines[0] ?? "";
-  const PREFIX = "Estimated time present — ";
-  if (!first.startsWith(PREFIX)) {
-    return { inTime: null, outTime: null, comment: reasonText };
-  }
-  const parts = first.slice(PREFIX.length).split("  |  ");
-  let inTime: string | null = null;
-  let outTime: string | null = null;
-  for (const p of parts) {
-    const s = p.trim();
-    if (s.startsWith("In: ")) inTime = s.slice(4);
-    else if (s.startsWith("Out: ")) outTime = s.slice(5);
-  }
-  return { inTime, outTime, comment: lines.slice(1).join("\n") };
-}
-
-// ─ EscalationTimingCard ───────────────────────────────────────────────────────
-
-function EscalationTimingCard({
-  inTime,
-  outTime,
-}: {
-  inTime: string | null;
-  outTime: string | null;
-}) {
-  const { t } = useTranslation();
-
-  // Convert "HH:MM" to "H:MM AM/PM"; returns "—" for null/unknown.
-  const fmt12 = (raw: string | null): string => {
-    if (!raw) return "—";
-    const [hStr, mStr] = raw.split(":");
-    const h = parseInt(hStr ?? "", 10);
-    const m = (mStr ?? "00").padStart(2, "0");
-    if (isNaN(h)) return raw;
-    const suffix = h >= 12 ? "PM" : "AM";
-    const h12 = h % 12 === 0 ? 12 : h % 12;
-    return `${h12}:${m} ${suffix}`;
-  };
-
-  return (
-    <div style={{ borderRadius: 10, overflow: "hidden", border: "1px solid var(--border)" }}>
-      {/* Header */}
-      <div style={{
-        padding: "8px 13px",
-        background: "var(--bg-sunken)",
-        borderBottom: "1px solid var(--border)",
-        display: "flex",
-        alignItems: "center",
-        gap: 7,
-      }}>
-        <BsClockFill aria-hidden style={{ fontSize: 11, color: "var(--accent-text)", flexShrink: 0 }} />
-        <span style={{
-          fontSize: 10.5, fontWeight: 700,
-          textTransform: "uppercase", letterSpacing: "0.06em",
-          color: "var(--text-secondary)",
-          flex: 1,
-        }}>
-          {t("calendar.absent.submittedTimings", { defaultValue: "Employee-submitted timings" }) as string}
-        </span>
-        <span style={{
-          fontSize: 9.5, fontWeight: 600,
-          color: "var(--accent-text)",
-          background: "color-mix(in oklab, var(--accent) 14%, transparent)",
-          padding: "2px 8px", borderRadius: 999,
-          border: "1px solid color-mix(in oklab, var(--accent) 26%, transparent)",
-          whiteSpace: "nowrap",
-        }}>
-          {t("calendar.absent.employeeSubmitted", { defaultValue: "Employee-submitted" }) as string}
-        </span>
-      </div>
-
-      {/* Two highlighted time panels */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
-        {/* In Time panel */}
-        <div style={{
-          padding: "18px 14px 16px",
-          background: "color-mix(in oklab, var(--success) 10%, var(--bg-elev))",
-          borderRight: "1px solid color-mix(in oklab, var(--success) 22%, var(--border))",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: 9,
-          textAlign: "center",
-        }}>
-          <div style={{
-            width: 38, height: 38, borderRadius: "50%",
-            background: "color-mix(in oklab, var(--success) 18%, var(--bg-elev))",
-            border: "2px solid color-mix(in oklab, var(--success) 45%, transparent)",
-            display: "grid", placeItems: "center",
-          }}>
-            <BsBoxArrowInRight aria-hidden style={{ fontSize: 17, color: "var(--success)" }} />
-          </div>
-          <div style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 21,
-            fontWeight: 800,
-            color: inTime ? "var(--success)" : "var(--text-tertiary)",
-            letterSpacing: "0.01em",
-            lineHeight: 1,
-          }}>
-            {fmt12(inTime)}
-          </div>
-          <div style={{
-            fontSize: 10, fontWeight: 700,
-            textTransform: "uppercase", letterSpacing: "0.07em",
-            color: "color-mix(in oklab, var(--success) 80%, var(--text-tertiary))",
-          }}>
-            {t("calendar.inTime", { defaultValue: "In Time" }) as string}
-          </div>
-        </div>
-
-        {/* Out Time panel */}
-        <div style={{
-          padding: "18px 14px 16px",
-          background: "color-mix(in oklab, var(--warning) 10%, var(--bg-elev))",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: 9,
-          textAlign: "center",
-        }}>
-          <div style={{
-            width: 38, height: 38, borderRadius: "50%",
-            background: "color-mix(in oklab, var(--warning) 18%, var(--bg-elev))",
-            border: "2px solid color-mix(in oklab, var(--warning) 45%, transparent)",
-            display: "grid", placeItems: "center",
-          }}>
-            <BsBoxArrowRight aria-hidden style={{ fontSize: 17, color: "var(--warning-text)" }} />
-          </div>
-          <div style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 21,
-            fontWeight: 800,
-            color: outTime ? "var(--warning-text)" : "var(--text-tertiary)",
-            letterSpacing: "0.01em",
-            lineHeight: 1,
-          }}>
-            {fmt12(outTime)}
-          </div>
-          <div style={{
-            fontSize: 10, fontWeight: 700,
-            textTransform: "uppercase", letterSpacing: "0.07em",
-            color: "color-mix(in oklab, var(--warning-text) 80%, var(--text-tertiary))",
-          }}>
-            {t("calendar.outTime", { defaultValue: "Out Time" }) as string}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-
-function RequestPendingCard({
-  detail,
-  currentRole,
-  onDecisionMade,
-}: {
-  detail: DayDetail;
-  currentRole: string | null;
-  onDecisionMade: () => void;
-}) {
-  const { t } = useTranslation();
-  const dt = useTenantDateTime();
-  const req = detail.pending_request!;
-
-  // Inline decision state
-  const [showReject, setShowReject] = useState(false);
-  const [comment, setComment] = useState("");
-  const [deciding, setDeciding] = useState(false);
-  const [decisionError, setDecisionError] = useState<string | null>(null);
-
-  const fmtDt = (iso: string): string => dt.formatDateTime(iso) || iso;
-
-  const statusMap: Record<string, [boolean, boolean, boolean]> = {
-    submitted:        [true, false, false],
-    manager_approved: [true, true,  false],
-  };
-  const [step1, step2, step3] = statusMap[req.status] ?? [true, false, false];
-
-  const typeLabel = req.request_type === "escalation"
-    ? t("calendar.absent.typeEscalation", { defaultValue: "Escalation" }) as string
-    : t("calendar.absent.typeException", { defaultValue: "Exception request" }) as string;
-
-  const stageLabel = step2
-    ? t("calendar.absent.awaitingHR", { defaultValue: "Awaiting HR review" }) as string
-    : t("calendar.absent.awaitingManager", { defaultValue: "Awaiting manager review" }) as string;
-
-  // Who can act and on which endpoint
-  const canManagerDecide = currentRole === "Manager" && req.status === "submitted";
-  const canHRDecide = currentRole === "HR" && req.status === "manager_approved";
-  const canDecide = canManagerDecide || canHRDecide;
-  const decisionEndpoint = canManagerDecide
-    ? `/api/requests/${req.request_id}/manager-decide`
-    : `/api/requests/${req.request_id}/hr-decide`;
-
-  const decide = async (decision: "approve" | "reject") => {
-    setDeciding(true);
-    setDecisionError(null);
-    try {
-      await api(decisionEndpoint, {
-        method: "POST",
-        body: JSON.stringify({ decision, comment: comment.trim() }),
-      });
-      onDecisionMade();
-    } catch (err) {
-      setDecisionError(extractApiError(err, t("calendar.absent.decisionFailed", { defaultValue: "Failed to submit decision. Please try again." }) as string));
-      setDeciding(false);
-    }
-  };
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      {/* Status banner */}
-      <div style={{ background: "var(--accent-soft)", border: "1px solid #93C5FD", borderRadius: 12, padding: "13px 15px", display: "flex", gap: 10, alignItems: "flex-start" }}>
-        <div style={{ fontSize: 20, flexShrink: 0, lineHeight: 1.2 }}>⏳</div>
-        <div>
-          <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--accent-text)", marginBottom: 3 }}>
-            {req.request_type === "escalation"
-              ? t("calendar.absent.pendingTitleEscalation", { defaultValue: "Escalation under review" }) as string
-              : t("calendar.absent.pendingTitleException", { defaultValue: "Exception request under review" }) as string}
-          </div>
-          <div style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.5 }}>
-            {t("calendar.absent.pendingSub", { defaultValue: "A request for this day is currently being reviewed. Attendance will update automatically once all approvals are complete." }) as string}
-          </div>
-        </div>
-      </div>
-
-      {/* Progress track */}
-      <div style={{ background: "var(--bg-elev)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 14px" }}>
-        <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".07em", color: "var(--text-tertiary)", marginBottom: 12 }}>
-          {t("calendar.absent.progressTitle", { defaultValue: "Request progress" }) as string}
-        </div>
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 0 }}>
-          <ProgressStep done={true} current={false} icon="✓" label={t("calendar.absent.stepSubmitted", { defaultValue: "Submitted" }) as string} />
-          <ProgressLine done={step1} />
-          <ProgressStep done={step2} current={!step2} icon="👤" label={t("calendar.absent.stepManager", { defaultValue: "Manager" }) as string} />
-          <ProgressLine done={step2} />
-          <ProgressStep done={step3} current={step2 && !step3} icon="🏢" label={t("calendar.absent.stepHR", { defaultValue: "HR review" }) as string} />
-          <ProgressLine done={step3} />
-          <ProgressStep done={false} current={false} icon="✔" label={req.request_type === "escalation" ? (t("calendar.absent.stepPresent", { defaultValue: "Confirmed" }) as string) : (t("calendar.absent.stepApproved", { defaultValue: "Approved" }) as string)} />
-        </div>
-
-        {/* Request summary */}
-        <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
-          {/* Meta facts */}
-          <div style={{ padding: "10px 12px", background: "var(--bg-sunken)", borderRadius: 8, display: "flex", flexDirection: "column", gap: 6 }}>
-            <FactRow label={t("calendar.absent.typeLabel", { defaultValue: "Type" }) as string} value={typeLabel} />
-            <FactRow label={t("calendar.absent.reasonLabel", { defaultValue: "Reason" }) as string} value={req.reason_category} />
-            <FactRow label={t("calendar.absent.submittedAt", { defaultValue: "Submitted" }) as string} value={fmtDt(req.submitted_at)} mono />
-            {req.manager_name && (
-              <FactRow label={t("calendar.absent.assignedTo", { defaultValue: "Assigned to" }) as string} value={req.manager_name} bold />
-            )}
-            <FactRow label={t("calendar.absent.currentStage", { defaultValue: "Status" }) as string} value={stageLabel} accent />
-          </div>
-
-          {/* Escalation: structured timing card + comment */}
-          {req.request_type === "escalation" && (() => {
-            const { inTime, outTime, comment } = parseEscalationTimes(req.reason_text);
-            const hasTimings = inTime !== null || outTime !== null;
-            return (
-              <>
-                {hasTimings && (
-                  <EscalationTimingCard inTime={inTime} outTime={outTime} />
-                )}
-                {comment && (
-                  <div style={{ padding: "10px 12px", background: "var(--bg-sunken)", borderRadius: 8 }}>
-                    <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-tertiary)", marginBottom: 5 }}>
-                      {t("calendar.absent.commentLabel", { defaultValue: "Employee comment" }) as string}
-                    </div>
-                    <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.6, fontStyle: "italic", fontFamily: "var(--font-sans)" }}>
-                      &ldquo;{comment}&rdquo;
-                    </p>
+            {facts.length > 0 && (
+              <dl className="dd-policy-facts">
+                {facts.map((f, i) => (
+                  <div key={i}>
+                    <dt>{f.label}</dt>
+                    <dd>{f.value}</dd>
                   </div>
-                )}
-                {!hasTimings && req.reason_text && (
-                  <FactRow label={t("calendar.absent.detailsLabel", { defaultValue: "Details" }) as string} value={`"${req.reason_text}"`} italic />
-                )}
-              </>
+                ))}
+              </dl>
+            )}
+            {d.policy_description && <p className="dd-policy-desc">{d.policy_description}</p>}
+          </>
+        ) : (
+          <div className="dd-policy-none">
+            {t("calendar.noPolicy", { defaultValue: "No policy applied for this day." }) as string}
+          </div>
+        )}
+      </div>
+      <div className="dd-week">
+        <div className="dd-label">{t("calendar.weekOff.weeklySchedule", { defaultValue: "Weekly schedule" }) as string}</div>
+        <ol className="dd-week-row">
+          {DOW_KEYS.map((k, i) => {
+            const off = offDays.has(WEEKDAYS_EN[i]!.toLowerCase());
+            const label = t(`calendar.dow.${k}`) as string;
+            const state = off
+              ? (t("calendar.weekOff.stripOff", { defaultValue: "Off" }) as string)
+              : (t("calendar.weekOff.stripWork", { defaultValue: "Work" }) as string);
+            return (
+              <li
+                key={k}
+                className={`${off ? "is-off" : "is-work"}${i === dow ? " is-today" : ""}`}
+                title={`${label} · ${state}`}
+                aria-label={`${label}: ${state}`}
+                aria-current={i === dow ? "date" : undefined}
+              >
+                <span className="dd-week-day">{label}</span>
+                <span aria-hidden className="dd-week-dot" />
+              </li>
             );
-          })()}
-
-          {/* Exception: plain details row */}
-          {req.request_type !== "escalation" && req.reason_text && (
-            <FactRow label={t("calendar.absent.detailsLabel", { defaultValue: "Details" }) as string} value={`"${req.reason_text}"`} italic />
-          )}
-        </div>
+          })}
+        </ol>
       </div>
-
-      {/* ── Inline decision panel (Manager / HR only) ── */}
-      {canDecide && (
-        <div style={{ border: "1.5px solid var(--border)", borderRadius: 12, overflow: "hidden", background: "var(--bg-elev)" }}>
-          {/* Header */}
-          <div style={{ padding: "11px 14px 9px", borderBottom: "1px solid var(--border)", background: "var(--bg-sunken)", display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 14 }}>🔍</span>
-            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>
-              {t("calendar.absent.decisionTitle", {
-                defaultValue: "Your decision",
-                role: currentRole ?? "",
-              }) as string}
-            </span>
-            <span className="pill pill-neutral" style={{ fontSize: 10.5, marginInlineStart: "auto" }}>
-              {currentRole}
-            </span>
-          </div>
-
-          <div style={{ padding: "14px" }}>
-            {!showReject ? (
-              /* Default: Approve + Reject side by side */
-              <div style={{ display: "flex", gap: 8 }}>
-                <button
-                  type="button"
-                  onClick={() => decide("approve")}
-                  disabled={deciding}
-                  style={{
-                    flex: 1, padding: "10px 0", borderRadius: 8, border: "none",
-                    background: deciding ? "var(--bg-sunken)" : "var(--success)",
-                    color: deciding ? "var(--text-tertiary)" : "#fff",
-                    fontWeight: 700, fontSize: 13, cursor: deciding ? "not-allowed" : "pointer",
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                    transition: "opacity 150ms ease",
-                    fontFamily: "var(--font-sans)",
-                  }}
-                >
-                  {deciding ? (
-                    t("calendar.absent.approving", { defaultValue: "Approving…" }) as string
-                  ) : (
-                    <>{t("calendar.absent.approveBtn", { defaultValue: "✓ Approve" }) as string}</>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowReject(true)}
-                  disabled={deciding}
-                  style={{
-                    flex: 1, padding: "10px 0", borderRadius: 8,
-                    border: "1.5px solid var(--border)",
-                    background: "var(--bg)", color: "var(--danger-text)",
-                    fontWeight: 700, fontSize: 13, cursor: deciding ? "not-allowed" : "pointer",
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                    fontFamily: "var(--font-sans)",
-                  }}
-                >
-                  {t("calendar.absent.rejectBtn", { defaultValue: "✕ Reject" }) as string}
-                </button>
-              </div>
-            ) : (
-              /* Reject form */
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                <label style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-secondary)" }}>
-                  {t("calendar.absent.rejectCommentLabel", { defaultValue: "Reason for rejection (optional)" }) as string}
-                </label>
-                <textarea
-                  value={comment}
-                  onChange={(e) => setComment(e.target.value)}
-                  rows={3}
-                  placeholder={t("calendar.absent.rejectCommentPlaceholder", { defaultValue: "Explain why this request is being rejected…" }) as string}
-                  style={{
-                    padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 7,
-                    fontSize: 13, background: "var(--bg)", color: "var(--text)",
-                    fontFamily: "var(--font-sans)", outline: "none", resize: "vertical",
-                    minHeight: 72, width: "100%",
-                  }}
-                />
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button
-                    type="button"
-                    className="btn btn-sm"
-                    onClick={() => { setShowReject(false); setComment(""); setDecisionError(null); }}
-                    disabled={deciding}
-                    style={{ flex: 1 }}
-                  >
-                    {t("common.cancel", { defaultValue: "Cancel" }) as string}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => decide("reject")}
-                    disabled={deciding}
-                    style={{
-                      flex: 2, padding: "7px 0", borderRadius: 7, border: "none",
-                      background: deciding ? "var(--bg-sunken)" : "var(--danger-text)",
-                      color: deciding ? "var(--text-tertiary)" : "#fff",
-                      fontWeight: 700, fontSize: 13, cursor: deciding ? "not-allowed" : "pointer",
-                      fontFamily: "var(--font-sans)",
-                    }}
-                  >
-                    {deciding
-                      ? t("calendar.absent.rejecting", { defaultValue: "Rejecting…" }) as string
-                      : t("calendar.absent.confirmReject", { defaultValue: "Confirm Rejection" }) as string}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {decisionError && (
-              <div role="alert" style={{ marginTop: 8, padding: "7px 10px", background: "var(--danger-soft)", color: "var(--danger-text)", borderRadius: 7, fontSize: 12.5, border: "1px solid var(--danger)" }}>
-                {decisionError}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Guidance note — only for employee / non-deciding roles */}
-      {!canDecide && (
-        <div style={{ background: "var(--bg-sunken)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px", fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.55 }}>
-          {t("calendar.absent.pendingGuidance", { defaultValue: "Your request is currently under review. You will receive a notification when a decision is made." }) as string}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─ State 5: Approved absence ──────────────────────────────────────────────────
-
-function ApprovedAbsenceCard({ detail }: { detail: DayDetail }) {
-  const { t } = useTranslation();
-  const dt = useTenantDateTime();
-  const req = detail.approved_request!;
-
-  const fmtDt = (iso: string | null | undefined): string | null =>
-    iso ? dt.formatDateTime(iso) : null;
-
-  const typeLabel =
-    req.request_type === "leave"
-      ? t("calendar.absent.typeLeave", { defaultValue: "Leave request" }) as string
-      : t("calendar.absent.typeException", { defaultValue: "Exception request" }) as string;
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div
-        style={{
-          background: "var(--success-soft)", border: "1px solid #86EFAC",
-          borderRadius: 12, padding: "14px 16px",
-          display: "flex", gap: 14, alignItems: "flex-start",
-        }}
-      >
-        <span
-          style={{
-            width: 42, height: 42, borderRadius: "50%",
-            background: "var(--success)", color: "#fff",
-            display: "grid", placeItems: "center", fontSize: 18, flexShrink: 0,
-          }}
-        >
-          ✓
-        </span>
-        <div>
-          <div style={{ fontSize: 14.5, fontWeight: 700, color: "var(--success-text)", marginBottom: 4 }}>
-            {req.request_type === "leave"
-              ? t("calendar.absent.approvedTitleLeave", { defaultValue: "Leave approved — absence on record" }) as string
-              : t("calendar.absent.approvedTitleException", { defaultValue: "Exception approved — absence on record" }) as string}
-          </div>
-          <div style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.55 }}>
-            {t("calendar.absent.approvedSub", { defaultValue: "An exception request for this day was reviewed and approved. The absence is officially on record." }) as string}
-          </div>
-        </div>
-      </div>
-
-      {/* Approval details */}
-      <div style={{ background: "var(--bg-elev)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 14px" }}>
-        <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".07em", color: "var(--text-tertiary)", marginBottom: 10 }}>
-          {t("calendar.absent.approvalDetailsTitle", { defaultValue: "Approval details" }) as string}
-        </div>
-
-        {/* Request facts */}
-        <div
-          style={{
-            padding: "10px 12px", background: "var(--bg-sunken)",
-            borderRadius: 8, display: "flex", flexDirection: "column", gap: 6, marginBottom: 12,
-          }}
-        >
-          <FactRow label={t("calendar.absent.typeLabel", { defaultValue: "Type" }) as string} value={typeLabel} />
-          <FactRow label={t("calendar.absent.reasonLabel", { defaultValue: "Reason" }) as string} value={req.reason_category} />
-          {req.reason_text && (
-            <FactRow label={t("calendar.absent.detailsLabel", { defaultValue: "Details" }) as string} value={`"${req.reason_text}"`} italic />
-          )}
-        </div>
-
-        {/* Approval chain */}
-        <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".07em", color: "var(--text-tertiary)", marginBottom: 10 }}>
-          {t("calendar.absent.approvalChainTitle", { defaultValue: "Approval chain" }) as string}
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <ApprovalChainStep
-            done
-            label={t("calendar.absent.chainSubmitted", { defaultValue: "Submitted by employee" }) as string}
-            meta={fmtDt(req.submitted_at)}
-          />
-          <div style={{ width: 1.5, height: 10, background: "var(--border)", marginInlineStart: 10, marginBlock: 2 }} />
-          {req.manager_name && (
-            <>
-              <ApprovalChainStep
-                done
-                label={`${t("calendar.absent.chainManagerApproved", { defaultValue: "Manager approved" }) as string} · ${req.manager_name}`}
-                meta={fmtDt(req.manager_decision_at)}
-                comment={req.manager_comment ?? null}
-              />
-              <div style={{ width: 1.5, height: 10, background: "var(--border)", marginInlineStart: 10, marginBlock: 2 }} />
-            </>
-          )}
-          {req.hr_name && (
-            <ApprovalChainStep
-              done
-              highlight
-              label={`${t("calendar.absent.chainHRApproved", { defaultValue: "HR approved" }) as string} · ${req.hr_name}`}
-              meta={fmtDt(req.hr_decision_at)}
-              comment={req.hr_comment ?? null}
-            />
-          )}
-        </div>
-      </div>
-
-      <div
-        style={{
-          display: "flex", gap: 10, alignItems: "flex-start",
-          background: "var(--success-soft)", border: "1px solid #86EFAC",
-          borderRadius: 8, padding: "10px 12px",
-          fontSize: 12.5, color: "var(--success-text)", lineHeight: 1.6,
-        }}
-      >
-        <span style={{ fontSize: 16, flexShrink: 0 }}>✅</span>
-        <div>{t("calendar.absent.approvedNote", { defaultValue: "This absence has been reviewed and approved. No further action is required." }) as string}</div>
-      </div>
-
-      <a href="/my-requests" className="btn btn-sm" style={{ textDecoration: "none", alignSelf: "flex-start" }}>
-        👁 {t("calendar.absent.viewBtn", { defaultValue: "View full request" }) as string}
-      </a>
-    </div>
-  );
-}
-
-// ─ Absent sub-components ─────────────────────────────────────────────────────
-
-function ProgressStep({
-  done, current, icon, label,
-}: {
-  done: boolean; current: boolean; icon: string; label: string;
-}) {
-  const bg = done
-    ? "var(--success)"
-    : current
-      ? "var(--accent)"
-      : "var(--bg-sunken)";
-  const color = done || current ? "#fff" : "var(--text-tertiary)";
-  const labelColor = done
-    ? "var(--success-text)"
-    : current
-      ? "var(--accent-text)"
-      : "var(--text-tertiary)";
-  return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: 0, minWidth: 48 }}>
-      <div
-        style={{
-          width: 30, height: 30, borderRadius: "50%",
-          background: bg, color, display: "grid", placeItems: "center",
-          fontSize: 12, fontWeight: 700, marginBottom: 5,
-          border: current ? `2px solid ${bg}` : "none",
-          boxShadow: current ? `0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent)` : "none",
-        }}
-      >
-        {icon}
-      </div>
-      <div style={{ fontSize: 10.5, textAlign: "center", color: labelColor, fontWeight: done || current ? 600 : 400, lineHeight: 1.3, maxWidth: 48 }}>
-        {label}
-      </div>
-    </div>
-  );
-}
-
-function ProgressLine({ done }: { done: boolean }) {
-  return (
-    <div
-      style={{
-        flex: 1, height: 2,
-        background: done ? "var(--success)" : "var(--border)",
-        marginTop: 14, minWidth: 12,
-      }}
-    />
-  );
-}
-
-function FactRow({
-  label, value, italic, mono, bold, accent,
-}: {
-  label: string; value: string;
-  italic?: boolean; mono?: boolean; bold?: boolean; accent?: boolean;
-}) {
-  return (
-    <div style={{ display: "flex", gap: 8, fontSize: 12, alignItems: "flex-start" }}>
-      <span style={{ color: "var(--text-tertiary)", width: 80, flexShrink: 0 }}>{label}</span>
-      <span
-        style={{
-          color: accent ? "var(--accent-text)" : bold ? "var(--text)" : "var(--text-secondary)",
-          fontStyle: italic ? "italic" : "normal",
-          fontFamily: mono ? "ui-monospace, Menlo, Consolas, monospace" : undefined,
-          fontWeight: bold || accent ? 600 : 400,
-          flex: 1, minWidth: 0,
-        }}
-      >
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function ApprovalChainStep({
-  done, highlight = false, label, meta, comment,
-}: {
-  done: boolean; highlight?: boolean; label: string;
-  meta: string | null; comment?: string | null;
-}) {
-  return (
-    <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-      <div
-        style={{
-          width: 20, height: 20, borderRadius: "50%",
-          background: done ? "var(--success)" : "var(--bg-sunken)",
-          border: done ? "none" : "1.5px dashed var(--border-strong)",
-          display: "grid", placeItems: "center", flexShrink: 0, marginTop: 1,
-        }}
-      >
-        {done && <Icon name="check" size={10} style={{ color: "#fff" }} />}
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 12.5, fontWeight: 600, color: highlight ? "var(--success-text)" : "var(--text)" }}>
-          {label}
-        </div>
-        {meta && (
-          <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: 1 }}>{meta}</div>
-        )}
-        {comment && (
-          <div
-            style={{
-              marginTop: 5, padding: "5px 9px", background: "var(--bg-sunken)",
-              borderRadius: 6, fontSize: 11.5, color: "var(--text-secondary)", fontStyle: "italic",
-            }}
-          >
-            "{comment}"
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-
-// ---------------------------------------------------------------------------
-// Absent / Waiting card — shown instead of empty tiles + ribbon
-// ---------------------------------------------------------------------------
-
-function AbsentWaitingCard({
-  isoDate,
-  detail,
-  onSubmitException,
-  onRaiseEscalation,
-}: {
-  isoDate: string;
-  detail: DayDetail;
-  onSubmitException: ((isoDate: string) => void) | null;
-  onRaiseEscalation: (() => void) | null;
-}) {
-  const { t } = useTranslation();
-  const dt = useTenantDateTime();
-
-  // Migration 0068 — tenant date format.
-  const parsedDate = dt.formatLocalDate(isoDate) || isoDate;
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-
-      {/* ── Banner ── */}
-      <div style={{
-        borderRadius: 14,
-        border: "1px solid color-mix(in oklab, var(--warning) 55%, var(--border))",
-        overflow: "hidden",
-        background: "color-mix(in oklab, var(--warning) 7%, var(--bg-elev))",
-      }}>
-        <div aria-hidden style={{ height: 3, background: "var(--warning-text)" }} />
-        <div style={{ padding: "16px 18px 14px", display: "flex", gap: 14, alignItems: "flex-start" }}>
-          <div style={{ position: "relative", flexShrink: 0 }}>
-            <div style={{
-              width: 44, height: 44, borderRadius: "50%",
-              background: "color-mix(in oklab, var(--warning) 22%, var(--bg-elev))",
-              border: "2px solid color-mix(in oklab, var(--warning) 50%, transparent)",
-              display: "grid", placeItems: "center", fontSize: 20,
-            }}>⏳</div>
-            <span aria-hidden style={{
-              position: "absolute", top: 1, right: 1,
-              width: 10, height: 10, borderRadius: "50%",
-              background: "var(--warning-text)", border: "2px solid var(--bg-elev)",
-            }} />
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 5 }}>
-              <span style={{ fontSize: 15, fontWeight: 800, color: "var(--warning-text)", lineHeight: 1 }}>
-                {t("calendar.waitingHeading", { defaultValue: "Day In Progress" }) as string}
-              </span>
-              <span style={{
-                fontSize: 9.5, fontWeight: 700,
-                textTransform: "uppercase", letterSpacing: "0.07em",
-                color: "var(--warning-text)",
-                background: "color-mix(in oklab, var(--warning) 18%, transparent)",
-                border: "1px solid color-mix(in oklab, var(--warning) 40%, transparent)",
-                padding: "2px 7px", borderRadius: 999,
-              }}>
-                {t("calendar.waitingLiveBadge", { defaultValue: "Live" }) as string}
-              </span>
-            </div>
-            <div style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.6 }}>
-              {t("calendar.waitingSubtitle", { defaultValue: "The shift window is still open. Attendance will update as detections come in." }) as string}
-            </div>
-            <div className="mono" style={{ fontSize: 11, marginTop: 7, color: "var(--text-tertiary)", display: "flex", alignItems: "center", gap: 5 }}>
-              <Icon name="calendar" size={11} aria-hidden />
-              {parsedDate}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Expected shift — PolicyAppliedCard style ── */}
-      {detail.policy_name && (
-        <PolicyAppliedCard detail={detail} />
-      )}
-
-      {/* ── Live monitoring strip ── */}
-      <div style={{
-        display: "flex", gap: 11, alignItems: "flex-start",
-        background: "color-mix(in oklab, var(--accent) 6%, var(--bg-elev))",
-        border: "1px solid color-mix(in oklab, var(--accent) 20%, var(--border))",
-        borderRadius: 10, padding: "11px 14px",
-      }}>
-        <div style={{
-          width: 30, height: 30, borderRadius: 8, flexShrink: 0,
-          background: "color-mix(in oklab, var(--accent) 14%, var(--bg-elev))",
-          border: "1px solid color-mix(in oklab, var(--accent) 24%, var(--border))",
-          display: "grid", placeItems: "center",
-        }}>
-          <Icon name="camera" size={14} style={{ color: "var(--accent-text)" }} aria-hidden />
-        </div>
-        <div>
-          <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--accent-text)", marginBottom: 2 }}>
-            {t("calendar.waitingMonitoringTitle", { defaultValue: "Camera monitoring active" }) as string}
-          </div>
-          <div style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.55 }}>
-            {t("calendar.waitingMonitoringSub", { defaultValue: "The system is actively watching for detections. Any face captured today will automatically update this record." }) as string}
-          </div>
-        </div>
-      </div>
-
-      {/* ── Actions ── */}
-      {(onSubmitException || onRaiseEscalation) && (
-        <div style={{
-          background: "var(--bg-elev)", border: "1px solid var(--border)",
-          borderRadius: 10, padding: "12px 14px",
-          display: "flex", flexDirection: "column", gap: 10,
-        }}>
-          <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-tertiary)" }}>
-            {t("calendar.whatNext", { defaultValue: "What you can do" }) as string}
-          </div>
-          <ActionRow
-            icon="clipboard"
-            title={t("calendar.actionSubmitException", { defaultValue: "Submit an exception request" }) as string}
-            sub={t("calendar.actionSubmitExceptionSub", { defaultValue: "If you have a valid reason, raise an exception for manager and HR review." }) as string}
-            cta={
-              onSubmitException ? (
-                <button type="button" className="btn btn-sm btn-primary" onClick={() => onSubmitException(isoDate)}>
-                  {t("calendar.submitException") as string}
-                </button>
-              ) : null
-            }
-          />
-          {onRaiseEscalation && (
-            <ActionRow
-              icon="zap"
-              title={t("escalation.actionTitle", { defaultValue: "Raise an escalation (I was present)" }) as string}
-              sub={t("escalation.actionSub", { defaultValue: "If you believe the camera missed you, raise an escalation. It routes to your manager then HR, and updates your attendance automatically when approved." }) as string}
-              cta={
-                <button
-                  type="button" className="btn btn-sm"
-                  style={{ background: "var(--danger)", color: "#fff", borderColor: "var(--danger)" }}
-                  onClick={onRaiseEscalation}
-                >
-                  {t("escalation.raiseButton", { defaultValue: "Raise escalation" }) as string}
-                </button>
-              }
-            />
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ActionRow({
-  icon,
-  title,
-  sub,
-  cta,
-}: {
-  icon: import("../../shell/Icon").IconName;
-  title: string;
-  sub: string;
-  cta: React.ReactNode;
-}) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        gap: 12,
-        alignItems: "flex-start",
-        padding: "10px 0",
-        borderTop: "1px solid var(--border)",
-      }}
-    >
-      <div
-        style={{
-          width: 32,
-          height: 32,
-          borderRadius: 8,
-          background: "var(--bg-sunken)",
-          display: "grid",
-          placeItems: "center",
-          flexShrink: 0,
-          color: "var(--text-secondary)",
-        }}
-      >
-        <Icon name={icon} size={14} />
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 2 }}>
-          {title}
-        </div>
-        <div style={{ fontSize: 12, color: "var(--text-tertiary)", lineHeight: 1.5 }}>
-          {sub}
-        </div>
-      </div>
-      {cta && <div style={{ flexShrink: 0 }}>{cta}</div>}
-    </div>
-  );
-}
-
-function Section({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="co-dd-section">
-      <div className="co-dd-section-head">{label}</div>
-      <div>{children}</div>
     </section>
   );
 }
 
-function Tile({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="co-dd-tile">
-      <div className="co-dd-tile-label">{label}</div>
-      <div className="co-dd-tile-value">{value}</div>
-    </div>
-  );
-}
-
-
-function getAbsentSubState(
-  detail: DayDetail,
-): "approved" | "pending" | "outside_shift" | "camera_offline" | "complete" {
-  if (detail.approved_request != null) return "approved";
-  if (detail.pending_request != null) return "pending";
-  if (detail.timeline.length > 0) return "outside_shift";
-  if (detail.camera_gaps.length > 0) return "camera_offline";
-  return "complete";
-}
-
-function StatusPill({
-  status,
-  detail,
-}: {
-  status: string;
-  detail?: DayDetail;
-}) {
-  const { t } = useTranslation();
-  if (status === "late") return <LateBadge size="md" />;
-
-  if (status === "absent" && detail != null) {
-    const sub = getAbsentSubState(detail);
-    // Only escalation-related sub-states show a distinct chip.
-    // camera_offline / outside_shift / complete all default to plain "Absent".
-    if (sub === "approved") {
-      return (
-        <span style={{ padding: "3px 10px", borderRadius: 999, fontSize: 12, fontWeight: 600, background: "var(--success-soft)", color: "var(--success-text)", border: "1px solid #86EFAC", whiteSpace: "nowrap" }}>
-          {t("calendar.absent.chipApproved", { defaultValue: "✓ Approved" }) as string}
-        </span>
-      );
-    }
-    if (sub === "pending") {
-      return (
-        <span style={{ padding: "3px 10px", borderRadius: 999, fontSize: 12, fontWeight: 600, background: "var(--accent-soft)", color: "var(--accent-text)", border: "1px solid #93C5FD", whiteSpace: "nowrap" }}>
-          {t("calendar.absent.chipPending", { defaultValue: "⏳ Waiting for Approval" }) as string}
-        </span>
-      );
-    }
-    return (
-      <span style={{ padding: "3px 10px", borderRadius: 999, fontSize: 12, fontWeight: 600, background: "var(--danger-soft)", color: "var(--danger-text)", border: "1px solid #FCA5A5", whiteSpace: "nowrap" }}>
-        {t("calendar.status.absent", { defaultValue: "Absent" }) as string}
-      </span>
-    );
-  }
-
-  // Escalation-confirmed present — distinct badge so it's never confused
-  // with a normal camera-detected present day.
-  if (status === "escalation_present") {
-    return (
-      <span style={{ padding: "3px 10px", borderRadius: 999, fontSize: 12, fontWeight: 600, background: "color-mix(in oklab, var(--accent) 18%, var(--bg))", color: "var(--accent-text)", border: "1px solid var(--accent)", whiteSpace: "nowrap" }}>
-        {t("calendar.status.escalation_present", { defaultValue: "✓ Present via Escalation" }) as string}
-      </span>
-    );
-  }
-
-  const tone =
-    status === "present" ? "success"
-    : status === "absent" ? "danger"
-    : status === "waiting" ? "accent"
-    : status === "leave" || status === "holiday" ? "info"
-    : "neutral";
-  return (
-    <span className={`pill pill-${tone}`}>
-      {t(`calendar.status.${status}`) as string}
-    </span>
-  );
-}
-
 // ---------------------------------------------------------------------------
-// Day timeline ribbon
+// Evidence
 // ---------------------------------------------------------------------------
 
-const TIMELINE_HOURS = 24;
-
-/** Returns minutes-since-midnight for an ``HH:MM[:SS]`` string. */
-function timeStringToMinutes(s: string | null | undefined): number | null {
-  if (!s) return null;
-  const parts = s.split(":");
-  const h = parseInt(parts[0] ?? "", 10);
-  const m = parseInt(parts[1] ?? "", 10);
-  if (Number.isNaN(h) || Number.isNaN(m)) return null;
-  return h * 60 + m;
-}
-
-/** Formats a total-minutes integer to ``Hh Mmin`` (compact). */
-function formatHoursAndMinutes(mins: number | null | undefined): string {
-  if (mins == null) return "—";
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  if (h === 0) return `${m} min`;
-  if (m === 0) return `${h} h`;
-  return `${h} h ${m.toString().padStart(2, "0")} min`;
-}
-
-interface TimelineHoverInfo {
-  kind: "event" | "interval" | "marker";
-  label: string;
-  sub?: string;
-  confidence?: number | null;
-  pctLeft: number;
-  hasAction?: boolean;
-}
-
-function DayTimelineRibbon({
-  intervals,
-  evidence,
-  inTime,
-  outTime,
-  totalMinutes,
-  onEventActivate,
+function EvidenceSection({
+  detail: d,
+  isoDate,
+  highlightedEventId,
+  registerRef,
 }: {
-  intervals: { start: string; end: string }[];
-  evidence: EvidenceCrop[];
-  inTime: string | null;
-  outTime: string | null;
-  totalMinutes: number | null;
-  onEventActivate?: (detectionEventId: number) => void;
+  detail: DayDetail;
+  isoDate: string;
+  highlightedEventId: number | null;
+  registerRef: (eventId: number, el: HTMLDivElement | null) => void;
 }) {
   const { t } = useTranslation();
-  const [showFullDay, setShowFullDay] = useState(false);
-  const [hover, setHover] = useState<TimelineHoverInfo | null>(null);
-
-  const minutesOf = (hhmm: string): number => timeStringToMinutes(hhmm) ?? 0;
-
-  const inMinutes = timeStringToMinutes(inTime);
-  const outMinutes = timeStringToMinutes(outTime);
-
-  // Collect all activity minutes to auto-zoom the view window.
-  const activityMinutes: number[] = [
-    inMinutes,
-    outMinutes,
-    ...evidence.map(ev => timeStringToMinutes(ev.captured_at)),
-    ...intervals.flatMap(iv => [minutesOf(iv.start), minutesOf(iv.end)]),
-  ].filter((m): m is number => m != null);
-  const hasActivity = activityMinutes.length > 0;
-
-  // Smart-zoom: pad ±90 min around the active window, min 4 h span.
-  const viewStart = (showFullDay || !hasActivity) ? 0
-    : Math.max(0, Math.min(...activityMinutes) - 90);
-  const rawEnd = (showFullDay || !hasActivity) ? TIMELINE_HOURS * 60
-    : Math.min(TIMELINE_HOURS * 60, Math.max(...activityMinutes) + 90);
-  const viewEnd = (showFullDay || !hasActivity) ? TIMELINE_HOURS * 60
-    : Math.max(rawEnd, viewStart + 240); // ensure min 4 h
-  const viewSpan = viewEnd - viewStart;
-
-  // Position helpers relative to the view window.
-  const toLeft = (mm: number) => (100 * (mm - viewStart)) / viewSpan;
-  const toWidth = (dur: number) => (100 * dur) / viewSpan;
-
-  // Confidence-coded colour for detection dots.
-  const confColor = (conf: number | null | undefined) => {
-    if (conf == null) return "var(--text-tertiary)";
-    if (conf >= 0.75) return "var(--accent)";
-    if (conf >= 0.50) return "#d97706";
-    return "var(--danger-text)";
-  };
-
-  // Hour ticks + labels within the view window.
-  const hourStep = viewSpan <= 240 ? 1 : viewSpan <= 480 ? 2 : viewSpan <= 720 ? 3 : 6;
-  const hourTicks = Array.from({ length: TIMELINE_HOURS + 1 }, (_, i) => i)
-    .filter(h => h * 60 >= viewStart && h * 60 <= viewEnd);
-  const hourLabels = hourTicks.filter(h => h % hourStep === 0);
-
-  // Tooltip position — clamp so it never overflows the ribbon edges.
-  const clampTooltipLeft = (raw: number) => Math.min(Math.max(raw, 8), 88);
+  const best = bestConfidence(d.evidence);
+  const n = d.evidence.length;
 
   return (
-    <div>
-      {/* ── Header: zoom range + toggle ── */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 11, color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
-            {String(Math.floor(viewStart / 60)).padStart(2, "0")}:00
-            {" – "}
-            {String(Math.floor(viewEnd / 60)).padStart(2, "0")}:{String(viewEnd % 60).padStart(2, "0")}
+    <DdSection
+      title={`${t("calendar.evidence", { defaultValue: "Evidence" }) as string}${n > 0 ? ` · ${n}` : ""}`}
+      aside={
+        best != null ? (
+          <span className={`dd-chip dd-tone-${best >= 0.75 ? "present" : best >= 0.5 ? "late" : "absent"}`}>
+            {t("calendar.bestConfidence", { defaultValue: "Best match" }) as string} {(best * 100).toFixed(0)}%
           </span>
-          {!showFullDay && hasActivity && (
-            <span style={{ fontSize: 10, color: "var(--accent)", fontWeight: 600, background: "color-mix(in oklab, var(--accent) 12%, transparent)", padding: "1px 6px", borderRadius: 10 }}>
-              {t("calendar.autoZoom", { defaultValue: "auto-zoom" })}
-            </span>
-          )}
-        </div>
-        {hasActivity && (
-          <button
-            type="button"
-            onClick={() => setShowFullDay(v => !v)}
-            style={{ background: "none", border: "1px solid var(--border)", borderRadius: 6, padding: "3px 9px", fontSize: 11, color: "var(--text-secondary)", cursor: "pointer" }}
-          >
-            {showFullDay
-              ? t("calendar.zoomToActivity", { defaultValue: "Zoom to activity" })
-              : t("calendar.fullDay", { defaultValue: "Full day" })}
-          </button>
-        )}
-      </div>
-
-      {/* ── Ribbon ── */}
-      <div
-        className="day-timeline"
-        style={{ position: "relative", height: 96, border: "1px solid var(--border)", borderRadius: 10, background: "var(--bg-sunken)", padding: "8px 0 26px", overflow: "visible" }}
-        onMouseLeave={() => setHover(null)}
-        role="figure"
-        aria-label={t("calendar.dayTimelineAria", { defaultValue: "Day timeline — detection events and presence windows" }) as string}
-      >
-        {/* Hour grid */}
-        {hourTicks.map((h) => (
-          <div
-            key={`tick-${h}`}
-            style={{ position: "absolute", insetInlineStart: `${toLeft(h * 60)}%`, top: 0, bottom: 20, width: 1, background: "var(--border)", opacity: h % 6 === 0 ? 0.7 : h % 3 === 0 ? 0.35 : 0.18 }}
-            aria-hidden
-          />
-        ))}
-
-        {/* Gap connectors between consecutive intervals */}
-        {intervals.map((iv, idx) => {
-          if (idx === intervals.length - 1) return null;
-          const next = intervals[idx + 1]!;
-          const endMm = minutesOf(iv.end);
-          const startMm = minutesOf(next.start);
-          if (startMm <= endMm || endMm > viewEnd || startMm < viewStart) return null;
-          const l = toLeft(Math.max(endMm, viewStart));
-          const w = toLeft(Math.min(startMm, viewEnd)) - l;
-          if (w <= 0) return null;
-          return (
-            <div key={`gap-${idx}`} style={{ position: "absolute", insetInlineStart: `${l}%`, width: `${w}%`, top: 38, height: 0, borderTop: "1.5px dashed var(--text-tertiary)", opacity: 0.45 }} aria-hidden />
-          );
-        })}
-
-        {/* Presence interval bars */}
-        {intervals.map((iv, idx) => {
-          const rawStart = minutesOf(iv.start);
-          const rawEnd = Math.max(rawStart + 1, minutesOf(iv.end));
-          const clampedStart = Math.max(rawStart, viewStart);
-          const clampedEnd = Math.min(rawEnd, viewEnd);
-          if (clampedStart >= clampedEnd) return null;
-          const l = toLeft(clampedStart);
-          const w = toWidth(clampedEnd - clampedStart);
-          const isHov = hover?.kind === "interval" && hover.label === `${iv.start}–${iv.end}`;
-          return (
-            <div
-              key={`bar-${idx}`}
-              style={{ position: "absolute", insetInlineStart: `${l}%`, width: `${Math.max(0.5, w)}%`, top: 30, height: 18, background: "var(--accent)", borderRadius: 5, cursor: "default", opacity: 0.88, boxShadow: isHov ? "0 0 0 3px color-mix(in oklab, var(--accent) 28%, transparent)" : undefined, transition: "box-shadow 120ms ease" }}
-              onMouseEnter={() => setHover({ kind: "interval", label: `${iv.start}–${iv.end}`, sub: `${iv.start.slice(0, 5)} – ${iv.end.slice(0, 5)}`, pctLeft: toLeft(rawStart + (rawEnd - rawStart) / 2) })}
-              onMouseLeave={() => setHover(null)}
-              role="img"
-              aria-label={`${t("calendar.presentBlock", { defaultValue: "Present" })} ${iv.start} – ${iv.end}`}
-            />
-          );
-        })}
-
-        {/* Detection event markers — larger, confidence-coloured */}
-        {evidence.map((ev) => {
-          const mins = timeStringToMinutes(ev.captured_at);
-          if (mins == null || mins < viewStart || mins > viewEnd) return null;
-          const left = toLeft(mins);
-          const cc = confColor(ev.confidence);
-          const isHov = hover?.kind === "event" && hover.label === ev.captured_at.slice(0, 5) && Math.abs(hover.pctLeft - left) < 0.1;
-          return (
-            <button
-              key={`ev-${ev.detection_event_id}`}
-              type="button"
-              onClick={() => onEventActivate?.(ev.detection_event_id)}
-              onMouseEnter={() => setHover({ kind: "event", label: ev.captured_at.slice(0, 5), sub: ev.camera_code, ...(ev.confidence != null ? { confidence: ev.confidence } : {}), pctLeft: left, hasAction: !!onEventActivate })}
-              onFocus={() => setHover({ kind: "event", label: ev.captured_at.slice(0, 5), sub: ev.camera_code, ...(ev.confidence != null ? { confidence: ev.confidence } : {}), pctLeft: left, hasAction: !!onEventActivate })}
-              onBlur={() => setHover(null)}
-              aria-label={`${t("calendar.detectionAt", { defaultValue: "Detection at" })} ${ev.captured_at.slice(0, 5)} · ${ev.camera_code}`}
-              style={{
-                position: "absolute",
-                insetInlineStart: `calc(${left}% - 9px)`,
-                top: 5,
-                width: 18,
-                height: 18,
-                borderRadius: "50%",
-                background: "var(--bg-elev)",
-                border: `2.5px solid ${cc}`,
-                cursor: onEventActivate ? "pointer" : "default",
-                padding: 0,
-                zIndex: 1,
-                display: "grid",
-                placeItems: "center",
-                boxShadow: isHov
-                  ? `0 0 0 5px color-mix(in oklab, ${cc} 22%, transparent), 0 2px 6px rgba(0,0,0,0.18)`
-                  : "0 1px 3px rgba(0,0,0,0.18)",
-                transform: isHov ? "scale(1.3)" : "scale(1)",
-                transition: "transform 120ms ease, box-shadow 120ms ease",
-              }}
-            >
-              <div style={{ width: 7, height: 7, borderRadius: "50%", background: cc }} />
-            </button>
-          );
-        })}
-
-        {/* First / last detection markers */}
-        {inMinutes != null && inMinutes >= viewStart && inMinutes <= viewEnd && (
-          <FirstLastMarker kind="first" pctLeft={toLeft(inMinutes)} timeLabel={inTime?.slice(0, 5) ?? ""} label={t("calendar.firstDetection", { defaultValue: "First detection" }) as string} onHover={setHover} />
-        )}
-        {outMinutes != null && outMinutes !== inMinutes && outMinutes >= viewStart && outMinutes <= viewEnd && (
-          <FirstLastMarker kind="last" pctLeft={toLeft(outMinutes)} timeLabel={outTime?.slice(0, 5) ?? ""} label={t("calendar.lastDetection", { defaultValue: "Last detection" }) as string} onHover={setHover} />
-        )}
-
-        {/* Hour labels */}
-        {hourLabels.map((h) => (
-          <div
-            key={`lbl-${h}`}
-            style={{ position: "absolute", insetInlineStart: `${toLeft(h * 60)}%`, bottom: 3, transform: "translateX(-50%)", fontSize: 10, color: "var(--text-tertiary)", fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}
-            aria-hidden
-          >
-            {String(h).padStart(2, "0")}:00
-          </div>
-        ))}
-
-        {/* Rich floating tooltip */}
-        {hover && (
-          <div
-            role="tooltip"
-            style={{ position: "absolute", insetInlineStart: `${clampTooltipLeft(hover.pctLeft)}%`, transform: "translate(-50%, calc(-100% - 12px))", top: 0, background: "var(--text)", color: "var(--bg-elev)", fontSize: 12, padding: "9px 11px", borderRadius: 8, whiteSpace: "nowrap", pointerEvents: "none", boxShadow: "0 6px 20px rgba(0,0,0,0.3)", zIndex: 10, minWidth: 140 }}
-          >
-            <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: hover.sub ? 3 : 0 }}>{hover.label}</div>
-            {hover.sub && <div style={{ opacity: 0.8, fontSize: 11 }}>{hover.sub}</div>}
-            {hover.confidence != null && (
-              <div style={{ marginTop: 6 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, opacity: 0.7, marginBottom: 3 }}>
-                  <span>{t("calendar.matchConfidence", { defaultValue: "Match confidence" })}</span>
-                  <span style={{ fontWeight: 700 }}>{(hover.confidence * 100).toFixed(0)}%</span>
-                </div>
-                <div style={{ height: 4, borderRadius: 2, background: "rgba(255,255,255,0.2)", overflow: "hidden" }}>
-                  <div style={{ height: "100%", width: `${Math.min(100, hover.confidence * 100)}%`, background: "rgba(255,255,255,0.85)", borderRadius: 2 }} />
-                </div>
-              </div>
-            )}
-            {hover.hasAction && (
-              <div style={{ marginTop: 6, fontSize: 10.5, opacity: 0.65, borderTop: "1px solid rgba(255,255,255,0.18)", paddingTop: 5 }}>
-                {t("calendar.clickForCrop", { defaultValue: "↓ Click to highlight face crop" })}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* ── Legend ── */}
-      <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", alignItems: "center", gap: "5px 14px", fontSize: 11, color: "var(--text-tertiary)" }}>
-        <TimelineLegendItem shape="bar" color="var(--accent)" label={t("calendar.legend.present", { defaultValue: "Present window" })} />
-        <TimelineLegendItem shape="dot" color="var(--accent)" label={t("calendar.legend.detection", { defaultValue: "Face detected" })} />
-        <TimelineLegendItem shape="pin" color="var(--accent)" label={t("calendar.legend.firstSeen", { defaultValue: "First seen" })} />
-        <TimelineLegendItem shape="pin" color="var(--danger-text)" label={t("calendar.legend.lastSeen", { defaultValue: "Last seen" })} />
-        {evidence.length > 0 && onEventActivate && (
-          <span style={{ marginInlineStart: "auto", fontSize: 10.5, fontStyle: "italic", opacity: 0.6 }}>
-            {t("calendar.cropClickHint", { defaultValue: "Click ● to highlight face crop below" })}
-          </span>
-        )}
-      </div>
-
-      {/* ── Summary stat pills ── */}
-      <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 8 }}>
-        <TimelineStatPill
-          dotColor="var(--accent)"
-          label={t("calendar.firstDetection", { defaultValue: "First" }) as string}
-          value={inTime?.slice(0, 5) ?? "—"}
-        />
-        <TimelineStatPill
-          dotColor="var(--danger-text)"
-          label={t("calendar.lastDetection", { defaultValue: "Last" }) as string}
-          value={outTime?.slice(0, 5) ?? "—"}
-        />
-        <TimelineStatPill
-          dotColor="var(--text-secondary)"
-          label={t("calendar.totalDuration", { defaultValue: "Duration" }) as string}
-          value={formatHoursAndMinutes(totalMinutes)}
-        />
-      </div>
-    </div>
-  );
-}
-
-function TimelineLegendItem({
-  shape,
-  color,
-  label,
-}: {
-  shape: "bar" | "dot" | "pin";
-  color: string;
-  label: string;
-}) {
-  const indicator =
-    shape === "bar" ? (
-      <span style={{ width: 14, height: 7, borderRadius: 2, background: color, display: "inline-block", flexShrink: 0, opacity: 0.88 }} />
-    ) : shape === "dot" ? (
-      <span style={{ width: 10, height: 10, borderRadius: "50%", border: `2px solid ${color}`, background: "transparent", display: "inline-block", flexShrink: 0 }} />
-    ) : (
-      // pin — diamond
-      <span style={{ width: 10, height: 10, borderRadius: 2, background: color, display: "inline-block", flexShrink: 0, transform: "rotate(45deg)" }} />
-    );
-  return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-      {indicator}
-      <span>{label}</span>
-    </span>
-  );
-}
-
-function TimelineStatPill({
-  dotColor,
-  label,
-  value,
-}: {
-  dotColor: string;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 11px", borderRadius: 20, border: "1px solid var(--border)", background: "var(--bg-elev)", fontSize: 12 }}>
-      <span style={{ width: 8, height: 8, borderRadius: "50%", background: dotColor, flexShrink: 0 }} />
-      <span style={{ color: "var(--text-tertiary)" }}>{label}</span>
-      <span className="mono" style={{ fontWeight: 700, color: "var(--text)" }}>{value}</span>
-    </div>
-  );
-}
-
-function FirstLastMarker({
-  kind,
-  pctLeft,
-  timeLabel,
-  label,
-  onHover,
-}: {
-  kind: "first" | "last";
-  pctLeft: number;
-  timeLabel: string;
-  label: string;
-  onHover: (h: TimelineHoverInfo | null) => void;
-}) {
-  const color = kind === "first" ? "var(--accent)" : "var(--danger-text)";
-  const tag = kind === "first" ? "IN" : "OUT";
-  return (
-    <div
-      style={{ position: "absolute", insetInlineStart: `calc(${pctLeft}% - 7px)`, top: 20, width: 14, pointerEvents: "auto", zIndex: 2 }}
-      onMouseEnter={() => onHover({ kind: "marker", label: `${label} · ${timeLabel}`, pctLeft })}
-      onMouseLeave={() => onHover(null)}
-      aria-label={`${label} ${timeLabel}`}
+        ) : null
+      }
     >
-      {/* Vertical line */}
-      <div style={{ position: "absolute", insetInlineStart: 6, top: 0, height: 30, width: 2, background: color, borderRadius: 1, opacity: 0.8 }} />
-      {/* Diamond at top */}
-      <div style={{ position: "absolute", insetInlineStart: 2, top: -4, width: 10, height: 10, background: color, transform: "rotate(45deg)", borderRadius: 2, boxShadow: "0 0 0 2px var(--bg-elev)" }} />
-      {/* IN / OUT tag below */}
-      <div style={{ position: "absolute", insetInlineStart: "50%", transform: "translateX(-50%)", top: 32, fontSize: 8.5, fontWeight: 800, color: color, letterSpacing: "0.05em", whiteSpace: "nowrap" }}>
-        {tag}
+      {n === 0 ? (
+        <div className="dd-empty">
+          <div className="dd-empty-title">
+            {t("calendar.emptyEvidencePresent.title", { defaultValue: "No face crops retained for this day" }) as string}
+          </div>
+          <div>
+            {t("calendar.emptyEvidencePresent.sub", { defaultValue: "Crops may have been swept by the retention policy. Detection events are still recorded." }) as string}
+          </div>
+        </div>
+      ) : (
+        <>
+          <p className="dd-hint">
+            <Icon name="info" size={12} />
+            <span>
+              {t("dayDetail.anomalyHint", {
+                defaultValue:
+                  "Cameras can miss events because of positioning, capture limits, lighting or brightness — treat a missing detection as a possible anomaly.",
+              }) as string}
+              {" "}
+              <span className="dd-hint-soft">
+                {t("calendar.clickToExpand", { defaultValue: "Click any crop to preview" }) as string}
+              </span>
+            </span>
+          </p>
+          <EvidenceGallery
+            evidence={d.evidence}
+            highlightedEventId={highlightedEventId}
+            registerRef={registerRef}
+            isoDate={isoDate}
+          />
+        </>
+      )}
+    </DdSection>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Small pieces
+// ---------------------------------------------------------------------------
+
+function DdSection({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) {
+  return (
+    <section className="dd-section">
+      <header className="dd-section-head">
+        <h3>{title}</h3>
+        {aside}
+      </header>
+      {children}
+    </section>
+  );
+}
+
+/** Shape-matched to the layout: hero · 4 facts · timeline · policy · crops. */
+function DayDetailSkeleton() {
+  return (
+    <div className="dd dd-skel" role="status" aria-label="Loading">
+      <SkeletonLine width="38%" height={11} />
+      <div className="dd-skel-hero">
+        <SkeletonLine width={44} height={44} radius={12} />
+        <div className="dd-skel-col">
+          <SkeletonLine width="55%" height={16} />
+          <SkeletonLine width="80%" height={11} />
+          <SkeletonLine width="30%" height={18} radius={999} />
+        </div>
+      </div>
+      <div className="dd-skel-facts">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="dd-skel-col">
+            <SkeletonLine width="50%" height={10} />
+            <SkeletonLine width="70%" height={16} />
+          </div>
+        ))}
+      </div>
+      <SkeletonLine width="22%" height={12} />
+      <SkeletonLine height={92} radius={12} />
+      <SkeletonLine height={88} radius={14} />
+      <SkeletonLine width="22%" height={12} />
+      <div className="dd-skel-grid">
+        {[0, 1, 2, 3].map((i) => (
+          <SkeletonLine key={i} height={150} radius={12} />
+        ))}
       </div>
     </div>
   );

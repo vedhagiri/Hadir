@@ -244,3 +244,8 @@
   .rp-controls-actions { margin-inline-start: 0; width: 100%; }
   .rp-controls-actions .btn { flex: 1; }
 }
+
+/* Unselected report cards: the empty radio circle shows only on hover /
+   keyboard focus; the selected card keeps its filled ✓. */
+.rp-type:not([aria-checked="true"]) .rp-type-check { opacity: 0; transition: opacity var(--dur-fast) ease; }
+.rp-type:not([aria-checked="true"]):is(:hover, :focus-visible) .rp-type-check { opacity: 1; }

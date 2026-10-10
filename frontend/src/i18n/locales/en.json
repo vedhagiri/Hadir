@@ -501,7 +501,8 @@
       "markAllRead": "Mark all read",
       "markOneRead": "Read",
       "empty": "You're all caught up.",
-      "seeAll": "See all notifications"
+      "seeAll": "See all notifications",
+      "allRead": "You're all caught up — no unread notifications."
     },
     "page": {
       "subtitle": "Recent activity targeted at you. Adjust which categories land here from {{settingsLink}}.",
@@ -581,7 +582,16 @@
       "title": "Couldn't load notifications"
     },
     "open": "Open",
-    "unreadLabel": "New"
+    "unreadLabel": "New",
+    "clearAll": "Clear all",
+    "clearAllConfirm": "Clear all?",
+    "clearAllYes": "Yes, clear",
+    "clear": "Clear notification",
+    "showCleared": "Show cleared ({{n}})",
+    "hideCleared": "Hide cleared",
+    "clearAllPageHint": "Hides these notifications and marks them read. Nothing is deleted — use Show cleared to see them again.",
+    "clearAllHint": "Marks everything read and empties this list. Your history stays on the Notifications page.",
+    "markReadClear": "Mark as read"
   },
   "settings": {
     "tabs": {
@@ -6894,5 +6904,118 @@
       "open": "Open {{angle}} photo"
     },
     "backMyTeam": "My team"
+  },
+  "dayDetail": {
+    "loadFailed": "Couldn't load this day.",
+    "shiftRange": "Shift {{start}} – {{end}}",
+    "absent": {
+      "noRequestSub": "Nobody has raised an exception or escalation for this day yet.",
+      "noFace": "No face detected",
+      "noFaceShift": "No camera matched this employee during the {{shift}} shift.",
+      "noLeave": "No approved leave or holiday",
+      "noLeaveSub": "It is a working day for this employee, so attendance was expected.",
+      "cameraGap": "Camera offline during the day",
+      "noCameraGap": "No camera outage recorded",
+      "noCameraGapSub": "Cameras were reporting, so a missed detection is less likely.",
+      "reqApproved": "Request approved",
+      "reqPending": "Request under review",
+      "reqNone": "No request submitted",
+      "why": "Why this day is absent"
+    },
+    "exportNothing": "Nothing to export — no time was recorded on this day",
+    "exportTitle": "Download this day's attendance",
+    "pill": {
+      "waiting": "Not in yet",
+      "weekOff": "Week off",
+      "weekOffWorked": "Worked on week off",
+      "holidayWorked": "Worked on holiday"
+    },
+    "hero": {
+      "present": {
+        "title": "Present · on time",
+        "meaning": "Arrived {{in}} · on-time cutoff {{cutoff}}",
+        "meaningNoPolicy": "Arrived {{in}}"
+      },
+      "late": {
+        "title": "Late by {{dur}}",
+        "meaningFlex": "Must arrive by {{by}} · arrived {{in}}",
+        "meaningGrace": "Expected by {{by}} ({{start}} + {{grace}} min grace) · arrived {{in}}",
+        "meaning": "Expected by {{by}} · arrived {{in}}"
+      },
+      "escalation": {
+        "title": "Present · confirmed by escalation"
+      },
+      "absent": {
+        "meaning": "No detection and no approved leave for this day."
+      },
+      "waiting": {
+        "title": "Shift still open · not detected yet",
+        "meaning": "The shift runs until {{end}}. This updates as soon as a camera detects them."
+      },
+      "leave": {
+        "titleNamed": "On leave · {{name}}",
+        "meaning": "Approved leave covers this day."
+      },
+      "weekend": {
+        "title": "Weekly off",
+        "meaning": "{{day}} · no attendance expected."
+      },
+      "weekendWorked": {
+        "title": "Worked on a weekly off day",
+        "meaning": "{{day}} is a weekly off · time worked is counted as overtime."
+      },
+      "holiday": {
+        "titleNamed": "Public holiday · {{name}}",
+        "title": "Public holiday",
+        "meaning": "No attendance expected."
+      },
+      "holidayWorked": {
+        "title": "Worked on a public holiday",
+        "meaningNamed": "{{name}} · time worked is counted as overtime.",
+        "meaning": "Time worked on a public holiday is counted as overtime."
+      },
+      "future": {
+        "title": "Upcoming day",
+        "meaning": "Attendance is computed once this day arrives and cameras report detections."
+      }
+    },
+    "chip": {
+      "approved": "Request approved",
+      "pending": "Request under review",
+      "cameraOffline": "Camera offline during the day",
+      "detectedOnLeave": "Detected while on leave",
+      "earlyOut": "Early out · left {{out}}",
+      "shortHours": "Short hours · {{worked}} of {{required}}",
+      "overtime": "+{{dur}} overtime",
+      "singleDetection": "Single detection · no hours to count"
+    },
+    "fact": {
+      "arrivalWindow": "Arrival window",
+      "expectedShift": "Expected shift",
+      "required": "Required",
+      "weeklyOff": "Weekly off days",
+      "holiday": "Holiday",
+      "detections": "Detections",
+      "noneYet": "None yet",
+      "none": "None"
+    },
+    "keyNumbers": "Key numbers",
+    "singleDetection": "Single detection",
+    "hoursWorked": "Hours worked",
+    "allOvertime": "All counted as overtime",
+    "policy": {
+      "arrive": "Arrive",
+      "leave": "Leave",
+      "shift": "Shift",
+      "hours": "{{hours}} h",
+      "grace": "Grace",
+      "minutes": "{{min}} min"
+    },
+    "anomalyHint": "Cameras can miss events because of positioning, capture limits, lighting or brightness — treat a missing detection as a possible anomaly.",
+    "in": "In",
+    "out": "Out",
+    "clickDot": "click a dot to find its crop",
+    "presentSpan": "Present span",
+    "cameraGaps": "Cameras offline during the day"
   }
 }

@@ -6,13 +6,14 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 
 import { RelativeTime } from "../components/RelativeTime";
-import { Icon } from "../shell/Icon";
+import { Icon, type IconName } from "../shell/Icon";
 import {
   useMarkAllRead,
   useMarkRead,
   useNotifications,
 } from "./hooks";
 import { type NotificationItem } from "./types";
+import { animateRowOut, animateRowsOut } from "./rowExit";
 import "../requests/workflow.css";
 
 export function NotificationBell() {
@@ -39,7 +40,11 @@ export function NotificationBell() {
   }, [open]);
 
   const unread = list.data?.unread_count ?? 0;
-  const items = list.data?.items ?? [];
+  // The bell lists UNREAD notifications only: reading one (click, its ×,
+  // or "Mark all read") moves it out of the bell. The full history — and
+  // the Clear all option — live on the Notifications page.
+  const allItems = list.data?.items ?? [];
+  const items = allItems.filter((n) => n.read_at == null);
 
   const onItemClick = (n: NotificationItem) => {
     if (n.read_at == null) markRead.mutate(n.id);
@@ -68,26 +73,49 @@ export function NotificationBell() {
         <div role="dialog" aria-label={t("notifications.bell.title")} className="wf-bell-panel">
           <header className="wf-bell-head">
             <span className="wf-bell-title">{t("notifications.bell.title")}</span>
-            <button
-              type="button"
-              className="btn btn-sm btn-ghost"
-              onClick={() => markAll.mutate()}
-              disabled={unread === 0 || markAll.isPending}
-            >
-              <Icon name="check" size={11} /> {t("notifications.bell.markAllRead")}
-            </button>
+            <span className="wf-bell-head-actions">
+              <button
+                type="button"
+                className="btn btn-sm btn-ghost"
+                onClick={async () => {
+                  await animateRowsOut(Array.from(document.querySelectorAll<HTMLElement>(".wf-bell-list > .wf-bell-li")));
+                  markAll.mutate();
+                }}
+                disabled={unread === 0 || markAll.isPending}
+              >
+                <Icon name="check" size={11} /> {t("notifications.bell.markAllRead")}
+              </button>
+            </span>
           </header>
 
           {items.length === 0 ? (
-            <div className="wf-bell-empty">{t("notifications.bell.empty")}</div>
+            <div className="wf-bell-empty">
+              {allItems.length > 0
+                ? t("notifications.bell.allRead", { defaultValue: "You're all caught up — no unread notifications." })
+                : t("notifications.bell.empty")}
+            </div>
           ) : (
             <ul className="wf-notif-list wf-bell-list">
               {items.map((n) => (
-                <li key={n.id}>
+                <li key={n.id} className="wf-bell-li">
                   <RowAction
                     notification={n}
                     onClick={() => onItemClick(n)}
                   />
+                  <button
+                    type="button"
+                    className="wf-bell-clear"
+                    aria-label={t("notifications.markReadClear", { defaultValue: "Mark as read" })}
+                    title={t("notifications.markReadClear", { defaultValue: "Mark as read" })}
+                    onClick={async (e) => {
+                      // Fade the row out of the bell first, then mark it read
+                      // (which removes it from the unread-only list).
+                      await animateRowOut((e.currentTarget as HTMLElement).closest<HTMLElement>(".wf-bell-li"));
+                      markRead.mutate(n.id);
+                    }}
+                  >
+                    <Icon name="x" size={13} />
+                  </button>
                 </li>
               ))}
             </ul>
@@ -104,6 +132,29 @@ export function NotificationBell() {
   );
 }
 
+/** Swap the hyphens inside ISO dates for non-breaking hyphens so a wrapped
+ *  title never splits "2026-10-11" across two lines. */
+function keepDatesTogether(text: string): string {
+  return text.replace(/(\d{4})-(\d{2})-(\d{2})/g, "$1\u2011$2\u2011$3");
+}
+
+const CATEGORY_ICON: Record<string, IconName> = {
+  approval_assigned: "inbox",
+  approval_decided: "check",
+  overtime_flagged: "clock",
+  camera_unreachable: "camera",
+  report_ready: "fileText",
+  admin_override: "shield",
+};
+const CATEGORY_TONE: Record<string, "accent" | "success" | "warning" | "danger" | "info" | "neutral"> = {
+  approval_assigned: "accent",
+  approval_decided: "success",
+  overtime_flagged: "warning",
+  camera_unreachable: "danger",
+  report_ready: "info",
+  admin_override: "warning",
+};
+
 function RowAction({
   notification,
   onClick,
@@ -114,27 +165,28 @@ function RowAction({
   const { t } = useTranslation();
   const unread = notification.read_at == null;
   const cls = `wf-bell-item${unread ? " is-unread" : ""}`;
+  const category = t(`notifications.categories.${notification.category}`, {
+    defaultValue: notification.category,
+  });
+  // One compact row: category icon · subject (one line, full text in the
+  // tooltip) · category + time. The body is left to the Notifications
+  // page — repeating it here made every item three or four lines long.
   const inner = (
     <>
+      <span className={`wf-bell-icon tone-${CATEGORY_TONE[notification.category] ?? "neutral"}`} aria-hidden>
+        <Icon name={CATEGORY_ICON[notification.category] ?? "bell"} size={14} />
+      </span>
+      <span className="wf-bell-text">
+        <span className="wf-bell-subject" title={notification.body ? `${notification.subject}\n${notification.body}` : notification.subject}>
+          {keepDatesTogether(notification.subject)}
+        </span>
+        <span className="wf-bell-meta">
+          {category}
+          <span aria-hidden> · </span>
+          <RelativeTime iso={notification.created_at} />
+        </span>
+      </span>
       <span className="wf-notif-dot" aria-hidden />
-      <div className="wf-notif-main">
-        <div className="wf-notif-meta">
-          <span className="text-xs" style={{ fontWeight: 600, color: "var(--text-secondary)" }}>
-            {t(`notifications.categories.${notification.category}`, {
-              defaultValue: notification.category,
-            })}
-          </span>
-          <span className="wf-notif-time">
-            <RelativeTime iso={notification.created_at} />
-          </span>
-        </div>
-        <div className="wf-notif-subject" style={{ fontSize: 13 }}>
-          {notification.subject}
-        </div>
-        {notification.body && (
-          <div className="wf-notif-body wf-clamp-2">{notification.body}</div>
-        )}
-      </div>
     </>
   );
   if (notification.link_url) {

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import {
   EmptyPanel,
@@ -19,6 +19,9 @@ import { Icon } from "../shell/Icon";
 import { SoftPill, WF_ICON, WfSvg, errorDetail } from "../requests/workflowUi";
 import type { SoftTone } from "../requests/workflowUi";
 import { useMarkAllRead, useMarkRead, useNotifications } from "./hooks";
+import { useBellCleared } from "./bellCleared";
+import { animateRowOut, animateRowsOut } from "./rowExit";
+import { useMe } from "../auth/AuthProvider";
 import { ALL_CATEGORIES } from "./types";
 import type { NotificationCategory } from "./types";
 
@@ -38,12 +41,38 @@ export function NotificationsPage() {
   const list = useNotifications(100);
   const markRead = useMarkRead();
   const markAll = useMarkAllRead();
+  const navigate = useNavigate();
+  // Clear hides items on this page only (nothing is deleted); "Show
+  // cleared" brings them back. Clearing also marks them read.
+  const me = useMe();
+  const pageCleared = useBellCleared(me.data?.id, "page");
+  const [showCleared, setShowCleared] = useState(false);
+  const clearOneLocal = async (n: { id: number; read_at: string | null }, row?: HTMLElement | null) => {
+    if (n.read_at == null) markRead.mutate(n.id);
+    await animateRowOut(row ?? null);
+    pageCleared.clearOne(n.id);
+  };
+  const clearAllLocal = async () => {
+    const rows = Array.from(document.querySelectorAll<HTMLElement>(".wf-notif-list > .wf-notif"));
+    await animateRowsOut(rows);
+    if ((list.data?.unread_count ?? 0) > 0) markAll.mutate();
+    const all = list.data?.items ?? [];
+    const newest = all.reduce<string | undefined>(
+      (m, n) => (m == null || Date.parse(n.created_at) > Date.parse(m) ? n.created_at : m),
+      undefined,
+    );
+    pageCleared.clearAll(newest);
+    setShowCleared(false);
+  };
 
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
   const [readFilter, setReadFilter] = useState<ReadFilter>("");
 
-  const all = list.data?.items ?? [];
+  const allRaw = list.data?.items ?? [];
+  // Hidden by "Clear" on this page unless "Show cleared" is on.
+  const clearedCount = allRaw.filter((n) => pageCleared.isCleared(n)).length;
+  const all = showCleared ? allRaw : allRaw.filter((n) => !pageCleared.isCleared(n));
   const unreadCount = all.filter((n) => n.read_at == null).length;
 
   const q = search.trim().toLowerCase();
@@ -93,6 +122,28 @@ export function NotificationsPage() {
             disabled={(list.data?.unread_count ?? 0) === 0 || markAll.isPending}
           >
             <Icon name="check" size={12} /> {t("notifications.bell.markAllRead")}
+          </button>
+          {clearedCount > 0 && (
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setShowCleared((v) => !v)}
+              aria-pressed={showCleared}
+            >
+              <Icon name="eye" size={12} />
+              {showCleared
+                ? t("notifications.hideCleared", { defaultValue: "Hide cleared" })
+                : t("notifications.showCleared", { defaultValue: "Show cleared ({{n}})", n: clearedCount })}
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => void clearAllLocal()}
+            disabled={all.length === 0}
+            title={t("notifications.clearAllPageHint", { defaultValue: "Hides these notifications and marks them read. Nothing is deleted — use Show cleared to see them again." })}
+          >
+            <Icon name="x" size={12} /> {t("notifications.clearAll", { defaultValue: "Clear all" })}
           </button>
         </div>
       </div>
@@ -197,7 +248,27 @@ export function NotificationsPage() {
                 {items.map((n) => {
                   const unread = n.read_at == null;
                   return (
-                    <li key={n.id} className={`wf-notif${unread ? " is-unread" : ""}`}>
+                    <li
+                      key={n.id}
+                      className={`wf-notif${unread ? " is-unread" : ""}${n.link_url ? " is-link" : ""}`}
+                      // The whole card opens the notification (and marks it
+                      // read); buttons inside stop the click themselves.
+                      role={n.link_url ? "link" : undefined}
+                      tabIndex={n.link_url ? 0 : undefined}
+                      onClick={(e) => {
+                        if ((e.target as HTMLElement).closest("button, a")) return;
+                        if (unread) markRead.mutate(n.id);
+                        if (n.link_url) navigate(n.link_url);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.target !== e.currentTarget || !n.link_url) return;
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          if (unread) markRead.mutate(n.id);
+                          navigate(n.link_url);
+                        }
+                      }}
+                    >
                       <span className="wf-notif-dot" aria-hidden />
                       <div className="wf-notif-main">
                         <div className="wf-notif-meta">
@@ -214,39 +285,24 @@ export function NotificationsPage() {
                           )}
                         </div>
                         <div className="wf-notif-subject">
-                          {n.link_url ? (
-                            <Link
-                              to={n.link_url}
-                              onClick={() => {
-                                if (unread) markRead.mutate(n.id);
-                              }}
-                            >
-                              {n.subject}
-                            </Link>
-                          ) : (
-                            n.subject
-                          )}
+                          {n.subject}
                         </div>
                         {n.body && <div className="wf-notif-body">{n.body}</div>}
                       </div>
                       <div className="wf-notif-actions">
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          aria-label={t("notifications.clear", { defaultValue: "Clear notification" })}
+                          title={t("notifications.clear", { defaultValue: "Clear notification" })}
+                          onClick={(e) => void clearOneLocal(n, (e.currentTarget as HTMLElement).closest<HTMLElement>(".wf-notif"))}
+                        >
+                          <Icon name="x" size={14} />
+                        </button>
                         {unread && (
                           <button type="button" className="btn btn-sm btn-ghost" onClick={() => markRead.mutate(n.id)}>
                             {t("notifications.bell.markOneRead")}
                           </button>
-                        )}
-                        {n.link_url && (
-                          <Link
-                            to={n.link_url}
-                            className="icon-btn"
-                            aria-label={t("notifications.open", { defaultValue: "Open" })}
-                            title={t("notifications.open", { defaultValue: "Open" })}
-                            onClick={() => {
-                              if (unread) markRead.mutate(n.id);
-                            }}
-                          >
-                            <Icon name="chevronRight" size={14} />
-                          </Link>
                         )}
                       </div>
                     </li>

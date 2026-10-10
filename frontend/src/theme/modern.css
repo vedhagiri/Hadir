@@ -173,7 +173,9 @@ code, pre, kbd, .kbd, .code-block, .endpoint-path, .docs-code-inline, .cb-pre {
   -webkit-backdrop-filter: saturate(1.6) blur(12px);
   border-bottom: 1px solid var(--border);
   position: relative;
-  z-index: 20;
+  /* Above page sticky layers (≤ 31) so topbar dropdowns are never
+     covered; below drawers / modals (50+). */
+  z-index: 40;
 }
 .crumbs { font-size: 13px; }
 .crumb-current { font-weight: 600; color: var(--text); }
