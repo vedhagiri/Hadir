@@ -15,7 +15,12 @@ import {
   useDeleteRequestList,
 } from "../features/employees/hooks";
 import type { DeleteRequest } from "../features/employees/types";
-import { SkeletonRows } from "../components/Skeleton";
+import { Icon } from "../shell/Icon";
+import { useTenantDateTime } from "../util/datetime";
+import { SkeletonTable } from "../components/Skeleton";
+import { EmptyPanel } from "../components/ListPageUi";
+import { Field, FormFooter, FormNotice } from "../components/FormKit";
+import { Alert, FormModal, SectionHead, SoftPill, TableCard, WF_ICON, WfSvg, errorDetail } from "./workflowUi";
 
 interface Props {
   role: "Admin" | "HR";
@@ -25,11 +30,16 @@ export function DeleteRequestsTab({ role }: Props) {
   const { t } = useTranslation();
   const list = useDeleteRequestList();
   const decide = useDecideDeleteRequest();
+  const dt = useTenantDateTime();
 
   const [drawerEmpId, setDrawerEmpId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rejectingId, setRejectingId] = useState<number | null>(null);
   const [rejectComment, setRejectComment] = useState("");
+  // Reject dialog — the min-length rule shows under the comment field,
+  // a failed decide call shows as a notice at the top of the dialog.
+  const [rejectFieldError, setRejectFieldError] = useState<string | null>(null);
+  const [rejectServerError, setRejectServerError] = useState<string | null>(null);
 
   const onApprove = async (req: DeleteRequest) => {
     setError(null);
@@ -40,19 +50,18 @@ export function DeleteRequestsTab({ role }: Props) {
         decision: "approve",
       });
     } catch (e) {
-      if (e instanceof ApiError) {
-        const detail = (e.body as { detail?: string })?.detail;
-        setError(typeof detail === "string" ? detail : `Error ${e.status}`);
-      }
+      if (e instanceof ApiError) setError(errorDetail(e, t("common.errorGeneric")));
     }
   };
 
   const onReject = async (req: DeleteRequest) => {
     if (rejectComment.trim().length < 5) {
-      setError(t("employees.delete.rejectMin") as string);
+      setRejectFieldError(t("employees.delete.rejectMin") as string);
       return;
     }
     setError(null);
+    setRejectFieldError(null);
+    setRejectServerError(null);
     try {
       await decide.mutateAsync({
         employeeId: req.employee_id,
@@ -63,171 +72,171 @@ export function DeleteRequestsTab({ role }: Props) {
       setRejectingId(null);
       setRejectComment("");
     } catch (e) {
-      if (e instanceof ApiError) {
-        const detail = (e.body as { detail?: string })?.detail;
-        setError(typeof detail === "string" ? detail : `Error ${e.status}`);
-      }
+      if (e instanceof ApiError) setRejectServerError(errorDetail(e, t("common.errorGeneric")));
     }
   };
 
+  const closeReject = () => {
+    setRejectingId(null);
+    setRejectComment("");
+    setRejectFieldError(null);
+    setRejectServerError(null);
+  };
+
   const items = list.data?.items ?? [];
+  const rejectingReq = items.find((r) => r.id === rejectingId) ?? null;
 
   return (
-    <>
-      <div className="card">
-        <div className="card-head">
-          <h3 className="card-title">
-            {t("approvals.deleteRequests.title") as string}
-          </h3>
-          <span className="text-xs text-dim">
+    <div className="wf-stack">
+      <SectionHead
+        title={t("approvals.deleteRequests.title") as string}
+        actions={
+          <SoftPill tone={items.length > 0 ? "warning" : "neutral"}>
             {items.length} {t("approvals.deleteRequests.pendingSuffix") as string}
-          </span>
+          </SoftPill>
+        }
+      />
+      {error && <Alert>{error}</Alert>}
+
+      {list.isLoading ? (
+        <SkeletonTable rows={4} cols={5} />
+      ) : list.error ? (
+        <div className="card">
+          <EmptyPanel
+            tone="danger"
+            icon={<WfSvg>{WF_ICON.alert}</WfSvg>}
+            title={t("approvals.deleteRequests.loadError", { defaultValue: "Couldn't load delete requests" })}
+            body={errorDetail(list.error, t("common.errorGeneric"))}
+            actions={
+              <button type="button" className="btn" onClick={() => void list.refetch()}>
+                <Icon name="refresh" size={12} /> {t("common.retry", { defaultValue: "Retry" })}
+              </button>
+            }
+          />
         </div>
-
-        {error && (
-          <div
-            style={{
-              background: "var(--danger-soft)",
-              color: "var(--danger-text)",
-              padding: "8px 10px",
-              fontSize: 12.5,
-              margin: 12,
-              borderRadius: "var(--radius-sm)",
-            }}
-          >
-            {error}
-          </div>
-        )}
-
-        <table className="table">
-          <thead>
-            <tr>
-              <th>{t("approvals.deleteRequests.col.employee") as string}</th>
-              <th>{t("approvals.deleteRequests.col.requestedBy") as string}</th>
-              <th>{t("approvals.deleteRequests.col.reason") as string}</th>
-              <th>{t("approvals.deleteRequests.col.submitted") as string}</th>
-              <th style={{ width: 220, textAlign: "end" }}>
-                {t("approvals.deleteRequests.col.action") as string}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.isLoading && (
-              <SkeletonRows cols={5} />
-            )}
-            {!list.isLoading && items.length === 0 && (
+      ) : items.length === 0 ? (
+        <div className="card">
+          <EmptyPanel
+            tone="success"
+            icon={<WfSvg>{WF_ICON.check}</WfSvg>}
+            title={t("approvals.caughtUp.title", { defaultValue: "You're all caught up!" })}
+            body={t("approvals.deleteRequests.empty") as string}
+          />
+        </div>
+      ) : (
+        <TableCard>
+          <table className="table">
+            <thead>
               <tr>
-                <td colSpan={5} className="text-sm text-dim" style={{ padding: 16 }}>
-                  {t("approvals.deleteRequests.empty") as string}
-                </td>
+                <th>{t("approvals.deleteRequests.col.employee") as string}</th>
+                <th>{t("approvals.deleteRequests.col.requestedBy") as string}</th>
+                <th>{t("approvals.deleteRequests.col.reason") as string}</th>
+                <th>{t("approvals.deleteRequests.col.submitted") as string}</th>
+                <th style={{ width: 260, textAlign: "end" }}>
+                  {t("approvals.deleteRequests.col.action") as string}
+                </th>
               </tr>
-            )}
-            {items.map((req) => {
-              const rejecting = rejectingId === req.id;
-              return (
-                <tr key={req.id}>
-                  <td
-                    style={{ cursor: "pointer" }}
-                    onClick={() => setDrawerEmpId(req.employee_id)}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <div className="avatar">{initials(req.employee_full_name)}</div>
-                      <div>
-                        <div style={{ fontWeight: 500 }}>
-                          {req.employee_full_name}
-                        </div>
-                        <div className="text-xs text-dim mono">
-                          {req.employee_code}
+            </thead>
+            <tbody>
+              {items.map((req) => {
+                const rejecting = rejectingId === req.id;
+                return (
+                  <tr key={req.id}>
+                    <td className="wf-row-click" onClick={() => setDrawerEmpId(req.employee_id)}>
+                      <div className="row-person">
+                        <div className="avatar">{initials(req.employee_full_name)}</div>
+                        <div>
+                          <div className="row-person-name wf-nowrap">{req.employee_full_name}</div>
+                          <div className="row-person-meta text-dim mono">{req.employee_code}</div>
                         </div>
                       </div>
-                    </div>
-                  </td>
-                  <td className="text-sm">
-                    {req.requested_by_full_name ?? "—"}
-                  </td>
-                  <td
-                    className="text-sm"
-                    style={{ maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis" }}
-                  >
-                    {req.reason}
-                  </td>
-                  <td className="text-sm text-dim">
-                    {new Date(req.created_at).toLocaleDateString()}
-                  </td>
-                  <td style={{ textAlign: "end" }}>
-                    {role === "HR" ? (
-                      rejecting ? (
-                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                          <input
-                            value={rejectComment}
-                            onChange={(e) => setRejectComment(e.target.value)}
-                            placeholder={
-                              t("approvals.deleteRequests.rejectPlaceholder") as string
-                            }
-                            style={{
-                              flex: 1,
-                              padding: "4px 8px",
-                              fontSize: 12,
-                              border: "1px solid var(--border)",
-                              borderRadius: 4,
-                            }}
-                          />
-                          <button
-                            type="button"
-                            className="btn btn-sm"
-                            onClick={() => void onReject(req)}
-                          >
-                            {t("approvals.deleteRequests.confirmReject") as string}
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-sm"
-                            onClick={() => {
-                              setRejectingId(null);
-                              setRejectComment("");
-                            }}
-                          >
-                            ×
-                          </button>
-                        </div>
+                    </td>
+                    <td className="text-sm">{req.requested_by_full_name ?? "—"}</td>
+                    <td className="text-sm wf-clip" style={{ maxWidth: 280 }}>
+                      {req.reason}
+                    </td>
+                    <td className="text-sm text-dim wf-nowrap mono">{dt.formatDate(req.created_at)}</td>
+                    <td style={{ textAlign: "end" }}>
+                      {role === "HR" ? (
+                        rejecting ? (
+                          <SoftPill tone="danger" dot={false}>{t("approvals.deleteRequests.reject") as string}…</SoftPill>
+                        ) : (
+                          <div className="wf-row wf-row-end" style={{ flexWrap: "nowrap" }}>
+                            <button type="button" className="btn btn-sm" onClick={() => void onApprove(req)} disabled={decide.isPending}>
+                              <Icon name="check" size={11} /> {t("approvals.deleteRequests.approve") as string}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-ghost wf-danger-text"
+                              onClick={() => {
+                                setRejectingId(req.id);
+                                setRejectComment("");
+                                setRejectFieldError(null);
+                                setRejectServerError(null);
+                              }}
+                            >
+                              {t("approvals.deleteRequests.reject") as string}
+                            </button>
+                          </div>
+                        )
                       ) : (
-                        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-primary"
-                            onClick={() => void onApprove(req)}
-                            disabled={decide.isPending}
-                          >
-                            {t("approvals.deleteRequests.approve") as string}
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-sm"
-                            onClick={() => {
-                              setRejectingId(req.id);
-                              setRejectComment("");
-                            }}
-                          >
-                            {t("approvals.deleteRequests.reject") as string}
-                          </button>
-                        </div>
-                      )
-                    ) : (
-                      <button
-                        type="button"
-                        className="btn btn-sm"
-                        onClick={() => setDrawerEmpId(req.employee_id)}
-                      >
-                        {t("approvals.deleteRequests.review") as string}
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                        <button type="button" className="btn btn-sm btn-ghost" onClick={() => setDrawerEmpId(req.employee_id)}>
+                          {t("approvals.deleteRequests.review") as string}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </TableCard>
+      )}
+
+      {rejectingReq && (
+        <FormModal
+          onClose={closeReject}
+          onSubmit={() => void onReject(rejectingReq)}
+          busy={decide.isPending}
+          size="sm"
+          icon={<Icon name="x" size={18} />}
+          title={t("approvals.deleteRequests.rejectTitle", { defaultValue: "Reject delete request" }) as string}
+          subtitle={t("approvals.deleteRequests.rejectSubtitle", {
+            defaultValue: "{{name}} stays on file. The requester sees your reason.",
+            name: rejectingReq.employee_full_name,
+          }) as string}
+          footer={
+            <FormFooter
+              onCancel={closeReject}
+              danger
+              submitting={decide.isPending}
+              canSubmit={rejectComment.trim().length > 0}
+              submitLabel={t("approvals.deleteRequests.confirmReject") as string}
+            />
+          }
+        >
+          {rejectServerError && <FormNotice tone="danger">{rejectServerError}</FormNotice>}
+          <Field
+            label={t("approvals.deleteRequests.rejectReason", { defaultValue: "Reason for rejection" }) as string}
+            htmlFor="dr-reject-comment"
+            required
+            error={rejectFieldError}
+            help={t("approvals.deleteRequests.rejectHelp", { defaultValue: "At least 5 characters." }) as string}
+          >
+            <textarea
+              id="dr-reject-comment"
+              className="textarea"
+              rows={3}
+              value={rejectComment}
+              onChange={(e) => {
+                setRejectComment(e.target.value);
+                setRejectFieldError(null);
+              }}
+              placeholder={t("approvals.deleteRequests.rejectPlaceholder") as string}
+            />
+          </Field>
+        </FormModal>
+      )}
 
       {drawerEmpId !== null && (
         <EmployeeDrawer
@@ -235,7 +244,7 @@ export function DeleteRequestsTab({ role }: Props) {
           onClose={() => setDrawerEmpId(null)}
         />
       )}
-    </>
+    </div>
   );
 }
 

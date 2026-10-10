@@ -10,15 +10,27 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../api/client";
+import { SkeletonPanel } from "../components/Skeleton";
 import { describeCron } from "../scheduled-reports/cronPreview";
-import { SettingsTabs } from "../settings/SettingsTabs";
+import { ChoiceCards, Field, FormSection, SwitchField } from "../components/FormKit";
+import {
+  Fact,
+  Facts,
+  InlineAlert,
+  LoadErrorPanel,
+  SettingsCard,
+  SettingsPage,
+  SoftPill,
+  type PillTone,
+} from "../settings/settingsUi";
 import { Icon } from "../shell/Icon";
 import {
   useErpExportConfig,
   usePatchErpExportConfig,
 } from "./hooks";
 import type { ErpFormat } from "./types";
-import { SkeletonPanel } from "../components/Skeleton";
+
+import "./erp-export.css";
 
 export function ErpExportPage() {
   const { t } = useTranslation();
@@ -104,209 +116,246 @@ export function ErpExportPage() {
     }
   };
 
-  if (cfg.isLoading) return <SkeletonPanel lines={6} />;
+  const title = t("erpExport.title");
+  const subtitle = t("settingsUi.erp.pageSub", {
+    defaultValue: "Drop a daily attendance file into a folder your ERP picks up automatically.",
+  });
+
+  if (cfg.isLoading)
+    return (
+      <SettingsPage title={title} subtitle={subtitle}>
+        <SkeletonPanel lines={6} />
+        <SkeletonPanel lines={2} />
+      </SettingsPage>
+    );
   if (cfg.error)
     return (
-      <p style={{ color: "var(--danger-text)" }}>
-        {t("erpExport.loadFailed")}
-      </p>
+      <SettingsPage title={title} subtitle={subtitle}>
+        <LoadErrorPanel title={t("erpExport.loadFailed")} onRetry={() => void cfg.refetch()} />
+      </SettingsPage>
     );
-  if (!cfg.data) return <p>{t("erpExport.signInRequired")}</p>;
+  if (!cfg.data)
+    return (
+      <SettingsPage title={title} subtitle={subtitle}>
+        <InlineAlert tone="warning">{t("erpExport.signInRequired")}</InlineAlert>
+      </SettingsPage>
+    );
 
   const cronLabel = describeCron(scheduleCron || "");
+  const lastStatus = (cfg.data.last_run_status ?? "").toLowerCase();
+  const lastTone: PillTone =
+    lastStatus === "succeeded" || lastStatus === "success" || lastStatus === "ok"
+      ? "success"
+      : lastStatus === "failed" || lastStatus === "error"
+        ? "danger"
+        : lastStatus === "running"
+          ? "info"
+          : "neutral";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <SettingsTabs />
-      <header>
-        <h1
-          style={{
-            fontFamily: "var(--font-display)",
-            fontSize: 28,
-            margin: "0 0 4px 0",
-            fontWeight: 400,
-          }}
-        >
-          {t("erpExport.title")}
-        </h1>
-        <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 13 }}>
-          {t("erpExport.subtitleMain")}{" "}
-          <span className="mono">{cfg.data.tenant_root}</span>{" "}
-          {t("erpExport.subtitlePaths")}{" "}
-          <span className="mono">docs/erp-file-drop-schema.md</span>{" "}
-          {t("erpExport.subtitleSchema")}
-        </p>
-      </header>
-
+    <SettingsPage title={title} subtitle={subtitle}>
       <form
+        id="erp-export-form"
         onSubmit={(e) => {
           e.preventDefault();
           void onSave();
         }}
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: 12,
-          background: "var(--bg-elev)",
-          border: "1px solid var(--border)",
-          borderRadius: "var(--radius)",
-          padding: 18,
-          maxWidth: 720,
-        }}
       >
-        <label
-          style={{ display: "flex", gap: 6, fontSize: 13, alignItems: "center" }}
-        >
-          <input
-            type="checkbox"
-            checked={enabled}
-            onChange={(e) => setEnabled(e.target.checked)}
-          />
-          {t("erpExport.enabledLabel")}
-        </label>
-
-        <Field label={t("erpExport.fieldFormat")}>
-          <div style={{ display: "flex", gap: 6 }}>
-            {(["csv", "json"] as ErpFormat[]).map((f) => (
-              <label
-                key={f}
-                className={`pill ${format === f ? "pill-accent" : "pill-neutral"}`}
-                style={{ cursor: "pointer", textTransform: "uppercase" }}
+        <SettingsCard
+          icon={<Icon name="database" size={17} />}
+          title={t("settingsUi.erp.configTitle", { defaultValue: "Export settings" })}
+          description={
+            <>
+              {t("erpExport.subtitleMain")}{" "}
+              <span className="mono">{cfg.data.tenant_root}</span>{" "}
+              {t("erpExport.subtitlePaths")}{" "}
+              <span className="mono">docs/erp-file-drop-schema.md</span>{" "}
+              {t("erpExport.subtitleSchema")}
+            </>
+          }
+          actions={
+            cfg.data.enabled ? (
+              <SoftPill tone="success">
+                {t("settingsUi.erp.scheduledOn", { defaultValue: "Scheduled" })}
+              </SoftPill>
+            ) : (
+              <SoftPill tone="neutral">
+                {t("settingsUi.erp.scheduledOff", { defaultValue: "Not scheduled" })}
+              </SoftPill>
+            )
+          }
+          footerNote={
+            cfg.data.enabled && scheduleCron && cronLabel !== scheduleCron
+              ? cronLabel
+              : undefined
+          }
+          footer={
+            <>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => void onRunNow()}
+                disabled={running}
               >
-                <input
-                  type="radio"
-                  name="format"
-                  value={f}
-                  checked={format === f}
-                  onChange={() => setFormat(f)}
-                  style={{ display: "none" }}
-                />
-                {f}
-              </label>
-            ))}
-          </div>
-        </Field>
-
-        <Field
-          label={t("erpExport.fieldOutputPath")}
-          hint={
-            outputPath
-              ? t("erpExport.hintPathWithSub", { root: cfg.data.tenant_root, path: outputPath.replace(/^\/+/, "") })
-              : t("erpExport.hintPathRoot", { root: cfg.data.tenant_root })
+                <Icon name="download" size={12} />
+                {running ? t("erpExport.running") : t("erpExport.runNow")}
+              </button>
+              <button
+                type="submit"
+                form="erp-export-form"
+                className="btn btn-primary"
+                disabled={patch.isPending}
+              >
+                {patch.isPending ? t("erpExport.saving") : t("erpExport.saveChanges")}
+              </button>
+            </>
           }
         >
-          <input
-            className="input mono"
-            value={outputPath}
-            onChange={(e) => setOutputPath(e.target.value)}
-            placeholder="incoming/attendance"
-          />
-        </Field>
-
-        <div
-          style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}
-        >
-          <Field
-            label={t("erpExport.fieldCron")}
-            hint={
-              scheduleCron && cronLabel !== scheduleCron
-                ? cronLabel
-                : t("erpExport.hintCronEmpty")
-            }
-          >
-            <input
-              className="input mono"
-              value={scheduleCron}
-              onChange={(e) => setScheduleCron(e.target.value)}
-              placeholder="0 1 * * *"
-            />
-          </Field>
-          <Field label={t("erpExport.fieldWindowDays")}>
-            <input
-              className="input"
-              type="number"
-              min={1}
-              max={180}
-              value={windowDays}
-              onChange={(e) => setWindowDays(Number(e.target.value))}
-            />
-          </Field>
-        </div>
-
-        {error && (
-          <div
-            role="alert"
-            style={{
-              background: "var(--danger-soft)",
-              color: "var(--danger-text)",
-              border: "1px solid var(--border)",
-              padding: "8px 10px",
-              borderRadius: "var(--radius-sm)",
-              fontSize: 12.5,
-            }}
-          >
-            {error}
+          <div className="erp-form">
+            <FormSection
+              title={t("settingsUi.forms.erp.scheduleSection", { defaultValue: "Schedule" })}
+              description={t("settingsUi.forms.erp.scheduleSectionDesc", {
+                defaultValue: "Turn the automatic export on and choose when it runs.",
+              })}
+            >
+              <SwitchField
+                id="erp-enabled"
+                label={t("erpExport.enabledLabel")}
+                description={t("settingsUi.erp.enabledHelp", {
+                  defaultValue: "When on, the file is written automatically on the cron schedule below.",
+                })}
+                checked={enabled}
+                onChange={setEnabled}
+              />
+              <Field
+                label={t("erpExport.fieldCron")}
+                htmlFor="erp-cron"
+                help={
+                  scheduleCron && cronLabel !== scheduleCron
+                    ? cronLabel
+                    : t("erpExport.hintCronEmpty")
+                }
+              >
+                <input
+                  id="erp-cron"
+                  className="input mono"
+                  value={scheduleCron}
+                  onChange={(e) => setScheduleCron(e.target.value)}
+                  placeholder="0 1 * * *"
+                />
+              </Field>
+              <Field
+                label={t("erpExport.fieldWindowDays")}
+                htmlFor="erp-window-days"
+                help={t("settingsUi.erp.windowHelp", {
+                  defaultValue: "How many days back each file covers. 1 = today only.",
+                })}
+              >
+                <input
+                  id="erp-window-days"
+                  className="input"
+                  type="number"
+                  min={1}
+                  max={180}
+                  value={windowDays}
+                  onChange={(e) => setWindowDays(Number(e.target.value))}
+                />
+              </Field>
+            </FormSection>
+            <FormSection
+              title={t("settingsUi.forms.erp.fileSection", { defaultValue: "File" })}
+              description={t("settingsUi.forms.erp.fileSectionDesc", {
+                defaultValue: "The file format and the folder it's written to.",
+              })}
+            >
+              <ChoiceCards<ErpFormat>
+                label={t("erpExport.fieldFormat")}
+                value={format}
+                onChange={setFormat}
+                options={[
+                  {
+                    value: "csv",
+                    title: "CSV",
+                    description: t("settingsUi.forms.erp.csvDesc", { defaultValue: "UTF-8, one row per employee per day." }),
+                    icon: <Icon name="excel" size={15} />,
+                  },
+                  {
+                    value: "json",
+                    title: "JSON",
+                    description: t("settingsUi.forms.erp.jsonDesc", { defaultValue: "Rows plus a metadata block." }),
+                    icon: <Icon name="fileText" size={15} />,
+                  },
+                ]}
+              />
+              <Field
+                label={t("erpExport.fieldOutputPath")}
+                htmlFor="erp-output-path"
+                span={2}
+                help={
+                  outputPath
+                    ? t("erpExport.hintPathWithSub", { root: cfg.data.tenant_root, path: outputPath.replace(/^\/+/, "") })
+                    : t("erpExport.hintPathRoot", { root: cfg.data.tenant_root })
+                }
+              >
+                <input
+                  id="erp-output-path"
+                  className="input mono"
+                  value={outputPath}
+                  onChange={(e) => setOutputPath(e.target.value)}
+                  placeholder="incoming/attendance"
+                />
+              </Field>
+            </FormSection>
           </div>
-        )}
-        {info && (
-          <div
-            style={{
-              background: "var(--bg-sunken)",
-              padding: "8px 10px",
-              borderRadius: "var(--radius-sm)",
-              fontSize: 12.5,
-            }}
-          >
-            {info}
-          </div>
-        )}
-
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            type="submit"
-            className="btn btn-primary"
-            disabled={patch.isPending}
-          >
-            {patch.isPending ? t("erpExport.saving") : t("erpExport.saveChanges")}
-          </button>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => void onRunNow()}
-            disabled={running}
-          >
-            <Icon name="download" size={12} />{" "}
-            {running ? t("erpExport.running") : t("erpExport.runNow")}
-          </button>
-        </div>
+        </SettingsCard>
       </form>
 
-      <section
-        style={{
-          background: "var(--bg-elev)",
-          border: "1px solid var(--border)",
-          borderRadius: "var(--radius)",
-          padding: 18,
-          maxWidth: 720,
-        }}
+      {error && (
+        <InlineAlert tone="danger" role="alert">
+          {error}
+        </InlineAlert>
+      )}
+      {info && (
+        <InlineAlert tone="success" role="status">
+          {info}
+        </InlineAlert>
+      )}
+
+      <SettingsCard
+        icon={<Icon name="clock" size={17} />}
+        title={t("erpExport.lastRunTitle")}
+        actions={
+          cfg.data.last_run_at ? (
+            <SoftPill tone={lastTone}>{cfg.data.last_run_status ?? "—"}</SoftPill>
+          ) : (
+            <SoftPill tone="neutral">
+              {t("settingsUi.erp.neverRun", { defaultValue: "Never run" })}
+            </SoftPill>
+          )
+        }
       >
-        <h2 style={{ fontSize: 16, margin: "0 0 8px 0" }}>{t("erpExport.lastRunTitle")}</h2>
         {cfg.data.last_run_at ? (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: 6,
-              fontSize: 13,
-            }}
-          >
+          <Facts>
             <Fact
               label={t("erpExport.factWhen")}
+              icon={<Icon name="clock" size={11} />}
               value={new Date(cfg.data.last_run_at).toLocaleString()}
             />
-            <Fact label={t("erpExport.factStatus")} value={cfg.data.last_run_status ?? "—"} />
+            <Fact
+              label={t("erpExport.factStatus")}
+              icon={<Icon name="activity" size={11} />}
+              value={cfg.data.last_run_status ?? "—"}
+            />
+            {cfg.data.next_run_at && (
+              <Fact
+                label={t("erpExport.factNextRun")}
+                icon={<Icon name="calendar" size={11} />}
+                value={new Date(cfg.data.next_run_at).toLocaleString()}
+              />
+            )}
             <Fact
               label={t("erpExport.factFile")}
+              icon={<Icon name="fileText" size={11} />}
               value={cfg.data.last_run_path ?? "—"}
               mono
               full
@@ -314,91 +363,19 @@ export function ErpExportPage() {
             {cfg.data.last_run_error && (
               <Fact
                 label={t("erpExport.factError")}
+                icon={<Icon name="info" size={11} />}
                 value={cfg.data.last_run_error}
                 full
               />
             )}
-            {cfg.data.next_run_at && (
-              <Fact
-                label={t("erpExport.factNextRun")}
-                value={new Date(cfg.data.next_run_at).toLocaleString()}
-              />
-            )}
-          </div>
+          </Facts>
         ) : (
-          <p style={{ color: "var(--text-secondary)", margin: 0 }}>
-            {t("erpExport.noRuns")}
-          </p>
+          <div className="st-strip">
+            <Icon name="info" size={12} className="text-dim" />
+            <span className="text-dim">{t("erpExport.noRuns")}</span>
+          </div>
         )}
-      </section>
-    </div>
-  );
-}
-
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <span
-        style={{
-          fontSize: 11,
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-          color: "var(--text-tertiary)",
-        }}
-      >
-        {label}
-      </span>
-      {children}
-      {hint && (
-        <span style={{ fontSize: 11.5, color: "var(--text-tertiary)" }}>
-          {hint}
-        </span>
-      )}
-    </label>
-  );
-}
-
-function Fact({
-  label,
-  value,
-  mono,
-  full,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-  full?: boolean;
-}) {
-  return (
-    <div
-      style={{
-        gridColumn: full ? "1 / -1" : "auto",
-        background: "var(--bg-sunken)",
-        padding: "6px 8px",
-        borderRadius: 6,
-      }}
-    >
-      <div
-        className="text-xs text-dim"
-        style={{
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-          fontWeight: 500,
-        }}
-      >
-        {label}
-      </div>
-      <div className={mono ? "mono" : ""} style={{ fontSize: 13 }}>
-        {value}
-      </div>
-    </div>
+      </SettingsCard>
+    </SettingsPage>
   );
 }

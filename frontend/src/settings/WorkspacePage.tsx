@@ -5,13 +5,12 @@
 // makes — shift boundaries, "today" rollover, scheduler firings,
 // report dates. This page is where Admin / HR sets it.
 
-import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../api/client";
 import { DatePicker, todayIso } from "../components/DatePicker";
-import { ModalShell } from "../components/DrawerShell";
+import { SkeletonPanel } from "../components/Skeleton";
 import { Icon } from "../shell/Icon";
 import {
   useRegenerateAttendanceRange,
@@ -19,8 +18,15 @@ import {
   useTenantSettings,
   type RegenerateRangeResponse,
 } from "../leave-calendar/hooks";
-import { SettingsTabs } from "./SettingsTabs";
-import { SkeletonPanel } from "../components/Skeleton";
+import {
+  ChoiceChip,
+  FormField,
+  InlineAlert,
+  LoadErrorPanel,
+  SettingsCard,
+  SettingsModal,
+  SettingsPage,
+} from "./settingsUi";
 
 const WEEKDAYS = [
   "Sunday",
@@ -95,13 +101,13 @@ export function WorkspacePage() {
     const oldTz = settings.data?.timezone ?? null;
     try {
       await patch.mutateAsync({ timezone: tz });
-      setSavedToast(`Timezone set to ${tz}`);
+      setSavedToast(t("settingsUi.workspace.tzSaved", { defaultValue: "Timezone set to {{tz}}", tz }));
       if (oldTz && oldTz !== tz) {
         setPreviousTz(oldTz);
         setTzJustChanged(true);
       }
     } catch (err) {
-      setError(extractError(err));
+      setError(extractError(err, t));
     }
   };
 
@@ -120,9 +126,9 @@ export function WorkspacePage() {
     else current.add(day);
     try {
       await patch.mutateAsync({ weekend_days: Array.from(current) });
-      setSavedToast("Weekend days updated");
+      setSavedToast(t("settingsUi.workspace.weekendSaved", { defaultValue: "Weekend days updated" }));
     } catch (err) {
-      setError(extractError(err));
+      setError(extractError(err, t));
     }
   };
 
@@ -136,9 +142,9 @@ export function WorkspacePage() {
     setSavedToast(null);
     try {
       await patch.mutateAsync({ date_format: fmt });
-      setSavedToast(`Date format set to ${fmt}`);
+      setSavedToast(t("settingsUi.workspace.dateFormatSaved", { defaultValue: "Date format set to {{fmt}}", fmt }));
     } catch (err) {
-      setError(extractError(err));
+      setError(extractError(err, t));
     }
   };
   const onSelectTimeFormat = async (fmt: "12h" | "24h") => {
@@ -146,44 +152,30 @@ export function WorkspacePage() {
     setSavedToast(null);
     try {
       await patch.mutateAsync({ time_format: fmt });
-      setSavedToast(`Time format set to ${fmt}`);
+      setSavedToast(t("settingsUi.workspace.timeFormatSaved", { defaultValue: "Time format set to {{fmt}}", fmt }));
     } catch (err) {
-      setError(extractError(err));
+      setError(extractError(err, t));
     }
   };
 
   return (
-    <>
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">{t("settings.workspace.title")}</h1>
-          <p className="page-sub">{t("settings.workspace.subtitle")}</p>
-        </div>
-      </div>
-
-      <SettingsTabs />
-
-      {settings.isLoading && (
-        <SkeletonPanel lines={6} />
-      )}
+    <SettingsPage
+      title={t("settings.workspace.title")}
+      subtitle={t("settings.workspace.subtitle")}
+    >
+      {settings.isLoading && <SkeletonPanel lines={6} />}
       {settings.error && (
-        <p style={{ color: "var(--danger-text)" }}>
-          {t("settings.workspace.loadFailed")}
-        </p>
+        <LoadErrorPanel
+          title={t("settings.workspace.loadFailed")}
+          onRetry={() => void settings.refetch()}
+        />
       )}
 
       {settings.data && (
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 16,
-            maxWidth: 720,
-          }}
-        >
+        <>
           {tzJustChanged && (
             <TimezoneChangedBanner
-              previousTz={previousTz ?? "the previous timezone"}
+              previousTz={previousTz ?? t("settingsUi.workspace.previousTz", { defaultValue: "the previous timezone" })}
               currentTz={settings.data.timezone}
               onRegenerate={() => setRegenOpen(true)}
               onDismiss={() => setTzJustChanged(false)}
@@ -201,29 +193,17 @@ export function WorkspacePage() {
           )}
 
           {/* --- Timezone card --- */}
-          <section
-            className="card"
-            style={{ padding: 18, display: "flex", flexDirection: "column", gap: 12 }}
+          <SettingsCard
+            icon={<Icon name="clock" size={17} />}
+            title={t("settings.workspace.timezoneTitle")}
+            description={t("settings.workspace.timezoneDesc")}
           >
-            <header>
-              <h2 style={cardTitleStyle}>
-                <Icon name="clock" size={13} />
-                {t("settings.workspace.timezoneTitle")}
-              </h2>
-              <p style={cardSubStyle}>
-                {t("settings.workspace.timezoneDesc")}
-              </p>
-            </header>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <span style={labelStyle}>
-                  {t("settings.workspace.timezoneLabel")}
-                </span>
+            <div className="st-form-grid">
+              <FormField label={t("settings.workspace.timezoneLabel")} htmlFor="ws-timezone" span>
                 <select
-                  value={
-                    customMode ? "__custom__" : settings.data.timezone
-                  }
+                  id="ws-timezone"
+                  className="select"
+                  value={customMode ? "__custom__" : settings.data.timezone}
                   onChange={(e) => {
                     const v = e.target.value;
                     if (v === "__custom__") {
@@ -235,7 +215,6 @@ export function WorkspacePage() {
                     }
                   }}
                   disabled={patch.isPending}
-                  style={selectStyle}
                 >
                   {COMMON_TIMEZONES.map((z) => (
                     <option key={z.value} value={z.value}>
@@ -246,198 +225,128 @@ export function WorkspacePage() {
                     {t("settings.workspace.customTimezone")}
                   </option>
                 </select>
-              </label>
+              </FormField>
 
               {customMode && (
-                <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-                  <label style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
-                    <span style={labelStyle}>
-                      {t("settings.workspace.customLabel")}
-                    </span>
+                <FormField label={t("settings.workspace.customLabel")} htmlFor="ws-timezone-custom" span>
+                  <div className="st-inline">
                     <input
+                      id="ws-timezone-custom"
                       type="text"
+                      className="input mono"
                       value={customValue}
                       placeholder="Continent/City"
                       onChange={(e) => setCustomValue(e.target.value)}
-                      style={inputStyle}
+                      style={{ flex: 1, minWidth: 220 }}
                     />
-                  </label>
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-sm"
-                    onClick={onSubmitCustom}
-                    disabled={
-                      patch.isPending ||
-                      !customValue.trim() ||
-                      customValue.trim() === settings.data.timezone
-                    }
-                  >
-                    {patch.isPending ? "…" : t("common.save")}
-                  </button>
-                </div>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={onSubmitCustom}
+                      disabled={
+                        patch.isPending ||
+                        !customValue.trim() ||
+                        customValue.trim() === settings.data.timezone
+                      }
+                    >
+                      {patch.isPending ? "…" : t("common.save")}
+                    </button>
+                  </div>
+                </FormField>
               )}
-            </div>
 
-            <LiveClock timezone={settings.data.timezone} />
-          </section>
+              <div className="st-span">
+                <LiveClock timezone={settings.data.timezone} />
+              </div>
+            </div>
+          </SettingsCard>
 
           {/* --- Date format card (migration 0068) --- */}
-          <section
-            className="card"
-            style={{ padding: 18, display: "flex", flexDirection: "column", gap: 12 }}
+          <SettingsCard
+            icon={<Icon name="calendar" size={17} />}
+            title={t("settings.workspace.dateFormatTitle", "Date format")}
+            description={t(
+              "settings.workspace.dateFormatDesc",
+              "Applied across every page, drawer, export, and notification email. Sample below uses today.",
+            )}
           >
-            <header>
-              <h2 style={cardTitleStyle}>
-                <Icon name="calendar" size={13} />
-                {t("settings.workspace.dateFormatTitle", "Date format")}
-              </h2>
-              <p style={cardSubStyle}>
-                {t(
-                  "settings.workspace.dateFormatDesc",
-                  "Applied across every page, drawer, export, and notification email. Sample below uses today.",
-                )}
-              </p>
-            </header>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <div className="st-chips" role="group" aria-label={t("settings.workspace.dateFormatTitle", "Date format")}>
               {(
                 ["DD/MM/YYYY", "MM/DD/YYYY", "YYYY-MM-DD"] as const
-              ).map((fmt) => {
-                const on = settings.data!.date_format === fmt;
-                return (
-                  <button
-                    key={fmt}
-                    type="button"
-                    onClick={() => void onSelectDateFormat(fmt)}
-                    aria-pressed={on}
-                    disabled={patch.isPending}
-                    style={pillStyle(on)}
-                  >
-                    <span className="mono">{fmt}</span>
-                    <span style={{ marginLeft: 8, opacity: 0.7, fontSize: 11 }}>
-                      {formatSampleDate(fmt)}
-                    </span>
-                  </button>
-                );
-              })}
+              ).map((fmt) => (
+                <ChoiceChip
+                  key={fmt}
+                  on={settings.data!.date_format === fmt}
+                  onClick={() => void onSelectDateFormat(fmt)}
+                  disabled={patch.isPending}
+                  sample={formatSampleDate(fmt)}
+                >
+                  <span className="mono">{fmt}</span>
+                </ChoiceChip>
+              ))}
             </div>
-          </section>
+          </SettingsCard>
 
           {/* --- Time format card (migration 0068) --- */}
-          <section
-            className="card"
-            style={{ padding: 18, display: "flex", flexDirection: "column", gap: 12 }}
+          <SettingsCard
+            icon={<Icon name="clock" size={17} />}
+            title={t("settings.workspace.timeFormatTitle", "Time format")}
+            description={t(
+              "settings.workspace.timeFormatDesc",
+              "12-hour shows AM/PM; 24-hour is the GCC default. Applies to every timestamp the platform renders.",
+            )}
           >
-            <header>
-              <h2 style={cardTitleStyle}>
-                <Icon name="clock" size={13} />
-                {t("settings.workspace.timeFormatTitle", "Time format")}
-              </h2>
-              <p style={cardSubStyle}>
-                {t(
-                  "settings.workspace.timeFormatDesc",
-                  "12-hour shows AM/PM; 24-hour is the GCC default. Applies to every timestamp the platform renders.",
-                )}
-              </p>
-            </header>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {(["24h", "12h"] as const).map((fmt) => {
-                const on = settings.data!.time_format === fmt;
-                return (
-                  <button
-                    key={fmt}
-                    type="button"
-                    onClick={() => void onSelectTimeFormat(fmt)}
-                    aria-pressed={on}
-                    disabled={patch.isPending}
-                    style={pillStyle(on)}
-                  >
-                    {fmt === "24h"
-                      ? t("settings.workspace.timeFormat24h", "24-hour")
-                      : t("settings.workspace.timeFormat12h", "12-hour (AM/PM)")}
-                    <span style={{ marginLeft: 8, opacity: 0.7, fontSize: 11 }}>
-                      {formatSampleTime(fmt)}
-                    </span>
-                  </button>
-                );
-              })}
+            <div className="st-chips" role="group" aria-label={t("settings.workspace.timeFormatTitle", "Time format")}>
+              {(["24h", "12h"] as const).map((fmt) => (
+                <ChoiceChip
+                  key={fmt}
+                  on={settings.data!.time_format === fmt}
+                  onClick={() => void onSelectTimeFormat(fmt)}
+                  disabled={patch.isPending}
+                  sample={formatSampleTime(fmt)}
+                >
+                  {fmt === "24h"
+                    ? t("settings.workspace.timeFormat24h", "24-hour")
+                    : t("settings.workspace.timeFormat12h", "12-hour (AM/PM)")}
+                </ChoiceChip>
+              ))}
             </div>
-          </section>
+          </SettingsCard>
 
           {/* --- Weekend days card --- */}
-          <section
-            className="card"
-            style={{ padding: 18, display: "flex", flexDirection: "column", gap: 12 }}
+          <SettingsCard
+            icon={<Icon name="calendar" size={17} />}
+            title={t("settings.workspace.weekendTitle")}
+            description={t("settings.workspace.weekendDesc")}
           >
-            <header>
-              <h2 style={cardTitleStyle}>
-                <Icon name="calendar" size={13} />
-                {t("settings.workspace.weekendTitle")}
-              </h2>
-              <p style={cardSubStyle}>
-                {t("settings.workspace.weekendDesc")}
-              </p>
-            </header>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {WEEKDAYS.map((d) => {
-                const on = settings.data!.weekend_days.includes(d);
-                return (
-                  <button
-                    key={d}
-                    type="button"
-                    onClick={() => void onToggleWeekendDay(d)}
-                    aria-pressed={on}
-                    disabled={patch.isPending}
-                    style={{
-                      fontSize: 12,
-                      padding: "6px 12px",
-                      borderRadius: 999,
-                      border: on
-                        ? "1px solid var(--accent-border)"
-                        : "1px solid var(--border)",
-                      background: on ? "var(--accent-soft)" : "var(--bg)",
-                      color: on ? "var(--accent-text)" : "var(--text)",
-                      cursor: "pointer",
-                      fontWeight: on ? 600 : 400,
-                    }}
-                  >
-                    {d.slice(0, 3)}
-                  </button>
-                );
-              })}
+            <div className="st-chips" role="group" aria-label={t("settings.workspace.weekendTitle")}>
+              {WEEKDAYS.map((d) => (
+                <ChoiceChip
+                  key={d}
+                  on={settings.data!.weekend_days.includes(d)}
+                  onClick={() => void onToggleWeekendDay(d)}
+                  disabled={patch.isPending}
+                  title={d}
+                >
+                  {d.slice(0, 3)}
+                </ChoiceChip>
+              ))}
             </div>
-          </section>
+          </SettingsCard>
 
           {savedToast && !error && (
-            <div
-              role="status"
-              style={{
-                background: "var(--success-soft)",
-                color: "var(--success-text)",
-                padding: "8px 12px",
-                borderRadius: "var(--radius-sm)",
-                fontSize: 13,
-              }}
-            >
+            <InlineAlert tone="success" role="status">
               {savedToast}
-            </div>
+            </InlineAlert>
           )}
           {error && (
-            <div
-              role="alert"
-              style={{
-                background: "var(--danger-soft)",
-                color: "var(--danger-text)",
-                padding: "8px 12px",
-                borderRadius: "var(--radius-sm)",
-                fontSize: 13,
-              }}
-            >
+            <InlineAlert tone="danger" role="alert">
               {error}
-            </div>
+            </InlineAlert>
           )}
-        </div>
+        </>
       )}
-    </>
+    </SettingsPage>
   );
 }
 
@@ -452,50 +361,39 @@ function TimezoneChangedBanner({
   onRegenerate: () => void;
   onDismiss: () => void;
 }) {
+  const { t } = useTranslation();
   return (
-    <div
+    <InlineAlert
+      tone="warning"
       role="alert"
-      style={{
-        background: "var(--warning-soft)",
-        color: "var(--warning-text)",
-        border: "1px solid var(--warning-border)",
-        borderRadius: "var(--radius)",
-        padding: "12px 14px",
-        display: "flex",
-        gap: 12,
-        alignItems: "flex-start",
-      }}
+      title={t("settingsUi.workspace.tzChangedTitle", {
+        defaultValue: "Timezone changed — historical attendance may be stale.",
+      })}
+      actions={
+        <>
+          <button type="button" className="btn btn-sm" onClick={onRegenerate}>
+            <Icon name="refresh" size={11} />
+            {t("settingsUi.workspace.regenerateCta", { defaultValue: "Regenerate historical attendance…" })}
+          </button>
+          <button type="button" className="btn btn-sm btn-ghost" onClick={onDismiss}>
+            {t("settingsUi.workspace.dismiss", { defaultValue: "Dismiss" })}
+          </button>
+        </>
+      }
     >
-      <Icon name="info" size={14} />
-      <div style={{ flex: 1, fontSize: 13, lineHeight: 1.5 }}>
-        <strong style={{ display: "block", marginBottom: 4 }}>
-          Timezone changed — historical attendance may be stale.
-        </strong>
-        <div>
-          Today's attendance was automatically recomputed in{" "}
-          <code>{currentTz}</code>. Past dates were computed in{" "}
-          <code>{previousTz}</code>; in / out / total / late /
-          overtime numbers near midnight may be off by the time
-          difference. Regenerate a date range to refresh them.
-        </div>
-        <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
-          <button
-            type="button"
-            className="btn btn-sm btn-primary"
-            onClick={onRegenerate}
-          >
-            Regenerate historical attendance…
-          </button>
-          <button
-            type="button"
-            className="btn btn-sm"
-            onClick={onDismiss}
-          >
-            Dismiss
-          </button>
-        </div>
-      </div>
-    </div>
+      {t("settingsUi.workspace.tzChangedBodyA", {
+        defaultValue: "Today's attendance was automatically recomputed in",
+      })}{" "}
+      <code>{currentTz}</code>.{" "}
+      {t("settingsUi.workspace.tzChangedBodyB", {
+        defaultValue: "Past dates were computed in",
+      })}{" "}
+      <code>{previousTz}</code>;{" "}
+      {t("settingsUi.workspace.tzChangedBodyC", {
+        defaultValue:
+          "in / out / total / late / overtime numbers near midnight may be off by the time difference. Regenerate a date range to refresh them.",
+      })}
+    </InlineAlert>
   );
 }
 
@@ -506,6 +404,7 @@ function RegenerateHistoricalModal({
   currentTz: string;
   onClose: (completed: boolean) => void;
 }) {
+  const { t } = useTranslation();
   const regenerate = useRegenerateAttendanceRange();
   const [start, setStart] = useState<string>(() => {
     // Default: 7 days back (covers the past week — common request).
@@ -532,16 +431,19 @@ function RegenerateHistoricalModal({
     setError(null);
     setResult(null);
     if (!start || !end) {
-      setError("Both start and end dates are required.");
+      setError(t("settingsUi.workspace.regenErrDates", { defaultValue: "Both start and end dates are required." }));
       return;
     }
     if (rangeDays === null) {
-      setError("Invalid date range.");
+      setError(t("settingsUi.workspace.regenErrRange", { defaultValue: "Invalid date range." }));
       return;
     }
     if (rangeDays > 92) {
       setError(
-        `Range is ${rangeDays} days; maximum is 92. Split into smaller ranges.`,
+        t("settingsUi.workspace.regenErrTooLong", {
+          defaultValue: "Range is {{days}} days; maximum is 92. Split into smaller ranges.",
+          days: rangeDays,
+        }),
       );
       return;
     }
@@ -549,152 +451,106 @@ function RegenerateHistoricalModal({
       const resp = await regenerate.mutateAsync({ start, end });
       setResult(resp);
     } catch (err) {
-      setError(extractError(err));
+      setError(extractError(err, t));
     }
   };
 
   return (
-    <ModalShell open onClose={() => onClose(result !== null)}>
-      <div
-        role="dialog"
-        aria-labelledby="regen-historical-title"
-        style={{
-          // ModalShell renders only the scrim — the panel has to carry
-          // its own fixed-position centering. Mirrors the pattern in
-          // requests/OverrideModal.tsx so it sits in the middle of the
-          // viewport instead of dropping into the page's document flow
-          // (where it would render bottom-left after the long Settings
-          // page content).
-          position: "fixed",
-          top: "50%",
-          left: "50%",
-          transform: "translate(-50%, -50%)",
-          width: 520,
-          maxWidth: "90vw",
-          maxHeight: "90vh",
-          overflowY: "auto",
-          background: "var(--bg)",
-          border: "1px solid var(--border-strong)",
-          borderRadius: "var(--radius)",
-          padding: 20,
-          zIndex: 60,
-          boxShadow: "var(--shadow-lg)",
-          display: "flex",
-          flexDirection: "column",
-          gap: 14,
-        }}
-      >
-        <header>
-          <h2
-            id="regen-historical-title"
-            style={{ margin: 0, fontSize: 16, fontWeight: 600 }}
-          >
-            Regenerate historical attendance
-          </h2>
-          <p
-            style={{
-              margin: "4px 0 0",
-              fontSize: 12.5,
-              color: "var(--text-secondary)",
-              lineHeight: 1.5,
-            }}
-          >
-            Recomputes attendance for every active employee on each
-            date in the range. Uses the current timezone{" "}
-            <code>{currentTz}</code>. Maximum 92 days per call.
-          </p>
-        </header>
-
-        <div style={{ display: "flex", gap: 10 }}>
-          <label style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={labelStyle}>Start (inclusive)</span>
-            <DatePicker
-              value={start}
-              onChange={setStart}
-              max={end || todayIso()}
-              ariaLabel="Start date"
-            />
-          </label>
-          <label style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={labelStyle}>End (inclusive)</span>
-            <DatePicker
-              value={end}
-              onChange={setEnd}
-              max={todayIso()}
-              ariaLabel="End date"
-            />
-          </label>
-        </div>
-
-        {rangeDays !== null && (
-          <div className="text-xs text-dim">
-            {rangeDays} day{rangeDays === 1 ? "" : "s"} in range
-          </div>
-        )}
-
-        {error && (
-          <div
-            role="alert"
-            style={{
-              background: "var(--danger-soft)",
-              color: "var(--danger-text)",
-              padding: "8px 12px",
-              borderRadius: "var(--radius-sm)",
-              fontSize: 12.5,
-            }}
-          >
-            {error}
-          </div>
-        )}
-
-        {result && (
-          <div
-            role="status"
-            style={{
-              background: "var(--success-soft)",
-              color: "var(--success-text)",
-              padding: "10px 12px",
-              borderRadius: "var(--radius-sm)",
-              fontSize: 12.5,
-              lineHeight: 1.5,
-            }}
-          >
-            Recomputed <strong>{result.total_rows_upserted}</strong>{" "}
-            attendance row{result.total_rows_upserted === 1 ? "" : "s"}{" "}
-            across <strong>{result.days_processed}</strong> day
-            {result.days_processed === 1 ? "" : "s"} ({result.start} →{" "}
-            {result.end}).
-          </div>
-        )}
-
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
+    <SettingsModal
+      labelledBy="regen-historical-title"
+      title={t("settingsUi.workspace.regenTitle", { defaultValue: "Regenerate historical attendance" })}
+      subtitle={
+        <>
+          {t("settingsUi.workspace.regenSubA", {
+            defaultValue: "Recomputes attendance for every active employee on each date in the range. Uses the current timezone",
+          })}{" "}
+          <code>{currentTz}</code>.{" "}
+          {t("settingsUi.workspace.regenSubB", { defaultValue: "Maximum 92 days per call." })}
+        </>
+      }
+      onClose={() => onClose(result !== null)}
+      footer={
+        <>
           <button
             type="button"
-            className="btn btn-sm"
+            className="btn"
             onClick={() => onClose(result !== null)}
             disabled={regenerate.isPending}
           >
-            {result ? "Close" : "Cancel"}
+            {result ? t("common.close") : t("common.cancel")}
           </button>
           {!result && (
             <button
               type="button"
-              className="btn btn-sm btn-primary"
+              className="btn btn-primary"
               onClick={onRun}
               disabled={regenerate.isPending || !rangeDays || rangeDays > 92}
             >
               {regenerate.isPending
-                ? "Regenerating…"
-                : "Run regenerate"}
+                ? t("settingsUi.workspace.regenRunning", { defaultValue: "Regenerating…" })
+                : t("settingsUi.workspace.regenRun", { defaultValue: "Run regenerate" })}
             </button>
           )}
-        </div>
+        </>
+      }
+    >
+      <div className="st-form-grid">
+        <FormField label={t("settingsUi.workspace.regenStart", { defaultValue: "Start (inclusive)" })}>
+          <DatePicker
+            value={start}
+            onChange={setStart}
+            max={end || todayIso()}
+            ariaLabel={t("settingsUi.workspace.regenStartAria", { defaultValue: "Start date" })}
+          />
+        </FormField>
+        <FormField label={t("settingsUi.workspace.regenEnd", { defaultValue: "End (inclusive)" })}>
+          <DatePicker
+            value={end}
+            onChange={setEnd}
+            max={todayIso()}
+            ariaLabel={t("settingsUi.workspace.regenEndAria", { defaultValue: "End date" })}
+          />
+        </FormField>
       </div>
-    </ModalShell>
+
+      {rangeDays !== null && (
+        <div className="text-xs text-dim">
+          {t("settingsUi.workspace.regenDaysInRange", {
+            defaultValue: "{{count}} days in range",
+            count: rangeDays,
+          })}
+        </div>
+      )}
+
+      {error && (
+        <InlineAlert tone="danger" role="alert">
+          {error}
+        </InlineAlert>
+      )}
+
+      {result && (
+        <InlineAlert tone="success" role="status">
+          {t("settingsUi.workspace.regenResultA", { defaultValue: "Recomputed" })}{" "}
+          <strong>{result.total_rows_upserted}</strong>{" "}
+          {t("settingsUi.workspace.regenResultRows", {
+            defaultValue: "attendance rows",
+            count: result.total_rows_upserted,
+          })}{" "}
+          {t("settingsUi.workspace.regenResultAcross", { defaultValue: "across" })}{" "}
+          <strong>{result.days_processed}</strong>{" "}
+          {t("settingsUi.workspace.regenResultDays", {
+            defaultValue: "days",
+            count: result.days_processed,
+          })}{" "}
+          (<span className="mono">{result.start}</span> → <span className="mono">{result.end}</span>).
+        </InlineAlert>
+      )}
+    </SettingsModal>
   );
 }
 
 function LiveClock({ timezone }: { timezone: string }) {
+  const { t } = useTranslation();
   const [now, setNow] = useState<Date>(() => new Date());
   useEffect(() => {
     const id = window.setInterval(() => setNow(new Date()), 1000);
@@ -709,92 +565,24 @@ function LiveClock({ timezone }: { timezone: string }) {
       timeStyle: "medium",
     }).format(now);
   } catch {
-    formatted = `Invalid timezone: ${timezone}`;
+    formatted = t("settingsUi.workspace.invalidTz", { defaultValue: "Invalid timezone: {{tz}}", tz: timezone });
   }
 
   return (
-    <div
-      style={{
-        marginTop: 4,
-        padding: "8px 12px",
-        borderRadius: "var(--radius-sm)",
-        background: "var(--bg-sunken)",
-        border: "1px solid var(--border)",
-        fontSize: 12.5,
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-      }}
-    >
-      <Icon name="check" size={11} className="text-secondary" />
-      <span className="text-dim">Tenant clock:</span>
-      <span className="mono" style={{ color: "var(--text)" }}>
-        {formatted}
-      </span>
+    <div className="st-strip">
+      <Icon name="clock" size={12} className="text-dim" />
+      <span className="text-dim">{t("settingsUi.workspace.tenantClock", { defaultValue: "Tenant clock:" })}</span>
+      <span className="mono">{formatted}</span>
     </div>
   );
 }
 
-function extractError(err: unknown): string {
+function extractError(err: unknown, t: (k: string, o: { defaultValue: string }) => string): string {
   if (err instanceof ApiError) {
     const detail = (err.body as { detail?: unknown } | null)?.detail;
     if (typeof detail === "string" && detail.length > 0) return detail;
   }
-  return "Save failed.";
-}
-
-const cardTitleStyle = {
-  margin: 0,
-  fontSize: 14,
-  fontWeight: 600,
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 6,
-};
-
-const cardSubStyle = {
-  margin: "4px 0 0 0",
-  color: "var(--text-secondary)",
-  fontSize: 12,
-  lineHeight: 1.5,
-};
-
-const labelStyle = {
-  fontSize: 11,
-  textTransform: "uppercase" as const,
-  letterSpacing: "0.04em",
-  color: "var(--text-tertiary)",
-};
-
-const inputStyle = {
-  padding: "7px 10px",
-  fontSize: 13,
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius-sm)",
-  background: "var(--bg-elev)",
-  color: "var(--text)",
-  fontFamily: "var(--font-mono)",
-};
-
-const selectStyle = {
-  ...inputStyle,
-  fontFamily: "var(--font-sans)",
-  minWidth: 320,
-};
-
-function pillStyle(on: boolean): React.CSSProperties {
-  return {
-    fontSize: 12,
-    padding: "6px 12px",
-    borderRadius: 999,
-    border: on ? "1px solid var(--accent-border)" : "1px solid var(--border)",
-    background: on ? "var(--accent-soft)" : "var(--bg)",
-    color: on ? "var(--accent-text)" : "var(--text)",
-    cursor: "pointer",
-    fontWeight: on ? 600 : 400,
-    display: "inline-flex",
-    alignItems: "center",
-  };
+  return t("settingsUi.workspace.saveFailed", { defaultValue: "Save failed." });
 }
 
 // Workspace-page-local samples (independent of the tenant choice

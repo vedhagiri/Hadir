@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next";
 import { extractApiError } from "../../api/client";
 import { DrawerShell } from "../../components/DrawerShell";
 import { RelativeTime } from "../../components/RelativeTime";
+import { FormHeader } from "../../components/FormKit";
 import { Icon } from "../../shell/Icon";
 import { useTenantDateTime } from "../../util/datetime";
 import { useEmployeeList } from "../employees/hooks";
@@ -28,6 +29,7 @@ import {
   useResyncDevice,
 } from "./hooks";
 import type { Device, DeviceEvent, DeviceUser } from "./types";
+import "./devices.css";
 import { SkeletonLines } from "../../components/Skeleton";
 
 interface Props {
@@ -95,51 +97,25 @@ export function DeviceDetailDrawer({ device, onClose, onShowSetup }: Props) {
 
   return (
     <DrawerShell onClose={onClose}>
-      <div className="drawer" style={{ width: "min(820px, 96vw)" }}>
-        <div className="drawer-head">
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="mono text-xs text-dim">
-              {t("devices.label", { defaultValue: "DEVICE" })}
-            </div>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                flexWrap: "wrap",
-                marginTop: 2,
-              }}
-            >
-              <span style={{ fontSize: 16, fontWeight: 600 }}>
-                {device.name}
-              </span>
+      <div className="drawer fk-drawer dv-detail" role="dialog" aria-labelledby="dv-detail-title">
+        <FormHeader
+          titleId="dv-detail-title"
+          icon={<Icon name="activity" size={18} />}
+          eyebrow={t("devices.label", { defaultValue: "DEVICE" })}
+          title={device.name}
+          subtitle={subtitle || undefined}
+          actions={
+            <span className="dv-head-status">
               <StatusPill device={device} />
-            </div>
-            {subtitle && <div className="text-xs text-dim">{subtitle}</div>}
-          </div>
-          <button
-            className="icon-btn"
-            onClick={onClose}
-            aria-label={t("common.close")}
-          >
-            <Icon name="x" size={14} />
-          </button>
-        </div>
+            </span>
+          }
+          onClose={onClose}
+        />
 
         {/* Liveness + hardware facts. Serial / model are learned from the
             events themselves, so a device that hasn't reported has none —
             we omit those rather than print a row of dashes. */}
-        <div
-          style={{
-            display: "flex",
-            gap: 20,
-            flexWrap: "wrap",
-            alignItems: "center",
-            padding: "10px 16px",
-            borderBottom: "1px solid var(--border)",
-            background: "var(--bg-sunken)",
-          }}
-        >
+        <div className="dv-meta-strip">
           {/* Arrival time of the last POST, keepalives included — this is
               the liveness signal, NOT the newest row in the events tab
               (those carry the time the device claims the tap happened).
@@ -170,9 +146,9 @@ export function DeviceDetailDrawer({ device, onClose, onShowSetup }: Props) {
               {device.model}
             </Meta>
           )}
-          <div style={{ flex: 1 }} />
-          <div style={{ display: "flex", gap: 8 }}>
+          <div className="dv-meta-actions">
             <button
+              type="button"
               className="btn btn-sm"
               onClick={runResync}
               disabled={resync.isPending}
@@ -186,17 +162,14 @@ export function DeviceDetailDrawer({ device, onClose, onShowSetup }: Props) {
                 ? t("devices.resync.running", { defaultValue: "Syncing…" })
                 : t("devices.resync.action", { defaultValue: "Sync now" })}
             </button>
-            <button className="btn btn-sm" onClick={onShowSetup}>
+            <button type="button" className="btn btn-sm" onClick={onShowSetup}>
               <Icon name="clipboard" size={12} />
               {t("devices.detail.showUrl", { defaultValue: "Show push URL" })}
             </button>
           </div>
         </div>
 
-        <div
-          className="tabs"
-          style={{ padding: "0 16px", marginBottom: 0, gap: 2 }}
-        >
+        <div className="tabs dv-detail-tabs">
           <TabButton
             active={tab === "events"}
             onClick={() => setTab("events")}

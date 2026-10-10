@@ -16,9 +16,9 @@
 //     match an existing /api/departments row — otherwise the row
 //     errors with a per-row message.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { useMe } from "../../auth/AuthProvider";
 import { Icon } from "../../shell/Icon";
@@ -27,7 +27,6 @@ import { useDepartments } from "../departments/hooks";
 import { BulkDeleteModal } from "./BulkDeleteModal";
 import { DeleteConfirmModal } from "./DeleteConfirmModal";
 import { EmployeeDrawer } from "./EmployeeDrawer";
-import { EmployeeViewDrawer } from "./EmployeeViewDrawer";
 import { ImportModal } from "./ImportModal";
 import {
   useDeleteRequestList,
@@ -36,7 +35,24 @@ import {
   type EmployeeSortDir,
 } from "./hooks";
 import type { Employee } from "./types";
-import { SkeletonRows } from "../../components/Skeleton";
+import { SkeletonCards, SkeletonGrid, SkeletonRows } from "../../components/Skeleton";
+import {
+  CardFact,
+  CardGrid,
+  EmptyPanel,
+  FilterSelect,
+  KebabMenu,
+  ResetButton,
+  SearchField,
+  StatCard,
+  StatGrid,
+  Toolbar,
+  ViewToggle,
+  gridCardStyle,
+  pct,
+  useViewMode,
+} from "../../components/ListPageUi";
+import { DotPill, LoadErrorPanel, PEOPLE_ICON, StatTile } from "./peopleUi";
 
 const PAGE_SIZE = 50;
 const SEARCH_MIN_CHARS = 3;
@@ -52,7 +68,6 @@ export function EmployeesPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
   const [importOpen, setImportOpen] = useState(false);
   const [drawerId, setDrawerId] = useState<number | null | undefined>(undefined);
-  const [viewId, setViewId] = useState<number | null>(null);
   const [deletingEmployee, setDeletingEmployee] = useState<Employee | null>(null);
   const [bulkDeleteScope, setBulkDeleteScope] = useState<
     "selected" | "all" | null
@@ -61,19 +76,19 @@ export function EmployeesPage() {
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
   const [sortBy, setSortBy] = useState<EmployeeSortBy>("created_at");
   const [sortDir, setSortDir] = useState<EmployeeSortDir>("desc");
+  const [view, setView] = useViewMode("maugood.employees.view");
 
-  // Deep-link support — opening this page with ``?employee=ID`` pops
-  // the view drawer for that employee. Used by the bulk-upload
-  // results screen so the operator can immediately verify the
-  // freshly-uploaded reference photos. We clear the param on close
-  // so the back button doesn't re-open the drawer.
-  const [searchParams, setSearchParams] = useSearchParams();
+  // The profile now lives on its own route (/employees/:id), so the
+  // legacy ``?employee=ID`` deep link simply redirects there.
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const openProfile = (id: number) => navigate(`/employees/${id}`);
   useEffect(() => {
     const raw = searchParams.get("employee");
     if (raw === null) return;
     const id = Number.parseInt(raw, 10);
-    if (Number.isFinite(id) && id > 0) setViewId(id);
-  }, [searchParams]);
+    if (Number.isFinite(id) && id > 0) navigate(`/employees/${id}`, { replace: true });
+  }, [searchParams, navigate]);
 
   const { data: me } = useMe();
   const isAdmin = !!me?.roles?.includes("Admin");
@@ -194,37 +209,37 @@ export function EmployeesPage() {
     window.location.assign(`/api/employees/export?${params.toString()}`);
   };
 
+  const enrolledOnPage = visibleItems.filter((e) => e.photo_count > 0).length;
+  const missingOnPage = visibleItems.length - enrolledOnPage;
+  const pendingDeleteCount = (pendingDeletes.data?.items ?? []).filter(
+    (r) => r.status === "pending",
+  ).length;
+  const filtersActive =
+    q.trim() !== "" || departmentId !== null || statusFilter !== "active";
+  const resetFilters = () => {
+    setQ("");
+    setDebouncedQ("");
+    setDepartmentId(null);
+    setStatusFilter("active");
+  };
+
+  // Five-state rendering (brief addendum): loading / error / no records
+  // at all / filters match nothing / data. "No records at all" is only
+  // claimable when no filter narrows the result.
+  const noRecords =
+    !list.isLoading && !list.isError && !filtersActive && (list.data?.total ?? 0) === 0;
+  const showStats = !list.isError && !noRecords;
+
   return (
     <>
-      {/* Sticky bg cover for ``.content``'s padding-top:20px zone.
-          Without it, scrolling tbody rows briefly show through the
-          20px strip between the topbar and the sticky table thead.
-          See DailyAttendancePage.tsx for the same pattern + rationale. */}
-      <div
-        aria-hidden
-        style={{
-          position: "sticky",
-          top: -20,
-          zIndex: 25,
-          height: 0,
-          marginTop: -20,
-          paddingTop: 20,
-          background: "var(--bg)",
-        }}
-      />
       <div className="page-header">
         <div>
           <h1 className="page-title">{t("employees.title") as string}</h1>
           <p className="page-sub">
-            {list.data
-              ? `${list.data.total} ${list.data.total === 1 ? "person" : "people"}`
-              : "—"}
-            {" · "}
-            <span className="mono">
-              {fullyEnrolledPercentage(list.data?.items)}
-            </span>
-            {" "}
-            {t("employees.fullyEnrolledSuffix") as string}
+            {t("employees.page.sub", {
+              defaultValue:
+                "Everyone the cameras can recognise — add people, keep their details current and upload reference photos.",
+            }) as string}
           </p>
         </div>
         <div className="page-actions">
@@ -268,11 +283,6 @@ export function EmployeesPage() {
                       }) as string)
                     : undefined
                 }
-                style={
-                  noData
-                    ? { opacity: 0.45, cursor: "not-allowed" }
-                    : undefined
-                }
               >
                 <Icon name="download" size={12} />
                 {selected.size > 0
@@ -297,320 +307,345 @@ export function EmployeesPage() {
         </div>
       </div>
 
-      <div className="card">
-        {/* Unified filter row — search + dept dropdown + status chip
-            + page count, mirroring the design screenshot. */}
-        <div
-          style={{
-            display: "flex",
-            gap: 10,
-            alignItems: "center",
-            padding: "12px 14px",
-            borderBottom: "1px solid var(--border)",
-          }}
-        >
-          <div className="topbar-search" style={{ flex: 1 }}>
-            <Icon name="search" size={13} />
-            <input
-              placeholder={t("employees.searchPlaceholder") as string}
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-            />
-          </div>
-          <select
-            value={departmentId ?? ""}
-            onChange={(e) =>
-              setDepartmentId(
-                e.target.value === "" ? null : Number(e.target.value),
-              )
+      {list.isLoading ? (
+        <SkeletonCards count={4} minWidth={220} />
+      ) : showStats ? (
+        <StatGrid>
+          <StatCard
+            tone="info"
+            icon={PEOPLE_ICON.people}
+            label={t("employees.stats.people", { defaultValue: "People" }) as string}
+            value={list.data?.total ?? 0}
+            sub={
+              filtersActive
+                ? (t("employees.stats.peopleFilteredSub", {
+                    defaultValue: "Matching your filters · click to clear",
+                  }) as string)
+                : (t("employees.stats.peopleActiveSub", { defaultValue: "Currently active" }) as string)
             }
-            style={{ ...selectStyle, minWidth: 200 }}
-          >
-            <option value="">{t("employees.allDepartments") as string}</option>
-            {(departmentsQuery.data?.items ?? []).map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </select>
-          <div
-            style={{
-              display: "inline-flex",
-              gap: 0,
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius-sm)",
-              padding: 2,
-              background: "var(--bg-sunken)",
-            }}
-          >
-            {(["active", "inactive", "all"] as StatusFilter[]).map((opt) => (
-              <button
-                key={opt}
-                type="button"
-                onClick={() => setStatusFilter(opt)}
-                aria-pressed={statusFilter === opt}
-                style={{
-                  padding: "4px 8px",
-                  fontSize: 11.5,
-                  border: "none",
-                  background:
-                    statusFilter === opt ? "var(--bg-elev)" : "transparent",
-                  color:
-                    statusFilter === opt
-                      ? "var(--text)"
-                      : "var(--text-secondary)",
-                  fontWeight: statusFilter === opt ? 600 : 500,
-                  cursor: "pointer",
-                  borderRadius: 3,
-                }}
-              >
-                {t(`employees.statusFilter.${opt}`) as string}
-              </button>
-            ))}
-          </div>
-          <div
-            className="mono text-xs text-dim"
-            style={{ marginInlineStart: 8, whiteSpace: "nowrap" }}
-            title={t("employees.pageOfTotal") as string}
-          >
-            {list.data?.items.length ?? 0} / {list.data?.total ?? 0}
-          </div>
-        </div>
+            active={!filtersActive}
+            onClick={resetFilters}
+          />
+          <StatTile
+            tone="success"
+            icon={PEOPLE_ICON.camera}
+            label={t("employees.stats.enrolled", { defaultValue: "Enrolled" }) as string}
+            value={enrolledOnPage}
+            sub={t("employees.stats.enrolledSub", {
+              defaultValue: "{{pct}}% of this page",
+              pct: pct(enrolledOnPage, visibleItems.length),
+            }) as string}
+          />
+          <StatTile
+            tone="warning"
+            icon={PEOPLE_ICON.cameraOff}
+            label={t("employees.stats.needPhotos", { defaultValue: "Need photos" }) as string}
+            value={missingOnPage}
+            sub={t("employees.stats.needPhotosSub", {
+              defaultValue: "Not recognisable yet",
+            }) as string}
+          />
+          <StatTile
+            tone="danger"
+            icon={PEOPLE_ICON.trash}
+            label={t("employees.stats.pendingDelete", { defaultValue: "Pending deletion" }) as string}
+            value={pendingDeleteCount}
+            sub={t("employees.stats.pendingDeleteSub", {
+              defaultValue: "Awaiting a decision",
+            }) as string}
+          />
+        </StatGrid>
+      ) : null}
 
-        {/* BUG-014 — sticky header. The page itself scrolls (the
-            table doesn't have its own scroll container), so we pin
-            the <thead> rows to the viewport top via position: sticky.
-            Each <th> needs an opaque background so the underlying
-            row content doesn't bleed through during scroll. */}
-        <table
-          className="table"
-          style={
-            {
-              ["--mg-sticky-bg" as string]: "var(--bg-elev)",
-            } as React.CSSProperties
-          }
-        >
-          <thead
-            style={{
-              position: "sticky",
-              top: 0,
-              // zIndex bumped from 2 → 20 so any stacking context that
-              // a row introduces (badges, hover, transforms) can't
-              // composite above the sticky header. ``--bg-elev`` matches
-              // the card surface so there's no colour band as rows
-              // scroll under. Inset shadow on each <th> below keeps the
-              // divider line while masking the 1-px sub-pixel slit that
-              // box-shadow on <thead> alone leaves on some browsers.
-              zIndex: 20,
-              background: "var(--bg-elev)",
-            }}
-          >
-            <tr>
-              <th
-                style={{
-                  width: 36,
-                  background: "var(--bg-elev)",
-                  boxShadow: "inset 0 -1px 0 var(--border)",
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={allOnPageSelected}
-                  onChange={toggleSelectAllOnPage}
-                  aria-label={t("employees.selectAllOnPage") as string}
-                />
-              </th>
-              <SortableHeader
-                column="employee_code"
-                label={t("employees.col.id") as string}
-                width={110}
-                activeColumn={sortBy}
-                direction={sortDir}
-                onClick={onSortClick}
-              />
-              <SortableHeader
-                column="full_name"
-                label={t("employees.col.employee") as string}
-                activeColumn={sortBy}
-                direction={sortDir}
-                onClick={onSortClick}
-              />
-              <th
-                style={{
-                  background: "var(--bg-elev)",
-                  boxShadow: "inset 0 -1px 0 var(--border)",
-                }}
-              >
-                {t("employees.col.email") as string}
-              </th>
-              <SortableHeader
-                column="department"
-                label={t("employees.col.department") as string}
-                activeColumn={sortBy}
-                direction={sortDir}
-                onClick={onSortClick}
-              />
-              <th
-                style={{
-                  background: "var(--bg-elev)",
-                  boxShadow: "inset 0 -1px 0 var(--border)",
-                }}
-              >
-                {t("employees.col.role") as string}
-              </th>
-              <th
-                style={{
-                  width: 130,
-                  background: "var(--bg-elev)",
-                  boxShadow: "inset 0 -1px 0 var(--border)",
-                }}
-              >
-                {t("employees.col.photos") as string}
-              </th>
-              <th
-                style={{
-                  width: 110,
-                  textAlign: "end",
-                  background: "var(--bg-elev)",
-                  boxShadow: "inset 0 -1px 0 var(--border)",
-                }}
-              >
-                {t("employees.col.actions") as string}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.isLoading && (
-              <SkeletonRows cols={8} />
-            )}
-            {list.isError && (
-              <tr>
-                <td
-                  colSpan={8}
-                  className="text-sm"
-                  style={{ padding: 16, color: "var(--danger-text)" }}
-                >
-                  {t("employees.loadFailed") as string}
-                </td>
-              </tr>
-            )}
-            {visibleItems.map((e) => {
-              const pendingDeleteId = pendingByEmployee.get(e.id);
-              const inactive = e.status !== "active";
-              const isSelected = selected.has(e.id);
-              const role = primaryRoleFromCodes(e.role_codes ?? []);
-              return (
-                <tr
-                  key={e.id}
-                  onClick={() => setViewId(e.id)}
-                  style={{
-                    cursor: "pointer",
-                    opacity: inactive ? 0.6 : 1,
-                    background: isSelected ? "var(--accent-soft)" : undefined,
-                  }}
-                >
-                  <td onClick={(ev) => ev.stopPropagation()}>
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      onChange={() => toggleOne(e.id)}
-                      aria-label={t("employees.selectRow") as string}
-                    />
-                  </td>
-                  <td className="mono text-sm">{e.employee_code}</td>
-                  <td>
-                    <div
-                      style={{ display: "flex", alignItems: "center", gap: 10 }}
-                    >
-                      <div
-                        className="avatar"
-                        style={{
-                          background: avatarBg(e.full_name),
-                          color: "var(--text-on-accent, #fff)",
-                          fontWeight: 600,
-                        }}
-                      >
-                        {initials(e.full_name)}
-                      </div>
-                      <div>
-                        <div style={{ fontWeight: 500 }}>{e.full_name}</div>
-                        <div className="text-xs text-dim">
+      {showStats && !list.isLoading && (
+      <Toolbar>
+        <SearchField
+          value={q}
+          onChange={setQ}
+          placeholder={t("employees.searchPlaceholder") as string}
+          clearLabel={t("employees.filters.clearSearch", { defaultValue: "Clear search" }) as string}
+        />
+        <FilterSelect
+          label={t("employees.filters.department", { defaultValue: "Department" }) as string}
+          value={departmentId === null ? "" : String(departmentId)}
+          onChange={(v) => setDepartmentId(v === "" ? null : Number(v))}
+          options={[
+            ["", t("employees.allDepartments") as string],
+            ...(departmentsQuery.data?.items ?? []).map(
+              (d) => [String(d.id), d.name] as [string, string],
+            ),
+          ]}
+        />
+        <FilterSelect
+          label={t("employees.filters.status", { defaultValue: "Status" }) as string}
+          value={statusFilter === "active" ? "" : statusFilter}
+          onChange={(v) => setStatusFilter(v === "" ? "active" : (v as StatusFilter))}
+          options={[
+            ["", t("employees.statusFilter.active") as string],
+            ["inactive", t("employees.statusFilter.inactive") as string],
+            ["all", t("employees.statusFilter.all") as string],
+          ]}
+        />
+        <span className="pp-count" title={t("employees.pageOfTotal") as string}>
+          {list.data?.items.length ?? 0} / {list.data?.total ?? 0}
+        </span>
+        <ResetButton
+          active={filtersActive}
+          label={t("employees.filters.reset", { defaultValue: "Reset" }) as string}
+          onClick={resetFilters}
+        />
+        <ViewToggle
+          value={view}
+          onChange={setView}
+          listLabel={t("employees.view.list", { defaultValue: "List view" }) as string}
+          gridLabel={t("employees.view.grid", { defaultValue: "Grid view" }) as string}
+        />
+      </Toolbar>
+      )}
+
+      <div className="card">
+        {list.isError ? (
+          <LoadErrorPanel
+            title={t("employees.loadFailed") as string}
+            onRetry={() => void list.refetch()}
+          />
+        ) : !list.isLoading && visibleItems.length === 0 ? (
+          <EmployeesEmptyState
+            filtered={filtersActive}
+            searched={debouncedQ !== ""}
+            q={debouncedQ}
+            onClear={resetFilters}
+            onAdd={() => setDrawerId(null)}
+            onImport={() => setImportOpen(true)}
+          />
+        ) : view === "grid" ? (
+          list.isLoading ? (
+            <SkeletonGrid count={8} avatar minWidth={280} />
+          ) : (
+            <CardGrid minWidth={280}>
+              {visibleItems.map((e) => {
+                const pendingDeleteId = pendingByEmployee.get(e.id);
+                const inactive = e.status !== "active";
+                const isSelected = selected.has(e.id);
+                const role = primaryRoleFromCodes(e.role_codes ?? []);
+                return (
+                  <div
+                    key={e.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={t("employees.grid.openAria", {
+                      defaultValue: "Open {{name}}",
+                      name: e.full_name,
+                    }) as string}
+                    onClick={() => openProfile(e.id)}
+                    onKeyDown={(ev) => {
+                      if (ev.target !== ev.currentTarget) return;
+                      if (ev.key === "Enter" || ev.key === " ") {
+                        ev.preventDefault();
+                        openProfile(e.id);
+                      }
+                    }}
+                    className={`card clickable${isSelected ? " pp-card-selected" : ""}${inactive ? " pp-card-muted" : ""}`}
+                    style={{ ...gridCardStyle, cursor: "pointer" }}
+                  >
+                    <div className="pp-card-top">
+                      <span onClick={(ev) => ev.stopPropagation()} style={{ display: "inline-flex" }}>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleOne(e.id)}
+                          aria-label={t("employees.selectRow") as string}
+                        />
+                      </span>
+                      <EmployeeAvatar employee={e} size="md" />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <span className="pp-truncate" style={{ fontWeight: 600, fontSize: 14.5 }} title={e.full_name}>
+                          {e.full_name}
+                        </span>
+                        <span className="pp-truncate text-xs text-dim" style={{ marginTop: 2 }}>
                           {e.designation ?? e.department.name}
+                        </span>
+                      </div>
+                      <span onClick={(ev) => ev.stopPropagation()}>
+                        <RowActionsMenu
+                          onView={() => openProfile(e.id)}
+                          onEdit={() => setDrawerId(e.id)}
+                          onDelete={() => setDeletingEmployee(e)}
+                        />
+                      </span>
+                    </div>
+                    <div className="pp-card-pills">
+                      {role && (
+                        <span className={`pill ${rolePillClass(role)}`}>
+                          {t(`role.${role}` as const, { defaultValue: role }) as string}
+                        </span>
+                      )}
+                      {inactive ? (
+                        <DotPill tone="neutral">{t("employees.statusFilter.inactive") as string}</DotPill>
+                      ) : (
+                        <DotPill tone="success">{t("employees.statusValue.active") as string}</DotPill>
+                      )}
+                      {pendingDeleteId !== undefined && (
+                        <span className="pill pill-danger" title={t("employees.delete.pendingTooltip") as string}>
+                          {t("employees.delete.pendingBadge") as string}
+                        </span>
+                      )}
+                    </div>
+                    <div className="pp-card-facts">
+                      <CardFact label={t("employees.col.id") as string}>
+                        <span className="mono pp-nowrap">{e.employee_code}</span>
+                      </CardFact>
+                      <CardFact label={t("employees.col.department") as string}>
+                        <span className="pp-truncate" style={{ maxWidth: 170 }}>
+                          {e.department.name}
+                        </span>
+                      </CardFact>
+                      <CardFact label={t("employees.col.email") as string}>
+                        <span className="pp-truncate text-xs" title={e.email ?? undefined} style={{ maxWidth: 170 }}>
+                          {e.email ?? "—"}
+                        </span>
+                      </CardFact>
+                      <CardFact label={t("employees.col.photos") as string}>
+                        <PhotoCountPill count={e.photo_count} />
+                      </CardFact>
+                    </div>
+                  </div>
+                );
+              })}
+            </CardGrid>
+          )
+        ) : (
+          /* BUG-014 — sticky header. The page itself scrolls (the
+             table doesn't have its own scroll container), so we pin
+             the <thead> rows to the viewport top via position: sticky.
+             Each <th> needs an opaque background so the underlying
+             row content doesn't bleed through during scroll. */
+          <table className="table">
+            <thead className="pp-sticky-thead">
+              <tr>
+                <th className="pp-th-check">
+                  <input
+                    type="checkbox"
+                    checked={allOnPageSelected}
+                    onChange={toggleSelectAllOnPage}
+                    aria-label={t("employees.selectAllOnPage") as string}
+                  />
+                </th>
+                <SortableHeader
+                  column="employee_code"
+                  label={t("employees.col.id") as string}
+                  width={110}
+                  activeColumn={sortBy}
+                  direction={sortDir}
+                  onClick={onSortClick}
+                />
+                <SortableHeader
+                  column="full_name"
+                  label={t("employees.col.employee") as string}
+                  activeColumn={sortBy}
+                  direction={sortDir}
+                  onClick={onSortClick}
+                />
+                <th>{t("employees.col.email") as string}</th>
+                <SortableHeader
+                  column="department"
+                  label={t("employees.col.department") as string}
+                  activeColumn={sortBy}
+                  direction={sortDir}
+                  onClick={onSortClick}
+                />
+                <th>{t("employees.col.role") as string}</th>
+                <th style={{ width: 130 }}>{t("employees.col.photos") as string}</th>
+                <th className="pp-th-end" style={{ width: 64 }}>
+                  {t("employees.col.actions") as string}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.isLoading && <SkeletonRows cols={8} />}
+              {visibleItems.map((e) => {
+                const pendingDeleteId = pendingByEmployee.get(e.id);
+                const inactive = e.status !== "active";
+                const isSelected = selected.has(e.id);
+                const role = primaryRoleFromCodes(e.role_codes ?? []);
+                return (
+                  <tr
+                    key={e.id}
+                    onClick={() => openProfile(e.id)}
+                    className={`pp-row-link${isSelected ? " pp-row-selected" : ""}${inactive ? " pp-row-muted" : ""}`}
+                  >
+                    <td onClick={(ev) => ev.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleOne(e.id)}
+                        aria-label={t("employees.selectRow") as string}
+                      />
+                    </td>
+                    <td className="mono text-sm pp-nowrap">{e.employee_code}</td>
+                    <td>
+                      <div className="pp-person">
+                        <EmployeeAvatar employee={e} />
+                        <div style={{ minWidth: 0 }}>
+                          <div className="pp-person-name">
+                            {e.full_name}
+                            {inactive && (
+                              <DotPill tone="neutral">
+                                {t("employees.statusFilter.inactive") as string}
+                              </DotPill>
+                            )}
+                          </div>
+                          <div className="text-xs text-dim">
+                            {e.designation ?? e.department.name}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </td>
-                  <td className="text-sm">
-                    {e.email ? (
-                      <span className="mono text-xs">{e.email}</span>
-                    ) : (
-                      <span className="text-xs text-dim">—</span>
-                    )}
-                  </td>
-                  <td className="text-sm">{e.department.name}</td>
-                  <td>
-                    {role ? (
-                      <span className={`pill ${rolePillClass(role)}`}>
-                        {t(`role.${role}` as const, {
-                          defaultValue: role,
-                        }) as string}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-dim">—</span>
-                    )}
-                  </td>
-                  <td>
-                    {e.photo_count > 0 ? (
-                      <span
-                        className="pill pill-accent"
-                        title={t("employees.photos.tooltip", {
-                          count: e.photo_count,
-                        }) as string}
-                      >
-                        <Icon name="camera" size={11} />
-                        <span style={{ marginInlineStart: 4 }}>
-                          {t("employees.photos.count", {
-                            count: e.photo_count,
+                    </td>
+                    <td className="text-sm">
+                      {e.email ? (
+                        <span className="pp-truncate pp-email" title={e.email}>{e.email}</span>
+                      ) : (
+                        <span className="text-xs text-dim">—</span>
+                      )}
+                    </td>
+                    <td className="text-sm">{e.department.name}</td>
+                    <td>
+                      {role ? (
+                        <span className={`pill ${rolePillClass(role)}`}>
+                          {t(`role.${role}` as const, {
+                            defaultValue: role,
                           }) as string}
                         </span>
+                      ) : (
+                        <span className="text-xs text-dim">—</span>
+                      )}
+                    </td>
+                    <td>
+                      <PhotoCountPill count={e.photo_count} />
+                    </td>
+                    <td onClick={(ev) => ev.stopPropagation()} className="pp-th-end pp-nowrap">
+                      <span className="pp-actions-end" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        {pendingDeleteId !== undefined && (
+                          <span
+                            className="pill pill-danger"
+                            title={t("employees.delete.pendingTooltip") as string}
+                          >
+                            {t("employees.delete.pendingBadge") as string}
+                          </span>
+                        )}
+                        <RowActionsMenu
+                          onView={() => openProfile(e.id)}
+                          onEdit={() => setDrawerId(e.id)}
+                          onDelete={() => setDeletingEmployee(e)}
+                        />
                       </span>
-                    ) : (
-                      <span className="text-xs text-dim">
-                        {t("employees.photos.none") as string}
-                      </span>
-                    )}
-                  </td>
-                  <td
-                    onClick={(ev) => ev.stopPropagation()}
-                    style={{ textAlign: "end" }}
-                  >
-                    {pendingDeleteId !== undefined && (
-                      <span
-                        className="pill pill-danger"
-                        title={t("employees.delete.pendingTooltip") as string}
-                        style={{ marginInlineEnd: 6 }}
-                      >
-                        {t("employees.delete.pendingBadge") as string}
-                      </span>
-                    )}
-                    <RowActionsMenu
-                      onView={() => setViewId(e.id)}
-                      onEdit={() => setDrawerId(e.id)}
-                      onDelete={() => setDeletingEmployee(e)}
-                    />
-                  </td>
-                </tr>
-              );
-            })}
-            {!list.isLoading && visibleItems.length === 0 && (
-              <tr>
-                <td colSpan={8} className="text-sm text-dim" style={{ padding: 16 }}>
-                  {t("employees.empty") as string}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
 
         {/* Pagination strip — BUG-016 / BUG-017 / BUG-018: hide the
             strip entirely when there's no data. Empty state shouldn't
@@ -633,20 +668,6 @@ export function EmployeesPage() {
       </div>
 
       {importOpen && <ImportModal onClose={() => setImportOpen(false)} />}
-      {viewId !== null && (
-        <EmployeeViewDrawer
-          employeeId={viewId}
-          onClose={() => {
-            setViewId(null);
-            if (searchParams.has("employee")) {
-              const next = new URLSearchParams(searchParams);
-              next.delete("employee");
-              setSearchParams(next, { replace: true });
-            }
-          }}
-          onEdit={() => setDrawerId(viewId)}
-        />
-      )}
       {drawerId !== undefined && (
         <EmployeeDrawer
           employeeId={drawerId}
@@ -682,13 +703,6 @@ export function EmployeesPage() {
 }
 
 /**
- * Per-row kebab menu: vertical 3-dots trigger that opens a small
- * dropdown of View / Edit / Delete actions. Click-outside + Esc
- * dismiss; the trigger and menu both stop event propagation so
- * neither bubbles up to the row click handler (which opens the
- * drawer).
- */
-/**
  * Clickable column header. Click cycles asc → desc → asc on the
  * same column; clicking a different column resets to asc on the
  * new column. Active column shows the chevron icon; inactive
@@ -712,30 +726,12 @@ function SortableHeader({
 }) {
   const active = activeColumn === column;
   return (
-    <th
-      style={{
-        ...(width != null ? { width } : {}),
-        // BUG-014 — opaque so sticky-thead doesn't bleed.
-        background: "var(--bg-elev)",
-        boxShadow: "inset 0 -1px 0 var(--border)",
-      }}
-    >
+    <th style={width != null ? { width } : undefined}>
       <button
         type="button"
         onClick={() => onClick(column)}
         aria-sort={active ? (direction === "asc" ? "ascending" : "descending") : "none"}
-        style={{
-          background: "transparent",
-          border: "none",
-          padding: 0,
-          cursor: "pointer",
-          color: "inherit",
-          font: "inherit",
-          fontWeight: "inherit",
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 4,
-        }}
+        className="pp-sort-btn"
       >
         {label}
         {active ? (
@@ -744,21 +740,8 @@ function SortableHeader({
             size={11}
           />
         ) : (
-          // Stacked tiny chevrons hint the column is sortable
-          // without picking a direction.
-          <span
-            aria-hidden
-            className="text-dim"
-            style={{
-              display: "inline-flex",
-              flexDirection: "column",
-              lineHeight: 0.6,
-              fontSize: 9,
-              opacity: 0.55,
-            }}
-          >
-            <span>▲</span>
-            <span>▼</span>
+          <span aria-hidden className="pp-sort-hint">
+            <Icon name="chevronsUpDown" size={11} />
           </span>
         )}
       </button>
@@ -766,6 +749,7 @@ function SortableHeader({
   );
 }
 
+/** Per-row ⋮ menu (View / Edit / Delete) — the shared KebabMenu. */
 function RowActionsMenu({
   onView,
   onEdit,
@@ -776,146 +760,142 @@ function RowActionsMenu({
   onDelete: () => void;
 }) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement | null>(null);
+  return (
+    <KebabMenu
+      label={t("employees.action.openMenu") as string}
+      items={[
+        { label: t("employees.action.view") as string, icon: <Icon name="eye" size={13} />, onClick: onView },
+        { label: t("employees.action.edit") as string, icon: <Icon name="edit" size={13} />, onClick: onEdit },
+        { label: t("employees.action.delete") as string, icon: <Icon name="trash" size={13} />, onClick: onDelete, danger: true },
+      ]}
+    />
+  );
+}
 
-  useEffect(() => {
-    if (!open) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (
-        wrapRef.current &&
-        !wrapRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false);
+function PhotoCountPill({ count }: { count: number }) {
+  const { t } = useTranslation();
+  return count > 0 ? (
+    <span
+      className="pill pill-accent pp-nowrap"
+      title={t("employees.photos.tooltip", { count }) as string}
+    >
+      <Icon name="camera" size={11} />
+      <span style={{ marginInlineStart: 4 }}>
+        {t("employees.photos.count", { count }) as string}
+      </span>
+    </span>
+  ) : (
+    <span className="text-xs text-dim pp-nowrap">
+      {t("employees.photos.none") as string}
+    </span>
+  );
+}
+
+/** Empty state — no employees at all vs. a search / filter with no hits. */
+function EmployeesEmptyState({
+  filtered,
+  searched,
+  q,
+  onClear,
+  onAdd,
+  onImport,
+}: {
+  filtered: boolean;
+  searched: boolean;
+  q: string;
+  onClear: () => void;
+  onAdd: () => void;
+  onImport: () => void;
+}) {
+  const { t } = useTranslation();
+  if (!filtered) {
+    return (
+      <EmptyPanel
+        tone="accent"
+        icon={<Icon name="users" size={30} />}
+        title={t("employees.emptyState.noneTitle", { defaultValue: "No employees yet" }) as string}
+        body={t("employees.emptyState.noneBody", {
+          defaultValue:
+            "Add people one at a time or import a spreadsheet. Once they have reference photos the cameras can recognise them.",
+        }) as string}
+        actions={
+          <>
+            <button type="button" className="btn" onClick={onImport}>
+              <Icon name="upload" size={12} />
+              {t("employees.importButton") as string}
+            </button>
+            <button type="button" className="btn btn-primary" onClick={onAdd}>
+              <Icon name="plus" size={12} />
+              {t("employees.addButton") as string}
+            </button>
+          </>
+        }
+      />
+    );
+  }
+  return (
+    <EmptyPanel
+      icon={<Icon name={searched ? "search" : "filter"} size={28} />}
+      title={
+        searched
+          ? (t("employees.emptyState.searchTitle", {
+              defaultValue: "No one matches “{{q}}”",
+              q,
+            }) as string)
+          : (t("employees.emptyState.filtersTitle", {
+              defaultValue: "No employees match these filters",
+            }) as string)
       }
-    };
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    document.addEventListener("keydown", handleEsc);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-      document.removeEventListener("keydown", handleEsc);
-    };
-  }, [open]);
+      body={t("employees.emptyState.filtersBody", {
+        defaultValue:
+          "Try a different name, ID or email, or clear the filters to see everyone.",
+      }) as string}
+      actions={
+        <button type="button" className="btn" onClick={onClear}>
+          <Icon name="refresh" size={12} />
+          {t("employees.emptyState.clearFilters", { defaultValue: "Clear filters" }) as string}
+        </button>
+      }
+    />
+  );
+}
 
-  const pick = (fn: () => void) => () => {
-    setOpen(false);
-    fn();
-  };
+/** Small, un-audited list thumbnail (see backend get_photo_thumb_endpoint). */
+export function employeeThumbUrl(employeeId: number, photoId: number): string {
+  return `/api/employees/${employeeId}/photos/${photoId}/thumb`;
+}
 
+/**
+ * List / grid avatar: the employee's reference-photo thumbnail when one
+ * is approved, otherwise coloured initials. Initials render first and
+ * the photo fades in only once it has loaded; a failed load keeps the
+ * initials, so a row never shows a broken image.
+ */
+export function EmployeeAvatar({ employee, size }: { employee: Employee; size?: "md" }) {
+  const [state, setState] = useState<"loading" | "loaded" | "failed">("loading");
+  const photoId = employee.primary_photo_id ?? null;
+  const src = photoId != null ? employeeThumbUrl(employee.id, photoId) : null;
   return (
     <div
-      ref={wrapRef}
-      style={{ position: "relative", display: "inline-block" }}
+      className={`avatar pp-avatar${size === "md" ? " pp-avatar-md" : ""} pp-avatar-photo`}
+      style={{ background: avatarBg(employee.full_name) }}
+      aria-hidden
     >
-      <button
-        type="button"
-        className="icon-btn"
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((s) => !s);
-        }}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={t("employees.action.openMenu") as string}
-        title={t("employees.action.openMenu") as string}
-      >
-        <Icon name="moreVertical" size={14} />
-      </button>
-      {open && (
-        <div
-          role="menu"
-          style={{
-            position: "absolute",
-            top: "100%",
-            insetInlineEnd: 0,
-            marginTop: 4,
-            minWidth: 160,
-            background: "var(--bg-elev)",
-            border: "1px solid var(--border)",
-            borderRadius: "var(--radius-sm)",
-            boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-            zIndex: 30,
-            padding: 4,
-          }}
-        >
-          <MenuItem
-            icon="eye"
-            label={t("employees.action.view") as string}
-            onClick={pick(onView)}
-          />
-          <MenuItem
-            icon="edit"
-            label={t("employees.action.edit") as string}
-            onClick={pick(onEdit)}
-          />
-          <MenuItem
-            icon="trash"
-            label={t("employees.action.delete") as string}
-            onClick={pick(onDelete)}
-            danger
-          />
-        </div>
+      {initials(employee.full_name)}
+      {src && state !== "failed" && (
+        <img
+          src={src}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          className={state === "loaded" ? "is-loaded" : undefined}
+          onLoad={() => setState("loaded")}
+          onError={() => setState("failed")}
+        />
       )}
     </div>
   );
 }
-
-function MenuItem({
-  icon,
-  label,
-  onClick,
-  danger,
-}: {
-  icon: "eye" | "edit" | "trash";
-  label: string;
-  onClick: () => void;
-  danger?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      onClick={onClick}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        width: "100%",
-        padding: "7px 10px",
-        textAlign: "start",
-        background: "transparent",
-        color: danger ? "var(--danger-text)" : "var(--text)",
-        border: "none",
-        cursor: "pointer",
-        borderRadius: "var(--radius-sm)",
-        fontSize: 12.5,
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background = "var(--bg-sunken)";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = "transparent";
-      }}
-    >
-      <Icon name={icon} size={12} />
-      {label}
-    </button>
-  );
-}
-
-const selectStyle = {
-  padding: "6px 10px",
-  fontSize: 12.5,
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius-sm)",
-  background: "var(--bg-elev)",
-  color: "var(--text)",
-  fontFamily: "var(--font-sans)",
-  outline: "none",
-} as const;
 
 export function initials(fullName: string): string {
   const parts = fullName.trim().split(/\s+/).filter(Boolean);
@@ -966,12 +946,4 @@ export function rolePillClass(role: string): string {
     default:
       return "pill-neutral";
   }
-}
-
-function fullyEnrolledPercentage(
-  items: readonly { photo_count: number }[] | undefined,
-): string {
-  if (!items || items.length === 0) return "0%";
-  const enrolled = items.filter((e) => e.photo_count > 0).length;
-  return `${Math.round((enrolled / items.length) * 100)}%`;
 }

@@ -2,9 +2,14 @@
 // super-admin audit + Access as / Suspend toggles, plus the
 // per-tenant branding editor that targets this tenant's id.
 
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { SuperAdminBrandingTab } from "../branding/SuperAdminBrandingTab";
+import { EmptyPanel } from "../components/ListPageUi";
+import { SkeletonCards, SkeletonLine, SkeletonPanel } from "../components/Skeleton";
+import { Panel, PanelEmpty, SoftPill, Tile, TileGrid, nowrap } from "../features/dashboard/DashUi";
+import { Icon } from "../shell/Icon";
+import { TenantStatusPill } from "./saUi";
 import {
   useAccessAs,
   useTenantDetail,
@@ -19,11 +24,52 @@ export function TenantDetailPage() {
   const updateStatus = useUpdateTenantStatus();
   const navigate = useNavigate();
 
-  if (!tenantId || Number.isNaN(tenantId)) return <p>Invalid tenant id.</p>;
-  if (detail.isLoading) return <p>Loading tenant…</p>;
-  if (detail.error) return <p style={{ color: "var(--danger-text)" }}>Error loading tenant.</p>;
+  const back = (
+    <Link to="/super-admin/tenants" className="sa-back">
+      <Icon name="chevronLeft" size={13} />
+      All tenants
+    </Link>
+  );
+
+  if (!tenantId || Number.isNaN(tenantId) || detail.error || (!detail.isLoading && !detail.data)) {
+    return (
+      <div>
+        {back}
+        <div className="card">
+          <EmptyPanel
+            tone="danger"
+            icon={<Icon name="info" size={28} />}
+            title={detail.error ? "Couldn't load this tenant" : "Tenant not found"}
+            body={
+              detail.error
+                ? "The tenant registry did not respond. Check the backend and try again."
+                : "There is no tenant with this id. It may have been deprovisioned."
+            }
+            actions={
+              <button type="button" className="btn" onClick={() => navigate("/super-admin/tenants")}>
+                Back to tenants
+              </button>
+            }
+          />
+        </div>
+      </div>
+    );
+  }
+  if (detail.isLoading || !detail.data) {
+    return (
+      <div role="status" aria-label="Loading tenant" className="sa-stack">
+        {back}
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <SkeletonLine width={240} height={26} />
+          <SkeletonLine width={160} height={12} />
+        </div>
+        <SkeletonCards count={3} />
+        <SkeletonPanel lines={4} />
+        <SkeletonPanel lines={4} />
+      </div>
+    );
+  }
   const t = detail.data;
-  if (!t) return <p>Tenant not found.</p>;
 
   const onAccessAs = async () => {
     if (t.status !== "active") return;
@@ -54,189 +100,112 @@ export function TenantDetailPage() {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-      <header
-        style={{
-          display: "flex",
-          alignItems: "baseline",
-          gap: 16,
-          flexWrap: "wrap",
-        }}
-      >
-        <h1 style={{ fontFamily: "var(--font-display)", fontSize: 28, margin: 0, fontWeight: 400 }}>
-          {t.name}
-        </h1>
-        <span
-          style={{
-            fontFamily: "var(--font-mono)",
-            color: "var(--text-tertiary)",
-            fontSize: 13,
-          }}
-        >
-          {t.schema_name}
-        </span>
-        <span
-          style={{
-            display: "inline-block",
-            padding: "2px 8px",
-            borderRadius: 999,
-            fontSize: 11,
-            fontWeight: 600,
-            background: t.status === "active" ? "var(--success-soft, #e6f4ea)" : "var(--danger-soft)",
-            color: t.status === "active" ? "var(--success-text, #1d6b3a)" : "var(--danger-text)",
-          }}
-        >
-          {t.status}
-        </span>
-        <div style={{ marginInlineStart: "auto", display: "flex", gap: 8 }}>
-          <button
-            type="button"
-            onClick={onAccessAs}
-            disabled={t.status !== "active" || accessAs.isPending}
-            style={{
-              background: "#c0392b",
-              color: "white",
-              border: "none",
-              padding: "8px 14px",
-              borderRadius: "var(--radius-sm)",
-              cursor: t.status === "active" ? "pointer" : "not-allowed",
-              fontWeight: 600,
-              opacity: t.status === "active" ? 1 : 0.4,
-            }}
-          >
-            Access as
-          </button>
-          <button
-            type="button"
-            onClick={onToggleStatus}
-            disabled={updateStatus.isPending}
-            style={{
-              background: "transparent",
-              border: "1px solid var(--border)",
-              padding: "8px 14px",
-              borderRadius: "var(--radius-sm)",
-              cursor: "pointer",
-              fontSize: 13,
-            }}
-          >
-            {t.status === "active" ? "Suspend" : "Reactivate"}
-          </button>
-        </div>
-      </header>
-
-      <div style={cardStyle}>
-        <h2 style={cardTitleStyle}>Stats</h2>
-        <div style={{ display: "flex", gap: 32 }}>
-          <Stat label="Admins" value={t.admin_count} />
-          <Stat label="Active employees" value={t.employee_count} />
-          <Stat label="Created" value={new Date(t.created_at).toLocaleDateString()} />
+    <div className="sa-stack">
+      <div>
+        {back}
+        <div className="page-header" style={{ marginBottom: 0 }}>
+          <div>
+            <h1 className="page-title sa-title-row">
+              {t.name || t.schema_name}
+              <TenantStatusPill status={t.status} />
+            </h1>
+            <p className="page-sub">
+              Schema <span className="mono">{t.schema_name}</span> · tenant #{t.id}
+            </p>
+          </div>
+          <div className="page-actions">
+            <button type="button" className="btn" onClick={onToggleStatus} disabled={updateStatus.isPending}>
+              {t.status === "active" ? "Suspend" : "Reactivate"}
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={onAccessAs}
+              disabled={t.status !== "active" || accessAs.isPending}
+              title={t.status !== "active" ? "Tenant is suspended — unsuspend before impersonating" : "Impersonate this tenant"}
+            >
+              Access as
+            </button>
+          </div>
         </div>
       </div>
 
-      <div style={cardStyle}>
-        <h2 style={cardTitleStyle}>Branding</h2>
+      <TileGrid>
+        <Tile tone="info" icon="shield" label="Admins" value={t.admin_count} sub="users with the Admin role" />
+        <Tile tone="success" icon="users" label="Active employees" value={t.employee_count.toLocaleString()} sub="on the employee register" />
+        <Tile
+          tone="neutral"
+          icon="calendar"
+          label="Created"
+          value={new Date(t.created_at).toLocaleDateString()}
+          sub={new Date(t.created_at).toLocaleTimeString()}
+        />
+      </TileGrid>
+
+      <Panel title="Branding" sub="Accent colour, font and logo this tenant's users see">
         <SuperAdminBrandingTab tenantId={t.id} />
-      </div>
+      </Panel>
 
-      <div style={cardStyle}>
-        <h2 style={cardTitleStyle}>Admin users</h2>
+      <Panel title="Admin users" sub={`${t.admin_users.length} account(s) with the Admin role`} bodyPadding={0}>
         {t.admin_users.length === 0 ? (
-          <p style={{ color: "var(--text-tertiary)", fontSize: 13 }}>No Admin users.</p>
+          <PanelEmpty icon="user" title="No Admin users" body="This tenant has no Admin account. Access as the tenant to create one." />
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <table className="table">
             <thead>
               <tr>
-                <th style={th}>Email</th>
-                <th style={th}>Full name</th>
-                <th style={th}>Status</th>
+                <th>Email</th>
+                <th>Full name</th>
+                <th>Status</th>
               </tr>
             </thead>
             <tbody>
               {t.admin_users.map((u) => (
-                <tr key={u.id} style={{ borderTop: "1px solid var(--border)" }}>
-                  <td style={td}>{u.email}</td>
-                  <td style={td}>{u.full_name}</td>
-                  <td style={td}>{u.is_active ? "active" : "inactive"}</td>
+                <tr key={u.id}>
+                  <td className="text-sm" style={nowrap}>{u.email}</td>
+                  <td className="text-sm sa-strong">{u.full_name}</td>
+                  <td>
+                    {u.is_active ? <SoftPill tone="success">Active</SoftPill> : <SoftPill tone="neutral">Inactive</SoftPill>}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
-      </div>
+      </Panel>
 
-      <div style={cardStyle}>
-        <h2 style={cardTitleStyle}>Recent operator audit (this tenant)</h2>
+      <Panel title="Recent operator audit" sub="Super-admin actions recorded against this tenant" bodyPadding={0}>
         {t.recent_super_admin_audit.length === 0 ? (
-          <p style={{ color: "var(--text-tertiary)", fontSize: 13 }}>
-            No super-admin actions recorded for this tenant.
-          </p>
+          <PanelEmpty icon="clipboard" title="No operator actions yet" body="No super-admin actions recorded for this tenant." />
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+          <table className="table">
             <thead>
               <tr>
-                <th style={th}>When</th>
-                <th style={th}>Action</th>
-                <th style={th}>Entity</th>
-                <th style={th}>Operator</th>
+                <th>When</th>
+                <th>Action</th>
+                <th>Entity</th>
+                <th>Operator</th>
               </tr>
             </thead>
             <tbody>
               {t.recent_super_admin_audit.map((a) => (
-                <tr key={a.id} style={{ borderTop: "1px solid var(--border)" }}>
-                  <td style={td}>{new Date(a.created_at).toLocaleString()}</td>
-                  <td style={td}>
-                    <code style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
-                      {a.action}
-                    </code>
+                <tr key={a.id}>
+                  <td className="text-sm sa-secondary" style={nowrap}>
+                    {new Date(a.created_at).toLocaleString()}
                   </td>
-                  <td style={td}>
+                  <td>
+                    <code className="sa-code">{a.action}</code>
+                  </td>
+                  <td className="text-sm">
                     {a.entity_type}
                     {a.entity_id ? ` #${a.entity_id}` : ""}
                   </td>
-                  <td style={td}>#{a.super_admin_user_id}</td>
+                  <td className="mono text-sm">#{a.super_admin_user_id}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
-      </div>
+      </Panel>
     </div>
   );
 }
-
-function Stat({ label, value }: { label: string; value: number | string }) {
-  return (
-    <div>
-      <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-tertiary)" }}>
-        {label}
-      </div>
-      <div style={{ fontSize: 22, fontWeight: 500, fontVariantNumeric: "tabular-nums" }}>{value}</div>
-    </div>
-  );
-}
-
-const cardStyle = {
-  background: "var(--bg-elev)",
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius-md)",
-  padding: 16,
-  display: "flex" as const,
-  flexDirection: "column" as const,
-  gap: 12,
-};
-const cardTitleStyle = {
-  fontSize: 12,
-  textTransform: "uppercase" as const,
-  letterSpacing: "0.04em",
-  color: "var(--text-tertiary)",
-  margin: 0,
-};
-const th = {
-  padding: "8px 10px",
-  textAlign: "left" as const,
-  fontSize: 11,
-  textTransform: "uppercase" as const,
-  letterSpacing: "0.04em",
-  color: "var(--text-tertiary)",
-};
-const td = { padding: "8px 10px" };

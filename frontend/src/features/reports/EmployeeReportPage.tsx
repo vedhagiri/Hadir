@@ -24,7 +24,11 @@ import { useEmployeeList, useEmployeeDetail } from "../employees/hooks";
 import type { Employee } from "../employees/types";
 import { formatMinutes } from "../attendance/timeFormat";
 import type { AttendanceItem, AttendanceListResponse } from "../attendance/types";
-import { SkeletonRows } from "../../components/Skeleton";
+import { SkeletonCards, SkeletonLines, SkeletonRows } from "../../components/Skeleton";
+import { EmptyPanel, StatCard, StatGrid, Toolbar, pct } from "../../components/ListPageUi";
+import { ATT_ICON, DotPill, FieldGroup, StrokeIcon, fieldDateStyle } from "../attendance/attendanceUi";
+
+import "./reports.css";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -346,6 +350,23 @@ export function EmployeeReportPage() {
     }
   };
 
+  // Which quick-range chip (if any) matches the current range.
+  const quick: "7d" | "30d" | "mtd" | null =
+    end !== todayIso()
+      ? null
+      : start === daysAgoIso(6)
+        ? "7d"
+        : start === daysAgoIso(29)
+          ? "30d"
+          : start === firstOfMonthIso()
+            ? "mtd"
+            : null;
+
+  // Five-state model for the breakdown: loading / error / no records
+  // at all in the range / filter matches nothing / rows.
+  const hasRecords = items.some((it) => it.in_time || it.leave_type_id !== null);
+  const initialLoad = range.isLoading && range.data === null;
+
   const downloadDaysCsv = () => {
     if (!employee) return;
     const csv = rowsToCsv(
@@ -381,6 +402,7 @@ export function EmployeeReportPage() {
         </div>
         <div className="page-actions">
           <button
+            type="button"
             className="btn"
             onClick={() => {
               const code = employee?.employee_code ?? selectedEmployeeId ?? "";
@@ -391,15 +413,12 @@ export function EmployeeReportPage() {
               });
             }}
             disabled={downloadDisabled}
-            style={{
-              opacity: downloadDisabled ? 0.5 : 1,
-              cursor: downloadDisabled ? "not-allowed" : "pointer",
-            }}
           >
             <Icon name="download" size={12} />
             {downloading === "xlsx" ? t("employeeReport.downloadingXlsx") : t("employeeReport.downloadXlsx")}
           </button>
           <button
+            type="button"
             className="btn btn-primary"
             onClick={() => {
               const code = employee?.employee_code ?? selectedEmployeeId ?? "";
@@ -410,7 +429,6 @@ export function EmployeeReportPage() {
               });
             }}
             disabled={downloadDisabled}
-            style={{ cursor: downloadDisabled ? "not-allowed" : "pointer" }}
           >
             <Icon name="fileText" size={12} />
             {downloading === "pdf" ? t("employeeReport.generatingPdf") : t("employeeReport.downloadPdf")}
@@ -419,58 +437,26 @@ export function EmployeeReportPage() {
       </div>
 
       {(info || error) && (
-        <div
-          className="card"
-          role="status"
-          style={{
-            padding: "10px 14px",
-            marginBottom: 12,
-            background: error ? "var(--danger-soft)" : "var(--success-soft)",
-            color: error ? "var(--danger-text)" : "var(--success-text)",
-            fontSize: 13,
-            borderColor: "transparent",
-          }}
-        >
+        <div className={`rp-banner ${error ? "tone-danger" : "tone-success"}`} role="status">
+          <Icon name={error ? "x" : "check"} size={14} />
           {error ?? info}
         </div>
       )}
 
       {/* Search + range */}
-      <div
-        className="card"
-        style={{
-          padding: "12px 14px",
-          marginBottom: 14,
-          display: "flex",
-          alignItems: "center",
-          gap: 14,
-          flexWrap: "wrap",
-        }}
-      >
-        <div style={{ flex: "1 1 320px", minWidth: 260 }}>
-          <EmployeeSearch
-            value={selectedEmployeeId}
-            onChange={setSelectedEmployeeId}
-            initial={employee}
-          />
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span
-            style={{
-              fontSize: 11,
-              fontWeight: 600,
-              letterSpacing: "0.06em",
-              color: "var(--text-tertiary)",
-              textTransform: "uppercase",
-            }}
-          >
-            {t("employeeReport.rangeLabel")}
-          </span>
+      <Toolbar>
+        <EmployeeSearch
+          value={selectedEmployeeId}
+          onChange={setSelectedEmployeeId}
+          initial={employee}
+        />
+        <FieldGroup label={t("employeeReport.rangeLabel")}>
           <DatePicker
             value={start}
             onChange={setStart}
             max={todayIso()}
             ariaLabel={t("employeeReport.startDateAria")}
+            triggerStyle={fieldDateStyle}
           />
           <DatePicker
             value={end}
@@ -478,88 +464,65 @@ export function EmployeeReportPage() {
             min={start}
             max={todayIso()}
             ariaLabel={t("employeeReport.endDateAria")}
+            triggerStyle={fieldDateStyle}
           />
-          <div className="seg" role="tablist" aria-label={t("employeeReport.quickRange")}>
-            <button
-              type="button"
-              className="seg-btn"
-              onClick={() => {
-                setStart(daysAgoIso(6));
-                setEnd(todayIso());
-              }}
-            >
-              7d
-            </button>
-            <button
-              type="button"
-              className="seg-btn"
-              onClick={() => {
-                setStart(daysAgoIso(29));
-                setEnd(todayIso());
-              }}
-            >
-              30d
-            </button>
-            <button
-              type="button"
-              className="seg-btn"
-              onClick={() => {
-                setStart(firstOfMonthIso());
-                setEnd(todayIso());
-              }}
-            >
-              MTD
-            </button>
-          </div>
+        </FieldGroup>
+        <div className="seg" role="group" aria-label={t("employeeReport.quickRange")}>
+          <button
+            type="button"
+            className={`seg-btn${quick === "7d" ? " active" : ""}`}
+            aria-pressed={quick === "7d"}
+            onClick={() => {
+              setStart(daysAgoIso(6));
+              setEnd(todayIso());
+            }}
+          >
+            7d
+          </button>
+          <button
+            type="button"
+            className={`seg-btn${quick === "30d" ? " active" : ""}`}
+            aria-pressed={quick === "30d"}
+            onClick={() => {
+              setStart(daysAgoIso(29));
+              setEnd(todayIso());
+            }}
+          >
+            30d
+          </button>
+          <button
+            type="button"
+            className={`seg-btn${quick === "mtd" ? " active" : ""}`}
+            aria-pressed={quick === "mtd"}
+            onClick={() => {
+              setStart(firstOfMonthIso());
+              setEnd(todayIso());
+            }}
+          >
+            MTD
+          </button>
         </div>
-      </div>
+      </Toolbar>
 
       {/* Selected-employee card */}
       {selectedEmployeeId === null && (
-        <div
-          className="card"
-          style={{
-            padding: 28,
-            textAlign: "center",
-            color: "var(--text-tertiary)",
-          }}
-        >
-          <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>
-            {t("employeeReport.pickEmployee")}
-          </div>
-          <div className="text-xs">
-            {t("employeeReport.pickEmployeeHint")}
-          </div>
+        <div className="card">
+          <EmptyPanel
+            tone="accent"
+            icon={<StrokeIcon>{ATT_ICON.people}</StrokeIcon>}
+            title={t("employeeReport.pickEmployee")}
+            body={t("employeeReport.pickEmployeeHint")}
+          />
         </div>
       )}
 
       {selectedEmployeeId !== null && employee && (
         <>
-          <div className="card" style={{ padding: 16, marginBottom: 14 }}>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "flex-start",
-                gap: 16,
-                flexWrap: "wrap",
-              }}
-            >
-              <Avatar name={employee.full_name} seed={employee.employee_code} size={56} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <h2
-                  style={{
-                    fontFamily: "var(--font-display)",
-                    fontSize: 22,
-                    margin: 0,
-                    letterSpacing: "-0.01em",
-                  }}
-                >
-                  {employee.full_name}
-                </h2>
-                <div
-                  className="text-sm text-dim"
-                  style={{ marginTop: 2 }}
-                >
+          <div className="card at-card-body rp-profile rp-profile-card">
+              <Avatar name={employee.full_name} size="lg" />
+              <div className="rp-profile-main">
+                <h2 className="rp-profile-name">{employee.full_name}</h2>
+                <div className="rp-profile-meta">
                   <span className="mono">{employee.employee_code}</span>
                   {employee.designation && (
                     <span> · {employee.designation}</span>
@@ -569,14 +532,7 @@ export function EmployeeReportPage() {
                     <span> · {t("employeeReport.reportsTo", { name: employee.reports_to_full_name })}</span>
                   )}
                 </div>
-                <div
-                  style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    gap: 6,
-                    marginTop: 8,
-                  }}
-                >
+                <div className="rp-profile-pills">
                   {(employee.role_codes ?? []).map((r) => (
                     <span key={r} className="pill pill-neutral">
                       {r}
@@ -600,86 +556,137 @@ export function EmployeeReportPage() {
                   {t("employeeReport.raiseRequest")}
                 </button>
               )}
-            </div>
           </div>
 
-          {/* Stat tiles */}
-          <div
-            className="grid"
-            style={{
-              gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-              gap: 10,
-              marginBottom: 14,
-            }}
-          >
-            <StatTile
+          {/* Loading → shape-matched skeletons; error → danger panel
+              with Retry; no records at all → single accent panel (stats
+              + table hidden); otherwise stats + breakdown. */}
+          {initialLoad ? (
+            <>
+              <SkeletonCards count={5} minWidth={180} />
+              <div className="card">
+                <div className="at-card-head">
+                  <h3 className="card-title">{t("employeeReport.breakdownTitle")}</h3>
+                </div>
+                <div className="at-scroll-x">
+                  <table className="table">
+                    <tbody>
+                      <SkeletonRows cols={8} />
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          ) : range.isError ? (
+            <div className="card">
+              <EmptyPanel
+                tone="danger"
+                icon={<StrokeIcon>{ATT_ICON.alert}</StrokeIcon>}
+                title={t("employeeReport.errorTitle", { defaultValue: "Couldn't load attendance" })}
+                body={t("employeeReport.loadFailed")}
+                actions={
+                  <button type="button" className="btn" onClick={range.retry}>
+                    <Icon name="refresh" size={12} />
+                    {t("employeeReport.retry", { defaultValue: "Retry" })}
+                  </button>
+                }
+              />
+            </div>
+          ) : !hasRecords ? (
+            <div className="card">
+              <EmptyPanel
+                tone="accent"
+                icon={<StrokeIcon>{ATT_ICON.calendar}</StrokeIcon>}
+                title={t("employeeReport.noRecordsTitle", { defaultValue: "No attendance recorded in this range" })}
+                body={t("employeeReport.noRecordsBody", {
+                  defaultValue: "{{name}} has no check-ins or approved leave between {{start}} and {{end}}.",
+                  name: employee.full_name,
+                  start,
+                  end,
+                })}
+                actions={
+                  quick !== "30d" ? (
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => {
+                        setStart(daysAgoIso(29));
+                        setEnd(todayIso());
+                      }}
+                    >
+                      <Icon name="calendar" size={12} />
+                      {t("employeeReport.widen30", { defaultValue: "Show last 30 days" })}
+                    </button>
+                  ) : undefined
+                }
+              />
+            </div>
+          ) : (
+          <>
+          {/* Summary — derived from the loaded day rows; each card
+              doubles as the day-by-day status filter. */}
+          <StatGrid>
+            <StatCard
+              tone="info"
+              icon={ATT_ICON.calendar}
               label={t("employeeReport.statWorkingDays")}
               value={stats.workingDays}
-              onClick={() => setStatusFilter(null)}
+              sub={
+                stats.totalMinutes > 0
+                  ? `${t("employeeReport.statTotalHours")}: ${formatMinutes(stats.totalMinutes)}${
+                      stats.otMinutes > 0
+                        ? ` · ${t("employeeReport.statOtHint", { n: formatMinutes(stats.otMinutes) })}`
+                        : ""
+                    }`
+                  : `${t("employeeReport.statTotalHours")}: —`
+              }
               active={statusFilter === null}
+              onClick={() => setStatusFilter(null)}
             />
-            <StatTile
+            <StatCard
+              tone="success"
+              icon={ATT_ICON.present}
               label={t("employeeReport.statPresent")}
               value={counts.present}
-              tone="success"
-              onClick={() => toggleStatus("present")}
+              sub={`${pct(counts.present, stats.workingDays)}%`}
               active={statusFilter === "present"}
-              hint={
-                stats.workingDays > 0
-                  ? t("employeeReport.statPresentHint", {
-                      pct: Math.round((counts.present / stats.workingDays) * 100),
-                    })
-                  : undefined
-              }
+              onClick={() => toggleStatus("present")}
             />
-            <StatTile
+            <StatCard
+              tone="warning"
+              icon={ATT_ICON.late}
               label={t("employeeReport.statLate")}
               value={counts.late}
-              tone="warning"
-              onClick={() => toggleStatus("late")}
+              sub={`${pct(counts.late, stats.workingDays)}%`}
               active={statusFilter === "late"}
+              onClick={() => toggleStatus("late")}
             />
-            <StatTile
+            <StatCard
+              tone="danger"
+              icon={ATT_ICON.absent}
               label={t("employeeReport.statAbsent")}
               value={counts.absent}
-              tone="danger"
-              onClick={() => toggleStatus("absent")}
+              sub={`${pct(counts.absent, stats.workingDays)}%`}
               active={statusFilter === "absent"}
+              onClick={() => toggleStatus("absent")}
             />
-            <StatTile
+            <StatCard
+              tone="neutral"
+              icon={ATT_ICON.leave}
               label={t("employeeReport.statOnLeave", { defaultValue: "On Leave" })}
               value={counts.leave}
-              onClick={() => toggleStatus("leave")}
+              sub={`${pct(counts.leave, stats.workingDays)}%`}
               active={statusFilter === "leave"}
+              onClick={() => toggleStatus("leave")}
             />
-            <StatTile
-              label={t("employeeReport.statTotalHours")}
-              value={stats.totalMinutes > 0 ? formatMinutes(stats.totalMinutes) : "—"}
-              hint={
-                stats.otMinutes > 0
-                  ? t("employeeReport.statOtHint", { n: formatMinutes(stats.otMinutes) })
-                  : undefined
-              }
-              hintTone="success"
-            />
-          </div>
+          </StatGrid>
 
           {/* Day-by-day breakdown */}
           <div className="card">
-            <div className="card-head">
-              <div>
-                <h3 className="card-title">{t("employeeReport.breakdownTitle")}</h3>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <label
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    fontSize: 12.5,
-                    color: "var(--text-secondary)",
-                  }}
-                >
+            <div className="at-card-head">
+              <h3 className="card-title">{t("employeeReport.breakdownTitle")}</h3>
+              <div className="at-card-head-actions">
+                <label className="rp-inline-check">
                   <input
                     type="checkbox"
                     checked={showWeekends}
@@ -688,7 +695,8 @@ export function EmployeeReportPage() {
                   {t("employeeReport.showWeekends")}
                 </label>
                 <button
-                  className="btn btn-sm"
+                  type="button"
+                  className="btn btn-sm btn-ghost"
                   onClick={() => {
                     if (!employee) return;
                     gateDownload({
@@ -704,6 +712,23 @@ export function EmployeeReportPage() {
                 </button>
               </div>
             </div>
+            {filteredDates.length === 0 ? (
+              <EmptyPanel
+                tone="neutral"
+                icon={<Icon name="filter" size={28} />}
+                title={t("employeeReport.empty.title", { defaultValue: "No days match this filter" })}
+                body={t("employeeReport.empty.body", { defaultValue: "Pick another summary card or widen the date range." })}
+                actions={
+                  statusFilter ? (
+                    <button type="button" className="btn" onClick={() => setStatusFilter(null)}>
+                      <Icon name="refresh" size={12} />
+                      {t("employeeReport.empty.showAll", { defaultValue: "Show all days" })}
+                    </button>
+                  ) : undefined
+                }
+              />
+            ) : (
+            <div className={`at-scroll-x${range.isLoading ? " at-faded" : ""}`}>
             <table className="table">
               <thead>
                 <tr>
@@ -719,34 +744,18 @@ export function EmployeeReportPage() {
                 </tr>
               </thead>
               <tbody>
-                {range.isLoading && (
-                  <SkeletonRows cols={9} />
-                )}
-                {range.isError && (
-                  <tr>
-                    <td
-                      colSpan={9}
-                      className="text-sm"
-                      style={{ padding: 16, color: "var(--danger-text)" }}
-                    >
-                      {t("employeeReport.loadFailed")}
-                    </td>
-                  </tr>
-                )}
-                {!range.isLoading &&
-                  !range.isError &&
-                  filteredDates.map((d) => {
+                {filteredDates.map((d) => {
                     const it = itemByDate.get(d) ?? null;
                     return (
                       <tr
                         key={d}
+                        className="at-row-clickable"
                         onClick={() => setOpenDayIso(d)}
-                        style={{ cursor: "pointer" }}
                         title={t("employeeReport.openDayDetail", {
                           defaultValue: "View day detail",
                         })}
                       >
-                        <td className="mono text-sm">{dt.formatLocalDate(d) || d}</td>
+                        <td className="mono text-sm at-nowrap">{dt.formatLocalDate(d) || d}</td>
                         <td className="text-sm">{dayName(d)}</td>
                         <td>
                           <DayStatusPill item={it} isoDate={d} />
@@ -768,9 +777,9 @@ export function EmployeeReportPage() {
                         <td className="text-xs">
                           {flagText(it)}
                         </td>
-                        <td className="text-dim" style={{ textAlign: "end" }}>
-                          <span aria-hidden style={{ fontSize: 14 }}>
-                            ›
+                        <td className="rp-row-chev-cell">
+                          <span aria-hidden className="rp-row-chev">
+                            <Icon name="chevronRight" size={14} />
                           </span>
                         </td>
                       </tr>
@@ -778,7 +787,11 @@ export function EmployeeReportPage() {
                   })}
               </tbody>
             </table>
+            </div>
+            )}
           </div>
+          </>
+          )}
         </>
       )}
 
@@ -849,22 +862,16 @@ function EmployeeSearch({
   }, []);
 
   return (
-    <div ref={wrapRef} style={{ position: "relative" }}>
-      <span
-        aria-hidden
-        style={{
-          position: "absolute",
-          insetInlineStart: 10,
-          top: "50%",
-          transform: "translateY(-50%)",
-          color: "var(--text-tertiary)",
-          fontSize: 14,
-        }}
-      >
-        ⌕
+    <div ref={wrapRef} className="rp-search">
+      <span aria-hidden className="rp-search-icon">
+        <Icon name="search" size={15} />
       </span>
       <input
         type="text"
+        className="input"
+        role="combobox"
+        aria-expanded={open}
+        aria-autocomplete="list"
         value={open ? q : value !== null ? displayLabel : q}
         placeholder={t("employeeReport.search.placeholder")}
         onFocus={() => setOpen(true)}
@@ -873,42 +880,17 @@ function EmployeeSearch({
           setOpen(true);
           if (e.target.value === "") onChange(null);
         }}
-        style={{
-          ...inputStyle,
-          width: "100%",
-          paddingInlineStart: 28,
-        }}
+        aria-label={t("employeeReport.search.placeholder")}
       />
       {open && q.length >= 0 && (
-        <div
-          role="listbox"
-          style={{
-            position: "absolute",
-            top: "calc(100% + 4px)",
-            insetInlineStart: 0,
-            insetInlineEnd: 0,
-            background: "var(--bg-elev)",
-            border: "1px solid var(--border)",
-            borderRadius: "var(--radius-sm)",
-            boxShadow: "var(--shadow-md)",
-            zIndex: 10,
-            maxHeight: 280,
-            overflowY: "auto",
-          }}
-        >
+        <div role="listbox" className="rp-search-menu">
           {list.isLoading && (
-            <div
-              className="text-sm text-dim"
-              style={{ padding: "8px 12px" }}
-            >
-              {t("employeeReport.search.searching")}
+            <div className="rp-search-note">
+              <SkeletonLines lines={2} />
             </div>
           )}
           {!list.isLoading && items.length === 0 && (
-            <div
-              className="text-sm text-dim"
-              style={{ padding: "8px 12px" }}
-            >
+            <div className="rp-search-note">
               {q.trim() ? t("employeeReport.search.noMatches") : t("employeeReport.search.typeToSearch")}
             </div>
           )}
@@ -918,35 +900,18 @@ function EmployeeSearch({
               type="button"
               role="option"
               aria-selected={emp.id === value}
+              className="rp-search-item"
               onClick={() => {
                 onChange(emp.id);
                 setOpen(false);
                 setQ("");
               }}
-              style={{
-                display: "flex",
-                width: "100%",
-                alignItems: "center",
-                gap: 10,
-                padding: "8px 12px",
-                background:
-                  emp.id === value ? "var(--bg-sunken)" : "transparent",
-                border: "none",
-                cursor: "pointer",
-                textAlign: "start",
-              }}
             >
-              <Avatar
-                name={emp.full_name}
-                seed={emp.employee_code}
-                size={28}
-              />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="text-sm" style={{ fontWeight: 500 }}>
-                  {emp.full_name}
-                </div>
-                <div className="mono text-xs text-dim">
-                  {emp.employee_code} · {emp.department.name}
+              <Avatar name={emp.full_name} size="sm" />
+              <div className="rp-search-item-main">
+                <div className="rp-search-item-name">{emp.full_name}</div>
+                <div className="rp-search-item-meta">
+                  <span className="mono">{emp.employee_code}</span> · {emp.department.name}
                 </div>
               </div>
             </button>
@@ -975,89 +940,6 @@ function reportDayBucket(
   return "present";
 }
 
-function StatTile({
-  label,
-  value,
-  hint,
-  hintTone,
-  tone,
-  onClick,
-  active,
-}: {
-  label: string;
-  value: number | string;
-  hint?: string | undefined;
-  hintTone?: "success" | undefined;
-  tone?: "success" | "warning" | "danger" | undefined;
-  onClick?: () => void;
-  active?: boolean;
-}) {
-  const toneBg: Record<string, string> = {
-    success: "var(--success-soft)",
-    warning: "var(--warning-soft)",
-    danger: "var(--danger-soft)",
-  };
-  const toneColor: Record<string, string> = {
-    success: "var(--success-text)",
-    warning: "var(--warning-text)",
-    danger: "var(--danger-text)",
-  };
-  const bg = tone ? toneBg[tone] : "var(--bg-elev)";
-  const labelColor = tone ? toneColor[tone] : "var(--text-tertiary)";
-  const clickable = onClick !== undefined;
-  return (
-    <div
-      className="stat"
-      onClick={onClick}
-      role={clickable ? "button" : undefined}
-      tabIndex={clickable ? 0 : undefined}
-      aria-pressed={clickable ? !!active : undefined}
-      onKeyDown={
-        clickable
-          ? (e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                onClick?.();
-              }
-            }
-          : undefined
-      }
-      style={{
-        background: bg,
-        border: active
-          ? "1.5px solid var(--accent)"
-          : tone
-            ? "1px solid transparent"
-            : "1px solid var(--border)",
-        cursor: clickable ? "pointer" : undefined,
-        boxShadow: active
-          ? "0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent)"
-          : undefined,
-        transition: "border-color 100ms ease, box-shadow 100ms ease",
-      }}
-    >
-      <div className="stat-label" style={{ color: labelColor }}>
-        {label}
-      </div>
-      <div className="stat-value">{value}</div>
-      {hint && (
-        <div
-          className="text-xs"
-          style={{
-            marginTop: 4,
-            color:
-              hintTone === "success"
-                ? "var(--success-text)"
-                : "var(--text-tertiary)",
-          }}
-        >
-          {hint}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // Status priority mirrors DailyStatusPill in DailyAttendancePage /
 // ReportsPage so all three surfaces agree on the meaning of a row.
 // The previous version of this pill ignored ``pending`` / ``is_weekend``
@@ -1075,36 +957,36 @@ function DayStatusPill({
   const { t } = useTranslation();
   if (!item) {
     if (isWeekend(isoDate))
-      return <span className="pill pill-neutral">{t("employeeReport.status.weekend")}</span>;
+      return <DotPill tone="neutral">{t("employeeReport.status.weekend")}</DotPill>;
     if (isoDate > todayIso())
-      return <span className="pill pill-neutral">—</span>;
-    return <span className="pill pill-neutral">{t("employeeReport.status.noRecord")}</span>;
+      return <DotPill tone="neutral">—</DotPill>;
+    return <DotPill tone="neutral">{t("employeeReport.status.noRecord")}</DotPill>;
   }
   if (item.leave_type_id !== null) {
-    return <span className="pill pill-info">{t("employeeReport.status.onLeave")}</span>;
+    return <DotPill tone="info">{t("employeeReport.status.onLeave")}</DotPill>;
   }
   if (item.is_holiday && !item.in_time) {
     return (
-      <span className="pill pill-info">
+      <DotPill tone="accent">
         {item.holiday_name
           ? t("employeeReport.status.holidayNamed", { name: item.holiday_name })
           : t("employeeReport.status.holiday")}
-      </span>
+      </DotPill>
     );
   }
   if (item.is_weekend && !item.in_time) {
-    return <span className="pill pill-neutral">{t("employeeReport.status.weekend")}</span>;
+    return <DotPill tone="neutral">{t("employeeReport.status.weekend")}</DotPill>;
   }
   if (item.pending) {
-    return <span className="pill pill-info">{t("employeeReport.status.waitingLogin")}</span>;
+    return <DotPill tone="info">{t("employeeReport.status.waitingLogin")}</DotPill>;
   }
   if (!item.in_time) {
-    return <span className="pill pill-danger">{t("employeeReport.status.absent")}</span>;
+    return <DotPill tone="danger">{t("employeeReport.status.absent")}</DotPill>;
   }
   if (item.late) {
-    return <span className="pill pill-warning">{t("employeeReport.status.late")}</span>;
+    return <DotPill tone="warning">{t("employeeReport.status.late")}</DotPill>;
   }
-  return <span className="pill pill-success">{t("employeeReport.status.present")}</span>;
+  return <DotPill tone="success">{t("employeeReport.status.present")}</DotPill>;
 }
 
 function statusLabel(item: AttendanceItem | null): string {
@@ -1134,16 +1016,8 @@ function flagText(item: AttendanceItem | null): string {
   return parts.length === 0 ? "—" : parts.join(" · ");
 }
 
-// Avatar — colored circle with up to two initials, deterministic from seed.
-function Avatar({
-  name,
-  seed,
-  size = 36,
-}: {
-  name: string;
-  seed: string;
-  size?: number;
-}) {
+// Avatar — design ``.avatar`` (accent gradient) with up to two initials.
+function Avatar({ name, size = "sm" }: { name: string; size?: "sm" | "lg" }) {
   const initials = (() => {
     const parts = name.trim().split(/\s+/);
     if (parts.length === 0) return "?";
@@ -1151,41 +1025,8 @@ function Avatar({
     const last = parts.length > 1 ? parts[parts.length - 1]?.[0] ?? "" : "";
     return (first + last).toUpperCase() || "?";
   })();
-  const palette = [
-    "#1f7ae0",
-    "#0aa57c",
-    "#d97706",
-    "#c026d3",
-    "#dc2626",
-    "#0891b2",
-    "#7c3aed",
-    "#65a30d",
-    "#b45309",
-    "#be185d",
-  ];
-  let hash = 0;
-  for (let i = 0; i < seed.length; i += 1) {
-    hash = (hash * 31 + seed.charCodeAt(i)) | 0;
-  }
-  const bg = palette[Math.abs(hash) % palette.length] ?? palette[0];
   return (
-    <span
-      aria-hidden
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        width: size,
-        height: size,
-        borderRadius: "50%",
-        background: bg,
-        color: "white",
-        fontSize: Math.round(size * 0.36),
-        fontWeight: 600,
-        flexShrink: 0,
-        letterSpacing: "0.02em",
-      }}
-    >
+    <span aria-hidden className={`avatar ${size === "lg" ? "rp-avatar-lg" : "rp-avatar-sm"}`}>
       {initials}
     </span>
   );
@@ -1203,10 +1044,12 @@ function useEmployeeAttendance(
   data: AttendanceListResponse | null;
   isLoading: boolean;
   isError: boolean;
+  retry: () => void;
 } {
   const [data, setData] = useState<AttendanceListResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isError, setIsError] = useState(false);
+  const [reload, setReload] = useState(0);
   useEffect(() => {
     if (employeeId === null) {
       setData(null);
@@ -1230,17 +1073,6 @@ function useEmployeeAttendance(
     return () => {
       cancelled = true;
     };
-  }, [employeeId, start, end]);
-  return { data, isLoading, isError };
+  }, [employeeId, start, end, reload]);
+  return { data, isLoading, isError, retry: () => setReload((n) => n + 1) };
 }
-
-const inputStyle = {
-  padding: "6px 10px",
-  fontSize: 12.5,
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius-sm)",
-  background: "var(--bg-elev)",
-  color: "var(--text)",
-  fontFamily: "var(--font-sans)",
-  outline: "none",
-} as const;

@@ -311,14 +311,16 @@ export function Sidebar({ role }: Props) {
 
   return (
     <aside className="sidebar">
-      {/* Brand row — logo only, centred, sharing the topbar's height so
-          the two meet on one baseline (see sidebar-rail.css). The tenant
-          name is not rendered here; it stays as the image's alt text.
-          The hamburger in the Topbar is the only toggle. */}
-      <div className="sidebar-brand">
+      {/* Brand row — sharing the topbar's height so the two meet on one
+          baseline (see sidebar-rail.css). With a tenant-uploaded logo the
+          tenant's display name (Settings → Branding → Corporate display
+          name) sits beside it; the product lockup already carries its own
+          wordmark, so it renders alone. The hamburger in the Topbar is the
+          only toggle. */}
+      <div className={`sidebar-brand${tenantLogoSrc ? " has-tenant-name" : ""}`}>
         <img
           src={brandLogoSrc}
-          alt={brandName}
+          alt={tenantLogoSrc ? "" : brandName}
           className="brand-logo"
           style={{
             width: 28,
@@ -327,6 +329,11 @@ export function Sidebar({ role }: Props) {
             flexShrink: 0,
           }}
         />
+        {tenantLogoSrc && (
+          <span className="brand-tenant-name" title={brandName}>
+            {brandName}
+          </span>
+        )}
       </div>
 
       {/* Scrollable nav block — flex:1 grabs the remaining height,

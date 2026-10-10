@@ -1,0 +1,15 @@
+/* Settings → Email — provider wizard (prefix em-). */
+.em-stepper { list-style: none; margin: 0; padding: 0; display: flex; align-items: center; gap: 8px; }
+.em-step { display: flex; align-items: center; gap: 8px; flex: none; min-width: 0; color: var(--text-tertiary); font-size: 12.5px; font-weight: 600; }
+.em-step + .em-step::before { content: ""; flex: 0 0 32px; height: 1px; margin-inline-end: 2px; background: var(--border-strong); }
+.em-step-dot {
+  width: 22px; height: 22px; flex: none; border-radius: 50%;
+  display: grid; place-items: center; font-size: 11.5px; font-weight: 700;
+  border: 1.5px solid var(--border-strong); background: var(--bg-elev);
+}
+.em-step-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.em-step.is-current { color: var(--text); }
+.em-step.is-current .em-step-dot { background: var(--accent); border-color: var(--accent); color: #fff; }
+.em-step.is-done { color: var(--text-secondary); }
+.em-step.is-done .em-step-dot { background: var(--success-soft); border-color: transparent; color: var(--success-text); }
+.em-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }

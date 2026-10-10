@@ -9,6 +9,7 @@ import { Link } from "react-router-dom";
 
 import { api } from "../../api/client";
 import { Icon } from "../../shell/Icon";
+import { SkeletonGrid } from "../../components/Skeleton";
 import { toast } from "../../shell/Toaster";
 import { validatePhotoFilesBasic } from "../../util/photoValidation";
 import { useBulkIngestPhotos } from "./hooks";
@@ -214,7 +215,7 @@ function UploadPhase({
   const totalMB = (files.reduce((n, f) => n + f.size, 0) / 1024 / 1024).toFixed(1);
 
   return (
-    <div style={{ maxWidth: 860, margin: "0 auto" }}>
+    <div>
       <input
         ref={inputRef}
         type="file"
@@ -227,6 +228,9 @@ function UploadPhase({
         }}
       />
 
+      <div
+        style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "stretch" }}
+      >
       {/* ── Drop zone ── */}
       <div
         role="button"
@@ -251,8 +255,10 @@ function UploadPhase({
         }}
         style={{
           border: `2px dashed ${dragging ? "var(--accent)" : "var(--border-strong)"}`,
-          borderRadius: 16,
-          padding: "60px 40px",
+          borderRadius: 12,
+          padding: "52px 32px",
+          flex: "2 1 460px",
+          minWidth: 0,
           textAlign: "center",
           cursor: "pointer",
           background: dragging ? "var(--accent-soft)" : "var(--bg-sunken)",
@@ -328,6 +334,9 @@ function UploadPhase({
         </button>
       </div>
 
+      <NamingGuide />
+      </div>
+
       {/* ── Selected files ── */}
       {files.length > 0 && (
         <div className="card" style={{ marginTop: 20 }}>
@@ -379,6 +388,86 @@ function UploadPhase({
         </div>
       )}
     </div>
+  );
+}
+
+/** Right-hand "how to name your files" guide shown next to the drop zone. */
+function NamingGuide() {
+  const { t } = useTranslation();
+  const steps: Array<{ title: string; body: React.ReactNode }> = [
+    {
+      title: t("bulkPhotoUpload.guide.codeTitle", { defaultValue: "Start with the employee ID" }),
+      body: t("bulkPhotoUpload.guide.codeBody", {
+        defaultValue: "Use the exact ID shown on the Employees page. Unknown IDs are flagged in the review step — nobody is created automatically.",
+      }),
+    },
+    {
+      title: t("bulkPhotoUpload.guide.angleTitle", { defaultValue: "Add the angle after an underscore" }),
+      body: (
+        <span style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 2 }}>
+          {VALID_ANGLES.map((a) => (
+            <code
+              key={a}
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 11.5,
+                background: "var(--bg-sunken)",
+                border: "1px solid var(--border)",
+                padding: "1px 6px",
+                borderRadius: 6,
+              }}
+            >
+              OM0097_{a}.jpg
+            </code>
+          ))}
+        </span>
+      ),
+    },
+    {
+      title: t("bulkPhotoUpload.guide.reviewTitle", { defaultValue: "Check the matches, then upload" }),
+      body: t("bulkPhotoUpload.guide.reviewBody", {
+        defaultValue: "You can fix or skip any photo before anything is saved. Clear, front-facing photos work best.",
+      }),
+    },
+  ];
+  return (
+    <aside
+      className="card"
+      aria-label={t("bulkPhotoUpload.guide.title", { defaultValue: "How to name your photos" })}
+      style={{ flex: "1 1 280px", padding: 18, borderRadius: 12, display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}
+    >
+      <div style={{ fontSize: 14, fontWeight: 600 }}>
+        {t("bulkPhotoUpload.guide.title", { defaultValue: "How to name your photos" })}
+      </div>
+      <ol style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 14 }}>
+        {steps.map((s, i) => (
+          <li key={i} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+            <span
+              aria-hidden
+              className="mono"
+              style={{
+                width: 24,
+                height: 24,
+                flex: "0 0 24px",
+                borderRadius: "50%",
+                background: "var(--accent-soft)",
+                color: "var(--accent-text, var(--accent))",
+                display: "grid",
+                placeItems: "center",
+                fontSize: 12,
+                fontWeight: 700,
+              }}
+            >
+              {i + 1}
+            </span>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{s.title}</div>
+              <div style={{ fontSize: 12.5, lineHeight: 1.5, color: "var(--text-secondary)", marginTop: 2 }}>{s.body}</div>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </aside>
   );
 }
 
@@ -524,9 +613,8 @@ function ReviewPhase({
 
       {/* Loading */}
       {isLoadingEmployees && (
-        <div className="empty" style={{ paddingTop: 60 }}>
-          <Icon name="activity" size={24} />
-          <p style={{ marginTop: 10 }}>{t("bulkPhotoUpload.review.lookingUp")}</p>
+        <div aria-label={t("bulkPhotoUpload.review.lookingUp")} role="status">
+          <SkeletonGrid count={6} avatar minWidth={220} />
         </div>
       )}
 

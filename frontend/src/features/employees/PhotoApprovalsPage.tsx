@@ -17,7 +17,18 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import { Icon } from "../../shell/Icon";
 import { toast } from "../../shell/Toaster";
-import { SkeletonGrid } from "../../components/Skeleton";
+import { SkeletonCards, SkeletonGrid } from "../../components/Skeleton";
+import {
+  CardGrid,
+  EmptyPanel,
+  FilterSelect,
+  ResetButton,
+  SearchField,
+  StatGrid,
+  Toolbar,
+} from "../../components/ListPageUi";
+import { DotPill, LoadErrorPanel, PEOPLE_ICON, StatTile } from "./peopleUi";
+import { rolePillClass } from "./EmployeesPage";
 
 interface PendingPhoto {
   photo_id: number;
@@ -88,6 +99,35 @@ export function PhotoApprovalsPage() {
   const pendingItems = pending.data?.items ?? [];
   const approvedItems = approved.data?.items ?? [];
 
+  // Client-side search + angle filter over whichever tab is open.
+  const [q, setQ] = useState("");
+  const [angleF, setAngleF] = useState("");
+  const filtersActive = q.trim() !== "" || angleF !== "";
+  const resetFilters = () => {
+    setQ("");
+    setAngleF("");
+  };
+  const matches = (p: PendingPhoto) => {
+    if (angleF && p.angle !== angleF) return false;
+    const needle = q.trim().toLowerCase();
+    if (!needle) return true;
+    return [p.employee_full_name, p.employee_code, p.uploaded_by_email ?? ""]
+      .join(" ")
+      .toLowerCase()
+      .includes(needle);
+  };
+  const pendingShown = pendingItems.filter(matches);
+  const approvedShown = approvedItems.filter(matches);
+  const waitingPeople = new Set(pendingItems.map((p) => p.employee_id)).size;
+
+  // Five-state rendering: stats + tabs + toolbar only once the pending
+  // queue has loaded without error. An empty pending queue is a genuine
+  // "all caught up" (the Approved tab can still hold history).
+  const showChrome = !pending.isLoading && !pending.isError;
+  // No records at all (nothing pending, nothing approved yet) → hide the
+  // stat row; the tab strip stays so the Approved history is reachable.
+  const showStats = showChrome && (pendingItems.length > 0 || approvedItems.length > 0);
+
   return (
     <>
       <div className="page-header">
@@ -97,43 +137,121 @@ export function PhotoApprovalsPage() {
           </h1>
           <p className="page-sub">
             {t("photoApprovals.subtitle", { count: pendingItems.length }) as string}
+            {" · "}
+            {t("photoApprovals.subHint", {
+              defaultValue:
+                "Photos employees upload themselves are only used for recognition after you approve them.",
+            }) as string}
           </p>
         </div>
       </div>
 
-      {/* Tab strip */}
-      <div
-        role="tablist"
-        aria-label={t("photoApprovals.tabsLabel") as string}
-        style={{
-          display: "flex",
-          gap: 4,
-          marginBottom: 12,
-          borderBottom: "1px solid var(--border)",
-        }}
-      >
-        <TabButton
-          active={tab === "pending"}
-          count={pendingItems.length}
-          onClick={() => setTab("pending")}
-        >
-          {t("photoApprovals.tab.pending") as string}
-        </TabButton>
-        <TabButton
-          active={tab === "approved"}
-          count={approved.data ? approvedItems.length : null}
-          onClick={() => setTab("approved")}
-        >
-          {t("photoApprovals.tab.approved") as string}
-        </TabButton>
-      </div>
+      {pending.isLoading ? (
+        <SkeletonCards count={3} minWidth={220} />
+      ) : showStats ? (
+        <StatGrid>
+          <StatTile
+            tone="warning"
+            icon={PEOPLE_ICON.clock}
+            label={t("photoApprovals.tab.pending") as string}
+            value={pendingItems.length}
+            sub={t("photoApprovals.stats.pendingSub", {
+              defaultValue: "Waiting for your review",
+            }) as string}
+            active={tab === "pending"}
+            onClick={() => setTab("pending")}
+          />
+          <StatTile
+            tone="info"
+            icon={PEOPLE_ICON.people}
+            label={t("photoApprovals.stats.people", { defaultValue: "Employees waiting" }) as string}
+            value={waitingPeople}
+            sub={t("photoApprovals.stats.peopleSub", {
+              defaultValue: "People with at least one pending photo",
+            }) as string}
+          />
+          <StatTile
+            tone="success"
+            icon={PEOPLE_ICON.check}
+            label={t("photoApprovals.tab.approved") as string}
+            value={approvedItems.length}
+            sub={
+              approved.data
+                ? (t("photoApprovals.stats.approvedSub", {
+                    defaultValue: "Already in use for recognition",
+                  }) as string)
+                : (t("photoApprovals.stats.approvedOpen", {
+                    defaultValue: "Open to load the approval history",
+                  }) as string)
+            }
+            active={tab === "approved"}
+            onClick={() => setTab("approved")}
+          />
+        </StatGrid>
+      ) : null}
+
+      {showChrome && (
+        <>
+          <div
+            className="tabs"
+            role="tablist"
+            aria-label={t("photoApprovals.tabsLabel") as string}
+            style={{ marginBottom: 12 }}
+          >
+            <TabButton
+              active={tab === "pending"}
+              count={pendingItems.length}
+              onClick={() => setTab("pending")}
+            >
+              {t("photoApprovals.tab.pending") as string}
+            </TabButton>
+            <TabButton
+              active={tab === "approved"}
+              count={approved.data ? approvedItems.length : null}
+              onClick={() => setTab("approved")}
+            >
+              {t("photoApprovals.tab.approved") as string}
+            </TabButton>
+          </div>
+
+          <Toolbar>
+            <SearchField
+              value={q}
+              onChange={setQ}
+              placeholder={t("photoApprovals.filters.search", {
+                defaultValue: "Search by employee name, ID or uploader…",
+              }) as string}
+              clearLabel={t("employees.filters.clearSearch", { defaultValue: "Clear search" }) as string}
+            />
+            <FilterSelect
+              label={t("photoApprovals.filters.angle", { defaultValue: "Angle" }) as string}
+              value={angleF}
+              onChange={setAngleF}
+              options={[
+                ["", t("photoApprovals.filters.allAngles", { defaultValue: "All angles" }) as string],
+                ...(["front", "left", "right", "other"] as const).map(
+                  (a) => [a, t(`employees.photos.angles.${a}`) as string] as [string, string],
+                ),
+              ]}
+            />
+            <ResetButton
+              active={filtersActive}
+              label={t("employees.filters.reset", { defaultValue: "Reset" }) as string}
+              onClick={resetFilters}
+            />
+          </Toolbar>
+        </>
+      )}
 
       <div className="card">
         {tab === "pending" && (
           <PendingPanel
             isLoading={pending.isLoading}
             isError={pending.isError}
-            items={pendingItems}
+            onRetry={() => void pending.refetch()}
+            items={pendingShown}
+            hasAny={pendingItems.length > 0}
+            onClear={resetFilters}
             onApprove={(id) => decide.mutate({ id, action: "approve" })}
             onReject={(id) => decide.mutate({ id, action: "reject" })}
             decidingId={
@@ -145,7 +263,10 @@ export function PhotoApprovalsPage() {
           <ApprovedPanel
             isLoading={approved.isLoading}
             isError={approved.isError}
-            items={approvedItems}
+            onRetry={() => void approved.refetch()}
+            items={approvedShown}
+            hasAny={approvedItems.length > 0}
+            onClear={resetFilters}
           />
         )}
       </div>
@@ -170,33 +291,11 @@ function TabButton({
       role="tab"
       aria-selected={active}
       onClick={onClick}
-      style={{
-        background: "transparent",
-        border: "none",
-        borderBottom: `2px solid ${active ? "var(--accent)" : "transparent"}`,
-        padding: "8px 14px",
-        fontSize: 13,
-        fontWeight: active ? 600 : 500,
-        color: active ? "var(--text)" : "var(--text-secondary)",
-        cursor: "pointer",
-        marginBottom: -1,
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-      }}
+      className={`tab${active ? " active" : ""}`}
     >
       {children}
       {count !== null && (
-        <span
-          style={{
-            fontSize: 11,
-            padding: "1px 7px",
-            borderRadius: 999,
-            background: active ? "var(--accent-soft)" : "var(--bg-sunken)",
-            color: active ? "var(--accent-text)" : "var(--text-tertiary)",
-            fontWeight: 600,
-          }}
-        >
+        <span className={`pill ${active ? "pill-accent" : "pill-neutral"}`} style={{ marginInlineStart: 6 }}>
           {count}
         </span>
       )}
@@ -208,52 +307,52 @@ function PendingPanel({
   isLoading,
   isError,
   items,
+  hasAny,
+  onClear,
   onApprove,
   onReject,
   decidingId,
+  onRetry,
 }: {
   isLoading: boolean;
   isError: boolean;
   items: PendingPhoto[];
+  hasAny: boolean;
+  onClear: () => void;
   onApprove: (id: number) => void;
   onReject: (id: number) => void;
   decidingId: number | null;
+  onRetry: () => void;
 }) {
   const { t } = useTranslation();
   if (isLoading) {
     return (
-      <SkeletonGrid count={6} />
+      <SkeletonGrid count={6} minWidth={210} />
     );
   }
   if (isError) {
     return (
-      <div
-        className="text-sm"
-        style={{ padding: 16, color: "var(--danger-text)" }}
-      >
-        {t("photoApprovals.loadFailed") as string}
-      </div>
+      <LoadErrorPanel title={t("photoApprovals.loadFailed") as string} onRetry={onRetry} />
     );
   }
   if (items.length === 0) {
-    return (
-      <div
-        className="text-sm text-dim"
-        style={{ padding: 24, textAlign: "center" }}
-      >
-        {t("photoApprovals.empty") as string}
-      </div>
+    return hasAny ? (
+      <NoMatch onClear={onClear} />
+    ) : (
+      <EmptyPanel
+        tone="success"
+        icon={<Icon name="check" size={30} />}
+        title={t("photoApprovals.emptyState.pendingTitle", {
+          defaultValue: "You're all caught up!",
+        }) as string}
+        body={t("photoApprovals.emptyState.pendingBody", {
+          defaultValue: "No pending approvals right now.",
+        }) as string}
+      />
     );
   }
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
-        gap: 14,
-        padding: 14,
-      }}
-    >
+    <CardGrid minWidth={210}>
       {items.map((p) => (
         <PendingTile
           key={p.photo_id}
@@ -263,7 +362,7 @@ function PendingPanel({
           busy={decidingId === p.photo_id}
         />
       ))}
-    </div>
+    </CardGrid>
   );
 }
 
@@ -271,50 +370,47 @@ function ApprovedPanel({
   isLoading,
   isError,
   items,
+  hasAny,
+  onClear,
+  onRetry,
 }: {
   isLoading: boolean;
   isError: boolean;
   items: ApprovedPhoto[];
+  hasAny: boolean;
+  onClear: () => void;
+  onRetry: () => void;
 }) {
   const { t } = useTranslation();
   if (isLoading) {
     return (
-      <SkeletonGrid count={6} />
+      <SkeletonGrid count={6} minWidth={210} />
     );
   }
   if (isError) {
     return (
-      <div
-        className="text-sm"
-        style={{ padding: 16, color: "var(--danger-text)" }}
-      >
-        {t("photoApprovals.loadFailed") as string}
-      </div>
+      <LoadErrorPanel title={t("photoApprovals.loadFailed") as string} onRetry={onRetry} />
     );
   }
   if (items.length === 0) {
-    return (
-      <div
-        className="text-sm text-dim"
-        style={{ padding: 24, textAlign: "center" }}
-      >
-        {t("photoApprovals.approvedEmpty") as string}
-      </div>
+    return hasAny ? (
+      <NoMatch onClear={onClear} />
+    ) : (
+      <EmptyPanel
+        icon={<Icon name="camera" size={30} />}
+        title={t("photoApprovals.emptyState.approvedTitle", {
+          defaultValue: "No approvals yet",
+        }) as string}
+        body={t("photoApprovals.approvedEmpty") as string}
+      />
     );
   }
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
-        gap: 14,
-        padding: 14,
-      }}
-    >
+    <CardGrid minWidth={210}>
       {items.map((p) => (
         <ApprovedTile key={p.photo_id} p={p} />
       ))}
-    </div>
+    </CardGrid>
   );
 }
 
@@ -331,74 +427,44 @@ function PendingTile({
 }) {
   const { t } = useTranslation();
   return (
-    <div
-      style={{
-        border: "1px solid var(--border)",
-        borderRadius: "var(--radius-md, 10px)",
-        overflow: "hidden",
-        background: "var(--bg-elev)",
-      }}
-    >
-      <div
-        style={{
-          aspectRatio: "1 / 1",
-          background: "var(--bg-sunken)",
-          position: "relative",
-        }}
-      >
+    <div className="pp-tile">
+      <div className="pp-tile-img">
         <img
           src={`/api/employees/${p.employee_id}/photos/${p.photo_id}/image`}
           alt={`${p.angle} reference for ${p.employee_full_name}`}
           loading="lazy"
-          style={{
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-            display: "block",
-          }}
         />
-        <span
-          className="pill pill-warning"
-          style={{
-            position: "absolute",
-            top: 6,
-            insetInlineStart: 6,
-            fontSize: 10.5,
-          }}
-        >
-          {t("photoApprovals.pendingPill") as string}
+        <span className="pp-tile-badge">
+          <DotPill tone="warning">{t("photoApprovals.pendingPill") as string}</DotPill>
         </span>
       </div>
-      <div style={{ padding: "10px 12px" }}>
-        <div style={{ fontSize: 13, fontWeight: 500 }}>
+      <div className="pp-tile-body">
+        <div className="pp-tile-title pp-truncate" title={p.employee_full_name}>
           {p.employee_full_name}
         </div>
-        <div className="mono text-xs text-dim" style={{ marginTop: 2 }}>
-          {p.employee_code} ·{" "}
-          {t(`employees.photos.angles.${p.angle}`) as string}
+        <div className="pp-tile-meta">
+          <span className="mono">{p.employee_code}</span>
+          <span>· {t(`employees.photos.angles.${p.angle}`) as string}</span>
+        </div>
+        <div className="pp-tile-meta" title={new Date(p.uploaded_at).toLocaleString()}>
+          <Icon name="clock" size={10} />
+          <span>
+            {t("photoApprovals.uploadedAt", { defaultValue: "Uploaded" }) as string}{" "}
+            <span className="mono">{new Date(p.uploaded_at).toLocaleString()}</span>
+          </span>
         </div>
         {p.uploaded_by_email && (
-          <div
-            className="text-xs text-dim"
-            style={{
-              marginTop: 4,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-            title={p.uploaded_by_email}
-          >
+          <div className="pp-tile-meta" title={p.uploaded_by_email}>
             <Icon name="user" size={10} />
-            <span style={{ marginInlineStart: 4 }}>{p.uploaded_by_email}</span>
+            <span>{p.uploaded_by_email}</span>
           </div>
         )}
-        <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+        <div className="pp-tile-actions">
           <button
             type="button"
-            className="btn btn-sm btn-primary"
+            className="btn btn-sm"
             onClick={onApprove}
             disabled={busy}
-            style={{ flex: 1 }}
           >
             <Icon name="check" size={11} />{" "}
             {t("photoApprovals.approve") as string}
@@ -408,7 +474,6 @@ function PendingTile({
             className="btn btn-sm btn-danger"
             onClick={onReject}
             disabled={busy}
-            style={{ flex: 1 }}
           >
             <Icon name="x" size={11} />{" "}
             {t("photoApprovals.reject") as string}
@@ -419,114 +484,63 @@ function PendingTile({
   );
 }
 
-const ROLE_PILL_STYLES: Record<string, { bg: string; fg: string }> = {
-  Admin: { bg: "var(--accent-soft)", fg: "var(--accent-text)" },
-  HR: { bg: "var(--info-soft, #dbeafe)", fg: "var(--info-text, #1e40af)" },
-  Manager: { bg: "var(--bg-sunken)", fg: "var(--text-secondary)" },
-  Employee: { bg: "var(--bg-sunken)", fg: "var(--text-secondary)" },
-};
+function NoMatch({ onClear }: { onClear: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <EmptyPanel
+      icon={<Icon name="search" size={28} />}
+      title={t("photoApprovals.emptyState.noMatchTitle", {
+        defaultValue: "No photos match your search",
+      }) as string}
+      body={t("photoApprovals.emptyState.noMatchBody", {
+        defaultValue: "Try another name or ID, or clear the filters.",
+      }) as string}
+      actions={
+        <button type="button" className="btn" onClick={onClear}>
+          <Icon name="refresh" size={12} />
+          {t("employees.emptyState.clearFilters", { defaultValue: "Clear filters" }) as string}
+        </button>
+      }
+    />
+  );
+}
 
 function ApprovedTile({ p }: { p: ApprovedPhoto }) {
   const { t } = useTranslation();
-  const roleStyle =
-    (p.approved_by_role && ROLE_PILL_STYLES[p.approved_by_role]) ||
-    ROLE_PILL_STYLES.Employee!;
   return (
-    <div
-      style={{
-        border: "1px solid var(--border)",
-        borderRadius: "var(--radius-md, 10px)",
-        overflow: "hidden",
-        background: "var(--bg-elev)",
-      }}
-    >
-      <div
-        style={{
-          aspectRatio: "1 / 1",
-          background: "var(--bg-sunken)",
-          position: "relative",
-        }}
-      >
+    <div className="pp-tile">
+      <div className="pp-tile-img">
         <img
           src={`/api/employees/${p.employee_id}/photos/${p.photo_id}/image`}
           alt={`${p.angle} reference for ${p.employee_full_name}`}
           loading="lazy"
-          style={{
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-            display: "block",
-          }}
         />
-        <span
-          className="pill pill-success"
-          style={{
-            position: "absolute",
-            top: 6,
-            insetInlineStart: 6,
-            fontSize: 10.5,
-          }}
-        >
-          {t("photoApprovals.approvedPill") as string}
+        <span className="pp-tile-badge">
+          <DotPill tone="success">{t("photoApprovals.approvedPill") as string}</DotPill>
         </span>
       </div>
-      <div style={{ padding: "10px 12px" }}>
-        <div style={{ fontSize: 13, fontWeight: 500 }}>
+      <div className="pp-tile-body">
+        <div className="pp-tile-title pp-truncate" title={p.employee_full_name}>
           {p.employee_full_name}
         </div>
-        <div className="mono text-xs text-dim" style={{ marginTop: 2 }}>
-          {p.employee_code} ·{" "}
-          {t(`employees.photos.angles.${p.angle}`) as string}
+        <div className="pp-tile-meta">
+          <span className="mono">{p.employee_code}</span>
+          <span>· {t(`employees.photos.angles.${p.angle}`) as string}</span>
         </div>
         {p.approved_by_email && (
-          <div
-            style={{
-              marginTop: 8,
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              flexWrap: "wrap",
-            }}
-          >
-            <span
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                padding: "2px 8px",
-                borderRadius: 999,
-                background: roleStyle.bg,
-                color: roleStyle.fg,
-                textTransform: "uppercase",
-                letterSpacing: "0.04em",
-              }}
-            >
+          <div className="pp-tile-meta" style={{ marginTop: 8 }} title={p.approved_by_email}>
+            <span className={`pill ${rolePillClass(p.approved_by_role ?? "")}`}>
               {p.approved_by_role ?? (t("photoApprovals.unknownRole") as string)}
             </span>
-            <span
-              className="text-xs text-dim"
-              style={{
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-                minWidth: 0,
-                flex: 1,
-              }}
-              title={p.approved_by_email}
-            >
-              {p.approved_by_email}
-            </span>
+            <span>{p.approved_by_email}</span>
           </div>
         )}
         {p.approved_at && (
-          <div
-            className="text-xs text-dim"
-            style={{ marginTop: 4 }}
-            title={new Date(p.approved_at).toLocaleString()}
-          >
+          <div className="pp-tile-meta" title={new Date(p.approved_at).toLocaleString()}>
             <Icon name="check" size={10} />
-            <span style={{ marginInlineStart: 4 }}>
+            <span>
               {t("photoApprovals.approvedAt") as string}{" "}
-              {new Date(p.approved_at).toLocaleString()}
+              <span className="mono">{new Date(p.approved_at).toLocaleString()}</span>
             </span>
           </div>
         )}

@@ -8,14 +8,14 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { extractApiError } from "../../api/client";
-import { ModalShell } from "../../components/DrawerShell";
-import { CardGrid, IconFact, EmptyPanel, FilterSelect, ResetButton, SearchField, StatCard, StatGrid, Toolbar, ViewToggle, gridCardStyle, pct, useViewMode } from "../../components/ListPageUi";
+import { CardGrid, IconFact, EmptyPanel, FilterSelect, KebabMenu, ResetButton, SearchField, StatCard, StatGrid, Toolbar, ViewToggle, pct, useViewMode } from "../../components/ListPageUi";
 import { Icon } from "../../shell/Icon";
 import { BrandLogo } from "./BrandLogo";
 import cameraDome from "../../assets/camera_dome.png";
 import { CameraDrawer } from "./CameraDrawer";
 import { CameraImportModal } from "./CameraImportModal";
 import { PreviewModal } from "./PreviewModal";
+import { AlertGlyph, InlineAlert, ModalFrame, StatusPill, Switch } from "./coreUi";
 import {
   exportCameras,
   useBulkUpdateCameras,
@@ -235,6 +235,24 @@ export function CamerasPage() {
       },
     });
   };
+
+  const rowActions = (cam: Camera) => (
+    <KebabMenu
+      label={t("cameras.rowActions.aria")}
+      items={[
+        { label: t("cameras.rowActions.preview"), icon: <Icon name="activity" size={13} />, onClick: () => setPreviewTarget(cam) },
+        { label: t("cameras.rowActions.edit"), icon: <Icon name="edit" size={13} />, onClick: () => openEdit(cam) },
+        { label: t("cameras.rowActions.delete"), icon: <Icon name="trash" size={13} />, onClick: () => setDeleteTarget(cam), danger: true },
+      ]}
+    />
+  );
+
+  // Five page states (brief addendum): loading · API error · no cameras
+  // at all · filters match nothing · normal list.
+  const loadFailed = list.isError && !list.data;
+  const noCameras = !!list.data && items.length === 0;
+  const showChrome = !loadFailed && !noCameras;
+
   return (
     <>
 
@@ -276,15 +294,16 @@ export function CamerasPage() {
         <div style={{ marginBottom: 14 }}>
           <SkeletonCards count={4} minWidth={220} />
         </div>
-      ) : (
+      ) : showChrome ? (
       <StatGrid>
         <StatCard tone="info" icon={STAT_ICON.total} label={t("cameras.stats.total")} value={counts.total} sub={t("cameras.stats.totalSub")} active={statusF === ""} onClick={() => { setStatusF(""); setPage(1); }} />
         <StatCard tone="success" icon={STAT_ICON.online} label={t("cameras.stats.online")} value={counts.online} sub={t("cameras.stats.pctSub", { pct: pct(counts.online, counts.total) })} active={statusF === "online"} onClick={() => { setStatusF("online"); setPage(1); }} />
         <StatCard tone="warning" icon={STAT_ICON.reconnecting} label={t("cameras.stats.reconnecting")} value={counts.reconnecting} sub={t("cameras.stats.pctSub", { pct: pct(counts.reconnecting, counts.total) })} active={statusF === "reconnecting"} onClick={() => { setStatusF("reconnecting"); setPage(1); }} />
         <StatCard tone="danger" icon={STAT_ICON.offline} label={t("cameras.stats.offline")} value={counts.offline} sub={counts.disabled ? t("cameras.stats.offlineDisabledSub", { pct: pct(counts.offline, counts.total), n: counts.disabled }) : t("cameras.stats.pctSub", { pct: pct(counts.offline, counts.total) })} active={statusF === "offline"} onClick={() => { setStatusF("offline"); setPage(1); }} />
       </StatGrid>
-      )}
+      ) : null}
 
+      {(list.isLoading || showChrome) && (
       <Toolbar>
         <SearchField
           value={q}
@@ -319,53 +338,14 @@ export function CamerasPage() {
         <ResetButton active={!!(q || statusF || zoneF || typeF)} label={t("cameras.filters.reset")} onClick={resetFilters} />
         <ViewToggle value={view} onChange={setView} listLabel={t("cameras.view.list")} gridLabel={t("cameras.view.grid")} />
       </Toolbar>
-
-      {exportError && (
-        <div
-          role="alert"
-          style={{
-            background: "var(--danger-soft)",
-            color: "var(--danger-text)",
-            padding: "8px 12px",
-            borderRadius: "var(--radius-sm)",
-            fontSize: 12.5,
-            marginBottom: 12,
-          }}
-        >
-          {exportError}
-        </div>
       )}
 
-      {bulkError && (
-        <div
-          role="alert"
-          style={{
-            background: "var(--danger-soft)",
-            color: "var(--danger-text)",
-            padding: "8px 12px",
-            borderRadius: "var(--radius-sm)",
-            fontSize: 12.5,
-            marginBottom: 12,
-          }}
-        >
-          {bulkError}
-        </div>
-      )}
-
+      {exportError && <InlineAlert tone="danger" onClose={() => setExportError(null)}>{exportError}</InlineAlert>}
+      {bulkError && <InlineAlert tone="danger" onClose={() => setBulkError(null)}>{bulkError}</InlineAlert>}
       {bulkApplied !== null && selectedCount === 0 && (
-        <div
-          role="status"
-          style={{
-            background: "var(--success-soft, var(--bg-sunken))",
-            color: "var(--text)",
-            padding: "8px 12px",
-            borderRadius: "var(--radius-sm)",
-            fontSize: 12.5,
-            marginBottom: 12,
-          }}
-        >
+        <InlineAlert tone="success" onClose={() => setBulkApplied(null)}>
           {t("cameras.bulk.applied", { count: bulkApplied })}
-        </div>
+        </InlineAlert>
       )}
 
       {selectedCount > 0 && (
@@ -378,7 +358,20 @@ export function CamerasPage() {
       )}
 
       <div className="card" style={{ padding: 12 }}>
-        {list.data && filtered.length === 0 ? (
+        {loadFailed ? (
+          <EmptyPanel
+            tone="danger"
+            icon={<AlertGlyph />}
+            title={t("cameras.empty.loadErrorTitle", { defaultValue: "Couldn't load cameras" })}
+            body={extractApiError(list.error, t("cameras.page.loadError"))}
+            actions={
+              <button type="button" className="btn" onClick={() => void list.refetch()}>
+                <Icon name="refresh" size={12} />
+                {t("common.retry", { defaultValue: "Retry" })}
+              </button>
+            }
+          />
+        ) : list.data && filtered.length === 0 ? (
           <CamerasEmptyState
             hasCameras={items.length > 0}
             q={q.trim()}
@@ -396,60 +389,67 @@ export function CamerasPage() {
         ) : view === "grid" ? (
           <CardGrid minWidth={340}>
             {pageRows.map((cam) => (
-              <div key={cam.id} style={{ ...gridCardStyle, padding: 16, gap: 14, borderColor: selected.has(cam.id) ? "var(--accent)" : "var(--border)" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <input
-                    type="checkbox"
-                    checked={selected.has(cam.id)}
-                    onChange={() => toggleOne(cam.id)}
-                    aria-label={t("cameras.page.selectCameraAria", { name: cam.name })}
-                  />
-                  <span
-                    aria-hidden
-                    style={{ width: 66, height: 52, flex: "0 0 66px", borderRadius: 10, border: "1px solid var(--border)", background: "linear-gradient(160deg, var(--bg-elev), var(--bg-sunken))", display: "grid", placeItems: "center" }}
-                  >
-                    <img src={cameraDome} alt="" style={{ width: 46, height: 46, objectFit: "contain", display: "block" }} />
-                  </span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, fontSize: 15.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{cam.name}</div>
-                    <div className="text-xs text-dim mono" style={{ marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {[cam.camera_code, cam.detected_resolution_w && cam.detected_resolution_h ? `${cam.detected_resolution_w}×${cam.detected_resolution_h}` : null].filter(Boolean).join(" · ")}
-                    </div>
+              <article key={cam.id} className={`co-card${selected.has(cam.id) ? " is-selected" : ""}`}>
+                <div className="co-card-media">
+                  <div className="co-card-media-tl">
+                    <input
+                      type="checkbox"
+                      className="co-card-check"
+                      checked={selected.has(cam.id)}
+                      onChange={() => toggleOne(cam.id)}
+                      aria-label={t("cameras.page.selectCameraAria", { name: cam.name })}
+                    />
+                    <span className="pill pill-neutral mono">{cam.camera_code}</span>
                   </div>
-                  <BrandLogo brand={cam.brand} size={28} />
-                  <RowActionsMenu onPreview={() => setPreviewTarget(cam)} onEdit={() => openEdit(cam)} onDelete={() => setDeleteTarget(cam)} />
+                  <div className="co-card-media-tr">{rowActions(cam)}</div>
+                  <img src={cameraDome} alt="" />
+                  <div className="co-card-media-bl">
+                    <StatusDot camera={cam} worker={workerByCamera[cam.id]} />
+                  </div>
+                  <span className="co-card-media-br" title={cam.brand ?? undefined}>
+                    <BrandLogo brand={cam.brand} size={22} />
+                  </span>
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                  <StatusDot camera={cam} worker={workerByCamera[cam.id]} />
-                  {cam.last_seen_at && <LastSeenInline at={cam.last_seen_at} />}
+                <div className="co-card-body">
+                  <div className="co-card-title-row">
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="co-card-name" title={cam.name}>{cam.name}</div>
+                      <div className="co-card-meta">
+                        {[
+                          cam.detected_resolution_w && cam.detected_resolution_h ? `${cam.detected_resolution_w}×${cam.detected_resolution_h}` : null,
+                          cam.last_seen_at ? `${t("cameras.lastSeen.label")} · ${agoText(cam.last_seen_at, t)}` : null,
+                        ].filter(Boolean).join(" · ") || "—"}
+                      </div>
+                    </div>
+                    {cam.zone && <ZonePill zone={cam.zone} />}
+                  </div>
+                  <div className="co-card-facts">
+                    <IconFact icon={<FactIcon kind="location" />} label={t("cameras.page.colLocation")}>{cam.location || "—"}</IconFact>
+                    <IconFact icon={<FactIcon kind="host" />} label={t("cameras.page.colHost")}><span className="mono">{cam.rtsp_host}</span></IconFact>
+                    <IconFact icon={<FactIcon kind="events" />} label={t("cameras.page.colEvents24h")}><span className="mono">{cam.images_captured_24h.toLocaleString()}</span></IconFact>
+                  </div>
+                  <div className="co-card-switches">
+                    {([
+                      ["colWorker", cam.worker_enabled, () => toggleWorkerEnabled(cam), "switchWorkerTitle", "worker"],
+                      ["colDetection", cam.detection_enabled, () => toggleDetectionEnabled(cam), "switchDetectionTitle", "detection"],
+                      ["colDisplay", cam.display_enabled, () => toggleDisplayEnabled(cam), "switchDisplayTitle", "display"],
+                      ["colRecording", cam.recording_mode === "save_clips", () => toggleRecordingMode(cam), "switchRecordingTitle", "recording"],
+                    ] as const).map(([k, on, fn, title, icon]) => (
+                      <div key={k} className="co-card-switch">
+                        <span aria-hidden className="co-card-switch-icon"><FactIcon kind={icon} /></span>
+                        <span className="co-card-switch-label">{t(`cameras.page.${k}`)}</span>
+                        <Switch checked={on} onChange={fn} title={t(`cameras.page.${title}`)} label={`${t(`cameras.page.${k}`)} · ${cam.name}`} />
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                <div style={{ display: "grid", gap: 2, padding: "10px 14px", borderRadius: 10, background: "var(--bg-sunken)" }}>
-                  <IconFact icon={<FactIcon kind="zone" />} label={t("cameras.page.colZone")}>{cam.zone ? <ZonePill zone={cam.zone} /> : "—"}</IconFact>
-                  <IconFact icon={<FactIcon kind="location" />} label={t("cameras.page.colLocation")}>{cam.location || "—"}</IconFact>
-                  <IconFact icon={<FactIcon kind="host" />} label={t("cameras.page.colHost")}><span className="mono">{cam.rtsp_host}</span></IconFact>
-                  <IconFact icon={<FactIcon kind="events" />} label={t("cameras.page.colEvents24h")}><span className="mono">{cam.images_captured_24h.toLocaleString()}</span></IconFact>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 18px" }}>
-                  {([
-                    ["colWorker", cam.worker_enabled, () => toggleWorkerEnabled(cam), "switchWorkerTitle", "worker"],
-                    ["colDetection", cam.detection_enabled, () => toggleDetectionEnabled(cam), "switchDetectionTitle", "detection"],
-                    ["colDisplay", cam.display_enabled, () => toggleDisplayEnabled(cam), "switchDisplayTitle", "display"],
-                    ["colRecording", cam.recording_mode === "save_clips", () => toggleRecordingMode(cam), "switchRecordingTitle", "recording"],
-                  ] as const).map(([k, on, fn, title, icon]) => (
-                    <label key={k} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--text-secondary)" }}>
-                      <span aria-hidden style={{ display: "inline-flex", color: "var(--text-tertiary)" }}><FactIcon kind={icon} /></span>
-                      <span style={{ flex: 1 }}>{t(`cameras.page.${k}`)}</span>
-                      <Switch checked={on} onChange={fn} title={t(`cameras.page.${title}`)} />
-                    </label>
-                  ))}
-                </div>
-              </div>
+              </article>
             ))}
           </CardGrid>
         ) : (
         <table className="table cameras-table">
           <thead>
-            <tr style={{ background: "var(--bg-sunken)" }}>
+            <tr>
               <th style={{ width: 36 }}>
                 <input
                   ref={headerCheckRef}
@@ -473,23 +473,12 @@ export function CamerasPage() {
               <th>{t("cameras.page.colDisplay")}</th>
               <th>{t("cameras.page.colDetection")}</th>
               <th>{t("cameras.page.colRecording")}</th>
-              <th style={{ textAlign: "right" }}>{t("cameras.page.colActions")}</th>
+              <th style={{ textAlign: "end" }}>{t("cameras.page.colActions")}</th>
             </tr>
           </thead>
           <tbody>
             {list.isLoading && (
               <SkeletonRows cols={14} />
-            )}
-            {list.isError && (
-              <tr>
-                <td
-                  colSpan={14}
-                  className="text-sm"
-                  style={{ padding: 16, color: "var(--danger-text)" }}
-                >
-                  {t("cameras.page.loadError")}
-                </td>
-              </tr>
             )}
             {pageRows.map((cam) => {
               const metadataLine = [
@@ -519,7 +508,7 @@ export function CamerasPage() {
                 <td>
                   <div style={{ fontWeight: 600, whiteSpace: "nowrap" }}>{cam.name}</div>
                   {metadataLine && (
-                    <div className="text-xs text-dim mono" style={{ marginTop: 2, whiteSpace: "nowrap" }}>
+                    <div className="text-xs text-dim" style={{ marginTop: 2, whiteSpace: "nowrap" }}>
                       {metadataLine}
                     </div>
                   )}
@@ -572,12 +561,8 @@ export function CamerasPage() {
                     }`}
                   />
                 </td>
-                <td style={{ textAlign: "right" }}>
-                  <RowActionsMenu
-                    onPreview={() => setPreviewTarget(cam)}
-                    onEdit={() => openEdit(cam)}
-                    onDelete={() => setDeleteTarget(cam)}
-                  />
+                <td style={{ textAlign: "end" }}>
+                  <div style={{ display: "inline-flex" }}>{rowActions(cam)}</div>
                 </td>
               </tr>
               );
@@ -585,7 +570,7 @@ export function CamerasPage() {
           </tbody>
         </table>
         )}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 6px 4px", gap: 12, flexWrap: "wrap" }}>
+        <div className="co-pager">
           <span className="text-sm text-dim">
             {t("cameras.page.showing", {
               from: filtered.length ? (safePage - 1) * PAGE_SIZE + 1 : 0,
@@ -595,7 +580,7 @@ export function CamerasPage() {
           </span>
           {/* Page buttons only once the list spills past one page. */}
           {pageCount > 1 && (
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <div className="co-pager-pages">
             <button type="button" className="btn btn-sm" disabled={safePage <= 1} onClick={() => setPage(safePage - 1)} aria-label={t("common.previous")}>
               <Icon name="chevronLeft" size={12} />
             </button>
@@ -606,7 +591,6 @@ export function CamerasPage() {
                 className={n === safePage ? "btn btn-sm btn-primary" : "btn btn-sm"}
                 aria-current={n === safePage ? "page" : undefined}
                 onClick={() => setPage(n)}
-                style={{ minWidth: 32, justifyContent: "center", borderRadius: 999 }}
               >
                 {n}
               </button>
@@ -657,9 +641,7 @@ export function CamerasPage() {
  * the three operational settings (Worker / Display / Detection). Each
  * button fires a single ``bulk-update`` with exactly one
  * boolean field set across every selected camera. Buttons disable while a
- * mutation is in flight. Layout reuses the design's ``card`` + ``btn`` +
- * ``btn-sm`` classes; the small inline styles match the inline-style
- * pattern already used elsewhere on this page.
+ * mutation is in flight.
  */
 function BulkActionBar({
   count,
@@ -679,39 +661,21 @@ function BulkActionBar({
   ][];
   return (
     <div
-      className="card"
+      className="card co-bulkbar"
       role="region"
       aria-label={t("cameras.bulk.regionAria")}
-      style={{
-        marginBottom: 12,
-        padding: "12px 16px",
-        display: "flex",
-        alignItems: "center",
-        flexWrap: "wrap",
-        gap: 16,
-      }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div className="co-bulkbar-group">
         <strong style={{ fontSize: 13 }}>
           {t("cameras.bulk.selected", { count })}
         </strong>
-        <button type="button" className="btn btn-sm" onClick={onClear}>
+        <button type="button" className="btn btn-sm btn-ghost" onClick={onClear}>
           {t("cameras.bulk.clear")}
         </button>
       </div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          flexWrap: "wrap",
-          gap: 14,
-        }}
-      >
+      <div className="co-bulkbar-group" style={{ gap: 14 }}>
         {fields.map(([field, labelKey]) => (
-          <div
-            key={field}
-            style={{ display: "flex", alignItems: "center", gap: 6 }}
-          >
+          <div key={field} className="co-bulkbar-field">
             <span className="text-xs text-dim" style={{ fontWeight: 500 }}>
               {t(`cameras.bulk.${labelKey}`)}
             </span>
@@ -743,68 +707,6 @@ function BulkActionBar({
         ))}
       </div>
     </div>
-  );
-}
-
-/**
- * iOS-style toggle switch — 36×20 pill with a sliding thumb. Used in
- * the Worker / Display / Detection columns of the Cameras table so
- * each row has a tactile on/off control instead of a static pill.
- * Background flips between accent (on) and the design's neutral
- * border tone (off); thumb translates to the right when checked.
- */
-function Switch({
-  checked,
-  onChange,
-  title,
-  disabled = false,
-}: {
-  checked: boolean;
-  onChange: () => void;
-  title?: string;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-disabled={disabled}
-      disabled={disabled}
-      onClick={disabled ? undefined : onChange}
-      title={title}
-      style={{
-        appearance: "none",
-        width: 36,
-        height: 20,
-        borderRadius: 999,
-        background: checked ? "var(--success)" : "var(--border)",
-        border: "none",
-        position: "relative",
-        cursor: disabled ? "not-allowed" : "pointer",
-        padding: 0,
-        display: "inline-block",
-        transition: "background 120ms ease",
-        outline: "none",
-        verticalAlign: "middle",
-        opacity: disabled ? 0.4 : 1,
-      }}
-    >
-      <span
-        aria-hidden
-        style={{
-          position: "absolute",
-          top: 2,
-          insetInlineStart: checked ? 18 : 2,
-          width: 16,
-          height: 16,
-          borderRadius: "50%",
-          background: "white",
-          boxShadow: "0 1px 3px rgba(0,0,0,0.25)",
-          transition: "inset-inline-start 140ms ease",
-        }}
-      />
-    </button>
   );
 }
 
@@ -841,36 +743,13 @@ function cameraHealth(
   }
 }
 
-const HEALTH_TONE: Record<HealthKey, { dot: string; bg: string; fg: string }> = {
-  online: { dot: "var(--success)", bg: "var(--success-soft)", fg: "var(--success-text)" },
-  reconnecting: { dot: "var(--warning)", bg: "var(--warning-soft)", fg: "var(--warning-text)" },
-  offline: { dot: "var(--danger)", bg: "var(--danger-soft)", fg: "var(--danger-text)" },
-  disabled: { dot: "var(--text-tertiary)", bg: "var(--bg-sunken)", fg: "var(--text-secondary)" },
-};
-
 function StatusDot({ camera, worker }: { camera: Camera; worker: WorkerStats | undefined }) {
   const { t } = useTranslation();
   const h = cameraHealth(camera, worker);
-  const tone = HEALTH_TONE[h.key];
   return (
-    <span
-      title={h.detail || t(h.titleKey)}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 7,
-        padding: "3px 10px",
-        borderRadius: 8,
-        background: tone.bg,
-        color: tone.fg,
-        fontSize: 12,
-        fontWeight: 600,
-        whiteSpace: "nowrap",
-      }}
-    >
-      <span aria-hidden style={{ width: 9, height: 9, borderRadius: "50%", background: tone.dot }} />
+    <StatusPill tone={h.key} title={h.detail || t(h.titleKey)}>
       {t(h.labelKey)}
-    </span>
+    </StatusPill>
   );
 }
 
@@ -893,15 +772,6 @@ function FactIcon({ kind }: { kind: "zone" | "location" | "host" | "events" | "w
   );
 }
 
-function LastSeenInline({ at }: { at: string }) {
-  const { t } = useTranslation();
-  return (
-    <span className="text-xs text-dim" title={new Date(at).toLocaleString()}>
-      {t("cameras.lastSeen.label")} · {agoText(at, t)}
-    </span>
-  );
-}
-
 function agoText(at: string, t: ReturnType<typeof useTranslation>["t"]): string {
   const mins = Math.max(0, Math.round((Date.now() - new Date(at).getTime()) / 60000));
   return mins < 1
@@ -916,57 +786,23 @@ function agoText(at: string, t: ReturnType<typeof useTranslation>["t"]): string 
 function LastSeen({ at }: { at: string | null }) {
   const { t } = useTranslation();
   if (!at) return null;
-  const mins = Math.max(0, Math.round((Date.now() - new Date(at).getTime()) / 60000));
-  const ago =
-    mins < 1 ? t("cameras.lastSeen.now")
-    : mins < 60 ? t("cameras.lastSeen.mins", { count: mins })
-    : mins < 1440 ? t("cameras.lastSeen.hours", { count: Math.round(mins / 60) })
-    : t("cameras.lastSeen.days", { count: Math.round(mins / 1440) });
   return (
     <div className="text-xs text-dim" style={{ marginTop: 4, lineHeight: 1.35 }} title={new Date(at).toLocaleString()}>
       {t("cameras.lastSeen.label")}
       <br />
-      {ago}
+      {agoText(at, t)}
     </div>
   );
 }
 
-const ZONE_TONE: Record<string, { bg: string; fg: string }> = {
-  Entry: { bg: "var(--info-soft)", fg: "var(--info-text)" },
-  Exit: { bg: "var(--warning-soft)", fg: "var(--warning-text)" },
+const ZONE_PILL: Record<string, string> = {
+  Entry: "pill pill-info",
+  Exit: "pill pill-warning",
 };
 
 function ZonePill({ zone }: { zone: string }) {
-  const tone = ZONE_TONE[zone] ?? { bg: "var(--bg-sunken)", fg: "var(--text-secondary)" };
-  return (
-    <span
-      style={{
-        display: "inline-block",
-        padding: "2px 10px",
-        borderRadius: 999,
-        fontSize: 12,
-        fontWeight: 600,
-        background: tone.bg,
-        color: tone.fg,
-        border: `1px solid color-mix(in oklab, ${tone.fg} 25%, transparent)`,
-      }}
-    >
-      {zone}
-    </span>
-  );
+  return <span className={ZONE_PILL[zone] ?? "pill pill-neutral"}>{zone}</span>;
 }
-
-
-
-
-
-
-
-
-
-
-
-
 
 const STAT_ICON = {
   total: <><rect x="3" y="5" width="13" height="10" rx="2" /><path d="M16 9l5-2v8l-5-2M7 19h5M9.5 15v4" /></>,
@@ -1051,144 +887,6 @@ function CamerasEmptyState({
   );
 }
 
-
-/**
- * Per-row kebab menu — vertical 3-dots trigger that drops a small
- * popover with Preview / Edit / Delete. Mirrors the Employees page's
- * RowActionsMenu shape so the two surfaces feel consistent. Click-
- * outside + Esc close the popover (it's a small menu, not a modal —
- * the operator-policy red line that bars Esc/backdrop on
- * drawers/modals doesn't extend here).
- */
-function RowActionsMenu({
-  onPreview,
-  onEdit,
-  onDelete,
-}: {
-  onPreview: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-}) {
-  const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onClickOutside = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    const onEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onClickOutside);
-    document.addEventListener("keydown", onEsc);
-    return () => {
-      document.removeEventListener("mousedown", onClickOutside);
-      document.removeEventListener("keydown", onEsc);
-    };
-  }, [open]);
-
-  const pick = (fn: () => void) => () => {
-    setOpen(false);
-    fn();
-  };
-
-  return (
-    <div
-      ref={wrapRef}
-      style={{ position: "relative", display: "inline-block" }}
-    >
-      <button
-        type="button"
-        className="icon-btn"
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((s) => !s);
-        }}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={t("cameras.rowActions.aria")}
-        title={t("cameras.rowActions.aria")}
-      >
-        <Icon name="moreVertical" size={14} />
-      </button>
-      {open && (
-        <div
-          role="menu"
-          style={{
-            position: "absolute",
-            top: "100%",
-            insetInlineEnd: 0,
-            marginTop: 4,
-            minWidth: 160,
-            background: "var(--bg-elev)",
-            border: "1px solid var(--border)",
-            borderRadius: "var(--radius-sm)",
-            boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-            zIndex: 30,
-            padding: 4,
-          }}
-        >
-          <MenuItem icon="activity" label={t("cameras.rowActions.preview")} onClick={pick(onPreview)} />
-          <MenuItem icon="settings" label={t("cameras.rowActions.edit")} onClick={pick(onEdit)} />
-          <MenuItem
-            icon="trash"
-            label={t("cameras.rowActions.delete")}
-            onClick={pick(onDelete)}
-            danger
-          />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function MenuItem({
-  icon,
-  label,
-  onClick,
-  danger,
-}: {
-  icon: "activity" | "settings" | "trash";
-  label: string;
-  onClick: () => void;
-  danger?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      onClick={onClick}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        width: "100%",
-        padding: "7px 10px",
-        textAlign: "start",
-        background: "transparent",
-        color: danger ? "var(--danger-text)" : "var(--text)",
-        border: "none",
-        cursor: "pointer",
-        borderRadius: "var(--radius-sm)",
-        fontSize: 12.5,
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background = "var(--bg-sunken)";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = "transparent";
-      }}
-    >
-      <Icon name={icon} size={12} />
-      {label}
-    </button>
-  );
-}
-
 /**
  * Delete-confirmation modal — explicit Cancel / Delete buttons; no
  * Esc / backdrop dismiss (operator-policy red line). Spells out the
@@ -1207,88 +905,22 @@ function DeleteConfirmModal({
 }) {
   const { t } = useTranslation();
   return (
-    <ModalShell onClose={onClose}>
-      <div
-        style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 60,
-          display: "grid",
-          placeItems: "center",
-          padding: 16,
-        }}
-      >
-        <div
-          role="dialog"
-          aria-modal="true"
-          style={{
-            background: "var(--bg-elev)",
-            border: "1px solid var(--border)",
-            borderRadius: "var(--radius)",
-            boxShadow: "var(--shadow-lg)",
-            width: 460,
-            maxWidth: "calc(100vw - 32px)",
-            padding: 18,
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              marginBottom: 12,
-            }}
-          >
-            <div
-              style={{
-                width: 32,
-                height: 32,
-                borderRadius: "50%",
-                background: "var(--danger-soft)",
-                display: "grid",
-                placeItems: "center",
-                color: "var(--danger-text)",
-              }}
-            >
-              <Icon name="trash" size={14} />
-            </div>
-            <div style={{ fontSize: 15, fontWeight: 600 }}>
-              {t("cameras.deleteModal.title")}
-            </div>
-          </div>
-          <div
-            className="text-sm text-dim"
-            style={{ marginBottom: 16, lineHeight: 1.5 }}
-          >
-            {t("cameras.deleteModal.body", { name: camera.name })}
-          </div>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "flex-end",
-              gap: 8,
-            }}
-          >
-            <button
-              type="button"
-              className="btn"
-              onClick={onClose}
-              disabled={busy}
-            >
-              {t("common.cancel")}
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              style={{ background: "var(--danger)", color: "white" }}
-              onClick={onConfirm}
-              disabled={busy}
-            >
-              {busy ? t("cameras.deleteModal.deleting") : t("cameras.deleteModal.confirm")}
-            </button>
-          </div>
-        </div>
-      </div>
-    </ModalShell>
+    <ModalFrame
+      onClose={onClose}
+      title={t("cameras.deleteModal.title")}
+      icon={<Icon name="trash" size={16} />}
+      body={t("cameras.deleteModal.body", { name: camera.name })}
+      footer={
+        <>
+          <button type="button" className="btn" onClick={onClose} disabled={busy}>
+            {t("common.cancel")}
+          </button>
+          <button type="button" className="btn btn-danger" onClick={onConfirm} disabled={busy}>
+            <Icon name="trash" size={12} />
+            {busy ? t("cameras.deleteModal.deleting") : t("cameras.deleteModal.confirm")}
+          </button>
+        </>
+      }
+    />
   );
 }

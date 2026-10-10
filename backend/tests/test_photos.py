@@ -345,3 +345,55 @@ def test_enforces_max_reference_photos(
     ).json()
     assert len(body2["accepted"]) == 0
     assert "Maximum 10 reference images" in body2["rejected"][0]["reason"]
+
+
+# ---------------------------------------------------------------------------
+# List-avatar thumbnail (Oct 2026): primary_photo_id + un-audited /thumb
+# ---------------------------------------------------------------------------
+
+
+def _photo_viewed_total(client: TestClient) -> int:
+    resp = client.get("/api/audit-log?action=photo.viewed&page_size=1")
+    assert resp.status_code == 200, resp.text
+    return int(resp.json()["total"])
+
+
+@pytest.mark.usefixtures("clean_employees", "clean_faces_dir")
+def test_list_thumbnail_is_served_and_not_audited(
+    client: TestClient, admin_user: dict
+) -> None:
+    _login(client, admin_user)
+    _seed_three(client)
+
+    files = [("files", ("OM0098_front.jpg", _JPEG_BYTES, "image/jpeg"))]
+    resp = client.post("/api/employees/photos/bulk", files=files)
+    photo_id = resp.json()["accepted"][0]["photo_id"]
+
+    items = client.get("/api/employees?q=OM0098").json()["items"]
+    emp = next(e for e in items if e["employee_code"] == "OM0098")
+    # Admin uploads auto-approve, so the photo becomes the list avatar.
+    assert emp["primary_photo_id"] == photo_id
+    other = next(
+        e for e in client.get("/api/employees?q=OM0099").json()["items"]
+        if e["employee_code"] == "OM0099"
+    )
+    assert other["primary_photo_id"] is None
+
+    before = _photo_viewed_total(client)
+    thumb = client.get(f"/api/employees/{emp['id']}/photos/{photo_id}/thumb")
+    assert thumb.status_code == 200
+    assert thumb.headers["content-type"] == "image/jpeg"
+    assert thumb.headers["cache-control"].startswith("private")
+    assert thumb.content[:2] == b"\xff\xd8"  # a JPEG
+    # The list thumbnail is deliberately not audited per view …
+    assert _photo_viewed_total(client) == before
+    # … while the full-size image still is.
+    assert client.get(
+        f"/api/employees/{emp['id']}/photos/{photo_id}/image"
+    ).status_code == 200
+    assert _photo_viewed_total(client) == before + 1
+
+    # Unknown photo / wrong employee pair → 404, never another tenant's bytes.
+    assert client.get(
+        f"/api/employees/{other['id']}/photos/{photo_id}/thumb"
+    ).status_code == 404

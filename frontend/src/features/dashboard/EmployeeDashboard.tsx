@@ -5,33 +5,79 @@
 // (today's status, week summary, latest request) with a CTA into
 // the full My Attendance + My Requests pages.
 
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { useMyEmployee } from "../employees/hooks";
 import { useMyRecentAttendance } from "../attendance/hooks";
+import type { AttendanceItem } from "../attendance/types";
 import { formatMinutes } from "../attendance/timeFormat";
 import { useMyRequests } from "../../requests/hooks";
-
+import type { RequestStatus } from "../../requests/types";
+import { SkeletonCards, SkeletonRows } from "../../components/Skeleton";
+import { Panel, PanelEmpty, PanelError, SoftPill, Tile, TileGrid, clockTime, nowrap } from "./DashUi";
+import type { Tone } from "./DashUi";
 
 // Dashboard reuses the shared ``formatMinutes`` helper from
 // attendance/timeFormat for consistent ``8h 45m`` rendering.
 
-function _fmtTime(iso: string | null): string {
-  if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleTimeString(undefined, {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return "—";
+type DayState =
+  | "leave"
+  | "weekend"
+  | "holiday"
+  | "pending"
+  | "absent"
+  | "late"
+  | "complete"
+  | "clockedIn"
+  | "none";
+
+const DAY_STATE: Record<DayState, { tone: Tone; key: string; fallback: string }> = {
+  leave: { tone: "info", key: "dashboard.employee.state.leave", fallback: "On leave" },
+  weekend: { tone: "neutral", key: "dashboard.employee.state.weekend", fallback: "Weekend" },
+  holiday: { tone: "info", key: "dashboard.employee.state.holiday", fallback: "Holiday" },
+  pending: { tone: "neutral", key: "dashboard.employee.state.pending", fallback: "Not checked in yet" },
+  absent: { tone: "danger", key: "dashboard.employee.state.absent", fallback: "Absent" },
+  late: { tone: "warning", key: "dashboard.employee.state.late", fallback: "Late" },
+  complete: { tone: "success", key: "dashboard.employee.state.complete", fallback: "Day complete" },
+  clockedIn: { tone: "accent", key: "dashboard.employee.state.clockedIn", fallback: "Clocked in" },
+  none: { tone: "neutral", key: "dashboard.employee.state.none", fallback: "No record" },
+};
+
+function dayState(it: AttendanceItem | null): DayState {
+  if (!it) return "none";
+  if (it.leave_type_id !== null) return "leave";
+  if (!it.in_time) {
+    if (it.is_weekend) return "weekend";
+    if (it.is_holiday) return "holiday";
+    if (it.pending) return "pending";
+    return "absent";
   }
+  if (it.late) return "late";
+  return it.out_time ? "complete" : "clockedIn";
 }
 
+const STAGE_KEY: Record<RequestStatus, string> = {
+  submitted: "submitted",
+  manager_approved: "managerApproved",
+  manager_rejected: "managerRejected",
+  hr_approved: "hrApproved",
+  hr_rejected: "hrRejected",
+  admin_approved: "adminApproved",
+  admin_rejected: "adminRejected",
+  cancelled: "cancelled",
+};
+
+function requestTone(status: RequestStatus): Tone {
+  if (status.endsWith("approved") && status !== "manager_approved") return "success";
+  if (status.endsWith("rejected")) return "danger";
+  if (status === "cancelled") return "neutral";
+  return "warning";
+}
 
 export function EmployeeDashboard() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const me = useMyEmployee();
   const week = useMyRecentAttendance(7);
   const today = useMyRecentAttendance(1);
@@ -58,21 +104,7 @@ export function EmployeeDashboard() {
   const todayItem = today.data?.items[0] ?? null;
   const todayInTime = todayItem?.in_time ?? null;
   const todayOutTime = todayItem?.out_time ?? null;
-  const todayStatus = todayItem
-    ? todayItem.leave_type_id !== null
-      ? { label: "On leave", color: "#6366f1" }
-      : !todayItem.in_time
-        ? todayItem.is_weekend
-          ? { label: "Weekend", color: "#64748b" }
-          : todayItem.is_holiday
-            ? { label: "Holiday", color: "#0ea5e9" }
-            : { label: "Absent", color: "#dc2626" }
-        : todayItem.late
-          ? { label: "Late", color: "#f59e0b" }
-          : todayItem.out_time
-            ? { label: "Day complete", color: "#15803d" }
-            : { label: "Clocked in", color: "#0b6e4f" }
-    : { label: "No record", color: "#64748b" };
+  const todayState = DAY_STATE[dayState(todayItem)];
 
   // Pending requests count (submitted + manager_approved).
   const pendingRequests = (requests.data ?? []).filter(
@@ -80,389 +112,222 @@ export function EmployeeDashboard() {
       r.status === "submitted" ||
       r.status === "manager_approved",
   );
-  const recentRequest = (requests.data ?? [])[0] ?? null;
+  const recentRequests = (requests.data ?? []).slice(0, 3);
+
+  const fmtDay = (iso: string) =>
+    new Date(`${iso}T00:00:00Z`).toLocaleDateString(undefined, {
+      weekday: "short",
+      day: "2-digit",
+      month: "short",
+      timeZone: "UTC",
+    });
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-      {/* Greeting */}
-      <div>
-        <h1 className="page-title">
-          {me.data?.full_name
-            ? t("dashboard.employee.greeting", {
-                name: me.data.full_name,
-              })
-            : t("dashboard.employee.greeting", { name: "" })}
-        </h1>
-        <p className="page-sub">
-          {t("dashboard.employee.subtitle", {
-            defaultValue: "Your day at a glance",
-          }) as string}
-        </p>
+    <>
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">
+            {t("dashboard.employee.greeting", { name: me.data?.full_name ?? "" })}
+          </h1>
+          <p className="page-sub">{t("dashboard.employee.subtitle")}</p>
+        </div>
+        <div className="page-actions">
+          <button type="button" className="btn" onClick={() => navigate("/my-requests")}>
+            {t("dashboard.employee.newRequest", { defaultValue: "My requests" })}
+          </button>
+        </div>
       </div>
 
-      {/* Top KPI tiles */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-          gap: 12,
-        }}
-      >
-        <KpiTile
-          label="Today"
-          value={todayStatus.label}
-          color={todayStatus.color}
-          sub={
-            todayInTime
-              ? `In ${_fmtTime(todayInTime)}${todayOutTime ? ` · Out ${_fmtTime(todayOutTime)}` : ""}`
-              : null
-          }
-        />
-        <KpiTile
-          label="This week"
-          value={`${presentCount} / ${workingDays.length}`}
-          color="#0b6e4f"
-          sub={`days present · ${attendanceRate}% attendance`}
-        />
-        <KpiTile
-          label="Hours this week"
-          value={totalMinutes > 0 ? formatMinutes(totalMinutes) : "—"}
-          color="#2563eb"
-          sub={lateCount > 0 ? `${lateCount} late arrival(s)` : "no late arrivals"}
-        />
-        <KpiTile
-          label="Pending requests"
-          value={pendingRequests.length.toString()}
-          color={pendingRequests.length > 0 ? "#f59e0b" : "#64748b"}
-          sub={
-            pendingRequests.length > 0
-              ? "awaiting decision"
-              : "nothing pending"
-          }
-        />
-      </div>
+      {today.isLoading || week.isLoading ? (
+        <div style={{ marginBottom: 20 }}>
+          <SkeletonCards count={4} />
+        </div>
+      ) : (
+        <TileGrid>
+          <Tile
+            tone={todayState.tone}
+            icon="clock"
+            label={t("dashboard.employee.tiles.today", { defaultValue: "Today" })}
+            value={t(todayState.key, { defaultValue: todayState.fallback })}
+            sub={
+              todayInTime
+                ? todayOutTime
+                  ? t("dashboard.employee.tiles.inOut", {
+                      defaultValue: "In {{in}} · Out {{out}}",
+                      in: clockTime(todayInTime),
+                      out: clockTime(todayOutTime),
+                    })
+                  : t("dashboard.employee.tiles.inOnly", {
+                      defaultValue: "In {{in}}",
+                      in: clockTime(todayInTime),
+                    })
+                : t("dashboard.employee.tiles.noCheckIn", { defaultValue: "No check-in recorded" })
+            }
+            onClick={() => navigate("/my-attendance")}
+          />
+          <Tile
+            tone="success"
+            icon="calendar"
+            label={t("dashboard.employee.tiles.thisWeek", { defaultValue: "This week" })}
+            value={`${presentCount} / ${workingDays.length}`}
+            sub={t("dashboard.employee.tiles.daysPresent", {
+              defaultValue: "days present · {{pct}}% attendance",
+              pct: attendanceRate,
+            })}
+            onClick={() => navigate("/my-attendance")}
+          />
+          <Tile
+            tone={lateCount > 0 ? "warning" : "info"}
+            icon="activity"
+            label={t("dashboard.employee.tiles.hours", { defaultValue: "Hours this week" })}
+            value={totalMinutes > 0 ? formatMinutes(totalMinutes) : "—"}
+            sub={
+              lateCount > 0
+                ? t("dashboard.employee.tiles.lateCount", {
+                    defaultValue: "{{count}} late arrival(s)",
+                    count: lateCount,
+                  })
+                : t("dashboard.employee.tiles.noLate", { defaultValue: "no late arrivals" })
+            }
+          />
+          <Tile
+            tone={pendingRequests.length > 0 ? "warning" : "neutral"}
+            icon="inbox"
+            label={t("dashboard.employee.tiles.pending", { defaultValue: "Pending requests" })}
+            value={pendingRequests.length}
+            sub={
+              pendingRequests.length > 0
+                ? t("dashboard.employee.tiles.awaiting", { defaultValue: "awaiting decision" })
+                : t("dashboard.employee.tiles.nothingPending", { defaultValue: "nothing pending" })
+            }
+            onClick={() => navigate("/my-requests")}
+          />
+        </TileGrid>
+      )}
 
-      {/* Two-column body */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
-          gap: 14,
-        }}
-      >
-        {/* Last 7 days panel */}
-        <div
-          style={{
-            background: "var(--bg)",
-            border: "1px solid var(--border)",
-            borderRadius: 14,
-            overflow: "hidden",
-          }}
+      <div className="dsh-row-auto">
+        <Panel
+          title={t("dashboard.employee.week.title", { defaultValue: "Last 7 days" })}
+          sub={t("dashboard.employee.week.sub", { defaultValue: "Check-in, check-out and hours per day" })}
+          bodyPadding={0}
+          actions={
+            <button type="button" className="btn btn-sm btn-ghost" onClick={() => navigate("/my-attendance")}>
+              {t("dashboard.employee.week.viewAll", { defaultValue: "View full attendance" })}
+            </button>
+          }
         >
-          <div
-            style={{
-              padding: "12px 16px",
-              borderBottom: "1px solid var(--border)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}
-          >
-            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
-              Last 7 days
-            </span>
-            <Link
-              to="/my-attendance"
-              style={{
-                fontSize: 11,
-                color: "var(--accent, #0b6e4f)",
-                textDecoration: "none",
-                fontWeight: 600,
-              }}
-            >
-              View full attendance →
-            </Link>
-          </div>
-          <div style={{ padding: "10px 16px 16px" }}>
-            <table
-              style={{
-                width: "100%",
-                fontSize: 12.5,
-                borderCollapse: "collapse",
-              }}
-            >
+          {week.isError ? (
+            <PanelError
+              title={t("dashboard.employee.week.loadFailed", { defaultValue: "Couldn't load your attendance" })}
+              body={t("dashboard.common.loadFailedBody", { defaultValue: "The API did not respond. Try again in a moment." })}
+              retryLabel={t("dashboard.common.retry", { defaultValue: "Retry" })}
+              onRetry={() => void week.refetch()}
+            />
+          ) : !week.isLoading && items.length === 0 ? (
+            <PanelEmpty
+              tone="accent"
+              icon="calendar"
+              title={t("dashboard.employee.week.emptyTitle", { defaultValue: "No attendance yet" })}
+              body={t("dashboard.employee.week.empty", {
+                defaultValue: "Your days will appear here once the cameras record your first check-in.",
+              })}
+            />
+          ) : (
+            <table className="table">
               <thead>
-                <tr style={{ color: "var(--text-secondary)" }}>
-                  <th style={{ textAlign: "start", padding: "4px 0" }}>Day</th>
-                  <th style={{ textAlign: "start", padding: "4px 0" }}>In</th>
-                  <th style={{ textAlign: "start", padding: "4px 0" }}>Out</th>
-                  <th style={{ textAlign: "end", padding: "4px 0" }}>Hours</th>
+                <tr>
+                  <th>{t("dashboard.employee.week.cols.day", { defaultValue: "Day" })}</th>
+                  <th>{t("dashboard.employee.week.cols.in", { defaultValue: "In" })}</th>
+                  <th>{t("dashboard.employee.week.cols.out", { defaultValue: "Out" })}</th>
+                  <th className="dsh-end">{t("dashboard.employee.week.cols.hours", { defaultValue: "Hours" })}</th>
+                  <th>{t("dashboard.employee.week.cols.status", { defaultValue: "Status" })}</th>
                 </tr>
               </thead>
               <tbody>
+                {week.isLoading && <SkeletonRows cols={5} rows={5} />}
                 {items.slice(0, 7).map((it) => {
-                  const date = new Date(`${it.date}T00:00:00Z`);
-                  const dayLabel = date.toLocaleDateString(undefined, {
-                    weekday: "short",
-                    day: "2-digit",
-                    month: "short",
-                  });
+                  const st = DAY_STATE[dayState(it)];
                   return (
-                    <tr
-                      key={it.date}
-                      style={{ borderTop: "1px solid var(--border)" }}
-                    >
-                      <td style={{ padding: "8px 0", fontWeight: 500 }}>
-                        {dayLabel}
-                      </td>
-                      <td style={{ padding: "8px 0", color: "var(--text-secondary)" }}>
-                        {_fmtTime(it.in_time)}
-                      </td>
-                      <td style={{ padding: "8px 0", color: "var(--text-secondary)" }}>
-                        {_fmtTime(it.out_time)}
-                      </td>
-                      <td
-                        style={{
-                          padding: "8px 0",
-                          textAlign: "end",
-                          fontVariantNumeric: "tabular-nums",
-                        }}
-                      >
+                    <tr key={it.date}>
+                      <td className="text-sm dsh-strong" style={nowrap}>{fmtDay(it.date)}</td>
+                      <td className="mono text-sm" style={nowrap}>{clockTime(it.in_time)}</td>
+                      <td className="mono text-sm" style={nowrap}>{clockTime(it.out_time)}</td>
+                      <td className="mono text-sm dsh-end" style={nowrap}>
                         {it.total_minutes != null && it.total_minutes > 0
                           ? formatMinutes(it.total_minutes)
                           : "—"}
                       </td>
+                      <td>
+                        <SoftPill tone={st.tone}>{t(st.key, { defaultValue: st.fallback })}</SoftPill>
+                      </td>
                     </tr>
                   );
                 })}
-                {items.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={4}
-                      style={{
-                        padding: 14,
-                        textAlign: "center",
-                        color: "var(--text-secondary)",
-                      }}
-                    >
-                      No attendance records yet.
-                    </td>
-                  </tr>
-                )}
               </tbody>
             </table>
-          </div>
-        </div>
+          )}
+        </Panel>
 
-        {/* Latest request panel */}
-        <div
-          style={{
-            background: "var(--bg)",
-            border: "1px solid var(--border)",
-            borderRadius: 14,
-            overflow: "hidden",
-          }}
+        <Panel
+          title={t("dashboard.employee.requests.title", { defaultValue: "My requests" })}
+          sub={t("dashboard.employee.requests.sub", { defaultValue: "Your latest leave and exception requests" })}
+          actions={
+            <button type="button" className="btn btn-sm btn-ghost" onClick={() => navigate("/my-requests")}>
+              {t("dashboard.employee.requests.viewAll", { defaultValue: "View all" })}
+            </button>
+          }
         >
-          <div
-            style={{
-              padding: "12px 16px",
-              borderBottom: "1px solid var(--border)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}
-          >
-            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
-              My requests
-            </span>
-            <Link
-              to="/my-requests"
-              style={{
-                fontSize: 11,
-                color: "var(--accent, #0b6e4f)",
-                textDecoration: "none",
-                fontWeight: 600,
-              }}
-            >
-              View all →
-            </Link>
-          </div>
-          <div style={{ padding: "10px 16px 16px" }}>
-            {recentRequest ? (
-              <div
-                style={{
-                  border: "1px solid var(--border)",
-                  borderRadius: 10,
-                  padding: "12px 14px",
-                  background: "var(--bg-elev)",
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 700,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.04em",
-                      color: "var(--text-secondary)",
-                    }}
-                  >
-                    {recentRequest.type === "leave" ? "Leave" : "Exception"}
+          {requests.isLoading ? (
+            <SkeletonCards count={2} minWidth={260} />
+          ) : requests.isError ? (
+            <PanelError
+              title={t("dashboard.employee.requests.loadFailed", { defaultValue: "Couldn't load your requests" })}
+              body={t("dashboard.common.loadFailedBody", { defaultValue: "The API did not respond. Try again in a moment." })}
+              retryLabel={t("dashboard.common.retry", { defaultValue: "Retry" })}
+              onRetry={() => void requests.refetch()}
+            />
+          ) : recentRequests.length === 0 ? (
+            <PanelEmpty
+              tone="accent"
+              icon="clipboard"
+              title={t("dashboard.employee.requests.emptyTitle", { defaultValue: "No requests yet" })}
+              body={t("dashboard.employee.requests.empty", {
+                defaultValue: "Need a leave day or an attendance correction? File a request and your manager will review it.",
+              })}
+              action={
+                <button type="button" className="btn btn-primary btn-sm" onClick={() => navigate("/my-requests")}>
+                  {t("dashboard.employee.requests.submit", { defaultValue: "Submit a request" })}
+                </button>
+              }
+            />
+          ) : (
+            <div className="dsh-req-list">
+              {recentRequests.map((r) => (
+                <button key={r.id} type="button" className="card dsh-req-card" onClick={() => navigate("/my-requests")}>
+                  <span className="dsh-req-top">
+                    <span className="dsh-req-title">
+                      {(r.type === "leave"
+                        ? t("myRequests.filters.leave")
+                        : t("myRequests.filters.exception")) +
+                        (r.reason_category ? ` · ${r.reason_category}` : "")}
+                    </span>
+                    <SoftPill tone={requestTone(r.status)}>
+                      {t(`approvals.stages.${STAGE_KEY[r.status]}`)}
+                    </SoftPill>
                   </span>
-                  <span
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 600,
-                      padding: "2px 8px",
-                      borderRadius: 999,
-                      background:
-                        recentRequest.status.endsWith("approved")
-                          ? "rgba(34,197,94,0.15)"
-                          : recentRequest.status.endsWith("rejected")
-                            ? "rgba(220,38,38,0.15)"
-                            : "rgba(245,158,11,0.15)",
-                      color: recentRequest.status.endsWith("approved")
-                        ? "#15803d"
-                        : recentRequest.status.endsWith("rejected")
-                          ? "#b91c1c"
-                          : "#b45309",
-                    }}
-                  >
-                    {recentRequest.status.replace(/_/g, " ")}
+                  <span className="dsh-req-dates">
+                    {r.target_date_start}
+                    {r.target_date_end && r.target_date_end !== r.target_date_start
+                      ? ` → ${r.target_date_end}`
+                      : ""}
                   </span>
-                </div>
-                <div
-                  style={{
-                    marginTop: 8,
-                    fontSize: 13.5,
-                    fontWeight: 600,
-                    color: "var(--text)",
-                  }}
-                >
-                  {recentRequest.reason_category || "—"}
-                </div>
-                <div
-                  style={{
-                    marginTop: 4,
-                    fontSize: 11.5,
-                    color: "var(--text-secondary)",
-                  }}
-                >
-                  {recentRequest.target_date_start}
-                  {recentRequest.target_date_end &&
-                  recentRequest.target_date_end !==
-                    recentRequest.target_date_start
-                    ? ` → ${recentRequest.target_date_end}`
-                    : ""}
-                </div>
-                {recentRequest.reason_text && (
-                  <div
-                    style={{
-                      marginTop: 10,
-                      paddingTop: 10,
-                      borderTop: "1px solid var(--border)",
-                      fontSize: 12,
-                      color: "var(--text-secondary)",
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    {recentRequest.reason_text}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div
-                style={{
-                  padding: "20px 8px",
-                  textAlign: "center",
-                  color: "var(--text-secondary)",
-                  fontSize: 13,
-                }}
-              >
-                No requests submitted yet.{" "}
-                <Link
-                  to="/my-requests"
-                  style={{
-                    color: "var(--accent, #0b6e4f)",
-                    textDecoration: "none",
-                    fontWeight: 600,
-                  }}
-                >
-                  Submit one →
-                </Link>
-              </div>
-            )}
-          </div>
-        </div>
+                  {r.reason_text && <span className="dsh-req-reason">{r.reason_text}</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </Panel>
       </div>
-    </div>
+    </>
   );
 }
-
-
-function KpiTile({
-  label,
-  value,
-  color,
-  sub,
-}: {
-  label: string;
-  value: string;
-  color: string;
-  sub: string | null;
-}) {
-  return (
-    <div
-      style={{
-        background: "var(--bg)",
-        border: "1px solid var(--border)",
-        borderRadius: 12,
-        padding: "14px 16px",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-      }}
-    >
-      <div
-        style={{
-          fontSize: 10.5,
-          color: "var(--text-secondary)",
-          textTransform: "uppercase",
-          letterSpacing: "0.06em",
-          fontWeight: 700,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          marginTop: 4,
-          fontSize: 22,
-          fontWeight: 700,
-          color: color,
-          lineHeight: 1.1,
-          letterSpacing: "-0.01em",
-          fontVariantNumeric: "tabular-nums",
-        }}
-      >
-        {value}
-      </div>
-      {sub && (
-        <div
-          style={{
-            marginTop: 4,
-            fontSize: 11.5,
-            color: "var(--text-secondary)",
-          }}
-        >
-          {sub}
-        </div>
-      )}
-    </div>
-  );
-}
-

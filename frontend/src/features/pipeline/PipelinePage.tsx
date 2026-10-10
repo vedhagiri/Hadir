@@ -1,14 +1,14 @@
 // "How it works" / pipeline page (P22).
 //
 // Static explainer visible to every authenticated role — replaces
-// the placeholder mounted at /pipeline in earlier phases. The
-// design shipped a ``.pipeline-big`` grid + ``.pb-step`` card style
-// in styles-enhancements2.css; this page reuses those classes so
-// dark mode + density both pick up automatically.
+// the placeholder mounted at /pipeline in earlier phases. Step cards
+// use the ops-step classes (features/system/ops.css): numbered chip,
+// icon tile, progress track and a hover lift.
 
 import { useTranslation } from "react-i18next";
 
 import { Icon, type IconName } from "../../shell/Icon";
+import "../system/opsUi";
 
 interface Step {
   id:
@@ -35,56 +35,44 @@ const STEPS: Step[] = [
 export function PipelinePage() {
   const { t } = useTranslation();
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-      <header>
-        <h1
-          style={{
-            fontFamily: "var(--font-display)",
-            fontSize: 32,
-            margin: "0 0 6px 0",
-            fontWeight: 400,
-            letterSpacing: "-0.01em",
-          }}
-        >
-          {t("pipeline.title")}
-        </h1>
-        <p
-          style={{
-            margin: 0,
-            color: "var(--text-secondary)",
-            fontSize: 13.5,
-            maxWidth: 720,
-            lineHeight: 1.55,
-          }}
-        >
-          {t("pipeline.subtitle")}
-        </p>
-      </header>
-
-      <div className="pipeline-big">
-        {STEPS.map((step, i) => (
-          <article key={step.id} className="pb-step">
-            <span className="pb-num" aria-hidden="true">
-              {String(i + 1).padStart(2, "0")}
-            </span>
-            <div
-              className="pb-icon"
-              style={{
-                background: "var(--accent-soft)",
-                color: "var(--accent-text)",
-              }}
-              aria-hidden="true"
-            >
-              <Icon name={step.icon} size={22} />
-            </div>
-            <h2 className="pb-title">
-              {t(`pipeline.steps.${step.id}.title`)}
-            </h2>
-            <p className="pb-text">{t(`pipeline.steps.${step.id}.body`)}</p>
-            <div className="pb-meta">{`step ${i + 1} / ${STEPS.length}`}</div>
-          </article>
-        ))}
+    <>
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">{t("pipeline.title")}</h1>
+          <p className="page-sub">{t("pipeline.subtitle")}</p>
+        </div>
       </div>
-    </div>
+
+      <ol className="ops-steps" style={{ listStyle: "none", margin: 0, padding: 0 }}>
+        {STEPS.map((step, i) => (
+          <li key={step.id} className="ops-step">
+            <div className="ops-step-top">
+              <span className="ops-step-icon" aria-hidden="true">
+                <Icon name={step.icon} size={22} />
+              </span>
+              <span className="ops-step-num" aria-hidden="true">
+                {String(i + 1).padStart(2, "0")}
+              </span>
+            </div>
+            <h2 className="ops-step-title">{t(`pipeline.steps.${step.id}.title`)}</h2>
+            <p className="ops-step-text">{t(`pipeline.steps.${step.id}.body`)}</p>
+            <div className="ops-step-meta">
+              <div className="ops-step-track" aria-hidden="true">
+                {STEPS.map((s, j) => (
+                  <span key={s.id} className={j <= i ? "is-done" : ""} />
+                ))}
+              </div>
+              <div style={{ marginTop: 8 }}>
+                {t("pipeline.stepOf", {
+                  defaultValue: "step {{n}} / {{total}}",
+                  n: i + 1,
+                  total: STEPS.length,
+                })}
+              </div>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </>
   );
 }

@@ -2,6 +2,7 @@
 // the 1320px max-width wrapper from the design system. Route content is
 // rendered through <Outlet/>.
 
+import { useEffect, useRef, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 
 import { useMe } from "../auth/AuthProvider";
@@ -11,11 +12,32 @@ import { PageTransition } from "../motion/PageTransition";
 import { ImpersonationBanner } from "./ImpersonationBanner";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
+import { useTableFit } from "./useTableFit";
 import "./transitions.css";
 
 export function Layout() {
   const { data: me } = useMe();
   const location = useLocation();
+  // Keeps wide tables scrolling inside their card instead of pushing
+  // the page sideways (see useTableFit for why).
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  useTableFit(contentRef);
+
+  // Phones: the off-canvas sidebar is open while ``.app`` carries
+  // ``mobile-nav-open`` (toggled by the topbar hamburger). Mirror that
+  // into state for the scrim, and close it whenever the route changes.
+  const appRef = useRef<HTMLDivElement | null>(null);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  useEffect(() => {
+    const el = appRef.current;
+    if (!el) return;
+    const mo = new MutationObserver(() => setMobileNavOpen(el.classList.contains("mobile-nav-open")));
+    mo.observe(el, { attributes: true, attributeFilter: ["class"] });
+    return () => mo.disconnect();
+  }, []);
+  useEffect(() => {
+    appRef.current?.classList.remove("mobile-nav-open");
+  }, [location.pathname]);
 
   // ProtectedRoute guarantees ``me`` is non-null on first render.  But
   // if the session expires mid-session (GET /api/auth/me returns 401 →
@@ -37,7 +59,14 @@ export function Layout() {
   const pageId = location.pathname.replace(/^\//, "") || "dashboard";
 
   return (
-    <div className="app">
+    <div className="app" ref={appRef}>
+      {mobileNavOpen && (
+        <div
+          className="mobile-nav-scrim"
+          aria-hidden
+          onClick={() => appRef.current?.classList.remove("mobile-nav-open")}
+        />
+      )}
       {/* Mounts a <style> tag in document.head with --accent + body
           font-family overrides for the active tenant. Returns null. */}
       <BrandingProvider />
@@ -53,7 +82,7 @@ export function Layout() {
       <Sidebar role={role} />
       <div className="main">
         <Topbar pageId={pageId} role={role} me={me} />
-        <div className="content">
+        <div className="content" ref={contentRef}>
           {/* Framer Motion's AnimatePresence (in PageTransition)
               detects path changes via location.pathname and runs
               the outgoing-fade-out + incoming-fade-in. Sidebar /

@@ -10,9 +10,16 @@
  *  - Skeleton cards match the exact card dimensions so layout doesn't shift on load.
  */
 
+import { EmptyPanel, FilterSelect, Toolbar } from "../../components/ListPageUi";
+import { ATT_ICON, FieldCaption, StrokeIcon, fieldDateStyle } from "../attendance/attendanceUi";
+
+import "./unidentified-faces.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
+
+import { extractApiError } from "../../api/client";
 
 import { DatePicker } from "../../components/DatePicker";
 import { Icon } from "../../shell/Icon";
@@ -84,881 +91,17 @@ function todayIso(): string {
 
 // ── Styles injected once ───────────────────────────────────────────────────
 
-const INJECTED_STYLE = `
-@keyframes unid-shimmer {
-  0%   { background-position: -400px 0; }
-  100% { background-position:  400px 0; }
-}
-@keyframes unid-fadein {
-  from { opacity: 0; transform: translateY(4px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-@keyframes unid-toolbar-up {
-  from { opacity: 0; transform: translateY(12px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-.unid-skeleton {
-  background: linear-gradient(90deg, var(--bg-sunken) 25%, var(--bg-hover) 50%, var(--bg-sunken) 75%);
-  background-size: 800px 100%;
-  animation: unid-shimmer 1.4s infinite linear;
-  border-radius: var(--radius-sm);
-}
-.unid-card {
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  transition: border-color 0.15s, box-shadow 0.15s;
-  animation: unid-fadein 0.18s ease both;
-  position: relative;
-}
-.unid-card:hover {
-  border-color: var(--accent-border);
-  box-shadow: 0 2px 12px rgba(0,0,0,0.08);
-}
-.unid-card.unid-selected {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent);
-}
-.unid-card:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-.unid-checkbox {
-  position: absolute;
-  top: 7px;
-  inset-inline-start: 7px;
-  z-index: 2;
-  width: 20px;
-  height: 20px;
-  border-radius: 5px;
-  border: 2px solid rgba(255,255,255,0.85);
-  background: rgba(0,0,0,0.38);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.12s, border-color 0.12s, opacity 0.12s;
-  opacity: 0;
-  cursor: pointer;
-  flex-shrink: 0;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.28);
-}
-.unid-card:hover .unid-checkbox,
-.unid-card.unid-selected .unid-checkbox,
-.unid-select-mode .unid-checkbox {
-  opacity: 1;
-}
-.unid-checkbox.unid-checked {
-  background: var(--accent, #000);
-  border-color: var(--accent, #000);
-  opacity: 1;
-}
-.unid-emp-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-  transition: background 0.1s;
-}
-.unid-emp-row:hover, .unid-emp-row:focus-visible {
-  background: var(--bg-hover);
-  outline: none;
-}
-.unid-drawer-img {
-  position: relative;
-  display: block;
-}
-.unid-drawer-img::after {
-  content: "📷 Click to enlarge";
-  position: absolute;
-  bottom: 8px;
-  inset-inline-end: 10px;
-  font-size: 10px;
-  color: #fff;
-  background: rgba(0,0,0,0.55);
-  border-radius: 4px;
-  padding: 2px 7px;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-.unid-drawer-img:hover::after {
-  opacity: 1;
-}
-.unid-info-card {
-  background: var(--bg-sunken);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 10px 13px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.unid-thumb-label {
-  font-size: 9.5px;
-  text-align: center;
-  color: var(--text-tertiary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  margin-top: 2px;
-  max-width: 72px;
-}
-.unid-thresh-card {
-  background: var(--bg-sunken);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 14px 16px 13px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.unid-thresh-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-.unid-thresh-label {
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--text);
-}
-.unid-thresh-badge {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--accent, #000);
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-  min-width: 56px;
-  text-align: end;
-}
-.unid-thresh-hint {
-  font-size: 11.5px;
-  color: var(--text-tertiary);
-  line-height: 1.45;
-  margin-top: -4px;
-}
-.unid-thresh-slider {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 100%;
-  height: 6px;
-  border-radius: 3px;
-  outline: none;
-  cursor: pointer;
-  background: linear-gradient(to right, var(--accent, #000) var(--fill-pct, 37%), var(--bg-hover) var(--fill-pct, 37%));
-}
-.unid-thresh-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--accent, #000);
-  border: 2.5px solid var(--bg-elev);
-  box-shadow: 0 1px 5px rgba(0,0,0,0.25);
-  cursor: pointer;
-  transition: box-shadow 0.12s;
-}
-.unid-thresh-slider::-moz-range-thumb {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--accent, #000);
-  border: 2.5px solid var(--bg-elev);
-  box-shadow: 0 1px 5px rgba(0,0,0,0.25);
-  cursor: pointer;
-}
-.unid-thresh-slider:focus-visible::-webkit-slider-thumb {
-  box-shadow: 0 0 0 3px var(--accent-border);
-}
-.unid-thresh-zones {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: -4px;
-}
-.unid-thresh-zone {
-  font-size: 10px;
-  color: var(--text-quaternary);
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-.unid-thresh-zone span:first-child {
-  font-weight: 600;
-  font-size: 10.5px;
-  color: var(--text-tertiary);
-}
-.unid-timeline {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
-.unid-tl-day-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 10px 0 6px;
-  font-size: 10.5px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-tertiary);
-}
-.unid-tl-day-header:first-child {
-  margin-top: 0;
-}
-.unid-tl-day-line {
-  flex: 1;
-  height: 1px;
-  background: var(--border);
-}
-.unid-tl-events {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  padding-inline-start: 10px;
-  border-inline-start: 2px solid var(--border);
-  margin-inline-start: 5px;
-}
-.unid-tl-event {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 4px 0 4px 12px;
-  font-size: 12px;
-}
-.unid-tl-event::before {
-  content: "";
-  position: absolute;
-  inset-inline-start: -6px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--accent, #000);
-  border: 2px solid var(--bg-elev);
-  flex-shrink: 0;
-}
-.unid-tl-time {
-  color: var(--text-secondary);
-  font-variant-numeric: tabular-nums;
-  font-weight: 500;
-  flex-shrink: 0;
-  font-size: 11.5px;
-}
-.unid-tl-cam {
-  color: var(--text-tertiary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11.5px;
-}
-
-/* ── In-cluster filter chips ───────────────────────────────────────── */
-.unid-filterbar {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px 14px;
-  background: var(--bg-sunken);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  margin-top: 4px;
-}
-.unid-filterbar-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.unid-filterbar-label {
-  font-size: 10.5px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-tertiary);
-  min-width: 70px;
-}
-.unid-chip {
-  font-size: 11.5px;
-  font-weight: 500;
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--bg-elev);
-  color: var(--text);
-  cursor: pointer;
-  transition: background 0.12s, border-color 0.12s, color 0.12s;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  white-space: nowrap;
-}
-.unid-chip:hover {
-  border-color: var(--text);
-}
-.unid-chip:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-.unid-chip[aria-pressed="true"] {
-  background: var(--text);
-  border-color: var(--text);
-  color: var(--bg);
-  font-weight: 600;
-}
-.unid-chip-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.unid-filterbar input[type="number"]::-webkit-outer-spin-button,
-.unid-filterbar input[type="number"]::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-
-/* ── Active-tag filter bar (in-cluster redesign) ────────────────────
-   "+ Add filter" pattern: each active filter appears as a removable
-   tag; the trigger opens a grouped menu (Similarity / Quality /
-   Clarity). Replaces the old 3-row chip layout. */
-.unid-tagbar-wrap {
-  background: var(--bg-sunken);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 10px 12px;
-  margin-top: 4px;
-}
-.unid-tagbar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.unid-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 4px 4px 10px;
-  border-radius: 999px;
-  background: color-mix(in oklab, var(--accent) 14%, var(--bg-elev));
-  border: 1px solid color-mix(in oklab, var(--accent) 30%, var(--border));
-  font-size: 11.5px;
-  font-weight: 500;
-  color: var(--text);
-  white-space: nowrap;
-}
-.unid-tag-x {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  border-radius: 999px;
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-.unid-tag-x:hover {
-  background: color-mix(in oklab, var(--text) 12%, transparent);
-  color: var(--text);
-}
-.unid-tag-x:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-.unid-addbtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: var(--bg-elev);
-  border: 1px dashed var(--border);
-  color: var(--text-secondary);
-  font-size: 11.5px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: border-color 0.12s, color 0.12s;
-}
-.unid-addbtn:hover,
-.unid-addbtn[aria-expanded="true"] {
-  border-color: var(--text);
-  color: var(--text);
-  border-style: solid;
-}
-.unid-addbtn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-.unid-menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  inset-inline-start: 0;
-  min-width: 220px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
-  padding: 6px;
-  z-index: 50;
-  display: flex;
-  flex-direction: column;
-}
-.unid-menu-section {
-  display: flex;
-  flex-direction: column;
-}
-.unid-menu-section + .unid-menu-section {
-  margin-top: 4px;
-  padding-top: 6px;
-  border-top: 1px solid var(--border);
-}
-.unid-menu-heading {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-tertiary);
-  padding: 4px 10px 2px;
-}
-.unid-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 6px 10px;
-  border: none;
-  background: transparent;
-  color: var(--text);
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-  text-align: start;
-  cursor: pointer;
-}
-.unid-menu-item:hover {
-  background: var(--bg-sunken);
-}
-.unid-menu-item[aria-pressed="true"] {
-  background: color-mix(in oklab, var(--accent) 16%, transparent);
-  font-weight: 600;
-}
-.unid-menu-item:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-.unid-menu-empty {
-  font-size: 11.5px;
-  color: var(--text-tertiary);
-  padding: 6px 10px;
-}
-.unid-menu-range {
-  font-size: 11px;
-  color: var(--text-tertiary);
-  padding: 4px 10px 2px;
-  font-variant-numeric: tabular-nums;
-}
-.unid-menu-custom {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  background: var(--bg-sunken);
-  border-radius: var(--radius-sm);
-  margin: 4px 2px 2px;
-}
-.unid-menu-custom input[type="number"] {
-  width: 54px;
-  border: 1px solid var(--border);
-  background: var(--bg-elev);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 600;
-  padding: 3px 6px;
-  text-align: end;
-  outline: none;
-  font-variant-numeric: tabular-nums;
-}
-.unid-menu-custom input[type="number"]:focus {
-  border-color: var(--text);
-}
-.unid-menu-custom input[type="number"]::-webkit-outer-spin-button,
-.unid-menu-custom input[type="number"]::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-.unid-modetoggle {
-  display: flex;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  overflow: hidden;
-  background: var(--bg-elev);
-}
-.unid-modetoggle button {
-  padding: 2px 8px;
-  border: none;
-  background: transparent;
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  min-width: 22px;
-  line-height: 1.2;
-}
-.unid-modetoggle button[aria-pressed="true"] {
-  background: var(--text);
-  color: var(--bg);
-}
-.unid-apply-btn {
-  margin-inline-start: auto;
-  padding: 3px 10px;
-  border: 1px solid var(--text);
-  background: var(--text);
-  color: var(--bg);
-  border-radius: 999px;
-  font-size: 11.5px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.unid-apply-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-.unid-tagbar-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-  font-size: 11.5px;
-  color: var(--text-secondary);
-}
-.unid-reset-btn {
-  padding: 3px 10px;
-  border: 1px solid var(--border);
-  background: var(--bg-elev);
-  color: var(--text);
-  border-radius: 999px;
-  font-size: 11.5px;
-  font-weight: 500;
-  cursor: pointer;
-}
-.unid-reset-btn:hover {
-  border-color: var(--text);
-}
-
-/* ── Hierarchical sticky nav (primary tabs + sub-pills) ───────────── */
-.unid-nav-sticky {
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  background: var(--bg);
-  border-bottom: 1px solid var(--border);
-}
-.unid-nav-inner {
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 0 28px;
-}
-.unid-nav-primary {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-.unid-nav-tab {
-  position: relative;
-  padding: 12px 20px;
-  border: none;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: color 0.12s;
-  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-}
-.unid-nav-tab:hover {
-  color: var(--text);
-}
-.unid-nav-tab--active {
-  color: var(--text);
-  font-weight: 600;
-}
-.unid-nav-tab--active::after {
-  content: "";
-  position: absolute;
-  inset-inline-start: 16px;
-  inset-inline-end: 16px;
-  bottom: -1px;
-  height: 2px;
-  background: var(--accent);
-  border-radius: 999px 999px 0 0;
-}
-.unid-nav-tab:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-.unid-nav-sub {
-  display: flex;
-  gap: 6px;
-  padding: 10px 0 12px;
-}
-.unid-nav-pill {
-  padding: 5px 14px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--bg-elev);
-  color: var(--text-secondary);
-  font-size: 12.5px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.12s, border-color 0.12s, color 0.12s;
-}
-.unid-nav-pill:hover:not(.unid-nav-pill--active) {
-  border-color: var(--text);
-  color: var(--text);
-}
-.unid-nav-pill--active {
-  background: var(--text);
-  border-color: var(--text);
-  color: var(--bg);
-  font-weight: 600;
-}
-.unid-nav-pill--active:hover {
-  /* keep the inverted active colors on hover so the label stays
-     readable instead of going text-on-text invisible. */
-  background: var(--text);
-  border-color: var(--text);
-  color: var(--bg);
-}
-.unid-nav-pill:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-/* ── Timeline activity cards (P28.x redesign) ──────────────────────── */
-.unid-tl-card {
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 12px 14px;
-  margin-bottom: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.unid-tl-card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.unid-tl-card-date {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-.unid-tl-card-date-main {
-  font-size: 13.5px;
-  font-weight: 600;
-  color: var(--text);
-  letter-spacing: -0.01em;
-}
-.unid-tl-card-date-sub {
-  font-size: 10.5px;
-  color: var(--text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-weight: 500;
-}
-.unid-tl-card-count {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
-  background: var(--bg-sunken);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 3px 11px;
-  font-variant-numeric: tabular-nums;
-}
-.unid-tl-card-count-num {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text);
-}
-.unid-tl-card-count-label {
-  font-size: 10px;
-  font-weight: 500;
-  color: var(--text-tertiary);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-.unid-tl-card-events {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px 12px;
-  border-top: 1px dashed var(--border);
-  padding-top: 8px;
-}
-@media (max-width: 540px) {
-  .unid-tl-card-events { grid-template-columns: 1fr; }
-}
-.unid-tl-card-event {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 0;
-  font-size: 12px;
-  min-width: 0;
-}
-.unid-tl-card-event-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent, #000);
-  flex-shrink: 0;
-  opacity: 0.7;
-}
-.unid-tl-card-event-time {
-  font-variant-numeric: tabular-nums;
-  font-weight: 500;
-  color: var(--text-secondary);
-  flex-shrink: 0;
-  min-width: 60px;
-}
-.unid-tl-card-event-cam {
-  color: var(--text-tertiary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* ── Hero time block ───────────────────────────────────────────────── */
-.unid-time-hero {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  background: linear-gradient(135deg, var(--bg-sunken) 0%, var(--bg-elev) 100%);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 14px 16px;
-  gap: 12px;
-}
-.unid-time-col {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.unid-time-col-end {
-  text-align: end;
-}
-.unid-time-label {
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-tertiary);
-}
-.unid-time-value {
-  font-size: 13.5px;
-  font-weight: 600;
-  color: var(--text);
-  letter-spacing: -0.01em;
-}
-.unid-time-rel {
-  font-size: 11px;
-  color: var(--text-secondary);
-}
-.unid-time-arrow {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  color: var(--text-tertiary);
-  gap: 3px;
-  font-size: 10px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 0 8px;
-  border-inline-start: 1px dashed var(--border);
-  border-inline-end: 1px dashed var(--border);
-}
-.unid-time-arrow-icon {
-  font-size: 14px;
-  line-height: 1;
-}
-.unid-cam-activity {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 12px;
-}
-.unid-cam-bar-row {
-  display: grid;
-  grid-template-columns: minmax(80px, 28%) 1fr auto;
-  gap: 10px;
-  align-items: center;
-  font-size: 11.5px;
-}
-.unid-cam-bar-name {
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.unid-cam-bar-track {
-  height: 6px;
-  border-radius: 999px;
-  background: var(--bg-sunken);
-  overflow: hidden;
-}
-.unid-cam-bar-fill {
-  height: 100%;
-  background: var(--accent, #000);
-  border-radius: 999px;
-  transition: width 0.2s ease-out;
-}
-.unid-cam-bar-count {
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  color: var(--text);
-  font-size: 11.5px;
-  min-width: 22px;
-  text-align: end;
-}
-
-/* Cluster face gallery modal renders inline via element styles, mirroring
-   FaceCropLightbox in PersonClipsPage. No dedicated CSS classes — kept
-   intentionally so the two previews stay structurally identical. */
-`;
 
 // ── Skeleton card ──────────────────────────────────────────────────────────
 
 function SkeletonCard() {
   return (
-    <div className="unid-card" style={{ pointerEvents: "none" }}>
-      <div className="unid-skeleton" style={{ aspectRatio: "1", width: "100%" }} />
-      <div style={{ padding: "8px 10px 10px", display: "flex", flexDirection: "column", gap: 6 }}>
-        <div className="unid-skeleton" style={{ height: 11, width: "60%" }} />
-        <div className="unid-skeleton" style={{ height: 11, width: "80%" }} />
-        <div className="unid-skeleton" style={{ height: 11, width: "40%" }} />
+    <div className="unid-card unid-card-skeleton" aria-hidden>
+      <div className="unid-skeleton unid-skeleton-tile" />
+      <div className="unid-skeleton-lines">
+        <div className="unid-skeleton" style={{ width: "60%" }} />
+        <div className="unid-skeleton" style={{ width: "80%" }} />
+        <div className="unid-skeleton" style={{ width: "40%" }} />
       </div>
     </div>
   );
@@ -1379,18 +522,7 @@ function MapToEmployeeModal({ cluster, onClose, onSuccess }: MapToEmployeeModalP
   return (
     <>
       {/* backdrop */}
-      <div
-        role="presentation"
-        onClick={onClose}
-        style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 499,
-          background: "rgba(0,0,0,0.45)",
-          backdropFilter: "blur(2px)",
-          WebkitBackdropFilter: "blur(2px)",
-        }}
-      />
+      <div role="presentation" onClick={onClose} className="unid-scrim" style={{ zIndex: 499 }} />
 
       <div
         role="dialog"
@@ -1407,18 +539,8 @@ function MapToEmployeeModal({ cluster, onClose, onSuccess }: MapToEmployeeModalP
         }}
       >
         <div
-          style={{
-            pointerEvents: "auto",
-            background: "var(--bg-elev)",
-            border: "1px solid var(--border)",
-            borderRadius: "var(--radius)",
-            boxShadow: "0 8px 40px rgba(0,0,0,0.2)",
-            width: "min(480px, 92vw)",
-            maxHeight: "80vh",
-            display: "flex",
-            flexDirection: "column",
-            animation: "unid-fadein 0.15s ease both",
-          }}
+          className="unid-modal"
+          style={{ width: "min(480px, 92vw)", maxHeight: "80vh" }}
           onClick={(e) => e.stopPropagation()}
         >
           {/* modal header */}
@@ -2579,7 +1701,7 @@ function ClusterGalleryModal({
         position: "fixed",
         inset: 0,
         zIndex: 700,
-        background: "rgba(2, 6, 23, 0.55)",
+        background: "var(--unid-scrim)",
         backdropFilter: "blur(3px)",
         WebkitBackdropFilter: "blur(3px)",
         display: "flex",
@@ -2594,8 +1716,8 @@ function ClusterGalleryModal({
         onClick={(e) => e.stopPropagation()}
         style={{
           background: "var(--bg)",
-          borderRadius: 12,
-          boxShadow: "0 18px 48px rgba(0,0,0,0.4)",
+          borderRadius: "var(--radius-xl)",
+          boxShadow: "var(--shadow-lg)",
           width: "min(720px, 92vw)",
           maxHeight: "min(640px, 92vh)",
           display: "grid",
@@ -3590,37 +2712,14 @@ function ClusterDrawer({ cluster, onClose }: ClusterDrawerProps) {
     <>
       {/* Backdrop — visual only. Outside-click does NOT close; the
           drawer requires an explicit × button or Esc keypress. */}
-      <div
-        aria-hidden
-        style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 399,
-          background: "rgba(0,0,0,0.4)",
-          backdropFilter: "blur(2px)",
-          WebkitBackdropFilter: "blur(2px)",
-          pointerEvents: "none",
-        }}
-      />
+      <div aria-hidden className="unid-scrim" style={{ zIndex: 399, pointerEvents: "none" }} />
 
       <aside
         role="dialog"
         aria-label={t("unidentifiedFaces.drawerTitle", "Cluster detail")}
         aria-modal="true"
-        style={{
-          position: "fixed",
-          insetInlineEnd: 0,
-          top: 0,
-          bottom: 0,
-          width: "min(720px, 96vw)",
-          background: "var(--bg-elev)",
-          borderInlineStart: "1px solid var(--border)",
-          display: "flex",
-          flexDirection: "column",
-          zIndex: 400,
-          boxShadow: "-6px 0 32px rgba(0,0,0,0.14)",
-          animation: "unid-fadein 0.15s ease both",
-        }}
+        className="unid-drawer"
+        style={{ width: "min(720px, 96vw)", zIndex: 400 }}
       >
         {/* ── Header ── */}
         <div style={{
@@ -4052,15 +3151,7 @@ function RawEventViewer({ event, onClose, onMap }: RawEventViewerProps) {
 
   return (
     <>
-      <div
-        role="presentation"
-        style={{
-          position: "fixed", inset: 0, zIndex: 499,
-          background: "rgba(0,0,0,0.7)",
-          backdropFilter: "blur(3px)",
-          WebkitBackdropFilter: "blur(3px)",
-        }}
-      />
+      <div role="presentation" className="unid-scrim" style={{ zIndex: 499 }} />
       <div
         role="dialog"
         aria-modal="true"
@@ -4071,20 +3162,7 @@ function RawEventViewer({ event, onClose, onMap }: RawEventViewerProps) {
           pointerEvents: "none",
         }}
       >
-        <div
-          style={{
-            pointerEvents: "auto",
-            background: "var(--bg-elev)",
-            border: "1px solid var(--border)",
-            borderRadius: "var(--radius)",
-            boxShadow: "0 12px 48px rgba(0,0,0,0.35)",
-            width: "min(420px, 94vw)",
-            display: "flex",
-            flexDirection: "column",
-            animation: "unid-fadein 0.15s ease both",
-            overflow: "hidden",
-          }}
-        >
+        <div className="unid-modal" style={{ width: "min(420px, 94vw)", overflow: "hidden" }}>
           {/* header */}
           <div style={{
             display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -4271,22 +3349,10 @@ interface StatPillProps {
 
 function StatPill({ label, value, warn }: StatPillProps) {
   return (
-    <div style={{
-      display: "flex",
-      alignItems: "center",
-      gap: 6,
-      padding: "5px 12px",
-      background: "var(--bg-elev)",
-      border: `1px solid ${warn ? "var(--accent-border)" : "var(--border)"}`,
-      borderRadius: 999,
-      fontSize: 12.5,
-      whiteSpace: "nowrap",
-    }}>
-      <span style={{ color: "var(--text-tertiary)" }}>{label}</span>
-      <span style={{ fontWeight: 600, color: warn ? "var(--accent-text)" : "var(--text)" }}>
-        {value}
-      </span>
-    </div>
+    <span className={warn ? "unid-statpill pill pill-warning" : "unid-statpill pill"}>
+      <span className="unid-statpill-label">{label}</span>
+      <span className="unid-statpill-value">{value}</span>
+    </span>
   );
 }
 
@@ -4308,7 +3374,8 @@ interface MappedRenderProps {
   totalPages: number;
   onPage: (p: number) => void;
   renderEmpty: (hint: string) => React.ReactNode;
-  renderError: () => React.ReactNode;
+  renderError: (error?: unknown, retry?: () => void) => React.ReactNode;
+  onRetry?: () => void;
   renderSkeleton: (n: number) => React.ReactNode;
   renderPagination: (
     page: number,
@@ -4388,29 +3455,13 @@ function UnmapConfirmModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="unmap-confirm-title"
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.5)",
-        display: "grid",
-        placeItems: "center",
-        zIndex: 9000,
-        padding: 24,
-      }}
+      className="unid-scrim"
+      style={{ display: "grid", placeItems: "center", zIndex: 9000, padding: 24 }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{
-          background: "var(--bg)",
-          border: "1px solid var(--border)",
-          borderRadius: 10,
-          boxShadow: "0 18px 48px rgba(0,0,0,0.35)",
-          width: "min(460px, 92vw)",
-          padding: 18,
-          display: "flex",
-          flexDirection: "column",
-          gap: 12,
-        }}
+        className="unid-modal"
+        style={{ width: "min(460px, 92vw)", padding: 18, gap: 12 }}
       >
         <div
           id="unmap-confirm-title"
@@ -4429,8 +3480,8 @@ function UnmapConfirmModal({
               width: 26,
               height: 26,
               borderRadius: "50%",
-              background: "var(--warn-soft, #fef3c7)",
-              color: "var(--warn, #ca8a04)",
+              background: "var(--warning-soft)",
+              color: "var(--warning-text)",
               display: "inline-flex",
               alignItems: "center",
               justifyContent: "center",
@@ -4562,6 +3613,7 @@ function MappedFacesGrid({
   onPage,
   renderEmpty,
   renderError,
+  onRetry,
   renderSkeleton,
   renderPagination,
   pageSize,
@@ -4569,7 +3621,7 @@ function MappedFacesGrid({
   const { t } = useTranslation();
   return (
     <>
-      {isError && renderError()}
+      {isError && renderError(undefined, onRetry)}
       {isLoading && !data && renderSkeleton(pageSize)}
       {!isLoading &&
         !isError &&
@@ -4582,14 +3634,8 @@ function MappedFacesGrid({
           ),
         )}
       {data && data.items.length > 0 && (
-        <div style={{ opacity: isPlaceholder ? 0.6 : 1, transition: "opacity 0.2s" }}>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(175px, 1fr))",
-              gap: 12,
-            }}
-          >
+        <div className={isPlaceholder ? "at-faded" : undefined}>
+          <div className="unid-grid">
             {data.items.map((ev) => (
               <MappedFaceTile key={ev.id} event={ev} />
             ))}
@@ -4888,6 +3934,7 @@ function MappedClustersGrid({
   onPage,
   renderEmpty,
   renderError,
+  onRetry,
   renderSkeleton,
   renderPagination,
   pageSize,
@@ -4896,7 +3943,7 @@ function MappedClustersGrid({
   const { t } = useTranslation();
   return (
     <>
-      {isError && renderError()}
+      {isError && renderError(undefined, onRetry)}
       {isLoading && !data && renderSkeleton(pageSize)}
       {!isLoading &&
         !isError &&
@@ -4920,16 +3967,8 @@ function MappedClustersGrid({
               value={data.total_events.toLocaleString()}
             />
           </div>
-          <div
-            style={{ opacity: isPlaceholder ? 0.6 : 1, transition: "opacity 0.2s" }}
-          >
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
-                gap: 12,
-              }}
-            >
+          <div className={isPlaceholder ? "at-faded" : undefined}>
+            <div className="unid-grid unid-grid-wide">
               {data.items.map((emp) => (
                 <MappedEmployeeCard
                   key={emp.employee_id}
@@ -5364,29 +4403,13 @@ function UnmapByEmployeeModal({
     <div
       role="dialog"
       aria-modal="true"
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.5)",
-        display: "grid",
-        placeItems: "center",
-        zIndex: 9000,
-        padding: 24,
-      }}
+      className="unid-scrim"
+      style={{ display: "grid", placeItems: "center", zIndex: 9000, padding: 24 }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{
-          background: "var(--bg)",
-          border: "1px solid var(--border)",
-          borderRadius: 10,
-          boxShadow: "0 18px 48px rgba(0,0,0,0.35)",
-          width: "min(460px, 92vw)",
-          padding: 18,
-          display: "flex",
-          flexDirection: "column",
-          gap: 12,
-        }}
+        className="unid-modal"
+        style={{ width: "min(460px, 92vw)", padding: 18, gap: 12 }}
       >
         <div style={{
           fontSize: 15,
@@ -5400,8 +4423,8 @@ function UnmapByEmployeeModal({
             width: 26,
             height: 26,
             borderRadius: "50%",
-            background: "var(--warn-soft, #fef3c7)",
-            color: "var(--warn, #ca8a04)",
+            background: "var(--warning-soft)",
+            color: "var(--warning-text)",
             display: "inline-flex",
             alignItems: "center",
             justifyContent: "center",
@@ -5656,24 +4679,6 @@ export function UnidentifiedFacesPage() {
   // Cleanup debounce on unmount
   useEffect(() => () => { if (debounceRef.current) clearTimeout(debounceRef.current); }, []);
 
-  const inputStyle: React.CSSProperties = {
-    padding: "6px 10px",
-    fontSize: 12.5,
-    border: "1px solid var(--border)",
-    borderRadius: "var(--radius-sm)",
-    background: "var(--bg-elev)",
-    color: "var(--text)",
-    fontFamily: "var(--font-sans)",
-  };
-
-  const labelStyle: React.CSSProperties = {
-    fontSize: 11.5,
-    color: "var(--text-tertiary)",
-    fontWeight: 500,
-    marginBottom: 4,
-    display: "block",
-  };
-
   // Synthetic FaceClusterOut — single event (single Map button) or bulk selection.
   const syntheticCluster: FaceClusterOut | null = (() => {
     if (mapRawEvent) {
@@ -5734,9 +4739,9 @@ export function UnidentifiedFacesPage() {
   ) => {
     if (total <= 1) return null;
     return (
-      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 6, paddingTop: 4 }}>
-        <button onClick={() => onPage(1)} disabled={page <= 1} className="btn btn-sm" aria-label={t("common.first", "First page")} style={{ padding: "4px 8px" }}>«</button>
-        <button onClick={() => onPage(Math.max(1, page - 1))} disabled={page <= 1} className="btn btn-sm" aria-label={t("common.previous", "Previous page")} style={{ padding: "4px 8px" }}>
+      <div className="unid-pager">
+        <button onClick={() => onPage(1)} disabled={page <= 1} className="btn btn-sm btn-ghost" aria-label={t("common.first", "First page")}>«</button>
+        <button onClick={() => onPage(Math.max(1, page - 1))} disabled={page <= 1} className="btn btn-sm btn-ghost" aria-label={t("common.previous", "Previous page")}>
           <Icon name="chevronLeft" size={14} />
         </button>
         {Array.from({ length: Math.min(5, total) }, (_, i) => {
@@ -5744,20 +4749,14 @@ export function UnidentifiedFacesPage() {
           const p = startP + i;
           if (p > total) return null;
           return (
-            <button key={p} onClick={() => onPage(p)} className="btn btn-sm" aria-current={p === page ? "page" : undefined}
-              style={{ padding: "4px 10px", minWidth: 32,
-                background: p === page ? "var(--accent)" : undefined,
-                color: p === page ? "#fff" : undefined,
-                borderColor: p === page ? "var(--accent)" : undefined,
-              }}
-            >{p}</button>
+            <button key={p} onClick={() => onPage(p)} className={p === page ? "btn btn-sm unid-page-active" : "btn btn-sm btn-ghost"} aria-current={p === page ? "page" : undefined}>{p}</button>
           );
         })}
-        <button onClick={() => onPage(Math.min(total, page + 1))} disabled={page >= total} className="btn btn-sm" aria-label={t("common.next", "Next page")} style={{ padding: "4px 8px" }}>
+        <button onClick={() => onPage(Math.min(total, page + 1))} disabled={page >= total} className="btn btn-sm btn-ghost" aria-label={t("common.next", "Next page")}>
           <Icon name="chevronRight" size={14} />
         </button>
-        <button onClick={() => onPage(total)} disabled={page >= total} className="btn btn-sm" aria-label={t("common.last", "Last page")} style={{ padding: "4px 8px" }}>»</button>
-        <span style={{ fontSize: 12, color: "var(--text-tertiary)", marginInlineStart: 4 }}>
+        <button onClick={() => onPage(total)} disabled={page >= total} className="btn btn-sm btn-ghost" aria-label={t("common.last", "Last page")}>»</button>
+        <span className="text-xs text-dim" style={{ marginInlineStart: 4 }}>
           {t("unidentifiedFaces.page", "Page {{page}} of {{total}}", { page, total })}
         </span>
       </div>
@@ -5765,40 +4764,99 @@ export function UnidentifiedFacesPage() {
   };
 
   // ── Shared empty / error / skeleton helpers ──
-  const renderError = () => (
-    <div style={{ padding: "32px 0", textAlign: "center", background: "var(--bg-elev)", border: "1px solid var(--border)", borderRadius: "var(--radius)" }}>
-      <Icon name="x" size={28} style={{ opacity: 0.3, marginBottom: 10 }} />
-      <div style={{ fontSize: 14, color: "var(--text-secondary)" }}>
-        {t("unidentifiedFaces.loadFailed", "Could not load unidentified faces.")}
-      </div>
+  const renderError = (error?: unknown, retry?: () => void) => (
+    <div className="card">
+      <EmptyPanel
+        tone="danger"
+        icon={<StrokeIcon>{ATT_ICON.alert}</StrokeIcon>}
+        title={t("unidentifiedFaces.loadFailedTitle", "Couldn't load unidentified faces")}
+        body={extractApiError(error, t("unidentifiedFaces.loadFailed", "Could not load unidentified faces."))}
+        actions={retry ? (
+          <button type="button" className="btn" onClick={retry}>
+            <Icon name="refresh" size={12} />
+            {t("unidentifiedFaces.retry", "Retry")}
+          </button>
+        ) : undefined}
+      />
     </div>
   );
 
   const renderSkeleton = (count: number) => (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(175px, 1fr))", gap: 12 }}>
+    <div className="unid-grid" role="status" aria-label="Loading">
       {[...Array(count)].map((_, i) => <SkeletonCard key={i} />)}
     </div>
   );
 
-  const renderEmpty = (hint: string) => (
-    <div style={{ padding: "56px 24px", textAlign: "center", background: "var(--bg-elev)", border: "1px solid var(--border)", borderRadius: "var(--radius)" }}>
-      <div style={{ width: 56, height: 56, borderRadius: "50%", background: "var(--bg-sunken)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
-        <Icon name="user" size={26} style={{ opacity: 0.3 }} />
+  // Filters active = anything differs from the default range / camera /
+  // clustering knobs. Drives the "no results" vs "no records" split.
+  const filtersActive =
+    filters.start !== defaultStart() ||
+    filters.end !== todayIso() ||
+    filters.camera_id !== null ||
+    filters.min_count !== DEFAULT_MIN_COUNT ||
+    filters.threshold !== DEFAULT_THRESHOLD;
+  const resetAllFilters = () => {
+    setUiThreshold(DEFAULT_THRESHOLD);
+    setUiMinCount(DEFAULT_MIN_COUNT);
+    commitNow({ start: defaultStart(), end: todayIso(), camera_id: null, threshold: DEFAULT_THRESHOLD, min_count: DEFAULT_MIN_COUNT });
+  };
+
+  // No records at all: default filters, nothing came back on the
+  // active primary view. Hides the stats + toolbar per the brief.
+  const activeRaw = activeTab === "raw" && rawSubTab === "primary";
+  const activeGroups = activeTab === "groups" && groupsSubTab === "primary";
+  const activeMappedRaw = activeTab === "raw" && rawSubTab === "mapped";
+  const activeMappedGroups = activeTab === "groups" && groupsSubTab === "mapped";
+  const noRecordsAtAll =
+    !filtersActive &&
+    ((activeRaw && !!rawData && rawData.items.length === 0 && !rawResult.isLoading) ||
+      (activeGroups && !!clusterData && clusterData.clusters.length === 0 && !clusterResult.isLoading) ||
+      (activeMappedRaw && !!mappedData && mappedData.items.length === 0 && !mappedResult.isLoading) ||
+      (activeMappedGroups && !!mappedClustersData && mappedClustersData.items.length === 0 && !mappedClustersResult.isLoading));
+
+  const renderEmpty = (hint: string) =>
+    filtersActive ? (
+      <div className="card">
+        <EmptyPanel
+          tone="neutral"
+          icon={<Icon name="filter" size={28} />}
+          title={t("unidentifiedFaces.noResultsTitle", "No results for these filters")}
+          body={hint}
+          actions={
+            <button type="button" className="btn" onClick={resetAllFilters}>
+              <Icon name="refresh" size={12} />
+              {t("unidentifiedFaces.clearFilters", "Clear filters")}
+            </button>
+          }
+        />
       </div>
-      <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>
-        {t("unidentifiedFaces.empty", "No unidentified faces found")}
+    ) : (
+      <div className="card">
+        <EmptyPanel
+          tone="accent"
+          icon={<StrokeIcon>{ATT_ICON.face}</StrokeIcon>}
+          title={t("unidentifiedFaces.empty", "No unidentified faces found")}
+          body={hint}
+          actions={
+            <Link to="/camera-logs" className="btn">
+              <Icon name="camera" size={13} />
+              {t("unidentifiedFaces.viewCameraLogs", "View camera logs")}
+            </Link>
+          }
+        />
       </div>
-      <div style={{ fontSize: 13, color: "var(--text-secondary)", maxWidth: 340, margin: "0 auto" }}>{hint}</div>
-    </div>
-  );
+    );
 
   return (
     <>
-      <style>{INJECTED_STYLE}</style>
-
       {/* Page title — scrolls away once the sticky nav reaches the top. */}
-      <div style={{ padding: "24px 28px 14px", maxWidth: 1400 }}>
-        <h1 className="page-title">{t("unidentifiedFaces.title", "Unidentified Faces")}</h1>
+      <div className="page-header" style={{ marginBottom: 6 }}>
+        <div>
+          <h1 className="page-title">{t("unidentifiedFaces.title", "Unidentified Faces")}</h1>
+          <p className="page-sub">
+            {t("unidentifiedFaces.pageSub", "Faces the cameras saw but could not match to an employee. Review them and map each face to the right person.")}
+          </p>
+        </div>
       </div>
 
       {/* Hierarchical sticky nav: primary underline tabs + secondary pill row.
@@ -5807,7 +4865,7 @@ export function UnidentifiedFacesPage() {
           a long cluster grid. Pure CSS sticky — no JS measurement needed. */}
       <div className="unid-nav-sticky">
         <div className="unid-nav-inner">
-          <div role="tablist" aria-label={t("unidentifiedFaces.title", "Unidentified Faces") as string} className="unid-nav-primary">
+          <div role="tablist" aria-label={t("unidentifiedFaces.title", "Unidentified Faces") as string} className="tabs unid-nav-primary">
             {(["raw", "groups"] as const).map((tab) => {
               const isActive = activeTab === tab;
               const label = tab === "raw"
@@ -5820,14 +4878,14 @@ export function UnidentifiedFacesPage() {
                   role="tab"
                   aria-selected={isActive}
                   onClick={() => setActiveTab(tab)}
-                  className={isActive ? "unid-nav-tab unid-nav-tab--active" : "unid-nav-tab"}
+                  className={isActive ? "tab active" : "tab"}
                 >
                   {label}
                 </button>
               );
             })}
           </div>
-          <div role="tablist" aria-label={t("unidentifiedFaces.subTabsAria", "Section views") as string} className="unid-nav-sub">
+          <div role="tablist" aria-label={t("unidentifiedFaces.subTabsAria", "Section views") as string} className="seg unid-nav-sub">
             {(["primary", "mapped"] as const).map((sub) => {
               const isActive =
                 activeTab === "raw" ? rawSubTab === sub : groupsSubTab === sub;
@@ -5851,7 +4909,8 @@ export function UnidentifiedFacesPage() {
                     if (activeTab === "raw") setRawSubTab(sub);
                     else setGroupsSubTab(sub);
                   }}
-                  className={isActive ? "unid-nav-pill unid-nav-pill--active" : "unid-nav-pill"}
+                  aria-pressed={isActive}
+                  className={isActive ? "seg-btn active" : "seg-btn"}
                 >
                   {label}
                 </button>
@@ -5861,20 +4920,20 @@ export function UnidentifiedFacesPage() {
         </div>
       </div>
 
-      <div style={{ padding: "18px 28px 24px", display: "flex", flexDirection: "column", gap: 18, maxWidth: 1400 }}>
+      <div style={{ padding: "16px 0 24px", display: "flex", flexDirection: "column", gap: 14 }}>
 
         {/* ── Stats pills (tab-specific) ── */}
-        {activeTab === "raw" ? (
+        {noRecordsAtAll ? null : activeTab === "raw" ? (
           rawData ? (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            <div className="at-row">
               <StatPill label={t("unidentifiedFaces.totalEvents", "total events")} value={rawData.total.toLocaleString()} />
             </div>
           ) : rawResult.isLoading ? (
-            <div style={{ display: "flex", gap: 8 }}>{[80, 110].map((w) => <div key={w} className="unid-skeleton" style={{ height: 30, width: w, borderRadius: 999 }} />)}</div>
+            <div className="at-row" role="status" aria-label="Loading">{[80, 110].map((w) => <div key={w} className="unid-skeleton" style={{ height: 22, width: w, borderRadius: 999 }} />)}</div>
           ) : null
         ) : (
           clusterData ? (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            <div className="at-row">
               <StatPill label={t("unidentifiedFaces.clusters", "clusters")} value={clusterData.total_clusters.toLocaleString()} />
               <StatPill label={t("unidentifiedFaces.totalEvents", "total events")} value={clusterData.total_unidentified_events.toLocaleString()} />
               <StatPill label={t("unidentifiedFaces.withEmbedding", "with embedding")} value={clusterData.events_with_embedding.toLocaleString()} />
@@ -5886,95 +4945,93 @@ export function UnidentifiedFacesPage() {
               )}
             </div>
           ) : clusterResult.isLoading ? (
-            <div style={{ display: "flex", gap: 8 }}>{[80, 110, 90].map((w) => <div key={w} className="unid-skeleton" style={{ height: 30, width: w, borderRadius: 999 }} />)}</div>
+            <div className="at-row" role="status" aria-label="Loading">{[80, 110, 90].map((w) => <div key={w} className="unid-skeleton" style={{ height: 22, width: w, borderRadius: 999 }} />)}</div>
           ) : null
         )}
 
-        {/* ── Filter bar ── */}
-        <div style={{ background: "var(--bg-elev)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "14px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
-
+        {/* ── Filter bar — stays visible even when nothing came back, because
+            the default range is "today" and widening it is the way out. ── */}
+        <div className="unid-filters">
           {/* Shared: date range + camera */}
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "flex-end" }}>
-            <div>
-              <label style={labelStyle}>{t("unidentifiedFaces.from", "From")}</label>
-              <div style={{ marginTop: 4 }}>
-                <DatePicker
-                  value={filters.start ?? ""}
-                  onChange={(v) => commitNow({ start: v || null })}
-                  max={filters.end || todayIso()}
-                  ariaLabel={t("unidentifiedFaces.from", "From")}
-                  triggerStyle={{ width: 160 }}
-                />
-              </div>
-            </div>
-            <div>
-              <label style={labelStyle}>{t("unidentifiedFaces.to", "To")}</label>
-              <div style={{ marginTop: 4 }}>
-                <DatePicker
-                  value={filters.end ?? ""}
-                  onChange={(v) => commitNow({ end: v || null })}
-                  {...(filters.start ? { min: filters.start } : {})}
-                  max={todayIso()}
-                  ariaLabel={t("unidentifiedFaces.to", "To")}
-                  triggerStyle={{ width: 160 }}
-                />
-              </div>
-            </div>
+          <Toolbar>
+            <label className="at-field">
+              <FieldCaption>{t("unidentifiedFaces.from", "From")}</FieldCaption>
+              <DatePicker
+                value={filters.start ?? ""}
+                onChange={(v) => commitNow({ start: v || null })}
+                max={filters.end || todayIso()}
+                ariaLabel={t("unidentifiedFaces.from", "From")}
+                triggerStyle={{ ...fieldDateStyle, width: 160 }}
+              />
+            </label>
+            <label className="at-field">
+              <FieldCaption>{t("unidentifiedFaces.to", "To")}</FieldCaption>
+              <DatePicker
+                value={filters.end ?? ""}
+                onChange={(v) => commitNow({ end: v || null })}
+                {...(filters.start ? { min: filters.start } : {})}
+                max={todayIso()}
+                ariaLabel={t("unidentifiedFaces.to", "To")}
+                triggerStyle={{ ...fieldDateStyle, width: 160 }}
+              />
+            </label>
             {(filters.start !== defaultStart() || filters.end !== todayIso()) && (
               <button
                 type="button"
                 onClick={() => commitNow({ start: defaultStart(), end: todayIso() })}
-                className="btn btn-sm"
-                style={{ alignSelf: "flex-end" }}
+                className="btn"
                 title={t("unidentifiedFaces.resetToTodayHint", "Reset to default range (today)")}
               >
                 {t("unidentifiedFaces.today", "Today")}
               </button>
             )}
             {cameras.data && cameras.data.items.length > 0 && (
-              <div>
-                <label style={labelStyle}>{t("unidentifiedFaces.camera", "Camera")}</label>
-                <select value={filters.camera_id ?? ""} onChange={(e) => commitNow({ camera_id: e.target.value ? parseInt(e.target.value, 10) : null })} style={{ ...inputStyle, width: 180 }}>
-                  <option value="">{t("unidentifiedFaces.allCameras", "All cameras")}</option>
-                  {cameras.data.items.map((cam) => <option key={cam.id} value={cam.id}>{cam.name}</option>)}
-                </select>
-              </div>
+              <FilterSelect
+                label={t("unidentifiedFaces.camera", "Camera")}
+                value={filters.camera_id === null ? "" : String(filters.camera_id)}
+                onChange={(v) => commitNow({ camera_id: v ? parseInt(v, 10) : null })}
+                options={[
+                  ["", t("unidentifiedFaces.allCameras", "All cameras")],
+                  ...cameras.data.items.map((cam) => [String(cam.id), cam.name] as [string, string]),
+                ]}
+              />
             )}
             {/* Min appearances + Reset defaults — Similarity-Clusters-only
                 knobs. Hidden on the Mapped Employees sub-tab, which is
                 already mapped/reviewed data and isn't re-clustered. */}
             {activeTab === "groups" && groupsSubTab === "primary" && (
               <>
-                <div>
-                  <label style={labelStyle}>{t("unidentifiedFaces.minCount", "Min appearances")}</label>
+                <label className="at-field">
+                  <FieldCaption>{t("unidentifiedFaces.minCount", "Min appearances")}</FieldCaption>
                   <input
                     type="number"
                     min={1}
                     max={100}
                     value={uiMinCount}
                     onChange={(e) => { const v = Math.max(1, parseInt(e.target.value, 10) || 1); setUiMinCount(v); scheduleCommit({ min_count: v }); }}
-                    style={{ ...inputStyle, width: 90 }}
+                    className="at-control"
+                    style={{ width: 90 }}
                   />
-                </div>
+                </label>
                 <button
                   type="button"
                   onClick={() => { setUiThreshold(DEFAULT_THRESHOLD); setUiMinCount(DEFAULT_MIN_COUNT); commitNow({ threshold: DEFAULT_THRESHOLD, min_count: DEFAULT_MIN_COUNT }); }}
-                  className="btn btn-sm"
-                  style={{ alignSelf: "flex-end" }}
+                  className="btn btn-ghost"
+                  style={{ marginInlineStart: "auto" }}
                   title={t("unidentifiedFaces.resetDefaultsHint", "Reset threshold and min appearances to defaults") as string}
                 >
                   {t("unidentifiedFaces.resetDefaults", "Reset defaults")}
                 </button>
               </>
             )}
-          </div>
+          </Toolbar>
 
           {/* Threshold slider — only on the Similarity Clusters sub-tab.
               The Mapped Employees view is already-reviewed data, not
               re-clustered, so the clustering knobs would be misleading. */}
           {activeTab === "groups" && groupsSubTab === "primary" && (
             <>
-              <div style={{ paddingTop: 12, borderTop: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 12 }}>
+              <div className="card unid-thresh-wrap">
                 {/* Similarity threshold card */}
                 <div className="unid-thresh-card">
                   <div className="unid-thresh-header">
@@ -6024,14 +5081,16 @@ export function UnidentifiedFacesPage() {
         {/* ── Tab 1.a: All Unknown Faces → Unknown Faces ── */}
         {activeTab === "raw" && rawSubTab === "primary" && (
           <>
-            {rawResult.isError && renderError()}
+            {rawResult.isError && renderError(rawResult.error, () => void rawResult.refetch())}
             {rawResult.isLoading && !rawData && renderSkeleton(RAW_PAGE_SIZE)}
             {!rawResult.isLoading && !rawResult.isError && rawData && rawData.items.length === 0 && renderEmpty(
-              t("unidentifiedFaces.emptyRaw", "No unidentified face detections in this date range. Try expanding the range or removing the face-data filter.")
+              filtersActive
+                ? t("unidentifiedFaces.emptyRaw", "No unidentified face detections in this date range. Try expanding the range or removing the face-data filter.")
+                : t("unidentifiedFaces.emptyNoneBody", "Every face the cameras saw in this range was matched to an employee. Widen the date range above, or come back as new detections arrive.")
             )}
             {rawData && rawData.items.length > 0 && (
-              <div style={{ opacity: rawResult.isPlaceholderData ? 0.6 : 1, transition: "opacity 0.2s" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(175px, 1fr))", gap: 12 }}>
+              <div className={rawResult.isPlaceholderData ? "at-faded" : undefined}>
+                <div className="unid-grid">
                   {rawData.items.map((ev) => (
                     <RawEventCard
                       key={ev.id}
@@ -6062,6 +5121,7 @@ export function UnidentifiedFacesPage() {
             onPage={setMappedPage}
             renderEmpty={renderEmpty}
             renderError={renderError}
+            onRetry={() => void mappedResult.refetch()}
             renderSkeleton={renderSkeleton}
             renderPagination={renderPagination}
             pageSize={MAPPED_PAGE_SIZE}
@@ -6071,14 +5131,16 @@ export function UnidentifiedFacesPage() {
         {/* ── Tab 2.a: Similarity Groups → Similarity Clusters ── */}
         {activeTab === "groups" && groupsSubTab === "primary" && (
           <>
-            {clusterResult.isError && renderError()}
+            {clusterResult.isError && renderError(clusterResult.error, () => void clusterResult.refetch())}
             {clusterResult.isLoading && !clusterData && renderSkeleton(PAGE_SIZE)}
             {!clusterResult.isLoading && !clusterResult.isError && clusterData && clusterData.clusters.length === 0 && renderEmpty(
-              t("unidentifiedFaces.emptyHint", "Try expanding the date range or lowering the similarity threshold.")
+              filtersActive
+                ? t("unidentifiedFaces.emptyHint", "Try expanding the date range or lowering the similarity threshold.")
+                : t("unidentifiedFaces.emptyNoneBody", "Every face the cameras saw in this range was matched to an employee. Widen the date range above, or come back as new detections arrive.")
             )}
             {clusterData && clusters.length > 0 && (
-              <div style={{ opacity: isClusterPlaceholder ? 0.6 : 1, transition: "opacity 0.2s" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(175px, 1fr))", gap: 12 }}>
+              <div className={isClusterPlaceholder ? "at-faded" : undefined}>
+                <div className="unid-grid">
                   {clusters.map((cluster) => (
                     <ClusterCard key={cluster.cluster_id} cluster={cluster} onOpen={setOpenCluster} />
                   ))}
@@ -6101,6 +5163,7 @@ export function UnidentifiedFacesPage() {
             onPage={setMappedClustersPage}
             renderEmpty={renderEmpty}
             renderError={renderError}
+            onRetry={() => void mappedClustersResult.refetch()}
             renderSkeleton={renderSkeleton}
             renderPagination={renderPagination}
             pageSize={MAPPED_CLUSTERS_PAGE_SIZE}
@@ -6119,23 +5182,7 @@ export function UnidentifiedFacesPage() {
         <div
           role="toolbar"
           aria-label={t("unidentifiedFaces.bulkToolbar", "Bulk selection toolbar")}
-          style={{
-            position: "fixed",
-            bottom: 28,
-            left: "50%",
-            transform: "translateX(-50%)",
-            zIndex: 300,
-            background: "var(--bg-elev)",
-            border: "1px solid var(--border)",
-            borderRadius: "var(--radius)",
-            boxShadow: "0 6px 32px rgba(0,0,0,0.22)",
-            display: "flex",
-            alignItems: "center",
-            gap: 0,
-            padding: "8px 10px",
-            animation: "unid-toolbar-up 0.18s ease both",
-            whiteSpace: "nowrap",
-          }}
+          className="unid-bulkbar"
         >
           {/* selected count */}
           <div style={{
@@ -6146,13 +5193,8 @@ export function UnidentifiedFacesPage() {
             borderInlineEnd: "1px solid var(--border)",
             marginInlineEnd: 10,
           }}>
-            <div style={{
-              width: 22, height: 22, borderRadius: 5,
-              background: "var(--accent, #000)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              flexShrink: 0,
-            }}>
-              <Icon name="check" size={12} style={{ color: "#fff" }} />
+            <div className="unid-bulkbar-check">
+              <Icon name="check" size={12} />
             </div>
             <span style={{ fontSize: 13.5, fontWeight: 600 }}>
               {t("unidentifiedFaces.selectedCount", "{{count}} selected", { count: selectedIds.size })}

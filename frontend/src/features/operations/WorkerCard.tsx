@@ -2,7 +2,7 @@
 //
 // Sections (top to bottom):
 //   - Header row: name + status pill + uptime + actions
-//   - Pipeline stages (4 pills via PipelineStagesView)
+//   - Pipeline stages (4 cards via PipelineStagesView)
 //   - Counters strip
 //   - Metadata footer
 
@@ -15,6 +15,7 @@ import { CameraMetadataModal } from "./CameraMetadataModal";
 import { PipelineStagesView } from "./PipelineStages";
 import { RecentErrorsDrawer } from "./RecentErrorsDrawer";
 import type { WorkerStats, WorkerStatus } from "./types";
+import { ModalPanel, SoftPill, type PillTone } from "../system/opsUi";
 
 interface Props {
   worker: WorkerStats;
@@ -22,23 +23,12 @@ interface Props {
   restartPending: boolean;
 }
 
-const STATUS_PILL: Record<WorkerStatus, string> = {
-  starting: "pill-info",
-  running: "pill-success",
-  reconnecting: "pill-warning",
-  stopped: "pill-neutral",
-  failed: "pill-danger",
-};
-
-// Left-edge stripe colour so the card itself reflects the worker's
-// status at a glance — the small header pill is easy to miss on a
-// page with multiple cards.
-const STATUS_STRIPE: Record<WorkerStatus, string> = {
-  starting: "var(--info, var(--accent))",
-  running: "var(--success)",
-  reconnecting: "var(--warning)",
-  stopped: "var(--text-tertiary)",
-  failed: "var(--danger)",
+export const STATUS_TONE: Record<WorkerStatus, PillTone> = {
+  starting: "info",
+  running: "success",
+  reconnecting: "warning",
+  stopped: "neutral",
+  failed: "danger",
 };
 
 function formatUptime(secs: number): string {
@@ -49,10 +39,7 @@ function formatUptime(secs: number): string {
   return `${h}h ${m}m`;
 }
 
-function formatMetadataFooter(
-  m: WorkerStats["metadata"],
-  t: (k: string) => string,
-): string {
+function formatMetadataFooter(m: WorkerStats["metadata"], t: (k: string) => string): string {
   const tech: string[] = [];
   if (m.resolution_w && m.resolution_h) {
     tech.push(`${m.resolution_w}×${m.resolution_h}`);
@@ -72,67 +59,45 @@ export function WorkerCard({ worker, onRestart, restartPending }: Props) {
   const [confirmRestart, setConfirmRestart] = useState(false);
 
   const md = worker.metadata;
-  const hasMetadata = !!(
-    md.resolution_w ||
-    md.codec ||
-    md.fps ||
-    md.brand ||
-    md.mount_location
-  );
+  const hasMetadata = !!(md.resolution_w || md.codec || md.fps || md.brand || md.mount_location);
+  const tone = STATUS_TONE[worker.status];
 
   return (
     <>
-      <div
-        className="card"
-        style={{
-          padding: 16,
-          marginBottom: 12,
-          borderInlineStart: `4px solid ${STATUS_STRIPE[worker.status]}`,
-        }}
-      >
+      <div className={`card ops-worker-card tone-${tone}`}>
         {/* Header row */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            marginBottom: 12,
-          }}
-        >
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 14, fontWeight: 600 }}>
-              {worker.camera_name}
-            </div>
-            <div className="text-xs text-dim mono">
-              camera_id={worker.camera_id}
+        <div className="ops-worker-head">
+          <div className="ops-cam ops-worker-head-main">
+            <span className={`ops-cam-icon${worker.status === "running" ? " is-on" : ""}`} aria-hidden>
+              <Icon name="camera" size={14} />
+            </span>
+            <div style={{ minWidth: 0 }}>
+              <div className="ops-cam-name">{worker.camera_name}</div>
+              <div className="ops-cam-meta mono">camera_id={worker.camera_id}</div>
             </div>
           </div>
-          <span className={`pill ${STATUS_PILL[worker.status]}`}>
-            {t(`operations.status.${worker.status}`) as string}
-          </span>
-          <span className="text-xs text-dim">
-            {worker.status === "running"
-              ? formatUptime(worker.uptime_sec)
-              : "—"}
-          </span>
+          <SoftPill tone={tone}>{t(`operations.status.${worker.status}`) as string}</SoftPill>
+          <span className="text-xs text-dim mono">{worker.status === "running" ? formatUptime(worker.uptime_sec) : "—"}</span>
           <button
             type="button"
-            className="icon-btn"
+            className="btn btn-sm btn-ghost"
             onClick={() => setErrorsOpen(true)}
             aria-label={t("operations.actions.viewErrors") as string}
             title={t("operations.actions.viewErrors") as string}
           >
             <Icon name="bell" size={13} />
+            {t("operations.actions.viewErrors") as string}
           </button>
           <button
             type="button"
-            className="icon-btn"
+            className="btn btn-sm"
             onClick={() => setConfirmRestart(true)}
             disabled={restartPending}
             aria-label={t("operations.actions.restart") as string}
             title={t("operations.actions.restart") as string}
           >
             <Icon name="refresh" size={13} />
+            {t("operations.actions.restart") as string}
           </button>
         </div>
 
@@ -140,75 +105,34 @@ export function WorkerCard({ worker, onRestart, restartPending }: Props) {
         <PipelineStagesView stages={worker.stages} />
 
         {/* Counters */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
-            gap: 8,
-            marginTop: 12,
-            padding: "8px 10px",
-            background: "var(--bg-sunken)",
-            borderRadius: "var(--radius-sm)",
-          }}
-        >
-          <Counter
-            label={t("operations.counters.fpsReader") as string}
-            value={worker.fps_reader.toFixed(1)}
-          />
-          <Counter
-            label={t("operations.counters.fpsAnalyzer") as string}
-            value={worker.fps_analyzer.toFixed(1)}
-          />
-          <Counter
-            label={t("operations.counters.framesAnalyzed") as string}
-            value={String(worker.frames_analyzed_60s)}
-          />
-          <Counter
-            label={t("operations.counters.motionSkipped") as string}
-            value={String(worker.frames_motion_skipped_60s)}
-          />
-          <Counter
-            label={t("operations.counters.facesSaved") as string}
-            value={String(worker.faces_saved_60s)}
-          />
-          <Counter
-            label={t("operations.counters.matches") as string}
-            value={String(worker.matches_60s)}
-          />
+        <div className="ops-counter-grid">
+          <Counter label={t("operations.counters.fpsReader") as string} value={worker.fps_reader.toFixed(1)} />
+          <Counter label={t("operations.counters.fpsAnalyzer") as string} value={worker.fps_analyzer.toFixed(1)} />
+          <Counter label={t("operations.counters.framesAnalyzed") as string} value={String(worker.frames_analyzed_60s)} />
+          <Counter label={t("operations.counters.motionSkipped") as string} value={String(worker.frames_motion_skipped_60s)} />
+          <Counter label={t("operations.counters.facesSaved") as string} value={String(worker.faces_saved_60s)} />
+          <Counter label={t("operations.counters.matches") as string} value={String(worker.matches_60s)} />
         </div>
 
         {/* Metadata footer */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            marginTop: 10,
-            fontSize: 11.5,
-            color: "var(--text-tertiary)",
-          }}
-        >
-          <span style={{ flex: 1 }}>{formatMetadataFooter(md, (k) => t(k) as string)}</span>
+        <div className="ops-worker-foot">
+          <span className="grow">{formatMetadataFooter(md, (k) => t(k) as string)}</span>
+          {!hasMetadata && <span>{t("operations.metadata.add") as string}</span>}
+          {md.detected_at && (
+            <span className="mono">
+              {t("operations.metadata.detectedAt") as string} {new Date(md.detected_at).toLocaleDateString()}
+            </span>
+          )}
           <button
             type="button"
-            className="icon-btn"
+            className="btn btn-sm btn-ghost"
             onClick={() => setMetadataOpen(true)}
             aria-label={t("operations.actions.editMetadata") as string}
             title={t("operations.actions.editMetadata") as string}
           >
             <Icon name="edit" size={11} />
+            {t("operations.actions.editMetadata") as string}
           </button>
-          {!hasMetadata && (
-            <span style={{ color: "var(--text-secondary)" }}>
-              {t("operations.metadata.add") as string}
-            </span>
-          )}
-          {md.detected_at && (
-            <span className="mono" style={{ fontSize: 10.5 }}>
-              {t("operations.metadata.detectedAt") as string}{" "}
-              {new Date(md.detected_at).toLocaleDateString()}
-            </span>
-          )}
         </div>
       </div>
 
@@ -225,21 +149,13 @@ export function WorkerCard({ worker, onRestart, restartPending }: Props) {
       )}
 
       {errorsOpen && (
-        <RecentErrorsDrawer
-          cameraId={worker.camera_id}
-          cameraName={worker.camera_name}
-          onClose={() => setErrorsOpen(false)}
-        />
+        <RecentErrorsDrawer cameraId={worker.camera_id} cameraName={worker.camera_name} onClose={() => setErrorsOpen(false)} />
       )}
 
       {metadataOpen && (
         <CameraMetadataModal
           cameraId={worker.camera_id}
-          initial={{
-            brand: md.brand,
-            model: md.model,
-            mount_location: md.mount_location,
-          }}
+          initial={{ brand: md.brand, model: md.model, mount_location: md.mount_location }}
           detected={{
             resolution_w: md.resolution_w,
             resolution_h: md.resolution_h,
@@ -257,28 +173,8 @@ export function WorkerCard({ worker, onRestart, restartPending }: Props) {
 function Counter({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div
-        style={{
-          fontSize: 9.5,
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-          color: "var(--text-tertiary)",
-          fontWeight: 600,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        className="mono"
-        style={{
-          fontSize: 14,
-          fontWeight: 600,
-          marginTop: 2,
-          color: "var(--text)",
-        }}
-      >
-        {value}
-      </div>
+      <div className="ops-counter-label">{label}</div>
+      <div className="ops-counter-value">{value}</div>
     </div>
   );
 }
@@ -295,52 +191,26 @@ function ConfirmRestartModal({
   pending: boolean;
 }) {
   const { t } = useTranslation();
+  const title = t("operations.restart.singleTitle", { name: cameraName }) as string;
   return (
     <ModalShell onClose={onCancel}>
-      <div
-        role="dialog"
-        aria-modal="true"
-        style={{
-          position: "fixed",
-          top: "50%",
-          insetInlineStart: "50%",
-          transform: "translate(-50%, -50%)",
-          // 61 to clear .drawer-scrim's z-index (60 from
-          // styles-enhancements.css). 51 left the panel BEHIND the
-          // scrim and the modal looked like it never loaded.
-          zIndex: 61,
-          background: "var(--bg-elev)",
-          border: "1px solid var(--border)",
-          borderRadius: "var(--radius)",
-          boxShadow: "var(--shadow-lg)",
-          width: 420,
-          maxWidth: "calc(100vw - 32px)",
-          padding: 18,
-        }}
+      <ModalPanel
+        title={title}
+        ariaLabel={title}
+        footer={
+          <>
+            <button type="button" className="btn" onClick={onCancel}>
+              {t("common.cancel") as string}
+            </button>
+            <button type="button" className="btn btn-primary" onClick={onConfirm} disabled={pending}>
+              <Icon name="refresh" size={12} />
+              {t("operations.actions.restart") as string}
+            </button>
+          </>
+        }
       >
-        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>
-          {t("operations.restart.singleTitle", { name: cameraName }) as string}
-        </h3>
-        <p
-          className="text-sm text-dim"
-          style={{ marginTop: 8, marginBottom: 14 }}
-        >
-          {t("operations.restart.singleBody") as string}
-        </p>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button type="button" className="btn" onClick={onCancel}>
-            {t("common.cancel") as string}
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={onConfirm}
-            disabled={pending}
-          >
-            {t("operations.actions.restart") as string}
-          </button>
-        </div>
-      </div>
+        <p className="text-sm" style={{ margin: 0, color: "var(--text-secondary)" }}>{t("operations.restart.singleBody") as string}</p>
+      </ModalPanel>
     </ModalShell>
   );
 }

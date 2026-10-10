@@ -1,0 +1,244 @@
+/* Clips & analytics area — page-specific layout on top of theme/modern.css.
+ * Prefix: cl-. Only CSS variables from modern.css; no hex colours.
+ * Imported once from person-clips/StatTile.tsx (the area's shared Ui). */
+
+/* Read-only stat tile: same surface as the shared .mg-stat button but
+   inert (no pointer, no lift) because there is no filter to click. */
+.cl-stat,
+.cl-stat:hover {
+  cursor: default;
+  transform: none;
+  box-shadow: var(--shadow-sm);
+  border-color: var(--border);
+}
+.cl-stat::after { content: none; }
+.cl-stat .mg-stat-value {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Image / clip cards ------------------------------------------------ */
+.cl-media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
+  gap: 14px;
+}
+.cl-crop-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(148px, 100%), 1fr));
+  gap: 12px;
+  padding: 14px;
+}
+.cl-media-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  transition: transform var(--dur) var(--ease-out), box-shadow var(--dur) var(--ease-out), border-color var(--dur-fast) ease;
+}
+.cl-media-card:hover,
+.cl-media-card:focus-within {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow);
+  border-color: var(--border-strong);
+}
+.cl-media-card.is-selected { border-color: var(--accent); box-shadow: var(--ring), var(--shadow-sm); }
+.cl-media-card[role="button"] { cursor: pointer; }
+.cl-media-thumb {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: var(--text);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.cl-media-thumb.is-square { aspect-ratio: 1 / 1; background: var(--bg-sunken); }
+.cl-media-thumb img,
+.cl-media-thumb video { width: 100%; height: 100%; display: block; object-fit: cover; }
+.cl-media-thumb.is-square img { object-fit: contain; }
+.cl-media-thumb .cl-media-img-fade { transition: transform var(--dur) var(--ease-out); }
+.cl-media-card:hover .cl-media-img-fade { transform: scale(1.03); }
+.cl-media-check {
+  position: absolute;
+  top: 8px;
+  inset-inline-start: 8px;
+  z-index: 2;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: color-mix(in oklab, var(--bg-elev) 85%, transparent);
+  box-shadow: var(--shadow-xs);
+}
+.cl-media-check input { width: 14px; height: 14px; margin: 0; cursor: pointer; }
+.cl-media-check input:disabled { cursor: not-allowed; opacity: 0.5; }
+.cl-media-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(180deg, transparent 55%, color-mix(in oklab, var(--text) 55%, transparent));
+}
+.cl-media-overlay-inner {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  color: color-mix(in oklab, var(--bg-elev) 80%, transparent);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.cl-play {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  padding-inline-start: 2px;
+  background: var(--bg-elev);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.cl-media-card:hover .cl-play { transform: scale(1.08); }
+.cl-live-pill {
+  position: absolute;
+  top: 10px;
+  inset-inline-end: 10px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 9px 0 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #fff;
+  box-shadow: var(--shadow);
+}
+.cl-live-pill.is-recording { background: var(--danger); }
+.cl-live-pill.is-finalizing { background: var(--warning); }
+.cl-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: cl-pulse 1.4s ease-in-out infinite;
+}
+@keyframes cl-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+@keyframes cl-spin { to { transform: rotate(360deg); } }
+.cl-spin { display: inline-grid; place-items: center; animation: cl-spin 1.2s linear infinite; }
+
+.cl-media-body { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px 8px; }
+.cl-media-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+.cl-media-row.is-between { justify-content: space-between; flex-wrap: nowrap; }
+.cl-media-row .sep { color: var(--text-quaternary); }
+.cl-media-id { font-family: var(--font-num); font-variant-numeric: tabular-nums; color: var(--text-tertiary); font-size: 11px; }
+.cl-media-divider { height: 1px; background: var(--border); margin: 0 12px; }
+.cl-media-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px 8px 12px;
+}
+.cl-media-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+}
+.cl-media-actions { display: flex; align-items: center; gap: 2px; flex: none; }
+.cl-persons { display: flex; align-items: baseline; gap: 6px; }
+.cl-persons-n {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.cl-persons-n.is-many { color: var(--danger-text); }
+.cl-persons-n.is-two { color: var(--warning-text); }
+.cl-pills { display: flex; flex-wrap: wrap; gap: 4px; }
+.cl-progress { height: 4px; border-radius: 2px; background: var(--bg-sunken); overflow: hidden; }
+.cl-progress > span { display: block; height: 100%; background: var(--accent); border-radius: 2px; transition: width var(--dur) ease; }
+
+/* Face-crop tile caption: id + score + size as pills. */
+.cl-crop-caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 7px 8px;
+}
+.cl-crop-caption .pill { height: 20px; padding: 0 7px; font-size: 10.5px; }
+
+/* Clip-group header (Face Crops) */
+.cl-group { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-elev); overflow: hidden; }
+.cl-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 10px 14px;
+  background: var(--bg-sunken);
+  border-bottom: 1px solid var(--border);
+}
+.cl-group-title { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text); }
+.cl-group-meta { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11.5px; color: var(--text-tertiary); }
+
+/* Dense toolbar: nine controls must fit one row at 1600px. */
+.cl-toolbar-dense .mg-search { flex: 1 1 150px; min-width: 150px; }
+.cl-toolbar-dense .mg-control { min-width: 0 !important; }
+
+/* Preview lightbox (face crop) */
+.cl-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in oklab, var(--text) 72%, transparent);
+  animation: mg-fade-in 180ms ease-out both;
+}
+.cl-lightbox-inner { max-width: 90vw; max-height: 90vh; display: flex; flex-direction: column; gap: 12px; }
+.cl-lightbox-inner img { max-width: 100%; max-height: 80vh; border-radius: var(--radius-lg); display: block; object-fit: contain; box-shadow: var(--shadow-lg); }
+.cl-lightbox-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: var(--bg-elev); font-size: 13px; }
+
+/* Wide tables: scroll inside the card below 1320px instead of pushing
+   the page sideways (the sticky thead only matters on wide screens). */
+@media (max-width: 1320px) {
+  .cl-table-scroll { overflow-x: auto; }
+}
+
+@media (max-width: 720px) {
+  .cl-media-grid { grid-template-columns: 1fr; }
+  .cl-crop-grid { grid-template-columns: repeat(2, 1fr); padding: 10px; }
+}

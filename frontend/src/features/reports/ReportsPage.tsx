@@ -1,15 +1,11 @@
 // Reports page — three report types (Attendance / Event Log /
-// Department Summary), each with a live preview + Run & download
-// button, plus a scheduled-delivery list at the bottom.
-//
-// Layout matches:
-//   docs/scripts/issues-screenshots/06-Daily_Attendance_report.png
-//   docs/scripts/issues-screenshots/07-Events_log _report.png
-//   docs/scripts/issues-screenshots/08-Department_Summary.png
+// Department Summary) in a two-column layout: an options card
+// (report type, range, download) on the inline-start side and a live
+// preview card on the inline-end side.
 //
 // Attendance flows through /api/reports/attendance.{xlsx,pdf} and
 // supports a date range (start..end) — the table preview samples the
-// start day, the download streams the full range. Event Log + Dept
+// range (capped), the download streams the full range. Event Log + Dept
 // Summary download as client-side CSV blobs for now (server-side
 // XLSX/PDF for those types is a follow-up); both keep a single-day
 // picker since their data shape is per-event-on-day.
@@ -19,6 +15,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useQueries } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
 
 import { api } from "../../api/client";
 import { useMe } from "../../auth/AuthProvider";
@@ -35,6 +32,11 @@ import type {
 } from "../attendance/types";
 import { useDepartments } from "../departments/hooks";
 import { RematchModal } from "./RematchModal";
+import { EmptyPanel } from "../../components/ListPageUi";
+import { SkeletonRows } from "../../components/Skeleton";
+import { ATT_ICON, DotPill, StrokeIcon, fieldDateStyle } from "../attendance/attendanceUi";
+
+import "./reports.css";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -167,21 +169,33 @@ function rowsToCsv(headers: string[], rows: (string | number | null)[][]): strin
 // Page
 // ---------------------------------------------------------------------------
 
+/** What the active preview reports back to the options card so the
+ *  download buttons can disable on an empty / loading dataset. */
+interface PreviewMeta {
+  total: number;
+  isLoading: boolean;
+  isError: boolean;
+}
+
+const PREVIEW_DAYS_CAP = 31;
+
 export function ReportsPage() {
   const { t } = useTranslation();
   const dt = useTenantDateTime();
   const [activeReport, setActiveReport] = useState<ReportKey>("attendance");
   // Attendance uses a date range (start..end); Event Log + Department
   // Summary keep a single-day picker. The single ``date`` state below
-  // backs both — for Attendance it tracks the start day's preview
-  // sample, with ``endDate`` carrying the upper bound.
+  // backs both — for Attendance it tracks the start day, with
+  // ``endDate`` carrying the upper bound.
   const [date, setDate] = useState<string>(todayIso());
   const [endDate, setEndDate] = useState<string>(todayIso());
+  const [preset, setPreset] = useState<PresetKey>("today");
   const [downloading, setDownloading] = useState<"xlsx" | "pdf" | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pdfModalOpen, setPdfModalOpen] = useState(false);
   const [rematchOpen, setRematchOpen] = useState(false);
+  const [meta, setMeta] = useState<PreviewMeta>({ total: 0, isLoading: true, isError: false });
   const me = useMe();
   // Re-match rewrites detection history + triggers attendance
   // recompute, so it's gated to operator roles. Admin + HR both
@@ -201,6 +215,102 @@ export function ReportsPage() {
     setError(null);
   }, [activeReport, date, endDate]);
 
+  // Sync start/end whenever a preset (non-custom) is chosen.
+  useEffect(() => {
+    if (preset === "custom") return;
+    const { start: s, end: e } = presetRange(preset);
+    setDate(s);
+    setEndDate(e);
+  }, [preset]);
+
+  // ``true`` when the preview covers fewer days than the operator
+  // selected because the cap kicked in.
+  const truncated =
+    activeReport === "attendance" &&
+    enumerateDays(date, endDate, PREVIEW_DAYS_CAP + 1).length > PREVIEW_DAYS_CAP;
+
+  const PRESET_LABELS = getPresetLabels(t);
+  const noData = meta.isLoading || meta.isError || meta.total === 0;
+  const busy = downloading !== null;
+
+  const onDownloadAttendance = (format: "xlsx" | "pdf") => {
+    const rangeLabel = date === endDate ? date : `${date} → ${endDate}`;
+    gateDownload({
+      format,
+      reportName: `Attendance — ${rangeLabel}`,
+      action: async () => {
+        if (format === "pdf") {
+          // PDF flow: warning modal first, then PdfOptionsModal,
+          // then the actual download (the options modal owns its
+          // own busy state).
+          setPdfModalOpen(true);
+          return;
+        }
+        await downloadAttendance({
+          format,
+          start: date,
+          end: endDate,
+          setDownloading,
+          setInfo,
+          setError,
+          t,
+        });
+      },
+    });
+  };
+
+  const onDownloadEventLog = () => {
+    gateDownload({
+      format: "csv",
+      reportName: `Event log — ${date}`,
+      action: () =>
+        downloadEventLog({ date, dt, setDownloading, setInfo, setError, t }),
+    });
+  };
+
+  const onDownloadDeptSummary = () => {
+    gateDownload({
+      format: "csv",
+      reportName: `Department summary — ${date}`,
+      action: () =>
+        downloadDepartmentSummary({ date, setDownloading, setInfo, setError, t }),
+    });
+  };
+
+  // Primary action for the "no records" empty state — offer a wider
+  // range first, then fall back to the page that creates the data.
+  const emptyAction: ReactNode =
+    activeReport === "attendance" ? (
+      preset !== "last-7" && preset !== "custom" ? (
+        <button type="button" className="btn" onClick={() => setPreset("last-7")}>
+          <Icon name="calendar" size={12} />
+          {t("reports.emptyState.widenRange", { defaultValue: "Show last 7 days" })}
+        </button>
+      ) : (
+        <Link to="/daily-attendance" className="btn">
+          <Icon name="refresh" size={12} />
+          {t("reports.emptyState.goRegenerate", { defaultValue: "Regenerate from events" })}
+        </Link>
+      )
+    ) : activeReport === "event-log" ? (
+      date !== todayIso() ? (
+        <button type="button" className="btn" onClick={() => setDate(todayIso())}>
+          <Icon name="calendar" size={12} />
+          {t("reports.emptyState.useToday", { defaultValue: "Use today" })}
+        </button>
+      ) : (
+        <Link to="/camera-logs" className="btn">
+          <Icon name="camera" size={12} />
+          {t("reports.emptyState.openCameraLogs", { defaultValue: "Open camera logs" })}
+        </Link>
+      )
+    ) : (
+      <Link to="/daily-attendance" className="btn">
+        <Icon name="calendar" size={12} />
+        {t("reports.emptyState.openDaily", { defaultValue: "Open daily attendance" })}
+      </Link>
+    );
+
   return (
     <>
       <div className="page-header">
@@ -208,9 +318,10 @@ export function ReportsPage() {
           <h1 className="page-title">{t("reports.title")}</h1>
           <p className="page-sub">{t("reports.sub")}</p>
         </div>
-        <div className="page-actions" style={{ display: "flex", gap: 8 }}>
+        <div className="page-actions">
           {canRematch && activeReport === "attendance" && (
             <button
+              type="button"
               className="btn"
               onClick={() => setRematchOpen(true)}
               title={t("reports.rematchTitle")}
@@ -222,16 +333,20 @@ export function ReportsPage() {
         </div>
       </div>
 
-      {/* Three report-type cards */}
+      {(info || error) && (
+        <div className={`rp-banner ${error ? "tone-danger" : "tone-success"}`} role="status">
+          <Icon name={error ? "x" : "check"} size={14} />
+          {error ?? info}
+        </div>
+      )}
+
+      {/* ── Report type: three tiles across the full width ────── */}
       <div
-        className="grid"
-        style={{
-          gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-          gap: 12,
-          marginBottom: 16,
-        }}
+        className="rp-types"
+        role="radiogroup"
+        aria-label={t("reports.options.type", { defaultValue: "Report type" })}
       >
-        <ReportTypeCard
+        <ReportOption
           active={activeReport === "attendance"}
           onClick={() => setActiveReport("attendance")}
           icon="fileText"
@@ -239,7 +354,7 @@ export function ReportsPage() {
           subtitle={t("reports.cards.attendance.sub")}
           meta={t("reports.cards.attendance.meta")}
         />
-        <ReportTypeCard
+        <ReportOption
           active={activeReport === "event-log"}
           onClick={() => setActiveReport("event-log")}
           icon="activity"
@@ -247,7 +362,7 @@ export function ReportsPage() {
           subtitle={t("reports.cards.eventLog.sub")}
           meta={t("reports.cards.eventLog.meta")}
         />
-        <ReportTypeCard
+        <ReportOption
           active={activeReport === "department-summary"}
           onClick={() => setActiveReport("department-summary")}
           icon="users"
@@ -257,109 +372,136 @@ export function ReportsPage() {
         />
       </div>
 
-      {/* Banner */}
-      {(info || error) && (
-        <div
-          className="card"
-          role="status"
-          style={{
-            padding: "10px 14px",
-            marginBottom: 12,
-            background: error ? "var(--danger-soft)" : "var(--success-soft)",
-            color: error ? "var(--danger-text)" : "var(--success-text)",
-            fontSize: 13,
-            borderColor: "transparent",
-          }}
-        >
-          {error ?? info}
+      {/* ── Control bar: range on the start side, downloads on the end ── */}
+      <div className="rp-controls">
+        <div className="rp-controls-range">
+          {activeReport === "attendance" ? (
+            <>
+              <span className="rp-controls-label">
+                {t("reports.attendance.rangeLabel", { defaultValue: "Range" })}
+              </span>
+              <div className="seg rp-presets" role="group" aria-label={t("reports.attendance.rangePresetAria")}>
+                {PRESET_LABELS.map(({ key, label }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className={`seg-btn${preset === key ? " active" : ""}`}
+                    aria-pressed={preset === key}
+                    onClick={() => setPreset(key)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {preset === "custom" && (
+                <div className="rp-range">
+                  <DatePicker
+                    value={date}
+                    onChange={(next) => {
+                      setDate(next);
+                      // Keep end ≥ start to avoid an inverted range.
+                      if (endDate < next) setEndDate(next);
+                    }}
+                    max={todayIso()}
+                    ariaLabel={t("reports.attendance.fromDateAria")}
+                    triggerStyle={fieldDateStyle}
+                  />
+                  <span className="rp-range-arrow" aria-hidden>→</span>
+                  <DatePicker
+                    value={endDate}
+                    onChange={setEndDate}
+                    min={date}
+                    max={todayIso()}
+                    ariaLabel={t("reports.attendance.toDateAria")}
+                    triggerStyle={fieldDateStyle}
+                  />
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <span className="rp-controls-label">{t("reports.preview.dateAria")}</span>
+              <DatePicker
+                value={date}
+                onChange={setDate}
+                max={todayIso()}
+                ariaLabel={activeReport === "event-log" ? t("reports.eventLog.dateAria") : t("reports.preview.dateAria")}
+                triggerStyle={fieldDateStyle}
+              />
+            </>
+          )}
         </div>
-      )}
 
-      {/* Preview */}
-      {activeReport === "attendance" && (
-        <AttendancePreview
-          start={date}
-          end={endDate}
-          setStart={(d) => {
-            setDate(d);
-            // Keep end ≥ start to avoid an inverted range — when the
-            // operator drags the start past the current end, snap end
-            // forward. Same affordance most date-range pickers ship.
-            if (endDate < d) setEndDate(d);
-          }}
-          setEnd={setEndDate}
-          downloading={downloading}
-          onDownload={(format) => {
-            const rangeLabel =
-              date === endDate ? date : `${date} → ${endDate}`;
-            gateDownload({
-              format,
-              reportName: `Attendance — ${rangeLabel}`,
-              action: async () => {
-                if (format === "pdf") {
-                  // PDF flow: warning modal first, then PdfOptionsModal,
-                  // then the actual download (the options modal owns its
-                  // own busy state).
-                  setPdfModalOpen(true);
-                  return;
-                }
-                await downloadAttendance({
-                  format,
-                  start: date,
-                  end: endDate,
-                  setDownloading,
-                  setInfo,
-                  setError,
-                  t,
-                });
-              },
-            });
-          }}
-        />
-      )}
-      {activeReport === "event-log" && (
-        <EventLogPreview
-          date={date}
-          setDate={setDate}
-          downloading={downloading}
-          onDownload={() => {
-            gateDownload({
-              format: "csv",
-              reportName: `Event log — ${date}`,
-              action: () =>
-                downloadEventLog({
-                  date,
-                  dt,
-                  setDownloading,
-                  setInfo,
-                  setError,
-                  t,
-                }),
-            });
-          }}
-        />
-      )}
-      {activeReport === "department-summary" && (
-        <DepartmentSummaryPreview
-          date={date}
-          setDate={setDate}
-          downloading={downloading}
-          onDownload={() => {
-            gateDownload({
-              format: "csv",
-              reportName: `Department summary — ${date}`,
-              action: () =>
-                downloadDepartmentSummary({
-                  date,
-                  setDownloading,
-                  setInfo,
-                  setError,
-                  t,
-                }),
-            });
-          }}
-        />
-      )}
+        <div className="rp-controls-actions">
+          {activeReport === "attendance" && (
+            <>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => onDownloadAttendance("pdf")}
+                disabled={busy || noData}
+                title={noData ? t("reports.preview.noDataTitle") : undefined}
+              >
+                <Icon name="fileText" size={13} />
+                {downloading === "pdf" ? t("reports.preview.generatingPdf") : t("reports.preview.downloadPdf")}
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => onDownloadAttendance("xlsx")}
+                disabled={busy || noData}
+                title={noData ? t("reports.preview.noDataTitle") : undefined}
+              >
+                <Icon name="download" size={13} />
+                {downloading === "xlsx" ? t("reports.preview.downloading") : t("reports.preview.downloadXlsx", { defaultValue: "Download XLSX" })}
+              </button>
+            </>
+          )}
+          {activeReport === "event-log" && (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={onDownloadEventLog}
+              disabled={busy || noData}
+              title={noData ? t("reports.eventLog.noExportTitle") : undefined}
+            >
+              <Icon name="download" size={13} />
+              {downloading === "xlsx" ? t("reports.eventLog.downloading") : t("reports.eventLog.downloadCsv")}
+            </button>
+          )}
+          {activeReport === "department-summary" && (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={onDownloadDeptSummary}
+              disabled={busy || noData}
+              title={noData ? t("reports.preview.noDataTitle") : undefined}
+            >
+              <Icon name="download" size={13} />
+              {downloading === "xlsx" ? t("reports.preview.downloading") : t("reports.deptSummary.downloadCsv")}
+            </button>
+          )}
+        </div>
+
+        {truncated && (
+          <div className="rp-controls-note rp-hint tone-warning">
+            {t("reports.attendance.previewCapTitle", { n: PREVIEW_DAYS_CAP })}
+          </div>
+        )}
+      </div>
+
+      {/* ── Preview: full width ───────────────────────────────── */}
+      <section className="rp-preview">
+        {activeReport === "attendance" && (
+          <AttendancePreview start={date} end={endDate} onMeta={setMeta} emptyAction={emptyAction} />
+        )}
+        {activeReport === "event-log" && (
+          <EventLogPreview date={date} onMeta={setMeta} emptyAction={emptyAction} />
+        )}
+        {activeReport === "department-summary" && (
+          <DepartmentSummaryPreview date={date} onMeta={setMeta} emptyAction={emptyAction} />
+        )}
+      </section>
 
       <PdfOptionsModal
         open={pdfModalOpen}
@@ -392,10 +534,10 @@ export function ReportsPage() {
 }
 
 // ---------------------------------------------------------------------------
-// Report type cards
+// Report type option (vertical list inside the options card)
 // ---------------------------------------------------------------------------
 
-function ReportTypeCard({
+function ReportOption({
   active,
   onClick,
   icon,
@@ -411,57 +553,18 @@ function ReportTypeCard({
   meta: string;
 }) {
   return (
-    <button
-      type="button"
-      className="card"
-      onClick={onClick}
-      aria-pressed={active}
-      style={{
-        textAlign: "start",
-        padding: 16,
-        border: active
-          ? "2px solid var(--accent)"
-          : "1px solid var(--border)",
-        background: active ? "var(--accent-soft, var(--bg-elev))" : "var(--bg-elev)",
-        cursor: "pointer",
-        display: "flex",
-        flexDirection: "column",
-        gap: 6,
-        transition: "border-color 120ms ease, background 120ms ease",
-      }}
-    >
-      <span
-        aria-hidden
-        style={{
-          display: "inline-flex",
-          width: 32,
-          height: 32,
-          borderRadius: 8,
-          background: active ? "var(--accent)" : "var(--bg-sunken)",
-          color: active ? "white" : "var(--text-secondary)",
-          alignItems: "center",
-          justifyContent: "center",
-          marginBottom: 4,
-        }}
-      >
-        <Icon name={icon} size={14} />
+    <button type="button" className="rp-type" onClick={onClick} role="radio" aria-checked={active}>
+      <span className="rp-type-top">
+        <span aria-hidden className="rp-type-icon">
+          <Icon name={icon} size={18} />
+        </span>
+        <span aria-hidden className="rp-type-check">
+          {active && <Icon name="check" size={12} />}
+        </span>
       </span>
-      <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.3 }}>
-        {title}
-      </div>
-      <div className="text-xs text-dim" style={{ lineHeight: 1.4 }}>
-        {subtitle}
-      </div>
-      <div
-        className="text-xs"
-        style={{
-          color: "var(--text-tertiary)",
-          marginTop: 6,
-          fontFamily: "var(--font-mono)",
-        }}
-      >
-        {meta}
-      </div>
+      <span className="rp-type-title">{title}</span>
+      <span className="rp-type-desc">{subtitle}</span>
+      <span className="rp-type-meta">{meta}</span>
     </button>
   );
 }
@@ -473,33 +576,18 @@ function ReportTypeCard({
 function AttendancePreview({
   start,
   end,
-  setStart,
-  setEnd,
-  downloading,
-  onDownload,
+  onMeta,
+  emptyAction,
 }: {
   start: string;
   end: string;
-  setStart: (d: string) => void;
-  setEnd: (d: string) => void;
-  downloading: "xlsx" | "pdf" | null;
-  onDownload: (format: "xlsx" | "pdf") => void;
+  onMeta: (m: PreviewMeta) => void;
+  emptyAction: ReactNode;
 }) {
   const { t } = useTranslation();
   const dt = useTenantDateTime();
-  const PRESET_LABELS = getPresetLabels(t);
-  const [preset, setPreset] = useState<PresetKey>("today");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
-
-  // Sync start/end whenever a preset (non-custom) is chosen.
-  useEffect(() => {
-    if (preset === "custom") return;
-    const { start: s, end: e } = presetRange(preset);
-    setStart(s);
-    setEnd(e);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preset]);
 
   // Multi-day preview — enumerate every date in [start..end] and
   // fetch in parallel via useQueries so picking "Last 7 days" /
@@ -507,7 +595,6 @@ function AttendancePreview({
   // PREVIEW_DAYS_CAP so a wide custom range doesn't fire 90+
   // round-trips just to fill a preview; the downloaded XLSX/PDF
   // still covers the full range.
-  const PREVIEW_DAYS_CAP = 31;
   const dates = useMemo(() => enumerateDays(start, end, PREVIEW_DAYS_CAP), [start, end]);
   const dayQueries = useQueries({
     queries: dates.map((d) => ({
@@ -518,16 +605,19 @@ function AttendancePreview({
   });
   const isLoading = dayQueries.some((q) => q.isLoading);
   const isError = dayQueries.some((q) => q.isError);
+  const errorMessage = dayQueries.find((q) => q.error)?.error?.message ?? null;
   const items = useMemo(
     () => dayQueries.flatMap((q) => q.data?.items ?? []),
     [dayQueries],
   );
   const total = items.length;
-  // ``true`` when we're looking at fewer days than the operator
-  // selected because the cap kicked in; surfaces a hint near the
-  // page-size dropdown.
-  const truncated =
-    enumerateDays(start, end, PREVIEW_DAYS_CAP + 1).length > PREVIEW_DAYS_CAP;
+  const retry = () => {
+    for (const q of dayQueries) if (q.isError) void q.refetch();
+  };
+
+  useEffect(() => {
+    onMeta({ total, isLoading, isError });
+  }, [total, isLoading, isError, onMeta]);
 
   // Reset to page 1 when the range or page size changes — otherwise a
   // smaller dataset can leave us on an out-of-range page.
@@ -538,85 +628,20 @@ function AttendancePreview({
   const pageStart = (page - 1) * pageSize;
   const previewItems = items.slice(pageStart, pageStart + pageSize);
 
-  const presetSelectStyle: React.CSSProperties = {
-    padding: "5px 9px",
-    fontSize: 12.5,
-    border: "1px solid var(--border)",
-    borderRadius: "var(--radius-sm)",
-    background: "var(--bg-elev)",
-    color: "var(--text)",
-    fontFamily: "var(--font-sans)",
-    outline: "none",
-  };
-
-  const filterSlot = (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-      <select
-        value={preset}
-        onChange={(e) => setPreset(e.target.value as PresetKey)}
-        aria-label={t("reports.attendance.rangePresetAria")}
-        style={presetSelectStyle}
-      >
-        {PRESET_LABELS.map(({ key, label }) => (
-          <option key={key} value={key}>
-            {label}
-          </option>
-        ))}
-      </select>
-      {preset === "custom" && (
-        <>
-          <DatePicker
-            value={start}
-            onChange={(next) => {
-              setStart(next);
-              if (end < next) setEnd(next);
-            }}
-            max={todayIso()}
-            ariaLabel={t("reports.attendance.fromDateAria")}
-          />
-          <span
-            style={{
-              fontSize: 12,
-              color: "var(--text-tertiary)",
-              fontFamily: "var(--font-mono)",
-            }}
-          >
-            →
-          </span>
-          <DatePicker
-            value={end}
-            onChange={setEnd}
-            min={start}
-            max={todayIso()}
-            ariaLabel={t("reports.attendance.toDateAria")}
-          />
-        </>
-      )}
-      {truncated && (
-        <span
-          className="text-xs"
-          style={{
-            color: "var(--warning-text, var(--warning))",
-            fontFamily: "var(--font-mono)",
-          }}
-          title={t("reports.attendance.previewCapTitle", { n: PREVIEW_DAYS_CAP })}
-        >
-          {t("reports.attendance.previewCapLabel", { n: PREVIEW_DAYS_CAP })}
-        </span>
-      )}
-    </div>
-  );
-
   return (
     <PreviewCard
-      title={t("reports.cards.attendance.title")}
-      date={start}
-      setDate={setStart}
-      endDate={end}
-      filterSlot={filterSlot}
-      previewCount={previewItems.length}
-      totalCount={total}
-      pagerSlot={
+      title={t("reports.preview.cardTitle", { title: t("reports.cards.attendance.title") })}
+      subtitle={t("reports.preview.subtitleRange", { date: start, end })}
+      state={isLoading ? "loading" : isError ? "error" : total === 0 ? "empty" : "ready"}
+      errorBody={errorMessage ?? t("reports.preview.loadFailed")}
+      onRetry={retry}
+      empty={{
+        icon: <StrokeIcon>{ATT_ICON.calendar}</StrokeIcon>,
+        title: t("reports.emptyState.attendanceTitle", { defaultValue: "No attendance in this range" }),
+        body: t("reports.attendance.empty", { date: start }),
+        action: emptyAction,
+      }}
+      footer={
         <Pager
           page={page}
           pageSize={pageSize}
@@ -625,12 +650,6 @@ function AttendancePreview({
           setPageSize={setPageSize}
         />
       }
-      isLoading={isLoading}
-      isError={isError}
-      downloadXlsx={() => onDownload("xlsx")}
-      downloadingXlsx={downloading === "xlsx"}
-      downloadingPdf={downloading === "pdf"}
-      onDownloadPdf={() => onDownload("pdf")}
       columns={[
         t("reports.attendance.colNum"),
         t("reports.attendance.colEmployeeId"),
@@ -644,34 +663,26 @@ function AttendancePreview({
         t("reports.attendance.colOt"),
       ]}
     >
-      {previewItems.length === 0 ? (
-        <EmptyTableRow colSpan={10}>
-          {t("reports.attendance.empty", { date: start })}
-        </EmptyTableRow>
-      ) : (
-        previewItems.map((it, idx) => (
-          <tr key={`${it.employee_id}-${it.date}`}>
-            <td className="text-sm text-dim mono">{pageStart + idx + 1}</td>
-            <td className="mono text-sm">{it.employee_code}</td>
-            <td className="text-sm" style={{ fontWeight: 500 }}>
-              {it.full_name}
-            </td>
-            <td className="text-sm">{it.department.name}</td>
-            <td className="mono text-sm">{dt.formatLocalDate(it.date)}</td>
-            <td>
-              <DailyStatusPill item={it} />
-            </td>
-            <td className="mono text-sm">{dt.formatLocalTime(it.in_time) || "—"}</td>
-            <td className="mono text-sm">{dt.formatLocalTime(it.out_time) || "—"}</td>
-            <td className="mono text-sm">{formatMinutes(it.total_minutes)}</td>
-            <td className="mono text-sm">
-              {it.overtime_minutes > 0
-                ? formatMinutes(it.overtime_minutes)
-                : "—"}
-            </td>
-          </tr>
-        ))
-      )}
+      {previewItems.map((it, idx) => (
+        <tr key={`${it.employee_id}-${it.date}`}>
+          <td className="text-sm text-dim mono">{pageStart + idx + 1}</td>
+          <td className="mono text-sm at-nowrap">{it.employee_code}</td>
+          <td className="text-sm row-person-name">{it.full_name}</td>
+          <td className="text-sm">{it.department.name}</td>
+          <td className="mono text-sm">{dt.formatLocalDate(it.date)}</td>
+          <td>
+            <DailyStatusPill item={it} />
+          </td>
+          <td className="mono text-sm">{dt.formatLocalTime(it.in_time) || "—"}</td>
+          <td className="mono text-sm">{dt.formatLocalTime(it.out_time) || "—"}</td>
+          <td className="mono text-sm">{formatMinutes(it.total_minutes)}</td>
+          <td className="mono text-sm">
+            {it.overtime_minutes > 0
+              ? formatMinutes(it.overtime_minutes)
+              : "—"}
+          </td>
+        </tr>
+      ))}
     </PreviewCard>
   );
 }
@@ -679,30 +690,30 @@ function AttendancePreview({
 function DailyStatusPill({ item }: { item: AttendanceItem }) {
   const { t } = useTranslation();
   if (item.leave_type_id !== null) {
-    return <span className="pill pill-info">{t("reports.status.onLeave")}</span>;
+    return <DotPill tone="info">{t("reports.status.onLeave")}</DotPill>;
   }
   if (item.is_holiday && !item.in_time) {
     return (
-      <span className="pill pill-info">
+      <DotPill tone="accent">
         {item.holiday_name
           ? t("reports.status.holidayNamed", { name: item.holiday_name })
           : t("reports.status.holiday")}
-      </span>
+      </DotPill>
     );
   }
   if (item.is_weekend && !item.in_time) {
-    return <span className="pill pill-neutral">{t("reports.status.weekend")}</span>;
+    return <DotPill tone="neutral">{t("reports.status.weekend")}</DotPill>;
   }
   if (item.pending) {
-    return <span className="pill pill-info">{t("reports.status.waitingLogin")}</span>;
+    return <DotPill tone="info">{t("reports.status.waitingLogin")}</DotPill>;
   }
   if (!item.in_time) {
-    return <span className="pill pill-danger">{t("reports.status.absent")}</span>;
+    return <DotPill tone="danger">{t("reports.status.absent")}</DotPill>;
   }
   if (item.late) {
-    return <span className="pill pill-warning">{t("reports.status.late")}</span>;
+    return <DotPill tone="warning">{t("reports.status.late")}</DotPill>;
   }
-  return <span className="pill pill-success">{t("reports.status.present")}</span>;
+  return <DotPill tone="success">{t("reports.status.present")}</DotPill>;
 }
 
 async function downloadAttendance({
@@ -779,17 +790,14 @@ function localDayUtcRange(date: string): { start: string; end: string } {
   return { start: startLocal.toISOString(), end: endLocal.toISOString() };
 }
 
-function useEventLog(date: string, page: number, pageSize: number) {
+function useEventLog(date: string, page: number, pageSize: number, reload: number) {
   const { start, end } = localDayUtcRange(date);
   return useApi<DetectionEventListResponse>(
     `/api/detection-events?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&page=${page}&page_size=${pageSize}`,
-    [date, page, pageSize],
+    [date, page, pageSize, reload],
   );
 }
 
-// Tiny stand-in for TanStack Query — the existing `useDetectionEvents`
-// hook lives in features/camera-logs/hooks.ts but pulls in a richer
-// filter shape than we need here, so we use a one-shot fetch.
 function useApi<T>(
   path: string,
   deps: ReadonlyArray<unknown>,
@@ -821,29 +829,32 @@ function useApi<T>(
 
 function EventLogPreview({
   date,
-  setDate,
-  downloading,
-  onDownload,
+  onMeta,
+  emptyAction,
 }: {
   date: string;
-  setDate: (d: string) => void;
-  downloading: "xlsx" | "pdf" | null;
-  onDownload: () => void;
+  onMeta: (m: PreviewMeta) => void;
+  emptyAction: ReactNode;
 }) {
   const { t } = useTranslation();
   const dt = useTenantDateTime();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     setPage(1);
   }, [date, pageSize]);
 
-  const evts = useEventLog(date, page, pageSize);
+  const evts = useEventLog(date, page, pageSize, reload);
   const items = evts.data?.items ?? [];
   const total = evts.data?.total ?? 0;
   const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const rangeEnd = Math.min(total, page * pageSize);
+
+  useEffect(() => {
+    onMeta({ total, isLoading: evts.loading, isError: !!evts.error });
+  }, [total, evts.loading, evts.error, onMeta]);
 
   const columns = [
     t("reports.eventLog.colNum"),
@@ -857,169 +868,23 @@ function EventLogPreview({
   ];
 
   return (
-    <div className="card">
-      <div className="card-head">
-        <div>
-          <h3 className="card-title">{t("reports.eventLog.cardTitle")}</h3>
-          <div className="text-xs text-dim" style={{ marginTop: 2 }}>
-            {total === 0
-              ? t("reports.eventLog.noEvents", { date })
-              : t("reports.eventLog.showing", { from: rangeStart, to: rangeEnd, total, date })}
-          </div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <button
-            className="btn btn-sm"
-            onClick={onDownload}
-            disabled={downloading !== null || total === 0}
-            title={total === 0 ? t("reports.eventLog.noExportTitle") : undefined}
-          >
-            <Icon name="download" size={11} />
-            {downloading === "xlsx" ? t("reports.eventLog.downloading") : t("reports.eventLog.downloadCsv")}
-          </button>
-          <span
-            aria-hidden
-            style={{
-              width: 1,
-              height: 20,
-              background: "var(--border)",
-              margin: "0 2px",
-            }}
-          />
-          <DatePicker
-            value={date}
-            onChange={setDate}
-            max={todayIso()}
-            ariaLabel={t("reports.eventLog.dateAria")}
-          />
-        </div>
-      </div>
-      <table className="table">
-        <thead>
-          <tr>
-            {columns.map((c) => (
-              <th
-                key={c}
-                style={{ textTransform: "uppercase", fontSize: 11 }}
-              >
-                {c}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {evts.loading && (
-            <EmptyTableRow colSpan={columns.length}>
-              {t("reports.eventLog.loadingPreview")}
-            </EmptyTableRow>
-          )}
-          {evts.error && (
-            <tr>
-              <td
-                colSpan={columns.length}
-                className="text-sm"
-                style={{ padding: 16, color: "var(--danger-text)" }}
-              >
-                {t("reports.eventLog.loadFailed")}
-              </td>
-            </tr>
-          )}
-          {!evts.loading && !evts.error && items.length === 0 && (
-            <EmptyTableRow colSpan={columns.length}>
-              {t("reports.eventLog.emptyDate", { date })}
-            </EmptyTableRow>
-          )}
-          {!evts.loading &&
-            !evts.error &&
-            items.map((evt, idx) => (
-              <tr key={evt.id}>
-                <td className="text-sm text-dim mono">
-                  {(page - 1) * pageSize + idx + 1}
-                </td>
-                <td>
-                  {evt.has_crop ? (
-                    <img
-                      src={`/api/detection-events/${evt.id}/crop`}
-                      alt={`Event ${evt.id}`}
-                      loading="lazy"
-                      style={{
-                        width: 44,
-                        height: 44,
-                        objectFit: "cover",
-                        borderRadius: 4,
-                        border: "1px solid var(--border)",
-                        background: "var(--bg-sunken)",
-                      }}
-                    />
-                  ) : (
-                    <span
-                      aria-hidden
-                      style={{
-                        display: "inline-block",
-                        width: 44,
-                        height: 44,
-                        borderRadius: 4,
-                        border: "1px dashed var(--border)",
-                        background: "var(--bg-sunken)",
-                        color: "var(--text-tertiary)",
-                        fontSize: 10,
-                        textAlign: "center",
-                        lineHeight: "44px",
-                      }}
-                    >
-                      —
-                    </span>
-                  )}
-                </td>
-                <td className="mono text-sm">
-                  EV-{String(evt.id).padStart(6, "0")}
-                </td>
-                <td className="mono text-sm">
-                  {dt.formatDateTime(evt.captured_at) || evt.captured_at}
-                </td>
-                <td className="text-sm">{evt.camera_name}</td>
-                <td className="text-sm">
-                  {evt.employee_name ? (
-                    <>
-                      <span style={{ fontWeight: 500 }}>
-                        {evt.employee_name}
-                      </span>
-                      {evt.employee_code && (
-                        <span className="mono text-xs text-dim">
-                          {" "}
-                          · {evt.employee_code}
-                        </span>
-                      )}
-                    </>
-                  ) : (
-                    <span className="text-xs text-dim">{t("reports.eventLog.unidentified")}</span>
-                  )}
-                </td>
-                <td className="mono text-sm">
-                  {evt.confidence !== null
-                    ? `${(evt.confidence * 100).toFixed(1)}%`
-                    : "—"}
-                </td>
-                <td className="text-sm text-dim">—</td>
-              </tr>
-            ))}
-        </tbody>
-      </table>
-
-      {/* Pager — Download CSV moved to the card head (top, left of
-          the date filter) to mirror the other report cards. */}
-      <div
-        style={{
-          padding: "10px 14px",
-          display: "flex",
-          alignItems: "center",
-          borderTop: "1px solid var(--border)",
-          fontSize: 12.5,
-          color: "var(--text-secondary)",
-          flexWrap: "wrap",
-          gap: 8,
-        }}
-      >
+    <PreviewCard
+      title={t("reports.eventLog.cardTitle")}
+      subtitle={
+        total === 0
+          ? t("reports.eventLog.noEvents", { date })
+          : t("reports.eventLog.showing", { from: rangeStart, to: rangeEnd, total, date })
+      }
+      state={evts.loading ? "loading" : evts.error ? "error" : total === 0 ? "empty" : "ready"}
+      errorBody={evts.error ?? t("reports.eventLog.loadFailed")}
+      onRetry={() => setReload((n) => n + 1)}
+      empty={{
+        icon: <StrokeIcon>{ATT_ICON.face}</StrokeIcon>,
+        title: t("reports.emptyState.eventsTitle", { defaultValue: "No detections on this day" }),
+        body: t("reports.eventLog.emptyDate", { date }),
+        action: emptyAction,
+      }}
+      footer={
         <Pager
           page={page}
           pageSize={pageSize}
@@ -1027,8 +892,57 @@ function EventLogPreview({
           setPage={setPage}
           setPageSize={setPageSize}
         />
-      </div>
-    </div>
+      }
+      columns={columns}
+    >
+      {items.map((evt, idx) => (
+        <tr key={evt.id}>
+          <td className="text-sm text-dim mono">
+            {(page - 1) * pageSize + idx + 1}
+          </td>
+          <td>
+            {evt.has_crop ? (
+              <img
+                src={`/api/detection-events/${evt.id}/crop`}
+                alt={`Event ${evt.id}`}
+                loading="lazy"
+                className="at-thumb sm"
+              />
+            ) : (
+              <span aria-hidden className="at-thumb-empty sm">—</span>
+            )}
+          </td>
+          <td className="mono text-sm">
+            EV-{String(evt.id).padStart(6, "0")}
+          </td>
+          <td className="mono text-sm at-nowrap">
+            {dt.formatDateTime(evt.captured_at) || evt.captured_at}
+          </td>
+          <td className="text-sm">{evt.camera_name}</td>
+          <td className="text-sm">
+            {evt.employee_name ? (
+              <>
+                <span className="row-person-name">{evt.employee_name}</span>
+                {evt.employee_code && (
+                  <span className="mono text-xs text-dim">
+                    {" "}
+                    · {evt.employee_code}
+                  </span>
+                )}
+              </>
+            ) : (
+              <span className="text-xs text-dim">{t("reports.eventLog.unidentified")}</span>
+            )}
+          </td>
+          <td className="mono text-sm">
+            {evt.confidence !== null
+              ? `${(evt.confidence * 100).toFixed(1)}%`
+              : "—"}
+          </td>
+          <td className="text-sm text-dim">—</td>
+        </tr>
+      ))}
+    </PreviewCard>
   );
 }
 
@@ -1158,6 +1072,7 @@ function useDepartmentSummary(date: string): {
   rows: DeptRow[];
   loading: boolean;
   error: string | null;
+  retry: () => void;
 } {
   const list = useAttendance(date, null);
   const departments = useDepartments();
@@ -1184,36 +1099,48 @@ function useDepartmentSummary(date: string): {
     rows,
     loading: list.isLoading || departments.isLoading,
     error: list.error?.message ?? departments.error?.message ?? null,
+    retry: () => {
+      void list.refetch();
+      void departments.refetch();
+    },
   };
 }
 
 function DepartmentSummaryPreview({
   date,
-  setDate,
-  downloading,
-  onDownload,
+  onMeta,
+  emptyAction,
 }: {
   date: string;
-  setDate: (d: string) => void;
-  downloading: "xlsx" | "pdf" | null;
-  onDownload: () => void;
+  onMeta: (m: PreviewMeta) => void;
+  emptyAction: ReactNode;
 }) {
   const { t } = useTranslation();
-  const { rows, loading, error } = useDepartmentSummary(date);
+  const { rows, loading, error, retry } = useDepartmentSummary(date);
   const previewRows = rows;
+
+  useEffect(() => {
+    onMeta({ total: rows.length, isLoading: loading, isError: !!error });
+  }, [rows.length, loading, error, onMeta]);
+
   return (
     <PreviewCard
-      title={t("reports.cards.deptSummary.title")}
-      date={date}
-      setDate={setDate}
-      previewCount={previewRows.length}
-      totalCount={rows.length}
-      isLoading={loading}
-      isError={!!error}
-      downloadXlsx={onDownload}
-      downloadingXlsx={downloading === "xlsx"}
-      downloadingPdf={false}
-      downloadXlsxLabel={t("reports.deptSummary.downloadCsv")}
+      title={t("reports.preview.cardTitle", { title: t("reports.cards.deptSummary.title") })}
+      subtitle={t("reports.preview.subtitleSingle", { date })}
+      state={loading ? "loading" : error ? "error" : rows.length === 0 ? "empty" : "ready"}
+      errorBody={error ?? t("reports.preview.loadFailed")}
+      onRetry={retry}
+      empty={{
+        icon: <StrokeIcon>{ATT_ICON.people}</StrokeIcon>,
+        title: t("reports.emptyState.deptTitle", { defaultValue: "No departments to summarise" }),
+        body: t("reports.deptSummary.empty"),
+        action: emptyAction,
+      }}
+      footer={
+        <span>
+          {t("reports.preview.footerRows", { count: previewRows.length, total: rows.length })}
+        </span>
+      }
       columns={[
         t("reports.deptSummary.colNum"),
         t("reports.deptSummary.colDept"),
@@ -1225,34 +1152,26 @@ function DepartmentSummaryPreview({
         t("reports.deptSummary.colAvgHours"),
       ]}
     >
-      {previewRows.length === 0 ? (
-        <EmptyTableRow colSpan={8}>
-          {t("reports.deptSummary.empty")}
-        </EmptyTableRow>
-      ) : (
-        previewRows.map((r, idx) => {
-          const avgWorkedMinutes =
-            r.present + r.late > 0
-              ? r.totalMinutes / (r.present + r.late)
-              : 0;
-          return (
-            <tr key={r.id}>
-              <td className="text-sm text-dim mono">{idx + 1}</td>
-              <td className="text-sm" style={{ fontWeight: 500 }}>
-                {r.name}
-              </td>
-              <td className="mono text-sm">{r.headcount}</td>
-              <td className="mono text-sm">{r.present}</td>
-              <td className="mono text-sm">{r.late}</td>
-              <td className="mono text-sm">{r.absent}</td>
-              <td className="mono text-sm">{r.onLeave}</td>
-              <td className="mono text-sm">
-                {avgWorkedMinutes > 0 ? formatMinutes(avgWorkedMinutes) : "—"}
-              </td>
-            </tr>
-          );
-        })
-      )}
+      {previewRows.map((r, idx) => {
+        const avgWorkedMinutes =
+          r.present + r.late > 0
+            ? r.totalMinutes / (r.present + r.late)
+            : 0;
+        return (
+          <tr key={r.id}>
+            <td className="text-sm text-dim mono">{idx + 1}</td>
+            <td className="text-sm row-person-name">{r.name}</td>
+            <td className="mono text-sm">{r.headcount}</td>
+            <td className="mono text-sm">{r.present}</td>
+            <td className="mono text-sm">{r.late}</td>
+            <td className="mono text-sm">{r.absent}</td>
+            <td className="mono text-sm">{r.onLeave}</td>
+            <td className="mono text-sm">
+              {avgWorkedMinutes > 0 ? formatMinutes(avgWorkedMinutes) : "—"}
+            </td>
+          </tr>
+        );
+      })}
     </PreviewCard>
   );
 }
@@ -1340,219 +1259,85 @@ async function downloadDepartmentSummary({
   }
 }
 
+
 // ---------------------------------------------------------------------------
-// Shared preview card shell
+// Shared preview card shell — five states: loading / error / empty / ready
+// (the "no results for filter" state doesn't apply: the only filter is
+// the range itself, which the empty-state action widens).
 // ---------------------------------------------------------------------------
+
+type PreviewState = "loading" | "error" | "empty" | "ready";
 
 function PreviewCard({
   title,
-  date,
-  setDate,
-  endDate,
-  setEndDate,
-  filterSlot,
-  previewCount,
-  totalCount,
-  pagerSlot,
-  isLoading,
-  isError,
-  downloadXlsx,
-  downloadingXlsx,
-  downloadingPdf,
-  onDownloadPdf,
-  runAndDownload,
-  downloadXlsxLabel,
+  subtitle,
+  state,
+  errorBody,
+  onRetry,
+  empty,
+  footer,
   columns,
   children,
 }: {
   title: string;
-  date: string;
-  setDate: (d: string) => void;
-  /** When present the subtitle shows "{start} → {end}". */
-  endDate?: string;
-  /** When present together with endDate, a second date input renders. */
-  setEndDate?: (d: string) => void;
-  /** When provided, replaces the built-in date inputs in the card header.
-   *  The Run & download button still renders after it. */
-  filterSlot?: ReactNode;
-  previewCount: number;
-  totalCount: number;
-  /** When provided, replaces the static "N preview rows · …" footer
-   *  text with a paginator + page-size selector. The download buttons
-   *  still render to the right. */
-  pagerSlot?: ReactNode;
-  isLoading: boolean;
-  isError: boolean;
-  downloadXlsx: () => void;
-  downloadingXlsx: boolean;
-  downloadingPdf: boolean;
-  onDownloadPdf?: () => void;
-  // Optional. When omitted the PreviewCard skips the primary
-  // "Run & download" button in the header and lets the footer's
-  // Download XLSX / PDF buttons carry the action — avoids two
-  // visually competing download CTAs.
-  runAndDownload?: () => void;
-  // Footer button label for the primary download. Defaults to
-  // "Download XLSX". Reports that emit CSV pass "Download CSV"
-  // so the label matches the file the operator actually gets.
-  downloadXlsxLabel?: string;
+  subtitle: string;
+  state: PreviewState;
+  errorBody: string;
+  onRetry: () => void;
+  empty: { icon: ReactNode; title: string; body: string; action?: ReactNode };
+  footer?: ReactNode;
   columns: string[];
   children: ReactNode;
 }) {
   const { t } = useTranslation();
-  const hasRange = endDate !== undefined && setEndDate !== undefined;
-
-  const subtitle =
-    endDate !== undefined
-      ? t("reports.preview.subtitleRange", { date, end: endDate })
-      : t("reports.preview.subtitleSingle", { date });
-
-  const xlsxLabel = downloadXlsxLabel ?? t("reports.preview.downloading");
-
   return (
     <div className="card">
-      <div className="card-head">
+      <div className="at-card-head">
         <div>
-          <h3 className="card-title">{t("reports.preview.cardTitle", { title })}</h3>
-          <div className="text-xs text-dim" style={{ marginTop: 2 }}>
-            {subtitle}
+          <h3 className="card-title">{title}</h3>
+          <div className="card-sub">{subtitle}</div>
+        </div>
+      </div>
+      {state === "error" ? (
+        <EmptyPanel
+          tone="danger"
+          icon={<StrokeIcon>{ATT_ICON.alert}</StrokeIcon>}
+          title={t("reports.preview.errorTitle", { defaultValue: "Couldn't load the preview" })}
+          body={errorBody}
+          actions={
+            <button type="button" className="btn" onClick={onRetry}>
+              <Icon name="refresh" size={12} />
+              {t("reports.preview.retry", { defaultValue: "Retry" })}
+            </button>
+          }
+        />
+      ) : state === "empty" ? (
+        <EmptyPanel
+          tone="accent"
+          icon={empty.icon}
+          title={empty.title}
+          body={empty.body}
+          {...(empty.action ? { actions: empty.action } : {})}
+        />
+      ) : (
+        <>
+          <div className="at-scroll-x">
+            <table className="table">
+              <thead>
+                <tr>
+                  {columns.map((c) => (
+                    <th key={c}>{c}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {state === "loading" ? <SkeletonRows cols={columns.length} /> : children}
+              </tbody>
+            </table>
           </div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          {/* Download buttons sit at the leading edge of the filter row
-              so the two primary export actions are reachable without
-              scrolling the table footer into view. Disabled mirrors the
-              footer behaviour — no exports on an empty dataset. */}
-          {onDownloadPdf && (
-            <button
-              className="btn btn-sm"
-              onClick={onDownloadPdf}
-              disabled={downloadingXlsx || downloadingPdf || totalCount === 0}
-              title={totalCount === 0 ? t("reports.preview.noDataTitle") : undefined}
-            >
-              <Icon name="fileText" size={11} />
-              {downloadingPdf ? t("reports.preview.generatingPdf") : t("reports.preview.downloadPdf")}
-            </button>
-          )}
-          <button
-            className="btn btn-sm"
-            onClick={downloadXlsx}
-            disabled={downloadingXlsx || downloadingPdf || totalCount === 0}
-            title={totalCount === 0 ? t("reports.preview.noDataTitle") : undefined}
-          >
-            <Icon name="download" size={11} />
-            {downloadingXlsx ? t("reports.preview.downloading") : xlsxLabel}
-          </button>
-          {/* Vertical separator between download actions and filters. */}
-          <span
-            aria-hidden
-            style={{
-              width: 1,
-              height: 20,
-              background: "var(--border)",
-              margin: "0 2px",
-            }}
-          />
-          {filterSlot ?? (
-            <>
-              <DatePicker
-                value={date}
-                onChange={setDate}
-                max={todayIso()}
-                ariaLabel={hasRange ? t("reports.preview.startDateAria") : t("reports.preview.dateAria")}
-              />
-              {hasRange && (
-                <>
-                  <span
-                    style={{
-                      fontSize: 12,
-                      color: "var(--text-tertiary)",
-                      fontFamily: "var(--font-mono)",
-                    }}
-                  >
-                    →
-                  </span>
-                  <DatePicker
-                    value={endDate}
-                    onChange={setEndDate!}
-                    min={date}
-                    max={todayIso()}
-                    ariaLabel={t("reports.preview.endDateAria")}
-                  />
-                </>
-              )}
-            </>
-          )}
-          {runAndDownload && (
-            <button
-              className="btn btn-primary btn-sm"
-              onClick={runAndDownload}
-              disabled={downloadingXlsx || downloadingPdf}
-            >
-              <Icon name="download" size={11} />
-              {downloadingXlsx ? t("reports.preview.downloading") : t("reports.preview.runAndDownload")}
-            </button>
-          )}
-        </div>
-      </div>
-      <table className="table">
-        <thead>
-          <tr>
-            {columns.map((c) => (
-              <th
-                key={c}
-                style={{ textTransform: "uppercase", fontSize: 11 }}
-              >
-                {c}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {isLoading && (
-            <EmptyTableRow colSpan={columns.length}>{t("reports.preview.loadingPreview")}</EmptyTableRow>
-          )}
-          {isError && (
-            <tr>
-              <td
-                colSpan={columns.length}
-                className="text-sm"
-                style={{ padding: 16, color: "var(--danger-text)" }}
-              >
-                {t("reports.preview.loadFailed")}
-              </td>
-            </tr>
-          )}
-          {!isLoading && !isError && children}
-        </tbody>
-      </table>
-      <div
-        style={{
-          padding: "10px 14px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          borderTop: "1px solid var(--border)",
-          fontSize: 12.5,
-          color: "var(--text-secondary)",
-          flexWrap: "wrap",
-          gap: 8,
-        }}
-      >
-        {pagerSlot ?? (
-          <span>
-            {totalCount === 0 ? (
-              <strong style={{ color: "var(--danger-text)" }}>
-                {t("reports.preview.noData")}
-              </strong>
-            ) : (
-              t("reports.preview.footerRows", { count: previewCount, total: totalCount })
-            )}
-          </span>
-        )}
-        {/* Download buttons moved to the card head (left of filters).
-            The footer keeps the row-count message only. */}
-      </div>
+          {footer && <div className="at-table-foot">{footer}</div>}
+        </>
+      )}
     </div>
   );
 }
@@ -1580,34 +1365,18 @@ function Pager({
   const rangeEnd = Math.min(total, safePage * pageSize);
   return (
     <>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+      <div className="at-row">
         <span>
           {total === 0
             ? t("reports.pager.zeroRows")
             : t("reports.pager.range", { from: rangeStart, to: rangeEnd, total })}
         </span>
-        <label
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            fontSize: 12,
-            color: "var(--text-tertiary)",
-          }}
-        >
+        <label className="rp-pager-size">
           {t("reports.pager.pageSize")}
           <select
+            className="select"
             value={pageSize}
             onChange={(e) => setPageSize(Number(e.target.value))}
-            style={{
-              padding: "3px 6px",
-              fontSize: 12,
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius-sm)",
-              background: "var(--bg-elev)",
-              color: "var(--text)",
-              outline: "none",
-            }}
           >
             {PAGE_SIZE_OPTIONS.map((n) => (
               <option key={n} value={n}>
@@ -1617,9 +1386,10 @@ function Pager({
           </select>
         </label>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <div className="rp-pager">
         <button
-          className="btn btn-sm"
+          type="button"
+          className="btn btn-sm btn-ghost"
           onClick={() => setPage(1)}
           disabled={page <= 1}
           aria-label={t("reports.pager.firstPage")}
@@ -1627,6 +1397,7 @@ function Pager({
           «
         </button>
         <button
+          type="button"
           className="btn btn-sm"
           onClick={() => setPage(Math.max(1, page - 1))}
           disabled={page <= 1}
@@ -1634,13 +1405,11 @@ function Pager({
         >
           {t("reports.pager.prev")}
         </button>
-        <span
-          className="mono text-xs"
-          style={{ minWidth: 80, textAlign: "center" }}
-        >
+        <span className="rp-pager-label mono">
           {t("reports.pager.pageOf", { page: safePage, total: totalPages })}
         </span>
         <button
+          type="button"
           className="btn btn-sm"
           onClick={() => setPage(Math.min(totalPages, page + 1))}
           disabled={page >= totalPages}
@@ -1649,7 +1418,8 @@ function Pager({
           {t("reports.pager.next")}
         </button>
         <button
-          className="btn btn-sm"
+          type="button"
+          className="btn btn-sm btn-ghost"
           onClick={() => setPage(totalPages)}
           disabled={page >= totalPages}
           aria-label={t("reports.pager.lastPage")}
@@ -1660,24 +1430,3 @@ function Pager({
     </>
   );
 }
-
-function EmptyTableRow({
-  colSpan,
-  children,
-}: {
-  colSpan: number;
-  children: ReactNode;
-}) {
-  return (
-    <tr>
-      <td
-        colSpan={colSpan}
-        className="text-sm text-dim"
-        style={{ padding: 16, textAlign: "center" }}
-      >
-        {children}
-      </td>
-    </tr>
-  );
-}
-

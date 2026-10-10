@@ -32,19 +32,19 @@ import { SkeletonCards } from "../../components/Skeleton";
 type Severity = "ok" | "warn" | "bad";
 const sevColor: Record<Severity, { bd: string; bg: string; fg: string }> = {
   ok: {
-    bd: "var(--success, #10b981)",
-    bg: "var(--success-soft, #ecfdf5)",
-    fg: "var(--success-text, #047857)",
+    bd: "var(--success)",
+    bg: "var(--success-soft)",
+    fg: "var(--success-text)",
   },
   warn: {
-    bd: "var(--warning, #f59e0b)",
-    bg: "var(--warning-soft, #fffbeb)",
-    fg: "var(--warning-text, #b45309)",
+    bd: "var(--warning)",
+    bg: "var(--warning-soft)",
+    fg: "var(--warning-text)",
   },
   bad: {
-    bd: "var(--danger, #ef4444)",
-    bg: "var(--danger-soft, #fef2f2)",
-    fg: "var(--danger-text, #b91c1c)",
+    bd: "var(--danger)",
+    bg: "var(--danger-soft)",
+    fg: "var(--danger-text)",
   },
 };
 
@@ -276,10 +276,10 @@ function DoughnutGauge({
   const accentColor =
     accent ??
     (clamped >= 85
-      ? "var(--danger, #ef4444)"
+      ? "var(--danger)"
       : clamped >= 65
-      ? "var(--warning, #f59e0b)"
-      : "var(--accent, #10b981)");
+      ? "var(--warning)"
+      : "var(--accent)");
   return (
     <div
       style={{
@@ -302,7 +302,7 @@ function DoughnutGauge({
           cy={size / 2}
           r={r}
           fill="none"
-          stroke="var(--border, #e5e7eb)"
+          stroke="var(--border)"
           strokeWidth={stroke}
         />
         <circle
@@ -324,13 +324,13 @@ function DoughnutGauge({
           marginTop: 22,
           fontSize: 11,
           fontWeight: 500,
-          color: "var(--text-secondary, #6b7280)",
+          color: "var(--text-secondary)",
         }}
       >
         {label}
       </div>
       {sub ? (
-        <div style={{ fontSize: 10, color: "var(--text-dim, #9ca3af)" }}>
+        <div style={{ fontSize: 10, color: "var(--text-tertiary)" }}>
           {sub}
         </div>
       ) : null}
@@ -353,7 +353,7 @@ function ThreadCpuBar({ pct, accent }: { pct: number; accent: string }) {
         position: "relative",
         height: 6,
         width: "100%",
-        background: "var(--border-soft, #f3f4f6)",
+        background: "var(--border)",
         borderRadius: 3,
         overflow: "hidden",
       }}
@@ -385,7 +385,7 @@ function ThreadBreakdownBlock({ breakdown }: { breakdown: ThreadBreakdown }) {
     <div
       style={{
         marginTop: 12,
-        borderTop: "1px solid var(--border, #e5e7eb)",
+        borderTop: "1px solid var(--border)",
         paddingTop: 12,
       }}
     >
@@ -421,10 +421,10 @@ function ThreadBreakdownBlock({ breakdown }: { breakdown: ThreadBreakdown }) {
             c.category === "camera_readers" ||
             c.category === "camera_analyzers" ||
             c.category === "clip_pipeline"
-              ? "var(--accent, #10b981)"
+              ? "var(--accent)"
               : c.category === "main" || c.category === "request_handlers"
-              ? "var(--text-secondary, #6b7280)"
-              : "var(--info, #3b82f6)";
+              ? "var(--text-secondary)"
+              : "var(--info)";
           return (
             <div
               key={c.category}
@@ -464,15 +464,7 @@ function ThreadBreakdownBlock({ breakdown }: { breakdown: ThreadBreakdown }) {
                 aria-label={t("resources.threadExpandAria", {
                   category: c.display,
                 })}
-                style={{
-                  background: "none",
-                  border: "1px solid var(--border, #e5e7eb)",
-                  borderRadius: 4,
-                  padding: "2px 6px",
-                  fontSize: 10,
-                  cursor: "pointer",
-                  color: "var(--text-secondary, #6b7280)",
-                }}
+                className="btn btn-sm btn-ghost"
               >
                 {isOpen ? "−" : "+"}
               </button>
@@ -483,7 +475,7 @@ function ThreadBreakdownBlock({ breakdown }: { breakdown: ThreadBreakdown }) {
                     paddingInlineStart: 12,
                     paddingBottom: 8,
                     fontSize: 11,
-                    color: "var(--text-secondary, #6b7280)",
+                    color: "var(--text-secondary)",
                   }}
                 >
                   <table
@@ -495,7 +487,7 @@ function ThreadBreakdownBlock({ breakdown }: { breakdown: ThreadBreakdown }) {
                     <thead>
                       <tr
                         style={{
-                          background: "var(--bg-sunken, #f9fafb)",
+                          background: "var(--bg-sunken)",
                           fontSize: 10,
                         }}
                       >
@@ -546,7 +538,7 @@ function ThreadBreakdownBlock({ breakdown }: { breakdown: ThreadBreakdown }) {
 
 const cellStyleTiny: React.CSSProperties = {
   padding: "4px 8px",
-  borderBottom: "1px solid var(--border-soft, #f3f4f6)",
+  borderBottom: "1px solid var(--border)",
 };
 
 function SystemOverviewCard({
@@ -672,7 +664,7 @@ function SystemOverviewCard({
           gap: 12,
           marginTop: 12,
           fontSize: 12,
-          borderTop: "1px solid var(--border, #e5e7eb)",
+          borderTop: "1px solid var(--border)",
           paddingTop: 12,
         }}
       >
@@ -732,7 +724,7 @@ function SystemOverviewCard({
             gap: 12,
             marginTop: 8,
             fontSize: 12,
-            borderTop: "1px solid var(--border, #e5e7eb)",
+            borderTop: "1px solid var(--border)",
             paddingTop: 12,
           }}
         >
@@ -777,7 +769,7 @@ function CamerasResourceTable({ cameras }: ResourcesCamerasResponse) {
     return (
       <div
         className="card"
-        style={{ padding: 16, color: "var(--text-secondary, #6b7280)" }}
+        style={{ padding: 16, color: "var(--text-secondary)" }}
       >
         <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>
           {t("resources.perCamera")}
@@ -796,7 +788,7 @@ function CamerasResourceTable({ cameras }: ResourcesCamerasResponse) {
           alignItems: "baseline",
           justifyContent: "space-between",
           padding: "12px 16px",
-          borderBottom: "1px solid var(--border, #e5e7eb)",
+          borderBottom: "1px solid var(--border)",
         }}
       >
         <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>
@@ -815,7 +807,7 @@ function CamerasResourceTable({ cameras }: ResourcesCamerasResponse) {
           }}
         >
           <thead>
-            <tr style={{ background: "var(--bg-sunken, #f9fafb)" }}>
+            <tr style={{ background: "var(--bg-sunken)" }}>
               <th style={cellStyle}>{t("resources.col.health")}</th>
               <th style={cellStyle}>{t("resources.col.camera")}</th>
               <th style={cellStyle}>{t("resources.col.cpuShare")}</th>
@@ -870,9 +862,9 @@ function CamerasResourceTable({ cameras }: ResourcesCamerasResponse) {
                     ...cellStyle,
                     color:
                       c.frame_drops_60s > 30
-                        ? "var(--danger-text, #ef4444)"
+                        ? "var(--danger-text)"
                         : c.frame_drops_60s > 10
-                        ? "var(--warning-text, #f59e0b)"
+                        ? "var(--warning-text)"
                         : "inherit",
                   }}
                 >
@@ -883,7 +875,7 @@ function CamerasResourceTable({ cameras }: ResourcesCamerasResponse) {
                     ...cellStyle,
                     color:
                       c.rtsp_reconnects_60s > 0
-                        ? "var(--warning-text, #f59e0b)"
+                        ? "var(--warning-text)"
                         : "inherit",
                   }}
                 >
@@ -907,7 +899,7 @@ function CamerasResourceTable({ cameras }: ResourcesCamerasResponse) {
 const cellStyle: React.CSSProperties = {
   textAlign: "start",
   padding: "8px 12px",
-  borderBottom: "1px solid var(--border-soft, #f3f4f6)",
+  borderBottom: "1px solid var(--border)",
 };
 
 // ---------------------------------------------------------------------------
@@ -924,7 +916,7 @@ function StagesBreakdownTable({ stages }: ResourcesStagesResponse) {
           alignItems: "baseline",
           justifyContent: "space-between",
           padding: "12px 16px",
-          borderBottom: "1px solid var(--border, #e5e7eb)",
+          borderBottom: "1px solid var(--border)",
         }}
       >
         <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>
@@ -943,7 +935,7 @@ function StagesBreakdownTable({ stages }: ResourcesStagesResponse) {
           }}
         >
           <thead>
-            <tr style={{ background: "var(--bg-sunken, #f9fafb)" }}>
+            <tr style={{ background: "var(--bg-sunken)" }}>
               <th style={cellStyle}>{t("resources.col.health")}</th>
               <th style={cellStyle}>{t("resources.col.stage")}</th>
               <th style={cellStyle}>{t("resources.col.scope")}</th>
@@ -985,12 +977,12 @@ function StagesBreakdownTable({ stages }: ResourcesStagesResponse) {
                       fontSize: 10,
                       background:
                         s.scope === "shared_backend_process"
-                          ? "var(--bg-sunken, #f3f4f6)"
-                          : "var(--accent-soft, #ecfdf5)",
+                          ? "var(--bg-sunken)"
+                          : "var(--accent-soft)",
                       color:
                         s.scope === "shared_backend_process"
-                          ? "var(--text-secondary, #6b7280)"
-                          : "var(--accent-text, #047857)",
+                          ? "var(--text-secondary)"
+                          : "var(--accent-text)",
                     }}
                   >
                     {t(`resources.scope.${s.scope}`)}
@@ -1020,7 +1012,7 @@ function StagesBreakdownTable({ stages }: ResourcesStagesResponse) {
                     ...cellStyle,
                     color:
                       s.error_count_5min > 0
-                        ? "var(--danger-text, #ef4444)"
+                        ? "var(--danger-text)"
                         : "inherit",
                   }}
                 >

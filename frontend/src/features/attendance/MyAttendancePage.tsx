@@ -8,6 +8,9 @@
 // Mounted at /my-attendance and /attendance/me, and re-exported by
 // EmployeeDashboard so the Employee role's dashboard is this page.
 
+import { EmptyPanel } from "../../components/ListPageUi";
+import { ATT_ICON, DotPill, FieldCaption, StrokeIcon } from "./attendanceUi";
+import type { DotTone } from "./attendanceUi";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -24,7 +27,7 @@ import { useMyEmployee } from "../employees/hooks";
 import { useMyRecentAttendance, useRegenerateAttendanceForEmployee } from "./hooks";
 import { formatMinutes } from "./timeFormat";
 import type { AttendanceItem } from "./types";
-import { SkeletonLines } from "../../components/Skeleton";
+import { SkeletonCalendar, SkeletonLines } from "../../components/Skeleton";
 
 export function MyAttendancePage() {
   const { t } = useTranslation();
@@ -118,7 +121,7 @@ export function MyAttendancePage() {
               disabled={regen.isPending}
               title={t("myAttendance.regenTooltip")}
             >
-              <span aria-hidden style={{ marginInlineEnd: 4 }}>↻</span>
+              <Icon name="refresh" size={12} />
               {regen.isPending
                 ? t("myAttendance.regenerating")
                 : t("myAttendance.regenerate")}
@@ -136,32 +139,13 @@ export function MyAttendancePage() {
       </div>
 
       {regenInfo && (
-        <div
-          className="card"
-          style={{
-            padding: "10px 14px",
-            marginBottom: 12,
-            background:
-              regenInfo.tone === "ok"
-                ? "var(--info-soft, var(--bg-sunken))"
-                : "var(--danger-soft, var(--bg-sunken))",
-            borderColor:
-              regenInfo.tone === "ok"
-                ? "var(--info, var(--border))"
-                : "var(--danger, var(--border))",
-            fontSize: 13,
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-          }}
-        >
-          <span>{regenInfo.text}</span>
-          <div style={{ flex: 1 }} />
+        <div className={`at-notice tone-${regenInfo.tone === "ok" ? "info" : "danger"}`} role="status">
+          <span className="at-notice-text">{regenInfo.text}</span>
           <button
             type="button"
-            className="btn btn-sm"
-            style={{ padding: "2px 8px", fontSize: 11 }}
+            className="at-notice-close"
             onClick={() => setRegenInfo(null)}
+            aria-label={t("common.close", { defaultValue: "Close" })}
           >
             ×
           </button>
@@ -169,14 +153,7 @@ export function MyAttendancePage() {
       )}
 
       {/* ---------- Today + at-a-glance ---------- */}
-      <div
-        className="grid"
-        style={{
-          gridTemplateColumns: "1.3fr 1fr",
-          gap: 16,
-          marginBottom: 16,
-        }}
-      >
+      <div className="at-today-grid">
         <TodayCard day={todayDay} loading={person.isLoading} />
         <AtAGlanceCard
           days={person.data?.days ?? []}
@@ -185,20 +162,17 @@ export function MyAttendancePage() {
       </div>
 
       {/* ---------- Month calendar (clickable) ---------- */}
-      <div style={{ marginBottom: 16 }}>
-        <div
-          className="flex items-center justify-between"
-          style={{ marginBottom: 10, gap: 12, flexWrap: "wrap" }}
-        >
+      <div className="at-stack" style={{ marginBottom: 16, gap: 10 }}>
+        <div className="at-section-head">
           <div>
-            <h3 style={{ fontSize: 13.5, fontWeight: 600, margin: 0 }}>
+            <h3 className="at-section-title">
               {t("myAttendance.calendar.title", { month: monthLabel })}
             </h3>
-            <p className="text-xs text-dim" style={{ marginTop: 2 }}>
+            <p className="at-section-sub">
               {t("myAttendance.calendar.hint")}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="at-row">
             <button
               type="button"
               className="icon-btn"
@@ -224,33 +198,38 @@ export function MyAttendancePage() {
             </button>
           </div>
         </div>
-        {employeeId === null && myEmployee.isLoading && (
-          <div className="card" style={{ padding: 16 }}>
-            <div className="text-sm text-dim">
-              {t("myAttendance.linkingAccount")}
-            </div>
-          </div>
-        )}
+        {employeeId === null && myEmployee.isLoading && <SkeletonCalendar />}
         {employeeId === null && !myEmployee.isLoading && (
-          <div className="card" style={{ padding: 16 }}>
-            <div className="text-sm text-dim">
-              {t("myAttendance.noEmployeeLinked")}
-            </div>
+          <div className="card">
+            <EmptyPanel
+              tone="accent"
+              icon={<StrokeIcon>{ATT_ICON.face}</StrokeIcon>}
+              title={t("myAttendance.noEmployeeLinkedTitle", { defaultValue: "No employee record linked" })}
+              body={t("myAttendance.noEmployeeLinked")}
+              actions={
+                <Link className="btn" to="/my-profile">
+                  <Icon name="user" size={12} />
+                  {t("myAttendance.viewProfile", { defaultValue: "View my profile" })}
+                </Link>
+              }
+            />
           </div>
         )}
-        {employeeId !== null && person.isLoading && (
-          <div className="card" style={{ padding: 16 }}>
-            <SkeletonLines lines={5} />
-          </div>
-        )}
+        {employeeId !== null && person.isLoading && <SkeletonCalendar />}
         {employeeId !== null && person.isError && (
-          <div className="card" style={{ padding: 16 }}>
-            <div
-              className="text-sm"
-              style={{ color: "var(--danger-text)" }}
-            >
-              {t("myAttendance.calendarLoadFailed")}
-            </div>
+          <div className="card">
+            <EmptyPanel
+              tone="danger"
+              icon={<StrokeIcon>{ATT_ICON.alert}</StrokeIcon>}
+              title={t("myAttendance.calendarErrorTitle", { defaultValue: "Couldn't load your calendar" })}
+              body={extractApiError(person.error, t("myAttendance.calendarLoadFailed"))}
+              actions={
+                <button type="button" className="btn" onClick={() => void person.refetch()}>
+                  <Icon name="refresh" size={12} />
+                  {t("common.retry", { defaultValue: "Retry" })}
+                </button>
+              }
+            />
           </div>
         )}
         {employeeId !== null && person.data && (
@@ -274,8 +253,25 @@ export function MyAttendancePage() {
           {recent.isLoading && (
             <SkeletonLines lines={5} />
           )}
-          {!recent.isLoading && recentSorted.length === 0 && (
-            <div className="text-sm text-dim">{t("myAttendance.rolling.empty")}</div>
+          {recent.isError && !recent.isLoading && (
+            <EmptyPanel
+              tone="danger"
+              icon={<StrokeIcon>{ATT_ICON.alert}</StrokeIcon>}
+              title={t("myAttendance.rolling.errorTitle", { defaultValue: "Couldn't load recent attendance" })}
+              body={extractApiError(recent.error, t("myAttendance.requestFailed"))}
+              actions={
+                <button type="button" className="btn" onClick={() => void recent.refetch()}>
+                  <Icon name="refresh" size={12} />
+                  {t("common.retry", { defaultValue: "Retry" })}
+                </button>
+              }
+            />
+          )}
+          {!recent.isLoading && !recent.isError && recentSorted.length === 0 && (
+            <div className="at-inline-empty">
+              <StrokeIcon size={20}>{ATT_ICON.calendar}</StrokeIcon>
+              <span>{t("myAttendance.rolling.empty")}</span>
+            </div>
           )}
           {recentSorted.map((it) => (
             <Rolling14Row
@@ -367,10 +363,7 @@ function TodayCard({
         {loading && <SkeletonLines lines={5} />}
         {!loading && (
           <>
-            <div
-              className="grid grid-4"
-              style={{ gap: 10, marginBottom: 14 }}
-            >
+            <div className="at-facts" style={{ marginBottom: 16 }}>
               <Tile
                 label={t("myAttendance.today.inTime")}
                 value={day?.in_time?.slice(0, 8) ?? "—"}
@@ -390,46 +383,19 @@ function TodayCard({
               <Tile label={t("myAttendance.today.total")} value={totalLabel} sub={t("myAttendance.today.hoursSinceIn")} />
               <Tile label={t("myAttendance.today.overtime")} value={otLabel} sub={t("myAttendance.today.todaySub")} />
             </div>
-            <div
-              style={{
-                fontSize: 11,
-                color: "var(--text-tertiary)",
-                marginBottom: 6,
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-                fontWeight: 500,
-              }}
-            >
-              {t("myAttendance.today.dayTimeline")}
+            <div style={{ marginBottom: 6 }}>
+              <FieldCaption>{t("myAttendance.today.dayTimeline")}</FieldCaption>
             </div>
             <DayRuler day={day} />
-            <div
-              className="flex items-center gap-4"
-              style={{
-                marginTop: 10,
-                fontSize: 11,
-                color: "var(--text-secondary)",
-                flexWrap: "wrap",
-              }}
-            >
-              <LegendDot
-                label={t("myAttendance.today.policyWindow")}
-                style={{
-                  width: 12,
-                  height: 4,
-                  background: "var(--accent-soft)",
-                  border: "1px dashed var(--accent-border)",
-                }}
-              />
-              <LegendDot
-                label={t("myAttendance.today.onSiteLegend")}
-                style={{
-                  width: 12,
-                  height: 4,
-                  background: "var(--accent)",
-                  borderRadius: 2,
-                }}
-              />
+            <div className="at-legend" style={{ marginTop: 10 }}>
+              <span className="at-legend-item">
+                <span className="at-legend-swatch is-policy" />
+                {t("myAttendance.today.policyWindow")}
+              </span>
+              <span className="at-legend-item">
+                <span className="at-legend-swatch is-session" />
+                {t("myAttendance.today.onSiteLegend")}
+              </span>
             </div>
           </>
         )}
@@ -472,21 +438,11 @@ function AtAGlanceCard({
     <div className="card">
       <div className="card-head">
         <h3 className="card-title">{t("myAttendance.glance.title")}</h3>
-        <span className="text-xs text-dim mono">{monthLabel}</span>
+        <span className="text-xs text-dim">{monthLabel}</span>
       </div>
-      <div
-        className="card-body"
-        style={{ display: "flex", gap: 14, alignItems: "center" }}
-      >
+      <div className="card-body at-glance">
         <Donut parts={parts} total={total} size={120} totalLabel={t("myAttendance.glance.totalLabel")} />
-        <div
-          style={{
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            gap: 6,
-          }}
-        >
+        <div className="at-glance-list">
           <Counter
             label={t("myAttendance.glance.daysPresent")}
             value={String(counts.present)}
@@ -523,10 +479,7 @@ function Counter({
   kind: "accent" | "warning" | "info" | "success";
 }) {
   return (
-    <div
-      className="flex items-center justify-between"
-      style={{ fontSize: 12 }}
-    >
+    <div className="at-glance-row">
       <span className="text-secondary">{label}</span>
       <span className={`pill pill-${kind}`}>{value}</span>
     </div>
@@ -602,7 +555,7 @@ function Donut({
         textAnchor="middle"
         fontSize={9}
         fill="var(--text-tertiary)"
-        fontFamily="var(--font-mono)"
+        fontFamily="var(--font-num)"
         style={{ textTransform: "uppercase", letterSpacing: "0.05em" }}
       >
         {totalLabel}
@@ -629,22 +582,8 @@ function Rolling14Row({
   return (
     <button
       type="button"
-      className="timeline-day"
+      className="timeline-day at-roll-row"
       onClick={onClick}
-      style={{
-        appearance: "none",
-        textAlign: "start",
-        font: "inherit",
-        background: "transparent",
-        border: 0,
-        borderBottom: "1px solid var(--border)",
-        width: "100%",
-        cursor: "pointer",
-        padding: "10px 0",
-        display: "grid",
-        gridTemplateColumns: "auto 1fr",
-        gap: 14,
-      }}
     >
       <div className="tl-date">
         <div className="tl-date-num">{date.getDate()}</div>
@@ -656,11 +595,8 @@ function Rolling14Row({
         </div>
       </div>
       <div>
-        <div
-          className="flex items-center justify-between"
-          style={{ marginBottom: 6, flexWrap: "wrap", gap: 6 }}
-        >
-          <div className="flex items-center gap-2" style={{ fontSize: 12 }}>
+        <div className="at-roll-head">
+          <div className="at-roll-pills">
             <RecordStatusPill item={item} />
             {item.late && <span className="pill pill-warning">{t("myAttendance.rolling.late")}</span>}
             {item.early_out && (
@@ -689,11 +625,11 @@ function Rolling14Row({
 
 function RecordStatusPill({ item }: { item: AttendanceItem }) {
   const { t } = useTranslation();
-  if (item.absent) return <span className="pill pill-danger">{t("myAttendance.statusPill.absent")}</span>;
-  if (item.late) return <span className="pill pill-warning">{t("myAttendance.statusPill.late")}</span>;
+  if (item.absent) return <DotPill tone="danger">{t("myAttendance.statusPill.absent")}</DotPill>;
+  if (item.late) return <DotPill tone="warning">{t("myAttendance.statusPill.late")}</DotPill>;
   if (item.in_time)
-    return <span className="pill pill-success">{t("myAttendance.statusPill.present")}</span>;
-  return <span className="pill pill-neutral">{t("myAttendance.statusPill.noRecord")}</span>;
+    return <DotPill tone="success">{t("myAttendance.statusPill.present")}</DotPill>;
+  return <DotPill tone="neutral">{t("myAttendance.statusPill.noRecord")}</DotPill>;
 }
 
 // ----------------------------------------------------------------------
@@ -726,14 +662,14 @@ function DayRulerInline({
         <div
           key={h}
           className="day-ruler-hour"
-          style={{ left: pct(h) }}
+          style={{ insetInlineStart: pct(h) }}
         />
       ))}
       {[0, 6, 12, 18, 24].map((h) => (
         <div
           key={h}
           className="day-ruler-tick-label"
-          style={{ left: pct(h) }}
+          style={{ insetInlineStart: pct(h) }}
         >
           {String(h).padStart(2, "0")}
         </div>
@@ -741,7 +677,7 @@ function DayRulerInline({
       <div
         className="day-ruler-policy"
         style={{
-          left: pct(policyIn),
+          insetInlineStart: pct(policyIn),
           width: widthPct(policyIn, policyOut),
         }}
       />
@@ -749,16 +685,16 @@ function DayRulerInline({
         <div
           className="day-ruler-session"
           style={{
-            left: pct(inH),
+            insetInlineStart: pct(inH),
             width: widthPct(inH, outH ?? Math.min(inH + 0.5, 24)),
           }}
         />
       )}
       {inH !== null && (
-        <div className="day-ruler-event" style={{ left: pct(inH) }} />
+        <div className="day-ruler-event" style={{ insetInlineStart: pct(inH) }} />
       )}
       {outH !== null && (
-        <div className="day-ruler-event" style={{ left: pct(outH) }} />
+        <div className="day-ruler-event" style={{ insetInlineStart: pct(outH) }} />
       )}
     </div>
   );
@@ -778,26 +714,10 @@ function CalendarLegend() {
     { key: "weekend", label: t("myAttendance.statusPill.weekend"), bg: "var(--info-soft)" },
   ];
   return (
-    <div
-      className="flex items-center gap-3"
-      style={{
-        marginTop: 10,
-        fontSize: 11,
-        color: "var(--text-secondary)",
-        flexWrap: "wrap",
-      }}
-    >
+    <div className="at-legend">
       {items.map((l) => (
-        <span key={l.key} className="flex items-center gap-2">
-          <span
-            style={{
-              width: 14,
-              height: 14,
-              background: l.bg,
-              borderRadius: 3,
-              border: "1px solid var(--border)",
-            }}
-          />
+        <span key={l.key} className="at-legend-item">
+          <span className="at-legend-swatch" style={{ background: l.bg }} />
           {l.label}
         </span>
       ))}
@@ -809,7 +729,7 @@ function StatusPill({ status }: { status: CalendarStatus }) {
   const { t } = useTranslation();
   const map: Record<
     CalendarStatus,
-    { tone: string; label: string }
+    { tone: DotTone; label: string }
   > = {
     present: { tone: "success", label: t("myAttendance.statusPill.present") },
     escalation_present: { tone: "accent", label: t("myAttendance.statusPill.escalation") },
@@ -825,8 +745,8 @@ function StatusPill({ status }: { status: CalendarStatus }) {
     future: { tone: "neutral", label: t("myAttendance.statusPill.upcoming") },
     no_record: { tone: "neutral", label: t("myAttendance.statusPill.noRecord") },
   };
-  const m = map[status] ?? { tone: "neutral", label: status };
-  return <span className={`pill pill-${m.tone}`}>{m.label}</span>;
+  const m = map[status] ?? { tone: "neutral" as DotTone, label: status };
+  return <DotPill tone={m.tone}>{m.label}</DotPill>;
 }
 
 function Tile({
@@ -839,50 +759,11 @@ function Tile({
   sub?: string;
 }) {
   return (
-    <div
-      style={{
-        padding: "10px 12px",
-        background: "var(--bg-sunken)",
-        borderRadius: 8,
-      }}
-    >
-      <div
-        className="text-xs text-dim"
-        style={{
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
-          fontWeight: 500,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        className="mono"
-        style={{ fontSize: 16, fontWeight: 500, marginTop: 2 }}
-      >
-        {value}
-      </div>
-      {sub && (
-        <div className="text-xs text-dim" style={{ marginTop: 1 }}>
-          {sub}
-        </div>
-      )}
+    <div>
+      <div className="at-fact-label">{label}</div>
+      <div className="at-fact-value">{value}</div>
+      {sub && <div className="at-fact-sub">{sub}</div>}
     </div>
-  );
-}
-
-function LegendDot({
-  label,
-  style,
-}: {
-  label: string;
-  style: React.CSSProperties;
-}) {
-  return (
-    <span className="flex items-center gap-2">
-      <span style={{ display: "inline-block", ...style }} />
-      {label}
-    </span>
   );
 }
 

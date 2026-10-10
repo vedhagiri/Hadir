@@ -266,6 +266,29 @@ def read_decrypted(file_path: str) -> bytes:
     return decrypt_bytes(Path(file_path).read_bytes())
 
 
+def make_thumbnail(image_bytes: bytes, *, max_px: int) -> bytes:
+    """Downscale an image so its longest edge is ``max_px``; JPEG out.
+
+    Falls back to the original bytes if the image can't be decoded, so a
+    thumbnail request never fails harder than the full image would.
+    """
+
+    import cv2  # local import: keeps module import cheap for tests
+    import numpy as np
+
+    arr = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if arr is None:
+        return image_bytes
+    h, w = arr.shape[:2]
+    scale = max_px / float(max(h, w))
+    if scale < 1.0:
+        arr = cv2.resize(
+            arr, (max(1, int(w * scale)), max(1, int(h * scale))), interpolation=cv2.INTER_AREA
+        )
+    ok, buf = cv2.imencode(".jpg", arr, [int(cv2.IMWRITE_JPEG_QUALITY), 82])
+    return buf.tobytes() if ok else image_bytes
+
+
 # --- DB helpers -------------------------------------------------------------
 
 

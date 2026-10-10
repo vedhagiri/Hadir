@@ -1,37 +1,33 @@
 // Settings → Email. Admin-only.
-// Three inner tabs: Provider (SMTP / Microsoft Graph config),
-// Attendance Emails (employee-facing status toggles + delivery log),
-// Notifications (per-user category × channel grid).
+// Two inner tabs: Provider (SMTP / Microsoft Graph config) and
+// Attendance Emails (employee-facing status toggles + delivery log).
+//
+// Secrets stay write-only: the API only tells us ``has_smtp_password``
+// / ``has_graph_client_secret``; the form sends a secret only when the
+// operator actually typed one.
 
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  BsEnvelopeCheckFill,
-  BsEnvelopeXFill,
-  BsPauseFill,
-  BsPlayFill,
-  BsExclamationTriangleFill,
-  BsCheckCircleFill,
-  BsEnvelopeFill,
-  BsCloudFill,
-  BsHddNetworkFill,
-  BsPersonFill,
-  BsKeyFill,
-  BsBuildingFill,
-  BsPersonBadgeFill,
-  BsShieldLockFill,
-  BsPencilFill,
-  BsFloppyFill,
-  BsFlaskFill,
-  BsLockFill,
-  BsTrashFill,
-  BsPlusLg,
-} from "react-icons/bs";
+import { BsCloudFill, BsEnvelopeFill } from "react-icons/bs";
 
 import { ApiError } from "../api/client";
 import { useMe } from "../auth/AuthProvider";
-import { ModalShell } from "../components/DrawerShell";
-import { SettingsTabs } from "../settings/SettingsTabs";
+import { EmptyPanel, ResetButton, SearchField, Toolbar } from "../components/ListPageUi";
+import { SkeletonPanel, SkeletonRows } from "../components/Skeleton";
+import { ChoiceCards, Field, FormFooter, FormNotice, FormSection, SwitchField } from "../components/FormKit";
+import {
+  ConfirmModal,
+  Fact,
+  Facts,
+  FormField,
+  InlineAlert,
+  LoadErrorPanel,
+  SettingsCard,
+  SettingsFormModal,
+  SettingsPage,
+  SoftPill,
+  type PillTone,
+} from "../settings/settingsUi";
 import { Icon } from "../shell/Icon";
 import {
   useAttendanceEmailConfig,
@@ -51,20 +47,40 @@ import {
   useSendTestEmail,
 } from "./hooks";
 import type { EmailConfigUpdate, EmailProvider } from "./types";
-import { SkeletonRows } from "../components/Skeleton";
+
+import "./email-forms.css";
 
 type InnerTab = "provider" | "attendance";
 
+const CARD_W = { maxWidth: 960 } as const;
+
 // ─── small helpers ────────────────────────────────────────────────────────────
 
-function logOutcome(item: AttendanceEmailLogItem): {
-  label: string;
-  color: string;
-} {
-  if (item.sent_at) return { label: "Sent", color: "var(--success, #0a8a52)" };
-  if (item.skipped_at) return { label: "Skipped", color: "var(--text-secondary)" };
-  if (item.failed_at) return { label: "Failed", color: "var(--danger, #b91c1c)" };
-  return { label: "Pending", color: "var(--text-secondary)" };
+type Outcome = "sent" | "skipped" | "failed" | "pending";
+
+function logOutcome(item: AttendanceEmailLogItem): Outcome {
+  if (item.sent_at) return "sent";
+  if (item.skipped_at) return "skipped";
+  if (item.failed_at) return "failed";
+  return "pending";
+}
+
+const OUTCOME_TONE: Record<Outcome, PillTone> = {
+  sent: "success",
+  skipped: "neutral",
+  failed: "danger",
+  pending: "warning",
+};
+
+const ATT_STATUSES: AttendanceEmailStatus[] = ["present", "late", "absent"];
+const STATUS_TONE: Record<AttendanceEmailStatus, PillTone> = {
+  present: "success",
+  late: "warning",
+  absent: "danger",
+};
+
+function providerLabel(p: EmailProvider): string {
+  return p === "smtp" ? "SMTP" : "Microsoft Graph";
 }
 
 // Minimal inner-tab bar (not the outer SettingsTabs).
@@ -78,33 +94,17 @@ function InnerTabs({
   tabs: { id: InnerTab; label: string }[];
 }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        gap: 2,
-        borderBottom: "1px solid var(--border)",
-        marginBottom: 20,
-      }}
-    >
-      {tabs.map((t) => (
+    <div className="tabs" role="tablist">
+      {tabs.map((tab) => (
         <button
-          key={t.id}
+          key={tab.id}
           type="button"
-          onClick={() => onChange(t.id)}
-          style={{
-            background: "none",
-            border: "none",
-            borderBottom: value === t.id ? "2px solid var(--accent, #0b6e4f)" : "2px solid transparent",
-            color: value === t.id ? "var(--accent, #0b6e4f)" : "var(--text-secondary)",
-            fontWeight: value === t.id ? 700 : 500,
-            fontSize: 13,
-            padding: "8px 16px",
-            cursor: "pointer",
-            marginBottom: -1,
-            borderRadius: 0,
-          }}
+          role="tab"
+          aria-selected={value === tab.id}
+          className={`tab${value === tab.id ? " active" : ""}`}
+          onClick={() => onChange(tab.id)}
         >
-          {t.label}
+          {tab.label}
         </button>
       ))}
     </div>
@@ -126,6 +126,7 @@ function ProviderConfigModal({
   onClose: () => void;
   onSaved: (msg: string) => void;
 }) {
+  const { t } = useTranslation();
   const d = configData!;
   const patch = usePatchEmailConfig();
   const pending = usePendingEmailCount();
@@ -150,15 +151,23 @@ function ProviderConfigModal({
   const [enabled, setEnabled] = useState(d.enabled);
   const [error, setError] = useState<string | null>(null);
 
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const touch = (k: string) => setTouched((p) => (p[k] ? p : { ...p, [k]: true }));
+  const requiredMsg = t("settingsUi.email.fieldRequired", { defaultValue: "This field is required." });
+
+  const credLabel =
+    provider === "smtp"
+      ? t("settingsUi.email.stepSmtp", { defaultValue: "SMTP server" })
+      : t("settingsUi.email.stepAzure", { defaultValue: "Azure credentials" });
   const steps = lockedProvider
     ? [
-        { id: "credentials" as const, label: provider === "smtp" ? "SMTP Server" : "Azure Credentials" },
-        { id: "sender" as const, label: "Sender Identity" },
+        { id: "credentials" as const, label: credLabel },
+        { id: "sender" as const, label: t("settingsUi.email.stepSender", { defaultValue: "Sender identity" }) },
       ]
     : [
-        { id: "provider" as const, label: "Provider" },
-        { id: "credentials" as const, label: provider === "smtp" ? "SMTP Server" : "Azure Credentials" },
-        { id: "sender" as const, label: "Sender Identity" },
+        { id: "provider" as const, label: t("emailConfig.field.provider") },
+        { id: "credentials" as const, label: credLabel },
+        { id: "sender" as const, label: t("settingsUi.email.stepSender", { defaultValue: "Sender identity" }) },
       ];
   const stepIdx = steps.findIndex((s) => s.id === step);
 
@@ -193,450 +202,300 @@ function ProviderConfigModal({
     try {
       await patch.mutateAsync(payload);
       const cancelled = 0;
-      onSaved(cancelled > 0 ? `Saved · ${cancelled} queued emails cancelled` : "Configuration saved.");
+      onSaved(
+        cancelled > 0
+          ? `Saved · ${cancelled} queued emails cancelled`
+          : t("settingsUi.email.configSaved", { defaultValue: "Configuration saved." }),
+      );
       onClose();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Save failed.");
+      setError(err instanceof ApiError ? err.message : t("emailConfig.msg.saveFailed"));
     }
   };
 
+  const onBack = () => {
+    if (step === "credentials") {
+      if (lockedProvider) {
+        onClose();
+        return;
+      }
+      setStep("provider");
+    }
+    if (step === "sender") setStep("credentials");
+  };
+  const isCancel = step === "provider" || (lockedProvider && step === "credentials");
+
+  // Enter / primary button: advance a step, or save on the last one.
+  const onPrimary = () => {
+    if (!isStepValid()) return;
+    if (step === "provider") setStep("credentials");
+    else if (step === "credentials") setStep("sender");
+    else if (!patch.isPending) void onSave();
+  };
+
+  const stored = t("settingsUi.email.storedReplacePlaceholder", { defaultValue: "•••••• stored — type to replace" });
+
   return (
-    <ModalShell onClose={onClose}>
-      <div
-        role="dialog"
-        aria-label="Configure email provider"
-        style={{
-          position: "fixed",
-          top: "50%",
-          left: "50%",
-          transform: "translate(-50%, -50%)",
-          width: 680,
-          maxWidth: "96vw",
-          maxHeight: "94vh",
-          background: "var(--bg)",
-          border: "1px solid var(--border-strong)",
-          borderRadius: 16,
-          zIndex: 60,
-          boxShadow: "0 24px 64px rgba(0,0,0,0.18)",
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-        }}
-      >
-        {/* Modal header */}
-        <div
-          style={{
-            padding: "18px 22px 14px",
-            borderBottom: "1px solid var(--border)",
-            background: "var(--bg-elev)",
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-          }}
-        >
-          <div
-            style={{
-              width: 38,
-              height: 38,
-              borderRadius: 10,
-              background: "color-mix(in srgb, var(--accent,#0b6e4f) 14%, transparent)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 18,
-              color: "var(--accent,#0b6e4f)",
-              flexShrink: 0,
-            }}
-          >
-            <BsEnvelopeFill />
-          </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 700, fontSize: 14.5 }}>
-              {lockedProvider
-                ? `Edit ${provider === "smtp" ? "SMTP" : "Microsoft Graph"} Configuration`
-                : "Add Email Provider"}
-            </div>
-            <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginTop: 2 }}>
-              Step {stepIdx + 1} of {steps.length} · {steps[stepIdx]?.label}
-            </div>
-          </div>
-          <button
-            className="icon-btn"
-            aria-label="Close"
-            onClick={onClose}
-            style={{ fontSize: 18, lineHeight: 1 }}
-          >
-            ×
-          </button>
-        </div>
-
-        {/* Step progress bar */}
-        <div style={{ display: "flex", padding: "14px 22px 0", gap: 8 }}>
-          {steps.map((s, i) => (
-            <div key={s.id} style={{ flex: 1, display: "flex", flexDirection: "column", gap: 5 }}>
-              <div
-                style={{
-                  height: 4,
-                  borderRadius: 99,
-                  background: i <= stepIdx
-                    ? "var(--accent, #0b6e4f)"
-                    : "var(--border)",
-                  transition: "background 0.25s",
-                }}
-              />
-              <div
-                style={{
-                  fontSize: 10.5,
-                  fontWeight: i === stepIdx ? 700 : 400,
-                  color: i === stepIdx ? "var(--accent,#0b6e4f)" : "var(--text-tertiary)",
-                  letterSpacing: "0.03em",
-                }}
-              >
-                {i + 1}. {s.label}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Scrollable body */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "20px 22px" }}>
-
-          {/* Error */}
-          {error && (
-            <div
-              style={{
-                display: "flex", gap: 8, alignItems: "flex-start",
-                background: "var(--danger-soft)", color: "var(--danger-text)",
-                border: "1px solid #fecaca", padding: "10px 14px",
-                borderRadius: 10, fontSize: 13, marginBottom: 16,
-              }}
-            >
-              <BsExclamationTriangleFill style={{ flexShrink: 0, marginTop: 1 }} />
-              {error}
-            </div>
-          )}
-
-          {/* ── Step 1: Provider ── */}
-          {step === "provider" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <p style={{ margin: "0 0 6px", fontSize: 13, color: "var(--text-secondary)" }}>
-                Choose the email service to use for outbound delivery.
-              </p>
-              {(["smtp", "microsoft_graph"] as EmailProvider[]).map((p) => (
-                <label
-                  key={p}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 16,
-                    border: `2px solid ${provider === p ? "var(--accent,#0b6e4f)" : "var(--border)"}`,
-                    borderRadius: 14,
-                    padding: "16px 18px",
-                    cursor: "pointer",
-                    background: provider === p
-                      ? "color-mix(in srgb, var(--accent,#0b6e4f) 6%, var(--bg))"
-                      : "var(--bg)",
-                    transition: "border-color 0.15s, background 0.15s",
-                  }}
-                >
-                  <input type="radio" name="provider" value={p} checked={provider === p} onChange={() => setProvider(p)} style={{ display: "none" }} />
-                  <div
-                    style={{
-                      width: 44,
-                      height: 44,
-                      borderRadius: 12,
-                      background: provider === p
-                        ? "color-mix(in srgb, var(--accent,#0b6e4f) 15%, transparent)"
-                        : "var(--bg-sunken)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 20,
-                      color: provider === p ? "var(--accent,#0b6e4f)" : "var(--text-secondary)",
-                      flexShrink: 0,
-                      transition: "background 0.15s, color 0.15s",
-                    }}
-                  >
-                    {p === "smtp" ? <BsEnvelopeFill /> : <BsCloudFill />}
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 700, fontSize: 14 }}>
-                      {p === "smtp" ? "SMTP" : "Microsoft Graph"}
-                    </div>
-                    <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 3, lineHeight: 1.5 }}>
-                      {p === "smtp"
-                        ? "Gmail, Outlook, Brevo, or any custom SMTP relay"
-                        : "Microsoft 365 / Azure with app credentials"}
-                    </div>
-                    {p === "smtp" && (
-                      <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-                        {["Gmail", "Outlook", "Brevo", "SendGrid"].map((tag) => (
-                          <span key={tag} className="pill pill-neutral" style={{ fontSize: 10.5 }}>{tag}</span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div
-                    style={{
-                      width: 22,
-                      height: 22,
-                      borderRadius: "50%",
-                      border: `2px solid ${provider === p ? "var(--accent,#0b6e4f)" : "var(--border)"}`,
-                      background: provider === p ? "var(--accent,#0b6e4f)" : "transparent",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      color: "#fff",
-                      fontSize: 11,
-                      flexShrink: 0,
-                      transition: "all 0.15s",
-                    }}
-                  >
-                    {provider === p && <BsCheckCircleFill size={10} />}
-                  </div>
-                </label>
-              ))}
-            </div>
-          )}
-
-          {/* ── Step 2: Credentials ── */}
-          {step === "credentials" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              {provider === "smtp" ? (
-                <>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      padding: "12px 14px",
-                      borderRadius: 12,
-                      background: "color-mix(in srgb, var(--accent,#0b6e4f) 6%, var(--bg))",
-                      border: "1px solid color-mix(in srgb, var(--accent,#0b6e4f) 20%, transparent)",
-                      fontSize: 12.5,
-                      color: "var(--text-secondary)",
-                    }}
-                  >
-                    <BsHddNetworkFill style={{ color: "var(--accent,#0b6e4f)", fontSize: 16, flexShrink: 0 }} />
-                    Enter your SMTP relay server details. These are provided by your email service.
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 100px", gap: 10 }}>
-                    <Field label="Host *">
-                      <input className="input" value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)} placeholder="smtp.example.com" />
-                    </Field>
-                    <Field label="Port">
-                      <input className="input" type="number" value={smtpPort} onChange={(e) => setSmtpPort(Number(e.target.value))} />
-                    </Field>
-                  </div>
-                  <Field label="Username">
-                    <input className="input" value={smtpUsername} onChange={(e) => setSmtpUsername(e.target.value)} autoComplete="off" placeholder="your@email.com" />
-                  </Field>
-                  <Field
-                    label="Password"
-                    {...(d.has_smtp_password ? { hint: "Leave blank to keep the stored password" } : {})}
-                  >
-                    <input
-                      className="input"
-                      type="password"
-                      value={smtpPassword}
-                      placeholder={d.has_smtp_password ? "•••••• (stored)" : "Enter password"}
-                      onChange={(e) => setSmtpPassword(e.target.value)}
-                      autoComplete="new-password"
-                    />
-                  </Field>
-                  <label
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      padding: "11px 14px",
-                      borderRadius: 10,
-                      border: `1.5px solid ${smtpUseTls ? "var(--accent,#0b6e4f)" : "var(--border)"}`,
-                      background: smtpUseTls ? "color-mix(in srgb, var(--accent,#0b6e4f) 5%, var(--bg))" : "var(--bg)",
-                      cursor: "pointer",
-                      fontSize: 13,
-                      fontWeight: 500,
-                      transition: "border-color 0.15s",
-                    }}
-                  >
-                    <input type="checkbox" checked={smtpUseTls} onChange={(e) => setSmtpUseTls(e.target.checked)} />
-                    <BsLockFill style={{ color: "var(--accent,#0b6e4f)" }} />
-                    Use TLS / STARTTLS
-                    <span style={{ fontSize: 11.5, color: "var(--text-secondary)", fontWeight: 400, marginInlineStart: 4 }}>
-                      (recommended for port 587)
-                    </span>
-                  </label>
-                </>
-              ) : (
-                <>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      padding: "12px 14px",
-                      borderRadius: 12,
-                      background: "color-mix(in srgb, var(--accent,#0b6e4f) 6%, var(--bg))",
-                      border: "1px solid color-mix(in srgb, var(--accent,#0b6e4f) 20%, transparent)",
-                      fontSize: 12.5,
-                      color: "var(--text-secondary)",
-                    }}
-                  >
-                    <BsBuildingFill style={{ color: "var(--accent,#0b6e4f)", fontSize: 16, flexShrink: 0 }} />
-                    Register an app in Azure Active Directory and paste the credentials below.
-                  </div>
-                  <Field label="Entra Tenant ID">
-                    <input className="input" value={graphTenant} onChange={(e) => setGraphTenant(e.target.value)} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
-                  </Field>
-                  <Field label="Client ID (Application ID)">
-                    <input className="input" value={graphClientId} onChange={(e) => setGraphClientId(e.target.value)} autoComplete="off" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
-                  </Field>
-                  <Field
-                    label="Client Secret"
-                    {...(d.has_graph_client_secret ? { hint: "Leave blank to keep the stored secret" } : {})}
-                  >
-                    <input
-                      className="input"
-                      type="password"
-                      value={graphClientSecret}
-                      placeholder={d.has_graph_client_secret ? "•••••• (stored)" : "Enter client secret"}
-                      onChange={(e) => setGraphClientSecret(e.target.value)}
-                      autoComplete="new-password"
-                    />
-                  </Field>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* ── Step 3: Sender identity ── */}
-          {step === "sender" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  padding: "12px 14px",
-                  borderRadius: 12,
-                  background: "color-mix(in srgb, var(--accent,#0b6e4f) 6%, var(--bg))",
-                  border: "1px solid color-mix(in srgb, var(--accent,#0b6e4f) 20%, transparent)",
-                  fontSize: 12.5,
-                  color: "var(--text-secondary)",
-                }}
-              >
-                <BsEnvelopeFill style={{ color: "var(--accent,#0b6e4f)", fontSize: 16, flexShrink: 0 }} />
-                The name and address that recipients will see in their inbox.
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                <Field label="From Address *">
-                  <input className="input" value={fromAddress} onChange={(e) => setFromAddress(e.target.value)} placeholder="reports@your-domain.com" />
-                </Field>
-                <Field label="Display Name">
-                  <input className="input" value={fromName} onChange={(e) => setFromName(e.target.value)} placeholder="Maugood Reports" />
-                </Field>
-              </div>
-              <Field label="BCC (monitoring address)">
-                <input
-                  className="input"
-                  type="email"
-                  value={bccAddress}
-                  onChange={(e) => setBccAddress(e.target.value)}
-                  placeholder="monitoring@your-company.com (optional)"
-                />
-              </Field>
-              <label
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  padding: "11px 14px",
-                  borderRadius: 10,
-                  border: `1.5px solid ${enabled ? "var(--accent,#0b6e4f)" : "var(--border)"}`,
-                  background: enabled ? "color-mix(in srgb, var(--accent,#0b6e4f) 5%, var(--bg))" : "var(--bg)",
-                  cursor: "pointer",
-                  fontSize: 13,
-                  fontWeight: 500,
-                  transition: "border-color 0.15s",
-                }}
-              >
-                <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-                Enable email sending
-              </label>
-              {!enabled && pendingCount > 0 && (
-                <div
-                  style={{
-                    display: "flex", gap: 8, alignItems: "flex-start",
-                    padding: "10px 14px", borderRadius: 10,
-                    background: "color-mix(in srgb, #b45309 8%, var(--bg))",
-                    border: "1px solid #b45309", fontSize: 12.5, color: "#92400e",
-                  }}
-                >
-                  <BsExclamationTriangleFill style={{ flexShrink: 0, marginTop: 1 }} />
-                  Saving with this unchecked will cancel {pendingCount} queued email{pendingCount !== 1 ? "s" : ""}.
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Footer nav */}
-        <div
-          style={{
-            padding: "14px 22px",
-            borderTop: "1px solid var(--border)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 10,
-            background: "var(--bg-elev)",
-          }}
-        >
-          <button
-            type="button"
-            className="btn"
-            onClick={() => {
-              if (step === "provider") { onClose(); return; }
-              if (step === "credentials") {
-                if (lockedProvider) { onClose(); return; }
-                setStep("provider");
-              }
-              if (step === "sender") setStep("credentials");
-            }}
-          >
-            {(step === "provider" || (lockedProvider && step === "credentials")) ? "Cancel" : "← Back"}
-          </button>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            {step !== "sender" ? (
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={!isStepValid()}
-                onClick={() => {
-                  if (step === "provider") setStep("credentials");
-                  else if (step === "credentials") setStep("sender");
-                }}
-                style={{ minWidth: 110 }}
-              >
-                Next →
-              </button>
+    <SettingsFormModal
+      size="lg"
+      titleId="email-provider-modal-title"
+      icon={<Icon name="mail" size={18} />}
+      title={
+        lockedProvider
+          ? t("settingsUi.email.editProviderTitle", {
+              defaultValue: "Edit {{provider}} configuration",
+              provider: providerLabel(provider),
+            })
+          : t("settingsUi.email.addProviderTitle", { defaultValue: "Add email provider" })
+      }
+      subtitle={t("settingsUi.email.wizardSubtitle", {
+        defaultValue: "Connect the service Maugood uses to send reports and notifications.",
+      })}
+      onClose={onClose}
+      onSubmit={onPrimary}
+      footer={
+        <FormFooter
+          onCancel={onClose}
+          submitLabel={
+            step !== "sender" ? (
+              <>
+                {t("common.next")}
+                <Icon name="chevronRight" size={12} />
+              </>
             ) : (
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => void onSave()}
-                disabled={patch.isPending || !isStepValid()}
-                style={{ minWidth: 140 }}
-              >
-                {patch.isPending
-                  ? "Saving…"
-                  : <><BsFloppyFill style={{ marginInlineEnd: 6 }} />Save Changes</>}
+              t("emailConfig.save")
+            )
+          }
+          submittingLabel={t("common.saving")}
+          submitting={patch.isPending}
+          canSubmit={isStepValid()}
+          extra={
+            !isCancel ? (
+              <button type="button" className="btn btn-ghost" onClick={onBack} disabled={patch.isPending}>
+                <Icon name="chevronLeft" size={12} />
+                {t("settingsUi.email.back", { defaultValue: "Back" })}
               </button>
-            )}
-          </div>
-        </div>
-      </div>
-    </ModalShell>
+            ) : undefined
+          }
+        />
+      }
+    >
+      {/* Step progress */}
+      <ol className="em-stepper" aria-label={t("settingsUi.email.steps", { defaultValue: "Steps" })}>
+        {steps.map((s, i) => (
+          <li
+            key={s.id}
+            className={`em-step${i < stepIdx ? " is-done" : ""}${i === stepIdx ? " is-current" : ""}`}
+            aria-current={i === stepIdx ? "step" : undefined}
+          >
+            <span className="em-step-dot" aria-hidden>
+              {i < stepIdx ? <Icon name="check" size={11} /> : i + 1}
+            </span>
+            <span className="em-step-label">{s.label}</span>
+          </li>
+        ))}
+      </ol>
+
+      {error && <FormNotice tone="danger">{error}</FormNotice>}
+
+      {/* ── Step 1: Provider ── */}
+      {step === "provider" && (
+        <FormSection
+          title={t("emailConfig.field.provider")}
+          description={t("settingsUi.email.chooseProvider", { defaultValue: "Choose the email service to use for outbound delivery." })}
+        >
+          <ChoiceCards<EmailProvider>
+            label={t("emailConfig.field.provider")}
+            value={provider}
+            onChange={setProvider}
+            options={[
+              {
+                value: "smtp",
+                icon: <BsEnvelopeFill />,
+                title: providerLabel("smtp"),
+                description: (
+                  <>
+                    {t("settingsUi.email.smtpDesc", { defaultValue: "Gmail, Outlook, Brevo, or any custom SMTP relay" })}
+                    <span className="em-tags">
+                      {["Gmail", "Outlook", "Brevo", "SendGrid"].map((tag) => (
+                        <span key={tag} className="pill pill-neutral">
+                          {tag}
+                        </span>
+                      ))}
+                    </span>
+                  </>
+                ),
+              },
+              {
+                value: "microsoft_graph",
+                icon: <BsCloudFill />,
+                title: providerLabel("microsoft_graph"),
+                description: t("settingsUi.email.graphDesc", { defaultValue: "Microsoft 365 / Azure with app credentials" }),
+              },
+            ]}
+          />
+        </FormSection>
+      )}
+
+      {/* ── Step 2: Credentials ── */}
+      {step === "credentials" &&
+        (provider === "smtp" ? (
+          <FormSection
+            title={t("settingsUi.email.stepSmtp", { defaultValue: "SMTP server" })}
+            description={t("settingsUi.email.smtpIntro", {
+              defaultValue: "Enter your SMTP relay server details. These are provided by your email service.",
+            })}
+          >
+            <Field
+              label={t("emailConfig.field.host")}
+              required
+              htmlFor="smtp-host"
+              error={touched.host && !smtpHost.trim() ? requiredMsg : undefined}
+            >
+              <input
+                id="smtp-host"
+                className="input"
+                value={smtpHost}
+                onChange={(e) => setSmtpHost(e.target.value)}
+                onBlur={() => touch("host")}
+                placeholder="smtp.example.com"
+              />
+            </Field>
+            <Field label={t("emailConfig.field.port")} htmlFor="smtp-port">
+              <input id="smtp-port" className="input" type="number" value={smtpPort} onChange={(e) => setSmtpPort(Number(e.target.value))} placeholder="587" />
+            </Field>
+            <Field label={t("emailConfig.field.username")} htmlFor="smtp-user">
+              <input id="smtp-user" className="input" value={smtpUsername} onChange={(e) => setSmtpUsername(e.target.value)} autoComplete="off" placeholder="your@email.com" />
+            </Field>
+            <Field
+              label={t("emailConfig.field.password")}
+              htmlFor="smtp-pass"
+              help={d.has_smtp_password ? t("emailConfig.hint.secretStored") : t("emailConfig.hint.passwordRequired")}
+            >
+              <input
+                id="smtp-pass"
+                className="input"
+                type="password"
+                value={smtpPassword}
+                placeholder={d.has_smtp_password ? stored : t("settingsUi.email.enterPassword", { defaultValue: "Enter password" })}
+                onChange={(e) => setSmtpPassword(e.target.value)}
+                autoComplete="new-password"
+              />
+            </Field>
+            <SwitchField
+              id="smtp-tls"
+              checked={smtpUseTls}
+              onChange={setSmtpUseTls}
+              label={t("emailConfig.field.useTls")}
+              description={t("settingsUi.email.tlsHint", { defaultValue: "(recommended for port 587)" })}
+            />
+          </FormSection>
+        ) : (
+          <FormSection
+            title={t("settingsUi.email.stepAzure", { defaultValue: "Azure credentials" })}
+            description={t("settingsUi.email.graphIntro", {
+              defaultValue: "Register an app in Azure Active Directory and paste the credentials below.",
+            })}
+          >
+            <Field
+              label={t("emailConfig.field.entraTenantId")}
+              required
+              htmlFor="graph-tenant"
+              span={2}
+              error={touched.tenant && !graphTenant.trim() ? requiredMsg : undefined}
+            >
+              <input
+                id="graph-tenant"
+                className="input mono"
+                value={graphTenant}
+                onChange={(e) => setGraphTenant(e.target.value)}
+                onBlur={() => touch("tenant")}
+                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+              />
+            </Field>
+            <Field
+              label={t("emailConfig.field.clientId")}
+              required
+              htmlFor="graph-client"
+              span={2}
+              error={touched.client && !graphClientId.trim() ? requiredMsg : undefined}
+            >
+              <input
+                id="graph-client"
+                className="input mono"
+                value={graphClientId}
+                onChange={(e) => setGraphClientId(e.target.value)}
+                onBlur={() => touch("client")}
+                autoComplete="off"
+                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+              />
+            </Field>
+            <Field
+              label={t("emailConfig.field.clientSecret")}
+              htmlFor="graph-secret"
+              span={2}
+              help={d.has_graph_client_secret ? t("emailConfig.hint.secretStored") : t("emailConfig.hint.clientSecret")}
+            >
+              <input
+                id="graph-secret"
+                className="input"
+                type="password"
+                value={graphClientSecret}
+                placeholder={d.has_graph_client_secret ? stored : t("settingsUi.email.enterSecret", { defaultValue: "Enter client secret" })}
+                onChange={(e) => setGraphClientSecret(e.target.value)}
+                autoComplete="new-password"
+              />
+            </Field>
+          </FormSection>
+        ))}
+
+      {/* ── Step 3: Sender identity ── */}
+      {step === "sender" && (
+        <FormSection
+          title={t("settingsUi.email.stepSender", { defaultValue: "Sender identity" })}
+          description={t("settingsUi.email.senderIntro", { defaultValue: "The name and address that recipients will see in their inbox." })}
+        >
+          <Field
+            label={t("emailConfig.field.fromAddress")}
+            required
+            htmlFor="from-address"
+            error={touched.from && !fromAddress.trim() ? requiredMsg : undefined}
+          >
+            <input
+              id="from-address"
+              className="input"
+              value={fromAddress}
+              onChange={(e) => setFromAddress(e.target.value)}
+              onBlur={() => touch("from")}
+              placeholder="reports@your-domain.com"
+            />
+          </Field>
+          <Field label={t("emailConfig.field.fromName")} htmlFor="from-name">
+            <input id="from-name" className="input" value={fromName} onChange={(e) => setFromName(e.target.value)} placeholder="Maugood Reports" />
+          </Field>
+          <Field
+            label={t("settingsUi.email.bccLabel", { defaultValue: "BCC (monitoring address)" })}
+            htmlFor="bcc-address"
+            span={2}
+            help={t("settingsUi.email.bccHelp", { defaultValue: "Optional. Every outbound email is also copied here." })}
+          >
+            <input id="bcc-address" className="input" type="email" value={bccAddress} onChange={(e) => setBccAddress(e.target.value)} placeholder="monitoring@your-company.com" />
+          </Field>
+          <SwitchField
+            id="email-enabled"
+            checked={enabled}
+            onChange={setEnabled}
+            label={t("settingsUi.email.enableSending", { defaultValue: "Enable email sending" })}
+            description={t("settingsUi.email.enableSendingDesc", {
+              defaultValue: "When off, nothing is sent and new emails are not queued.",
+            })}
+          />
+          {!enabled && pendingCount > 0 && (
+            <FormNotice tone="warning">{t("emailConfig.disableQueueNote", { count: pendingCount })}</FormNotice>
+          )}
+        </FormSection>
+      )}
+    </SettingsFormModal>
   );
 }
 
@@ -671,20 +530,19 @@ function ProviderPanel() {
       setTestSuccess(true);
       setInfo(t("emailConfig.msg.testSent", { to: testTo.trim() }) as string);
     } catch (err) {
-      setError(
-        err instanceof ApiError ? err.message : (t("emailConfig.msg.testFailed") as string),
-      );
+      setError(err instanceof ApiError ? err.message : (t("emailConfig.msg.testFailed") as string));
     }
   };
 
-  if (cfg.isLoading) return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "40px 0", color: "var(--text-secondary)", fontSize: 13 }}>
-      <span style={{ width: 16, height: 16, borderRadius: "50%", border: "2px solid var(--border)", borderTopColor: "var(--accent)", display: "inline-block", animation: "spin 0.8s linear infinite" }} />
-      Loading email configuration…
-    </div>
-  );
+  if (cfg.isLoading) return <SkeletonPanel lines={5} />;
   if (cfg.error || !cfg.data)
-    return <p style={{ color: "var(--danger-text)", fontSize: 13 }}>Failed to load email config.</p>;
+    return (
+      <LoadErrorPanel
+        title={t("emailConfig.loadError")}
+        {...(cfg.error?.message ? { body: cfg.error.message } : {})}
+        onRetry={() => void cfg.refetch()}
+      />
+    );
 
   const d = cfg.data;
   const pendingCount = pending.data?.count ?? 0;
@@ -692,18 +550,22 @@ function ProviderPanel() {
   // A provider is "configured" if its primary credential is non-empty
   const smtpConfigured = !!d.smtp_host;
   const graphConfigured = !!d.graph_tenant_id;
+  const anyConfigured = smtpConfigured || graphConfigured;
 
   const onToggleEnabled = async () => {
     try {
       await patch.mutateAsync({ enabled: !d.enabled });
-    } catch { /* banner shows error */ }
+    } catch {
+      /* banner shows error */
+    }
   };
 
   const onDeleteProvider = async (p: EmailProvider) => {
     try {
-      const updates: Parameters<typeof patch.mutateAsync>[0] = p === "smtp"
-        ? { smtp_host: "", smtp_username: "", smtp_password: "" }
-        : { graph_tenant_id: "", graph_client_id: "", graph_client_secret: "" };
+      const updates: Parameters<typeof patch.mutateAsync>[0] =
+        p === "smtp"
+          ? { smtp_host: "", smtp_username: "", smtp_password: "" }
+          : { graph_tenant_id: "", graph_client_id: "", graph_client_secret: "" };
       // If deleting the active provider, switch to the other one (if available)
       if (p === "smtp" && d.provider === "smtp" && graphConfigured) {
         updates.provider = "microsoft_graph";
@@ -712,286 +574,192 @@ function ProviderPanel() {
       }
       await patch.mutateAsync(updates);
       setDeleteConfirm(null);
-      setInfo(`${p === "smtp" ? "SMTP" : "Microsoft Graph"} configuration removed.`);
+      setInfo(t("settingsUi.email.providerRemoved", { defaultValue: "{{provider}} configuration removed.", provider: providerLabel(p) }));
     } catch (err) {
       setDeleteConfirm(null);
-      setError(err instanceof ApiError ? err.message : "Failed to remove provider.");
+      setError(err instanceof ApiError ? err.message : t("settingsUi.email.removeFailed", { defaultValue: "Failed to remove provider." }));
     }
   };
 
-  const PROVIDERS: { key: EmailProvider; label: string; shortDesc: string; icon: React.ReactNode }[] = [
-    { key: "smtp", label: "SMTP", shortDesc: "Gmail, Outlook, Brevo, or any relay", icon: <BsEnvelopeFill /> },
-    { key: "microsoft_graph", label: "Microsoft Graph", shortDesc: "Microsoft 365 / Azure app credentials", icon: <BsCloudFill /> },
+  const PROVIDERS: { key: EmailProvider; label: string; icon: React.ReactNode }[] = [
+    { key: "smtp", label: "SMTP", icon: <BsEnvelopeFill /> },
+    { key: "microsoft_graph", label: "Microsoft Graph", icon: <BsCloudFill /> },
   ];
 
-  const configuredList = PROVIDERS.filter((p) => p.key === "smtp" ? smtpConfigured : graphConfigured);
-  const unconfiguredList = PROVIDERS.filter((p) => p.key === "smtp" ? !smtpConfigured : !graphConfigured);
+  const configuredList = PROVIDERS.filter((p) => (p.key === "smtp" ? smtpConfigured : graphConfigured));
+  const unconfiguredList = PROVIDERS.filter((p) => (p.key === "smtp" ? !smtpConfigured : !graphConfigured));
+
+  const addButtons = unconfiguredList.map(({ key, label }) => (
+    <button key={key} type="button" className="btn btn-sm" onClick={() => setEditingProvider(key)}>
+      <Icon name="plus" size={12} />
+      {t("settingsUi.email.addProvider", { defaultValue: "Add {{provider}}", provider: label })}
+    </button>
+  ));
+
+  const fromFact = (
+    <Fact label={t("emailConfig.field.fromAddress")} icon={<Icon name="mail" size={12} />}>
+      {d.from_address ? (
+        <>
+          <strong>{d.from_address}</strong>
+          {d.from_name && <div className="text-xs text-dim">{d.from_name}</div>}
+        </>
+      ) : (
+        <span className="text-dim">—</span>
+      )}
+    </Fact>
+  );
+  const secretFact = (label: string, has: boolean) => (
+    <Fact label={label} icon={<Icon name="shield" size={12} />}>
+      {has ? (
+        <>
+          <span aria-hidden>••••••</span>{" "}
+          <span className="text-xs text-dim">{t("settingsUi.email.stored", { defaultValue: "stored" })}</span>
+        </>
+      ) : (
+        <span className="text-dim">{t("settingsUi.email.notSet", { defaultValue: "Not set" })}</span>
+      )}
+    </Fact>
+  );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-
+    <div className="st-stack">
       {/* ── Master switch banner (only when at least one provider is set) ── */}
-      {(smtpConfigured || graphConfigured) && <div
-        style={{
-          borderRadius: 14,
-          border: `1.5px solid ${d.enabled ? "#bbf7d0" : "#fecaca"}`,
-          background: d.enabled
-            ? "linear-gradient(135deg, color-mix(in srgb, #0a8a52 6%, var(--bg)) 0%, var(--bg) 100%)"
-            : "linear-gradient(135deg, color-mix(in srgb, #b91c1c 5%, var(--bg)) 0%, var(--bg) 100%)",
-          padding: "18px 22px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 16,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <div
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: 12,
-              background: d.enabled
-                ? "color-mix(in srgb, #0a8a52 15%, transparent)"
-                : "color-mix(in srgb, #b91c1c 12%, transparent)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 22,
-              flexShrink: 0,
-            }}
-          >
-            {d.enabled ? <BsEnvelopeCheckFill /> : <BsEnvelopeXFill />}
-          </div>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 15, display: "flex", alignItems: "center", gap: 8 }}>
-              Email delivery is
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 5,
-                  fontSize: 12,
-                  fontWeight: 700,
-                  letterSpacing: "0.06em",
-                  padding: "2px 10px",
-                  borderRadius: 999,
-                  background: d.enabled ? "#0a8a52" : "#b91c1c",
-                  color: "#fff",
-                }}
-              >
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#fff", opacity: 0.8 }} />
-                {d.enabled ? "ACTIVE" : "PAUSED"}
-              </span>
-            </div>
-            <div style={{ fontSize: 12.5, color: "var(--text-secondary)", marginTop: 3 }}>
-              {d.enabled
-                ? "Attendance reports and scheduled emails are being delivered."
-                : pendingCount > 0
-                  ? `Delivery paused · ${pendingCount} email${pendingCount !== 1 ? "s" : ""} queued but not yet sent`
-                  : "No emails will be sent until you re-enable delivery."}
-            </div>
-          </div>
-        </div>
-        <button
-          type="button"
-          className="btn"
-          style={d.enabled
-            ? { borderColor: "#fecaca", color: "#b91c1c", minWidth: 130 }
-            : { borderColor: "#bbf7d0", color: "#0a8a52", minWidth: 130 }}
-          disabled={patch.isPending}
-          onClick={() => void onToggleEnabled()}
+      {anyConfigured && (
+        <InlineAlert
+          tone={d.enabled ? "success" : "warning"}
+          title={
+            d.enabled
+              ? t("settingsUi.email.deliveryActive", { defaultValue: "Email delivery is active" })
+              : t("settingsUi.email.deliveryPaused", { defaultValue: "Email delivery is paused" })
+          }
+          actions={
+            <button type="button" className="btn btn-sm" disabled={patch.isPending} onClick={() => void onToggleEnabled()}>
+              <Icon name={d.enabled ? "pause" : "play"} size={12} />
+              {patch.isPending
+                ? t("common.saving")
+                : d.enabled
+                  ? t("settingsUi.email.pauseDelivery", { defaultValue: "Pause delivery" })
+                  : t("settingsUi.email.resumeDelivery", { defaultValue: "Resume delivery" })}
+            </button>
+          }
         >
-          {patch.isPending
-            ? "Saving…"
-            : d.enabled
-              ? <><BsPauseFill style={{ marginInlineEnd: 5 }} />Pause delivery</>
-              : <><BsPlayFill style={{ marginInlineEnd: 5 }} />Resume delivery</>}
-        </button>
-      </div>}
+          {d.enabled
+            ? t("settingsUi.email.deliveryActiveBody", { defaultValue: "Attendance reports and scheduled emails are being delivered." })
+            : pendingCount > 0
+              ? t("settingsUi.email.deliveryPausedQueued", {
+                  defaultValue: "Delivery paused · {{count}} email(s) queued but not yet sent.",
+                  count: pendingCount,
+                })
+              : t("settingsUi.email.deliveryPausedBody", { defaultValue: "No emails will be sent until you re-enable delivery." })}
+        </InlineAlert>
+      )}
 
       {/* Feedback banners */}
-      {error && (
-        <div role="alert" style={{ background: "var(--danger-soft)", color: "var(--danger-text)", border: "1px solid #fecaca", padding: "10px 14px", borderRadius: 10, fontSize: 13, display: "flex", gap: 8, alignItems: "flex-start" }}>
-          <BsExclamationTriangleFill style={{ flexShrink: 0, marginTop: 1 }} />{error}
-        </div>
-      )}
-      {info && (
-        <div style={{ background: "color-mix(in srgb, #0a8a52 8%, var(--bg))", border: "1px solid #bbf7d0", padding: "10px 14px", borderRadius: 10, fontSize: 13, display: "flex", gap: 8, alignItems: "center", color: "#0a8a52", fontWeight: 500 }}>
-          <BsCheckCircleFill style={{ marginInlineEnd: 6, flexShrink: 0 }} />{info}
-        </div>
-      )}
+      {error && <InlineAlert tone="danger">{error}</InlineAlert>}
+      {info && <InlineAlert tone="success">{info}</InlineAlert>}
 
-      {/* ── Configured provider cards ──────────────────────────────────────── */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-          <div style={{ fontWeight: 600, fontSize: 12, color: "var(--text-secondary)", letterSpacing: "0.05em", textTransform: "uppercase", paddingInlineStart: 2 }}>
-            Email Providers
-          </div>
-          {unconfiguredList.length > 0 && (
-            <div style={{ display: "flex", gap: 8 }}>
-              {unconfiguredList.map(({ key, label, icon }) => (
-                <button
-                  key={key}
-                  type="button"
-                  className="btn btn-sm"
-                  style={{ display: "flex", alignItems: "center", gap: 6 }}
-                  onClick={() => setEditingProvider(key)}
-                >
-                  <BsPlusLg style={{ fontSize: 11 }} />
-                  <span style={{ fontSize: 13, lineHeight: 1 }}>{icon}</span>
-                  Add {label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {configuredList.length === 0 && (
-          <div style={{ textAlign: "center", padding: "28px 20px", borderRadius: 14, border: "1.5px dashed var(--border)", color: "var(--text-secondary)", fontSize: 13 }}>
-            No providers configured yet. Add one below to start sending emails.
-          </div>
-        )}
-
-        {configuredList.map(({ key, label, icon }) => {
-          const isActive = d.provider === key;
-
-          return (
-            <div
-              key={key}
-              style={{
-                borderRadius: 14,
-                border: `1.5px solid ${isActive ? "color-mix(in srgb, var(--accent,#0b6e4f) 30%, var(--border))" : "var(--border)"}`,
-                background: isActive
-                  ? "color-mix(in srgb, var(--accent,#0b6e4f) 3%, var(--bg))"
-                  : "var(--bg)",
-                overflow: "hidden",
-                marginBottom: 10,
-              }}
-            >
-              {/* Card header */}
-              <div
-                style={{
-                  padding: "14px 18px",
-                  borderBottom: "1px solid var(--border)",
-                  background: "var(--bg-elev)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 12,
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <div
-                    style={{
-                      width: 38,
-                      height: 38,
-                      borderRadius: 10,
-                      background: isActive
-                        ? "color-mix(in srgb, var(--accent,#0b6e4f) 14%, transparent)"
-                        : "var(--bg-sunken)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 18,
-                      color: isActive ? "var(--accent,#0b6e4f)" : "var(--text-secondary)",
-                      flexShrink: 0,
-                    }}
-                  >
-                    {icon}
-                  </div>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 14, display: "flex", alignItems: "center", gap: 7 }}>
-                      {label}
-                      {isActive && (
-                        <span className="pill pill-accent" style={{ fontSize: 10, letterSpacing: "0.04em" }}>
-                          Active
-                        </span>
-                      )}
-                    </div>
-                    {d.updated_at && (
-                      <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginTop: 1 }}>
-                        Updated {new Date(d.updated_at).toLocaleString()}
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-                  <button
-                    type="button"
-                    className="btn btn-sm"
-                    onClick={() => setEditingProvider(key)}
-                  >
-                    <BsPencilFill style={{ marginInlineEnd: 5 }} />Edit
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-sm"
-                    style={{ color: "#b91c1c", borderColor: "#fecaca" }}
-                    onClick={() => setDeleteConfirm(key)}
-                    aria-label={`Remove ${label}`}
-                  >
-                    <BsTrashFill style={{ marginInlineEnd: 5 }} />Remove
-                  </button>
-                </div>
-              </div>
-
-              {/* Config tiles */}
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(4, 1fr)",
-                  gap: 1,
-                  background: "var(--border)",
-                }}
-              >
-                {key === "smtp" ? (
-                  <>
-                    <ConfigTile icon={<BsHddNetworkFill />} label="SMTP Server">
-                      {d.smtp_host
-                        ? <><strong>{d.smtp_host}</strong><span style={{ color: "var(--text-tertiary)" }}>:{d.smtp_port}</span>{d.smtp_use_tls && <span className="pill pill-neutral" style={{ fontSize: 10, marginInlineStart: 6 }}>TLS</span>}</>
-                        : <span style={{ color: "var(--text-tertiary)" }}>Not configured</span>}
-                    </ConfigTile>
-                    <ConfigTile icon={<BsPersonFill />} label="Username">
-                      {d.smtp_username || <span style={{ color: "var(--text-tertiary)" }}>—</span>}
-                    </ConfigTile>
-                    <ConfigTile icon={<BsKeyFill />} label="Password">
-                      {d.has_smtp_password
-                        ? <span style={{ letterSpacing: 2 }}>••••••<span style={{ marginInlineStart: 6, fontSize: 11, color: "var(--text-secondary)", letterSpacing: 0 }}>stored</span></span>
-                        : <span style={{ color: "var(--text-tertiary)" }}>Not set</span>}
-                    </ConfigTile>
-                    <ConfigTile icon={<BsEnvelopeFill />} label="From Address">
-                      {d.from_address
-                        ? <><strong>{d.from_address}</strong>{d.from_name && <span style={{ color: "var(--text-tertiary)", display: "block", fontSize: 11.5, marginTop: 1 }}>{d.from_name}</span>}</>
-                        : <span style={{ color: "var(--text-tertiary)" }}>—</span>}
-                    </ConfigTile>
-                  </>
-                ) : (
-                  <>
-                    <ConfigTile icon={<BsBuildingFill />} label="Entra Tenant ID">
-                      <code style={{ fontSize: 11.5, wordBreak: "break-all" }}>{d.graph_tenant_id || <span style={{ color: "var(--text-tertiary)", fontStyle: "normal" }}>—</span>}</code>
-                    </ConfigTile>
-                    <ConfigTile icon={<BsPersonBadgeFill />} label="Client ID">
-                      <code style={{ fontSize: 11.5, wordBreak: "break-all" }}>{d.graph_client_id || <span style={{ color: "var(--text-tertiary)", fontStyle: "normal" }}>—</span>}</code>
-                    </ConfigTile>
-                    <ConfigTile icon={<BsShieldLockFill />} label="Client Secret">
-                      {d.has_graph_client_secret
-                        ? <span style={{ letterSpacing: 2 }}>••••••<span style={{ marginInlineStart: 6, fontSize: 11, color: "var(--text-secondary)", letterSpacing: 0 }}>stored</span></span>
-                        : <span style={{ color: "var(--text-tertiary)" }}>Not set</span>}
-                    </ConfigTile>
-                    <ConfigTile icon={<BsEnvelopeFill />} label="From Address">
-                      {d.from_address
-                        ? <><strong>{d.from_address}</strong>{d.from_name && <span style={{ color: "var(--text-tertiary)", display: "block", fontSize: 11.5, marginTop: 1 }}>{d.from_name}</span>}</>
-                        : <span style={{ color: "var(--text-tertiary)" }}>—</span>}
-                    </ConfigTile>
-                  </>
-                )}
-              </div>
-            </div>
-          );
-        })}
-
+      {/* ── Provider cards ─────────────────────────────────────────────────── */}
+      <div className="st-inline" style={{ justifyContent: "space-between" }}>
+        <h2 className="st-section-title" style={{ margin: 0 }}>
+          {t("settingsUi.email.providersHeading", { defaultValue: "Email providers" })}
+        </h2>
+        {configuredList.length > 0 && unconfiguredList.length > 0 && <div className="st-inline">{addButtons}</div>}
       </div>
+
+      {configuredList.length === 0 && (
+        <div className="card st-card" style={CARD_W}>
+          <EmptyPanel
+            tone="accent"
+            icon={<Icon name="mail" size={28} />}
+            title={t("settingsUi.email.noProvidersTitle", { defaultValue: "No email provider yet" })}
+            body={t("settingsUi.email.noProvidersBody", {
+              defaultValue: "Connect an SMTP relay or Microsoft Graph so scheduled reports and notifications can be delivered.",
+            })}
+            actions={addButtons}
+          />
+        </div>
+      )}
+
+      {configuredList.map(({ key, label, icon }) => {
+        const isActive = d.provider === key;
+        return (
+          <SettingsCard
+            key={key}
+            style={CARD_W}
+            icon={icon}
+            title={
+              <span className="st-inline" style={{ gap: 8 }}>
+                {label}
+                {isActive ? (
+                  <SoftPill tone="success">{t("settingsUi.email.active", { defaultValue: "Active" })}</SoftPill>
+                ) : (
+                  <SoftPill tone="neutral">{t("settingsUi.email.inactive", { defaultValue: "Inactive" })}</SoftPill>
+                )}
+              </span>
+            }
+            description={
+              d.updated_at
+                ? t("settingsUi.email.updatedAt", { defaultValue: "Updated {{when}}", when: new Date(d.updated_at).toLocaleString() })
+                : undefined
+            }
+            actions={
+              <>
+                <button type="button" className="btn btn-sm" onClick={() => setEditingProvider(key)}>
+                  <Icon name="edit" size={12} />
+                  {t("emailConfig.edit")}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost st-danger"
+                  onClick={() => setDeleteConfirm(key)}
+                  aria-label={t("settingsUi.email.removeProvider", { defaultValue: "Remove {{provider}}", provider: label })}
+                >
+                  <Icon name="trash" size={12} />
+                  {t("settingsUi.email.remove", { defaultValue: "Remove" })}
+                </button>
+              </>
+            }
+          >
+            <Facts>
+              {key === "smtp" ? (
+                <>
+                  <Fact label={t("settingsUi.email.smtpServer", { defaultValue: "SMTP server" })} icon={<Icon name="database" size={12} />}>
+                    {d.smtp_host ? (
+                      <span className="st-inline" style={{ gap: 6 }}>
+                        <span className="mono">
+                          <strong>{d.smtp_host}</strong>
+                          <span className="text-dim">:{d.smtp_port}</span>
+                        </span>
+                        {d.smtp_use_tls && (
+                          <span className="pill pill-neutral">TLS</span>
+                        )}
+                      </span>
+                    ) : (
+                      <span className="text-dim">{t("settingsUi.email.notConfigured", { defaultValue: "Not configured" })}</span>
+                    )}
+                  </Fact>
+                  <Fact label={t("emailConfig.field.username")} icon={<Icon name="user" size={12} />}>
+                    {d.smtp_username || <span className="text-dim">—</span>}
+                  </Fact>
+                  {secretFact(t("emailConfig.field.password"), d.has_smtp_password)}
+                  {fromFact}
+                </>
+              ) : (
+                <>
+                  <Fact label={t("emailConfig.field.entraTenantId")} icon={<Icon name="globe" size={12} />} mono>
+                    {d.graph_tenant_id || <span className="text-dim">—</span>}
+                  </Fact>
+                  <Fact label={t("emailConfig.field.clientId")} icon={<Icon name="user" size={12} />} mono>
+                    {d.graph_client_id || <span className="text-dim">—</span>}
+                  </Fact>
+                  {secretFact(t("emailConfig.field.clientSecret"), d.has_graph_client_secret)}
+                  {fromFact}
+                </>
+              )}
+            </Facts>
+          </SettingsCard>
+        );
+      })}
 
       {/* ── Provider config modal ──────────────────────────────────────────── */}
       {editingProvider !== null && (
@@ -1000,226 +768,91 @@ function ProviderPanel() {
           lockedProvider={editingProvider === "smtp" ? smtpConfigured : graphConfigured}
           configData={cfg.data}
           onClose={() => setEditingProvider(null)}
-          onSaved={(msg) => { setInfo(msg); setEditingProvider(null); }}
+          onSaved={(msg) => {
+            setInfo(msg);
+            setEditingProvider(null);
+          }}
         />
       )}
 
       {/* ── Delete confirm popup ───────────────────────────────────────────── */}
       {deleteConfirm !== null && (
-        <ModalShell onClose={() => setDeleteConfirm(null)}>
-          <div
-            role="dialog"
-            aria-label="Confirm remove provider"
-            style={{
-              position: "fixed",
-              top: "50%",
-              left: "50%",
-              transform: "translate(-50%, -50%)",
-              width: 420,
-              maxWidth: "92vw",
-              background: "var(--bg)",
-              border: "1px solid var(--border-strong)",
-              borderRadius: 16,
-              zIndex: 60,
-              boxShadow: "0 24px 64px rgba(0,0,0,0.18)",
-              overflow: "hidden",
-            }}
-          >
-            {/* Header */}
-            <div
-              style={{
-                padding: "18px 20px 14px",
-                borderBottom: "1px solid var(--border)",
-                background: "color-mix(in srgb, #b91c1c 5%, var(--bg))",
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-              }}
-            >
-              <div
-                style={{
-                  width: 38,
-                  height: 38,
-                  borderRadius: 10,
-                  background: "color-mix(in srgb, #b91c1c 14%, transparent)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 18,
-                  color: "#b91c1c",
-                  flexShrink: 0,
-                }}
-              >
-                <BsTrashFill />
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 700, fontSize: 14.5 }}>
-                  Remove {deleteConfirm === "smtp" ? "SMTP" : "Microsoft Graph"}?
-                </div>
-                <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginTop: 2 }}>
-                  This will clear the stored credentials.
-                </div>
-              </div>
-              <button
-                className="icon-btn"
-                aria-label="Close"
-                onClick={() => setDeleteConfirm(null)}
-                style={{ fontSize: 18, lineHeight: 1 }}
-              >
-                ×
-              </button>
-            </div>
-
-            {/* Body */}
-            <div style={{ padding: "18px 20px" }}>
-              <p style={{ margin: 0, fontSize: 13.5, color: "var(--text-primary)", lineHeight: 1.6 }}>
-                Are you sure you want to remove the{" "}
-                <strong>{deleteConfirm === "smtp" ? "SMTP" : "Microsoft Graph"}</strong>{" "}
-                configuration? All stored credentials will be cleared and cannot be recovered.
-              </p>
-              {deleteConfirm === d.provider && (configuredList.length === 1) && (
-                <div
-                  style={{
-                    marginTop: 12,
-                    padding: "10px 13px",
-                    borderRadius: 9,
-                    background: "color-mix(in srgb, #b45309 8%, var(--bg))",
-                    border: "1px solid #b45309",
-                    fontSize: 12.5,
-                    color: "#92400e",
-                    display: "flex",
-                    gap: 8,
-                    alignItems: "flex-start",
-                  }}
-                >
-                  <BsExclamationTriangleFill style={{ flexShrink: 0, marginTop: 1 }} />
-                  This is your only configured provider. Removing it will disable email delivery.
-                </div>
-              )}
-            </div>
-
-            {/* Footer */}
-            <div
-              style={{
-                padding: "12px 20px",
-                borderTop: "1px solid var(--border)",
-                background: "var(--bg-elev)",
-                display: "flex",
-                justifyContent: "flex-end",
-                gap: 10,
-              }}
-            >
-              <button
-                type="button"
-                className="btn"
-                onClick={() => setDeleteConfirm(null)}
-                disabled={patch.isPending}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn"
-                style={{ background: "#b91c1c", color: "#fff", borderColor: "#b91c1c" }}
-                onClick={() => void onDeleteProvider(deleteConfirm)}
-                disabled={patch.isPending}
-              >
-                <BsTrashFill style={{ marginInlineEnd: 6 }} />
-                {patch.isPending ? "Removing…" : "Yes, Remove"}
-              </button>
-            </div>
-          </div>
-        </ModalShell>
+        <ConfirmModal
+          titleId="email-remove-title"
+          title={t("settingsUi.email.removeTitle", { defaultValue: "Remove {{provider}}?", provider: providerLabel(deleteConfirm) })}
+          subtitle={t("settingsUi.email.removeSubtitle", { defaultValue: "This will clear the stored credentials." })}
+          confirmLabel={t("settingsUi.email.removeConfirm", { defaultValue: "Yes, remove" })}
+          busy={patch.isPending}
+          onConfirm={() => void onDeleteProvider(deleteConfirm)}
+          onClose={() => setDeleteConfirm(null)}
+        >
+          <p className="st-confirm-text">
+            {t("settingsUi.email.removeBody", {
+              defaultValue: "Are you sure you want to remove the {{provider}} configuration? All stored credentials will be cleared and cannot be recovered.",
+              provider: providerLabel(deleteConfirm),
+            })}
+          </p>
+          {deleteConfirm === d.provider && configuredList.length === 1 && (
+            <FormNotice tone="warning">
+              {t("settingsUi.email.removeOnlyProvider", {
+                defaultValue: "This is your only configured provider. Removing it will disable email delivery.",
+              })}
+            </FormNotice>
+          )}
+        </ConfirmModal>
       )}
 
       {/* ── Test email card (only when at least one provider is set) ─────── */}
-      {(smtpConfigured || graphConfigured) && <div
-        style={{
-          borderRadius: 14,
-          border: "1px solid var(--border)",
-          background: "var(--bg)",
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
-            padding: "14px 22px",
-            borderBottom: "1px solid var(--border)",
-            background: "var(--bg-elev)",
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-          }}
-        >
-          <div
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: 9,
-              background: "color-mix(in srgb, var(--accent, #0b6e4f) 12%, transparent)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 16,
-            }}
-          >
-            <BsFlaskFill />
-          </div>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 13.5 }}>Send Test Email</div>
-            <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginTop: 1 }}>
-              Verify your configuration by sending a test message.
-            </div>
-          </div>
-        </div>
-        <div style={{ padding: "16px 22px" }}>
-          <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
-            <Field label="Recipient Email">
-              <input
-                className="input"
-                value={testTo}
-                onChange={(e) => { setTestTo(e.target.value); setTestSuccess(false); }}
-                placeholder="you@your-domain.com"
-                style={{ minWidth: 280 }}
-              />
-            </Field>
-            <button
-              type="button"
-              className={`btn ${testSuccess ? "" : ""}`}
-              style={testSuccess ? { borderColor: "#bbf7d0", color: "#0a8a52" } : {}}
-              onClick={() => void onTest()}
-              disabled={testMutation.isPending}
-            >
-              {testMutation.isPending
-                ? "Sending…"
-                : testSuccess
-                  ? <><BsCheckCircleFill style={{ marginInlineEnd: 5 }} />Sent!</>
-                  : "Send Test"}
+      {anyConfigured && (
+        <SettingsCard
+          style={CARD_W}
+          icon={<Icon name="send" size={17} />}
+          title={t("emailConfig.test.title")}
+          description={t("emailConfig.test.desc")}
+          footer={
+            <button type="button" className="btn" onClick={() => void onTest()} disabled={testMutation.isPending}>
+              {testMutation.isPending ? (
+                t("emailConfig.test.sending")
+              ) : testSuccess ? (
+                <>
+                  <Icon name="check" size={12} />
+                  {t("settingsUi.email.sent", { defaultValue: "Sent" })}
+                </>
+              ) : (
+                <>
+                  <Icon name="send" size={12} />
+                  {t("emailConfig.test.send")}
+                </>
+              )}
             </button>
-          </div>
-        </div>
-      </div>}
+          }
+        >
+          <FormField label={t("settingsUi.email.recipient", { defaultValue: "Recipient email" })} htmlFor="test-to">
+            <input
+              id="test-to"
+              className="input"
+              type="email"
+              value={testTo}
+              onChange={(e) => {
+                setTestTo(e.target.value);
+                setTestSuccess(false);
+              }}
+              placeholder="you@your-domain.com"
+              style={{ maxWidth: 420 }}
+            />
+          </FormField>
+        </SettingsCard>
+      )}
     </div>
   );
 }
 
 // ─── Attendance emails tab ────────────────────────────────────────────────────
 
-const ATT_STATUSES: AttendanceEmailStatus[] = ["present", "late", "absent"];
-const STATUS_LABELS: Record<AttendanceEmailStatus, string> = {
-  present: "Present",
-  late: "Late",
-  absent: "Absent",
-};
-const STATUS_COLORS: Record<AttendanceEmailStatus, string> = {
-  present: "#0a8a52",
-  late: "#b45309",
-  absent: "#b91c1c",
-};
-
 const PAGE_SIZE = 50;
 
 function AttendanceEmailsPanel({ isAdmin, isHR }: { isAdmin: boolean; isHR: boolean }) {
+  const { t } = useTranslation();
   const config = useAttendanceEmailConfig(isAdmin);
   const putConfig = usePutAttendanceEmailConfig();
   const pendingCount = usePendingEmailCount();
@@ -1233,12 +866,14 @@ function AttendanceEmailsPanel({ isAdmin, isHR }: { isAdmin: boolean; isHR: bool
   // Debounce search so we don't fire on every keystroke
   const [debouncedSearch, setDebouncedSearch] = useState("");
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(searchRaw), 300);
-    return () => clearTimeout(t);
+    const id = setTimeout(() => setDebouncedSearch(searchRaw), 300);
+    return () => clearTimeout(id);
   }, [searchRaw]);
 
   // Reset to page 1 whenever filters change
-  useEffect(() => { setPage(1); }, [debouncedSearch, dateFrom, dateTo]);
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, dateFrom, dateTo]);
 
   const logParams = useMemo(() => {
     const p: { page: number; page_size: number; search?: string; date_from?: string; date_to?: string } = {
@@ -1270,7 +905,7 @@ function AttendanceEmailsPanel({ isAdmin, isHR }: { isAdmin: boolean; isHR: bool
         setCancelledBanner(null);
       }
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "Save failed.";
+      const msg = err instanceof ApiError ? err.message : t("emailConfig.msg.saveFailed");
       window.alert(msg);
     }
   };
@@ -1278,341 +913,210 @@ function AttendanceEmailsPanel({ isAdmin, isHR }: { isAdmin: boolean; isHR: bool
   const items = log.data?.items ?? [];
   const total = log.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const filtersActive = !!(searchRaw || dateFrom || dateTo);
+  const clearFilters = () => {
+    setSearchRaw("");
+    setDateFrom("");
+    setDateTo("");
+  };
+  const queue = pendingCount.data?.count ?? 0;
+
+  const statusLabel = (s: AttendanceEmailStatus) =>
+    t(`settingsUi.email.status.${s}`, { defaultValue: s === "present" ? "Present" : s === "late" ? "Late" : "Absent" });
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {/* Cancellation notice — shown briefly when queued emails were cancelled */}
+    <div className="st-stack st-stack-wide">
+      {/* Cancellation notice — shown when queued emails were cancelled */}
       {cancelledBanner && cancelledBanner.cancelled_queue_rows > 0 && (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-            padding: "10px 16px",
-            background: "color-mix(in srgb, #b45309 10%, transparent)",
-            border: "1px solid #b45309",
-            borderRadius: 10,
-            fontSize: 13,
-            color: "#92400e",
-          }}
+        <InlineAlert
+          tone="warning"
+          actions={
+            <button type="button" className="btn btn-sm" onClick={() => setCancelledBanner(null)}>
+              {t("common.dismiss")}
+            </button>
+          }
         >
-          <span>
-            <strong>{cancelledBanner.cancelled_queue_rows}</strong> pending email
-            {cancelledBanner.cancelled_queue_rows === 1 ? "" : "s"} in the queue were
-            cancelled immediately.
-          </span>
-          <button
-            type="button"
-            aria-label="Dismiss"
-            onClick={() => setCancelledBanner(null)}
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              color: "#92400e",
-              fontSize: 15,
-              lineHeight: 1,
-              padding: "0 4px",
-            }}
-          >
-            ✕
-          </button>
-        </div>
+          {t("settingsUi.email.queueCancelled", {
+            defaultValue: "{{count}} pending email(s) in the queue were cancelled immediately.",
+            count: cancelledBanner.cancelled_queue_rows,
+          })}
+        </InlineAlert>
       )}
 
       {/* Toggles — Admin only */}
       {isAdmin && (
-        <div className="card">
-          <div className="card-head">
-            <div>
-              <h3 className="card-title">Email Triggers</h3>
-              <p className="card-sub">
-                When enabled, employees receive a status email on the day their attendance is processed.
-              </p>
-            </div>
+        <SettingsCard
+          style={CARD_W}
+          icon={<Icon name="bell" size={17} />}
+          title={t("settingsUi.email.triggersTitle", { defaultValue: "Email triggers" })}
+          description={t("settingsUi.email.triggersDesc", {
+            defaultValue: "When enabled, employees receive a status email on the day their attendance is processed.",
+          })}
+        >
+          <div className="st-chips" role="group" aria-label={t("settingsUi.email.triggersTitle", { defaultValue: "Email triggers" })}>
+            {ATT_STATUSES.map((s) => {
+              const active = current[s];
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  className="st-chip"
+                  aria-pressed={active}
+                  disabled={config.isLoading || putConfig.isPending}
+                  onClick={() => void onToggle(s, !active)}
+                >
+                  <SoftPill tone={active ? STATUS_TONE[s] : "neutral"}>{statusLabel(s)}</SoftPill>
+                  <span className="text-xs text-dim">
+                    {active ? t("settingsUi.email.on", { defaultValue: "On" }) : t("settingsUi.email.off", { defaultValue: "Off" })}
+                  </span>
+                </button>
+              );
+            })}
           </div>
-          <div className="card-body">
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-              {ATT_STATUSES.map((s) => {
-                const active = current[s];
-                return (
-                  <label
-                    key={s}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      border: `1.5px solid ${active ? STATUS_COLORS[s] : "var(--border)"}`,
-                      borderRadius: 10,
-                      padding: "10px 16px",
-                      cursor: "pointer",
-                      background: active
-                        ? `color-mix(in srgb, ${STATUS_COLORS[s]} 8%, transparent)`
-                        : "var(--bg)",
-                      minWidth: 130,
-                      transition: "border-color 0.15s, background 0.15s",
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={active}
-                      onChange={(e) => void onToggle(s, e.target.checked)}
-                      disabled={config.isLoading || putConfig.isPending}
-                      style={{ display: "none" }}
-                    />
-                    <span
-                      style={{
-                        width: 10,
-                        height: 10,
-                        borderRadius: "50%",
-                        background: active ? STATUS_COLORS[s] : "var(--border)",
-                        flexShrink: 0,
-                        transition: "background 0.15s",
-                      }}
-                    />
-                    <span style={{ fontSize: 13, fontWeight: 600, color: active ? STATUS_COLORS[s] : "var(--text)" }}>
-                      {STATUS_LABELS[s]}
-                    </span>
-                  </label>
-                );
-              })}
-            </div>
-          </div>
-        </div>
+        </SettingsCard>
       )}
 
       {/* Delivery log */}
-      <div className="card">
-        <div className="card-head">
-          <div>
-            <h3 className="card-title">
-              Recent Deliveries
-            </h3>
-            <p className="card-sub">All attendance email attempts — search by name, filter by date.</p>
-          </div>
-          {/* Queue counter */}
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-            {(() => {
-              const count = pendingCount.data?.count ?? 0;
-              return (
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    fontSize: 12.5,
-                    fontWeight: 600,
-                    padding: "4px 10px",
-                    borderRadius: 999,
-                    background: count > 0 ? "var(--warn-soft, #fef9ec)" : "var(--bg-sunken)",
-                    border: `1px solid ${count > 0 ? "var(--warn-border, #f5c518)" : "var(--border)"}`,
-                    color: count > 0 ? "#b45309" : "var(--text-secondary)",
-                  }}
-                  title="Emails waiting to be sent"
-                >
-                  <span
-                    style={{
-                      width: 7,
-                      height: 7,
-                      borderRadius: "50%",
-                      background: count > 0 ? "#f59e0b" : "var(--border)",
-                      flexShrink: 0,
-                    }}
-                  />
-                  {count > 0 ? `${count} in queue` : "Queue empty"}
-                </span>
-              );
-            })()}
-          </div>
-        </div>
-
-        {/* Filter row */}
-        <div
-          style={{
-            display: "flex",
-            gap: 10,
-            alignItems: "center",
-            padding: "10px 14px",
-            borderBottom: "1px solid var(--border)",
-            flexWrap: "wrap",
-          }}
-        >
-          <div className="topbar-search" style={{ flex: "1 1 200px", minWidth: 160 }}>
-            <Icon name="search" size={13} />
-            <input
-              placeholder="Search employee name…"
+      <SettingsCard
+        icon={<Icon name="activity" size={17} />}
+        title={t("settingsUi.email.recentTitle", { defaultValue: "Recent deliveries" })}
+        description={t("settingsUi.email.recentDesc", { defaultValue: "All attendance email attempts — search by name, filter by date." })}
+        actions={
+          <SoftPill tone={queue > 0 ? "warning" : "neutral"} title={t("settingsUi.email.queueTitle", { defaultValue: "Emails waiting to be sent" })}>
+            {queue > 0
+              ? t("settingsUi.email.inQueue", { defaultValue: "{{count}} in queue", count: queue })
+              : t("settingsUi.email.queueEmpty", { defaultValue: "Queue empty" })}
+          </SoftPill>
+        }
+        flush
+      >
+        <div style={{ padding: "12px 20px 0" }}>
+          <Toolbar>
+            <SearchField
               value={searchRaw}
-              onChange={(e) => setSearchRaw(e.target.value)}
+              onChange={setSearchRaw}
+              placeholder={t("settingsUi.email.searchEmployee", { defaultValue: "Search employee name…" })}
+              clearLabel={t("settingsUi.email.clearSearch", { defaultValue: "Clear search" })}
             />
-          </div>
-          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--text-secondary)" }}>
-            From
-            <input
-              type="date"
-              className="input"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              style={{ fontSize: 12.5, padding: "4px 8px" }}
-            />
-          </label>
-          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--text-secondary)" }}>
-            To
-            <input
-              type="date"
-              className="input"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              style={{ fontSize: 12.5, padding: "4px 8px" }}
-            />
-          </label>
-          {(searchRaw || dateFrom || dateTo) && (
-            <button
-              type="button"
-              className="btn btn-sm"
-              onClick={() => { setSearchRaw(""); setDateFrom(""); setDateTo(""); }}
-            >
-              Clear
-            </button>
-          )}
-          <span
-            className="mono text-xs text-dim"
-            style={{ marginInlineStart: "auto", whiteSpace: "nowrap" }}
-          >
-            {items.length} / {total}
-          </span>
+            <label className="st-inline text-sm text-dim" style={{ gap: 6 }}>
+              {t("settingsUi.email.from", { defaultValue: "From" })}
+              <input type="date" className="input sm" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} aria-label={t("settingsUi.email.dateFrom", { defaultValue: "From date" })} />
+            </label>
+            <label className="st-inline text-sm text-dim" style={{ gap: 6 }}>
+              {t("settingsUi.email.to", { defaultValue: "To" })}
+              <input type="date" className="input sm" value={dateTo} onChange={(e) => setDateTo(e.target.value)} aria-label={t("settingsUi.email.dateTo", { defaultValue: "To date" })} />
+            </label>
+            <ResetButton active={filtersActive} label={t("settingsUi.email.reset", { defaultValue: "Reset" })} onClick={clearFilters} />
+          </Toolbar>
         </div>
 
-        {/* Table */}
-        <div style={{ overflowX: "auto" }}>
-          <table
-            className="table"
-            style={{ ["--mg-sticky-bg" as string]: "var(--bg-elev)" } as React.CSSProperties}
-          >
-            <thead
-              style={{
-                position: "sticky",
-                top: 0,
-                zIndex: 20,
-                background: "var(--bg-elev)",
-              }}
-            >
-              <tr>
-                <th>Employee</th>
-                <th>Date</th>
-                <th>Status</th>
-                <th>Recipient</th>
-                <th>Delivery</th>
-                <th>Attempts</th>
-              </tr>
-            </thead>
-            <tbody>
-              {log.isLoading && (
-                <SkeletonRows cols={6} />
-              )}
-              {!log.isLoading && items.length === 0 && (
+        {log.isError ? (
+          <div style={{ padding: 12 }}>
+            <LoadErrorPanel
+              title={t("settingsUi.email.logLoadFailed", { defaultValue: "Couldn't load the delivery log" })}
+              {...(log.error?.message ? { body: log.error.message } : {})}
+              onRetry={() => void log.refetch()}
+            />
+          </div>
+        ) : !log.isLoading && items.length === 0 ? (
+          <div style={{ padding: 12 }}>
+            {filtersActive ? (
+              <EmptyPanel
+                tone="neutral"
+                icon={<Icon name="search" size={28} />}
+                title={t("settingsUi.email.noResultsTitle", { defaultValue: "No results" })}
+                body={t("settingsUi.email.noResultsBody", { defaultValue: "No deliveries match the current search or date range." })}
+                actions={
+                  <button type="button" className="btn" onClick={clearFilters}>
+                    <Icon name="refresh" size={12} />
+                    {t("settingsUi.email.clearFilters", { defaultValue: "Clear filters" })}
+                  </button>
+                }
+              />
+            ) : (
+              <EmptyPanel
+                tone="accent"
+                icon={<Icon name="mail" size={28} />}
+                title={t("settingsUi.email.noLogTitle", { defaultValue: "No attendance emails sent yet" })}
+                body={t("settingsUi.email.noLogBody", {
+                  defaultValue: "Deliveries appear here once a trigger above is on and attendance is processed.",
+                })}
+              />
+            )}
+          </div>
+        ) : (
+          <div className="st-table-wrap">
+            <table className="table">
+              <thead>
                 <tr>
-                  <td colSpan={6} style={{ padding: 20, textAlign: "center", color: "var(--text-secondary)", fontSize: 13 }}>
-                    {searchRaw || dateFrom || dateTo ? "No results match your filters." : "No attendance emails have been sent yet."}
-                  </td>
+                  <th>{t("settingsUi.email.colEmployee", { defaultValue: "Employee" })}</th>
+                  <th>{t("settingsUi.email.colDate", { defaultValue: "Date" })}</th>
+                  <th>{t("settingsUi.email.colStatus", { defaultValue: "Status" })}</th>
+                  <th>{t("settingsUi.email.colRecipient", { defaultValue: "Recipient" })}</th>
+                  <th>{t("settingsUi.email.colDelivery", { defaultValue: "Delivery" })}</th>
+                  <th>{t("settingsUi.email.colAttempts", { defaultValue: "Attempts" })}</th>
                 </tr>
-              )}
-              {items.map((item) => {
-                const outcome = logOutcome(item);
-                return (
-                  <tr key={item.id}>
-                    <td>
-                      <div style={{ fontSize: 13, fontWeight: 600 }}>{item.employee_name}</div>
-                      <div style={{ fontSize: 11, color: "var(--text-secondary)", fontFamily: "monospace" }}>
-                        {item.employee_code}
-                      </div>
-                    </td>
-                    <td style={{ fontSize: 13, whiteSpace: "nowrap" }}>{item.date}</td>
-                    <td>
-                      <span
-                        className="pill pill-neutral"
-                        style={{
-                          fontSize: 11,
-                          color:
-                            item.status === "present"
-                              ? STATUS_COLORS.present
-                              : item.status === "late"
-                                ? STATUS_COLORS.late
-                                : STATUS_COLORS.absent,
-                        }}
-                      >
-                        {STATUS_LABELS[item.status] ?? item.status}
-                      </span>
-                      {item.recipient_kind === "manager" && (
-                        <span className="pill pill-neutral" style={{ fontSize: 10, marginInlineStart: 4 }}>
-                          Mgr
+              </thead>
+              <tbody>
+                {log.isLoading && <SkeletonRows cols={6} />}
+                {items.map((item) => {
+                  const outcome = logOutcome(item);
+                  return (
+                    <tr key={item.id}>
+                      <td>
+                        <div className="row-person-name">{item.employee_name}</div>
+                        <div className="row-person-meta mono">{item.employee_code}</div>
+                      </td>
+                      <td className="mono" style={{ whiteSpace: "nowrap" }}>
+                        {item.date}
+                      </td>
+                      <td>
+                        <span className="st-inline" style={{ gap: 4 }}>
+                          <SoftPill tone={STATUS_TONE[item.status] ?? "neutral"}>{statusLabel(item.status)}</SoftPill>
+                          {item.recipient_kind === "manager" && (
+                            <span className="pill pill-neutral">{t("settingsUi.email.managerTag", { defaultValue: "Mgr" })}</span>
+                          )}
                         </span>
-                      )}
-                    </td>
-                    <td style={{ fontSize: 12.5, color: "var(--text-secondary)" }}>
-                      {item.recipient_email ?? "—"}
-                    </td>
-                    <td>
-                      <span
-                        className={`pill ${
-                          outcome.label === "Sent"
-                            ? "pill-accent"
-                            : outcome.label === "Failed"
-                              ? "pill-danger"
-                              : "pill-neutral"
-                        }`}
-                        style={{ fontSize: 11 }}
-                        title={item.last_error ?? undefined}
-                      >
-                        {outcome.label}
-                      </span>
-                    </td>
-                    <td style={{ fontSize: 12.5, color: "var(--text-secondary)", textAlign: "center" }}>
-                      {item.attempts}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                      </td>
+                      <td className="text-sm text-dim">{item.recipient_email ?? "—"}</td>
+                      <td>
+                        <SoftPill tone={OUTCOME_TONE[outcome]} {...(item.last_error ? { title: item.last_error } : {})}>
+                          {t(`settingsUi.email.outcome.${outcome}`, {
+                            defaultValue: outcome === "sent" ? "Sent" : outcome === "skipped" ? "Skipped" : outcome === "failed" ? "Failed" : "Pending",
+                          })}
+                        </SoftPill>
+                      </td>
+                      <td className="mono text-sm">{item.attempts}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         {/* Pagination strip */}
         {total > 0 && (
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              padding: "10px 14px",
-              borderTop: "1px solid var(--border)",
-              fontSize: 12,
-            }}
-          >
-            <span className="text-dim">
-              Page {page} of {totalPages} · {total.toLocaleString()} total
+          <div className="st-card-foot">
+            <span className="st-card-foot-note">
+              {t("settingsUi.email.pageOf", {
+                defaultValue: "Page {{page}} of {{pages}} · {{total}} total",
+                page,
+                pages: totalPages,
+                total: total.toLocaleString(),
+              })}
             </span>
-            <div style={{ display: "flex", gap: 6 }}>
-              <button
-                className="btn btn-sm"
-                disabled={page <= 1 || log.isFetching}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-              >
-                <Icon name="chevronLeft" size={11} />
-                Previous
-              </button>
-              <button
-                className="btn btn-sm"
-                disabled={page >= totalPages || log.isFetching}
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              >
-                Next
-                <Icon name="chevronRight" size={11} />
-              </button>
-            </div>
+            <button type="button" className="btn btn-sm" disabled={page <= 1 || log.isFetching} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+              <Icon name="chevronLeft" size={11} />
+              {t("common.previous")}
+            </button>
+            <button type="button" className="btn btn-sm" disabled={page >= totalPages || log.isFetching} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>
+              {t("common.next")}
+              <Icon name="chevronRight" size={11} />
+            </button>
           </div>
         )}
-      </div>
+      </SettingsCard>
     </div>
   );
 }
@@ -1629,82 +1133,16 @@ export function EmailConfigPage() {
   const [activeTab, setActiveTab] = useState<InnerTab>("provider");
 
   const tabs: { id: InnerTab; label: string }[] = [
-    { id: "provider", label: "Provider" },
-    { id: "attendance", label: "Attendance Emails" },
+    { id: "provider", label: t("settingsUi.email.tabProvider", { defaultValue: "Provider" }) },
+    { id: "attendance", label: t("settingsUi.email.tabAttendance", { defaultValue: "Attendance emails" }) },
   ];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <SettingsTabs />
-      <header>
-        <h1
-          style={{
-            fontFamily: "var(--font-display)",
-            fontSize: 28,
-            margin: "0 0 4px 0",
-            fontWeight: 400,
-          }}
-        >
-          {t("emailConfig.title") as string}
-        </h1>
-        <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 13 }}>
-          {t("emailConfig.subtitle") as string}
-        </p>
-      </header>
-
+    <SettingsPage title={t("emailConfig.title") as string} subtitle={t("emailConfig.subtitle") as string} wide>
       <InnerTabs value={activeTab} onChange={setActiveTab} tabs={tabs} />
 
       {activeTab === "provider" && <ProviderPanel />}
-      {activeTab === "attendance" && (
-        <AttendanceEmailsPanel isAdmin={isAdmin} isHR={isHR} />
-      )}
-    </div>
-  );
-}
-
-// ─── Shared primitives ────────────────────────────────────────────────────────
-
-function ConfigTile({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
-  return (
-    <div style={{ padding: "16px 20px", background: "var(--bg)" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}>
-        <span style={{ fontSize: 14, color: "var(--accent, #0b6e4f)", display: "flex" }}>{icon}</span>
-        <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-tertiary)" }}>
-          {label}
-        </span>
-      </div>
-      <div style={{ fontSize: 13, lineHeight: 1.5 }}>{children}</div>
-    </div>
-  );
-}
-
-
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <span
-        style={{
-          fontSize: 11,
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-          color: "var(--text-tertiary)",
-          fontWeight: 600,
-        }}
-      >
-        {label}
-      </span>
-      {children}
-      {hint && (
-        <span style={{ fontSize: 11.5, color: "var(--text-tertiary)" }}>{hint}</span>
-      )}
-    </label>
+      {activeTab === "attendance" && <AttendanceEmailsPanel isAdmin={isAdmin} isHR={isHR} />}
+    </SettingsPage>
   );
 }

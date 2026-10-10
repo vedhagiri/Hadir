@@ -1,0 +1,4 @@
+/* Authentication settings — form-only layout (prefix au-). */
+.au-redirect-row { display: flex; align-items: center; gap: 8px; }
+.au-redirect-row > .input { flex: 1; min-width: 0; }
+.au-redirect-row > .btn { white-space: nowrap; }

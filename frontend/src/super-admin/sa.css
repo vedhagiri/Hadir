@@ -1,0 +1,159 @@
+/* Super-Admin console (prefix sa-). Imported from saUi.tsx.
+   The console keeps its red operator accent: inside .sa-shell the
+   accent tokens are re-pointed at red, so every design class (.btn-
+   primary, .nav active, .mg-stat tone-accent, focus rings) reads red
+   without per-element styling. */
+
+.sa-shell {
+  --sa-red: oklch(0.55 0.19 25);
+  --accent: var(--sa-red);
+  --accent-hover: oklch(0.49 0.19 25);
+  --accent-soft: oklch(0.96 0.025 25);
+  --accent-border: oklch(0.86 0.07 25);
+  --accent-text: oklch(0.47 0.18 25);
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+}
+[data-theme="dark"] .sa-shell {
+  --accent-soft: color-mix(in oklab, var(--sa-red) 18%, var(--bg-elev));
+  --accent-border: color-mix(in oklab, var(--sa-red) 45%, var(--bg-elev));
+  --accent-text: color-mix(in oklab, var(--sa-red) 55%, white);
+}
+
+.sa-bar { height: 5px; background: var(--sa-red); }
+
+.sa-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  height: var(--topbar-h);
+  padding: 0 24px;
+  background: color-mix(in oklab, var(--bg-elev) 85%, transparent);
+  backdrop-filter: saturate(1.6) blur(12px);
+  -webkit-backdrop-filter: saturate(1.6) blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+.sa-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--sa-red);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.sa-brand-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--sa-red); box-shadow: 0 0 0 3px var(--accent-soft); }
+.sa-nav { display: flex; gap: 4px; }
+.sa-nav-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
+}
+.sa-nav-link:hover { background: var(--bg-hover); color: var(--text); }
+.sa-nav-link.active { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
+.sa-topbar-end { margin-inline-start: auto; display: flex; align-items: center; gap: 10px; }
+.sa-topbar-email { font-size: 12.5px; color: var(--text-secondary); }
+
+.sa-main { max-width: 1440px; margin: 0 auto; padding: 28px 32px 72px; }
+
+.sa-section-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary);
+  margin: 4px 0 10px;
+}
+.sa-section-label:not(:first-child) { margin-top: 8px; }
+
+.sa-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+}
+.sa-back:hover { color: var(--text); }
+.sa-title-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.sa-stack { display: flex; flex-direction: column; gap: 20px; }
+
+.sa-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; padding: 2px 6px; border-radius: 6px; background: var(--bg-sunken); }
+.sa-link { color: var(--text); font-weight: 600; text-decoration: none; }
+.sa-link:hover { color: var(--accent-text); }
+.sa-muted { color: var(--text-tertiary); font-weight: 400; }
+.sa-row-actions { display: inline-flex; gap: 6px; }
+.sa-end, .table th.sa-end, .table td.sa-end { text-align: end; }
+.sa-strong { font-weight: 600; }
+.sa-secondary { color: var(--text-secondary); }
+
+/* Core strip + contention bar inside a stat card */
+.sa-cores { display: flex; gap: 2px; flex-wrap: wrap; }
+.sa-core { width: 10px; height: 14px; border-radius: 2px; background: var(--success); }
+.sa-core.is-warning { background: var(--warning); }
+.sa-core.is-danger { background: var(--danger); }
+.sa-meter { width: 100%; height: 4px; border-radius: 2px; background: var(--bg-sunken); overflow: hidden; }
+.sa-meter-fill { height: 100%; background: var(--success); transition: width var(--dur) var(--ease-out); }
+.sa-meter-fill.is-warning { background: var(--warning); }
+.sa-meter-fill.is-danger { background: var(--danger); }
+.mg-stat .dsh-stat-extra { justify-content: flex-start; }
+
+/* Provision page */
+.sa-provision { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); gap: 20px; align-items: start; max-width: 1080px; }
+.sa-form { display: flex; flex-direction: column; gap: 16px; }
+.sa-form-foot { display: flex; justify-content: flex-end; gap: 10px; padding-top: 4px; }
+.sa-field-error { font-size: 11.5px; color: var(--danger-text); }
+.sa-alert {
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--danger-soft);
+  color: var(--danger-text);
+  border: 1px solid color-mix(in oklab, var(--danger) 25%, transparent);
+  font-size: 12.5px;
+}
+.sa-steps { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 12px; }
+.sa-step { display: flex; gap: 12px; align-items: flex-start; font-size: 13px; line-height: 1.5; }
+.sa-step-n {
+  flex: 0 0 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-num);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+.sa-note { margin-top: 16px; padding: 10px 12px; border-radius: var(--radius); background: var(--bg-sunken); font-size: 12.5px; color: var(--text-secondary); display: flex; gap: 8px; align-items: flex-start; }
+.sa-note svg { flex: none; margin-top: 2px; }
+
+/* Login */
+.sa-login { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+.sa-login-card { width: 100%; max-width: 420px; padding: 32px; display: flex; flex-direction: column; gap: 16px; border-top: 3px solid var(--sa-red); }
+.sa-login-title { font-family: var(--font-display); font-size: 24px; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
+.sa-login-sub { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.55; }
+.sa-login-version { margin-top: 14px; font-size: 11px; color: var(--text-tertiary); text-align: center; }
+
+@media (max-width: 1100px) { .sa-main { padding: 22px 20px 64px; } }
+@media (max-width: 720px) {
+  .sa-main { padding: 16px 14px 56px; }
+  .sa-topbar { padding: 0 14px; gap: 10px; overflow-x: auto; }
+  .sa-topbar-email { display: none; }
+}
+.sa-block { margin-bottom: 20px; }

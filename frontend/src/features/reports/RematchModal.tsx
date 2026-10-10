@@ -9,8 +9,12 @@ import { useTranslation } from "react-i18next";
 
 import { api, ApiError } from "../../api/client";
 import { DatePicker, todayIso } from "../../components/DatePicker";
+import { ModalShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
 import { toast } from "../../shell/Toaster";
+import { fieldDateStyle } from "../attendance/attendanceUi";
+
+import "./reports.css";
 
 interface Props {
   onClose: () => void;
@@ -69,188 +73,112 @@ export function RematchModal({ onClose }: Props) {
   }
 
   return (
-    <div
-      role="dialog"
-      aria-label={t("rematch.ariaLabel")}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.45)",
-        display: "grid",
-        placeItems: "center",
-        zIndex: 80,
-      }}
-      onClick={onClose}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width: 520,
-          maxWidth: "calc(100vw - 32px)",
-          background: "var(--bg-elev)",
-          border: "1px solid var(--border)",
-          borderRadius: "var(--radius-md, 10px)",
-          boxShadow:
-            "0 12px 40px rgba(0,0,0,0.25), 0 4px 12px rgba(0,0,0,0.1)",
-          overflow: "hidden",
-        }}
-      >
+    <ModalShell onClose={onClose}>
+      <div className="rp-modal-center">
         <div
-          style={{
-            padding: "14px 18px",
-            borderBottom: "1px solid var(--border)",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
+          className="modal rp-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("rematch.ariaLabel")}
         >
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 600 }}>
-              {t("rematch.title")}
+          <div className="modal-head rp-modal-head">
+            <div>
+              <h3 className="modal-title">{t("rematch.title")}</h3>
+              <div className="rp-modal-sub">{t("rematch.sub")}</div>
             </div>
-            <div className="text-xs text-dim" style={{ marginTop: 2 }}>
-              {t("rematch.sub")}
-            </div>
-          </div>
-          <button
-            type="button"
-            className="icon-btn"
-            onClick={onClose}
-            aria-label={t("rematch.closeAria")}
-          >
-            <Icon name="x" size={14} />
-          </button>
-        </div>
-
-        <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 14 }}>
-          <div>
-            <label
-              className="text-xs text-dim"
-              style={{ display: "block", marginBottom: 6, fontWeight: 500 }}
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={onClose}
+              aria-label={t("rematch.closeAria")}
+              title={t("rematch.closeAria")}
+              disabled={running}
             >
-              {t("rematch.dateRange")}
+              <Icon name="x" size={14} />
+            </button>
+          </div>
+
+          <div className="modal-body at-form">
+            <div className="field">
+              <span className="field-label">{t("rematch.dateRange")}</span>
+              <div className="rp-range">
+                <DatePicker
+                  value={from}
+                  onChange={(next) => {
+                    setFrom(next);
+                    if (to < next) setTo(next);
+                  }}
+                  max={todayIso()}
+                  ariaLabel={t("rematch.fromDateAria")}
+                  triggerStyle={fieldDateStyle}
+                />
+                <span aria-hidden className="rp-range-arrow">→</span>
+                <DatePicker
+                  value={to}
+                  onChange={setTo}
+                  min={from}
+                  max={todayIso()}
+                  ariaLabel={t("rematch.toDateAria")}
+                  triggerStyle={fieldDateStyle}
+                />
+              </div>
+            </div>
+
+            <label className="rp-check">
+              <input
+                type="checkbox"
+                checked={onlyUnidentified}
+                onChange={(e) => setOnlyUnidentified(e.target.checked)}
+              />
+              <span>
+                <span className="rp-check-title">{t("rematch.onlyUnidentified")}</span>
+                <span className="rp-check-sub">
+                  {t("rematch.onlyUnidentifiedHint")}
+                </span>
+              </span>
             </label>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <DatePicker
-                value={from}
-                onChange={(next) => {
-                  setFrom(next);
-                  if (to < next) setTo(next);
-                }}
-                max={todayIso()}
-                ariaLabel={t("rematch.fromDateAria")}
+
+            <label className="rp-check">
+              <input
+                type="checkbox"
+                checked={recompute}
+                onChange={(e) => setRecompute(e.target.checked)}
               />
-              <span
-                style={{
-                  fontSize: 12,
-                  color: "var(--text-tertiary)",
-                  fontFamily: "var(--font-mono)",
-                }}
-              >
-                →
+              <span>
+                <span className="rp-check-title">{t("rematch.recompute")}</span>
+                <span className="rp-check-sub">
+                  {t("rematch.recomputeHint")}
+                </span>
               </span>
-              <DatePicker
-                value={to}
-                onChange={setTo}
-                min={from}
-                max={todayIso()}
-                ariaLabel={t("rematch.toDateAria")}
-              />
-            </div>
+            </label>
+
+            {last && (
+              <dl className="rp-kv" aria-live="polite">
+                <dt>{t("rematch.eventsScanned")}</dt>
+                <dd className="mono">{last.events_scanned.toLocaleString()}</dd>
+                <dt>{t("rematch.matchesAdded")}</dt>
+                <dd className="mono tone-success">{last.matches_added.toLocaleString()}</dd>
+                <dt>{t("rematch.matchesChanged")}</dt>
+                <dd className="mono">{last.matches_changed.toLocaleString()}</dd>
+                <dt>{t("rematch.attendanceRecomputed")}</dt>
+                <dd className="mono">{last.attendance_recomputed.toLocaleString()}</dd>
+              </dl>
+            )}
+
+            {err && (
+              <div className="rp-alert" role="alert">
+                {err}
+              </div>
+            )}
           </div>
 
-          <label
-            style={{ display: "flex", alignItems: "flex-start", gap: 8, cursor: "pointer" }}
-          >
-            <input
-              type="checkbox"
-              checked={onlyUnidentified}
-              onChange={(e) => setOnlyUnidentified(e.target.checked)}
-              style={{ marginTop: 2 }}
-            />
-            <span style={{ fontSize: 13 }}>
-              {t("rematch.onlyUnidentified")}
-              <div className="text-xs text-dim" style={{ marginTop: 2 }}>
-                {t("rematch.onlyUnidentifiedHint")}
-              </div>
+          <div className="modal-foot">
+            <span className="rp-modal-foot-note">
+              {from === to
+                ? t("rematch.oneDay", { date: from })
+                : t("rematch.dateRangeDisplay", { from, to })}
             </span>
-          </label>
-
-          <label
-            style={{ display: "flex", alignItems: "flex-start", gap: 8, cursor: "pointer" }}
-          >
-            <input
-              type="checkbox"
-              checked={recompute}
-              onChange={(e) => setRecompute(e.target.checked)}
-              style={{ marginTop: 2 }}
-            />
-            <span style={{ fontSize: 13 }}>
-              {t("rematch.recompute")}
-              <div className="text-xs text-dim" style={{ marginTop: 2 }}>
-                {t("rematch.recomputeHint")}
-              </div>
-            </span>
-          </label>
-
-          {last && (
-            <div
-              style={{
-                padding: "10px 12px",
-                background: "var(--bg-sunken)",
-                border: "1px solid var(--border)",
-                borderRadius: "var(--radius-sm)",
-                fontSize: 12.5,
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: "4px 16px",
-              }}
-            >
-              <span className="text-dim">{t("rematch.eventsScanned")}</span>
-              <span className="mono">{last.events_scanned}</span>
-              <span className="text-dim">{t("rematch.matchesAdded")}</span>
-              <span className="mono" style={{ color: "var(--success)" }}>
-                {last.matches_added}
-              </span>
-              <span className="text-dim">{t("rematch.matchesChanged")}</span>
-              <span className="mono">{last.matches_changed}</span>
-              <span className="text-dim">{t("rematch.attendanceRecomputed")}</span>
-              <span className="mono">{last.attendance_recomputed}</span>
-            </div>
-          )}
-
-          {err && (
-            <div
-              className="text-sm"
-              style={{
-                color: "var(--danger-text)",
-                padding: "8px 10px",
-                background: "var(--danger-soft)",
-                borderRadius: "var(--radius-sm)",
-              }}
-            >
-              {err}
-            </div>
-          )}
-        </div>
-
-        <div
-          style={{
-            padding: "12px 18px",
-            borderTop: "1px solid var(--border)",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 8,
-          }}
-        >
-          <span className="text-xs text-dim">
-            {from === to
-              ? t("rematch.oneDay", { date: from })
-              : t("rematch.dateRangeDisplay", { from, to })}
-          </span>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button type="button" className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose} disabled={running}>
               {t("rematch.close")}
             </button>
             <button
@@ -259,11 +187,12 @@ export function RematchModal({ onClose }: Props) {
               onClick={() => void runOnce()}
               disabled={running}
             >
+              <Icon name="refresh" size={12} />
               {running ? t("rematch.running") : last ? t("rematch.runAgain") : t("rematch.run")}
             </button>
           </div>
         </div>
       </div>
-    </div>
+    </ModalShell>
   );
 }

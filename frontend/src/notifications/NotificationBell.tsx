@@ -5,15 +5,15 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 
+import { RelativeTime } from "../components/RelativeTime";
 import { Icon } from "../shell/Icon";
-import { useTenantDateTime } from "../util/datetime";
 import {
   useMarkAllRead,
   useMarkRead,
   useNotifications,
 } from "./hooks";
 import { type NotificationItem } from "./types";
-
+import "../requests/workflow.css";
 
 export function NotificationBell() {
   const { t } = useTranslation();
@@ -47,105 +47,43 @@ export function NotificationBell() {
   };
 
   return (
-    <div ref={ref} style={{ position: "relative" }}>
+    <div ref={ref} className="wf-bell-wrap">
       <button
         type="button"
         className="icon-btn"
         aria-label={t("notifications.bell.label")}
+        aria-haspopup="dialog"
+        aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
         style={{ position: "relative" }}
       >
         <Icon name="bell" size={14} />
         {unread > 0 && (
-          <span
-            aria-label={t("notifications.bell.unreadAria", { count: unread })}
-            style={{
-              position: "absolute",
-              top: -2,
-              insetInlineEnd: -2,
-              background: "var(--danger-bg, #b91c1c)",
-              color: "white",
-              fontSize: 9,
-              fontWeight: 700,
-              borderRadius: 8,
-              padding: "1px 5px",
-              minWidth: 14,
-              textAlign: "center",
-              border: "1px solid var(--bg)",
-            }}
-          >
+          <span className="wf-bell-badge" aria-label={t("notifications.bell.unreadAria", { count: unread })}>
             {unread > 99 ? "99+" : unread}
           </span>
         )}
       </button>
       {open && (
-        <div
-          role="dialog"
-          aria-label={t("notifications.bell.title")}
-          style={{
-            position: "absolute",
-            top: "calc(100% + 6px)",
-            insetInlineEnd: 0,
-            width: 360,
-            maxHeight: 480,
-            overflow: "auto",
-            background: "var(--bg)",
-            border: "1px solid var(--border-strong)",
-            borderRadius: "var(--radius)",
-            boxShadow: "var(--shadow-lg)",
-            zIndex: 60,
-          }}
-        >
-          <header
-            style={{
-              padding: "10px 12px",
-              borderBottom: "1px solid var(--border)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}
-          >
-            <strong style={{ fontSize: 13 }}>
-              {t("notifications.bell.title")}
-            </strong>
+        <div role="dialog" aria-label={t("notifications.bell.title")} className="wf-bell-panel">
+          <header className="wf-bell-head">
+            <span className="wf-bell-title">{t("notifications.bell.title")}</span>
             <button
               type="button"
-              className="btn btn-sm"
+              className="btn btn-sm btn-ghost"
               onClick={() => markAll.mutate()}
               disabled={unread === 0 || markAll.isPending}
             >
-              {t("notifications.bell.markAllRead")}
+              <Icon name="check" size={11} /> {t("notifications.bell.markAllRead")}
             </button>
           </header>
 
           {items.length === 0 ? (
-            <div
-              style={{
-                padding: 16,
-                color: "var(--text-secondary)",
-                fontSize: 13,
-                textAlign: "center",
-              }}
-            >
-              {t("notifications.bell.empty")}
-            </div>
+            <div className="wf-bell-empty">{t("notifications.bell.empty")}</div>
           ) : (
-            <ul
-              style={{
-                listStyle: "none",
-                margin: 0,
-                padding: 0,
-              }}
-            >
+            <ul className="wf-notif-list wf-bell-list">
               {items.map((n) => (
-                <li
-                  key={n.id}
-                  style={{
-                    borderBottom: "1px solid var(--border)",
-                    background:
-                      n.read_at == null ? "var(--bg-sunken)" : "transparent",
-                  }}
-                >
+                <li key={n.id}>
                   <RowAction
                     notification={n}
                     onClick={() => onItemClick(n)}
@@ -155,22 +93,8 @@ export function NotificationBell() {
             </ul>
           )}
 
-          <footer
-            style={{
-              padding: "8px 12px",
-              borderTop: "1px solid var(--border)",
-              textAlign: "center",
-            }}
-          >
-            <Link
-              to="/notifications"
-              onClick={() => setOpen(false)}
-              style={{
-                fontSize: 12.5,
-                color: "var(--accent)",
-                textDecoration: "none",
-              }}
-            >
+          <footer className="wf-bell-foot">
+            <Link to="/notifications" onClick={() => setOpen(false)}>
               {t("notifications.bell.seeAll")}
             </Link>
           </footer>
@@ -188,65 +112,40 @@ function RowAction({
   onClick: () => void;
 }) {
   const { t } = useTranslation();
-  const dt = useTenantDateTime();
+  const unread = notification.read_at == null;
+  const cls = `wf-bell-item${unread ? " is-unread" : ""}`;
   const inner = (
-    <div
-      style={{
-        padding: "10px 12px",
-        cursor: notification.link_url ? "pointer" : "default",
-        display: "flex",
-        flexDirection: "column",
-        gap: 2,
-      }}
-    >
-      <div className="text-xs text-dim" style={{ fontWeight: 500 }}>
-        {t(`notifications.categories.${notification.category}`, {
-          defaultValue: notification.category,
-        })}
-        <span style={{ marginInlineStart: 8 }}>
-          {dt.formatDateTime(notification.created_at)}
-        </span>
-      </div>
-      <div
-        style={{
-          fontSize: 13,
-          fontWeight: notification.read_at == null ? 600 : 400,
-        }}
-      >
-        {notification.subject}
-      </div>
-      {notification.body && (
-        <div
-          className="text-xs text-dim"
-          style={{
-            display: "-webkit-box",
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: "vertical",
-            overflow: "hidden",
-          }}
-        >
-          {notification.body}
+    <>
+      <span className="wf-notif-dot" aria-hidden />
+      <div className="wf-notif-main">
+        <div className="wf-notif-meta">
+          <span className="text-xs" style={{ fontWeight: 600, color: "var(--text-secondary)" }}>
+            {t(`notifications.categories.${notification.category}`, {
+              defaultValue: notification.category,
+            })}
+          </span>
+          <span className="wf-notif-time">
+            <RelativeTime iso={notification.created_at} />
+          </span>
         </div>
-      )}
-    </div>
+        <div className="wf-notif-subject" style={{ fontSize: 13 }}>
+          {notification.subject}
+        </div>
+        {notification.body && (
+          <div className="wf-notif-body wf-clamp-2">{notification.body}</div>
+        )}
+      </div>
+    </>
   );
   if (notification.link_url) {
     return (
-      <Link
-        to={notification.link_url}
-        onClick={onClick}
-        style={{
-          display: "block",
-          color: "inherit",
-          textDecoration: "none",
-        }}
-      >
+      <Link to={notification.link_url} onClick={onClick} className={cls}>
         {inner}
       </Link>
     );
   }
   return (
-    <div onClick={onClick} role="button">
+    <div onClick={onClick} role="button" tabIndex={0} className={cls} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onClick(); }}>
       {inner}
     </div>
   );

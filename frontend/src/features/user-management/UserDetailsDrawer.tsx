@@ -9,8 +9,9 @@ import { useTranslation } from "react-i18next";
 import { DrawerShell } from "../../components/DrawerShell";
 import { RelativeTime } from "../../components/RelativeTime";
 import { Icon } from "../../shell/Icon";
+import { ChoiceCards, FormHeader, FormNotice, FormSection, SwitchField } from "../../components/FormKit";
+import { DrawerTabs } from "../employees/peopleUi";
 import {
-  AccessToggle,
   ROLE_META,
   ROLE_ORDER,
   avatarColor,
@@ -20,6 +21,13 @@ import { useLoginActivity, usePatchUser } from "./hooks";
 import type { AdUser, RoleCode } from "./types";
 
 type Tab = "overview" | "roles" | "login";
+
+const ROLE_ICON: Record<RoleCode, "shield" | "users" | "user" | "clipboard"> = {
+  Admin: "shield",
+  HR: "clipboard",
+  Manager: "users",
+  Employee: "user",
+};
 
 export function UserDetailsDrawer({
   user,
@@ -33,117 +41,58 @@ export function UserDetailsDrawer({
 
   return (
     <DrawerShell onClose={onClose}>
-      <div className="drawer" role="dialog" aria-label={t("userManagement.drawerTitle")}>
-        <div className="drawer-head" style={{ flexDirection: "column", alignItems: "stretch", gap: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div className="drawer fk-drawer" role="dialog" aria-labelledby="user-details-title">
+        <FormHeader
+          titleId="user-details-title"
+          icon={
             <span
-              style={{
-                fontSize: 10.5,
-                fontWeight: 700,
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
-                color: "var(--text-tertiary)",
-              }}
-            >
-              {t("userManagement.drawerTitle")}
-            </span>
-            <button
-              type="button"
-              className="icon-btn"
-              aria-label={t("common.close", { defaultValue: "Close" })}
-              onClick={onClose}
-              style={{ fontSize: 18, lineHeight: 1 }}
-            >
-              ×
-            </button>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <span
-              style={{
-                width: 46,
-                height: 46,
-                borderRadius: "50%",
-                background: avatarColor(user.full_name),
-                color: "#fff",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 15,
-                fontWeight: 700,
-                flexShrink: 0,
-              }}
+              className="pp-head-avatar"
+              style={{ background: avatarColor(user.full_name) }}
             >
               {avatarInitials(user.full_name)}
             </span>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 17, fontWeight: 700 }}>{user.full_name}</div>
-              <div
-                style={{
-                  fontSize: 12,
-                  color: "var(--text-secondary)",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {user.email}
-              </div>
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            <Pill
-              tone={user.ad_status === "active" ? "green" : "muted"}
-              icon="shield"
-            >
-              {user.ad_status === "active"
-                ? t("userManagement.adActive")
-                : t("userManagement.adDisabled")}
-            </Pill>
-            <Pill tone={user.is_active ? "green" : "muted"} icon="check">
-              {user.is_active
-                ? t("userManagement.accessOn")
-                : t("userManagement.accessOff")}
-            </Pill>
-            {user.source === "entra" && (
-              <Pill tone="blue" icon="refresh">
-                {t("userManagement.synced")}
-              </Pill>
-            )}
-          </div>
-        </div>
+          }
+          eyebrow={t("userManagement.drawerTitle")}
+          title={user.full_name}
+          subtitle={
+            <>
+              <span className="pp-head-email" title={user.email}>{user.email}</span>
+              <span className="pp-drawer-pills pp-head-pills">
+                <span className={`pill ${user.ad_status === "active" ? "pill-success" : "pill-neutral"}`}>
+                  <Icon name="shield" size={11} />
+                  {user.ad_status === "active"
+                    ? t("userManagement.adActive")
+                    : t("userManagement.adDisabled")}
+                </span>
+                <span className={`pill ${user.is_active ? "pill-success" : "pill-neutral"}`}>
+                  <Icon name="check" size={11} />
+                  {user.is_active
+                    ? t("userManagement.accessOn")
+                    : t("userManagement.accessOff")}
+                </span>
+                {user.source === "entra" && (
+                  <span className="pill pill-info">
+                    <Icon name="refresh" size={11} />
+                    {t("userManagement.synced")}
+                  </span>
+                )}
+              </span>
+            </>
+          }
+          onClose={onClose}
+        />
 
-        <nav
-          style={{
-            display: "flex",
-            gap: 4,
-            padding: "0 16px",
-            borderBottom: "1px solid var(--border)",
-          }}
-        >
-          {(["overview", "roles", "login"] as const).map((k) => (
-            <button
-              key={k}
-              type="button"
-              aria-pressed={tab === k}
-              onClick={() => setTab(k)}
-              style={{
-                background: "none",
-                border: "none",
-                padding: "10px 10px",
-                fontSize: 13,
-                fontWeight: tab === k ? 600 : 400,
-                color: tab === k ? "var(--text)" : "var(--text-secondary)",
-                borderBottom:
-                  tab === k ? "2px solid var(--accent)" : "2px solid transparent",
-                cursor: "pointer",
-              }}
-            >
-              {t(`userManagement.tab_${k}`)}
-            </button>
-          ))}
-        </nav>
+        <DrawerTabs<Tab>
+          label={t("userManagement.drawerTitle")}
+          value={tab}
+          onChange={setTab}
+          tabs={(["overview", "roles", "login"] as const).map((k) => ({
+            key: k,
+            label: t(`userManagement.tab_${k}`),
+          }))}
+        />
 
-        <div className="drawer-body">
+        <div className="drawer-body fk-body">
           {tab === "overview" && <OverviewTab user={user} />}
           {tab === "roles" && <RolesTab user={user} />}
           {tab === "login" && <LoginTab user={user} />}
@@ -161,70 +110,62 @@ function OverviewTab({ user }: { user: AdUser }) {
   const { t } = useTranslation();
   const patch = usePatchUser();
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-      <Section title={t("userManagement.basicInfo")}>
-        <Row label={t("userManagement.displayName")} value={user.full_name} />
-        <Row label={t("userManagement.email")} value={user.email} mono />
-        {user.upn && <Row label={t("userManagement.upn")} value={user.upn} mono />}
-      </Section>
+    <>
+      <FormSection columns={1} title={t("userManagement.basicInfo")}>
+        <div className="pp-kv">
+          <Row label={t("userManagement.displayName")} value={user.full_name} />
+          <Row label={t("userManagement.email")} value={user.email} />
+          {user.upn && <Row label={t("userManagement.upn")} value={user.upn} mono />}
+        </div>
+      </FormSection>
 
-      <Section title={t("userManagement.activeDirectory")}>
-        <Row label={t("userManagement.department")} value={user.department ?? "—"} />
-        <Row label={t("userManagement.jobTitle")} value={user.job_title ?? "—"} />
-        <Row
-          label={t("userManagement.adStatus")}
-          value={
-            user.ad_status === "active"
-              ? t("userManagement.adActive")
-              : t("userManagement.adDisabled")
-          }
-        />
-        <Row
-          label={t("userManagement.msObject")}
-          value={user.ms_object_id ?? "—"}
-          mono
-        />
-        <Row
-          label={t("userManagement.lastSynced")}
-          value={user.last_synced_at ? <RelativeTime iso={user.last_synced_at} /> : "—"}
-        />
-      </Section>
-
-      <Section title={t("userManagement.applicationAccess")}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-            padding: "12px 14px",
-            borderRadius: 10,
-            background: user.is_active
-              ? "color-mix(in srgb, #0a8a52 8%, var(--bg))"
-              : "var(--bg-sunken)",
-            border: `1px solid ${user.is_active ? "var(--success-border)" : "var(--border)"}`,
-          }}
-        >
-          <div>
-            <div style={{ fontWeight: 600, fontSize: 13 }}>
-              {user.is_active
-                ? t("userManagement.accessEnabled")
-                : t("userManagement.accessDisabled")}
-            </div>
-            <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 2 }}>
-              {t("userManagement.accessHint")}
-            </div>
-          </div>
-          <AccessToggle
-            checked={user.is_active}
-            onChange={() =>
-              void patch.mutateAsync({ userId: user.id, is_active: !user.is_active })
+      <FormSection columns={1} title={t("userManagement.activeDirectory")}>
+        <div className="pp-kv">
+          <Row label={t("userManagement.department")} value={user.department ?? "—"} />
+          <Row label={t("userManagement.jobTitle")} value={user.job_title ?? "—"} />
+          <Row
+            label={t("userManagement.adStatus")}
+            value={
+              user.ad_status === "active"
+                ? t("userManagement.adActive")
+                : t("userManagement.adDisabled")
             }
-            disabled={patch.isPending}
+          />
+          <Row
+            label={t("userManagement.msObject")}
+            value={user.ms_object_id ?? "—"}
+            mono
+          />
+          <Row
+            label={t("userManagement.lastSynced")}
+            value={user.last_synced_at ? <RelativeTime iso={user.last_synced_at} /> : "—"}
           />
         </div>
-      </Section>
-    </div>
+      </FormSection>
+
+      <FormSection
+        columns={1}
+        title={t("userManagement.applicationAccess")}
+        description={t("userManagement.accessApplyNow", {
+          defaultValue: "Takes effect immediately and is written to the audit log.",
+        })}
+      >
+        <SwitchField
+          id="user-access-toggle"
+          label={
+            user.is_active
+              ? t("userManagement.accessEnabled")
+              : t("userManagement.accessDisabled")
+          }
+          description={t("userManagement.accessHint")}
+          checked={user.is_active}
+          onChange={() =>
+            void patch.mutateAsync({ userId: user.id, is_active: !user.is_active })
+          }
+          disabled={patch.isPending}
+        />
+      </FormSection>
+    </>
   );
 }
 
@@ -243,87 +184,38 @@ function RolesTab({ user }: { user: AdUser }) {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-      <div
-        className="card"
-        style={{ padding: 16, display: "flex", flexDirection: "column", gap: 6 }}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span
-            style={{
-              fontSize: 10.5,
-              fontWeight: 700,
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-              color: "var(--text-tertiary)",
-            }}
-          >
-            {t("userManagement.currentRole")}
-          </span>
-          {current ? (
-            <span className="pill pill-accent">{current}</span>
-          ) : (
-            <span style={{ color: "var(--text-tertiary)", fontSize: 12 }}>
-              {t("userManagement.noRole")}
-            </span>
-          )}
-        </div>
-        <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-          {current ? ROLE_META[current].desc : t("userManagement.noRoleDesc")}
-        </div>
-      </div>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        <span
-          style={{
-            fontSize: 10.5,
-            fontWeight: 700,
-            textTransform: "uppercase",
-            letterSpacing: "0.05em",
-            color: "var(--text-tertiary)",
-            marginBottom: 4,
-          }}
-        >
-          {t("userManagement.changeRole")}
-        </span>
-        {ROLE_ORDER.map((code) => {
-          const active = current === code;
-          return (
-            <button
-              key={code}
-              type="button"
-              onClick={() => setRole(code)}
-              disabled={patch.isPending}
-              style={{
-                textAlign: "start",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 10,
-                padding: "12px 14px",
-                marginBottom: 8,
-                borderRadius: 10,
-                border: `1px solid ${active ? "var(--accent-border, var(--accent))" : "var(--border)"}`,
-                background: active
-                  ? "color-mix(in srgb, var(--accent) 8%, var(--bg))"
-                  : "var(--bg)",
-                cursor: patch.isPending ? "default" : "pointer",
-              }}
-            >
-              <div>
-                <div style={{ fontWeight: 600, fontSize: 13 }}>
-                  {ROLE_META[code].label}
-                </div>
-                <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 1 }}>
-                  {ROLE_META[code].desc}
-                </div>
-              </div>
-              {active && <Icon name="check" size={16} />}
-            </button>
-          );
+    <>
+      <FormSection
+        columns={1}
+        title={t("userManagement.changeRole")}
+        description={t("userManagement.changeRoleHelp", {
+          defaultValue: "One role per user. The change applies immediately and is audited.",
         })}
-      </div>
-    </div>
+        aside={
+          current ? (
+            <span className="pill pill-accent">
+              {t("userManagement.currentRole")}: {t(`role.${current}`, { defaultValue: current })}
+            </span>
+          ) : (
+            <span className="pill pill-neutral">{t("userManagement.noRole")}</span>
+          )
+        }
+      >
+        {!current && <FormNotice tone="info">{t("userManagement.noRoleDesc")}</FormNotice>}
+        <ChoiceCards<RoleCode>
+          label={t("userManagement.changeRole")}
+          value={(current ?? "") as RoleCode}
+          onChange={setRole}
+          options={ROLE_ORDER.map((code) => ({
+            value: code,
+            title: t(`role.${code}`, { defaultValue: ROLE_META[code].label }),
+            description: ROLE_META[code].desc,
+            icon: <Icon name={ROLE_ICON[code]} size={15} />,
+            disabled: patch.isPending,
+          }))}
+        />
+      </FormSection>
+    </>
   );
 }
 
@@ -336,8 +228,8 @@ function LoginTab({ user }: { user: AdUser }) {
   const act = useLoginActivity(user.id);
   const d = act.data;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-      <div style={{ display: "flex", gap: 12 }}>
+    <>
+      <div className="pp-stat-row">
         <Stat value={String(d?.total_logins ?? user.login_count)} label={t("userManagement.totalLogins")} />
         <Stat
           value={
@@ -350,27 +242,31 @@ function LoginTab({ user }: { user: AdUser }) {
           label={t("userManagement.lastLogin")}
         />
       </div>
-      <Section title={t("userManagement.loginDetails")}>
-        <Row
-          label={t("userManagement.authProvider")}
-          value={providerLabel(user.auth_provider)}
-        />
-        <Row label={t("userManagement.loginCount")} value={String(user.login_count)} />
-        <Row
-          label={t("userManagement.accountStatus")}
-          value={
-            user.is_active
-              ? t("userManagement.accessGranted")
-              : t("userManagement.accessDisabled")
-          }
-        />
-      </Section>
-      <Section title={t("userManagement.systemInfo")}>
-        <Row label={t("userManagement.userId")} value={String(user.id)} mono />
-        <Row label={t("userManagement.msObject")} value={user.ms_object_id ?? "—"} mono />
-        <Row label={t("userManagement.createdBy")} value={d?.created_by ?? "AD Sync"} />
-      </Section>
-    </div>
+      <FormSection columns={1} title={t("userManagement.loginDetails")}>
+        <div className="pp-kv">
+          <Row
+            label={t("userManagement.authProvider")}
+            value={providerLabel(user.auth_provider)}
+          />
+          <Row label={t("userManagement.loginCount")} value={String(user.login_count)} />
+          <Row
+            label={t("userManagement.accountStatus")}
+            value={
+              user.is_active
+                ? t("userManagement.accessGranted")
+                : t("userManagement.accessDisabled")
+            }
+          />
+        </div>
+      </FormSection>
+      <FormSection columns={1} title={t("userManagement.systemInfo")}>
+        <div className="pp-kv">
+          <Row label={t("userManagement.userId")} value={String(user.id)} mono />
+          <Row label={t("userManagement.msObject")} value={user.ms_object_id ?? "—"} mono />
+          <Row label={t("userManagement.createdBy")} value={d?.created_by ?? "AD Sync"} />
+        </div>
+      </FormSection>
+    </>
   );
 }
 
@@ -385,26 +281,6 @@ function providerLabel(p: string | null): string {
 // Presentational bits
 // ---------------------------------------------------------------------------
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <div
-        style={{
-          fontSize: 10.5,
-          fontWeight: 700,
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
-          color: "var(--text-tertiary)",
-          marginBottom: 6,
-        }}
-      >
-        {title}
-      </div>
-      <div style={{ display: "flex", flexDirection: "column" }}>{children}</div>
-    </div>
-  );
-}
-
 function Row({
   label,
   value,
@@ -415,89 +291,18 @@ function Row({
   mono?: boolean;
 }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        justifyContent: "space-between",
-        gap: 14,
-        padding: "9px 0",
-        borderBottom: "1px solid var(--border)",
-        fontSize: 13,
-      }}
-    >
-      <span style={{ color: "var(--text-secondary)", flexShrink: 0 }}>{label}</span>
-      <span
-        className={mono ? "mono" : undefined}
-        style={{
-          textAlign: "end",
-          wordBreak: "break-all",
-          fontSize: mono ? 12 : 13,
-        }}
-      >
-        {value}
-      </span>
+    <div className="pp-kv-row">
+      <span className="pp-kv-label">{label}</span>
+      <span className={`pp-kv-value${mono ? " mono text-xs" : ""}`}>{value}</span>
     </div>
   );
 }
 
 function Stat({ value, label }: { value: React.ReactNode; label: string }) {
   return (
-    <div
-      className="card"
-      style={{ flex: 1, padding: "14px 16px", textAlign: "center" }}
-    >
-      <div style={{ fontSize: 20, fontWeight: 700, color: "var(--accent)" }}>{value}</div>
-      <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginTop: 2 }}>
-        {label}
-      </div>
+    <div className="stat">
+      <div className="stat-label">{label}</div>
+      <div className="stat-value">{value}</div>
     </div>
-  );
-}
-
-function Pill({
-  children,
-  tone,
-  icon,
-}: {
-  children: React.ReactNode;
-  tone: "green" | "blue" | "muted";
-  icon: "shield" | "check" | "refresh";
-}) {
-  const styles: Record<string, { bg: string; fg: string; bd: string }> = {
-    green: {
-      bg: "var(--success-soft)",
-      fg: "var(--success-text)",
-      bd: "var(--success-border)",
-    },
-    blue: {
-      bg: "color-mix(in srgb, #2563eb 10%, var(--bg))",
-      fg: "#2563eb",
-      bd: "color-mix(in srgb, #2563eb 30%, var(--border))",
-    },
-    muted: {
-      bg: "var(--bg-sunken)",
-      fg: "var(--text-tertiary)",
-      bd: "var(--border)",
-    },
-  };
-  const s = styles[tone]!;
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 5,
-        fontSize: 11,
-        fontWeight: 600,
-        padding: "3px 9px",
-        borderRadius: 999,
-        background: s.bg,
-        color: s.fg,
-        border: `1px solid ${s.bd}`,
-      }}
-    >
-      <Icon name={icon} size={11} />
-      {children}
-    </span>
   );
 }

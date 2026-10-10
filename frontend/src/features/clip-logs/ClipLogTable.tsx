@@ -6,6 +6,8 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 import type { UseQueryResult } from "@tanstack/react-query";
 
 import { api } from "../../api/client";
@@ -16,6 +18,7 @@ import { dayBound } from "../../util/datetime";
 import { useCameraOptions } from "../person-clips/hooks";
 import type { PersonClipListResponse, PersonClipOut } from "../person-clips/types";
 import { SkeletonRows } from "../../components/Skeleton";
+import { EmptyPanel, FIELD_H, FilterSelect, ResetButton, Toolbar } from "../../components/ListPageUi";
 
 const PAGE_SIZE = 50;
 
@@ -72,6 +75,7 @@ function useClipLog(
 }
 
 export function ClipLogsPage() {
+  const { t } = useTranslation();
   const [mode, setMode] = useState<Mode>("save_clips");
   const [cameraId, setCameraId] = useState<number | null>(null);
   const [start, setStart] = useState<string | null>(null);
@@ -93,231 +97,270 @@ export function ClipLogsPage() {
     setPage(1);
   };
 
+  const resetFilters = () => {
+    setCameraId(null);
+    setStart(null);
+    setEnd(null);
+    setPage(1);
+  };
+  // Addendum — no entries at all for this mode (no filter narrowing):
+  // hide the toolbar; the card shows one EmptyPanel.
+  const noRecords = !list.isLoading && !list.isError && list.data !== undefined && items.length === 0 && !hasFilter;
+
   return (
     <>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Clip Logs</h1>
+          <h1 className="page-title">{t("clipLogs.title", { defaultValue: "Clip Logs" })}</h1>
           <p className="page-sub">
             {isSaveClips
-              ? `${total.toLocaleString()} recorded clip${total === 1 ? "" : "s"}`
-              : `${total.toLocaleString()} presence log${total === 1 ? "" : "s"}`}
+              ? t("clipLogs.subSaved", {
+                  defaultValue: "Every recorded clip from cameras in “Save Clips” mode — {{n}} in total.",
+                  n: total.toLocaleString(),
+                })
+              : t("clipLogs.subLogs", {
+                  defaultValue: "Presence logs from cameras in “Logs Only” mode (no video) — {{n}} in total.",
+                  n: total.toLocaleString(),
+                })}
           </p>
         </div>
-        {/* Segmented split toggle */}
-        <div className="seg" role="tablist" aria-label="Recording mode">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={isSaveClips}
-            className={`seg-btn${isSaveClips ? " active" : ""}`}
-            onClick={() => switchMode("save_clips")}
-          >
-            <Icon name="videocam" size={13} />
-            Saved Clips
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={!isSaveClips}
-            className={`seg-btn${!isSaveClips ? " active" : ""}`}
-            onClick={() => switchMode("logs_only")}
-          >
-            <Icon name="clipboard" size={13} />
-            Logs Only
-          </button>
+        <div className="page-actions">
+          {/* Segmented split toggle */}
+          <div className="seg" role="tablist" aria-label={t("clipLogs.modeAria", { defaultValue: "Recording mode" })}>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={isSaveClips}
+              className={`seg-btn${isSaveClips ? " active" : ""}`}
+              onClick={() => switchMode("save_clips")}
+            >
+              <Icon name="videocam" size={13} />
+              {t("clipLogs.savedClips", { defaultValue: "Saved Clips" })}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={!isSaveClips}
+              className={`seg-btn${!isSaveClips ? " active" : ""}`}
+              onClick={() => switchMode("logs_only")}
+            >
+              <Icon name="clipboard" size={13} />
+              {t("clipLogs.logsOnly", { defaultValue: "Logs Only" })}
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="card">
-        <div className="card-head">
-          <h3 className="card-title">
-            {isSaveClips ? "Saved Clips" : "Presence Logs"}
-          </h3>
-          <div className="flex gap-2" style={{ alignItems: "center", flexWrap: "wrap" }}>
-            <select
-              value={cameraId ?? ""}
-              onChange={(e) => {
-                setCameraId(e.target.value === "" ? null : Number(e.target.value));
-                setPage(1);
-              }}
-              style={selectStyle}
-              aria-label="Filter by camera"
-            >
-              <option value="">All cameras</option>
-              {cameras.data?.items.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-            <DatePicker
-              value={start ?? ""}
-              onChange={(next) => {
-                setStart(next || null);
-                setPage(1);
-              }}
-              max={todayIso()}
-              ariaLabel="From"
-              placeholder="From"
-              triggerStyle={selectStyle}
-            />
-            <DatePicker
-              value={end ?? ""}
-              onChange={(next) => {
-                setEnd(next || null);
-                setPage(1);
-              }}
-              {...(start ? { min: start } : {})}
-              max={todayIso()}
-              ariaLabel="To"
-              placeholder="To"
-              triggerStyle={selectStyle}
-            />
-            {hasFilter && (
-              <button
-                type="button"
-                className="btn btn-sm"
-                onClick={() => {
-                  setCameraId(null);
-                  setStart(null);
-                  setEnd(null);
-                  setPage(1);
-                }}
-              >
-                <Icon name="x" size={11} /> Clear
+      {!noRecords && (
+      <Toolbar>
+        <FilterSelect
+          label={t("clipLogs.camera", { defaultValue: "Camera" })}
+          value={cameraId === null ? "" : String(cameraId)}
+          onChange={(v) => {
+            setCameraId(v === "" ? null : Number(v));
+            setPage(1);
+          }}
+          options={[
+            ["", t("clipLogs.allCameras", { defaultValue: "All cameras" })],
+            ...(cameras.data?.items ?? []).map((c) => [String(c.id), c.name] as [string, string]),
+          ]}
+        />
+        <DatePicker
+          value={start ?? ""}
+          onChange={(next) => {
+            setStart(next || null);
+            setPage(1);
+          }}
+          max={todayIso()}
+          ariaLabel={t("clipLogs.from", { defaultValue: "From" })}
+          placeholder={t("clipLogs.from", { defaultValue: "From" })}
+          triggerStyle={dateTriggerStyle}
+        />
+        <DatePicker
+          value={end ?? ""}
+          onChange={(next) => {
+            setEnd(next || null);
+            setPage(1);
+          }}
+          {...(start ? { min: start } : {})}
+          max={todayIso()}
+          ariaLabel={t("clipLogs.to", { defaultValue: "To" })}
+          placeholder={t("clipLogs.to", { defaultValue: "To" })}
+          triggerStyle={dateTriggerStyle}
+        />
+        <ResetButton
+          active={hasFilter}
+          label={t("clipLogs.reset", { defaultValue: "Reset" })}
+          onClick={resetFilters}
+        />
+      </Toolbar>
+      )}
+
+      <div className="card" style={{ padding: noRecords ? 0 : 12 }}>
+        {list.isError && !list.isLoading ? (
+          <EmptyPanel
+            tone="danger"
+            icon={<Icon name="info" size={28} />}
+            title={t("clipLogs.errorTitle", { defaultValue: "Couldn’t load clip logs" })}
+            body={t("clipLogs.errorBody", { defaultValue: "Something went wrong while fetching this list. Try again in a moment." })}
+            actions={
+              <button type="button" className="btn" onClick={() => void list.refetch()}>
+                <Icon name="refresh" size={12} />
+                {t("clipLogs.retry", { defaultValue: "Retry" })}
               </button>
-            )}
-          </div>
-        </div>
-
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Camera</th>
-              <th style={{ width: 130 }}>Date</th>
-              <th style={{ width: 100 }}>Start</th>
-              <th style={{ width: 100 }}>End</th>
-              <th style={{ width: 90 }}>Duration</th>
-              {!isSaveClips && (
-                <th style={{ width: 80, textAlign: "center" }}>Persons</th>
-              )}
-              {isSaveClips && <th style={{ width: 90, textAlign: "end" }}>Size</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {list.isLoading && (
-              <SkeletonRows cols={colCount} />
-            )}
-            {list.isError && !list.isLoading && (
-              <tr>
-                <td
-                  colSpan={colCount}
-                  className="text-sm"
-                  style={{ padding: 16, color: "var(--danger-text)" }}
-                >
-                  Failed to load.
-                </td>
-              </tr>
-            )}
-            {!list.isLoading && !list.isError && items.length === 0 && (
-              <tr>
-                <td colSpan={colCount} style={{ padding: "32px 16px", textAlign: "center" }}>
-                  <div style={{ opacity: 0.4, marginBottom: 6 }}>
-                    <Icon name={isSaveClips ? "videocam" : "clipboard"} size={26} />
-                  </div>
-                  <div className="text-sm text-dim">
-                    {isSaveClips ? "No saved clips yet." : "No presence logs yet."}
-                  </div>
-                  <div className="text-xs text-dim" style={{ marginTop: 3 }}>
-                    {isSaveClips
-                      ? "Cameras set to “Save Clips” mode list recorded clips here."
-                      : "Cameras set to “Logs Only” mode list presence logs here."}
-                  </div>
-                </td>
-              </tr>
-            )}
-            {items.map((clip) => {
-              const s = new Date(clip.clip_start);
-              const e = new Date(clip.clip_end);
-              const dateStr = s.toLocaleDateString(undefined, {
-                month: "short",
-                day: "numeric",
-                year: "numeric",
-              });
-              const startStr = s.toLocaleTimeString(undefined, {
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit",
-              });
-              const endStr = e.toLocaleTimeString(undefined, {
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit",
-              });
-              const dur = clip.duration_seconds;
-              const durStr =
-                dur > 0 ? `${Math.floor(dur / 60)}m ${Math.round(dur % 60)}s` : "—";
-              const pc = clip.person_count ?? 0;
-              return (
-                <tr key={clip.id}>
-                  <td className="text-sm" style={{ fontWeight: 500 }}>
-                    {clip.camera_name}
-                  </td>
-                  <td className="text-sm text-dim" style={{ whiteSpace: "nowrap" }}>
-                    {dateStr}
-                  </td>
-                  <td className="mono text-xs" style={{ whiteSpace: "nowrap" }}>
-                    {startStr}
-                  </td>
-                  <td className="mono text-xs" style={{ whiteSpace: "nowrap" }}>
-                    {endStr}
-                  </td>
-                  <td className="mono text-xs">{durStr}</td>
-                  {!isSaveClips && (
-                    <td style={{ textAlign: "center" }}>
-                      <span
-                        className={pc >= 2 ? "pill pill-warning" : "pill pill-neutral"}
-                        style={{ fontVariantNumeric: "tabular-nums", opacity: pc >= 1 ? 1 : 0.45 }}
-                      >
-                        {pc}
-                      </span>
-                    </td>
-                  )}
-                  {isSaveClips && (
-                    <td
-                      className="mono text-xs text-dim"
-                      style={{ whiteSpace: "nowrap", textAlign: "end" }}
-                    >
-                      {clip.filesize_bytes > 0 ? fmtFileSize(clip.filesize_bytes) : "—"}
-                    </td>
-                  )}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-
-        {total > 0 && (
-          <Pagination
-            page={page}
-            totalPages={totalPages}
-            onPageChange={setPage}
-            summary={`Page ${page} of ${totalPages} · ${total.toLocaleString()} rows`}
+            }
           />
+        ) : !list.isLoading && items.length === 0 ? (
+          hasFilter ? (
+            <EmptyPanel
+              icon={<Icon name="filter" size={28} />}
+              title={t("clipLogs.emptyFilteredTitle", { defaultValue: "No entries match these filters" })}
+              body={t("clipLogs.emptyFilteredBody", { defaultValue: "Try another camera or widen the date range." })}
+              actions={
+                <button type="button" className="btn" onClick={resetFilters}>
+                  <Icon name="refresh" size={12} />
+                  {t("clipLogs.clearFilters", { defaultValue: "Clear filters" })}
+                </button>
+              }
+            />
+          ) : (
+            <EmptyPanel
+              tone="accent"
+              icon={<Icon name={isSaveClips ? "videocam" : "clipboard"} size={28} />}
+              title={
+                isSaveClips
+                  ? t("clipLogs.emptySavedTitle", { defaultValue: "No saved clips yet" })
+                  : t("clipLogs.emptyLogsTitle", { defaultValue: "No presence logs yet" })
+              }
+              body={
+                isSaveClips
+                  ? t("clipLogs.emptySavedBody", { defaultValue: "Cameras set to “Save Clips” mode list their recorded clips here." })
+                  : t("clipLogs.emptyLogsBody", { defaultValue: "Cameras set to “Logs Only” mode list their presence logs here." })
+              }
+              actions={
+                <Link className="btn btn-primary" to="/cameras">
+                  <Icon name="camera" size={12} />
+                  {t("clipLogs.goToCameras", { defaultValue: "Go to cameras" })}
+                </Link>
+              }
+            />
+          )
+        ) : (
+          <>
+            <div style={{ overflowX: "auto" }}>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>{t("clipLogs.colCamera", { defaultValue: "Camera" })}</th>
+                    <th style={{ width: 130 }}>{t("clipLogs.colDate", { defaultValue: "Date" })}</th>
+                    <th style={{ width: 110 }}>{t("clipLogs.colStart", { defaultValue: "Start" })}</th>
+                    <th style={{ width: 110 }}>{t("clipLogs.colEnd", { defaultValue: "End" })}</th>
+                    <th style={{ width: 100 }}>{t("clipLogs.colDuration", { defaultValue: "Duration" })}</th>
+                    {!isSaveClips && (
+                      <th style={{ width: 90, textAlign: "center" }}>{t("clipLogs.colPersons", { defaultValue: "Persons" })}</th>
+                    )}
+                    {isSaveClips && <th style={{ width: 90, textAlign: "end" }}>{t("clipLogs.colSize", { defaultValue: "Size" })}</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {list.isLoading && <SkeletonRows cols={colCount} />}
+                  {items.map((clip) => {
+                    const s = new Date(clip.clip_start);
+                    const e = new Date(clip.clip_end);
+                    const dateStr = s.toLocaleDateString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    });
+                    const startStr = s.toLocaleTimeString(undefined, {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      second: "2-digit",
+                    });
+                    const endStr = e.toLocaleTimeString(undefined, {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      second: "2-digit",
+                    });
+                    const dur = clip.duration_seconds;
+                    const durStr =
+                      dur > 0 ? `${Math.floor(dur / 60)}m ${Math.round(dur % 60)}s` : "—";
+                    const pc = clip.person_count ?? 0;
+                    return (
+                      <tr key={clip.id}>
+                        <td className="text-sm" style={{ fontWeight: 500, whiteSpace: "nowrap" }}>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                            <span aria-hidden style={{ display: "inline-flex", color: "var(--text-tertiary)" }}>
+                              <Icon name={isSaveClips ? "videocam" : "camera"} size={13} />
+                            </span>
+                            {clip.camera_name}
+                          </span>
+                        </td>
+                        <td className="text-sm text-dim" style={{ whiteSpace: "nowrap" }}>
+                          {dateStr}
+                        </td>
+                        <td className="mono text-xs" style={{ whiteSpace: "nowrap" }}>
+                          {startStr}
+                        </td>
+                        <td className="mono text-xs" style={{ whiteSpace: "nowrap" }}>
+                          {endStr}
+                        </td>
+                        <td className="mono text-xs" style={{ whiteSpace: "nowrap" }}>{durStr}</td>
+                        {!isSaveClips && (
+                          <td style={{ textAlign: "center" }}>
+                            <SoftCount n={pc} />
+                          </td>
+                        )}
+                        {isSaveClips && (
+                          <td
+                            className="mono text-xs text-dim"
+                            style={{ whiteSpace: "nowrap", textAlign: "end" }}
+                          >
+                            {clip.filesize_bytes > 0 ? fmtFileSize(clip.filesize_bytes) : "—"}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {total > 0 && (
+              <Pagination
+                page={page}
+                totalPages={totalPages}
+                onPageChange={setPage}
+                summary={t("clipLogs.pageSummary", {
+                  defaultValue: "Page {{page}} of {{pages}} · {{rows}} rows",
+                  page,
+                  pages: totalPages,
+                  rows: total.toLocaleString(),
+                })}
+              />
+            )}
+          </>
         )}
       </div>
     </>
   );
 }
 
-const selectStyle = {
-  padding: "6px 10px",
-  fontSize: 12.5,
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius-sm)",
-  background: "var(--bg-elev)",
-  color: "var(--text)",
-  fontFamily: "var(--font-sans)",
-  outline: "none",
+/** Soft person-count pill: neutral for 0–1, amber when 2+ people share a log. */
+function SoftCount({ n }: { n: number }) {
+  const multi = n >= 2;
+  return (
+    <span className={`pill mono ${multi ? "pill-warning" : "pill-neutral"}`} style={{ opacity: n >= 1 ? 1 : 0.55 }}>
+      <span aria-hidden className="pill-dot" />
+      {n}
+    </span>
+  );
+}
+
+const dateTriggerStyle = {
+  height: FIELD_H,
+  minWidth: 160,
+  padding: "0 12px",
+  fontSize: 13,
+  borderRadius: 10,
 } as const;

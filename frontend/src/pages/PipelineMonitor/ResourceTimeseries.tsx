@@ -17,6 +17,7 @@ import { useTranslation } from "react-i18next";
 
 import { ApiError, api } from "../../api/client";
 import { SkeletonChart } from "../../components/Skeleton";
+import { FilterSelect } from "../../components/ListPageUi";
 
 type RangeKey = "15m" | "1h" | "6h" | "24h";
 type MetricKey = "cpu" | "memory" | "io_speed" | "swap";
@@ -372,7 +373,7 @@ export function ResourceTimeseries({ isAdmin }: { isAdmin: boolean }) {
         <div
           role="tablist"
           aria-label={t("resources.chart.tablistAria")}
-          style={{ display: "flex", gap: 4 }}
+          className="seg"
         >
           {metricOptions.map((opt) => {
             const selected = metric === opt.key;
@@ -383,20 +384,7 @@ export function ResourceTimeseries({ isAdmin }: { isAdmin: boolean }) {
                 role="tab"
                 aria-selected={selected}
                 onClick={() => setMetric(opt.key)}
-                style={{
-                  padding: "6px 14px",
-                  fontSize: 13,
-                  fontWeight: selected ? 600 : 500,
-                  border: "1px solid var(--border, #e5e7eb)",
-                  borderRadius: 6,
-                  cursor: "pointer",
-                  background: selected
-                    ? "var(--accent, #0ea5e9)"
-                    : "transparent",
-                  color: selected
-                    ? "var(--accent-fg, #ffffff)"
-                    : "var(--text-secondary, #374151)",
-                }}
+                className={`seg-btn${selected ? " active" : ""}`}
               >
                 {opt.label}
               </button>
@@ -404,49 +392,19 @@ export function ResourceTimeseries({ isAdmin }: { isAdmin: boolean }) {
           })}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <label
-            htmlFor="resources-range"
-            className="text-dim"
-            style={{ fontSize: 12 }}
-          >
-            {t("resources.chart.rangeLabel")}
-          </label>
-          <select
-            id="resources-range"
+          <FilterSelect
+            label={t("resources.chart.rangeLabel")}
             value={range}
-            onChange={(e) => setRange(e.target.value as RangeKey)}
-            style={{
-              padding: "5px 8px",
-              fontSize: 13,
-              border: "1px solid var(--border, #e5e7eb)",
-              borderRadius: 6,
-              background: "var(--bg, #ffffff)",
-            }}
-          >
-            {rangeOptions.map((opt) => (
-              <option key={opt.key} value={opt.key}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => setRange(v as RangeKey)}
+            options={rangeOptions.map((opt) => [opt.key, opt.label] as [string, string])}
+          />
           <button
             type="button"
             onClick={() => {
               if (q.data) exportCsv(series, q.data.points, metric, range);
             }}
             disabled={!q.data || q.data.points.length === 0}
-            style={{
-              padding: "5px 12px",
-              fontSize: 12,
-              fontWeight: 500,
-              border: "1px solid var(--border, #e5e7eb)",
-              borderRadius: 6,
-              cursor: "pointer",
-              background: "transparent",
-              color: "var(--text-secondary, #374151)",
-              opacity:
-                !q.data || q.data.points.length === 0 ? 0.5 : 1,
-            }}
+            className="btn"
           >
             {t("resources.chart.export")}
           </button>
@@ -478,7 +436,7 @@ export function ResourceTimeseries({ isAdmin }: { isAdmin: boolean }) {
                     y1={tk.y}
                     x2={geom.width - CHART_PADDING.right}
                     y2={tk.y}
-                    stroke="var(--border-soft, #f3f4f6)"
+                    stroke="var(--border)"
                     strokeWidth={1}
                   />
                   <text
@@ -486,7 +444,7 @@ export function ResourceTimeseries({ isAdmin }: { isAdmin: boolean }) {
                     y={tk.y + 4}
                     fontSize={10}
                     textAnchor="end"
-                    fill="var(--text-secondary, #9ca3af)"
+                    fill="var(--text-secondary)"
                   >
                     {tk.label}
                   </text>
@@ -501,7 +459,7 @@ export function ResourceTimeseries({ isAdmin }: { isAdmin: boolean }) {
                   y={CHART_HEIGHT - CHART_PADDING.bottom + 16}
                   fontSize={10}
                   textAnchor="middle"
-                  fill="var(--text-secondary, #9ca3af)"
+                  fill="var(--text-secondary)"
                 >
                   {tk.label}
                 </text>
@@ -512,7 +470,7 @@ export function ResourceTimeseries({ isAdmin }: { isAdmin: boolean }) {
                 <path
                   d={geom.pathD}
                   fill="none"
-                  stroke="var(--accent, #0ea5e9)"
+                  stroke="var(--accent)"
                   strokeWidth={2}
                   strokeLinejoin="round"
                   strokeLinecap="round"
@@ -527,7 +485,7 @@ export function ResourceTimeseries({ isAdmin }: { isAdmin: boolean }) {
                     y1={CHART_PADDING.top}
                     x2={geom.pointPositions[hover.index]!.x}
                     y2={CHART_HEIGHT - CHART_PADDING.bottom}
-                    stroke="var(--text-secondary, #9ca3af)"
+                    stroke="var(--text-secondary)"
                     strokeDasharray="3 3"
                     strokeWidth={1}
                   />
@@ -535,7 +493,7 @@ export function ResourceTimeseries({ isAdmin }: { isAdmin: boolean }) {
                     cx={geom.pointPositions[hover.index]!.x}
                     cy={geom.pointPositions[hover.index]!.y}
                     r={4}
-                    fill="var(--accent, #0ea5e9)"
+                    fill="var(--accent)"
                     stroke="white"
                     strokeWidth={2}
                   />
@@ -557,8 +515,8 @@ export function ResourceTimeseries({ isAdmin }: { isAdmin: boolean }) {
                     8,
                     geom.pointPositions[hover.index]!.y - 50,
                   ),
-                  background: "var(--bg, #ffffff)",
-                  border: "1px solid var(--border, #e5e7eb)",
+                  background: "var(--bg)",
+                  border: "1px solid var(--border)",
                   borderRadius: 6,
                   padding: "6px 10px",
                   fontSize: 11,
@@ -595,7 +553,7 @@ export function ResourceTimeseries({ isAdmin }: { isAdmin: boolean }) {
           justifyContent: "center",
           marginTop: 8,
           fontSize: 12,
-          color: "var(--text-secondary, #374151)",
+          color: "var(--text-secondary)",
         }}
       >
         <span
@@ -603,7 +561,7 @@ export function ResourceTimeseries({ isAdmin }: { isAdmin: boolean }) {
             display: "inline-block",
             width: 12,
             height: 3,
-            background: "var(--accent, #0ea5e9)",
+            background: "var(--accent)",
           }}
           aria-hidden="true"
         />

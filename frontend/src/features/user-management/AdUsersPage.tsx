@@ -1,7 +1,7 @@
 // Settings → Users → AD Users tab. The directory synced from Microsoft
 // Entra. Sync button + filter/search + per-user access toggle + role
-// management via the details drawer. The page chrome (settings tabs,
-// title, sub-tab switcher) lives in UsersPage — this is just the view.
+// management via the details drawer. Renders the full page including
+// the page header (its actions need this component's state).
 
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -13,10 +13,21 @@ import { EmployeeDrawer } from "../employees/EmployeeDrawer";
 import { GroupRoleMappingModal } from "./GroupRoleMappingModal";
 import { SyncConfirmModal } from "./SyncConfirmModal";
 import { UserDetailsDrawer } from "./UserDetailsDrawer";
-import { AccessToggle, RoleBadges, avatarInitials, avatarColor } from "./shared";
+import { AccessToggle, ROLE_ORDER, RoleBadges, avatarInitials, avatarColor } from "./shared";
 import { useAdUsers, usePatchUser, useSyncUsers } from "./hooks";
 import type { AdUser } from "./types";
-import { SkeletonTable } from "../../components/Skeleton";
+import { SkeletonCards, SkeletonRows } from "../../components/Skeleton";
+import {
+  EmptyPanel,
+  FilterSelect,
+  ResetButton,
+  SearchField,
+  StatCard,
+  StatGrid,
+  Toolbar,
+  pct,
+} from "../../components/ListPageUi";
+import { Banner, DotPill, LoadErrorPanel, PEOPLE_ICON } from "../employees/peopleUi";
 
 type Filter = "all" | "enabled" | "disabled";
 
@@ -28,6 +39,7 @@ export function AdUsersView() {
 
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
+  const [roleF, setRoleF] = useState("");
   const [selected, setSelected] = useState<number | null>(null);
   // When a user has a linked employee record, clicking the row opens the
   // employee edit drawer instead of the user-details drawer.
@@ -43,6 +55,8 @@ export function AdUsersView() {
     return items.filter((u) => {
       if (filter === "enabled" && !u.is_active) return false;
       if (filter === "disabled" && u.is_active) return false;
+      if (roleF === "__none" && u.role_codes.length > 0) return false;
+      if (roleF && roleF !== "__none" && !u.role_codes.includes(roleF)) return false;
       if (!needle) return true;
       return (
         u.full_name.toLowerCase().includes(needle) ||
@@ -50,7 +64,15 @@ export function AdUsersView() {
         (u.department ?? "").toLowerCase().includes(needle)
       );
     });
-  }, [items, q, filter]);
+  }, [items, q, filter, roleF]);
+
+  const noRoleCount = items.filter((u) => u.role_codes.length === 0).length;
+  const filtersActive = q.trim() !== "" || filter !== "all" || roleF !== "";
+  const resetFilters = () => {
+    setQ("");
+    setFilter("all");
+    setRoleF("");
+  };
 
   const onSync = async (defaultRole: string | null, createEmployees: boolean) => {
     setError(null);
@@ -100,209 +122,239 @@ export function AdUsersView() {
 
   const selectedUser = items.find((u) => u.id === selected) ?? null;
 
+  // Five-state rendering: loading / error / nothing synced yet / filters
+  // match nothing / data. Stats + toolbar only make sense once there is
+  // at least one synced user.
+  const noRecords = !list.isLoading && !list.error && items.length === 0;
+  const showStats = !list.error && !noRecords;
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {toast && !error && (
-        <div
-          role="status"
-          style={{
-            background: "color-mix(in srgb, #0a8a52 8%, var(--bg))",
-            border: "1px solid var(--success-border)",
-            padding: "10px 14px",
-            borderRadius: 10,
-            fontSize: 13,
-            display: "flex",
-            gap: 8,
-            alignItems: "center",
-            color: "var(--success-text)",
-            fontWeight: 500,
-          }}
-        >
-          <Icon name="check" size={14} />
-          {toast}
+    <div>
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">{t("userManagement.title")}</h1>
+          <p className="page-sub">{t("userManagement.subtitle")}</p>
         </div>
-      )}
-      {error && (
-        <div
-          role="alert"
-          style={{
-            background: "var(--danger-soft)",
-            color: "var(--danger-text)",
-            border: "1px solid var(--danger-border)",
-            padding: "10px 14px",
-            borderRadius: 10,
-            fontSize: 13,
-          }}
-        >
-          {error}
-        </div>
-      )}
-
-      {/* Toolbar */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          flexWrap: "wrap",
-        }}
-      >
-        <div style={{ position: "relative", flex: "1 1 260px", minWidth: 220 }}>
-          <span
-            style={{
-              position: "absolute",
-              insetInlineStart: 10,
-              top: "50%",
-              transform: "translateY(-50%)",
-              color: "var(--text-tertiary)",
-              display: "flex",
-            }}
-          >
-            <Icon name="search" size={14} />
-          </span>
-          <input
-            className="input"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder={t("userManagement.searchPlaceholder")}
-            style={{ paddingInlineStart: 30 }}
-          />
-        </div>
-
-        <div className="seg" role="group" aria-label={t("userManagement.filter")}>
-          {(["all", "enabled", "disabled"] as const).map((f) => (
-            <button
-              key={f}
-              type="button"
-              className={`seg-btn${filter === f ? " active" : ""}`}
-              onClick={() => setFilter(f)}
-              aria-pressed={filter === f}
-            >
-              {t(`userManagement.filter_${f}`)}
-            </button>
-          ))}
-        </div>
-
-        <div style={{ fontSize: 12.5, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
-          <strong>{list.data?.total ?? 0}</strong> {t("userManagement.total")} ·{" "}
-          <span style={{ color: "var(--success-text)" }}>{list.data?.enabled ?? 0}</span>{" "}
-          {t("userManagement.enabled")} ·{" "}
-          <span style={{ color: "var(--text-tertiary)" }}>{list.data?.disabled ?? 0}</span>{" "}
-          {t("userManagement.disabled")}
-        </div>
-
-        <div style={{ marginInlineStart: "auto", display: "flex", gap: 8 }}>
+        <div className="page-actions">
           <button
             type="button"
-            className="btn btn-sm"
+            className="btn"
             onClick={() => setMappingOpen(true)}
           >
-            <Icon name="settings" size={13} />
+            <Icon name="settings" size={12} />
             {t("userManagement.configureRoles")}
           </button>
           <button
             type="button"
-            className="btn btn-primary btn-sm"
+            className="btn btn-primary"
             onClick={() => {
               setError(null);
               setSyncOpen(true);
             }}
             disabled={sync.isPending}
           >
-            <Icon name="refresh" size={13} />
+            <Icon name="refresh" size={12} />
             {sync.isPending ? t("userManagement.syncing") : t("userManagement.sync")}
           </button>
         </div>
       </div>
 
+      {toast && !error && (
+        <Banner tone="success" role="status" title={toast} />
+      )}
+      {error && <Banner tone="danger" role="alert" title={error} />}
+
+      {list.isLoading ? (
+        <SkeletonCards count={4} minWidth={220} />
+      ) : showStats ? (
+        <StatGrid>
+          <StatCard
+            tone="info"
+            icon={PEOPLE_ICON.people}
+            label={t("userManagement.stats.total", { defaultValue: "All users" })}
+            value={list.data?.total ?? 0}
+            sub={t("userManagement.stats.totalSub", { defaultValue: "From Microsoft Entra" })}
+            active={filter === "all"}
+            onClick={() => setFilter("all")}
+          />
+          <StatCard
+            tone="success"
+            icon={PEOPLE_ICON.key}
+            label={t("userManagement.stats.enabled", { defaultValue: "Access enabled" })}
+            value={list.data?.enabled ?? 0}
+            sub={t("userManagement.stats.pctSub", {
+              defaultValue: "{{pct}}% can sign in",
+              pct: pct(list.data?.enabled ?? 0, list.data?.total ?? 0),
+            })}
+            active={filter === "enabled"}
+            onClick={() => setFilter("enabled")}
+          />
+          <StatCard
+            tone="neutral"
+            icon={PEOPLE_ICON.x}
+            label={t("userManagement.stats.disabled", { defaultValue: "Access disabled" })}
+            value={list.data?.disabled ?? 0}
+            sub={t("userManagement.stats.disabledSub", { defaultValue: "Can’t sign in" })}
+            active={filter === "disabled"}
+            onClick={() => setFilter("disabled")}
+          />
+          <StatCard
+            tone="warning"
+            icon={PEOPLE_ICON.star}
+            label={t("userManagement.stats.noRole", { defaultValue: "No role assigned" })}
+            value={noRoleCount}
+            sub={t("userManagement.stats.noRoleSub", { defaultValue: "Assign one in the user drawer" })}
+            active={roleF === "__none"}
+            onClick={() => setRoleF(roleF === "__none" ? "" : "__none")}
+          />
+        </StatGrid>
+      ) : null}
+
+      {showStats && !list.isLoading && (
+      <Toolbar>
+        <SearchField
+          value={q}
+          onChange={setQ}
+          placeholder={t("userManagement.searchPlaceholder")}
+          clearLabel={t("userManagement.clearSearch", { defaultValue: "Clear search" })}
+        />
+        <FilterSelect
+          label={t("userManagement.colAccess")}
+          value={filter === "all" ? "" : filter}
+          onChange={(v) => setFilter(v === "" ? "all" : (v as Filter))}
+          options={[
+            ["", t("userManagement.filter_all")],
+            ["enabled", t("userManagement.filter_enabled")],
+            ["disabled", t("userManagement.filter_disabled")],
+          ]}
+        />
+        <FilterSelect
+          label={t("userManagement.colRole")}
+          value={roleF}
+          onChange={setRoleF}
+          options={[
+            ["", t("userManagement.allRoles", { defaultValue: "All roles" })],
+            ...ROLE_ORDER.map((r) => [r, t(`role.${r}`, { defaultValue: r })] as [string, string]),
+            ["__none", t("userManagement.noRole")],
+          ]}
+        />
+        <span className="pp-count">
+          {filtered.length} / {items.length}
+        </span>
+        <ResetButton
+          active={filtersActive}
+          label={t("userManagement.reset", { defaultValue: "Reset" })}
+          onClick={resetFilters}
+        />
+      </Toolbar>
+      )}
+
       {/* Table */}
-      <div className="card" style={{ overflow: "hidden" }}>
-        {list.isLoading ? (
-          <SkeletonTable rows={6} cols={6} />
-        ) : list.error ? (
-          <div style={{ padding: 22, color: "var(--danger-text)", fontSize: 13 }}>
-            {t("userManagement.loadFailed")}
-          </div>
-        ) : filtered.length === 0 ? (
-          <div
-            style={{
-              padding: "36px 20px",
-              textAlign: "center",
-              color: "var(--text-secondary)",
-              fontSize: 13,
-            }}
-          >
-            {items.length === 0
-              ? t("userManagement.empty")
-              : t("userManagement.noMatch")}
-          </div>
+      <div className="card">
+        {list.error ? (
+          <LoadErrorPanel
+            title={t("userManagement.loadFailed")}
+            onRetry={() => void list.refetch()}
+          />
+        ) : !list.isLoading && filtered.length === 0 ? (
+          items.length === 0 ? (
+            <EmptyPanel
+              tone="accent"
+              icon={<Icon name="users" size={30} />}
+              title={t("userManagement.emptyTitle", { defaultValue: "No users synced yet" })}
+              body={t("userManagement.empty")}
+              actions={
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => {
+                    setError(null);
+                    setSyncOpen(true);
+                  }}
+                  disabled={sync.isPending}
+                >
+                  <Icon name="refresh" size={12} />
+                  {t("userManagement.sync")}
+                </button>
+              }
+            />
+          ) : (
+            <EmptyPanel
+              icon={<Icon name={q.trim() ? "search" : "filter"} size={28} />}
+              title={t("userManagement.noMatch")}
+              body={t("userManagement.noMatchBody", {
+                defaultValue: "Try a different name or email, or clear the filters to see everyone.",
+              })}
+              actions={
+                <button type="button" className="btn" onClick={resetFilters}>
+                  <Icon name="refresh" size={12} />
+                  {t("userManagement.clearFilters", { defaultValue: "Clear filters" })}
+                </button>
+              }
+            />
+          )
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <table className="table">
             <thead>
-              <tr style={{ textAlign: "start", color: "var(--text-tertiary)" }}>
-                <Th>{t("userManagement.colUser")}</Th>
-                <Th>{t("userManagement.colDepartment")}</Th>
-                <Th>{t("userManagement.colRole")}</Th>
-                <Th>{t("userManagement.colAccess")}</Th>
-                <Th align="end">{t("userManagement.colLastLogin")}</Th>
+              <tr>
+                <th>{t("userManagement.colUser")}</th>
+                <th>{t("userManagement.colDepartment")}</th>
+                <th>{t("userManagement.colRole")}</th>
+                <th>{t("userManagement.colAccess")}</th>
+                <th className="pp-th-end">{t("userManagement.colLastLogin")}</th>
               </tr>
             </thead>
             <tbody>
+              {list.isLoading && <SkeletonRows cols={5} />}
               {filtered.map((u) => (
                 <tr
                   key={u.id}
+                  className="pp-row-link"
                   onClick={() =>
                     u.employee_id != null
                       ? setSelectedEmployeeId(u.employee_id)
                       : setSelected(u.id)
                   }
-                  style={{
-                    borderTop: "1px solid var(--border)",
-                    cursor: "pointer",
-                  }}
                 >
-                  <td style={tdStyle}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
+                  <td>
+                    <div className="pp-person">
                       <Avatar name={u.full_name} />
                       <div style={{ minWidth: 0 }}>
-                        <div style={{ fontWeight: 600 }}>{u.full_name}</div>
-                        <div
-                          style={{
-                            color: "var(--text-secondary)",
-                            fontSize: 12,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                            maxWidth: 320,
-                          }}
-                        >
+                        <div className="pp-person-name">{u.full_name}</div>
+                        <span className="pp-truncate text-xs text-dim" title={u.email} style={{ maxWidth: 320 }}>
                           {u.email}
-                        </div>
+                        </span>
                       </div>
                     </div>
                   </td>
-                  <td style={tdStyle}>
+                  <td>
                     {u.department ? (
-                      <span className="pill pill-neutral">{u.department}</span>
+                      <span className="pill pill-neutral pp-nowrap">{u.department}</span>
                     ) : (
-                      <span style={{ color: "var(--text-tertiary)" }}>—</span>
+                      <span className="text-xs text-dim">—</span>
                     )}
                   </td>
-                  <td style={tdStyle}>
+                  <td>
                     <RoleBadges codes={u.role_codes} />
                   </td>
-                  <td style={tdStyle} onClick={(e) => e.stopPropagation()}>
-                    <AccessToggle
-                      checked={u.is_active}
-                      onChange={() => void onToggleAccess(u)}
-                      disabled={patch.isPending}
-                    />
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <span className="pp-access-row">
+                      <AccessToggle
+                        checked={u.is_active}
+                        onChange={() => void onToggleAccess(u)}
+                        disabled={patch.isPending}
+                        label={t("userManagement.colAccess")}
+                      />
+                      <DotPill tone={u.is_active ? "success" : "neutral"}>
+                        {u.is_active ? t("userManagement.filter_enabled") : t("userManagement.filter_disabled")}
+                      </DotPill>
+                    </span>
                   </td>
-                  <td style={{ ...tdStyle, textAlign: "end", color: "var(--text-secondary)" }}>
+                  <td className="pp-th-end pp-nowrap text-dim">
                     {u.last_login_at ? (
                       <RelativeTime iso={u.last_login_at} />
                     ) : (
-                      <span style={{ color: "var(--text-tertiary)" }}>
+                      <span className="text-xs text-dim">
                         {t("userManagement.never")}
                       </span>
                     )}
@@ -343,43 +395,9 @@ export function AdUsersView() {
   );
 }
 
-function Th({ children, align }: { children: React.ReactNode; align?: "end" }) {
-  return (
-    <th
-      style={{
-        padding: "10px 14px",
-        fontSize: 10.5,
-        fontWeight: 700,
-        textTransform: "uppercase",
-        letterSpacing: "0.05em",
-        textAlign: align === "end" ? "end" : "start",
-        borderBottom: "1px solid var(--border)",
-      }}
-    >
-      {children}
-    </th>
-  );
-}
-
-const tdStyle: React.CSSProperties = { padding: "11px 14px", verticalAlign: "middle" };
-
 function Avatar({ name }: { name: string }) {
   return (
-    <span
-      style={{
-        width: 34,
-        height: 34,
-        borderRadius: "50%",
-        background: avatarColor(name),
-        color: "#fff",
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontSize: 12,
-        fontWeight: 700,
-        flexShrink: 0,
-      }}
-    >
+    <span className="avatar pp-avatar" aria-hidden style={{ background: avatarColor(name) }}>
       {avatarInitials(name)}
     </span>
   );

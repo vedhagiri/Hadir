@@ -14,6 +14,7 @@ import {
   useBulkDeleteEmployees,
   type BulkDeleteResponse,
 } from "./hooks";
+import { Banner } from "./peopleUi";
 
 const PDPL_PHRASE = "I CONFIRM PDPL DELETION";
 
@@ -56,28 +57,13 @@ export function BulkDeleteModal({
 
   return (
     <ModalShell onClose={onClose}>
-      <div
-        style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 60,
-          display: "grid",
-          placeItems: "center",
-        }}
-      >
-        <div
-          className="card"
-          style={{
-            width: "min(520px, 92vw)",
-            padding: 22,
-            display: "flex",
-            flexDirection: "column",
-            gap: 14,
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <Icon name="trash" size={16} />
-            <h2 style={{ margin: 0, fontSize: 17, fontWeight: 600 }}>
+      <div role="dialog" aria-modal="true" className="modal pp-modal pp-modal-wide">
+        <div className="modal-head pp-modal-head">
+          <span aria-hidden className="pp-modal-icon tone-danger">
+            <Icon name="trash" size={15} />
+          </span>
+          <div className="pp-modal-head-text">
+            <h2 className="modal-title">
               {scope === "all"
                 ? (t("employees.bulkDelete.titleAll") as string)
                 : (t("employees.bulkDelete.titleSelected", {
@@ -85,17 +71,12 @@ export function BulkDeleteModal({
                   }) as string)}
             </h2>
           </div>
+        </div>
 
-          {!result && (
-            <>
-              <p
-                style={{
-                  margin: 0,
-                  color: "var(--text-secondary)",
-                  fontSize: 13,
-                  lineHeight: 1.5,
-                }}
-              >
+        {!result && (
+          <>
+            <div className="modal-body pp-stack" style={{ gap: 14 }}>
+              <p className="text-sm text-dim" style={{ margin: 0, lineHeight: 1.5 }}>
                 {scope === "all"
                   ? (t("employees.bulkDelete.descAll") as string)
                   : (t("employees.bulkDelete.descSelected", {
@@ -103,185 +84,112 @@ export function BulkDeleteModal({
                     }) as string)}
               </p>
 
-              <fieldset
-                style={{
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--radius-sm)",
-                  padding: 12,
-                  margin: 0,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 8,
-                }}
-              >
-                <legend
-                  style={{
-                    fontSize: 11,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.04em",
-                    color: "var(--text-tertiary)",
-                    padding: "0 4px",
-                  }}
-                >
+              <div className="field" role="radiogroup" aria-label={t("employees.bulkDelete.modeLabel") as string}>
+                <span className="field-label">
                   {t("employees.bulkDelete.modeLabel") as string}
-                </legend>
-                <ModeOption
-                  selected={mode === "soft"}
-                  onSelect={() => setMode("soft")}
-                  title={t("employees.bulkDelete.softTitle") as string}
-                  body={t("employees.bulkDelete.softBody") as string}
-                />
-                <ModeOption
-                  selected={mode === "hard"}
-                  onSelect={() => setMode("hard")}
-                  title={t("employees.bulkDelete.hardTitle") as string}
-                  body={t("employees.bulkDelete.hardBody") as string}
-                  danger
-                />
-              </fieldset>
+                </span>
+                <div className="pp-role-list">
+                  <ModeOption
+                    selected={mode === "soft"}
+                    onSelect={() => setMode("soft")}
+                    title={t("employees.bulkDelete.softTitle") as string}
+                    body={t("employees.bulkDelete.softBody") as string}
+                  />
+                  <ModeOption
+                    selected={mode === "hard"}
+                    onSelect={() => setMode("hard")}
+                    title={t("employees.bulkDelete.hardTitle") as string}
+                    body={t("employees.bulkDelete.hardBody") as string}
+                    danger
+                  />
+                </div>
+              </div>
 
               {mode === "hard" && (
-                <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <span
-                    style={{
-                      fontSize: 11,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.04em",
-                      color: "var(--text-tertiary)",
-                    }}
-                  >
+                <div className="field">
+                  <label className="field-label" htmlFor="pp-bulk-phrase">
                     {t("employees.bulkDelete.phraseLabel", {
                       phrase: PDPL_PHRASE,
                     }) as string}
-                  </span>
+                  </label>
                   <input
+                    id="pp-bulk-phrase"
+                    className="input mono"
                     type="text"
                     value={phrase}
                     onChange={(e) => setPhrase(e.target.value)}
                     placeholder={PDPL_PHRASE}
-                    style={{
-                      padding: "8px 10px",
-                      border: "1px solid var(--border)",
-                      borderRadius: "var(--radius-sm)",
-                      fontSize: 13,
-                      fontFamily: "var(--font-mono)",
-                      background: "var(--bg)",
-                      color: "var(--text)",
-                    }}
                     autoFocus
                   />
-                </label>
+                </div>
               )}
 
               {mutation.error && (
-                <div
-                  role="alert"
-                  style={{
-                    background: "var(--danger-soft)",
-                    color: "var(--danger-text)",
-                    padding: "8px 10px",
-                    borderRadius: "var(--radius-sm)",
-                    fontSize: 12.5,
-                  }}
-                >
-                  {bulkDeleteError(mutation.error)}
-                </div>
+                <Banner tone="danger" role="alert" title={bulkDeleteError(mutation.error)} />
               )}
+            </div>
 
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                <button
-                  className="btn"
-                  onClick={onClose}
-                  disabled={mutation.isPending}
-                >
-                  {t("common.cancel") as string}
-                </button>
-                <button
-                  className="btn btn-danger"
-                  onClick={onSubmit}
-                  disabled={submitDisabled}
-                >
-                  <Icon name="trash" size={12} />
-                  {mutation.isPending
-                    ? (t("employees.bulkDelete.deleting") as string)
-                    : (t("employees.bulkDelete.confirm") as string)}
-                </button>
-              </div>
-            </>
-          )}
-
-          {result && (
-            <>
-              <div
-                style={{
-                  background: "var(--success-soft)",
-                  border: "1px solid var(--border)",
-                  padding: "10px 12px",
-                  borderRadius: "var(--radius-sm)",
-                  fontSize: 13,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 4,
-                }}
+            <div className="modal-foot">
+              <button
+                type="button"
+                className="btn"
+                onClick={onClose}
+                disabled={mutation.isPending}
               >
-                <div style={{ fontWeight: 600 }}>
-                  {t("employees.bulkDelete.resultTitle") as string}
-                </div>
-                <div className="text-sm">
-                  {t("employees.bulkDelete.resultCounts", {
-                    deleted: result.deleted,
-                    skipped: result.skipped,
-                    requested: result.requested,
-                  }) as string}
-                </div>
-              </div>
+                {t("common.cancel") as string}
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={onSubmit}
+                disabled={submitDisabled}
+              >
+                <Icon name="trash" size={12} />
+                {mutation.isPending
+                  ? (t("employees.bulkDelete.deleting") as string)
+                  : (t("employees.bulkDelete.confirm") as string)}
+              </button>
+            </div>
+          </>
+        )}
+
+        {result && (
+          <>
+            <div className="modal-body pp-stack" style={{ gap: 14 }}>
+              <Banner tone="success" role="status" title={t("employees.bulkDelete.resultTitle") as string}>
+                {t("employees.bulkDelete.resultCounts", {
+                  deleted: result.deleted,
+                  skipped: result.skipped,
+                  requested: result.requested,
+                }) as string}
+              </Banner>
 
               {result.errors.length > 0 && (
-                <div
-                  style={{
-                    border: "1px solid var(--border)",
-                    borderRadius: "var(--radius-sm)",
-                    overflow: "hidden",
-                  }}
-                >
-                  <div
-                    style={{
-                      padding: "8px 10px",
-                      background: "var(--bg-sunken)",
-                      fontSize: 12,
-                      fontWeight: 600,
-                    }}
-                  >
+                <div className="pp-error-list">
+                  <div className="pp-error-list-head">
                     {t("employees.bulkDelete.errorsHeading", {
                       count: result.errors.length,
                     }) as string}
                   </div>
-                  <div style={{ maxHeight: 180, overflowY: "auto" }}>
+                  <div className="pp-error-list-body">
                     {result.errors.map((e) => (
-                      <div
-                        key={e.row}
-                        style={{
-                          padding: "6px 10px",
-                          fontSize: 12,
-                          borderTop: "1px solid var(--border)",
-                        }}
-                      >
+                      <div key={e.row} className="pp-error-list-row">
                         <span className="mono">#{e.row}</span> · {e.message}
                       </div>
                     ))}
                   </div>
                 </div>
               )}
+            </div>
 
-              <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                <button className="btn btn-primary" onClick={onClose}>
-                  <Icon name="check" size={12} />
-                  {t("common.done") as string}
-                </button>
-              </div>
-            </>
-          )}
-        </div>
+            <div className="modal-foot">
+              <button type="button" className="btn btn-primary" onClick={onClose}>
+                <Icon name="check" size={12} />
+                {t("common.done") as string}
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </ModalShell>
   );
@@ -303,32 +211,16 @@ function ModeOption({
   return (
     <button
       type="button"
+      role="radio"
+      aria-checked={selected}
       onClick={onSelect}
-      style={{
-        textAlign: "start",
-        padding: "10px 12px",
-        border: selected
-          ? `1px solid ${danger ? "var(--danger-text)" : "var(--accent)"}`
-          : "1px solid var(--border)",
-        borderRadius: "var(--radius-sm)",
-        background: selected ? "var(--bg-sunken)" : "transparent",
-        cursor: "pointer",
-        display: "flex",
-        flexDirection: "column",
-        gap: 2,
-        fontFamily: "var(--font-sans)",
-      }}
+      className={`radio-card${selected ? " active" : ""}`}
     >
-      <span
-        style={{
-          fontWeight: 600,
-          fontSize: 13,
-          color: danger && selected ? "var(--danger-text)" : "var(--text)",
-        }}
-      >
-        {title}
-      </span>
-      <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{body}</span>
+      <div>
+        <div className={`pp-mode-title${danger && selected ? " pp-text-danger" : ""}`}>{title}</div>
+        <div className="pp-mode-sub">{body}</div>
+      </div>
+      {selected && <Icon name="check" size={16} />}
     </button>
   );
 }

@@ -2,9 +2,9 @@
 //
 // Three jobs in one page:
 //   1. List existing fields with drag-handle reorder.
-//   2. Inline create form for a new field (text/number/date/select).
-//   3. Per-row edit (rename, toggle required, edit options for select)
-//      and delete-with-confirmation (warns the value cascade).
+//   2. Add-field modal for a new field (text/number/date/select).
+//   3. Per-row edit modal (rename, toggle required, edit options for
+//      select) and delete-with-confirmation (warns the value cascade).
 //
 // Drag and drop uses native HTML5 — no new dependencies. Same approach
 // as the P8 manager-assignments page.
@@ -12,8 +12,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { ModalShell } from "../components/DrawerShell";
-import { SettingsTabs } from "../settings/SettingsTabs";
 import { Icon } from "../shell/Icon";
 import {
   useCreateCustomField,
@@ -29,6 +27,18 @@ import type {
 } from "./types";
 import { CUSTOM_FIELD_TYPES } from "./types";
 import { SkeletonTable } from "../components/Skeleton";
+import { EmptyPanel } from "../components/ListPageUi";
+
+import "./custom-fields.css";
+import { ChoiceCards, Field, FormFooter, FormNotice, FormSection, SwitchField } from "../components/FormKit";
+import {
+  ConfirmModal,
+  LoadErrorPanel,
+  SettingsCard,
+  SettingsFormModal,
+  SettingsPage,
+  SoftPill,
+} from "../settings/settingsUi";
 
 export function CustomFieldsPage() {
   const { t } = useTranslation();
@@ -37,7 +47,8 @@ export function CustomFieldsPage() {
   const reorder = useReorderCustomFields();
 
   const [pendingDelete, setPendingDelete] = useState<CustomField | null>(null);
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editing, setEditing] = useState<CustomField | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
 
   // Drag state — index of the row being dragged over (for the visual cue).
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
@@ -70,88 +81,95 @@ export function CustomFieldsPage() {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <SettingsTabs />
-      <header>
-        <h1
-          style={{
-            fontFamily: "var(--font-display)",
-            fontSize: 28,
-            margin: "0 0 4px 0",
-            fontWeight: 400,
-          }}
-        >
-          {t("customFields.title")}
-        </h1>
-        <p
-          style={{
-            margin: 0,
-            color: "var(--text-secondary)",
-            fontSize: 13,
-          }}
-        >
+    <SettingsPage
+      title={t("customFields.title")}
+      subtitle={
+        <>
           {t("customFields.subtitlePrefix")}{" "}
           <span className="mono">badge_number</span>{" "}
           {t("customFields.subtitleSuffix")}
-        </p>
-      </header>
-
-      <CreateForm
-        onCreate={(input) => create.mutateAsync(input)}
-        creating={create.isPending}
-      />
-
-      {fields.isLoading ? (
-        <SkeletonTable rows={5} cols={5} />
-      ) : fields.error ? (
-        <p style={{ color: "var(--danger-text)" }}>
-          {t("customFields.loadFailed")}
-        </p>
-      ) : orderedFields.length === 0 ? (
-        <div
-          style={{
-            border: "1px dashed var(--border-strong)",
-            borderRadius: "var(--radius)",
-            padding: 24,
-            textAlign: "center",
-            color: "var(--text-secondary)",
-            fontSize: 13,
-          }}
-        >
-          {t("customFields.empty")}
-        </div>
-      ) : (
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 6,
-          }}
-        >
-          {orderedFields.map((field, idx) => (
-            <FieldRow
-              key={field.id}
-              field={field}
-              isEditing={editingId === field.id}
-              onStartEdit={() => setEditingId(field.id)}
-              onCancelEdit={() => setEditingId(null)}
-              onAfterSave={() => setEditingId(null)}
-              onAskDelete={() => setPendingDelete(field)}
-              draggingOver={dragOverIdx === idx}
-              onDragStart={() => setDragSourceIdx(idx)}
-              onDragOver={(e) => {
-                e.preventDefault();
-                setDragOverIdx(idx);
-              }}
-              onDragLeave={() => setDragOverIdx(null)}
-              onDrop={(e) => {
-                e.preventDefault();
-                handleDrop(idx);
-              }}
-            />
-          ))}
-        </div>
+        </>
+      }
+      actions={
+        <button type="button" className="btn btn-primary" onClick={() => setShowCreate(true)}>
+          <Icon name="plus" size={12} />
+          {t("customFields.addField")}
+        </button>
+      }
+    >
+      {showCreate && (
+        <CreateForm
+          onCreate={(input) => create.mutateAsync(input)}
+          creating={create.isPending}
+          onClose={() => setShowCreate(false)}
+        />
       )}
+      {editing && <EditForm field={editing} onClose={() => setEditing(null)} />}
+
+      <SettingsCard
+        icon={<Icon name="clipboard" size={17} />}
+        title={t("settingsUi.customFields.listTitle", { defaultValue: "Fields" })}
+        description={t("settingsUi.customFields.listDesc", {
+          defaultValue: "Drag a field by its handle to change the order it appears in on the employee record.",
+        })}
+        actions={
+          orderedFields.length > 0 ? (
+            <SoftPill tone="neutral" dot={false}>
+              {t("settingsUi.customFields.count", {
+                defaultValue: "{{count}} fields",
+                count: orderedFields.length,
+              })}
+            </SoftPill>
+          ) : undefined
+        }
+        tight
+      >
+        {fields.isLoading ? (
+          <SkeletonTable rows={5} cols={5} />
+        ) : fields.error ? (
+          <LoadErrorPanel
+            title={t("customFields.loadFailed")}
+            onRetry={() => void fields.refetch()}
+          />
+        ) : orderedFields.length === 0 ? (
+          <EmptyPanel
+            tone="accent"
+            icon={<Icon name="clipboard" size={28} />}
+            title={t("settingsUi.customFields.emptyTitle", { defaultValue: "No custom fields yet" })}
+            body={t("settingsUi.customFields.emptyBody", {
+              defaultValue: "Add extra details to every employee record, such as a badge number or blood group.",
+            })}
+            actions={
+              <button type="button" className="btn" onClick={() => setShowCreate(true)}>
+                <Icon name="plus" size={12} />
+                {t("customFields.addField")}
+              </button>
+            }
+          />
+        ) : (
+          <div className="st-list">
+            {orderedFields.map((field, idx) => (
+              <FieldRow
+                key={field.id}
+                field={field}
+                onStartEdit={() => setEditing(field)}
+                onAskDelete={() => setPendingDelete(field)}
+                draggingOver={dragOverIdx === idx}
+                onDragStart={() => setDragSourceIdx(idx)}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragOverIdx(idx);
+                }}
+                onDragLeave={() => setDragOverIdx(null)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  handleDrop(idx);
+                }}
+              />
+            ))}
+          </div>
+        )}
+      </SettingsCard>
 
       {pendingDelete && (
         <DeleteConfirmModal
@@ -159,20 +177,83 @@ export function CustomFieldsPage() {
           onClose={() => setPendingDelete(null)}
         />
       )}
-    </div>
+    </SettingsPage>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Create form
+// Shared helpers
 // ---------------------------------------------------------------------------
+
+function parseOptions(text: string): string[] {
+  return text
+    .split(/[\n,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function OptionsField({
+  id,
+  label,
+  value,
+  onChange,
+  error,
+  placeholder,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  error?: string | null | undefined;
+  placeholder?: string | undefined;
+}) {
+  const { t } = useTranslation();
+  const count = parseOptions(value).length;
+  return (
+    <Field
+      label={label}
+      htmlFor={id}
+      required
+      span={2}
+      error={error}
+      help={t("settingsUi.forms.customFields.optionsHelp", {
+        defaultValue: "{{count}} options — the list employees pick from.",
+        count,
+      })}
+    >
+      <textarea
+        id={id}
+        className="textarea"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        rows={4}
+      />
+    </Field>
+  );
+}
+
+const TYPE_ICON: Record<CustomFieldType, "fileText" | "database" | "calendar" | "menu"> = {
+  text: "fileText",
+  number: "database",
+  date: "calendar",
+  select: "menu",
+};
+
+// ---------------------------------------------------------------------------
+// Create form (modal)
+// ---------------------------------------------------------------------------
+
+type CreateErrors = { name?: string; code?: string; options?: string; form?: string };
 
 function CreateForm({
   onCreate,
   creating,
+  onClose,
 }: {
   onCreate: (input: CustomFieldCreateInput) => Promise<unknown>;
   creating: boolean;
+  onClose: () => void;
 }) {
   const { t } = useTranslation();
   const [name, setName] = useState("");
@@ -180,37 +261,35 @@ function CreateForm({
   const [type, setType] = useState<CustomFieldType>("text");
   const [required, setRequired] = useState(false);
   const [optionsText, setOptionsText] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [errors, setErrors] = useState<CreateErrors>({});
 
-  const reset = () => {
-    setName("");
-    setCode("");
-    setType("text");
-    setRequired(false);
-    setOptionsText("");
-    setError(null);
+  const typeDesc: Record<CustomFieldType, string> = {
+    text: t("settingsUi.forms.customFields.typeTextDesc", { defaultValue: "Free text, e.g. a badge number." }),
+    number: t("settingsUi.forms.customFields.typeNumberDesc", { defaultValue: "Whole or decimal numbers." }),
+    date: t("settingsUi.forms.customFields.typeDateDesc", { defaultValue: "A calendar date." }),
+    select: t("settingsUi.forms.customFields.typeSelectDesc", { defaultValue: "One value from a fixed list." }),
   };
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
+  const submit = async () => {
+    setErrors({});
     const trimmedCode = code.trim();
     if (!name.trim() || !trimmedCode) {
-      setError(t("customFields.errNameCodeRequired"));
+      const msg = t("customFields.errNameCodeRequired");
+      setErrors({
+        ...(!name.trim() ? { name: msg } : {}),
+        ...(!trimmedCode ? { code: msg } : {}),
+      });
       return;
     }
     if (!/^[a-z][a-z0-9_]*$/.test(trimmedCode)) {
-      setError(t("customFields.errCodeFormat"));
+      setErrors({ code: t("customFields.errCodeFormat") });
       return;
     }
     let options: string[] | undefined;
     if (type === "select") {
-      options = optionsText
-        .split(/[\n,]+/)
-        .map((s) => s.trim())
-        .filter(Boolean);
+      options = parseOptions(optionsText);
       if (options.length === 0) {
-        setError(t("customFields.errOptionsRequired"));
+        setErrors({ options: t("customFields.errOptionsRequired") });
         return;
       }
     }
@@ -222,103 +301,97 @@ function CreateForm({
         required,
         ...(options ? { options } : {}),
       });
-      reset();
+      onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("customFields.errSaveGeneric"));
+      setErrors({ form: err instanceof Error ? err.message : t("customFields.errSaveGeneric") });
     }
   };
 
   return (
-    <form
-      onSubmit={submit}
-      style={{
-        background: "var(--bg-sunken)",
-        border: "1px solid var(--border)",
-        borderRadius: "var(--radius)",
-        padding: 12,
-        display: "grid",
-        gridTemplateColumns: "1.4fr 1fr 0.9fr auto auto",
-        gap: 8,
-        alignItems: "end",
-      }}
+    <SettingsFormModal
+      titleId="cf-create-title"
+      size="lg"
+      icon={<Icon name="clipboard" size={18} />}
+      title={t("settingsUi.forms.customFields.addTitle", { defaultValue: "Add custom field" })}
+      subtitle={t("settingsUi.customFields.addDesc", {
+        defaultValue: "The code must be lower-case letters, numbers and underscores. It becomes the Excel column header.",
+      })}
+      onClose={onClose}
+      onSubmit={() => void submit()}
+      footer={
+        <FormFooter
+          onCancel={onClose}
+          submitLabel={t("customFields.addField")}
+          submittingLabel={t("customFields.saving")}
+          submitting={creating}
+          canSubmit={name.trim() !== "" && code.trim() !== ""}
+        />
+      }
     >
-      <Field label={t("customFields.field.name")}>
-        <input
-          className="input"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder={t("customFields.field.namePlaceholder")}
-        />
-      </Field>
-      <Field label={t("customFields.field.code")}>
-        <input
-          className="input mono"
-          value={code}
-          onChange={(e) => setCode(e.target.value.toLowerCase())}
-          placeholder="badge_number"
-        />
-      </Field>
-      <Field label={t("customFields.field.type")}>
-        <select
-          className="input"
+      {errors.form && <FormNotice tone="danger">{errors.form}</FormNotice>}
+      <FormSection
+        title={t("settingsUi.forms.customFields.identitySection", { defaultValue: "Field" })}
+        description={t("settingsUi.forms.customFields.identitySectionDesc", {
+          defaultValue: "The label HR sees and the code used in Excel files.",
+        })}
+      >
+        <Field label={t("customFields.field.name")} htmlFor="cf-new-name" required error={errors.name}>
+          <input
+            id="cf-new-name"
+            className="input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={t("customFields.field.namePlaceholder")}
+          />
+        </Field>
+        <Field label={t("customFields.field.code")} htmlFor="cf-new-code" required error={errors.code}>
+          <input
+            id="cf-new-code"
+            className="input mono"
+            value={code}
+            onChange={(e) => setCode(e.target.value.toLowerCase())}
+            placeholder="badge_number"
+          />
+        </Field>
+      </FormSection>
+      <FormSection
+        title={t("customFields.field.type")}
+        description={t("settingsUi.forms.customFields.typeSectionDesc", {
+          defaultValue: "The type can't be changed after the field is created.",
+        })}
+      >
+        <ChoiceCards<CustomFieldType>
+          label={t("customFields.field.type")}
           value={type}
-          onChange={(e) => setType(e.target.value as CustomFieldType)}
-        >
-          {CUSTOM_FIELD_TYPES.map((opt) => (
-            <option key={opt} value={opt}>
-              {t(`customFields.types.${opt}`)}
-            </option>
-          ))}
-        </select>
-      </Field>
-      <label
-        style={{
-          display: "flex",
-          gap: 6,
-          alignItems: "center",
-          fontSize: 13,
-          paddingBottom: 6,
-        }}
-      >
-        <input
-          type="checkbox"
-          checked={required}
-          onChange={(e) => setRequired(e.target.checked)}
+          onChange={setType}
+          options={CUSTOM_FIELD_TYPES.map((opt) => ({
+            value: opt,
+            title: <span className="cf-cap">{t(`customFields.types.${opt}`)}</span>,
+            description: typeDesc[opt],
+            icon: <Icon name={TYPE_ICON[opt]} size={15} />,
+          }))}
         />
-        {t("customFields.required")}
-      </label>
-      <button
-        type="submit"
-        className="btn btn-primary btn-sm"
-        disabled={creating}
-      >
-        {creating ? t("customFields.saving") : t("customFields.addField")}
-      </button>
-      {type === "select" && (
-        <div style={{ gridColumn: "1 / -1" }}>
-          <Field label={t("customFields.field.options")}>
-            <textarea
-              className="input"
-              value={optionsText}
-              onChange={(e) => setOptionsText(e.target.value)}
-              placeholder={t("customFields.field.optionsPlaceholder")}
-              rows={2}
-            />
-          </Field>
-        </div>
-      )}
-      {error && (
-        <div
-          style={{
-            gridColumn: "1 / -1",
-            color: "var(--danger-text)",
-            fontSize: 12,
-          }}
-        >
-          {error}
-        </div>
-      )}
-    </form>
+        {type === "select" && (
+          <OptionsField
+            id="cf-new-options"
+            label={t("customFields.field.options")}
+            value={optionsText}
+            onChange={setOptionsText}
+            error={errors.options}
+            placeholder={t("customFields.field.optionsPlaceholder")}
+          />
+        )}
+        <SwitchField
+          id="cf-new-required"
+          label={t("customFields.required")}
+          description={t("settingsUi.forms.customFields.requiredDesc", {
+            defaultValue: "HR must fill this in when saving an employee.",
+          })}
+          checked={required}
+          onChange={setRequired}
+        />
+      </FormSection>
+    </SettingsFormModal>
   );
 }
 
@@ -328,10 +401,7 @@ function CreateForm({
 
 interface FieldRowProps {
   field: CustomField;
-  isEditing: boolean;
   onStartEdit: () => void;
-  onCancelEdit: () => void;
-  onAfterSave: () => void;
   onAskDelete: () => void;
   draggingOver: boolean;
   onDragStart: () => void;
@@ -342,10 +412,7 @@ interface FieldRowProps {
 
 function FieldRow({
   field,
-  isEditing,
   onStartEdit,
-  onCancelEdit,
-  onAfterSave,
   onAskDelete,
   draggingOver,
   onDragStart,
@@ -356,83 +423,55 @@ function FieldRow({
   const { t } = useTranslation();
   return (
     <div
-      draggable={!isEditing}
+      draggable
       onDragStart={onDragStart}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
-      style={{
-        background: "var(--bg)",
-        border: `1px solid ${draggingOver ? "var(--accent-border)" : "var(--border)"}`,
-        borderRadius: "var(--radius)",
-        padding: 10,
-      }}
+      className={`st-drag-row${draggingOver ? " is-over" : ""}`}
     >
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "auto 1.4fr 1fr 0.7fr auto auto",
-          alignItems: "center",
-          gap: 10,
-        }}
-      >
+      <div className="st-inline cf-row">
         <span
           title={t("customFields.dragHandle")}
-          style={{
-            cursor: "grab",
-            color: "var(--text-tertiary)",
-            fontSize: 14,
-            userSelect: "none",
-          }}
+          aria-label={t("customFields.dragHandle")}
+          className="st-drag-handle"
         >
-          ⋮⋮
+          <Icon name="moreVertical" size={16} />
         </span>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>{field.name}</div>
+        <div className="cf-row-main">
+          <div className="cf-row-name">{field.name}</div>
           <div className="text-xs text-dim mono">{field.code}</div>
         </div>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          <span className="pill pill-neutral">{t(`customFields.types.${field.type}`)}</span>
+        <div className="st-inline cf-row-meta">
+          <SoftPill tone="info" dot={false}>{t(`customFields.types.${field.type}`)}</SoftPill>
           {field.required && (
-            <span className="pill pill-warning">{t("customFields.requiredPill")}</span>
+            <SoftPill tone="warning">{t("customFields.requiredPill")}</SoftPill>
+          )}
+          {field.type === "select" && field.options && (
+            <span className="text-xs text-dim">
+              {t("customFields.optionCount", { count: field.options.length })}
+            </span>
           )}
         </div>
-        <div className="text-xs text-dim">
-          {field.type === "select" && field.options
-            ? t("customFields.optionCount", { count: field.options.length })
-            : ""}
+        <div className="st-row-actions">
+          <button type="button" className="btn btn-sm btn-ghost" onClick={onStartEdit}>
+            <Icon name="edit" size={11} /> {t("customFields.edit")}
+          </button>
+          <button type="button" className="btn btn-sm btn-ghost st-danger" onClick={onAskDelete}>
+            <Icon name="trash" size={12} /> {t("customFields.delete")}
+          </button>
         </div>
-        {!isEditing ? (
-          <button className="btn btn-sm" onClick={onStartEdit}>
-            {t("customFields.edit")}
-          </button>
-        ) : (
-          <button className="btn btn-sm" onClick={onCancelEdit}>
-            {t("customFields.cancel")}
-          </button>
-        )}
-        <button
-          className="btn btn-sm"
-          onClick={onAskDelete}
-          style={{ color: "var(--danger-text)" }}
-        >
-          <Icon name="trash" size={12} /> {t("customFields.delete")}
-        </button>
       </div>
-
-      {isEditing && (
-        <EditForm field={field} onAfterSave={onAfterSave} />
-      )}
     </div>
   );
 }
 
 function EditForm({
   field,
-  onAfterSave,
+  onClose,
 }: {
   field: CustomField;
-  onAfterSave: () => void;
+  onClose: () => void;
 }) {
   const { t } = useTranslation();
   const patch = usePatchCustomField(field.id);
@@ -441,11 +480,12 @@ function EditForm({
   const [optionsText, setOptionsText] = useState(
     field.options ? field.options.join("\n") : "",
   );
+  const [optionsError, setOptionsError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const submit = async () => {
     setError(null);
+    setOptionsError(null);
     const body: {
       name?: string;
       required?: boolean;
@@ -454,12 +494,9 @@ function EditForm({
     if (name.trim() !== field.name) body.name = name.trim();
     if (required !== field.required) body.required = required;
     if (field.type === "select") {
-      const opts = optionsText
-        .split(/[\n,]+/)
-        .map((s) => s.trim())
-        .filter(Boolean);
+      const opts = parseOptions(optionsText);
       if (opts.length === 0) {
-        setError(t("customFields.errOptionsRequired"));
+        setOptionsError(t("customFields.errOptionsRequired"));
         return;
       }
       const sameLength =
@@ -470,72 +507,84 @@ function EditForm({
       if (!sameOrder) body.options = opts;
     }
     if (Object.keys(body).length === 0) {
-      onAfterSave();
+      onClose();
       return;
     }
     try {
       await patch.mutateAsync(body);
-      onAfterSave();
+      onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : t("customFields.errSaveChanges"));
     }
   };
 
   return (
-    <form
-      onSubmit={submit}
-      style={{
-        marginTop: 10,
-        padding: 10,
-        background: "var(--bg-sunken)",
-        borderRadius: "var(--radius-sm)",
-        display: "flex",
-        flexDirection: "column",
-        gap: 8,
-      }}
+    <SettingsFormModal
+      titleId="cf-edit-title"
+      size={field.type === "select" ? "lg" : "md"}
+      icon={<Icon name="edit" size={18} />}
+      title={t("settingsUi.forms.customFields.editTitle", { defaultValue: "Edit custom field" })}
+      subtitle={t("settingsUi.forms.customFields.editSub", {
+        defaultValue: "Rename the field or change whether it's required. The code and type stay fixed.",
+      })}
+      onClose={onClose}
+      onSubmit={() => void submit()}
+      footer={
+        <FormFooter
+          onCancel={onClose}
+          submitLabel={t("settingsUi.forms.saveChanges", { defaultValue: "Save changes" })}
+          submittingLabel={t("customFields.saving")}
+          submitting={patch.isPending}
+        />
+      }
     >
-      <Field label={t("customFields.field.name")}>
-        <input
-          className="input"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-      </Field>
-      <label
-        style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}
+      {error && <FormNotice tone="danger">{error}</FormNotice>}
+      <FormSection
+        title={t("settingsUi.forms.customFields.identitySection", { defaultValue: "Field" })}
+        description={t("settingsUi.forms.customFields.identitySectionDesc", {
+          defaultValue: "The label HR sees and the code used in Excel files.",
+        })}
       >
-        <input
-          type="checkbox"
-          checked={required}
-          onChange={(e) => setRequired(e.target.checked)}
-        />
-        {t("customFields.required")}
-      </label>
-      {field.type === "select" && (
-        <Field label={t("customFields.field.optionsOnePerLine")}>
-          <textarea
+        <Field label={t("customFields.field.name")} htmlFor={`cf-edit-name-${field.id}`}>
+          <input
+            id={`cf-edit-name-${field.id}`}
             className="input"
-            value={optionsText}
-            onChange={(e) => setOptionsText(e.target.value)}
-            rows={3}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
           />
         </Field>
-      )}
-      {error && (
-        <div style={{ color: "var(--danger-text)", fontSize: 12 }}>
-          {error}
-        </div>
-      )}
-      <div style={{ display: "flex", gap: 6 }}>
-        <button
-          type="submit"
-          className="btn btn-primary btn-sm"
-          disabled={patch.isPending}
-        >
-          {patch.isPending ? t("customFields.saving") : t("customFields.save")}
-        </button>
-      </div>
-    </form>
+        <Field label={t("customFields.field.code")} htmlFor={`cf-edit-code-${field.id}`}>
+          <input id={`cf-edit-code-${field.id}`} className="input mono" value={field.code} disabled readOnly />
+        </Field>
+        <Field label={t("customFields.field.type")} htmlFor={`cf-edit-type-${field.id}`} span={2}>
+          <input
+            id={`cf-edit-type-${field.id}`}
+            className="input cf-cap"
+            value={t(`customFields.types.${field.type}`)}
+            disabled
+            readOnly
+          />
+        </Field>
+        {field.type === "select" && (
+          <OptionsField
+            id={`cf-edit-options-${field.id}`}
+            label={t("customFields.field.optionsOnePerLine")}
+            value={optionsText}
+            onChange={setOptionsText}
+            error={optionsError}
+          />
+        )}
+        <SwitchField
+          id={`cf-edit-required-${field.id}`}
+          label={t("customFields.required")}
+          description={t("settingsUi.forms.customFields.requiredDesc", {
+            defaultValue: "HR must fill this in when saving an employee.",
+          })}
+          checked={required}
+          onChange={setRequired}
+        />
+      </FormSection>
+    </SettingsFormModal>
   );
 }
 
@@ -564,105 +613,20 @@ function DeleteConfirmModal({
   };
 
   return (
-    <ModalShell onClose={onClose}>
-      <div
-        style={{
-          position: "fixed",
-          top: "50%",
-          left: "50%",
-          transform: "translate(-50%, -50%)",
-          background: "var(--bg)",
-          border: "1px solid var(--border-strong)",
-          borderRadius: "var(--radius)",
-          padding: 20,
-          width: 420,
-          zIndex: 60,
-          boxShadow: "var(--shadow-lg)",
-        }}
-        role="dialog"
-        aria-labelledby="cf-delete-title"
-      >
-        <h2
-          id="cf-delete-title"
-          style={{ margin: "0 0 8px 0", fontSize: 16 }}
-        >
+    <ConfirmModal
+      titleId="cf-delete-title"
+      title={
+        <>
           {t("customFields.deleteTitle")} <span className="mono">{field.code}</span>?
-        </h2>
-        <p style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-          {t("customFields.deleteBody")}
-        </p>
-        {error && (
-          <div
-            style={{
-              color: "var(--danger-text)",
-              fontSize: 12,
-              margin: "8px 0",
-            }}
-          >
-            {error}
-          </div>
-        )}
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            marginTop: 12,
-            justifyContent: "flex-end",
-          }}
-        >
-          <button className="btn btn-sm" onClick={onClose}>
-            {t("customFields.cancel")}
-          </button>
-          <button
-            className="btn btn-sm"
-            style={{
-              background: "var(--danger-bg)",
-              color: "var(--danger-text)",
-              borderColor: "var(--danger-border)",
-            }}
-            onClick={confirm}
-            disabled={del.isPending}
-          >
-            {del.isPending ? t("customFields.deleting") : t("customFields.deleteCta")}
-          </button>
-        </div>
-      </div>
-    </ModalShell>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Tiny helpers
-// ---------------------------------------------------------------------------
-
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: 4,
-        fontSize: 12,
-        color: "var(--text-secondary)",
-      }}
+        </>
+      }
+      subtitle={field.name}
+      confirmLabel={del.isPending ? t("customFields.deleting") : t("customFields.deleteCta")}
+      busy={del.isPending}
+      onConfirm={() => void confirm()}
+      onClose={onClose}
     >
-      <span
-        style={{
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
-          fontWeight: 500,
-          fontSize: 11,
-        }}
-      >
-        {label}
-      </span>
-      {children}
-    </label>
+      <FormNotice tone={error ? "danger" : "warning"}>{error ?? t("customFields.deleteBody")}</FormNotice>
+    </ConfirmModal>
   );
 }

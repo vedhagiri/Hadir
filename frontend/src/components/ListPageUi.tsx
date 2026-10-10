@@ -8,7 +8,7 @@ import type { ReactNode } from "react";
 
 import { Icon } from "../shell/Icon";
 
-export const FIELD_H = 40;
+export const FIELD_H = 38;
 
 // ---------------------------------------------------------------------------
 // Stat card
@@ -43,84 +43,25 @@ export function StatCard({
   active: boolean;
   onClick: () => void;
 }) {
-  const c = STAT_TONE[tone];
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className="card"
-      style={{
-        appearance: "none",
-        font: "inherit",
-        textAlign: "start",
-        cursor: "pointer",
-        padding: 8,
-        border: active ? `1.5px solid ${c.fg}` : "1px solid var(--border)",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 16,
-          padding: 14,
-          borderRadius: 10,
-          background: `color-mix(in oklab, ${c.bg} 70%, var(--bg-elev))`,
-        }}
-      >
-        <span
-          aria-hidden
-          style={{
-            width: 56,
-            height: 56,
-            flex: "0 0 56px",
-            borderRadius: "50%",
-            background: c.bg,
-            color: c.fg,
-            display: "grid",
-            placeItems: "center",
-          }}
-        >
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <button type="button" onClick={onClick} aria-pressed={active} className={`mg-stat tone-${tone}`}>
+      <span className="mg-stat-top">
+        <span className="mg-stat-label">{label}</span>
+        <span className="mg-stat-icon" aria-hidden>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
             {icon}
           </svg>
         </span>
-        <span style={{ flex: 1, minWidth: 0 }}>
-          <span style={{ display: "block", fontSize: 13, fontWeight: 600, color: tone === "info" || tone === "neutral" ? "var(--text)" : c.fg }}>
-            {label}
-          </span>
-          <span className="mono" style={{ display: "block", fontSize: 26, fontWeight: 700, lineHeight: 1.2, color: "var(--text)" }}>
-            {value}
-          </span>
-          <span style={{ display: "block", fontSize: 12.5, color: "var(--text-secondary)" }}>{sub}</span>
-        </span>
-        <span
-          aria-hidden
-          style={{
-            alignSelf: "flex-start",
-            width: 22,
-            height: 22,
-            borderRadius: "50%",
-            border: `1.5px solid ${c.fg}`,
-            color: c.fg,
-            display: "grid",
-            placeItems: "center",
-            opacity: 0.8,
-          }}
-        >
-          <Icon name="chevronRight" size={11} />
-        </span>
-      </div>
+      </span>
+      <span className="mg-stat-value">{value.toLocaleString()}</span>
+      <span className="mg-stat-sub">{sub}</span>
     </button>
   );
 }
 
 export function StatGrid({ children }: { children: ReactNode }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14, marginBottom: 14 }}>
-      {children}
-    </div>
+    <div className="mg-stat-grid">{children}</div>
   );
 }
 
@@ -130,9 +71,7 @@ export function StatGrid({ children }: { children: ReactNode }) {
 
 export function Toolbar({ children }: { children: ReactNode }) {
   return (
-    <div className="card" style={{ padding: 12, marginBottom: 14, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-      {children}
-    </div>
+    <div className="mg-toolbar">{children}</div>
   );
 }
 
@@ -148,61 +87,13 @@ export function SearchField({
   clearLabel: string;
 }) {
   return (
-    <label
-      style={{
-        flex: "1 1 340px",
-        minWidth: 220,
-        height: FIELD_H,
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        padding: "0 12px",
-        border: "1px solid var(--border)",
-        borderRadius: 10,
-        background: "var(--bg-elev)",
-        cursor: "text",
-      }}
-    >
-      <span aria-hidden style={{ color: "var(--text-tertiary)", display: "inline-flex" }}>
+    <label className="mg-search">
+      <span aria-hidden className="mg-search-icon">
         <Icon name="search" size={15} />
       </span>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        aria-label={placeholder}
-        style={{
-          flex: 1,
-          minWidth: 0,
-          height: "100%",
-          border: "none",
-          outline: "none",
-          background: "transparent",
-          color: "var(--text)",
-          fontSize: 13.5,
-          fontFamily: "inherit",
-        }}
-      />
+      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} aria-label={placeholder} />
       {value && (
-        <button
-          type="button"
-          onClick={() => onChange("")}
-          aria-label={clearLabel}
-          title={clearLabel}
-          style={{
-            appearance: "none",
-            border: "none",
-            background: "var(--bg-sunken)",
-            color: "var(--text-secondary)",
-            width: 22,
-            height: 22,
-            borderRadius: "50%",
-            display: "grid",
-            placeItems: "center",
-            cursor: "pointer",
-            padding: 0,
-          }}
-        >
+        <button type="button" onClick={() => onChange("")} aria-label={clearLabel} title={clearLabel} className="mg-search-clear">
           <Icon name="x" size={12} />
         </button>
       )}
@@ -212,29 +103,7 @@ export function SearchField({
 
 export function ResetButton({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={!active}
-      style={{
-        appearance: "none",
-        height: FIELD_H,
-        padding: "0 14px",
-        marginInlineStart: "auto",
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 7,
-        border: "1px solid var(--border)",
-        borderRadius: 10,
-        background: "var(--bg-elev)",
-        color: active ? "var(--text)" : "var(--text-tertiary)",
-        fontSize: 13,
-        fontWeight: 500,
-        fontFamily: "inherit",
-        cursor: active ? "pointer" : "default",
-        opacity: active ? 1 : 0.7,
-      }}
-    >
+    <button type="button" onClick={onClick} disabled={!active} className="mg-control" style={{ marginInlineStart: "auto" }}>
       <Icon name="refresh" size={13} />
       {label}
     </button>
@@ -316,55 +185,17 @@ export function FilterSelect({
         aria-expanded={open}
         aria-label={`${label}: ${current}`}
         onClick={() => setOpen((o) => !o)}
-        style={{
-          appearance: "none",
-          height: FIELD_H,
-          minWidth: 176,
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 6,
-          padding: "0 12px",
-          border: `1px solid ${open || active ? "var(--accent)" : "var(--border)"}`,
-          borderRadius: 10,
-          background: active ? "var(--accent-soft)" : "var(--bg-elev)",
-          boxShadow: open ? "0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent)" : "none",
-          color: "var(--text)",
-          fontFamily: "inherit",
-          fontSize: 13,
-          cursor: "pointer",
-          textAlign: "start",
-        }}
+        className={`mg-control${active ? " is-active" : ""}${open ? " is-open" : ""}`}
+        style={{ minWidth: 176 }}
       >
-        <span style={{ color: "var(--text-tertiary)", fontSize: 12 }}>{label}:</span>
-        <span style={{ fontWeight: 600, flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{current}</span>
-        <span
-          aria-hidden
-          style={{ display: "inline-flex", color: "var(--text-secondary)", transform: open ? "rotate(180deg)" : "none", transition: "transform 120ms ease" }}
-        >
+        <span className="mg-control-label">{label}:</span>
+        <span className="mg-control-value">{current}</span>
+        <span aria-hidden className="mg-control-chev">
           <Icon name="chevronDown" size={13} />
         </span>
       </button>
       {open && (
-        <ul
-          role="listbox"
-          aria-label={label}
-          style={{
-            position: "absolute",
-            top: FIELD_H + 6,
-            insetInlineStart: 0,
-            minWidth: "100%",
-            maxHeight: 280,
-            overflowY: "auto",
-            margin: 0,
-            padding: 6,
-            listStyle: "none",
-            background: "var(--bg-elev)",
-            border: "1px solid var(--border)",
-            borderRadius: 12,
-            boxShadow: "0 12px 32px rgba(15, 23, 42, 0.14)",
-            zIndex: 50,
-          }}
-        >
+        <ul role="listbox" aria-label={label} className="mg-menu">
           {options.map(([v, l], idx) => {
             const selected = v === value;
             return (
@@ -375,22 +206,10 @@ export function FilterSelect({
                 onMouseEnter={() => setHi(idx)}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => choose(v)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  padding: "8px 10px",
-                  borderRadius: 8,
-                  fontSize: 13,
-                  fontWeight: selected ? 600 : 500,
-                  color: selected ? "var(--accent-text, var(--accent))" : "var(--text)",
-                  background: idx === hi ? "var(--bg-sunken)" : "transparent",
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                }}
+                className={`mg-menu-item${idx === hi ? " is-hi" : ""}`}
               >
                 <span style={{ flex: 1 }}>{l}</span>
-                <span aria-hidden style={{ width: 14, display: "inline-flex", color: "var(--accent)" }}>
+                <span aria-hidden className="mg-menu-check">
                   {selected && <Icon name="check" size={14} />}
                 </span>
               </li>
@@ -421,26 +240,11 @@ export function EmptyPanel({
 }) {
   const c = tone === "accent" ? { bg: "var(--accent-soft)", fg: "var(--accent)" } : STAT_TONE[tone];
   return (
-    <div style={{ padding: "56px 24px 52px", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 10 }}>
-      <span
-        aria-hidden
-        style={{
-          width: 72,
-          height: 72,
-          borderRadius: "50%",
-          background: c.bg,
-          color: c.fg,
-          display: "grid",
-          placeItems: "center",
-          marginBottom: 6,
-          boxShadow: `0 0 0 8px color-mix(in oklab, ${c.bg} 45%, transparent)`,
-        }}
-      >
-        {icon}
-      </span>
-      <h3 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: "var(--text)" }}>{title}</h3>
-      <p style={{ margin: 0, maxWidth: 460, fontSize: 13.5, lineHeight: 1.55, color: "var(--text-secondary)" }}>{body}</p>
-      {actions && <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap", justifyContent: "center" }}>{actions}</div>}
+    <div className="mg-empty" style={{ ["--tone-bg" as string]: c.bg, ["--tone-fg" as string]: c.fg } as React.CSSProperties}>
+      <span aria-hidden className="mg-empty-icon">{icon}</span>
+      <h3 className="mg-empty-title">{title}</h3>
+      <p className="mg-empty-body">{body}</p>
+      {actions && <div className="mg-empty-actions">{actions}</div>}
     </div>
   );
 }

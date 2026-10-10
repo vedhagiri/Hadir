@@ -10,11 +10,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 
 import { api } from "../../api/client";
 import { AnomalyInfoBanner } from "../../components/AnomalyNote";
 import { ModalShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
+import "../person-clips/clips.css";
 import { dayBound, useTenantDateTime } from "../../util/datetime";
 import { DatePicker, todayIso } from "../../components/DatePicker";
 import { Pagination } from "../../components/Pagination";
@@ -562,6 +564,7 @@ function MatchRow({
 
 import type { ReconcileTenantSummary } from "../person-clips/hooks";
 import { SkeletonRows } from "../../components/Skeleton";
+import { EmptyPanel, FIELD_H, FilterSelect, ResetButton, SearchField, Toolbar } from "../../components/ListPageUi";
 
 function ProcessingHealthPanel({
   reconcileStatus,
@@ -1099,6 +1102,11 @@ export function ClipAnalyticsPage() {
   const allOnPageSelected =
     items.length > 0 && items.every((c) => selected.has(c.id));
 
+  // Addendum — "no records at all" (no filter narrowing, server says 0):
+  // hide the toolbar + table and show one EmptyPanel with the next step.
+  const noRecords =
+    !list.isLoading && !list.isError && list.data !== undefined && total === 0 && !hasActiveFilter;
+
   const toggleSelectAllOnPage = () => {
     setSelected((cur) => {
       const next = new Set(cur);
@@ -1121,22 +1129,6 @@ export function ClipAnalyticsPage() {
 
   return (
     <>
-      {/* Sticky bg cover for ``.content``'s padding-top:20px zone.
-          Without it, scrolling tbody rows briefly show through the
-          20px strip between the topbar and the sticky table thead.
-          See DailyAttendancePage.tsx for the same pattern + rationale. */}
-      <div
-        aria-hidden
-        style={{
-          position: "sticky",
-          top: -20,
-          zIndex: 25,
-          height: 0,
-          marginTop: -20,
-          paddingTop: 20,
-          background: "var(--bg)",
-        }}
-      />
       <div className="page-header">
         <div>
           <h1 className="page-title">{t("clipAnalytics.title")}</h1>
@@ -1231,8 +1223,8 @@ export function ClipAnalyticsPage() {
             disabled={selected.size === 0 || total === 0}
             title={
               selected.size === 0
-                ? "Tick clips to process just those"
-                : `Process ${selected.size} selected clip(s)`
+                ? t("clipAnalytics.identifySelected.titleNone", { defaultValue: "Tick clips to process just those" })
+                : t("clipAnalytics.identifySelected.titleN", { defaultValue: "Process {{count}} selected clip(s)", count: selected.size })
             }
             style={
               selected.size === 0 || total === 0
@@ -1242,8 +1234,8 @@ export function ClipAnalyticsPage() {
           >
             <Icon name="sparkles" size={12} />
             {selected.size === 0
-              ? "Identify selected"
-              : `Identify selected (${selected.size})`}
+              ? t("clipAnalytics.identifySelected.label", { defaultValue: "Identify selected" })
+              : t("clipAnalytics.identifySelected.labelN", { defaultValue: "Identify selected ({{count}})", count: selected.size })}
           </button>
           <button
             // Always carry ``btn-danger`` so the matching
@@ -1330,62 +1322,128 @@ export function ClipAnalyticsPage() {
         }}
       />
 
-      <div className="card">
-        {/* Filter toolbar — holds filters that don't map to a table
-            column (recording mode) plus the global Clear. Keeping them
-            here lets the per-column filter row line up 1:1 with the
-            column headers below. */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "flex-end",
-            gap: 12,
-            flexWrap: "wrap",
-            padding: "4px 2px 12px",
-          }}
-        >
-          <label
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 8,
-              fontSize: 12.5,
-              color: "var(--text-secondary)",
-            }}
-          >
-            {t("clipAnalytics.filters.recordingModeLabel")}
-            <select
-              value={recordingMode}
-              onChange={(e) => {
-                setRecordingMode(
-                  e.target.value as "all" | "save_clips" | "logs_only",
-                );
-                setPage(1);
-              }}
-              style={filterControlStyle}
-              aria-label={t("clipAnalytics.filters.byRecordingMode")}
-            >
-              <option value="all">{t("clipAnalytics.recordingMode.all")}</option>
-              <option value="save_clips">
-                {t("clipAnalytics.recordingMode.saveClips")}
-              </option>
-              <option value="logs_only">
-                {t("clipAnalytics.recordingMode.logsOnly")}
-              </option>
-            </select>
-          </label>
-          {hasActiveFilter && (
-            <button
-              type="button"
-              className="btn btn-sm"
-              onClick={clearFilters}
-              aria-label={t("clipAnalytics.filters.clearAria")}
-            >
-              <Icon name="x" size={11} /> {t("clipAnalytics.filters.clear")}
-            </button>
-          )}
+      {noRecords ? (
+        <div className="card">
+          <EmptyPanel
+            tone="accent"
+            icon={<Icon name="videocam" size={28} />}
+            title={t("clipAnalytics.toolbar.emptyTitle", { defaultValue: "No clips yet" })}
+            body={t("clipAnalytics.empty")}
+            actions={
+              <Link className="btn btn-primary" to="/cameras">
+                <Icon name="camera" size={12} />
+                {t("clipAnalytics.toolbar.goToCameras", { defaultValue: "Go to cameras" })}
+              </Link>
+            }
+          />
         </div>
+      ) : (
+      <>
+      <div className="cl-toolbar-dense">
+      <Toolbar>
+        <SearchField
+          value={clipNameQ}
+          onChange={setClipNameQ}
+          placeholder={t("clipAnalytics.filters.namePlaceholder")}
+          clearLabel={t("clipAnalytics.toolbar.clearSearch", { defaultValue: "Clear search" })}
+        />
+        <IdField
+          value={clipIdQ}
+          onChange={setClipIdQ}
+          placeholder={t("clipAnalytics.filters.idPlaceholder")}
+          ariaLabel={t("clipAnalytics.filters.byId")}
+        />
+        <FilterSelect
+          label={t("clipAnalytics.cols.camera")}
+          value={cameraId === null ? "" : String(cameraId)}
+          onChange={(v) => {
+            setCameraId(v === "" ? null : Number(v));
+            setPage(1);
+          }}
+          options={[
+            ["", t("clipAnalytics.filters.allCameras")],
+            ...(camerasQuery.data?.items ?? []).map((c) => [String(c.id), c.name] as [string, string]),
+          ]}
+        />
+        <FilterSelect
+          label={t("clipAnalytics.toolbar.status", { defaultValue: "Status" })}
+          value={processingFilter === "all" ? "" : processingFilter}
+          onChange={(v) => {
+            setProcessingFilter((v === "" ? "all" : v) as ProcessingFilter);
+            setPage(1);
+          }}
+          options={[
+            ["", t("clipAnalytics.status.all")],
+            ["recording", t("clipAnalytics.status.recording")],
+            ["encoding", t("clipAnalytics.status.finalizing")],
+            ["processing", t("clipAnalytics.status.processing")],
+            ["queued", t("clipAnalytics.status.queued")],
+            ["saved", t("clipAnalytics.status.saved")],
+            ["processed", t("clipAnalytics.status.processed")],
+          ]}
+        />
+        <FilterSelect
+          label={t("clipAnalytics.toolbar.processedUcs", { defaultValue: "Processed" })}
+          value={processedUcFilter === "any" ? "" : processedUcFilter}
+          onChange={(v) => setProcessedUcFilter((v === "" ? "any" : v) as ProcessedUcFilter)}
+          options={[
+            ["", t("clipAnalytics.ucFilter.any")],
+            ...(enabledUcs.includes("uc1") ? [["uc1", "UC1"] as [string, string]] : []),
+            ...(enabledUcs.includes("uc2") ? [["uc2", "UC2"] as [string, string]] : []),
+            ["not_processed", t("clipAnalytics.ucFilter.notProcessed")],
+          ]}
+        />
+        <FilterSelect
+          label={t("clipAnalytics.toolbar.mode", { defaultValue: "Mode" })}
+          value={recordingMode === "all" ? "" : recordingMode}
+          onChange={(v) => {
+            setRecordingMode((v === "" ? "all" : v) as "all" | "save_clips" | "logs_only");
+            setPage(1);
+          }}
+          options={[
+            ["", t("clipAnalytics.recordingMode.all")],
+            ["save_clips", t("clipAnalytics.recordingMode.saveClips")],
+            ["logs_only", t("clipAnalytics.recordingMode.logsOnly")],
+          ]}
+        />
+        {showMatchResult && (
+          <FilterSelect
+            label={t("clipAnalytics.cols.matchResult")}
+            value={matchResult === "all" ? "" : matchResult}
+            onChange={(v) => setMatchResult((v === "" ? "all" : v) as "all" | "matched" | "unmatched")}
+            options={[
+              ["", t("clipAnalytics.matchResultFilter.all")],
+              ["matched", t("clipAnalytics.matchResultFilter.matched")],
+              ["unmatched", t("clipAnalytics.matchResultFilter.unmatched")],
+            ]}
+          />
+        )}
+        <DatePicker
+          value={startDate}
+          onChange={(next) => setStartDate(next)}
+          max={todayIso()}
+          ariaLabel={t("clipAnalytics.filters.byStartDate")}
+          placeholder={t("clipAnalytics.toolbar.from", { defaultValue: "From" })}
+          triggerStyle={dateTriggerStyle}
+        />
+        <DatePicker
+          value={endDate}
+          onChange={(next) => setEndDate(next)}
+          {...(startDate ? { min: startDate } : {})}
+          max={todayIso()}
+          ariaLabel={t("clipAnalytics.filters.byEndDate")}
+          placeholder={t("clipAnalytics.toolbar.to", { defaultValue: "To" })}
+          triggerStyle={dateTriggerStyle}
+        />
+        <ResetButton
+          active={hasActiveFilter}
+          label={t("clipAnalytics.filters.clear")}
+          onClick={clearFilters}
+        />
+      </Toolbar>
+      </div>
+
+      <div className="card cl-table-scroll" style={{ padding: 12 }}>
         {/* Sticky thead is two rows: the column titles + a per-column
             filter row. Each <th>/<td> in the sticky region carries an
             opaque background so scrolling rows don't bleed through. */}
@@ -1416,7 +1474,7 @@ export function ClipAnalyticsPage() {
               <th
                 style={{
                   width: 36,
-                  background: "var(--bg-elev)",
+                  background: "var(--bg-sunken)",
                   boxShadow: "inset 0 -1px 0 var(--border)",
                 }}
               >
@@ -1430,7 +1488,7 @@ export function ClipAnalyticsPage() {
               <th
                 style={{
                   width: 120,
-                  background: "var(--bg-elev)",
+                  background: "var(--bg-sunken)",
                   boxShadow: "inset 0 -1px 0 var(--border)",
                 }}
               >
@@ -1438,7 +1496,7 @@ export function ClipAnalyticsPage() {
               </th>
               <th
                 style={{
-                  background: "var(--bg-elev)",
+                  background: "var(--bg-sunken)",
                   boxShadow: "inset 0 -1px 0 var(--border)",
                 }}
               >
@@ -1446,7 +1504,7 @@ export function ClipAnalyticsPage() {
               </th>
               <th
                 style={{
-                  background: "var(--bg-elev)",
+                  background: "var(--bg-sunken)",
                   boxShadow: "inset 0 -1px 0 var(--border)",
                 }}
               >
@@ -1455,7 +1513,7 @@ export function ClipAnalyticsPage() {
               <th
                 style={{
                   width: 160,
-                  background: "var(--bg-elev)",
+                  background: "var(--bg-sunken)",
                   boxShadow: "inset 0 -1px 0 var(--border)",
                 }}
               >
@@ -1464,7 +1522,7 @@ export function ClipAnalyticsPage() {
               <th
                 style={{
                   width: 160,
-                  background: "var(--bg-elev)",
+                  background: "var(--bg-sunken)",
                   boxShadow: "inset 0 -1px 0 var(--border)",
                 }}
               >
@@ -1473,7 +1531,7 @@ export function ClipAnalyticsPage() {
               <th
                 style={{
                   width: 90,
-                  background: "var(--bg-elev)",
+                  background: "var(--bg-sunken)",
                   boxShadow: "inset 0 -1px 0 var(--border)",
                 }}
               >
@@ -1482,7 +1540,7 @@ export function ClipAnalyticsPage() {
               <th
                 style={{
                   width: 90,
-                  background: "var(--bg-elev)",
+                  background: "var(--bg-sunken)",
                   boxShadow: "inset 0 -1px 0 var(--border)",
                 }}
               >
@@ -1491,7 +1549,7 @@ export function ClipAnalyticsPage() {
               <th
                 style={{
                   width: 140,
-                  background: "var(--bg-elev)",
+                  background: "var(--bg-sunken)",
                   boxShadow: "inset 0 -1px 0 var(--border)",
                 }}
               >
@@ -1500,7 +1558,7 @@ export function ClipAnalyticsPage() {
               <th
                 style={{
                   width: 150,
-                  background: "var(--bg-elev)",
+                  background: "var(--bg-sunken)",
                   boxShadow: "inset 0 -1px 0 var(--border)",
                 }}
               >
@@ -1510,7 +1568,7 @@ export function ClipAnalyticsPage() {
                 <th
                   style={{
                     width: 200,
-                    background: "var(--bg-elev)",
+                    background: "var(--bg-sunken)",
                     boxShadow: "inset 0 -1px 0 var(--border)",
                   }}
                   title={t("clipAnalytics.cols.matchResultTitle")}
@@ -1522,196 +1580,12 @@ export function ClipAnalyticsPage() {
                 style={{
                   width: 60,
                   textAlign: "end",
-                  background: "var(--bg-elev)",
+                  background: "var(--bg-sunken)",
                   boxShadow: "inset 0 -1px 0 var(--border)",
                 }}
               >
                 {t("clipAnalytics.cols.actions")}
               </th>
-            </tr>
-            {/* Row 2 — per-column filter inputs */}
-            <tr>
-              <th
-                style={{
-                  background: "var(--bg-elev)",
-                  boxShadow: "inset 0 -1px 0 var(--border)",
-                }}
-              />
-              <th
-                style={{
-                  background: "var(--bg-elev)",
-                  boxShadow: "inset 0 -1px 0 var(--border)",
-                }}
-              >
-                <input
-                  type="search"
-                  placeholder={t("clipAnalytics.filters.idPlaceholder")}
-                  value={clipIdQ}
-                  onChange={(e) => setClipIdQ(e.target.value)}
-                  style={filterControlStyle}
-                  aria-label={t("clipAnalytics.filters.byId")}
-                />
-              </th>
-              <th
-                style={{
-                  background: "var(--bg-elev)",
-                  boxShadow: "inset 0 -1px 0 var(--border)",
-                }}
-              >
-                <select
-                  value={cameraId ?? ""}
-                  onChange={(e) =>
-                    setCameraId(
-                      e.target.value === "" ? null : Number(e.target.value),
-                    )
-                  }
-                  style={filterControlStyle}
-                  aria-label={t("clipAnalytics.filters.byCamera")}
-                >
-                  <option value="">{t("clipAnalytics.filters.allCameras")}</option>
-                  {(camerasQuery.data?.items ?? []).map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </th>
-              <th
-                style={{
-                  background: "var(--bg-elev)",
-                  boxShadow: "inset 0 -1px 0 var(--border)",
-                }}
-              >
-                <input
-                  type="search"
-                  placeholder={t("clipAnalytics.filters.namePlaceholder")}
-                  value={clipNameQ}
-                  onChange={(e) => setClipNameQ(e.target.value)}
-                  style={filterControlStyle}
-                  aria-label={t("clipAnalytics.filters.byName")}
-                />
-              </th>
-              <th
-                style={{
-                  background: "var(--bg-elev)",
-                  boxShadow: "inset 0 -1px 0 var(--border)",
-                }}
-              >
-                <DatePicker
-                  value={startDate}
-                  onChange={(next) => setStartDate(next)}
-                  max={todayIso()}
-                  ariaLabel={t("clipAnalytics.filters.byStartDate")}
-                  placeholder={t("clipAnalytics.filters.byStartDate")}
-                  triggerStyle={filterControlStyle}
-                />
-              </th>
-              <th
-                style={{
-                  background: "var(--bg-elev)",
-                  boxShadow: "inset 0 -1px 0 var(--border)",
-                }}
-              >
-                <DatePicker
-                  value={endDate}
-                  onChange={(next) => setEndDate(next)}
-                  {...(startDate ? { min: startDate } : {})}
-                  max={todayIso()}
-                  ariaLabel={t("clipAnalytics.filters.byEndDate")}
-                  placeholder={t("clipAnalytics.filters.byEndDate")}
-                  triggerStyle={filterControlStyle}
-                />
-              </th>
-              <th
-                style={{
-                  background: "var(--bg-elev)",
-                  boxShadow: "inset 0 -1px 0 var(--border)",
-                }}
-              />
-              <th
-                style={{
-                  background: "var(--bg-elev)",
-                  boxShadow: "inset 0 -1px 0 var(--border)",
-                }}
-              />
-              <th
-                style={{
-                  background: "var(--bg-elev)",
-                  boxShadow: "inset 0 -1px 0 var(--border)",
-                }}
-              >
-                <select
-                  value={processingFilter}
-                  onChange={(e) =>
-                    setProcessingFilter(e.target.value as ProcessingFilter)
-                  }
-                  style={filterControlStyle}
-                  aria-label={t("clipAnalytics.filters.byStatus")}
-                >
-                  <option value="all">{t("clipAnalytics.status.all")}</option>
-                  <option value="recording">{t("clipAnalytics.status.recording")}</option>
-                  <option value="encoding">{t("clipAnalytics.status.finalizing")}</option>
-                  <option value="processing">{t("clipAnalytics.status.processing")}</option>
-                  <option value="queued">{t("clipAnalytics.status.queued")}</option>
-                  <option value="saved">{t("clipAnalytics.status.saved")}</option>
-                  <option value="processed">{t("clipAnalytics.status.processed")}</option>
-                </select>
-              </th>
-              <th
-                style={{
-                  background: "var(--bg-elev)",
-                  boxShadow: "inset 0 -1px 0 var(--border)",
-                }}
-              >
-                <select
-                  value={processedUcFilter}
-                  onChange={(e) =>
-                    setProcessedUcFilter(e.target.value as ProcessedUcFilter)
-                  }
-                  style={filterControlStyle}
-                  aria-label={t("clipAnalytics.filters.byProcessedUcs")}
-                >
-                  <option value="any">{t("clipAnalytics.ucFilter.any")}</option>
-                  {enabledUcs.includes("uc1") && <option value="uc1">UC1</option>}
-                  {enabledUcs.includes("uc2") && <option value="uc2">UC2</option>}
-                  <option value="not_processed">{t("clipAnalytics.ucFilter.notProcessed")}</option>
-                </select>
-              </th>
-              {showMatchResult && (
-                <th
-                  style={{
-                    background: "var(--bg-elev)",
-                    boxShadow: "inset 0 -1px 0 var(--border)",
-                  }}
-                >
-                  <select
-                    value={matchResult}
-                    onChange={(e) =>
-                      setMatchResult(
-                        e.target.value as "all" | "matched" | "unmatched",
-                      )
-                    }
-                    style={filterControlStyle}
-                    aria-label={t("clipAnalytics.filters.byMatchResult")}
-                  >
-                    <option value="all">
-                      {t("clipAnalytics.matchResultFilter.all")}
-                    </option>
-                    <option value="matched">
-                      {t("clipAnalytics.matchResultFilter.matched")}
-                    </option>
-                    <option value="unmatched">
-                      {t("clipAnalytics.matchResultFilter.unmatched")}
-                    </option>
-                  </select>
-                </th>
-              )}
-              <th
-                style={{
-                  background: "var(--bg-elev)",
-                  boxShadow: "inset 0 -1px 0 var(--border)",
-                }}
-              />
             </tr>
           </thead>
           <tbody>
@@ -1720,23 +1594,45 @@ export function ClipAnalyticsPage() {
             )}
             {list.isError && (
               <tr>
-                <td
-                  colSpan={showMatchResult ? 12 : 11}
-                  className="text-sm"
-                  style={{ padding: 16, color: "var(--danger-text)" }}
-                >
-                  {t("clipAnalytics.loadError")}
+                <td colSpan={showMatchResult ? 12 : 11} style={{ padding: 0 }}>
+                  <EmptyPanel
+                    tone="danger"
+                    icon={<Icon name="info" size={28} />}
+                    title={t("clipAnalytics.loadError")}
+                    body={t("clipAnalytics.toolbar.errorBody", { defaultValue: "Something went wrong while fetching clips. Try again in a moment." })}
+                    actions={
+                      <button type="button" className="btn" onClick={() => void list.refetch()}>
+                        <Icon name="refresh" size={12} />
+                        {t("clipAnalytics.toolbar.retry", { defaultValue: "Retry" })}
+                      </button>
+                    }
+                  />
                 </td>
               </tr>
             )}
             {!list.isLoading && !list.isError && items.length === 0 && (
               <tr>
-                <td
-                  colSpan={showMatchResult ? 12 : 11}
-                  className="text-sm text-dim"
-                  style={{ padding: 16 }}
-                >
-                  {t("clipAnalytics.empty")}
+                <td colSpan={showMatchResult ? 12 : 11} style={{ padding: 0 }}>
+                  {hasActiveFilter ? (
+                    <EmptyPanel
+                      icon={<Icon name="filter" size={28} />}
+                      title={t("clipAnalytics.toolbar.emptyFilteredTitle", { defaultValue: "No clips match these filters" })}
+                      body={t("clipAnalytics.toolbar.emptyFilteredBody", { defaultValue: "Try a different search, camera, status or date range." })}
+                      actions={
+                        <button type="button" className="btn" onClick={clearFilters}>
+                          <Icon name="refresh" size={12} />
+                          {t("clipAnalytics.toolbar.clearFilters", { defaultValue: "Clear filters" })}
+                        </button>
+                      }
+                    />
+                  ) : (
+                    <EmptyPanel
+                      tone="accent"
+                      icon={<Icon name="videocam" size={28} />}
+                      title={t("clipAnalytics.toolbar.emptyTitle", { defaultValue: "No clips yet" })}
+                      body={t("clipAnalytics.empty")}
+                    />
+                  )}
                 </td>
               </tr>
             )}
@@ -1806,7 +1702,9 @@ export function ClipAnalyticsPage() {
                       </div>
                     </div>
                   </td>
-                  <td className="mono text-sm">{c.clip_name || "—"}</td>
+                  <td className="mono text-sm">
+                    <span className="cell-ellipsis" title={c.clip_name || undefined}>{c.clip_name || "—"}</span>
+                  </td>
                   <td className="text-sm">
                     <CellDateTime iso={c.clip_start} />
                   </td>
@@ -1904,6 +1802,8 @@ export function ClipAnalyticsPage() {
           />
         )}
       </div>
+      </>
+      )}
 
       {identifyTarget && (
         <IdentifyEventModal
@@ -2166,18 +2066,65 @@ function BulkDeleteClipsModal({
 
 // Tight control style for the per-column header filter row. Width 100%
 // so each control fills its <th> column.
-const filterControlStyle: React.CSSProperties = {
-  padding: "3px 6px",
-  fontSize: 11.5,
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius-sm)",
-  background: "var(--bg-elev)",
-  color: "var(--text)",
-  fontFamily: "var(--font-sans)",
-  outline: "none",
-  width: "100%",
-  fontWeight: 400,
-};
+
+const dateTriggerStyle = {
+  height: FIELD_H,
+  minWidth: 112,
+  padding: "0 12px",
+  fontSize: 13,
+  borderRadius: 10,
+} as const;
+
+/** Compact numeric clip-ID filter, styled to sit beside the SearchField. */
+function IdField({
+  value,
+  onChange,
+  placeholder,
+  ariaLabel,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  ariaLabel: string;
+}) {
+  return (
+    <label
+      style={{
+        width: 96,
+        height: FIELD_H,
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "0 10px",
+        border: `1px solid ${value ? "var(--accent)" : "var(--border)"}`,
+        borderRadius: 10,
+        background: value ? "var(--accent-soft)" : "var(--bg-elev)",
+        cursor: "text",
+        boxSizing: "border-box",
+      }}
+    >
+      <span aria-hidden className="mono" style={{ color: "var(--text-tertiary)", fontSize: 13 }}>#</span>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        aria-label={ariaLabel}
+        inputMode="numeric"
+        style={{
+          flex: 1,
+          minWidth: 0,
+          height: "100%",
+          border: "none",
+          outline: "none",
+          background: "transparent",
+          color: "var(--text)",
+          fontSize: 13.5,
+          fontFamily: "inherit",
+        }}
+      />
+    </label>
+  );
+}
 
 function avatarBg(seed: string): string {
   const palette = [
@@ -2443,6 +2390,7 @@ function IdentifySelectedModal({
   onClose: () => void;
   onDone: () => void;
 }) {
+  const { t } = useTranslation();
   const enabledUcs = useEnabledUseCases();
   const submit = useClipPipelineSubmit();
   const ucOptions = (["uc1", "uc2"] as const).filter((u) => enabledUcs.includes(u));
@@ -2462,7 +2410,7 @@ function IdentifySelectedModal({
   async function run() {
     setError(null);
     if (ucs.size === 0) {
-      setError("Pick at least one use case.");
+      setError(t("clipAnalytics.identifySelected.pickOne", { defaultValue: "Pick at least one use case." }));
       return;
     }
     try {
@@ -2472,12 +2420,18 @@ function IdentifySelectedModal({
         skip_existing: !overwrite,
       });
       setDone(
-        `Submitted ${res.queued_jobs} job(s) for ${clipIds.length} clip(s)` +
-          (res.skipped_jobs ? ` · ${res.skipped_jobs} skipped (already done).` : "."),
+        t("clipAnalytics.identifySelected.submitted", {
+          defaultValue: "Submitted {{jobs}} job(s) for {{clips}} clip(s)",
+          jobs: res.queued_jobs,
+          clips: clipIds.length,
+        }) +
+          (res.skipped_jobs
+            ? ` · ${t("clipAnalytics.identifySelected.skipped", { defaultValue: "{{n}} skipped (already done).", n: res.skipped_jobs })}`
+            : "."),
       );
       onDone();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not start processing.");
+      setError(e instanceof Error ? e.message : t("clipAnalytics.identifySelected.failed", { defaultValue: "Could not start processing." }));
     }
   }
 
@@ -2485,7 +2439,7 @@ function IdentifySelectedModal({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Identify selected clips"
+      aria-label={t("clipAnalytics.identifySelected.modalTitle", { defaultValue: "Identify selected clips" })}
       style={{
         position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",
         zIndex: 80, display: "grid", placeItems: "center", padding: 16,
@@ -2504,25 +2458,25 @@ function IdentifySelectedModal({
             <Icon name="sparkles" size={17} />
           </span>
           <div style={{ flex: 1 }}>
-            <h2 style={{ margin: 0, fontSize: 15.5, fontWeight: 700, color: "var(--text)" }}>Identify selected clips</h2>
+            <h2 className="modal-title" style={{ margin: 0, fontSize: 15.5 }}>{t("clipAnalytics.identifySelected.modalTitle", { defaultValue: "Identify selected clips" })}</h2>
             <div style={{ fontSize: 12, color: "var(--text-tertiary)", marginTop: 1 }}>
-              Process only the {clipIds.length} clip(s) you ticked — not the whole tenant.
+              {t("clipAnalytics.identifySelected.modalSub", { defaultValue: "Process only the {{count}} clip(s) you ticked — not the whole tenant.", count: clipIds.length })}
             </div>
           </div>
-          <button className="btn btn-sm" onClick={onClose} disabled={submit.isPending} aria-label="Close"><Icon name="x" size={12} /></button>
+          <button className="btn btn-sm btn-ghost" onClick={onClose} disabled={submit.isPending} aria-label={t("common.close")}><Icon name="x" size={12} /></button>
         </div>
 
         {done ? (
           <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
             <div style={{ fontSize: 13.5, color: "var(--text)" }}>{done}</div>
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button className="btn btn-primary" onClick={onClose}>Done</button>
+              <button className="btn btn-primary" onClick={onClose}>{t("common.done")}</button>
             </div>
           </div>
         ) : (
           <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-tertiary)" }}>Use cases</span>
+              <span className="field-label">{t("clipAnalytics.identifySelected.useCases", { defaultValue: "Use cases" })}</span>
               <div style={{ display: "flex", gap: 8 }}>
                 {ucOptions.map((u) => {
                   const on = ucs.has(u);
@@ -2539,26 +2493,28 @@ function IdentifySelectedModal({
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-tertiary)" }}>Mode</span>
+              <span className="field-label">{t("clipAnalytics.identifySelected.mode", { defaultValue: "Mode" })}</span>
               <label style={{ display: "flex", gap: 9, alignItems: "flex-start", cursor: "pointer" }}>
                 <input type="radio" checked={overwrite} onChange={() => setOverwrite(true)} style={{ marginTop: 3 }} />
-                <span style={{ fontSize: 13, color: "var(--text)" }}>Reprocess (overwrite)
-                  <span style={{ display: "block", fontSize: 11.5, color: "var(--text-tertiary)" }}>Re-run these clips even if already processed.</span></span>
+                <span style={{ fontSize: 13, color: "var(--text)" }}>{t("clipAnalytics.identifySelected.overwrite", { defaultValue: "Reprocess (overwrite)" })}
+                  <span className="field-help" style={{ display: "block" }}>{t("clipAnalytics.identifySelected.overwriteHelp", { defaultValue: "Re-run these clips even if already processed." })}</span></span>
               </label>
               <label style={{ display: "flex", gap: 9, alignItems: "flex-start", cursor: "pointer" }}>
                 <input type="radio" checked={!overwrite} onChange={() => setOverwrite(false)} style={{ marginTop: 3 }} />
-                <span style={{ fontSize: 13, color: "var(--text)" }}>Skip already processed
-                  <span style={{ display: "block", fontSize: 11.5, color: "var(--text-tertiary)" }}>Only run the selected clips that have no result yet.</span></span>
+                <span style={{ fontSize: 13, color: "var(--text)" }}>{t("clipAnalytics.identifySelected.skip", { defaultValue: "Skip already processed" })}
+                  <span className="field-help" style={{ display: "block" }}>{t("clipAnalytics.identifySelected.skipHelp", { defaultValue: "Only run the selected clips that have no result yet." })}</span></span>
               </label>
             </div>
 
             {error && <div role="alert" style={{ fontSize: 12.5, color: "var(--danger-text)" }}>{error}</div>}
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <button className="btn btn-sm" onClick={onClose} disabled={submit.isPending}>Cancel</button>
+              <button className="btn" onClick={onClose} disabled={submit.isPending}>{t("common.cancel")}</button>
               <button className="btn btn-primary" onClick={run} disabled={submit.isPending || ucs.size === 0}>
                 <Icon name="sparkles" size={12} />
-                {submit.isPending ? "Submitting…" : `Process ${clipIds.length} clip(s)`}
+                {submit.isPending
+                  ? t("clipAnalytics.identifySelected.submitting", { defaultValue: "Submitting…" })
+                  : t("clipAnalytics.identifySelected.process", { defaultValue: "Process {{count}} clip(s)", count: clipIds.length })}
               </button>
             </div>
           </div>

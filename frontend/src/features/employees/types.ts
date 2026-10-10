@@ -41,6 +41,9 @@ export interface Employee {
   section?: SectionRef | null;
   status: EmployeeStatus;
   photo_count: number;
+  // Approved front photo (else oldest approved) for list avatars; fetch
+  // the small, un-audited thumbnail via ``employeeThumbUrl``.
+  primary_photo_id?: number | null;
   created_at: string;
   // P28.7 fields. All optional / nullable — pre-P28.7 rows have NULL.
   designation?: string | null;

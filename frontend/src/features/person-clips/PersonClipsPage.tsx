@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { DrawerShell, ModalShell } from "../../components/DrawerShell";
@@ -34,7 +35,9 @@ import type {
   SystemResourceStats,
   UseCaseStatsRow,
 } from "./types";
-import { SkeletonCards, SkeletonLines, SkeletonTable } from "../../components/Skeleton";
+import { SkeletonCards, SkeletonGrid, SkeletonLines } from "../../components/Skeleton";
+import { EmptyPanel, FIELD_H, FilterSelect, ResetButton, StatCard, StatGrid, Toolbar } from "../../components/ListPageUi";
+import { StatTile, TILE_ICON } from "./StatTile";
 
 const PAGE_SIZE = 24;
 
@@ -105,25 +108,6 @@ export function parseFlexibleTimestamp(raw: string | null | undefined): Date | n
   return null;
 }
 
-function personCountColor(count: number): string {
-  if (count >= 3) return "var(--danger-text, #e53935)";
-  if (count >= 2) return "var(--accent, #f59e0b)";
-  return "var(--text-secondary, #888)";
-}
-
-// ── Shared style helpers ─────────────────────────────────────────────────────
-
-const selectStyle: React.CSSProperties = {
-  padding: "6px 10px",
-  fontSize: 12.5,
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius-sm)",
-  background: "var(--bg-elev)",
-  color: "var(--text)",
-  fontFamily: "var(--font-sans)",
-  outline: "none",
-};
-
 // Migration 0055 — headline summary band shown at the top of the
 // Person Clips page. Four stat tiles in a responsive grid: total
 // clips, total storage, live-now count (animated red when > 0),
@@ -151,217 +135,57 @@ function ClipSummaryBand({
   const cameraCount = stats?.per_camera?.length ?? 0;
   const isLive = liveCount > 0;
 
-  const tile: React.CSSProperties = {
-    background: "var(--bg-elev)",
-    border: "1px solid var(--border)",
-    borderRadius: "var(--radius)",
-    padding: "14px 16px",
-    display: "flex",
-    alignItems: "center",
-    gap: 14,
-    boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-    minHeight: 76,
-    transition: "transform 0.15s ease, box-shadow 0.15s ease",
-  };
-
-  // Tiles that drive filters render as buttons so they're
-  // keyboard-accessible. ``activeBorder`` highlights the tile when
-  // its corresponding filter is the active list query.
-  const interactiveTile = (
-    extra: React.CSSProperties,
-    isActiveTile: boolean,
-  ): React.CSSProperties => ({
-    ...tile,
-    ...extra,
-    cursor: "pointer",
-    border: isActiveTile
-      ? "1px solid var(--accent, #0b6e4f)"
-      : (extra.border ?? tile.border),
-    boxShadow: isActiveTile
-      ? "0 0 0 2px var(--accent-soft, rgba(11, 110, 79, 0.18))"
-      : tile.boxShadow,
-    fontFamily: "var(--font-sans)",
-    textAlign: "start",
-  });
-
-  const iconWrap: React.CSSProperties = {
-    width: 44,
-    height: 44,
-    borderRadius: 10,
-    display: "grid",
-    placeItems: "center",
-    flexShrink: 0,
-  };
-
-  const bigNumber: React.CSSProperties = {
-    fontSize: 26,
-    fontWeight: 700,
-    lineHeight: 1.05,
-    color: "var(--text)",
-    fontFamily: "var(--font-sans)",
-    letterSpacing: "-0.02em",
-  };
-
-  const subLabel: React.CSSProperties = {
-    fontSize: 11,
-    color: "var(--text-secondary)",
-    textTransform: "uppercase",
-    letterSpacing: "0.06em",
-    marginTop: 3,
-    fontWeight: 500,
-  };
+  if (!stats) {
+    return (
+      <div style={{ marginBottom: 14 }}>
+        <SkeletonCards count={4} minWidth={220} />
+      </div>
+    );
+  }
 
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-        gap: 12,
-        marginBottom: 14,
-      }}
-    >
+    <StatGrid>
       {/* Total clips — click clears every active filter (back to all). */}
-      <button
-        type="button"
+      <StatCard
+        tone="info"
+        icon={TILE_ICON.video}
+        label={t("personClips.summary.totalClips")}
+        value={totalClips}
+        sub={t("personClips.statsSub.total", { defaultValue: "click to show every clip" })}
+        active={!hasActiveFilters}
         onClick={onResetAll}
-        aria-pressed={!hasActiveFilters}
-        aria-label={t("personClips.summary.showAll") as string}
-        title={t("personClips.summary.showAll") as string}
-        style={interactiveTile({}, !hasActiveFilters)}
-      >
-        <div
-          style={{
-            ...iconWrap,
-            background: "var(--accent-soft, rgba(11, 110, 79, 0.10))",
-            color: "var(--accent, #0b6e4f)",
-          }}
-        >
-          <Icon name="videocam" size={22} />
-        </div>
-        <div style={{ minWidth: 0 }}>
-          <div style={bigNumber}>{totalClips.toLocaleString()}</div>
-          <div style={subLabel}>
-            {t("personClips.summary.totalClips")}
-          </div>
-        </div>
-      </button>
-
-      {/* Storage used — informational; click also clears filters. */}
-      <button
-        type="button"
-        onClick={onResetAll}
-        aria-label={t("personClips.summary.showAll") as string}
-        title={t("personClips.summary.showAll") as string}
-        style={interactiveTile({}, false)}
-      >
-        <div
-          style={{
-            ...iconWrap,
-            background: "rgba(99, 102, 241, 0.12)",
-            color: "rgb(99, 102, 241)",
-          }}
-        >
-          <Icon name="database" size={22} />
-        </div>
-        <div style={{ minWidth: 0 }}>
-          <div style={bigNumber}>{fmtFileSize(totalBytes)}</div>
-          <div style={subLabel}>
-            {t("personClips.summary.storage")}
-          </div>
-        </div>
-      </button>
-
+      />
+      {/* Storage used — informational. */}
+      <StatTile
+        tone="neutral"
+        icon={TILE_ICON.storage}
+        label={t("personClips.summary.storage")}
+        value={fmtFileSize(totalBytes)}
+        sub={t("personClips.statsSub.storage", { defaultValue: "recorded video on disk" })}
+      />
       {/* Live recording right now — click filters to recording rows. */}
-      <button
-        type="button"
+      <StatCard
+        tone={isLive ? "danger" : "neutral"}
+        icon={TILE_ICON.camera}
+        label={t("personClips.summary.liveNow")}
+        value={liveCount}
+        sub={
+          liveActive
+            ? (t("personClips.summary.clearLiveFilter") as string)
+            : (t("personClips.summary.showLiveOnly") as string)
+        }
+        active={liveActive}
         onClick={onToggleLive}
-        aria-pressed={liveActive}
-        aria-label={
-          liveActive
-            ? (t("personClips.summary.clearLiveFilter") as string)
-            : (t("personClips.summary.showLiveOnly") as string)
-        }
-        title={
-          liveActive
-            ? (t("personClips.summary.clearLiveFilter") as string)
-            : (t("personClips.summary.showLiveOnly") as string)
-        }
-        style={interactiveTile(
-          {
-            background: isLive
-              ? "linear-gradient(135deg, rgba(220,38,38,0.06), var(--bg-elev))"
-              : tile.background,
-            border: isLive
-              ? "1px solid rgba(220,38,38,0.35)"
-              : "1px solid var(--border)",
-          },
-          liveActive,
-        )}
-      >
-        <div
-          style={{
-            ...iconWrap,
-            background: isLive
-              ? "rgba(220,38,38,0.15)"
-              : "rgba(148,163,184,0.12)",
-            color: isLive ? "rgb(220,38,38)" : "var(--text-secondary)",
-          }}
-        >
-          {isLive ? (
-            <span
-              style={{
-                width: 10,
-                height: 10,
-                borderRadius: "50%",
-                background: "rgb(220,38,38)",
-                animation: "maugood-live-pulse 1.4s ease-in-out infinite",
-              }}
-              aria-hidden
-            />
-          ) : (
-            <Icon name="pause" size={22} />
-          )}
-        </div>
-        <div style={{ minWidth: 0 }}>
-          <div
-            style={{
-              ...bigNumber,
-              color: isLive ? "rgb(220,38,38)" : "var(--text)",
-            }}
-          >
-            {liveCount}
-          </div>
-          <div style={subLabel}>
-            {t("personClips.summary.liveNow")}
-          </div>
-        </div>
-      </button>
-
-      {/* Active cameras — click clears filters. */}
-      <button
-        type="button"
-        onClick={onResetAll}
-        aria-label={t("personClips.summary.showAll") as string}
-        title={t("personClips.summary.showAll") as string}
-        style={interactiveTile({}, false)}
-      >
-        <div
-          style={{
-            ...iconWrap,
-            background: "rgba(234, 179, 8, 0.12)",
-            color: "rgb(202, 138, 4)",
-          }}
-        >
-          <Icon name="camera" size={22} />
-        </div>
-        <div style={{ minWidth: 0 }}>
-          <div style={bigNumber}>{cameraCount}</div>
-          <div style={subLabel}>
-            {t("personClips.summary.cameras")}
-          </div>
-        </div>
-      </button>
-    </div>
+      />
+      {/* Active cameras — informational. */}
+      <StatTile
+        tone="success"
+        icon={TILE_ICON.camera}
+        label={t("personClips.summary.cameras")}
+        value={cameraCount.toLocaleString()}
+        sub={t("personClips.statsSub.cameras", { defaultValue: "cameras with saved clips" })}
+      />
+    </StatGrid>
   );
 }
 
@@ -461,6 +285,10 @@ export function PersonClipsPage() {
     ? list.data.items.filter((c) => selectedIds.has(c.id))
     : [];
 
+  // Addendum — five list states. "No records at all" hides the stat
+  // band + face-matching pills; the Clips tab shows one EmptyPanel.
+  const noRecords = stats.data !== undefined && (stats.data.total_clips ?? 0) === 0;
+
   return (
     <>
       {/* ── Page header ── */}
@@ -469,23 +297,25 @@ export function PersonClipsPage() {
           <h1 className="page-title">{t("personClips.title")}</h1>
           <p className="page-sub">{t("personClips.headerSub")}</p>
         </div>
-        <button
-          type="button"
-          className="btn btn-sm"
-          onClick={() => setReprocessDialog(true)}
-          disabled={isReprocessing}
-          style={{ display: "flex", alignItems: "center", gap: 6 }}
-          aria-label={t("personClips.reprocessBtn")}
-        >
-          <Icon name="refresh" size={12} />
-          {isReprocessing ? t("personClips.reprocessRunning") : t("personClips.reprocessBtn")}
-        </button>
+        <div className="page-actions">
+          <button
+            type="button"
+            className="btn"
+            onClick={() => setReprocessDialog(true)}
+            disabled={isReprocessing}
+            aria-label={t("personClips.reprocessBtn")}
+          >
+            <Icon name="refresh" size={12} />
+            {isReprocessing ? t("personClips.reprocessRunning") : t("personClips.reprocessBtn")}
+          </button>
+        </div>
       </div>
 
       {/* ── Headline summary band (clips count + storage + live + cams) ──
           Tiles are clickable filters: Total/Storage/Cameras clear all
           active filters; Live Now toggles a recording_status=recording
           filter on the list query. */}
+      {!noRecords && (
       <ClipSummaryBand
         stats={stats.data ?? null}
         liveCount={
@@ -521,11 +351,12 @@ export function PersonClipsPage() {
           })
         }
       />
+      )}
 
       {/* ── Pipeline (face-match) progress pills ──
           Each pill is a clickable filter mapped to ``matched_status``.
           Clicking the active pill again clears the filter. */}
-      {stats.data && (
+      {stats.data && !noRecords && (
         <PipelineStatsBar
           stats={stats.data}
           active={filters.matched_status}
@@ -543,37 +374,15 @@ export function PersonClipsPage() {
         )}
 
       {/* ── Tab navigation ── */}
-      <div
-        style={{
-          display: "flex",
-          gap: 2,
-          marginBottom: 12,
-          borderBottom: "1px solid var(--border)",
-          paddingBottom: 0,
-        }}
-        role="tablist"
-        aria-label="Person Clips sections"
-      >
+      <div className="tabs" role="tablist" aria-label={t("personClips.tabsAria", { defaultValue: "Person Clips sections" })}>
         {(["clips", "pipeline", "system", "comparison"] as Tab[]).map((tab) => (
           <button
             key={tab}
             type="button"
             role="tab"
             aria-selected={activeTab === tab}
+            className={`tab${activeTab === tab ? " active" : ""}`}
             onClick={() => setActiveTab(tab)}
-            style={{
-              padding: "8px 16px",
-              fontSize: 13,
-              fontWeight: activeTab === tab ? 600 : 400,
-              color: activeTab === tab ? "var(--text)" : "var(--text-secondary)",
-              background: "none",
-              border: "none",
-              borderBottom: activeTab === tab ? "2px solid var(--text)" : "2px solid transparent",
-              cursor: "pointer",
-              marginBottom: -1,
-              transition: "color 0.15s, border-color 0.15s",
-              fontFamily: "var(--font-sans)",
-            }}
           >
             {tab === "clips" && t("personClips.tabClips")}
             {tab === "pipeline" && t("personClips.tabPipeline")}
@@ -589,6 +398,7 @@ export function PersonClipsPage() {
           filters={filters}
           list={list}
           cameras={cameras}
+          noRecords={noRecords}
           selectedIds={selectedIds}
           selectedClips={selectedClips}
           totalPages={totalPages}
@@ -848,6 +658,7 @@ function ClipsTab({
   filters,
   list,
   cameras,
+  noRecords,
   selectedIds,
   selectedClips,
   totalPages,
@@ -863,6 +674,7 @@ function ClipsTab({
   filters: PersonClipFilters;
   list: ReturnType<typeof usePersonClips>;
   cameras: ReturnType<typeof useCameraOptions>;
+  noRecords: boolean;
   selectedIds: Set<number>;
   selectedClips: PersonClipOut[];
   totalPages: number;
@@ -876,182 +688,278 @@ function ClipsTab({
   onOpenDetail: (c: PersonClipOut) => void;
 }) {
   const { t } = useTranslation();
+  const items = list.data?.items ?? [];
+  const allSelected = items.length > 0 && selectedIds.size === items.length;
+  const filtersActive =
+    filters.camera_id !== null ||
+    filters.start !== null ||
+    filters.end !== null ||
+    filters.employee_id !== null ||
+    filters.matched_status !== null ||
+    filters.recording_status !== null;
+  const resetFilters = () =>
+    onUpdateFilters({
+      camera_id: null,
+      employee_id: null,
+      start: null,
+      end: null,
+      matched_status: null,
+      recording_status: null,
+    });
+
+  if (noRecords && !filtersActive && !list.isLoading && !list.isError) {
+    return (
+      <div className="card">
+        <EmptyPanel
+          tone="accent"
+          icon={<Icon name="videocam" size={28} />}
+          title={t("personClips.toolbar.emptyTitle", { defaultValue: "No clips recorded yet" })}
+          body={t("personClips.empty")}
+          actions={
+            <Link className="btn btn-primary" to="/cameras">
+              <Icon name="camera" size={12} />
+              {t("personClips.toolbar.goToCameras", { defaultValue: "Go to cameras" })}
+            </Link>
+          }
+        />
+      </div>
+    );
+  }
 
   return (
-    <div className="card">
-      <div className="card-head">
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {list.data && list.data.items.length > 0 && (
+    <>
+      <Toolbar>
+        <FilterSelect
+          label={t("personClips.toolbar.camera", { defaultValue: "Camera" })}
+          value={filters.camera_id === null ? "" : String(filters.camera_id)}
+          onChange={(v) => onUpdateFilters({ camera_id: v === "" ? null : Number(v) })}
+          options={[
+            ["", t("personClips.allCameras")],
+            ...(cameras.data?.items ?? []).map((c) => [String(c.id), c.name] as [string, string]),
+          ]}
+        />
+        <DateTimeField
+          label={t("personClips.from")}
+          value={filters.start ?? ""}
+          onChange={(v) => onUpdateFilters({ start: v || null })}
+        />
+        <DateTimeField
+          label={t("personClips.to")}
+          value={filters.end ?? ""}
+          onChange={(v) => onUpdateFilters({ end: v || null })}
+        />
+        <ResetButton
+          active={filtersActive}
+          label={t("personClips.toolbar.reset", { defaultValue: "Reset" })}
+          onClick={resetFilters}
+        />
+      </Toolbar>
+
+      <div className="card" style={{ padding: 14 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            flexWrap: "wrap",
+            padding: "2px 4px 12px",
+          }}
+        >
+          {items.length > 0 && (
             <label
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: 4,
-                fontSize: 11.5,
+                gap: 6,
+                fontSize: 12.5,
                 cursor: "pointer",
                 color: "var(--text-secondary)",
               }}
-              aria-label="Select all"
             >
               <input
                 type="checkbox"
-                checked={
-                  list.data.items.length > 0 &&
-                  selectedIds.size === list.data.items.length
-                }
-                onChange={() => {
-                  if (selectedIds.size === list.data!.items.length) {
-                    onDeselectAll();
-                  } else {
-                    onSelectAll();
-                  }
-                }}
+                checked={allSelected}
+                onChange={() => (allSelected ? onDeselectAll() : onSelectAll())}
+                aria-label={t("personClips.toolbar.selectAllAria", { defaultValue: "Select all clips on this page" })}
                 style={{ accentColor: "var(--accent)" }}
               />
-              All
+              {t("personClips.toolbar.all", { defaultValue: "All" })}
             </label>
           )}
-          <h3 className="card-title">{t("personClips.listTitle")}</h3>
-        </div>
-        <div className="flex gap-2" style={{ alignItems: "center", flexWrap: "wrap" as const }}>
-          <select
-            value={filters.camera_id ?? ""}
-            onChange={(e) =>
-              onUpdateFilters({
-                camera_id: e.target.value === "" ? null : Number(e.target.value),
-              })
-            }
-            style={selectStyle}
-            aria-label={t("personClips.filterCamera")}
-          >
-            <option value="">{t("personClips.allCameras")}</option>
-            {cameras.data?.items.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-          <input
-            type="datetime-local"
-            value={filters.start ?? ""}
-            onChange={(e) => onUpdateFilters({ start: e.target.value || null })}
-            style={selectStyle}
-            title={t("personClips.from")}
-            aria-label={t("personClips.from")}
-          />
-          <input
-            type="datetime-local"
-            value={filters.end ?? ""}
-            onChange={(e) => onUpdateFilters({ end: e.target.value || null })}
-            style={selectStyle}
-            title={t("personClips.to")}
-            aria-label={t("personClips.to")}
-          />
-        </div>
-      </div>
-
-      {list.isLoading && (
-        <SkeletonTable rows={8} cols={7} />
-      )}
-      {list.isError && (
-        <div className="text-sm" style={{ padding: 16, color: "var(--danger-text)" }}>
-          {t("personClips.loadFailed")}
-        </div>
-      )}
-      {list.data && list.data.items.length === 0 && !list.isLoading && (
-        <div className="text-sm text-dim" style={{ padding: 16 }}>
-          {t("personClips.empty")}
-        </div>
-      )}
-
-      {list.data && list.data.items.length > 0 && (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
-            gap: 12,
-            padding: 12,
-          }}
-        >
+          <h3 className="card-title" style={{ margin: 0 }}>{t("personClips.listTitle")}</h3>
+          {list.data && (
+            <span className="pill pill-neutral mono">
+              {list.data.total.toLocaleString()}
+            </span>
+          )}
           {selectedIds.size > 0 && (
             <div
               style={{
-                gridColumn: "1 / -1",
+                marginInlineStart: "auto",
                 display: "flex",
                 alignItems: "center",
                 gap: 10,
-                padding: "8px 12px",
+                padding: "4px 6px 4px 12px",
                 background: "var(--accent-soft)",
-                borderRadius: "var(--radius-sm)",
+                borderRadius: 10,
                 fontSize: 12.5,
               }}
             >
               <Icon name="check" size={13} />
-              <span style={{ fontWeight: 500 }}>{selectedIds.size} selected</span>
-              <button
-                type="button"
-                className="btn btn-sm"
-                onClick={onDeselectAll}
-                style={{ marginLeft: "auto" }}
-              >
-                Clear
+              <span style={{ fontWeight: 500 }}>
+                {t("personClips.toolbar.selected", { defaultValue: "{{n}} selected", n: selectedIds.size })}
+              </span>
+              <button type="button" className="btn btn-sm" onClick={onDeselectAll}>
+                {t("personClips.toolbar.clearSelection", { defaultValue: "Clear" })}
               </button>
               <button
                 type="button"
-                className="btn btn-sm"
-                style={{ background: "var(--danger)", color: "white" }}
+                className="btn btn-sm btn-danger"
                 onClick={() => onBulkDeleteTarget(selectedClips)}
               >
-                <Icon name="trash" size={11} /> Delete selected
+                <Icon name="trash" size={11} /> {t("personClips.toolbar.deleteSelected", { defaultValue: "Delete selected" })}
               </button>
             </div>
           )}
-          {list.data.items.map((clip) => (
-            <ClipCard
-              key={clip.id}
-              clip={clip}
-              isSelected={selectedIds.has(clip.id)}
-              onToggleSelect={() => onToggleSelect(clip.id)}
-              onDelete={() => onDeleteTarget(clip)}
-              onOpenDetail={() => onOpenDetail(clip)}
-            />
-          ))}
         </div>
-      )}
 
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          padding: "10px 14px",
-          borderTop: "1px solid var(--border)",
-          fontSize: 12,
-        }}
-      >
-        <span className="text-dim">
-          {t("personClips.page")} {filters.page} {t("personClips.of")} {totalPages}
-        </span>
-        <div style={{ display: "flex", gap: 6 }}>
-          <button
-            className="btn btn-sm"
-            disabled={filters.page <= 1}
-            onClick={() => onPageChange(filters.page - 1)}
+        {list.isLoading && <SkeletonGrid count={8} minWidth={300} />}
+        {list.isError && (
+          <EmptyPanel
+            tone="danger"
+            icon={<Icon name="info" size={28} />}
+            title={t("personClips.loadFailed")}
+            body={t("personClips.toolbar.errorBody", { defaultValue: "Something went wrong while fetching clips. Try again in a moment." })}
+            actions={
+              <button type="button" className="btn" onClick={() => void list.refetch()}>
+                <Icon name="refresh" size={12} />
+                {t("personClips.toolbar.retry", { defaultValue: "Retry" })}
+              </button>
+            }
+          />
+        )}
+        {list.data && items.length === 0 && !list.isLoading && (
+          filtersActive ? (
+            <EmptyPanel
+              icon={<Icon name="filter" size={28} />}
+              title={t("personClips.toolbar.emptyFilteredTitle", { defaultValue: "No clips match these filters" })}
+              body={t("personClips.toolbar.emptyFilteredBody", { defaultValue: "Try another camera, time range or face-matching status." })}
+              actions={
+                <button type="button" className="btn" onClick={resetFilters}>
+                  <Icon name="refresh" size={12} />
+                  {t("personClips.toolbar.clearFilters", { defaultValue: "Clear filters" })}
+                </button>
+              }
+            />
+          ) : (
+            <EmptyPanel
+              tone="accent"
+              icon={<Icon name="videocam" size={28} />}
+              title={t("personClips.toolbar.emptyTitle", { defaultValue: "No clips recorded yet" })}
+              body={t("personClips.empty")}
+            />
+          )
+        )}
+
+        {items.length > 0 && (
+          <div className="cl-media-grid">
+            {items.map((clip) => (
+              <ClipCard
+                key={clip.id}
+                clip={clip}
+                isSelected={selectedIds.has(clip.id)}
+                onToggleSelect={() => onToggleSelect(clip.id)}
+                onDelete={() => onDeleteTarget(clip)}
+                onOpenDetail={() => onOpenDetail(clip)}
+              />
+            ))}
+          </div>
+        )}
+
+        {(list.data?.total ?? 0) > 0 && (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "12px 4px 2px",
+              marginTop: 12,
+              borderTop: "1px solid var(--border)",
+              fontSize: 12,
+            }}
           >
-            <Icon name="chevronLeft" size={11} />
-            {t("common.previous")}
-          </button>
-          <button
-            className="btn btn-sm"
-            disabled={filters.page >= totalPages}
-            onClick={() => onPageChange(filters.page + 1)}
-          >
-            {t("common.next")}
-            <Icon name="chevronRight" size={11} />
-          </button>
-        </div>
+            <span className="text-dim">
+              {t("personClips.page")} {filters.page} {t("personClips.of")} {totalPages}
+            </span>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button
+                className="btn btn-sm"
+                disabled={filters.page <= 1}
+                onClick={() => onPageChange(filters.page - 1)}
+              >
+                <Icon name="chevronLeft" size={11} />
+                {t("common.previous")}
+              </button>
+              <button
+                className="btn btn-sm"
+                disabled={filters.page >= totalPages}
+                onClick={() => onPageChange(filters.page + 1)}
+              >
+                {t("common.next")}
+                <Icon name="chevronRight" size={11} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
-    </div>
+    </>
+  );
+}
+
+/** Date-time filter styled to match the shared Toolbar fields. Native
+ *  ``datetime-local`` kept on purpose — the API filters to the minute. */
+function DateTimeField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const active = value !== "";
+  return (
+    <label
+      style={{
+        height: FIELD_H,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "0 10px 0 12px",
+        border: `1px solid ${active ? "var(--accent)" : "var(--border)"}`,
+        borderRadius: 10,
+        background: active ? "var(--accent-soft)" : "var(--bg-elev)",
+        boxSizing: "border-box",
+      }}
+    >
+      <span style={{ color: "var(--text-tertiary)", fontSize: 12 }}>{label}:</span>
+      <input
+        type="datetime-local"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        aria-label={label}
+        title={label}
+        style={{
+          border: "none",
+          outline: "none",
+          background: "transparent",
+          color: value ? "var(--text)" : "var(--text-tertiary)",
+          fontSize: 13,
+          fontFamily: "var(--font-sans)",
+          height: "100%",
+        }}
+      />
+    </label>
   );
 }
 
@@ -4363,15 +4271,7 @@ function ClipCard({
 
   return (
     <div
-      style={{
-        position: "relative",
-        border: "1px solid var(--border)",
-        borderRadius: "var(--radius)",
-        overflow: "hidden",
-        background: "var(--bg-elev)",
-        display: "flex",
-        flexDirection: "column",
-      }}
+      className={`cl-media-card${isSelected ? " is-selected" : ""}`}
       // Migration 0058 — right-click on a completed clip opens the
       // Process menu. In-flight clips (recording / finalizing) skip
       // the menu since they have no MP4 to process yet — let the
@@ -4387,21 +4287,14 @@ function ClipCard({
       }
     >
       {/* Checkbox overlay */}
-      <div style={{ position: "absolute", top: 6, left: 6, zIndex: 2 }}>
+      <div className="cl-media-check">
         <input
           type="checkbox"
           checked={isSelected}
           onChange={onToggleSelect}
           onClick={(e) => e.stopPropagation()}
           disabled={isInFlight}
-          aria-label={`Select clip ${clip.id}`}
-          style={{
-            width: 16,
-            height: 16,
-            cursor: isInFlight ? "not-allowed" : "pointer",
-            accentColor: "var(--accent)",
-            opacity: isInFlight ? 0.4 : 1,
-          }}
+          aria-label={t("personClips.card.selectAria", { defaultValue: "Select clip {{id}}", id: clip.id })}
           title={
             isInFlight
               ? (t("personClips.live.deleteDisabled") as string)
@@ -4410,53 +4303,17 @@ function ClipCard({
         />
       </div>
 
-      {/* Migration 0054 / 0055 — premium in-flight status pill.
-          Recording: red gradient + pulsing dot, surveillance feel.
-          Finalizing: amber gradient + spinning hint.
-          The pill sits above the static placeholder so it stands out
-          against the dark tile. */}
+      {/* In-flight status pill: recording (red, pulsing) / finalizing (amber). */}
       {isInFlight && (
         <div
-          style={{
-            position: "absolute",
-            top: 10,
-            right: 10,
-            zIndex: 3,
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "4px 9px 4px 8px",
-            borderRadius: 999,
-            background: isRecording
-              ? "linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)"
-              : "linear-gradient(135deg, #f59e0b 0%, #b45309 100%)",
-            color: "#fff",
-            fontSize: 10,
-            fontWeight: 800,
-            letterSpacing: "0.08em",
-            textTransform: "uppercase",
-            boxShadow: isRecording
-              ? "0 4px 14px rgba(239,68,68,0.5), 0 0 0 1px rgba(255,255,255,0.18) inset"
-              : "0 4px 14px rgba(245,158,11,0.45), 0 0 0 1px rgba(255,255,255,0.15) inset",
-            backdropFilter: "blur(6px)",
-          }}
+          className={`cl-live-pill ${isRecording ? "is-recording" : "is-finalizing"}`}
           aria-label={
             isRecording
-              ? "Recording in progress"
-              : "Encoding in progress"
+              ? t("personClips.card.recordingAria", { defaultValue: "Recording in progress" })
+              : t("personClips.card.encodingAria", { defaultValue: "Encoding in progress" })
           }
         >
-          <span
-            aria-hidden
-            style={{
-              width: 7,
-              height: 7,
-              borderRadius: "50%",
-              background: "#fff",
-              boxShadow: "0 0 0 2px rgba(255,255,255,0.25)",
-              animation: "maugood-live-pulse 1.4s ease-in-out infinite",
-            }}
-          />
+          <span aria-hidden className="cl-live-dot" />
           {isRecording
             ? t("personClips.live.badge")
             : t("personClips.live.finalizing")}
@@ -4465,22 +4322,11 @@ function ClipCard({
 
       {/* Thumbnail / Video */}
       <div
-        style={{
-          position: "relative",
-          width: "100%",
-          aspectRatio: "16 / 9",
-          background: "#0b0f14",
-          display: "grid",
-          placeItems: "center",
-          // In-flight tiles (recording / finalizing) are inert: there
-          // is no decodable artifact yet, so the tile is a static
-          // placeholder rather than a play affordance.
-          cursor: isInFlight ? "default" : "pointer",
-          overflow: "hidden",
-        }}
+        className="cl-media-thumb"
+        style={{ cursor: isInFlight ? "default" : "pointer" }}
         onClick={isInFlight ? undefined : handlePlay}
         role={isInFlight ? undefined : "button"}
-        aria-label={isInFlight ? undefined : "Play clip"}
+        aria-label={isInFlight ? undefined : t("personClips.card.playAria", { defaultValue: "Play clip" })}
         tabIndex={isInFlight ? -1 : 0}
         onKeyDown={
           isInFlight
@@ -4498,93 +4344,38 @@ function ClipCard({
             src={videoUrl}
             controls
             autoPlay
-            style={{ width: "100%", height: "100%", display: "block" }}
             onError={() => setPlayError(true)}
           />
         ) : thumbUrl && !thumbError ? (
           <img
+            className="cl-media-img-fade"
             src={thumbUrl}
             alt=""
-            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
             onError={() => setThumbError(true)}
           />
         ) : playError ? (
-          <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 11 }}>Load failed</div>
+          <div className="cl-media-overlay-inner">{t("personClips.card.loadFailed", { defaultValue: "Load failed" })}</div>
         ) : null}
 
         {/* Static overlay for the three non-playing states:
             recording → videocam + "Recording…"
             finalizing → spinning loader + "Encoding…"
-            completed → minimal circular play button + duration */}
+            completed → circular play button + duration */}
         {!showVideo && (
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              display: "grid",
-              placeItems: "center",
-              background: "rgba(0,0,0,0.2)",
-            }}
-          >
-            <div
-              style={{
-                display: "grid",
-                placeItems: "center",
-                gap: 8,
-                color: "rgba(255,255,255,0.7)",
-              }}
-            >
-              {/* Three overlay states:
-                  - recording  → videocam + "Recording…"
-                  - finalizing → spinning loader + "Encoding…"
-                  - completed  → minimal circular play button
-                                 (white round button, black filled
-                                  triangle, soft shadow — streaming-
-                                  player aesthetic) + duration */}
+          <div className="cl-media-overlay">
+            <div className="cl-media-overlay-inner">
               {isFinalizing ? (
-                <span
-                  style={{
-                    display: "inline-grid",
-                    placeItems: "center",
-                    animation: "maugood-spin 1.2s linear infinite",
-                  }}
-                  aria-label={t("personClips.live.finalizing") as string}
-                >
+                <span className="cl-spin" aria-label={t("personClips.live.finalizing") as string}>
                   <Icon name="refresh" size={32} strokeWidth={1.5} />
                 </span>
               ) : isRecording ? (
                 <Icon name="videocam" size={32} strokeWidth={1} />
               ) : (
-                <span
-                  className="clip-play-btn"
-                  style={{
-                    width: 40,
-                    height: 40,
-                    borderRadius: "50%",
-                    background: "#fff",
-                    display: "grid",
-                    placeItems: "center",
-                    boxShadow:
-                      "0 4px 14px rgba(0, 0, 0, 0.3), " +
-                      "0 1px 4px rgba(0, 0, 0, 0.18)",
-                    color: "#000",
-                    // Optical correction: the triangle's visual mass
-                    // sits left of its geometric center, so a small
-                    // right-shift makes the icon look centered.
-                    paddingInlineStart: 2,
-                    transition: "transform 0.15s ease",
-                  }}
-                  aria-hidden
-                >
-                  <Icon
-                    name="play"
-                    size={16}
-                    strokeWidth={0}
-                    style={{ fill: "currentColor" }}
-                  />
+                <span className="cl-play" aria-hidden>
+                  <Icon name="play" size={16} strokeWidth={0} style={{ fill: "currentColor" }} />
                 </span>
               )}
-              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)" }}>
+              <span>
                 {isFinalizing
                   ? t("personClips.live.encodingProgress")
                   : isRecording
@@ -4598,148 +4389,85 @@ function ClipCard({
 
       {/* Matching progress bar */}
       {isMatching && (
-        <div style={{ padding: "6px 12px 0" }}>
-          <div
-            style={{
-              width: "100%",
-              height: 4,
-              background: "rgba(0,0,0,0.06)",
-              borderRadius: 2,
-              overflow: "hidden",
-            }}
-          >
-            <div
-              style={{
-                width: `${Math.max(2, matchProgress)}%`,
-                height: "100%",
-                background: "var(--accent)",
-                borderRadius: 2,
-                transition: "width 0.5s ease",
-              }}
-            />
+        <div style={{ padding: "8px 12px 0" }}>
+          <div className="cl-progress">
+            <span style={{ width: `${Math.max(2, matchProgress)}%` }} />
           </div>
-          <span style={{ fontSize: 9, color: "var(--text-secondary)", marginTop: 2, display: "block" }}>
-            Matching {matchProgress}%
+          <span className="text-xs text-dim" style={{ display: "block", marginTop: 3 }}>
+            {t("personClips.card.matchingPct", { defaultValue: "Matching {{pct}}%", pct: matchProgress })}
           </span>
         </div>
       )}
 
-      {/* Camera + ID */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          padding: "10px 12px 4px",
-        }}
-      >
-        <span className="pill pill-neutral" style={{ fontSize: 10, fontWeight: 500 }}>
-          {clip.camera_name}
-        </span>
-        <span
-          style={{
-            fontSize: 10,
-            color: "var(--text-secondary)",
-            fontFamily: "var(--font-mono, monospace)",
-            letterSpacing: "0.3px",
-          }}
+      <div className="cl-media-body">
+        {/* Camera + ID */}
+        <div className="cl-media-row is-between">
+          <span className="pill pill-neutral" style={{ minWidth: 0 }}>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{clip.camera_name}</span>
+          </span>
+          <span className="cl-media-id">#{clip.id}</span>
+        </div>
+
+        {/* Timestamp + duration */}
+        <div className="cl-media-row">
+          <span>
+            {dateStr} {hourStr}
+          </span>
+          <span className="sep">|</span>
+          <span>{fmtDuration(clip.duration_seconds)}</span>
+          {personStart && personEnd && (
+            <>
+              <span className="sep">|</span>
+              <span>
+                {t("personClips.card.person", { defaultValue: "Person" })}{" "}
+                {personStart.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+                &ndash;
+                {personEnd.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            </>
+          )}
+          {/* Surface chunk_count when >1 (long recordings merged from
+              multiple chunks). */}
+          <ChunkBadge chunkCount={clip.chunk_count} />
+        </div>
+
+        {/* Precise clip start → end times. Tabular so the pair lines up
+            with the on-disk filename's HHMMSS-HHMMSS format. */}
+        <div
+          className="cl-media-row mono"
+          title={
+            isRecording
+              ? (t("personClips.startEnd.titleRecording") as string)
+              : (t("personClips.startEnd.titleCompleted") as string)
+          }
         >
-          #{clip.id}
-        </span>
+          <span>{startHms}</span>
+          <span className="sep">→</span>
+          <span>
+            {/* While 'recording' clip_end is the start sentinel, so we
+                render "Recording…" instead of an equal-time pair. */}
+            {isRecording ? t("personClips.startEnd.recording") : endHms}
+          </span>
+        </div>
       </div>
 
-      {/* Timestamp + duration */}
-      <div
-        style={{
-          padding: "0 12px 8px",
-          fontSize: 11,
-          color: "var(--text-secondary)",
-          display: "flex",
-          gap: 12,
-          alignItems: "center",
-          flexWrap: "wrap",
-        }}
-      >
-        <span>
-          {dateStr} {hourStr}
-        </span>
-        <span style={{ opacity: 0.4 }}>|</span>
-        <span>{fmtDuration(clip.duration_seconds)}</span>
-        {personStart && personEnd && (
-          <>
-            <span style={{ opacity: 0.4 }}>|</span>
-            <span>
-              Person{" "}
-              {personStart.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
-              &ndash;
-              {personEnd.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
-            </span>
-          </>
-        )}
-        {/* Surface chunk_count when >1 (long recordings merged from
-            multiple chunks). */}
-        <ChunkBadge chunkCount={clip.chunk_count} />
-      </div>
-
-      {/* Precise clip start → end times. Mono for alignment; matches
-          the on-disk filename's HHMMSS-HHMMSS format so an operator
-          can grep a path back to the row by eye. */}
-      <div
-        className="mono"
-        style={{
-          padding: "0 12px 8px",
-          fontSize: 11,
-          color: "var(--text-secondary)",
-          display: "flex",
-          gap: 6,
-          alignItems: "center",
-        }}
-        title={
-          isRecording
-            ? (t("personClips.startEnd.titleRecording") as string)
-            : (t("personClips.startEnd.titleCompleted") as string)
-        }
-      >
-        <span>{startHms}</span>
-        <span style={{ opacity: 0.45 }}>→</span>
-        <span>
-          {/* While 'recording' clip_end is the start sentinel, so we
-              render "Recording…" instead of an equal-time pair.
-              While 'finalizing' clip_end has been updated to the real
-              last-frame timestamp (see reader._mark_recording_finalizing),
-              so the real time renders fine. */}
-          {isRecording ? t("personClips.startEnd.recording") : endHms}
-        </span>
-      </div>
-
-      <div style={{ height: 1, background: "var(--border)", margin: "0 12px" }} />
+      <div className="cl-media-divider" />
 
       {/* Person count + names */}
-      <div style={{ padding: "8px 12px 4px" }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-          <span
-            style={{
-              fontWeight: 700,
-              fontSize: 22,
-              color: personCountColor(personCount),
-              lineHeight: 1,
-            }}
-          >
+      <div className="cl-media-body">
+        <div className="cl-persons">
+          <span className={`cl-persons-n${personCount >= 3 ? " is-many" : personCount === 2 ? " is-two" : ""}`}>
             {personCount}
           </span>
-          <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-            {personCount === 1 ? "person" : "persons"}
+          <span className="text-xs text-dim">
+            {t("personClips.card.persons", { defaultValue: "persons", count: personCount })}
           </span>
         </div>
 
         {isMatched && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
+          <div className="cl-pills">
             {clip.matched_employee_names.map((name) => (
-              <span
-                key={name}
-                className="pill pill-primary"
-                style={{ fontSize: 10, lineHeight: "16px" }}
-              >
+              <span key={name} className="pill pill-primary">
                 {name}
               </span>
             ))}
@@ -4747,112 +4475,73 @@ function ClipCard({
         )}
 
         {hasUnknown && (
-          <div
-            style={{
-              fontSize: 10,
-              color: "var(--text-secondary)",
-              marginTop: 4,
-              opacity: 0.7,
-            }}
-          >
-            +{unknownCount} unknown
+          <div className="text-xs text-dim">
+            {t("personClips.card.unknown", { defaultValue: "+{{n}} unknown", n: unknownCount })}
           </div>
         )}
 
         {!isMatched && !hasUnknown && personCount > 0 && (
-          <div
-            style={{
-              fontSize: 10,
-              color: isMatching ? "var(--accent)" : "var(--text-secondary)",
-              marginTop: 4,
-            }}
-          >
-            {isMatching ? "Matching…" : t("personClips.pendingMatch")}
+          <div className="text-xs" style={{ color: isMatching ? "var(--accent-text)" : "var(--text-tertiary)" }}>
+            {isMatching ? t("personClips.card.matching", { defaultValue: "Matching…" }) : t("personClips.pendingMatch")}
           </div>
         )}
       </div>
 
-      <div style={{ height: 1, background: "var(--border)", margin: "0 12px" }} />
+      <div className="cl-media-divider" />
 
       {/* Footer metadata */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          padding: "6px 12px 8px",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            fontSize: 10,
-            color: "var(--text-secondary)",
-            alignItems: "center",
-            flexWrap: "wrap",
-          }}
-        >
+      <div className="cl-media-foot">
+        <div className="cl-media-meta">
           <span>{fmtFileSize(clip.filesize_bytes)}</span>
           {res && (
             <>
-              <span style={{ opacity: 0.3 }}>·</span>
+              <span className="sep">·</span>
               <span>{res}</span>
             </>
           )}
           {fps !== null && (
             <>
-              <span style={{ opacity: 0.3 }}>·</span>
+              <span className="sep">·</span>
               <span>{fps.toFixed(1)} fps</span>
             </>
           )}
           {encMs !== null && (
             <>
-              <span style={{ opacity: 0.3 }}>·</span>
-              <span title="Encoding duration">{fmtMs(encMs)} enc</span>
+              <span className="sep">·</span>
+              <span title={t("personClips.card.encodingDuration", { defaultValue: "Encoding duration" })}>{fmtMs(encMs)} enc</span>
             </>
           )}
           {matchDuration !== null && matchDuration !== undefined && (
             <>
-              <span style={{ opacity: 0.3 }}>·</span>
-              <span title="Face matching duration">{fmtMs(matchDuration)} match</span>
+              <span className="sep">·</span>
+              <span title={t("personClips.card.matchDuration", { defaultValue: "Face matching duration" })}>{fmtMs(matchDuration)} match</span>
             </>
           )}
         </div>
-        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+        <div className="cl-media-actions">
           {matchProgress >= 100 && isMatched && (
-            <span
-              style={{
-                fontSize: 9,
-                color: "var(--success-text, #2e7d32)",
-                background: "var(--success-soft, #e6f7e6)",
-                padding: "1px 6px",
-                borderRadius: "var(--radius-sm)",
-                fontWeight: 500,
-              }}
-            >
-              Matched
+            <span className="pill pill-success" style={{ marginInlineEnd: 4 }}>
+              {t("personClips.card.matched", { defaultValue: "Matched" })}
             </span>
           )}
           <button
             type="button"
-            className="icon-btn"
-            aria-label="View clip details"
-            title="View details"
+            className="btn btn-sm btn-ghost"
+            aria-label={t("personClips.card.viewDetailsAria", { defaultValue: "View clip details" })}
+            title={t("personClips.card.viewDetails", { defaultValue: "View details" })}
             onClick={onOpenDetail}
-            style={{ opacity: 0.6 }}
           >
-            <Icon name="eye" size={11} />
+            <Icon name="eye" size={13} />
           </button>
           <button
             type="button"
-            className="icon-btn"
-            aria-label="Delete clip"
-            title="Delete clip"
+            className="btn btn-sm btn-ghost"
+            aria-label={t("personClips.card.deleteAria", { defaultValue: "Delete clip" })}
+            title={t("personClips.card.deleteAria", { defaultValue: "Delete clip" })}
             onClick={onDelete}
-            style={{ color: "var(--danger-text)", opacity: 0.5, marginLeft: 2 }}
+            style={{ color: "var(--danger-text)" }}
           >
-            <Icon name="trash" size={11} />
+            <Icon name="trash" size={13} />
           </button>
         </div>
       </div>

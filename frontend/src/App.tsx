@@ -21,6 +21,7 @@ import { DivisionsPage } from "./settings/DivisionsPage";
 import { SectionsPage } from "./settings/SectionsPage";
 import { DisplaySettingsPage } from "./settings/DisplaySettingsPage";
 import { WorkspacePage } from "./settings/WorkspacePage";
+import { SettingsShell } from "./settings/SettingsTabs";
 import { ErpExportPage } from "./erp-export/ErpExportPage";
 import { NotificationsPage } from "./notifications/NotificationsPage";
 import { NotificationPreferencesPage } from "./notifications/PreferencesPage";
@@ -44,6 +45,7 @@ import { PipelineAnalyticsPage } from "./features/pipeline-analytics/PipelineAna
 import { StorageAnalyticsPage } from "./features/storage-analytics/StorageAnalyticsPage";
 import { DashboardRouter } from "./features/dashboard/DashboardRouter";
 import { EmployeesPage } from "./features/employees/EmployeesPage";
+import { EmployeeProfilePage } from "./features/employees/EmployeeProfilePage";
 import { MyProfilePage } from "./features/employees/MyProfilePage";
 import { MyTeamPage } from "./features/employees/MyTeamPage";
 import { PhotoApprovalsPage } from "./features/employees/PhotoApprovalsPage";
@@ -140,6 +142,7 @@ export function App() {
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<DashboardRouter />} />
         <Route path="employees" element={<EmployeesPage />} />
+        <Route path="employees/:id" element={<EmployeeProfilePage />} />
         <Route path="users" element={<AdminOnly><UsersPage /></AdminOnly>} />
         <Route path="cameras" element={<CamerasPage />} />
         <Route path="devices" element={<AdminOnly><DevicesPage /></AdminOnly>} />
@@ -176,25 +179,29 @@ export function App() {
         <Route path="policies" element={<PoliciesPage />} />
         <Route path="leave-policy" element={<LeaveCalendarPage />} />
         <Route path="settings" element={<SettingsRedirect />} />
-        <Route path="settings/workspace" element={<SettingsAdminOnly><WorkspacePage /></SettingsAdminOnly>} />
-        <Route path="settings/branding" element={<SettingsAdminOnly><BrandingPage /></SettingsAdminOnly>} />
-        <Route path="settings/authentication" element={<SettingsAdminOnly><AuthenticationPage /></SettingsAdminOnly>} />
-        {/* Users moved out of Settings to its own sidebar nav item (/users).
-            Bounce stale /settings/users bookmarks there. */}
-        <Route path="settings/users" element={<Navigate to="/users" replace />} />
-        <Route path="settings/departments" element={<DepartmentsPage />} />
-        <Route path="settings/divisions" element={<DivisionsPage />} />
-        <Route path="settings/sections" element={<SectionsPage />} />
-        <Route path="settings/custom-fields" element={<SettingsAdminOnly><CustomFieldsPage /></SettingsAdminOnly>} />
-        <Route path="settings/reason-categories" element={<SettingsAdminOnly><ReasonCategoriesPage /></SettingsAdminOnly>} />
-        <Route path="settings/email" element={<SettingsAdminOnly><EmailConfigPage /></SettingsAdminOnly>} />
-        <Route path="settings/schedules" element={<SettingsAdminOnly><SchedulesPage /></SettingsAdminOnly>} />
-        <Route path="settings/erp-export" element={<SettingsAdminOnly><ErpExportPage /></SettingsAdminOnly>} />
-        {/* BUG-050 — Display + Notifications are per-user preferences,
-            not admin surfaces. Allow Manager / Employee through so the
-            topbar Settings link doesn't bounce them to the dashboard. */}
-        <Route path="settings/notifications" element={<NotificationPreferencesPage />} />
-        <Route path="settings/display" element={<DisplaySettingsPage />} />
+        {/* Settings hub: one layout route renders the grouped side nav
+            (SettingsShell) beside whichever settings page is active. */}
+        <Route element={<SettingsShell />}>
+          <Route path="settings/workspace" element={<SettingsAdminOnly><WorkspacePage /></SettingsAdminOnly>} />
+          <Route path="settings/branding" element={<SettingsAdminOnly><BrandingPage /></SettingsAdminOnly>} />
+          <Route path="settings/authentication" element={<SettingsAdminOnly><AuthenticationPage /></SettingsAdminOnly>} />
+          {/* Users moved out of Settings to its own sidebar nav item (/users).
+              Bounce stale /settings/users bookmarks there. */}
+          <Route path="settings/users" element={<Navigate to="/users" replace />} />
+          <Route path="settings/departments" element={<DepartmentsPage />} />
+          <Route path="settings/divisions" element={<DivisionsPage />} />
+          <Route path="settings/sections" element={<SectionsPage />} />
+          <Route path="settings/custom-fields" element={<SettingsAdminOnly><CustomFieldsPage /></SettingsAdminOnly>} />
+          <Route path="settings/reason-categories" element={<SettingsAdminOnly><ReasonCategoriesPage /></SettingsAdminOnly>} />
+          <Route path="settings/email" element={<SettingsAdminOnly><EmailConfigPage /></SettingsAdminOnly>} />
+          <Route path="settings/schedules" element={<SettingsAdminOnly><SchedulesPage /></SettingsAdminOnly>} />
+          <Route path="settings/erp-export" element={<SettingsAdminOnly><ErpExportPage /></SettingsAdminOnly>} />
+          {/* BUG-050 — Display + Notifications are per-user preferences,
+              not admin surfaces. Allow Manager / Employee through so the
+              topbar Settings link doesn't bounce them to the dashboard. */}
+          <Route path="settings/notifications" element={<NotificationPreferencesPage />} />
+          <Route path="settings/display" element={<DisplaySettingsPage />} />
+        </Route>
         <Route path="notifications" element={<NotificationsPage />} />
         <Route path="my-requests" element={<MyRequestsPage />} />
         <Route path="approvals" element={<ApprovalsPage />} />

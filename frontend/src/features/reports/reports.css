@@ -1,0 +1,246 @@
+/* Reports area — page-specific layout on top of src/theme/modern.css and
+ * features/attendance/attendance.css. Prefix: rp-. CSS variables only,
+ * logical properties only, transitions ≤ 200ms. */
+
+/* ── Status banner (download result / error) ─────────────────────── */
+.rp-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  font-size: 13px;
+  font-weight: 500;
+}
+.rp-banner.tone-success { background: var(--success-soft); color: var(--success-text); border-color: color-mix(in oklab, var(--success) 22%, transparent); }
+.rp-banner.tone-danger { background: var(--danger-soft); color: var(--danger-text); border-color: color-mix(in oklab, var(--danger) 22%, transparent); }
+
+/* ── Date-range row inside a form (from → to) ────────────────────── */
+.rp-range { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rp-range > * { min-width: 0; }
+.rp-range-arrow { color: var(--text-tertiary); font-size: 12px; }
+[dir="rtl"] .rp-range-arrow { transform: scaleX(-1); display: inline-block; }
+.rp-hint { font-size: 11.5px; color: var(--text-tertiary); line-height: 1.5; }
+.rp-hint.tone-warning { color: var(--warning-text); }
+
+/* ── Checkbox option row ─────────────────────────────────────────── */
+.rp-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) ease, background var(--dur-fast) ease;
+}
+.rp-check:hover { border-color: var(--border-strong); background: var(--bg-sunken); }
+.rp-check input { margin-top: 3px; }
+.rp-check-title { font-size: 13px; font-weight: 600; }
+.rp-check-sub { display: block; font-size: 11.5px; color: var(--text-tertiary); margin-top: 2px; line-height: 1.45; }
+
+/* ── Key / value result grid (modal result block) ────────────────── */
+.rp-kv {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  font-size: 12.5px;
+}
+.rp-kv dt { color: var(--text-secondary); margin: 0; }
+.rp-kv dd { margin: 0; font-weight: 600; text-align: end; }
+.rp-kv dd.tone-success { color: var(--success-text); }
+
+/* ── Modal centering wrapper (ModalShell renders the scrim) ──────── */
+.rp-modal-center {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+.rp-modal { width: min(540px, 96vw); max-height: 88vh; overflow: auto; }
+.rp-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.rp-modal-sub { font-size: 12.5px; color: var(--text-tertiary); margin-top: 3px; }
+.rp-modal-foot-note { margin-inline-end: auto; font-size: 12px; color: var(--text-tertiary); }
+.rp-alert {
+  padding: 9px 12px;
+  border-radius: var(--radius);
+  background: var(--danger-soft);
+  color: var(--danger-text);
+  font-size: 12.5px;
+}
+
+/* ── Employee search (combobox) ──────────────────────────────────── */
+.rp-search { position: relative; flex: 1 1 320px; min-width: 240px; }
+.rp-search-icon {
+  position: absolute;
+  inset-inline-start: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-tertiary);
+  display: inline-flex;
+  pointer-events: none;
+}
+.rp-search .input { width: 100%; padding-inline-start: 36px; }
+.rp-search-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  inset-inline: 0;
+  padding: 6px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  z-index: 50;
+  max-height: 300px;
+  overflow-y: auto;
+  animation: mg-pop-in 160ms var(--ease-out) both;
+}
+.rp-search-note { padding: 8px 10px; font-size: 12.5px; color: var(--text-tertiary); }
+.rp-search-item {
+  appearance: none;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: background var(--dur-fast) ease;
+}
+.rp-search-item:hover, .rp-search-item[aria-selected="true"] { background: var(--bg-hover); }
+.rp-search-item-main { flex: 1; min-width: 0; }
+.rp-search-item-name { font-size: 13px; font-weight: 600; }
+.rp-search-item-meta { font-size: 11.5px; color: var(--text-tertiary); margin-top: 1px; }
+
+/* ── Avatar sizes (design .avatar is 26px) ───────────────────────── */
+.rp-avatar-lg { width: 56px; height: 56px; font-size: 19px; }
+.rp-avatar-sm { width: 28px; height: 28px; font-size: 11px; }
+
+/* ── Employee profile strip ──────────────────────────────────────── */
+.rp-profile { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.rp-profile-card { margin-bottom: 16px; }
+.rp-profile-main { flex: 1; min-width: 0; }
+.rp-profile-name { font-family: var(--font-display); font-size: 20px; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
+.rp-profile-meta { font-size: 13px; color: var(--text-secondary); margin-top: 3px; }
+.rp-profile-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+
+/* ── Inline checkbox label in card headers ───────────────────────── */
+.rp-inline-check { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-secondary); cursor: pointer; }
+
+/* ── Pager (in at-table-foot) ────────────────────────────────────── */
+.rp-pager { display: flex; align-items: center; gap: 6px; }
+.rp-pager-label { min-width: 84px; text-align: center; font-size: 12px; color: var(--text-secondary); }
+.rp-pager-size { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-tertiary); }
+
+/* ── Row chevron (clickable rows) ────────────────────────────────── */
+.rp-row-chev-cell { text-align: end; width: 32px; }
+.rp-row-chev { color: var(--text-quaternary); display: inline-flex; }
+[dir="rtl"] .rp-row-chev { transform: scaleX(-1); }
+
+/* Option tiles render their text in spans (inside a <button>) */
+.rp-modal .rp-check-sub, .at-option .at-option-desc, .at-option .at-option-meta { display: block; }
+
+
+/* ── Page layout (Oct 2026 v3): type tiles → control bar → preview ── */
+.rp-types {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.rp-type {
+  appearance: none;
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 18px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  transition: border-color var(--dur-fast) ease, box-shadow var(--dur) var(--ease-out), transform var(--dur) var(--ease-out);
+}
+.rp-type:hover { transform: translateY(-2px); box-shadow: var(--shadow); border-color: var(--border-strong); }
+.rp-type[aria-checked="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 14%, transparent), var(--shadow-sm);
+  background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 5%, var(--bg-elev)), var(--bg-elev) 70%);
+}
+.rp-type-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.rp-type-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  background: var(--bg-sunken);
+  color: var(--text-secondary);
+  transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
+}
+.rp-type[aria-checked="true"] .rp-type-icon { background: var(--accent); color: #fff; }
+.rp-type-check {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  border: 1.5px solid var(--border-strong);
+  color: #fff;
+  transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease;
+}
+.rp-type[aria-checked="true"] .rp-type-check { background: var(--accent); border-color: var(--accent); }
+.rp-type-title { font-family: var(--font-display); font-size: 15px; font-weight: 700; letter-spacing: -0.015em; }
+.rp-type-desc { font-size: 12.5px; line-height: 1.5; color: var(--text-secondary); }
+.rp-type-meta { font-size: 11.5px; color: var(--text-tertiary); margin-top: 4px; font-variant-numeric: tabular-nums; }
+
+.rp-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+.rp-controls-range { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-width: 0; }
+.rp-controls-label { font-size: 12.5px; font-weight: 600; color: var(--text-secondary); }
+.rp-presets .seg-btn { min-height: 32px; padding: 0 14px; }
+.rp-controls-actions { display: flex; align-items: center; gap: 8px; margin-inline-start: auto; }
+.rp-controls-note { flex-basis: 100%; }
+.rp-preview { min-width: 0; }
+/* Short fields (ids, dates, times, status) stay on one line; names and
+   departments may wrap so the preview fits a laptop-width screen. */
+.rp-preview .table td.mono, .rp-preview .table td:has(> .pill) { white-space: nowrap; }
+
+@media (max-width: 1000px) {
+  .rp-types { grid-template-columns: 1fr; }
+  .rp-type { flex-direction: row; flex-wrap: wrap; align-items: center; column-gap: 12px; }
+  .rp-type-top { margin-bottom: 0; }
+  .rp-type-check { display: none; }
+}
+@media (max-width: 720px) {
+  .rp-controls-actions { margin-inline-start: 0; width: 100%; }
+  .rp-controls-actions .btn { flex: 1; }
+}

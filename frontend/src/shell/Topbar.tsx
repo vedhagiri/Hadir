@@ -1,4 +1,5 @@
-// Topbar — breadcrumbs + role chip + notifications bell + logout.
+// Topbar — breadcrumbs + notifications bell + user menu (identity,
+// role switch, profile/settings, sign out with a confirmation dialog).
 // Arabic toggle + dark mode + "New request" button still deferred per
 // PROJECT_CONTEXT §8; the design references them but pilot scope is
 // deliberately narrower. The bell ships in P20.
@@ -16,7 +17,9 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { useNavigate, NavLink } from "react-router-dom";
 
+import productMark from "../assets/mts_mark.png";
 import { useLogout, useSwitchRole } from "../auth/AuthProvider";
+import { ModalShell } from "../components/DrawerShell";
 import { getSidebar, subscribeSidebar, toggleSidebar } from "../sidebar";
 import { SessionCountdown } from "../auth/SessionCountdown";
 import { NotificationBell } from "../notifications/NotificationBell";
@@ -24,6 +27,7 @@ import type { MeResponse, Role } from "../types";
 import { Icon } from "./Icon";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 import { CRUMBS, CRUMB_TARGETS } from "./nav";
+import "./user-menu.css";
 
 
 function initialsFor(fullName: string): string {
@@ -43,7 +47,12 @@ export function Topbar({ pageId, role, me }: Props) {
   const navigate = useNavigate();
   const logout = useLogout();
   const { t } = useTranslation();
-  const crumbs = CRUMBS[pageId] ?? ["Maugood", pageId];
+  // Detail routes (``employees/123``) reuse the list's trail + "Profile".
+  const crumbs =
+    CRUMBS[pageId] ??
+    (pageId.startsWith("employees/") && CRUMBS.employees
+      ? [...CRUMBS.employees, "Profile"]
+      : ["Maugood", pageId]);
 
   const onLogout = () => {
     logout.mutate(undefined, {
@@ -78,7 +87,16 @@ export function Topbar({ pageId, role, me }: Props) {
       <button
         type="button"
         className="topbar-menu-btn"
-        onClick={toggleSidebar}
+        onClick={() => {
+          // Phones: the sidebar is an off-canvas drawer opened via the
+          // ``mobile-nav-open`` class (styles-enhancements.css). Desktop:
+          // collapse / expand the rail.
+          if (window.matchMedia("(max-width: 900px)").matches) {
+            document.querySelector(".app")?.classList.toggle("mobile-nav-open");
+          } else {
+            toggleSidebar();
+          }
+        }}
         aria-pressed={sidebarCollapsed}
         aria-label={menuLabel}
         title={menuLabel}
@@ -166,11 +184,6 @@ const VIEWPORT_MARGIN_PX = 8;
 // (zIndex 30) and any other sticky/fixed layer. Picked an order of
 // magnitude higher so future stickies have headroom.
 const MENU_Z_INDEX = 1000;
-// Approximate panel width used by the initial RTL/LTR clamp before
-// the first layout measurement. Matches the ``minWidth`` in the
-// rendered panel; small enough that an off-by-a-few-px first paint
-// is invisible to the eye.
-const MENU_APPROX_WIDTH_PX = 240;
 
 function UserMenu({
   role,
@@ -188,6 +201,7 @@ function UserMenu({
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   // Anchor rect drives the floating panel's ``position: fixed`` coords.
@@ -303,15 +317,8 @@ function UserMenu({
       top,
       ...edge,
       zIndex: MENU_Z_INDEX,
-      background: "var(--bg-elev)",
-      border: "1px solid var(--border)",
-      borderRadius: "var(--radius-md)",
-      boxShadow: "var(--shadow-lg)",
-      minWidth: MENU_APPROX_WIDTH_PX,
       maxWidth: `min(360px, calc(100vw - ${VIEWPORT_MARGIN_PX * 2}px))`,
       maxHeight: `calc(100vh - ${VIEWPORT_MARGIN_PX * 2}px)`,
-      overflowY: "auto",
-      padding: 4,
     };
   })();
 
@@ -320,93 +327,40 @@ function UserMenu({
       <button
         ref={buttonRef}
         type="button"
+        className="um-trigger"
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={t("topbar.userMenu")}
         title={me.full_name}
-        style={{
-          width: 32,
-          height: 32,
-          borderRadius: "50%",
-          border: "1px solid var(--border)",
-          background:
-            "linear-gradient(135deg, oklch(0.72 0.09 195), oklch(0.55 0.1 230))",
-          color: "white",
-          cursor: "pointer",
-          display: "grid",
-          placeItems: "center",
-          fontSize: 12,
-          fontWeight: 600,
-          letterSpacing: "0.02em",
-          padding: 0,
-        }}
       >
         {initials}
       </button>
 
       {open && createPortal(
-        <div
-          ref={panelRef}
-          role="menu"
-          aria-label={t("topbar.userMenu")}
-          style={panelStyle}
-        >
-          {/* Identity header — name, email, active role */}
-          <div
-            style={{
-              padding: "10px 12px 8px",
-              borderBottom: "1px solid var(--border)",
-              marginBottom: 4,
-            }}
-          >
-            <div
-              style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}
-            >
-              {me.full_name}
+        <div ref={panelRef} role="menu" aria-label={t("topbar.userMenu")} className="um-panel" style={panelStyle}>
+          {/* Identity: "Signed in as" + role, then avatar · name · email */}
+          <div className="um-head">
+            <div className="um-head-row">
+              <span className="um-eyebrow">{t("topbar.signedInAs", { defaultValue: "Signed in as" })}</span>
+              <span className="um-role">
+                <span className="um-role-dot" aria-hidden />
+                {t(`roles.${role}`, { defaultValue: role })}
+              </span>
             </div>
-            <div
-              style={{
-                fontSize: 11.5,
-                color: "var(--text-secondary)",
-                marginTop: 2,
-                wordBreak: "break-all",
-              }}
-            >
-              {me.email}
-            </div>
-            <div style={{ marginTop: 8 }}>
-              <span
-                className="nav-badge"
-                style={{
-                  background: "var(--accent-soft)",
-                  color: "var(--accent-text)",
-                  border: "1px solid var(--accent-border)",
-                  padding: "2px 8px",
-                  borderRadius: 999,
-                  fontSize: 10.5,
-                }}
-              >
-                {role}
+            <div className="um-identity">
+              <span className="um-avatar" aria-hidden>{initials}</span>
+              <span className="um-identity-text">
+                <span className="um-name">{me.full_name}</span>
+                <span className="um-email">{me.email}</span>
               </span>
             </div>
           </div>
 
           {/* Role switcher (only when multiple roles available). */}
           {multi && (
-            <>
-              <div
-                style={{
-                  fontSize: 10.5,
-                  fontWeight: 500,
-                  color: "var(--text-tertiary)",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.04em",
-                  padding: "6px 10px 4px",
-                }}
-              >
-                {t("topbar.switchRole")}
-              </div>
+            <div className="um-section">
+              <div className="um-section-label">{t("topbar.switchRole")}</div>
               {available.map((r) => (
                 <button
                   key={r}
@@ -415,105 +369,103 @@ function UserMenu({
                   disabled={busy}
                   role="menuitemradio"
                   aria-checked={r === role}
-                  style={{
-                    width: "100%",
-                    textAlign: "start",
-                    background:
-                      r === role ? "var(--accent-soft)" : "transparent",
-                    border: "none",
-                    padding: "6px 10px",
-                    fontSize: 12.5,
-                    color: r === role ? "var(--accent-text)" : "var(--text)",
-                    fontWeight: r === role ? 600 : 500,
-                    borderRadius: 4,
-                    cursor: busy ? "wait" : "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                  }}
+                  className={`um-item${r === role ? " is-current" : ""}`}
                 >
-                  <span>{r}</span>
-                  {r === role && (
-                    <span
-                      style={{
-                        marginInlineStart: "auto",
-                        fontSize: 10.5,
-                        color: "var(--text-tertiary)",
-                      }}
-                    >
-                      {t("topbar.active")}
-                    </span>
-                  )}
+                  <Icon name="user" size={14} />
+                  <span className="um-item-label">{t(`roles.${r}`, { defaultValue: r })}</span>
+                  {r === role && <span className="um-item-meta">{t("topbar.active")}</span>}
                 </button>
               ))}
-              {error && (
-                <div
-                  style={{
-                    padding: "4px 10px",
-                    color: "var(--danger-text)",
-                    fontSize: 11,
-                  }}
-                >
-                  {error}
-                </div>
-              )}
-              <div
-                style={{
-                  borderTop: "1px solid var(--border)",
-                  margin: "4px 0",
-                }}
-              />
-            </>
+              {error && <div className="um-error">{error}</div>}
+            </div>
           )}
 
-          {/* Settings + Logout actions. */}
-          <NavLink
-            to="/settings"
-            role="menuitem"
-            onClick={() => setOpen(false)}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 9,
-              padding: "8px 10px",
-              borderRadius: 4,
-              color: "var(--text)",
-              fontSize: 12.5,
-              fontWeight: 500,
-              textDecoration: "none",
-            }}
-          >
-            <Icon name="settings" size={13} />
-            {t("topbar.settings")}
-          </NavLink>
-          <button
-            type="button"
-            onClick={onLogout}
-            disabled={loggingOut}
-            role="menuitem"
-            style={{
-              width: "100%",
-              textAlign: "start",
-              display: "flex",
-              alignItems: "center",
-              gap: 9,
-              padding: "8px 10px",
-              borderRadius: 4,
-              border: "none",
-              background: "transparent",
-              color: "var(--text)",
-              fontSize: 12.5,
-              fontWeight: 500,
-              cursor: loggingOut ? "wait" : "pointer",
-            }}
-          >
-            <Icon name="logout" size={13} />
-            {loggingOut ? "…" : t("topbar.logout")}
-          </button>
+          <div className="um-section">
+            <NavLink to="/settings" role="menuitem" className="um-item" onClick={() => setOpen(false)}>
+              <Icon name="settings" size={14} />
+              <span className="um-item-label">{t("topbar.settings")}</span>
+              <span className="um-item-chev" aria-hidden><Icon name="chevronRight" size={13} /></span>
+            </NavLink>
+          </div>
+
+          <div className="um-section">
+            <button
+              type="button"
+              role="menuitem"
+              className="um-item is-danger"
+              onClick={() => {
+                setOpen(false);
+                setConfirmOpen(true);
+              }}
+              disabled={loggingOut}
+            >
+              <Icon name="logout" size={14} />
+              <span className="um-item-label">{t("topbar.logout")}</span>
+            </button>
+          </div>
         </div>,
         document.body,
       )}
+
+      {confirmOpen && (
+        <SignOutDialog
+          busy={loggingOut}
+          onCancel={() => setConfirmOpen(false)}
+          onConfirm={onLogout}
+        />
+      )}
     </div>
+  );
+}
+
+/** "Sign out?" confirmation — shown before the session is ended. */
+function SignOutDialog({
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const { t } = useTranslation();
+  // The shared ModalShell deliberately ignores Escape; for this simple
+  // yes/no question Escape means "Stay signed in".
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !busy) onCancel();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [busy, onCancel]);
+  return (
+    <ModalShell onClose={() => { if (!busy) onCancel(); }}>
+      <div className="um-modal-host">
+        <div role="alertdialog" aria-modal="true" aria-labelledby="um-signout-title" aria-describedby="um-signout-body" className="modal um-signout">
+          <button type="button" className="icon-btn um-signout-x" onClick={onCancel} disabled={busy} aria-label={t("common.close", { defaultValue: "Close" })}>
+            <Icon name="x" size={15} />
+          </button>
+          <img src={productMark} alt="" className="um-signout-mark" />
+          <h2 id="um-signout-title" className="um-signout-title">{t("topbar.signOut.title", { defaultValue: "Sign out?" })}</h2>
+          <p id="um-signout-body" className="um-signout-body">
+            {t("topbar.signOut.body", { defaultValue: "Your session will end on this device. You'll need to sign in again to continue." })}
+          </p>
+          <div className="um-signout-note">
+            <Icon name="info" size={15} />
+            <span>{t("topbar.signOut.note", { defaultValue: "Any unsaved changes on the current page will be lost." })}</span>
+          </div>
+          <div className="um-signout-actions">
+            <button type="button" className="btn" onClick={onCancel} disabled={busy}>
+              {t("topbar.signOut.stay", { defaultValue: "Stay signed in" })}
+            </button>
+            <button type="button" className="btn btn-danger" onClick={onConfirm} disabled={busy}>
+              <Icon name="logout" size={14} />
+              {busy ? t("topbar.loggingOut") : t("topbar.signOut.confirm", { defaultValue: "Sign out" })}
+            </button>
+          </div>
+        </div>
+      </div>
+    </ModalShell>
   );
 }
 

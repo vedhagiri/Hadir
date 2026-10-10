@@ -11,6 +11,8 @@ import { ApiError } from "../api/client";
 import { APP_VERSION_FULL } from "../config";
 import { useSuperLogin, useSuperMe } from "./SuperAdminProvider";
 
+import "./sa.css";
+
 const loginSchema = z.object({
   email: z.string().email("Enter a valid email"),
   password: z.string().min(1, "Password is required"),
@@ -65,171 +67,60 @@ export function SuperAdminLogin() {
   })();
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        display: "grid",
-        placeItems: "center",
-        background: "var(--bg)",
-        color: "var(--text)",
-        padding: 24,
-      }}
-    >
+    <main className="sa-shell sa-login">
       {/* Red accent bar — same treatment as inside the console so the
           login surface signals the privileged context immediately. */}
-      <div
-        style={{
-          position: "fixed",
-          top: 0,
-          left: 0,
-          right: 0,
-          height: 6,
-          background: "#c0392b",
-        }}
-      />
-      <form
-        onSubmit={onSubmit}
-        noValidate
-        style={{
-          width: "100%",
-          maxWidth: 400,
-          background: "var(--bg-elev)",
-          border: "1px solid #c0392b",
-          borderRadius: "var(--radius-lg)",
-          boxShadow: "var(--shadow)",
-          padding: 28,
-          display: "flex",
-          flexDirection: "column",
-          gap: 14,
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            color: "#c0392b",
-            fontWeight: 600,
-            letterSpacing: "0.02em",
-            textTransform: "uppercase",
-            fontSize: 11,
-          }}
-        >
-          MTS Operator Console — Privileged
-        </div>
-        <h1
-          style={{
-            fontFamily: "var(--font-display)",
-            fontSize: 28,
-            margin: 0,
-            fontWeight: 400,
-            letterSpacing: "-0.01em",
-          }}
-        >
-          Super-Admin sign in
-        </h1>
-        <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 13 }}>
-          Maugood staff only. Every action you take here is audit-logged in the
-          tenant&apos;s own log and the global operator log.
-        </p>
-
-        <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <span style={labelStyle}>Email</span>
-          <input
-            type="email"
-            autoComplete="username"
-            autoFocus
-            aria-invalid={!!errors.email}
-            {...register("email")}
-            style={inputStyle}
-          />
-          {errors.email && <FieldError message={errors.email.message ?? ""} />}
-        </label>
-
-        <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <span style={labelStyle}>Password</span>
-          <input
-            type="password"
-            autoComplete="current-password"
-            aria-invalid={!!errors.password}
-            {...register("password")}
-            style={inputStyle}
-          />
-          {errors.password && <FieldError message={errors.password.message ?? ""} />}
-        </label>
-
-        {serverError && (
-          <div
-            role="alert"
-            style={{
-              background: "var(--danger-soft)",
-              color: "var(--danger-text)",
-              border: "1px solid var(--border)",
-              padding: "8px 10px",
-              borderRadius: "var(--radius-sm)",
-              fontSize: 12.5,
-            }}
-          >
-            {serverError}
+      <div className="sa-bar" aria-hidden style={{ position: "fixed", top: 0, insetInline: 0 }} />
+      <div>
+        <form onSubmit={onSubmit} noValidate className="card sa-login-card">
+          <div className="sa-brand">
+            <span className="sa-brand-dot" aria-hidden />
+            MTS Operator Console — Privileged
           </div>
-        )}
+          <h1 className="sa-login-title">Super-Admin sign in</h1>
+          <p className="sa-login-sub">
+            Maugood staff only. Every action you take here is audit-logged in the tenant&apos;s own log and the global
+            operator log.
+          </p>
 
-        <button
-          type="submit"
-          disabled={isSubmitting || login.isPending}
-          style={{
-            justifyContent: "center",
-            marginTop: 4,
-            background: "#c0392b",
-            color: "white",
-            border: "none",
-            padding: "8px 14px",
-            borderRadius: "var(--radius-sm)",
-            cursor: "pointer",
-            fontWeight: 600,
-          }}
-        >
-          {isSubmitting || login.isPending ? "Signing in…" : "Sign in"}
-        </button>
-      </form>
+          <label className="field">
+            <span className="field-label">Email</span>
+            <input type="email" className="input" autoComplete="username" autoFocus aria-invalid={!!errors.email} {...register("email")} />
+            {errors.email && <FieldError message={errors.email.message ?? ""} />}
+          </label>
 
-      {/* Product version — same source as the sidebar version chip.
-          A support ticket carrying "Super-Admin login on v1.1.9"
-          spares the operator a shell session to read .version. */}
-      <div
-        className="mono"
-        style={{
-          marginTop: 14,
-          fontSize: 10.5,
-          color: "var(--text-tertiary)",
-          opacity: 0.75,
-          letterSpacing: "0.02em",
-        }}
-      >
-        Maugood v{APP_VERSION_FULL}
+          <label className="field">
+            <span className="field-label">Password</span>
+            <input
+              type="password"
+              className="input"
+              autoComplete="current-password"
+              aria-invalid={!!errors.password}
+              {...register("password")}
+            />
+            {errors.password && <FieldError message={errors.password.message ?? ""} />}
+          </label>
+
+          {serverError && (
+            <div role="alert" className="sa-alert">
+              {serverError}
+            </div>
+          )}
+
+          <button type="submit" className="btn btn-primary" disabled={isSubmitting || login.isPending}>
+            {isSubmitting || login.isPending ? "Signing in…" : "Sign in"}
+          </button>
+        </form>
+
+        {/* Product version — same source as the sidebar version chip.
+            A support ticket carrying "Super-Admin login on v1.1.9"
+            spares the operator a shell session to read .version. */}
+        <div className="sa-login-version mono">Maugood v{APP_VERSION_FULL}</div>
       </div>
     </main>
   );
 }
 
-const labelStyle = {
-  fontSize: 11,
-  textTransform: "uppercase" as const,
-  letterSpacing: "0.04em",
-  color: "var(--text-tertiary)",
-};
-
-const inputStyle = {
-  padding: "8px 10px",
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius-sm)",
-  fontSize: 13,
-  background: "var(--bg)",
-  color: "var(--text)",
-  fontFamily: "var(--font-sans)",
-  outline: "none",
-} as const;
-
 function FieldError({ message }: { message: string }) {
-  return <span style={{ color: "var(--danger-text)", fontSize: 11.5 }}>{message}</span>;
+  return <span className="sa-field-error">{message}</span>;
 }

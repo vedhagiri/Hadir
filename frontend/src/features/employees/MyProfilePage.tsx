@@ -25,7 +25,10 @@ import { Icon } from "../../shell/Icon";
 import { toast } from "../../shell/Toaster";
 import { validateReferencePhotos } from "../../util/photoValidation";
 import type { Employee, PhotoAngle } from "./types";
-import { SkeletonPanel } from "../../components/Skeleton";
+import { SkeletonGrid, SkeletonPanel } from "../../components/Skeleton";
+import { EmptyPanel } from "../../components/ListPageUi";
+import { avatarBg, initials } from "./EmployeesPage";
+import { Banner, DotPill, FormGrid, LoadErrorPanel, Section } from "./peopleUi";
 
 const ANGLES: PhotoAngle[] = ["front", "left", "right", "other"];
 
@@ -83,17 +86,30 @@ export function MyProfilePage() {
       )}
 
       {profile.isError && (
-        <div className="card" style={{ padding: 18 }}>
-          <div className="text-sm" style={{ color: "var(--danger-text)" }}>
-            {profile.error instanceof ApiError && profile.error.status === 404
-              ? (t("myProfile.noLink", {
-                  defaultValue:
-                    "Your account isn't linked to an employee record yet. Ask an Admin or HR to wire your email to an employee row.",
-                }) as string)
-              : (t("myProfile.loadFailed", {
-                  defaultValue: "Could not load your profile.",
-                }) as string)}
-          </div>
+        <div className="card">
+          {profile.error instanceof ApiError && profile.error.status === 404 ? (
+            <EmptyPanel
+              tone="warning"
+              icon={<Icon name="user" size={30} />}
+              title={t("myProfile.noLinkTitle", {
+                defaultValue: "No employee record linked",
+              }) as string}
+              body={t("myProfile.noLink", {
+                defaultValue:
+                  "Your account isn't linked to an employee record yet. Ask an Admin or HR to wire your email to an employee row.",
+              }) as string}
+            />
+          ) : (
+            <LoadErrorPanel
+              title={t("myProfile.loadFailed", {
+                defaultValue: "Could not load your profile.",
+              }) as string}
+              body={t("myProfile.loadFailedBody", {
+                defaultValue: "Check your connection and try again.",
+              }) as string}
+              onRetry={() => void profile.refetch()}
+            />
+          )}
         </div>
       )}
 
@@ -157,170 +173,122 @@ function ProfileCard({ employee: e }: { employee: Employee }) {
     }
   };
   return (
-    <div className="card" style={{ marginBottom: 16, padding: 18 }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 12,
-        }}
-      >
-        <h3 className="card-title" style={{ margin: 0 }}>
-          {t("myProfile.facts", { defaultValue: "Profile" }) as string}
-        </h3>
-        {!editing ? (
-          <button
-            type="button"
-            className="btn btn-sm"
-            onClick={() => {
-              setDraftPhone(e.phone ?? "");
-              setDraftDesignation(e.designation ?? "");
-              setEditing(true);
-              setProfileError(null);
-            }}
-          >
-            <Icon name="edit" size={11} /> {t("myProfile.edit") as string}
-          </button>
-        ) : (
-          <div style={{ display: "flex", gap: 8 }}>
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card-body">
+        <div className="pp-profile-head" style={{ marginBottom: 18 }}>
+          <div className="pp-drawer-identity">
+            <div className="avatar pp-avatar pp-avatar-lg" aria-hidden style={{ background: avatarBg(e.full_name) }}>
+              {initials(e.full_name)}
+            </div>
+            <div className="pp-drawer-identity-text">
+              <h3 className="card-title" style={{ margin: 0, fontSize: 17 }}>
+                {e.full_name}
+              </h3>
+              <div className="pp-profile-meta">
+                <span className="mono">{e.employee_code}</span>
+                <span aria-hidden>·</span>
+                <span>{e.designation ?? e.department.name}</span>
+                <DotPill tone={e.status === "active" ? "success" : "neutral"}>
+                  {t(`employees.statusValue.${e.status}`) as string}
+                </DotPill>
+              </div>
+            </div>
+          </div>
+          {!editing ? (
             <button
               type="button"
               className="btn btn-sm"
               onClick={() => {
-                setEditing(false);
+                setDraftPhone(e.phone ?? "");
+                setDraftDesignation(e.designation ?? "");
+                setEditing(true);
                 setProfileError(null);
               }}
-              disabled={savingProfile}
             >
-              {t("myProfile.cancel") as string}
+              <Icon name="edit" size={11} /> {t("myProfile.edit") as string}
             </button>
-            <button
-              type="button"
-              className="btn btn-sm btn-primary"
-              onClick={onSaveProfile}
-              disabled={savingProfile}
-            >
-              {savingProfile
-                ? (t("myProfile.saving") as string)
-                : (t("myProfile.save") as string)}
-            </button>
-          </div>
-        )}
-      </div>
-      {editing && (
-        <div
-          style={{
-            background: "var(--bg-elev)",
-            border: "1px solid var(--border)",
-            borderRadius: 8,
-            padding: 12,
-            marginBottom: 14,
-          }}
-        >
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: 12,
-            }}
-          >
-            <div>
-              <label
-                className="text-xs text-dim"
-                style={{ display: "block", marginBottom: 3 }}
-              >
-                {t("employees.field.designation", {
-                  defaultValue: "Designation",
-                }) as string}
-              </label>
-              <input
-                type="text"
-                value={draftDesignation}
-                onChange={(ev) => setDraftDesignation(ev.target.value)}
-                maxLength={80}
-                style={{
-                  width: "100%",
-                  padding: "6px 8px",
-                  fontSize: 13,
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--radius-sm)",
-                  background: "var(--bg)",
+          ) : (
+            <div className="pp-head-actions">
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => {
+                  setEditing(false);
+                  setProfileError(null);
                 }}
-              />
-            </div>
-            <div>
-              <label
-                className="text-xs text-dim"
-                style={{ display: "block", marginBottom: 3 }}
+                disabled={savingProfile}
               >
-                {t("employees.field.phone", {
-                  defaultValue: "Phone",
-                }) as string}
-              </label>
-              <input
-                type="tel"
-                value={draftPhone}
-                onChange={(ev) =>
-                  setDraftPhone(ev.target.value.replace(/[^\d+\-\s]/g, ""))
-                }
-                maxLength={30}
-                inputMode="tel"
-                style={{
-                  width: "100%",
-                  padding: "6px 8px",
-                  fontSize: 13,
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--radius-sm)",
-                  background: "var(--bg)",
-                }}
-              />
-            </div>
-          </div>
-          {profileError && (
-            <div
-              style={{
-                color: "var(--danger-text)",
-                fontSize: 12,
-                marginTop: 8,
-              }}
-            >
-              {profileError}
+                {t("myProfile.cancel") as string}
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm btn-primary"
+                onClick={onSaveProfile}
+                disabled={savingProfile}
+              >
+                {savingProfile
+                  ? (t("myProfile.saving") as string)
+                  : (t("myProfile.save") as string)}
+              </button>
             </div>
           )}
-          <div
-            style={{
-              fontSize: 11,
-              color: "var(--text-secondary)",
-              marginTop: 10,
-            }}
-          >
-            {t("myProfile.editHint") as string}
-          </div>
         </div>
-      )}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-          gap: "14px 24px",
-        }}
-      >
-        <Fact label={t("employees.field.code", { defaultValue: "Employee ID" }) as string} value={e.employee_code} mono />
-        <Fact label={t("employees.field.fullName", { defaultValue: "Name" }) as string} value={e.full_name} />
-        <Fact label={t("employees.field.designation", { defaultValue: "Designation" }) as string} value={e.designation ?? "—"} />
-        <Fact label={t("employees.field.email", { defaultValue: "Email" }) as string} value={e.email ?? "—"} />
-        <Fact label={t("employees.field.phone", { defaultValue: "Phone" }) as string} value={e.phone ?? "—"} />
-        {e.division && (
-          <Fact label={t("employees.team.col.division", { defaultValue: "Division" }) as string} value={e.division.name} />
+        {editing && (
+          <div className="pp-edit-panel">
+            <FormGrid cols={2}>
+              <div className="field">
+                <label className="field-label" htmlFor="pp-profile-designation">
+                  {t("employees.field.designation", { defaultValue: "Designation" }) as string}
+                </label>
+                <input
+                  id="pp-profile-designation"
+                  className="input"
+                  type="text"
+                  value={draftDesignation}
+                  onChange={(ev) => setDraftDesignation(ev.target.value)}
+                  maxLength={80}
+                />
+              </div>
+              <div className="field">
+                <label className="field-label" htmlFor="pp-profile-phone">
+                  {t("employees.field.phone", { defaultValue: "Phone" }) as string}
+                </label>
+                <input
+                  id="pp-profile-phone"
+                  className="input"
+                  type="tel"
+                  value={draftPhone}
+                  onChange={(ev) =>
+                    setDraftPhone(ev.target.value.replace(/[^\d+\-\s]/g, ""))
+                  }
+                  maxLength={30}
+                  inputMode="tel"
+                />
+              </div>
+            </FormGrid>
+            {profileError && <div className="pp-inline-error">{profileError}</div>}
+            <div className="pp-hint">{t("myProfile.editHint") as string}</div>
+          </div>
         )}
-        <Fact label={t("employees.team.col.department", { defaultValue: "Department" }) as string} value={e.department.name} />
-        {e.section && (
-          <Fact label={t("employees.team.col.section", { defaultValue: "Section" }) as string} value={e.section.name} />
-        )}
-        {e.joining_date && (
-          <Fact label={t("employees.field.joinDate", { defaultValue: "Joining date" }) as string} value={e.joining_date} mono />
-        )}
+        <Section title={t("myProfile.facts", { defaultValue: "Profile" }) as string}>
+          <div className="pp-fact-tiles">
+            <Fact label={t("employees.field.code", { defaultValue: "Employee ID" }) as string} value={e.employee_code} mono />
+            <Fact label={t("employees.field.fullName", { defaultValue: "Name" }) as string} value={e.full_name} />
+            <Fact label={t("employees.field.designation", { defaultValue: "Designation" }) as string} value={e.designation ?? "—"} />
+            <Fact label={t("employees.field.email", { defaultValue: "Email" }) as string} value={e.email ?? "—"} />
+            <Fact label={t("employees.field.phone", { defaultValue: "Phone" }) as string} value={e.phone ?? "—"} />
+            {e.division && (
+              <Fact label={t("employees.team.col.division", { defaultValue: "Division" }) as string} value={e.division.name} />
+            )}
+            <Fact label={t("employees.team.col.department", { defaultValue: "Department" }) as string} value={e.department.name} />
+            {e.section && (
+              <Fact label={t("employees.team.col.section", { defaultValue: "Section" }) as string} value={e.section.name} />
+            )}
+            {e.joining_date && (
+              <Fact label={t("employees.field.joinDate", { defaultValue: "Joining date" }) as string} value={e.joining_date} mono />
+            )}
+          </div>
+        </Section>
       </div>
     </div>
   );
@@ -329,25 +297,8 @@ function ProfileCard({ employee: e }: { employee: Employee }) {
 function Fact({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div>
-      <div
-        className="text-xs text-dim"
-        style={{
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
-          fontWeight: 500,
-          marginBottom: 4,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          fontSize: 13,
-          fontFamily: mono ? "var(--font-mono)" : undefined,
-        }}
-      >
-        {value}
-      </div>
+      <div className="pp-fact-tile-label">{label}</div>
+      <div className={`pp-fact-tile-value${mono ? " mono" : ""}`}>{value}</div>
     </div>
   );
 }
@@ -457,43 +408,27 @@ function PhotosCard({
   }
 
   return (
-    <div className="card" style={{ padding: 18 }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 14,
-          flexWrap: "wrap",
-          gap: 10,
-        }}
-      >
+    <div className="card">
+      <div className="card-head pp-profile-head">
         <div>
           <h3 className="card-title">
             {t("myProfile.photos", {
               defaultValue: "Reference photos",
             }) as string}
           </h3>
-          <div className="text-xs text-dim" style={{ marginTop: 2 }}>
+          <div className="card-sub">
             {t("myProfile.photosHint", {
               defaultValue:
                 "Front-facing photos work best. Each upload is reviewed by HR/Admin before face detection picks it up.",
             }) as string}
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div className="pp-head-actions">
           <select
+            className="select"
             value={angle}
             onChange={(e) => setAngle(e.target.value as PhotoAngle)}
             disabled={uploading}
-            style={{
-              padding: "6px 10px",
-              fontSize: 12.5,
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius-sm)",
-              background: "var(--bg-elev)",
-              color: "var(--text)",
-            }}
             aria-label={t("myProfile.angleAria") as string}
           >
             {ANGLES.map((a) => (
@@ -530,72 +465,66 @@ function PhotosCard({
         </div>
       </div>
 
-      {pendingCount > 0 && (
-        <div
-          style={{
-            padding: "8px 12px",
-            marginBottom: 12,
-            background: "var(--warning-soft)",
-            color: "var(--warning-text, var(--warning))",
-            border: "1px solid var(--warning)",
-            borderRadius: "var(--radius-sm)",
-            fontSize: 12.5,
-          }}
-        >
-          {t("myProfile.pendingBanner", {
-            count: pendingCount,
-            defaultValue:
-              pendingCount === 1
-                ? "1 photo waiting for HR/Admin approval."
-                : `${pendingCount} photos waiting for HR/Admin approval.`,
-          }) as string}
-        </div>
-      )}
+      <div className="card-body">
+        {pendingCount > 0 && (
+          <Banner tone="warning" role="status">
+            {t("myProfile.pendingBanner", {
+              count: pendingCount,
+              defaultValue:
+                pendingCount === 1
+                  ? "1 photo waiting for HR/Admin approval."
+                  : `${pendingCount} photos waiting for HR/Admin approval.`,
+            }) as string}
+          </Banner>
+        )}
 
-      {loading && (
-        <SkeletonPanel lines={5} />
-      )}
+        {loading && <SkeletonGrid count={4} minWidth={180} />}
 
-      {!loading && photos.length === 0 && (
-        <div
-          className="text-sm text-dim"
-          style={{
-            padding: 24,
-            textAlign: "center",
-            border: "1px dashed var(--border)",
-            borderRadius: "var(--radius-sm)",
-          }}
-        >
-          {t("myProfile.noPhotos", {
-            defaultValue:
-              "No reference photos yet. Click Upload to add one.",
-          }) as string}
-        </div>
-      )}
-
-      {photos.length > 0 && (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
-            gap: 12,
-          }}
-        >
-          {photos.map((p) => (
-            <PhotoTile
-              key={p.id}
-              photo={p}
-              employee={employee}
-              myUserId={myUserId}
-              onDelete={() => deleteMutation.mutate(p.id)}
-              deleting={
-                deleteMutation.isPending &&
-                deleteMutation.variables === p.id
+        {!loading && photos.length === 0 && (
+          <div className="pp-dashed">
+            <EmptyPanel
+              tone="accent"
+              icon={<Icon name="camera" size={30} />}
+              title={t("myProfile.noPhotosTitle", {
+                defaultValue: "Add your first reference photo",
+              }) as string}
+              body={t("myProfile.noPhotos", {
+                defaultValue:
+                  "No reference photos yet. Click Upload to add one.",
+              }) as string}
+              actions={
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={uploading}
+                >
+                  <Icon name="upload" size={12} />
+                  {t("myProfile.uploadBtn", { defaultValue: "Upload photo" }) as string}
+                </button>
               }
             />
-          ))}
-        </div>
-      )}
+          </div>
+        )}
+
+        {photos.length > 0 && (
+          <div className="pp-photo-grid">
+            {photos.map((p) => (
+              <PhotoTile
+                key={p.id}
+                photo={p}
+                employee={employee}
+                myUserId={myUserId}
+                onDelete={() => deleteMutation.mutate(p.id)}
+                deleting={
+                  deleteMutation.isPending &&
+                  deleteMutation.variables === p.id
+                }
+              />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -617,46 +546,21 @@ function PhotoTile({
   const isMine =
     myUserId !== null && p.uploaded_by_user_id === myUserId;
   return (
-    <div
-      style={{
-        border: "1px solid var(--border)",
-        borderRadius: "var(--radius-sm)",
-        overflow: "hidden",
-        background: "var(--bg-sunken)",
-      }}
-    >
-      <div
-        style={{
-          aspectRatio: "1 / 1",
-          background: "var(--bg-sunken)",
-          position: "relative",
-        }}
-      >
+    <div className="pp-tile">
+      <div className="pp-tile-img">
         <img
           src={`/api/employees/me/photos/${p.id}/image`}
           alt={`${p.angle} reference`}
           loading="lazy"
-          style={{
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-            display: "block",
-          }}
         />
         <span
-          className={`pill ${
+          className={`pill pp-tile-badge ${
             p.approval_status === "approved"
               ? "pill-success"
               : p.approval_status === "pending"
                 ? "pill-warning"
                 : "pill-danger"
           }`}
-          style={{
-            position: "absolute",
-            top: 6,
-            insetInlineStart: 6,
-            fontSize: 10.5,
-          }}
         >
           {t(`myProfile.status.${p.approval_status}`, {
             defaultValue:
@@ -668,17 +572,9 @@ function PhotoTile({
           }) as string}
         </span>
       </div>
-      <div
-        style={{
-          padding: "8px 10px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 6,
-        }}
-      >
+      <div className="pp-tile-foot">
         <div>
-          <div className="text-xs" style={{ fontWeight: 500 }}>
+          <div className="text-xs" style={{ fontWeight: 600 }}>
             {t(`employees.photos.angle.${p.angle}`, {
               defaultValue: p.angle[0]!.toUpperCase() + p.angle.slice(1),
             }) as string}
@@ -696,7 +592,7 @@ function PhotoTile({
         {isMine && (
           <button
             type="button"
-            className="btn btn-sm btn-danger"
+            className="btn btn-sm btn-ghost"
             onClick={onDelete}
             disabled={deleting}
             aria-label={t("myProfile.deletePhotoAria") as string}

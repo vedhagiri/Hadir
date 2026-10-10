@@ -3,7 +3,9 @@
 // pointing at the prompt that will flesh it out (or "v1.0" for pages
 // explicitly deferred per PROJECT_CONTEXT §8).
 
+import { EmptyPanel } from "../components/ListPageUi";
 import { CRUMBS } from "../shell/nav";
+import { Icon } from "../shell/Icon";
 
 interface Props {
   pageId: string;
@@ -46,13 +48,19 @@ export function Placeholder({ pageId }: Props) {
   return (
     <>
       <div className="page-header">
-        <h1 className="page-title">{titleFor(pageId)}</h1>
-        <p className="page-sub">{hint}</p>
+        <div>
+          <h1 className="page-title">{titleFor(pageId)}</h1>
+          <p className="page-sub">{hint}</p>
+        </div>
       </div>
-      <p style={{ color: "var(--text-secondary)", fontSize: 13, marginTop: 8 }}>
-        This page is a pilot-scaffold placeholder. The real view is wired up
-        by the pilot prompt above — see <code>pilot-plan.md</code>.
-      </p>
+      <div className="card">
+        <EmptyPanel
+          tone="accent"
+          icon={<Icon name="sparkles" size={28} />}
+          title={hint}
+          body="This page is a pilot-scaffold placeholder. The real view is wired up by the pilot prompt above — see pilot-plan.md."
+        />
+      </div>
     </>
   );
 }

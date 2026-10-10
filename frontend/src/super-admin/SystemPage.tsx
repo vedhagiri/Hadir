@@ -10,7 +10,12 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { api } from "../api/client";
-import { SkeletonRows } from "../components/Skeleton";
+import { EmptyPanel } from "../components/ListPageUi";
+import { SkeletonCards, SkeletonRows, SkeletonTable } from "../components/Skeleton";
+import { Panel, PanelEmpty, SoftPill, Tile, TileGrid, nowrap } from "../features/dashboard/DashUi";
+import type { Tone } from "../features/dashboard/DashUi";
+import { Icon } from "../shell/Icon";
+import { SectionLabel } from "./saUi";
 
 interface HostMetrics {
   cpu_percent: number;
@@ -96,23 +101,38 @@ export function SystemPage() {
 
   const m = metrics.data;
 
+  const pctTone = (v: number, warn: number, bad: number): Tone => (v > bad ? "danger" : v > warn ? "warning" : "success");
+  const lvl = (v: number) => (v > 80 ? " is-danger" : v > 50 ? " is-warning" : "");
+
   return (
     <>
       <div className="page-header">
         <div>
           <h1 className="page-title">System</h1>
-          <p className="page-sub">
-            Host metrics + capture pipeline + per-tenant health.
-          </p>
+          <p className="page-sub">Host resources, the capture pipeline and per-tenant health — refreshes every 5 seconds.</p>
         </div>
       </div>
 
       {metrics.isLoading && (
-        <div className="text-sm text-dim">Loading metrics…</div>
+        <div role="status" aria-label="Loading metrics" className="sa-stack">
+          <SkeletonCards count={4} />
+          <SkeletonCards count={3} />
+          <SkeletonTable rows={3} cols={5} />
+        </div>
       )}
-      {metrics.isError && (
-        <div className="text-sm" style={{ color: "var(--danger-text)" }}>
-          Could not load system metrics.
+      {metrics.isError && !m && (
+        <div className="card">
+          <EmptyPanel
+            tone="danger"
+            icon={<Icon name="info" size={28} />}
+            title="Couldn't load system metrics"
+            body="The metrics endpoint did not respond. The page retries automatically every 5 seconds."
+            actions={
+              <button type="button" className="btn" onClick={() => void metrics.refetch()}>
+                Retry now
+              </button>
+            }
+          />
         </div>
       )}
 
@@ -120,360 +140,216 @@ export function SystemPage() {
         <>
           {/* Host metrics */}
           <SectionLabel>Host</SectionLabel>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-              gap: 10,
-              marginBottom: 16,
-            }}
-          >
-            <MetricCard
+          <TileGrid>
+            <Tile
+              tone={pctTone(m.host.cpu_percent, 50, 80)}
+              icon="zap"
               label="CPU"
               value={`${m.host.cpu_percent.toFixed(1)}%`}
-              tone={m.host.cpu_percent > 80 ? "danger" : m.host.cpu_percent > 50 ? "warning" : "success"}
-              footer={
-                <div style={{ display: "flex", gap: 2, marginTop: 6 }}>
+              sub={`${m.host.cpu_per_core.length} cores`}
+              extra={
+                <span className="sa-cores">
                   {m.host.cpu_per_core.map((v, i) => (
-                    <div
-                      key={i}
-                      title={`Core ${i}: ${v.toFixed(1)}%`}
-                      style={{
-                        width: 12,
-                        height: 16,
-                        borderRadius: 2,
-                        background:
-                          v > 80
-                            ? "var(--danger)"
-                            : v > 50
-                              ? "var(--warning)"
-                              : "var(--success)",
-                        opacity: 0.4 + (v / 100) * 0.6,
-                      }}
-                    />
+                    <span key={i} className={`sa-core${lvl(v)}`} title={`Core ${i}: ${v.toFixed(1)}%`} style={{ opacity: 0.4 + (v / 100) * 0.6 }} />
                   ))}
-                </div>
+                </span>
               }
             />
-            <MetricCard
+            <Tile
+              tone={pctTone(m.host.mem_percent, 65, 85)}
+              icon="activity"
               label="Memory"
               value={`${m.host.mem_percent.toFixed(1)}%`}
-              tone={m.host.mem_percent > 85 ? "danger" : m.host.mem_percent > 65 ? "warning" : "success"}
-              footer={
-                <div className="text-xs text-dim mono" style={{ marginTop: 4 }}>
-                  {Math.round(m.host.mem_used_mb / 1024)} GB /{" "}
-                  {Math.round(m.host.mem_total_mb / 1024)} GB
-                </div>
-              }
+              sub={`${Math.round(m.host.mem_used_mb / 1024)} GB / ${Math.round(m.host.mem_total_mb / 1024)} GB`}
             />
-            <MetricCard
+            <Tile
+              tone={pctTone(m.host.disk_percent, 60, 80)}
+              icon="database"
               label="Disk"
               value={`${m.host.disk_percent.toFixed(1)}%`}
-              tone={m.host.disk_percent > 80 ? "danger" : m.host.disk_percent > 60 ? "warning" : "success"}
-              footer={
-                <div className="text-xs text-dim mono" style={{ marginTop: 4 }}>
-                  {m.host.disk_used_gb.toFixed(0)} GB /{" "}
-                  {m.host.disk_total_gb.toFixed(0)} GB
-                </div>
-              }
+              sub={`${m.host.disk_used_gb.toFixed(0)} GB / ${m.host.disk_total_gb.toFixed(0)} GB`}
             />
-            <MetricCard
+            <Tile
+              tone="neutral"
+              icon="clock"
               label="Uptime"
               value={formatUptime(m.host.uptime_sec)}
-              tone="neutral"
-              footer={
-                <div className="text-xs text-dim mono" style={{ marginTop: 4 }}>
-                  load: {m.host.load_avg.map((l) => l.toFixed(2)).join(" / ")}
-                </div>
-              }
+              sub={`load ${m.host.load_avg.map((l) => l.toFixed(2)).join(" / ")}`}
             />
-          </div>
+          </TileGrid>
 
           {/* Capture metrics */}
           <SectionLabel>Capture</SectionLabel>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-              gap: 10,
-              marginBottom: 16,
-            }}
-          >
-            <MetricCard
+          <TileGrid>
+            <Tile
+              tone={m.capture.total_workers_running === m.capture.total_workers_configured ? "success" : "warning"}
+              icon="camera"
               label="Workers running"
               value={`${m.capture.total_workers_running} / ${m.capture.total_workers_configured}`}
-              tone={
-                m.capture.total_workers_running ===
-                m.capture.total_workers_configured
-                  ? "success"
-                  : "warning"
-              }
-              footer={
-                <div className="text-xs text-dim" style={{ marginTop: 4 }}>
-                  across {m.capture.tenants_with_workers} tenant(s)
-                </div>
-              }
+              sub={`across ${m.capture.tenants_with_workers} tenant(s)`}
             />
-            <MetricCard
+            <Tile
+              tone={pctTone(m.capture.detector_lock_contention_60s_pct, 50, 80)}
+              icon="activity"
               label="Detector lock contention (60s)"
               value={`${m.capture.detector_lock_contention_60s_pct.toFixed(1)}%`}
-              tone={
-                m.capture.detector_lock_contention_60s_pct > 80
-                  ? "danger"
-                  : m.capture.detector_lock_contention_60s_pct > 50
-                    ? "warning"
-                    : "success"
-              }
-              footer={
-                <ContentionBar
-                  pct={m.capture.detector_lock_contention_60s_pct}
-                />
+              sub="time the shared detector lock was held"
+              extra={
+                <span className="sa-meter">
+                  <span
+                    className={`sa-meter-fill${lvl(m.capture.detector_lock_contention_60s_pct)}`}
+                    style={{ display: "block", width: `${Math.min(100, m.capture.detector_lock_contention_60s_pct)}%` }}
+                  />
+                </span>
               }
             />
-            <MetricCard
-              label="Active viewers"
-              value={`${m.capture.active_mjpeg_viewers} MJPEG · ${m.capture.active_ws_subscribers} WS`}
+            <Tile
               tone="neutral"
+              icon="eye"
+              label="Active viewers"
+              value={m.capture.active_mjpeg_viewers + m.capture.active_ws_subscribers}
+              sub={`${m.capture.active_mjpeg_viewers} MJPEG · ${m.capture.active_ws_subscribers} WS`}
             />
-          </div>
+            <Tile
+              tone="info"
+              icon="database"
+              label="DB pool"
+              value={`${m.database.pool_active} / ${m.database.pool_total}`}
+              sub={`${m.database.pool_idle} idle${m.database.size_mb != null ? ` · ${m.database.size_mb.toFixed(0)} MB` : ""}`}
+            />
+          </TileGrid>
 
           {/* Data partition */}
           <SectionLabel>Data partition</SectionLabel>
-          <div
-            className="card"
-            style={{ padding: 14, marginBottom: 16, fontSize: 13 }}
-          >
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                gap: 16,
-              }}
-            >
-              <div>
-                <div className="text-xs text-dim">Path</div>
-                <div className="mono" style={{ marginTop: 2 }}>
-                  {m.data_partition.path}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-dim">Used / Total</div>
-                <div className="mono" style={{ marginTop: 2 }}>
-                  {m.data_partition.used_gb.toFixed(1)} GB /{" "}
-                  {m.data_partition.total_gb.toFixed(1)} GB (
-                  {m.data_partition.percent.toFixed(1)}%)
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-dim">Face crops</div>
-                <div className="mono" style={{ marginTop: 2 }}>
-                  {m.data_partition.face_crops_count.toLocaleString()} files ·{" "}
-                  {m.data_partition.face_crops_size_gb.toFixed(2)} GB
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-dim">Days until full</div>
-                <div className="mono" style={{ marginTop: 2 }}>
-                  {m.data_partition.estimated_days_until_full ?? "—"}
-                </div>
-              </div>
-            </div>
-          </div>
+          <TileGrid>
+            <Tile tone="neutral" icon="fileText" label="Path" value={m.data_partition.path} sub="data volume mount" />
+            <Tile
+              tone={pctTone(m.data_partition.percent, 60, 80)}
+              icon="database"
+              label="Used / total"
+              value={`${m.data_partition.percent.toFixed(1)}%`}
+              sub={`${m.data_partition.used_gb.toFixed(1)} GB / ${m.data_partition.total_gb.toFixed(1)} GB`}
+            />
+            <Tile
+              tone="neutral"
+              icon="user"
+              label="Face crops"
+              value={m.data_partition.face_crops_count.toLocaleString()}
+              sub={`${m.data_partition.face_crops_size_gb.toFixed(2)} GB on disk`}
+            />
+            <Tile
+              tone={
+                m.data_partition.estimated_days_until_full == null
+                  ? "neutral"
+                  : m.data_partition.estimated_days_until_full < 14
+                    ? "danger"
+                    : m.data_partition.estimated_days_until_full < 60
+                      ? "warning"
+                      : "success"
+              }
+              icon="calendar"
+              label="Days until full"
+              value={m.data_partition.estimated_days_until_full ?? "—"}
+              sub="at the current growth rate"
+            />
+          </TileGrid>
 
           {/* Tenants summary */}
           <SectionLabel>Tenants</SectionLabel>
-          <div className="card" style={{ marginBottom: 16 }}>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Slug</th>
-                  <th>Workers</th>
-                  <th>Events / hour</th>
-                  <th>Status</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {tenants.isLoading && (
-                  <SkeletonRows cols={5} />
-                )}
-                {tenants.data?.tenants.map((t) => (
-                  <tr key={t.slug}>
-                    <td className="mono text-sm">{t.slug}</td>
-                    <td className="mono text-sm">
-                      {t.workers_running} / {t.workers_configured}
-                    </td>
-                    <td className="mono text-sm">{t.events_last_hour}</td>
-                    <td>
-                      {t.any_stage_red ? (
-                        <span className="pill pill-danger">Stage red</span>
-                      ) : (
-                        <span className="pill pill-success">OK</span>
-                      )}
-                    </td>
-                    <td>
-                      <a
-                        href={`/super-admin/tenants?slug=${t.slug}`}
-                        className="text-xs"
-                        style={{ color: "var(--accent)" }}
-                      >
-                        Access as →
-                      </a>
-                    </td>
+          <Panel title="Tenants" sub="Capture workers and events per tenant — refreshes every 30 seconds" bodyPadding={0} className="sa-block">
+            {tenants.isError ? (
+              <PanelEmpty
+                tone="danger"
+                icon="info"
+                title="Couldn't load the tenants summary"
+                body="The summary endpoint did not respond."
+                action={
+                  <button type="button" className="btn btn-sm" onClick={() => void tenants.refetch()}>
+                    Retry
+                  </button>
+                }
+              />
+            ) : tenants.data && tenants.data.tenants.length === 0 ? (
+              <PanelEmpty icon="users" title="No tenants reporting" body="No tenant has capture workers configured yet." />
+            ) : (
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Slug</th>
+                    <th className="sa-end">Workers</th>
+                    <th className="sa-end">Events / hour</th>
+                    <th>Pipeline</th>
+                    <th className="sa-end">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {tenants.isLoading && <SkeletonRows cols={5} />}
+                  {tenants.data?.tenants.map((t) => (
+                    <tr key={t.slug}>
+                      <td className="mono text-sm sa-strong" style={nowrap}>
+                        {t.slug}
+                      </td>
+                      <td className="mono text-sm sa-end">
+                        {t.workers_running} / {t.workers_configured}
+                      </td>
+                      <td className="mono text-sm sa-end">{t.events_last_hour}</td>
+                      <td>
+                        {t.any_stage_red ? (
+                          <SoftPill tone="danger" title="At least one worker has a pipeline stage in the red">
+                            Stage red
+                          </SoftPill>
+                        ) : (
+                          <SoftPill tone="success">Healthy</SoftPill>
+                        )}
+                      </td>
+                      <td className="sa-end">
+                        <a href={`/super-admin/tenants?slug=${t.slug}`} className="btn btn-sm btn-ghost" style={nowrap}>
+                          Access as
+                          <Icon name="chevronRight" size={12} />
+                        </a>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </Panel>
 
           {/* Scheduled jobs */}
           <SectionLabel>Scheduled jobs</SectionLabel>
-          <div className="card">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Next run</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {m.scheduled_jobs.length === 0 && (
+          <Panel title="Scheduled jobs" sub="Background schedulers registered with the backend" bodyPadding={0}>
+            {m.scheduled_jobs.length === 0 ? (
+              <PanelEmpty icon="clock" title="No scheduled jobs reporting" body="Background schedulers register here once the backend has started them." />
+            ) : (
+              <table className="table">
+                <thead>
                   <tr>
-                    <td
-                      colSpan={3}
-                      className="text-sm text-dim"
-                      style={{ padding: 16 }}
-                    >
-                      No scheduled jobs reporting.
-                    </td>
+                    <th>Name</th>
+                    <th>Next run</th>
+                    <th>Status</th>
                   </tr>
-                )}
-                {m.scheduled_jobs.map((j) => (
-                  <tr key={j.name}>
-                    <td className="mono text-sm">{j.name}</td>
-                    <td className="text-sm text-dim">
-                      {j.next_run
-                        ? new Date(j.next_run).toLocaleString()
-                        : "—"}
-                    </td>
-                    <td>
-                      <span
-                        className={`pill ${
-                          j.status === "ok"
-                            ? "pill-success"
-                            : j.status === "error"
-                              ? "pill-danger"
-                              : "pill-neutral"
-                        }`}
-                      >
-                        {j.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {m.scheduled_jobs.map((j) => (
+                    <tr key={j.name}>
+                      <td className="mono text-sm">{j.name}</td>
+                      <td className="text-sm text-dim" style={nowrap}>
+                        {j.next_run ? new Date(j.next_run).toLocaleString() : "—"}
+                      </td>
+                      <td>
+                        <SoftPill tone={j.status === "ok" ? "success" : j.status === "error" ? "danger" : "neutral"}>
+                          {j.status === "ok" ? "OK" : j.status}
+                        </SoftPill>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </Panel>
         </>
       )}
     </>
-  );
-}
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        fontSize: 11,
-        fontWeight: 600,
-        textTransform: "uppercase",
-        letterSpacing: "0.05em",
-        color: "var(--text-tertiary)",
-        margin: "16px 0 8px 0",
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function MetricCard({
-  label,
-  value,
-  tone,
-  footer,
-}: {
-  label: string;
-  value: string;
-  tone: "success" | "warning" | "danger" | "neutral";
-  footer?: React.ReactNode;
-}) {
-  const colors: Record<string, string> = {
-    success: "var(--success)",
-    warning: "var(--warning)",
-    danger: "var(--danger)",
-    neutral: "var(--text-tertiary)",
-  };
-  return (
-    <div
-      className="card"
-      style={{
-        padding: 12,
-        borderInlineStart: `3px solid ${colors[tone]}`,
-      }}
-    >
-      <div
-        style={{
-          fontSize: 10.5,
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
-          color: "var(--text-tertiary)",
-          fontWeight: 600,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          fontSize: 18,
-          fontWeight: 600,
-          marginTop: 4,
-          color: "var(--text)",
-        }}
-      >
-        {value}
-      </div>
-      {footer}
-    </div>
-  );
-}
-
-function ContentionBar({ pct }: { pct: number }) {
-  const color =
-    pct > 80
-      ? "var(--danger)"
-      : pct > 50
-        ? "var(--warning)"
-        : "var(--success)";
-  return (
-    <div
-      style={{
-        marginTop: 6,
-        height: 4,
-        background: "var(--bg-sunken)",
-        borderRadius: 2,
-        overflow: "hidden",
-      }}
-    >
-      <div
-        style={{
-          width: `${Math.min(100, pct)}%`,
-          height: "100%",
-          background: color,
-        }}
-      />
-    </div>
   );
 }
 

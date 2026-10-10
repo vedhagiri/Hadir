@@ -7,6 +7,8 @@ import { DrawerShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
 import { useWorkerErrors } from "./hooks";
 import { SkeletonLines } from "../../components/Skeleton";
+import { EmptyPanel } from "../../components/ListPageUi";
+import { SectionLabel } from "../system/opsUi";
 
 interface Props {
   cameraId: number;
@@ -23,116 +25,63 @@ export function RecentErrorsDrawer({ cameraId, cameraName, onClose }: Props) {
       <div className="drawer">
         <div className="drawer-head">
           <div>
-            <div className="mono text-xs text-dim">
-              {t("operations.errors.title") as string}
-            </div>
-            <div style={{ fontSize: 16, fontWeight: 600, marginTop: 2 }}>
-              {cameraName}
-            </div>
+            <div className="text-xs text-dim">{t("operations.errors.title") as string}</div>
+            <div className="drawer-title" style={{ fontSize: 16, marginTop: 2 }}>{cameraName}</div>
           </div>
-          <button
-            className="icon-btn"
-            onClick={onClose}
-            aria-label={t("common.close") as string}
-          >
+          <button className="icon-btn" onClick={onClose} aria-label={t("common.close") as string}>
             <Icon name="x" size={14} />
           </button>
         </div>
         <div className="drawer-body">
-          {errors.isLoading && (
-            <SkeletonLines lines={4} />
-          )}
+          {errors.isLoading && <SkeletonLines lines={6} />}
           {errors.isError && (
-            <div
-              className="text-sm"
-              style={{ color: "var(--danger-text)" }}
-            >
-              {t("operations.errors.loadFailed") as string}
-            </div>
+            <EmptyPanel
+              tone="danger"
+              icon={<Icon name="info" size={30} />}
+              title={t("operations.errors.loadFailed") as string}
+              body={t("operations.errors.loadFailedBody", { defaultValue: "The worker's error buffer could not be read." })}
+              actions={
+                <button type="button" className="btn" onClick={() => void errors.refetch()}>
+                  <Icon name="refresh" size={12} />
+                  {t("common.retry", { defaultValue: "Retry" })}
+                </button>
+              }
+            />
           )}
           {errors.data && (
             <>
               <SectionLabel>
                 {t("operations.errors.recent") as string}
-                {errors.data.recent_errors.length > 0 &&
-                  ` · ${errors.data.recent_errors.length}`}
+                {errors.data.recent_errors.length > 0 && ` · ${errors.data.recent_errors.length}`}
               </SectionLabel>
               {errors.data.recent_errors.length === 0 ? (
                 <div className="text-sm text-dim" style={{ marginBottom: 16 }}>
                   {t("operations.errors.noneRecent") as string}
                 </div>
               ) : (
-                <ul
-                  style={{
-                    listStyle: "none",
-                    padding: 0,
-                    margin: "0 0 16px 0",
-                    border: "1px solid var(--border)",
-                    borderRadius: "var(--radius-sm)",
-                    overflow: "hidden",
-                  }}
-                >
+                <ul className="ops-log-list">
                   {errors.data.recent_errors.map((line, i) => (
-                    <li
-                      key={i}
-                      style={{
-                        padding: "6px 10px",
-                        fontFamily: "var(--font-mono)",
-                        fontSize: 11.5,
-                        color: "var(--text)",
-                        borderBottom:
-                          i < errors.data.recent_errors.length - 1
-                            ? "1px solid var(--border)"
-                            : "none",
-                        background:
-                          i % 2 === 0 ? "transparent" : "var(--bg-sunken)",
-                      }}
-                    >
-                      {line}
-                    </li>
+                    <li key={i}>{line}</li>
                   ))}
                 </ul>
               )}
 
               <SectionLabel>
                 {t("operations.errors.auditLog") as string}
-                {errors.data.audit_log_errors.length > 0 &&
-                  ` · ${errors.data.audit_log_errors.length}`}
+                {errors.data.audit_log_errors.length > 0 && ` · ${errors.data.audit_log_errors.length}`}
               </SectionLabel>
               {errors.data.audit_log_errors.length === 0 ? (
-                <div className="text-sm text-dim">
-                  {t("operations.errors.noneAudit") as string}
-                </div>
+                <div className="text-sm text-dim">{t("operations.errors.noneAudit") as string}</div>
               ) : (
-                <ul
-                  style={{
-                    listStyle: "none",
-                    padding: 0,
-                    margin: 0,
-                  }}
-                >
+                <ul className="ops-audit-list">
                   {errors.data.audit_log_errors.map((row) => (
-                    <li
-                      key={row.id}
-                      style={{
-                        padding: "8px 10px",
-                        border: "1px solid var(--border)",
-                        borderRadius: "var(--radius-sm)",
-                        marginBottom: 6,
-                        fontSize: 12,
-                      }}
-                    >
+                    <li key={row.id}>
                       <div className="mono text-xs text-dim">
-                        {row.created_at
-                          ? new Date(row.created_at).toLocaleString()
-                          : "—"}
+                        {row.created_at ? new Date(row.created_at).toLocaleString() : "—"}
                       </div>
-                      <div style={{ fontWeight: 500 }}>{row.action}</div>
+                      <div style={{ fontWeight: 600 }}>{row.action}</div>
                       {Object.keys(row.after).length > 0 && (
-                        <div
-                          className="mono text-xs text-dim"
-                          style={{ marginTop: 2, wordBreak: "break-word" }}
-                        >
+                        <div className="mono text-xs text-dim" style={{ marginTop: 2, wordBreak: "break-word" }}>
                           {JSON.stringify(row.after)}
                         </div>
                       )}
@@ -141,16 +90,7 @@ export function RecentErrorsDrawer({ cameraId, cameraName, onClose }: Props) {
                 </ul>
               )}
 
-              <a
-                href={`/audit?action=capture.worker&entity_id=${cameraId}`}
-                style={{
-                  display: "inline-block",
-                  marginTop: 12,
-                  fontSize: 12,
-                  color: "var(--accent)",
-                  textDecoration: "underline",
-                }}
-              >
+              <a href={`/audit?action=capture.worker&entity_id=${cameraId}`} className="ops-link">
                 {t("operations.errors.viewFullLog") as string}
               </a>
             </>
@@ -163,22 +103,5 @@ export function RecentErrorsDrawer({ cameraId, cameraName, onClose }: Props) {
         </div>
       </div>
     </DrawerShell>
-  );
-}
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        fontSize: 11,
-        fontWeight: 600,
-        textTransform: "uppercase",
-        letterSpacing: "0.05em",
-        color: "var(--text-tertiary)",
-        marginBottom: 8,
-      }}
-    >
-      {children}
-    </div>
   );
 }

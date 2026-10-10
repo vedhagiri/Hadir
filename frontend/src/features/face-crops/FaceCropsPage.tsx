@@ -11,7 +11,10 @@ import {
   useStartProcessing,
 } from "./hooks";
 import type { ByClipFilters, ClipGroup, FaceCropInGroup } from "./types";
-import { SkeletonGrid } from "../../components/Skeleton";
+import { SkeletonCards, SkeletonGrid } from "../../components/Skeleton";
+import { EmptyPanel, FilterSelect, ResetButton, StatGrid, Toolbar } from "../../components/ListPageUi";
+import { StatTile, TILE_ICON } from "../person-clips/StatTile";
+import "../person-clips/clips.css";
 
 const PAGE_SIZE = 20;
 
@@ -91,16 +94,14 @@ export function FaceCropsPage() {
   const clipsCount =
     (clipsStatus.data?.pending ?? 0) + (clipsStatus.data?.failed ?? 0);
 
-  const selectStyle: React.CSSProperties = {
-    padding: "6px 10px",
-    fontSize: 12.5,
-    border: "1px solid var(--border)",
-    borderRadius: "var(--radius-sm)",
-    background: "var(--bg-elev)",
-    color: "var(--text)",
-    fontFamily: "var(--font-sans)",
-    outline: "none",
-  };
+  const st = clipsStatus.data;
+  const totalCrops = list.data?.total_crops ?? stats.data?.total_crops ?? 0;
+  const cameraFilterActive = filters.camera_id !== null;
+  // Addendum — "no records at all": no crops and no filter narrowing.
+  // Hides the stat grid + toolbar; the card below shows one EmptyPanel
+  // carrying the page's primary action (Process Face Crops).
+  const noRecords =
+    !list.isLoading && !list.isError && list.data !== undefined && list.data.groups.length === 0 && !cameraFilterActive;
 
   return (
     <>
@@ -108,141 +109,148 @@ export function FaceCropsPage() {
         <div>
           <h1 className="page-title">{t("faceCrops.title", "Face Crops")}</h1>
           <p className="page-sub">
-            {list.data
-              ? `${list.data.total_crops} ${t("faceCrops.totalSuffix", "crops")}`
-              : "—"}
-            {stats.data && stats.data.total_crops > 0
-              ? ` · ${t("faceCrops.fromClips", "from")} ${list.data?.total_groups ?? 0} ${t("faceCrops.clips", "clips")}`
-              : ""}
-            {clipsStatus.data && clipsStatus.data.pending > 0
-              ? ` · ${clipsStatus.data.pending} pending`
-              : ""}
+            {t("faceCrops.pageSub", {
+              defaultValue: "Faces extracted from recorded clips, grouped by the event they came from.",
+            })}
           </p>
         </div>
-        <button
-          className="btn btn-primary"
-          onClick={handleProcess}
-          disabled={isProcessing}
-          style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}
-        >
-          <Icon name="user" size={13} />
-          {isProcessing
-            ? t("faceCrops.processing", "Processing…")
-            : t("faceCrops.processBtn", "Process Face Crops")}
-        </button>
+        <div className="page-actions">
+          <button
+            className="btn btn-primary"
+            onClick={handleProcess}
+            disabled={isProcessing}
+          >
+            <Icon name="user" size={13} />
+            {isProcessing
+              ? t("faceCrops.processing", "Processing…")
+              : t("faceCrops.processBtn", "Process Face Crops")}
+          </button>
+        </div>
       </div>
 
-      <div className="card">
-        <div className="card-head">
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <h3 className="card-title">
-              {t("faceCrops.byClipTitle", "Crops by event")}
-            </h3>
-          </div>
-          <div
-            className="flex gap-2"
-            style={{ alignItems: "center", flexWrap: "wrap" as const }}
-          >
-            {isProcessing && (
-              <span
-                className="text-sm"
-                style={{
-                  color: "var(--accent)",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 4,
-                }}
-              >
-                <span
-                  style={{
-                    display: "inline-block",
-                    width: 8,
-                    height: 8,
-                    borderRadius: "50%",
-                    background: "var(--accent)",
-                    animation: "pulse 1.5s infinite",
-                  }}
-                />
-                {t("faceCrops.processingHint", "Processing clips in background…")}
-              </span>
-            )}
-            <select
-              value={filters.camera_id ?? ""}
-              onChange={(e) =>
-                updateFilters({
-                  camera_id: e.target.value === "" ? null : Number(e.target.value),
-                })
-              }
-              style={selectStyle}
-              aria-label={t("faceCrops.filterCamera", "Filter by camera")}
-            >
-              <option value="">
-                {t("faceCrops.allCameras", "All cameras")}
-              </option>
-              {cameras.data?.items.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </div>
+      {stats.isLoading || clipsStatus.isLoading ? (
+        <div style={{ marginBottom: 14 }}>
+          <SkeletonCards count={4} minWidth={220} />
         </div>
+      ) : noRecords ? null : (
+        <StatGrid>
+          <StatTile
+            tone="info"
+            icon={TILE_ICON.face}
+            label={t("faceCrops.stats.crops", { defaultValue: "Face crops" })}
+            value={totalCrops.toLocaleString()}
+            sub={t("faceCrops.stats.cropsSub", {
+              defaultValue: "across {{n}} events",
+              n: (list.data?.total_groups ?? 0).toLocaleString(),
+            })}
+          />
+          <StatTile
+            tone="success"
+            icon={TILE_ICON.check}
+            label={t("faceCrops.stats.processed", { defaultValue: "Clips processed" })}
+            value={(st?.processed ?? 0).toLocaleString()}
+            sub={t("faceCrops.stats.ofTotal", { defaultValue: "of {{n}} clips", n: (st?.total ?? 0).toLocaleString() })}
+          />
+          <StatTile
+            tone="warning"
+            icon={TILE_ICON.clock}
+            label={t("faceCrops.stats.pending", { defaultValue: "Pending" })}
+            value={((st?.pending ?? 0) + (st?.processing ?? 0)).toLocaleString()}
+            sub={
+              isProcessing
+                ? t("faceCrops.stats.pendingRunning", { defaultValue: "processing now" })
+                : t("faceCrops.stats.pendingSub", { defaultValue: "waiting for extraction" })
+            }
+          />
+          <StatTile
+            tone="danger"
+            icon={TILE_ICON.alert}
+            label={t("faceCrops.stats.failed", { defaultValue: "Failed" })}
+            value={(st?.failed ?? 0).toLocaleString()}
+            sub={t("faceCrops.stats.failedSub", { defaultValue: "retried on next run" })}
+          />
+        </StatGrid>
+      )}
 
-        {list.isLoading && (
-          <SkeletonGrid count={12} />
+      {!noRecords && (
+      <Toolbar>
+        <FilterSelect
+          label={t("faceCrops.cameraLabel", { defaultValue: "Camera" })}
+          value={filters.camera_id === null ? "" : String(filters.camera_id)}
+          onChange={(v) => updateFilters({ camera_id: v === "" ? null : Number(v) })}
+          options={[
+            ["", t("faceCrops.allCameras", "All cameras")],
+            ...(cameras.data?.items ?? []).map((c) => [String(c.id), c.name] as [string, string]),
+          ]}
+        />
+        {isProcessing && (
+          <span role="status" className="pill pill-accent">
+            <span aria-hidden className="pill-dot cl-live-dot" />
+            {t("faceCrops.processingHint", "Processing clips in background…")}
+          </span>
         )}
+        <ResetButton
+          active={cameraFilterActive}
+          label={t("faceCrops.reset", { defaultValue: "Reset" })}
+          onClick={() => updateFilters({ camera_id: null })}
+        />
+      </Toolbar>
+      )}
+
+      <div className="card" style={{ padding: noRecords ? 0 : 14 }}>
+        {list.isLoading && <SkeletonGrid count={12} />}
         {list.isError && (
-          <div
-            className="text-sm"
-            style={{ padding: 16, color: "var(--danger-text)" }}
-          >
-            {t("faceCrops.loadFailed", "Could not load face crops.")}
-          </div>
+          <EmptyPanel
+            tone="danger"
+            icon={<Icon name="info" size={28} />}
+            title={t("faceCrops.loadFailed", "Could not load face crops.")}
+            body={t("faceCrops.loadFailedBody", { defaultValue: "Something went wrong while fetching face crops. Try again in a moment." })}
+            actions={
+              <button type="button" className="btn" onClick={() => void list.refetch()}>
+                <Icon name="refresh" size={12} />
+                {t("faceCrops.retry", { defaultValue: "Retry" })}
+              </button>
+            }
+          />
         )}
-        {list.data &&
-          list.data.groups.length === 0 &&
-          !list.isLoading && (
-            <div
-              className="text-sm text-dim"
-              style={{ padding: 16, textAlign: "center" }}
-            >
-              <div style={{ fontSize: 32, marginBottom: 8, opacity: 0.4 }}>
-                <Icon name="user" size={32} />
-              </div>
-              {clipsCount > 0 ? (
-                <>
-                  <p style={{ marginBottom: 8 }}>
-                    {t(
-                      "faceCrops.pendingClips",
-                      "{{count}} clip(s) available for processing.",
-                      { count: clipsCount },
-                    )}
-                  </p>
-                  <p>
-                    {t(
-                      "faceCrops.clickProcess",
-                      'Click "Process Face Crops" to extract faces.',
-                    )}
-                  </p>
-                </>
-              ) : (
-                <>
-                  <p style={{ marginBottom: 8 }}>
-                    {t("faceCrops.empty", "No face crops yet.")}
-                  </p>
-                  <p>
-                    {t(
-                      "faceCrops.emptyHint",
-                      "Record person clips from cameras first.",
-                    )}
-                  </p>
-                </>
-              )}
-            </div>
-          )}
+        {list.data && list.data.groups.length === 0 && !list.isLoading && (
+          cameraFilterActive && hasExistingCrops ? (
+            <EmptyPanel
+              icon={<Icon name="filter" size={28} />}
+              title={t("faceCrops.emptyFilteredTitle", { defaultValue: "No face crops from this camera" })}
+              body={t("faceCrops.emptyFilteredBody", { defaultValue: "Pick another camera or show crops from every camera." })}
+              actions={
+                <button type="button" className="btn" onClick={() => updateFilters({ camera_id: null })}>
+                  <Icon name="refresh" size={12} />
+                  {t("faceCrops.showAll", { defaultValue: "Show all cameras" })}
+                </button>
+              }
+            />
+          ) : clipsCount > 0 ? (
+            <EmptyPanel
+              tone="accent"
+              icon={<Icon name="user" size={30} />}
+              title={t("faceCrops.pendingClips", "{{count}} clip(s) available for processing.", { count: clipsCount })}
+              body={t("faceCrops.clickProcess", 'Click "Process Face Crops" to extract faces.')}
+              actions={
+                <button type="button" className="btn btn-primary" onClick={handleProcess} disabled={isProcessing}>
+                  <Icon name="user" size={12} />
+                  {t("faceCrops.processBtn", "Process Face Crops")}
+                </button>
+              }
+            />
+          ) : (
+            <EmptyPanel
+              tone="accent"
+              icon={<Icon name="user" size={30} />}
+              title={t("faceCrops.empty", "No face crops yet.")}
+              body={t("faceCrops.emptyHint", "Record person clips from cameras first.")}
+            />
+          )
+        )}
 
         {list.data && list.data.groups.length > 0 && (
-          <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 20 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             {list.data.groups.map((group) => (
               <ClipGroupCard
                 key={group.person_clip_id}
@@ -253,43 +261,46 @@ export function FaceCropsPage() {
           </div>
         )}
 
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            padding: "10px 14px",
-            borderTop: "1px solid var(--border)",
-            fontSize: 12,
-          }}
-        >
-          <span className="text-dim">
-            {t("personClips.page")} {filters.page} {t("personClips.of")}{" "}
-            {totalPages}
-          </span>
-          <div style={{ display: "flex", gap: 6 }}>
-            <button
-              className="btn btn-sm"
-              disabled={filters.page <= 1}
-              onClick={() =>
-                setFilters((prev) => ({ ...prev, page: prev.page - 1 }))
-              }
-            >
-              <Icon name="chevronLeft" size={11} />
-              {t("common.previous")}
-            </button>
-            <button
-              className="btn btn-sm"
-              disabled={filters.page >= totalPages}
-              onClick={() =>
-                setFilters((prev) => ({ ...prev, page: prev.page + 1 }))
-              }
-            >
-              {t("common.next")}
-              <Icon name="chevronRight" size={11} />
-            </button>
+        {(list.data?.total_groups ?? 0) > 0 && (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "12px 4px 2px",
+              marginTop: 12,
+              borderTop: "1px solid var(--border)",
+              fontSize: 12,
+            }}
+          >
+            <span className="text-dim">
+              {t("personClips.page")} {filters.page} {t("personClips.of")}{" "}
+              {totalPages}
+            </span>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button
+                className="btn btn-sm"
+                disabled={filters.page <= 1}
+                onClick={() =>
+                  setFilters((prev) => ({ ...prev, page: prev.page - 1 }))
+                }
+              >
+                <Icon name="chevronLeft" size={11} />
+                {t("common.previous")}
+              </button>
+              <button
+                className="btn btn-sm"
+                disabled={filters.page >= totalPages}
+                onClick={() =>
+                  setFilters((prev) => ({ ...prev, page: prev.page + 1 }))
+                }
+              >
+                {t("common.next")}
+                <Icon name="chevronRight" size={11} />
+              </button>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {previewCropId !== null && (
@@ -331,83 +342,39 @@ function ClipGroupCard({
   const { t } = useTranslation();
 
   return (
-    <div
-      style={{
-        border: "1px solid var(--border)",
-        borderRadius: "var(--radius)",
-        background: "var(--bg-elev)",
-        overflow: "hidden",
-      }}
-    >
+    <div className="cl-group">
       {/* Clip info header */}
-      <div
-        style={{
-          padding: "10px 14px",
-          borderBottom: "1px solid var(--border)",
-          background: "var(--bg)",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          flexWrap: "wrap" as const,
-          gap: 6,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" as const }}>
-          <span
-            style={{
-              fontWeight: 600,
-              fontSize: 13,
-              display: "flex",
-              alignItems: "center",
-              gap: 4,
-            }}
-          >
+      <div className="cl-group-head">
+        <div className="cl-group-meta">
+          <span className="cl-group-title">
             <Icon name="camera" size={13} />
             {group.camera_name}
           </span>
-          <span
-            className="text-dim"
-            style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}
-          >
+          <span className="mono" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
             <Icon name="clock" size={10} />
             {group.clip_start ? fmtTimestamp(group.clip_start) : "—"}
           </span>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 11 }}>
-          <span className="text-dim">
+        <div className="cl-group-meta">
+          <span className="mono">
             {t("faceCrops.clipId", "Clip")} #{group.person_clip_id}
           </span>
-          <span
-            style={{
-              background: "var(--accent-bg)",
-              color: "var(--accent)",
-              padding: "2px 6px",
-              borderRadius: "var(--radius-sm)",
-              fontWeight: 500,
-            }}
-          >
+          <span className="pill pill-accent">
             {group.crops.length} {t("faceCrops.faces", "faces")}
           </span>
           {group.track_count > 0 && (
-            <span className="text-dim">
+            <span>
               {group.track_count} {t("faceCrops.tracks", "tracks")}
             </span>
           )}
           {group.duration_seconds > 0 && (
-            <span className="text-dim">{fmtDuration(group.duration_seconds)}</span>
+            <span className="mono">{fmtDuration(group.duration_seconds)}</span>
           )}
         </div>
       </div>
 
       {/* Face crops grid */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
-          gap: 10,
-          padding: 12,
-        }}
-      >
+      <div className="cl-crop-grid">
         {group.crops.map((crop) => (
           <FaceCropCard
             key={crop.id}
@@ -434,17 +401,14 @@ function FaceCropCard({
   clipId: number;
   onClick: () => void;
 }) {
+  const { t } = useTranslation();
   const imgUrl = `/api/face-crops/${crop.id}/image`;
+  const score = crop.quality_score;
+  const scoreTone = score >= 0.75 ? "pill-success" : score >= 0.5 ? "pill-neutral" : "pill-warning";
 
   return (
     <div
-      style={{
-        border: "1px solid var(--border)",
-        borderRadius: "var(--radius-sm)",
-        overflow: "hidden",
-        background: "#111",
-        cursor: "pointer",
-      }}
+      className="cl-media-card"
       onClick={onClick}
       role="button"
       tabIndex={0}
@@ -454,44 +418,18 @@ function FaceCropCard({
           onClick();
         }
       }}
-      aria-label={`Face ${crop.face_index} from clip ${clipId}`}
+      aria-label={t("faceCrops.cropAria", { defaultValue: "Face {{face}} from clip {{clip}}", face: crop.face_index, clip: clipId })}
     >
-      <div
-        style={{
-          width: "100%",
-          aspectRatio: "1",
-          display: "grid",
-          placeItems: "center",
-          overflow: "hidden",
-        }}
-      >
-        <img
-          src={imgUrl}
-          alt=""
-          style={{
-            width: "100%",
-            height: "100%",
-            objectFit: "contain",
-            display: "block",
-          }}
-        />
+      <div className="cl-media-thumb is-square">
+        <img className="cl-media-img-fade" src={imgUrl} alt="" />
       </div>
-      <div
-        style={{
-          padding: "5px 8px",
-          fontSize: 10,
-          lineHeight: 1.4,
-          background: "var(--bg-elev)",
-        }}
-      >
-        <div style={{ display: "flex", gap: 4, justifyContent: "space-between" }}>
-          <span className="text-dim">
-            #{crop.face_index} · {fmtScore(crop.quality_score)}
-          </span>
-          <span className="text-dim">
-            {crop.width}×{crop.height}
-          </span>
-        </div>
+      <div className="cl-crop-caption">
+        <span className={`pill ${scoreTone} mono`} title={t("faceCrops.qualityTitle", { defaultValue: "Quality score" })}>
+          #{crop.face_index} · {fmtScore(score)}
+        </span>
+        <span className="cl-media-id">
+          {crop.width}×{crop.height}
+        </span>
       </div>
     </div>
   );
@@ -508,63 +446,24 @@ function FaceCropPreview({
   cropId: number;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const imgUrl = `/api/face-crops/${cropId}/image`;
 
   return (
     <ModalShell onClose={onClose}>
       <div
-        style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 60,
-          display: "grid",
-          placeItems: "center",
-          padding: 24,
-          background: "rgba(0,0,0,0.7)",
-        }}
+        className="cl-lightbox"
         onClick={onClose}
         role="dialog"
         aria-modal="true"
-        aria-label="Face crop preview"
+        aria-label={t("faceCrops.previewAria", { defaultValue: "Face crop preview" })}
       >
-        <div
-          style={{
-            maxWidth: "90vw",
-            maxHeight: "90vh",
-            display: "flex",
-            flexDirection: "column",
-            gap: 12,
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <img
-            src={imgUrl}
-            alt=""
-            style={{
-              maxWidth: "100%",
-              maxHeight: "80vh",
-              borderRadius: "var(--radius)",
-              display: "block",
-              objectFit: "contain",
-            }}
-          />
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              color: "rgba(255,255,255,0.8)",
-              fontSize: 13,
-            }}
-          >
-            <span>Crop #{cropId}</span>
-            <button
-              type="button"
-              className="btn btn-sm"
-              style={{ background: "rgba(255,255,255,0.15)", color: "white" }}
-              onClick={onClose}
-            >
-              <Icon name="x" size={12} /> Close
+        <div className="cl-lightbox-inner" onClick={(e) => e.stopPropagation()}>
+          <img src={imgUrl} alt="" />
+          <div className="cl-lightbox-bar">
+            <span className="mono">{t("faceCrops.cropLabel", { defaultValue: "Crop #{{id}}", id: cropId })}</span>
+            <button type="button" className="btn btn-sm" onClick={onClose}>
+              <Icon name="x" size={12} /> {t("common.close")}
             </button>
           </div>
         </div>

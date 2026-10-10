@@ -1,0 +1,103 @@
+/* Dashboard-area layout (prefix dsh-). Imported from DashUi.tsx.
+   Everything visual comes from theme/modern.css tokens; this file only
+   adds the layout the dashboards need and ListPageUi doesn't carry. */
+
+/* Accent-toned stat card (the shared set stops at info/success/warning/
+   danger/neutral). Same shape as the other .mg-stat tone modifiers. */
+.mg-stat.tone-accent { --tone-fg: var(--accent-text); --tone-bg: var(--accent-soft); }
+
+/* Non-interactive stat card: same look, no lift / cursor / underline. */
+.mg-stat.dsh-static { cursor: default; }
+.mg-stat.dsh-static:hover { transform: none; box-shadow: var(--shadow-sm); border-color: var(--border); }
+.mg-stat.dsh-static:hover::after { transform: scaleX(0); }
+.mg-stat-value.dsh-value-text { font-size: 22px; line-height: 1.25; }
+.mg-stat-value.dsh-clip,
+.mg-stat-sub.dsh-clip { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dsh-stat-extra { display: flex; justify-content: flex-end; margin-top: 6px; }
+
+/* Panel = .card with the design's head/body. */
+.dsh-panel { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+.dsh-panel > .card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.dsh-panel > .card-head > div:first-child { min-width: 0; }
+.dsh-panel-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.dsh-panel-body { flex: 1; min-width: 0; }
+.dsh-panel-body.dsh-flush { padding: 0; }
+.dsh-panel .table { margin: 0; }
+.dsh-panel-empty .mg-empty { padding: 32px 20px 30px; gap: 6px; animation: none; }
+.dsh-panel-empty .mg-empty-icon { width: 48px; height: 48px; border-radius: 14px; margin-bottom: 4px; }
+.dsh-panel-empty .mg-empty-title { font-size: 14.5px; }
+.dsh-panel-empty .mg-empty-body { font-size: 12.5px; }
+.dsh-panel-empty .mg-empty-actions { margin-top: 6px; }
+
+/* Rows */
+.dsh-row-2 { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; margin-bottom: 20px; align-items: stretch; }
+.dsh-row-2.dsh-row-rev { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); align-items: start; }
+.dsh-row-auto { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr)); gap: 16px; align-items: start; }
+.dsh-mini-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 14px; }
+.dsh-notice { padding: 14px 18px; margin-bottom: 20px; background: var(--warning-soft); color: var(--warning-text); border-color: color-mix(in oklab, var(--warning) 28%, transparent); font-size: 13px; }
+
+/* Segmented bar (status breakdown + storage) */
+.dsh-bar { display: flex; height: 10px; border-radius: 999px; overflow: hidden; background: var(--bg-sunken); gap: 2px; }
+.dsh-bar-seg { transition: flex var(--dur) var(--ease-out); min-width: 2px; }
+.dsh-bar-seg.is-accent { background: var(--accent); }
+.dsh-bar-seg.is-success { background: var(--success); }
+.dsh-bar-seg.is-warning { background: var(--warning); }
+.dsh-bar-seg.is-danger { background: var(--danger); }
+.dsh-bar-seg.is-info { background: var(--info); }
+.dsh-bar-seg.is-neutral { background: var(--text-quaternary); }
+.dsh-bar-seg.is-free { background: transparent; }
+
+.dsh-legend { display: flex; flex-direction: column; gap: 2px; }
+.dsh-legend-row {
+  display: flex; align-items: center; gap: 10px; font-size: 13px; padding: 7px 8px; border-radius: 8px;
+  appearance: none; border: 0; background: transparent; font: inherit; color: var(--text); text-align: start; width: 100%;
+  transition: background var(--dur-fast) ease;
+}
+button.dsh-legend-row { cursor: pointer; }
+button.dsh-legend-row:hover { background: var(--bg-hover); }
+.dsh-legend-row[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-text); }
+.dsh-legend-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 9px; }
+.dsh-legend-dot.is-accent { background: var(--accent); }
+.dsh-legend-dot.is-success { background: var(--success); }
+.dsh-legend-dot.is-warning { background: var(--warning); }
+.dsh-legend-dot.is-danger { background: var(--danger); }
+.dsh-legend-dot.is-info { background: var(--info); }
+.dsh-legend-dot.is-neutral { background: var(--text-quaternary); }
+.dsh-legend-dot.is-free { background: var(--bg-sunken); border: 1px solid var(--border); }
+.dsh-legend-label { flex: 1; min-width: 0; }
+.dsh-legend-value { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-weight: 600; }
+.dsh-legend-pct { font-family: var(--font-num); font-variant-numeric: tabular-nums; color: var(--text-tertiary); width: 42px; text-align: end; }
+.dsh-legend-inline { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; font-size: 12px; color: var(--text-tertiary); }
+.dsh-legend-inline > span { display: inline-flex; align-items: center; gap: 6px; }
+
+/* Storage card */
+.dsh-storage-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+.dsh-storage-figure { font-family: var(--font-display); font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-top: 4px; }
+.dsh-storage-figure span { color: var(--text-secondary); font-weight: 500; }
+.dsh-storage-pct { text-align: end; }
+.dsh-storage-pct .mg-stat-value { font-size: 36px; }
+.dsh-storage-pct .mg-stat-value.is-warning { color: var(--warning-text); }
+.dsh-storage-pct .mg-stat-value.is-danger { color: var(--danger-text); }
+.dsh-storage-pct .mg-stat-value.is-accent { color: var(--accent-text); }
+.dsh-storage-mini { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--border); }
+
+/* Request cards (employee dashboard) */
+.dsh-req-list { display: flex; flex-direction: column; gap: 10px; }
+.dsh-req-card { appearance: none; font: inherit; text-align: start; cursor: pointer; color: var(--text); padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.dsh-req-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.dsh-req-title { font-size: 13.5px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-req-dates { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 12px; color: var(--text-secondary); }
+.dsh-req-reason { font-size: 12.5px; color: var(--text-secondary); line-height: 1.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.dsh-person-name { font-weight: 600; white-space: nowrap; }
+.dsh-code { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.dsh-end, .table th.dsh-end, .table td.dsh-end { text-align: end; }
+.dsh-strong { font-weight: 600; }
+.dsh-secondary { color: var(--text-secondary); }
+
+@media (max-width: 1100px) {
+  .dsh-row-2, .dsh-row-2.dsh-row-rev { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 720px) {
+  .dsh-storage-pct .mg-stat-value { font-size: 28px; }
+}

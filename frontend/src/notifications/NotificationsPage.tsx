@@ -1,156 +1,262 @@
 // Full notifications history page at /notifications.
 
+import { useMemo, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 
-import { useTenantDateTime } from "../util/datetime";
+import {
+  EmptyPanel,
+  FilterSelect,
+  ResetButton,
+  SearchField,
+  StatCard,
+  StatGrid,
+  Toolbar,
+} from "../components/ListPageUi";
+import { RelativeTime } from "../components/RelativeTime";
+import { SkeletonCards, SkeletonTable } from "../components/Skeleton";
+import { Icon } from "../shell/Icon";
+import { SoftPill, WF_ICON, WfSvg, errorDetail } from "../requests/workflowUi";
+import type { SoftTone } from "../requests/workflowUi";
 import { useMarkAllRead, useMarkRead, useNotifications } from "./hooks";
-import { SkeletonRows } from "../components/Skeleton";
+import { ALL_CATEGORIES } from "./types";
+import type { NotificationCategory } from "./types";
 
+type ReadFilter = "" | "unread" | "read";
+
+const CATEGORY_TONE: Record<NotificationCategory, SoftTone> = {
+  approval_assigned: "warning",
+  approval_decided: "success",
+  overtime_flagged: "info",
+  camera_unreachable: "danger",
+  report_ready: "accent",
+  admin_override: "danger",
+};
 
 export function NotificationsPage() {
   const { t } = useTranslation();
   const list = useNotifications(100);
   const markRead = useMarkRead();
   const markAll = useMarkAllRead();
-  const dt = useTenantDateTime();
+
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("");
+  const [readFilter, setReadFilter] = useState<ReadFilter>("");
+
+  const all = list.data?.items ?? [];
+  const unreadCount = all.filter((n) => n.read_at == null).length;
+
+  const q = search.trim().toLowerCase();
+  const items = useMemo(
+    () =>
+      all.filter((n) => {
+        if (category && n.category !== category) return false;
+        if (readFilter === "unread" && n.read_at != null) return false;
+        if (readFilter === "read" && n.read_at == null) return false;
+        if (!q) return true;
+        return (
+          n.subject.toLowerCase().includes(q) ||
+          (n.body ?? "").toLowerCase().includes(q)
+        );
+      }),
+    [all, category, readFilter, q],
+  );
+  const filtersActive = q !== "" || category !== "" || readFilter !== "";
+  const resetFilters = () => {
+    setSearch("");
+    setCategory("");
+    setReadFilter("");
+  };
+
+  const catLabel = (c: string) => t(`notifications.categories.${c}`, { defaultValue: c });
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <header
-        style={{
-          display: "flex",
-          alignItems: "flex-start",
-          justifyContent: "space-between",
-        }}
-      >
+    <div className="wf-page">
+      <div className="page-header">
         <div>
-          <h1
-            style={{
-              fontFamily: "var(--font-display)",
-              fontSize: 28,
-              margin: "0 0 4px 0",
-              fontWeight: 400,
-            }}
-          >
-            {t("notifications.title")}
-          </h1>
-          <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 13 }}>
+          <h1 className="page-title">{t("notifications.title")}</h1>
+          <p className="page-sub">
             <Trans
               i18nKey="notifications.page.subtitle"
               components={{
-                1: (
-                  <Link
-                    to="/settings/notifications"
-                    style={{
-                      color: "var(--accent)",
-                      textDecoration: "underline",
-                    }}
-                  />
-                ),
+                1: <Link to="/settings/notifications" className="wf-link-btn" />,
               }}
               values={{ settingsLink: t("notifications.page.settingsLink") }}
             />
           </p>
         </div>
-        <button
-          type="button"
-          className="btn"
-          onClick={() => markAll.mutate()}
-          disabled={(list.data?.unread_count ?? 0) === 0 || markAll.isPending}
-        >
-          {t("notifications.bell.markAllRead")}
-        </button>
-      </header>
-
-      <div className="card">
-        <table className="table">
-          <thead>
-            <tr>
-              <th style={{ width: 200 }}>{t("myRequests.columns.submitted")}</th>
-              <th style={{ width: 180 }}>
-                {t("notifications.preferences.category")}
-              </th>
-              <th>{t("approvals.columns.reason")}</th>
-              <th style={{ width: 80 }}></th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.isLoading ? (
-              <SkeletonRows cols={4} />
-            ) : (list.data?.items ?? []).length === 0 ? (
-              <tr>
-                <td colSpan={4} className="text-sm text-dim">
-                  {t("notifications.bell.empty")}
-                </td>
-              </tr>
-            ) : (
-              list.data!.items.map((n) => (
-                <tr
-                  key={n.id}
-                  style={{
-                    background:
-                      n.read_at == null ? "var(--bg-sunken)" : "transparent",
-                  }}
-                >
-                  <td className="mono text-xs">
-                    {dt.formatDateTime(n.created_at)}
-                  </td>
-                  <td className="text-xs">
-                    {t(`notifications.categories.${n.category}`, {
-                      defaultValue: n.category,
-                    })}
-                  </td>
-                  <td>
-                    <div
-                      style={{
-                        fontSize: 13,
-                        fontWeight: n.read_at == null ? 600 : 400,
-                      }}
-                    >
-                      {n.link_url ? (
-                        <Link
-                          to={n.link_url}
-                          onClick={() => {
-                            if (n.read_at == null) markRead.mutate(n.id);
-                          }}
-                          style={{
-                            color: "inherit",
-                            textDecoration: "none",
-                          }}
-                        >
-                          {n.subject}
-                        </Link>
-                      ) : (
-                        n.subject
-                      )}
-                    </div>
-                    {n.body && (
-                      <div
-                        className="text-xs text-dim"
-                        style={{ marginTop: 2 }}
-                      >
-                        {n.body}
-                      </div>
-                    )}
-                  </td>
-                  <td style={{ textAlign: "end" }}>
-                    {n.read_at == null && (
-                      <button
-                        type="button"
-                        className="btn btn-sm"
-                        onClick={() => markRead.mutate(n.id)}
-                      >
-                        {t("notifications.bell.markOneRead")}
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+        <div className="page-actions">
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => markAll.mutate()}
+            disabled={(list.data?.unread_count ?? 0) === 0 || markAll.isPending}
+          >
+            <Icon name="check" size={12} /> {t("notifications.bell.markAllRead")}
+          </button>
+        </div>
       </div>
+
+      {list.isLoading ? (
+        <>
+          <SkeletonCards count={3} />
+          <SkeletonTable rows={6} cols={3} />
+        </>
+      ) : list.error ? (
+        <div className="card">
+          <EmptyPanel
+            tone="danger"
+            icon={<WfSvg>{WF_ICON.alert}</WfSvg>}
+            title={t("notifications.loadError.title", { defaultValue: "Couldn't load notifications" })}
+            body={errorDetail(list.error, t("common.errorGeneric"))}
+            actions={
+              <button type="button" className="btn" onClick={() => void list.refetch()}>
+                <Icon name="refresh" size={12} /> {t("common.retry", { defaultValue: "Retry" })}
+              </button>
+            }
+          />
+        </div>
+      ) : all.length === 0 ? (
+        <div className="card">
+          <EmptyPanel
+            tone="accent"
+            icon={<WfSvg>{WF_ICON.bell}</WfSvg>}
+            title={t("notifications.emptyAll.title", { defaultValue: "You're all caught up" })}
+            body={t("notifications.bell.empty")}
+          />
+        </div>
+      ) : (
+        <>
+          <StatGrid>
+            <StatCard
+              tone="info"
+              icon={WF_ICON.bell}
+              label={t("notifications.stats.all", { defaultValue: "All notifications" })}
+              value={all.length}
+              sub={t("notifications.stats.allSub", { defaultValue: "Most recent 100" })}
+              active={readFilter === ""}
+              onClick={() => setReadFilter("")}
+            />
+            <StatCard
+              tone="warning"
+              icon={<><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="3" fill="currentColor" /></>}
+              label={t("notifications.stats.unread", { defaultValue: "Unread" })}
+              value={unreadCount}
+              sub={t("notifications.stats.unreadSub", { defaultValue: "Not opened yet" })}
+              active={readFilter === "unread"}
+              onClick={() => setReadFilter(readFilter === "unread" ? "" : "unread")}
+            />
+            <StatCard
+              tone="success"
+              icon={WF_ICON.check}
+              label={t("notifications.stats.read", { defaultValue: "Read" })}
+              value={all.length - unreadCount}
+              sub={t("notifications.stats.readSub", { defaultValue: "Already seen" })}
+              active={readFilter === "read"}
+              onClick={() => setReadFilter(readFilter === "read" ? "" : "read")}
+            />
+          </StatGrid>
+          <Toolbar>
+            <SearchField
+              value={search}
+              onChange={setSearch}
+              placeholder={t("notifications.searchPlaceholder", { defaultValue: "Search notifications" })}
+              clearLabel={t("notifications.clearSearch", { defaultValue: "Clear search" })}
+            />
+            <FilterSelect
+              label={t("notifications.preferences.category")}
+              value={category}
+              onChange={setCategory}
+              options={[
+                ["", t("notifications.filters.allCategories", { defaultValue: "All categories" })],
+                ...ALL_CATEGORIES.map((c): [string, string] => [c, catLabel(c)]),
+              ]}
+            />
+            <ResetButton
+              active={filtersActive}
+              label={t("notifications.filters.reset", { defaultValue: "Reset" })}
+              onClick={resetFilters}
+            />
+          </Toolbar>
+
+          <div className="card">
+            {items.length === 0 ? (
+              <EmptyPanel
+                tone="neutral"
+                icon={<WfSvg>{WF_ICON.search}</WfSvg>}
+                title={t("notifications.emptyFiltered.title", { defaultValue: "No notifications match" })}
+                body={t("notifications.emptyFiltered.body", { defaultValue: "Try a different search or clear the filters." })}
+                actions={
+                  <button type="button" className="btn" onClick={resetFilters}>
+                    {t("notifications.filters.clear", { defaultValue: "Clear filters" })}
+                  </button>
+                }
+              />
+            ) : (
+              <ul className="wf-notif-list">
+                {items.map((n) => {
+                  const unread = n.read_at == null;
+                  return (
+                    <li key={n.id} className={`wf-notif${unread ? " is-unread" : ""}`}>
+                      <span className="wf-notif-dot" aria-hidden />
+                      <div className="wf-notif-main">
+                        <div className="wf-notif-meta">
+                          <SoftPill tone={CATEGORY_TONE[n.category] ?? "neutral"} dot={false}>
+                            {catLabel(n.category)}
+                          </SoftPill>
+                          <span className="wf-notif-time">
+                            <RelativeTime iso={n.created_at} />
+                          </span>
+                          {unread && (
+                            <span className="text-xs" style={{ color: "var(--accent-text)", fontWeight: 600 }}>
+                              {t("notifications.unreadLabel", { defaultValue: "New" })}
+                            </span>
+                          )}
+                        </div>
+                        <div className="wf-notif-subject">
+                          {n.link_url ? (
+                            <Link
+                              to={n.link_url}
+                              onClick={() => {
+                                if (unread) markRead.mutate(n.id);
+                              }}
+                            >
+                              {n.subject}
+                            </Link>
+                          ) : (
+                            n.subject
+                          )}
+                        </div>
+                        {n.body && <div className="wf-notif-body">{n.body}</div>}
+                      </div>
+                      <div className="wf-notif-actions">
+                        {unread && (
+                          <button type="button" className="btn btn-sm btn-ghost" onClick={() => markRead.mutate(n.id)}>
+                            {t("notifications.bell.markOneRead")}
+                          </button>
+                        )}
+                        {n.link_url && (
+                          <Link
+                            to={n.link_url}
+                            className="icon-btn"
+                            aria-label={t("notifications.open", { defaultValue: "Open" })}
+                            title={t("notifications.open", { defaultValue: "Open" })}
+                            onClick={() => {
+                              if (unread) markRead.mutate(n.id);
+                            }}
+                          >
+                            <Icon name="chevronRight" size={14} />
+                          </Link>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

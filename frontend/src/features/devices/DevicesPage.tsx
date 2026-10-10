@@ -10,7 +10,6 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { extractApiError } from "../../api/client";
-import { ModalShell } from "../../components/DrawerShell";
 import { RelativeTime } from "../../components/RelativeTime";
 import {
   CardGrid,
@@ -23,7 +22,6 @@ import {
   StatGrid,
   Toolbar,
   ViewToggle,
-  gridCardStyle,
   pct,
   useViewMode,
 } from "../../components/ListPageUi";
@@ -36,6 +34,7 @@ import { livenessOf, type Liveness } from "./DeviceStatus";
 import { deviceSubtitle } from "./format";
 import { useDeleteDevice, useDeviceEvents, useDevices } from "./hooks";
 import { BrandLogo } from "../cameras/BrandLogo";
+import { AlertGlyph, InlineAlert, ModalFrame, StatusPill } from "../cameras/coreUi";
 import { TerminalArt } from "../../components/DeviceArt";
 import { DRIVER_OPTIONS, type Device } from "./types";
 import { SkeletonCards, SkeletonGrid, SkeletonTable } from "../../components/Skeleton";
@@ -130,6 +129,12 @@ export function DevicesPage() {
     }
   };
 
+  // Five page states (brief addendum): loading · API error · no devices
+  // at all · filters match nothing · normal list.
+  const loadFailed = list.isError && !list.data;
+  const noDevices = !!list.data && items.length === 0;
+  const showChrome = !loadFailed && !noDevices;
+
   return (
     <>
       <div className="page-header">
@@ -155,7 +160,7 @@ export function DevicesPage() {
         <div style={{ marginBottom: 14 }}>
           <SkeletonCards count={4} minWidth={220} />
         </div>
-      ) : (
+      ) : showChrome ? (
       <StatGrid>
         <StatCard
           tone="info"
@@ -198,8 +203,9 @@ export function DevicesPage() {
           onClick={() => setStatusF("unreachable")}
         />
       </StatGrid>
-      )}
+      ) : null}
 
+      {(list.isLoading || showChrome) && (
       <Toolbar>
         <SearchField
           value={q}
@@ -235,25 +241,25 @@ export function DevicesPage() {
           gridLabel={t("devices.list.viewGrid", { defaultValue: "Grid view" })}
         />
       </Toolbar>
-
-      {rowError && (
-        <div
-          role="alert"
-          style={{
-            background: "var(--danger-soft)",
-            color: "var(--danger-text)",
-            padding: "8px 12px",
-            borderRadius: "var(--radius-sm)",
-            fontSize: 12.5,
-            marginBottom: 12,
-          }}
-        >
-          {rowError}
-        </div>
       )}
 
+      {rowError && <InlineAlert tone="danger" onClose={() => setRowError(null)}>{rowError}</InlineAlert>}
+
       <div className="card" style={{ padding: 12 }}>
-        {list.isLoading ? (
+        {loadFailed ? (
+          <EmptyPanel
+            tone="danger"
+            icon={<AlertGlyph />}
+            title={t("devices.list.loadErrorTitle", { defaultValue: "Couldn't load devices" })}
+            body={extractApiError(list.error, t("devices.list.loadErrorBody", { defaultValue: "The device list could not be fetched." }))}
+            actions={
+              <button type="button" className="btn" onClick={() => void list.refetch()}>
+                <Icon name="refresh" size={12} />
+                {t("common.retry", { defaultValue: "Retry" })}
+              </button>
+            }
+          />
+        ) : list.isLoading ? (
           view === "grid" ? <SkeletonGrid count={3} minWidth={420} /> : <SkeletonTable rows={4} cols={6} />
         ) : filtered.length === 0 ? (
           <DevicesEmptyState
@@ -272,7 +278,7 @@ export function DevicesPage() {
                   const state = livenessOf(d);
                   const subtitle = deviceSubtitle([d.location, d.reported_device_name]);
                   return (
-                    <div
+                    <article
                       key={d.id}
                       role="button"
                       tabIndex={0}
@@ -280,123 +286,97 @@ export function DevicesPage() {
                       onKeyDown={(e) => {
                         if (e.key === "Enter") setDetailTarget(d);
                       }}
-                      style={{ ...gridCardStyle, padding: 20, gap: 16, cursor: "pointer" }}
+                      className="co-card is-clickable"
+                      aria-label={d.name}
                     >
-                      {/* Header: device art, identity, brand, menu */}
-                      <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
-                        <div
-                          style={{
-                            width: 104,
-                            height: 104,
-                            flex: "0 0 104px",
-                            borderRadius: 16,
-                            background: "linear-gradient(160deg, color-mix(in oklab, var(--accent-soft) 85%, white), var(--accent-soft))",
-                            display: "grid",
-                            placeItems: "center",
-                            position: "relative",
-                          }}
-                        >
-                          <TerminalArt size={78} />
-                          <span aria-hidden style={{ position: "absolute", right: 6, bottom: 6, width: 12, height: 12, borderRadius: "50%", background: HEALTH[state].dot, border: "2px solid var(--bg-elev)" }} />
+                      <div className="co-card-media">
+                        <div className="co-card-media-tl">
+                          <HealthPill state={state} />
                         </div>
-                        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
-                          <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                            <div style={{ flex: 1, minWidth: 0, fontWeight: 700, fontSize: 18, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.name}</div>
-                            <BrandLogo brand={driverLabel(d.driver)} size={28} />
-                            <KebabMenu
-                              label={t("devices.list.moreActions", { defaultValue: "More actions" })}
-                              items={[
-                                { label: t("devices.page.showUrl", { defaultValue: "Show push URL" }), icon: <Icon name="clipboard" size={13} />, onClick: () => setSetupTarget(d) },
-                                { label: t("common.edit"), icon: <Icon name="edit" size={13} />, onClick: () => openEdit(d) },
-                                { label: t("common.delete"), icon: <Icon name="trash" size={13} />, onClick: () => setDeleteTarget(d), danger: true },
-                              ]}
-                            />
+                        <div className="co-card-media-tr">
+                          <KebabMenu
+                            label={t("devices.list.moreActions", { defaultValue: "More actions" })}
+                            items={[
+                              { label: t("devices.page.showUrl", { defaultValue: "Show push URL" }), icon: <Icon name="clipboard" size={13} />, onClick: () => setSetupTarget(d) },
+                              { label: t("common.edit"), icon: <Icon name="edit" size={13} />, onClick: () => openEdit(d) },
+                              { label: t("common.delete"), icon: <Icon name="trash" size={13} />, onClick: () => setDeleteTarget(d), danger: true },
+                            ]}
+                          />
+                        </div>
+                        <TerminalArt size={96} />
+                        <span className="co-card-media-br" title={driverLabel(d.driver)}>
+                          <BrandLogo brand={driverLabel(d.driver)} size={22} />
+                        </span>
+                      </div>
+                      <div className="co-card-body">
+                        <div className="co-card-title-row">
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div className="co-card-name" title={d.name}>{d.name}</div>
+                            <div className="co-card-meta">
+                              {[subtitle, d.model || d.serial_number].filter(Boolean).join(" · ") || "—"}
+                            </div>
                           </div>
-                          {subtitle && <div className="text-sm text-dim" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{subtitle}</div>}
-                          {(d.model || d.serial_number) && (
-                            <div className="text-sm text-dim mono" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.model || d.serial_number}</div>
+                          {d.clock_suspect && (
+                            <span
+                              className="pill pill-warning"
+                              title={t("devices.page.clockHint", { defaultValue: "The terminal reported an implausible timestamp — set its clock via NTP." })}
+                            >
+                              <Icon name="clock" size={11} />
+                              {t("devices.page.clockSuspect", { defaultValue: "clock not set" })}
+                            </span>
                           )}
-                          <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", marginTop: 6 }}>
-                            <HealthPill state={state} />
-                            {d.clock_suspect && (
-                              <span
-                                className="text-sm"
-                                title={t("devices.page.clockHint", { defaultValue: "The terminal reported an implausible timestamp — set its clock via NTP." })}
-                                style={{ color: "var(--warning-text)", display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 500 }}
-                              >
-                                <Icon name="clock" size={14} />
-                                {t("devices.page.clockSuspect", { defaultValue: "clock not set" })}
-                              </span>
-                            )}
-                            {!d.last_event_at && (
-                              <button
-                                className="btn btn-sm"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSetupTarget(d);
-                                }}
-                              >
-                                {t("devices.page.setUp", { defaultValue: "Set up →" })}
-                              </button>
-                            )}
-                          </div>
+                          {!d.last_event_at && (
+                            <button
+                              className="btn btn-sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSetupTarget(d);
+                              }}
+                            >
+                              {t("devices.page.setUp", { defaultValue: "Set up →" })}
+                            </button>
+                          )}
+                        </div>
+
+                        <DeviceMethods device={d} large />
+
+                        {/* People + last seen */}
+                        <div className="co-bigfacts">
+                          <BigFact
+                            icon={<Icon name="users" size={20} />}
+                            label={t("devices.page.colPeople", { defaultValue: "People" })}
+                            value={String(d.users_total)}
+                            hint={
+                              d.users_unmapped > 0
+                                ? t("devices.page.unmappedCount", { count: d.users_unmapped, defaultValue: `${d.users_unmapped} unmapped` })
+                                : t("devices.list.peopleSeen", { defaultValue: "people seen" })
+                            }
+                            hintTone={d.users_unmapped > 0 ? "warn" : undefined}
+                          />
+                          <span aria-hidden className="co-bigfacts-sep" />
+                          <BigFact
+                            icon={<Icon name="clock" size={20} />}
+                            label={t("devices.page.colLastSeen", { defaultValue: "Last seen" })}
+                            value={d.last_event_at ? <RelativeTime iso={d.last_event_at} /> : t("devices.page.never", { defaultValue: "never" })}
+                            hint={t("devices.list.lastEventHint", { defaultValue: "Last successful event" })}
+                          />
+                        </div>
+
+                        {/* Footer actions */}
+                        <div onClick={(e) => e.stopPropagation()} className="co-card-footer">
+                          <FooterAction icon="eye" label={t("devices.list.viewDetails", { defaultValue: "View details" })} onClick={() => setDetailTarget(d)} />
+                          <FooterAction icon="edit" label={t("common.edit")} onClick={() => openEdit(d)} />
+                          <FooterAction icon="trash" label={t("common.delete")} onClick={() => setDeleteTarget(d)} danger />
                         </div>
                       </div>
-
-                      <DeviceMethods device={d} large />
-
-                      {/* People + last seen */}
-                      <div
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns: "1fr auto 1fr",
-                          alignItems: "center",
-                          gap: 16,
-                          padding: "14px 16px",
-                          borderRadius: 12,
-                          background: "var(--bg-sunken)",
-                          border: "1px solid var(--border)",
-                        }}
-                      >
-                        <BigFact
-                          icon={<Icon name="users" size={20} />}
-                          label={t("devices.page.colPeople", { defaultValue: "People" })}
-                          value={String(d.users_total)}
-                          hint={
-                            d.users_unmapped > 0
-                              ? t("devices.page.unmappedCount", { count: d.users_unmapped, defaultValue: `${d.users_unmapped} unmapped` })
-                              : t("devices.list.peopleSeen", { defaultValue: "people seen" })
-                          }
-                          hintTone={d.users_unmapped > 0 ? "warn" : undefined}
-                        />
-                        <span aria-hidden style={{ width: 1, alignSelf: "stretch", background: "var(--border)" }} />
-                        <BigFact
-                          icon={<Icon name="clock" size={20} />}
-                          label={t("devices.page.colLastSeen", { defaultValue: "Last seen" })}
-                          value={d.last_event_at ? <RelativeTime iso={d.last_event_at} /> : t("devices.page.never", { defaultValue: "never" })}
-                          hint={t("devices.list.lastEventHint", { defaultValue: "Last successful event" })}
-                        />
-                      </div>
-
-                      {/* Footer actions */}
-                      <div
-                        onClick={(e) => e.stopPropagation()}
-                        style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr auto 1fr", alignItems: "center", borderTop: "1px solid var(--border)", paddingTop: 12 }}
-                      >
-                        <FooterAction icon="eye" label={t("devices.list.viewDetails", { defaultValue: "View details" })} onClick={() => setDetailTarget(d)} />
-                        <span aria-hidden style={{ width: 1, height: 18, background: "var(--border)" }} />
-                        <FooterAction icon="edit" label={t("common.edit")} onClick={() => openEdit(d)} />
-                        <span aria-hidden style={{ width: 1, height: 18, background: "var(--border)" }} />
-                        <FooterAction icon="trash" label={t("common.delete")} onClick={() => setDeleteTarget(d)} danger />
-                      </div>
-                    </div>
+                    </article>
                   );
                 })}
               </CardGrid>
             ) : (
             <table className="table">
               <thead>
-                <tr style={{ background: "var(--bg-sunken)" }}>
+                <tr>
                   <th>{t("devices.page.colName", { defaultValue: "Device" })}</th>
                   <th>{t("devices.list.colBrand", { defaultValue: "Brand / model" })}</th>
                   <th>{t("devices.list.colMethods", { defaultValue: "Verification" })}</th>
@@ -557,40 +537,16 @@ export function DevicesPage() {
       )}
 
       {deleteTarget && (
-        <ModalShell onClose={() => setDeleteTarget(null)}>
-          <div
-            role="dialog"
-            aria-label={t("devices.delete.title", { defaultValue: "Delete device" })}
-            style={{
-              position: "fixed",
-              top: "50%",
-              left: "50%",
-              transform: "translate(-50%, -50%)",
-              width: "min(420px, 92vw)",
-              background: "var(--bg)",
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius)",
-              padding: 20,
-              boxShadow: "var(--shadow-lg, 0 20px 60px rgba(0,0,0,.3))",
-              zIndex: 1000,
-            }}
-          >
-            <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>
-              {t("devices.delete.title", { defaultValue: "Delete device" })}
-            </h3>
-            <p
-              style={{
-                margin: "0 0 16px",
-                fontSize: 13.5,
-                color: "var(--text-secondary)",
-              }}
-            >
-              {t("devices.delete.body", {
-                name: deleteTarget.name,
-                defaultValue: `Remove “${deleteTarget.name}”? Its push URL stops working immediately, and the people and event history recorded for it are removed. This cannot be undone.`,
-              })}
-            </p>
-            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+        <ModalFrame
+          onClose={() => setDeleteTarget(null)}
+          title={t("devices.delete.title", { defaultValue: "Delete device" })}
+          icon={<Icon name="trash" size={16} />}
+          body={t("devices.delete.body", {
+            name: deleteTarget.name,
+            defaultValue: `Remove “${deleteTarget.name}”? Its push URL stops working immediately, and the people and event history recorded for it are removed. This cannot be undone.`,
+          })}
+          footer={
+            <>
               <button
                 className="btn"
                 onClick={() => setDeleteTarget(null)}
@@ -608,9 +564,9 @@ export function DevicesPage() {
                   ? t("common.deleting", { defaultValue: "Deleting…" })
                   : t("common.delete")}
               </button>
-            </div>
-          </div>
-        </ModalShell>
+            </>
+          }
+        />
       )}
     </>
   );
@@ -626,67 +582,25 @@ function driverLabel(driver: string): string {
   return o ? o.label.replace(/\s*\(.*\)$/, "") : driver;
 }
 
-const HEALTH: Record<Liveness, { dot: string; bg: string; fg: string; key: string; fallback: string }> = {
-  online: { dot: "var(--success)", bg: "var(--success-soft)", fg: "var(--success-text)", key: "devices.health.online", fallback: "Online" },
-  unreachable: { dot: "var(--danger)", bg: "var(--danger-soft)", fg: "var(--danger-text)", key: "devices.health.unreachable", fallback: "Unreachable" },
-  waiting: { dot: "var(--text-tertiary)", bg: "var(--bg-sunken)", fg: "var(--text-secondary)", key: "devices.health.waiting", fallback: "No events yet" },
+const HEALTH: Record<Liveness, { key: string; fallback: string }> = {
+  online: { key: "devices.health.online", fallback: "Online" },
+  unreachable: { key: "devices.health.unreachable", fallback: "Unreachable" },
+  waiting: { key: "devices.health.waiting", fallback: "No events yet" },
 };
 
 function HealthPill({ state }: { state: Liveness }) {
   const { t } = useTranslation();
   const h = HEALTH[state];
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 7,
-        padding: "3px 10px",
-        borderRadius: 8,
-        background: h.bg,
-        color: h.fg,
-        fontSize: 12,
-        fontWeight: 600,
-        whiteSpace: "nowrap",
-      }}
-    >
-      <span aria-hidden style={{ width: 9, height: 9, borderRadius: "50%", background: h.dot }} />
-      {t(h.key, { defaultValue: h.fallback })}
-    </span>
-  );
+  return <StatusPill tone={state}>{t(h.key, { defaultValue: h.fallback })}</StatusPill>;
 }
 
 /** Terminal tile: a fingerprint mark on a tinted square, with a small
  *  status dot so the row reads at a glance. */
 function TerminalBadge({ state }: { state: Liveness }) {
-  const h = HEALTH[state];
   return (
-    <span aria-hidden style={{ position: "relative", width: 42, height: 42, flex: "0 0 42px" }}>
-      <span
-        style={{
-          width: 42,
-          height: 42,
-          borderRadius: 11,
-          display: "grid",
-          placeItems: "center",
-          background: "var(--accent-soft)",
-          color: "var(--accent)",
-        }}
-      >
-        <FingerprintIcon size={22} />
-      </span>
-      <span
-        style={{
-          position: "absolute",
-          right: -2,
-          bottom: -2,
-          width: 12,
-          height: 12,
-          borderRadius: "50%",
-          background: h.dot,
-          border: "2px solid var(--bg-elev)",
-        }}
-      />
+    <span aria-hidden className="co-tile">
+      <FingerprintIcon size={22} />
+      <span className={`co-tile-dot tone-${state}`} />
     </span>
   );
 }
@@ -822,14 +736,12 @@ function BigFact({
   hintTone?: "warn" | undefined;
 }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
-      <span aria-hidden style={{ width: 46, height: 46, flex: "0 0 46px", borderRadius: "50%", background: "var(--accent-soft)", color: "var(--accent)", display: "grid", placeItems: "center" }}>
-        {icon}
-      </span>
+    <div className="co-bigfact">
+      <span aria-hidden className="co-bigfact-icon">{icon}</span>
       <div style={{ minWidth: 0 }}>
-        <div className="text-sm text-dim">{label}</div>
-        <div style={{ fontSize: 18, fontWeight: 700, color: "var(--text)", lineHeight: 1.3 }}>{value}</div>
-        <div className="text-sm" style={{ color: hintTone === "warn" ? "var(--warning-text)" : "var(--text-tertiary)" }}>{hint}</div>
+        <div className="co-bigfact-label">{label}</div>
+        <div className="co-bigfact-value">{value}</div>
+        <div className={`co-bigfact-hint${hintTone === "warn" ? " is-warn" : ""}`}>{hint}</div>
       </div>
     </div>
   );
@@ -837,29 +749,8 @@ function BigFact({
 
 function FooterAction({ icon, label, onClick, danger = false }: { icon: "eye" | "edit" | "trash"; label: string; onClick: () => void; danger?: boolean }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        appearance: "none",
-        border: "none",
-        background: "transparent",
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 8,
-        padding: "8px 6px",
-        borderRadius: 8,
-        fontSize: 14,
-        fontWeight: 600,
-        fontFamily: "inherit",
-        color: danger ? "var(--danger-text)" : "var(--text)",
-        cursor: "pointer",
-      }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = danger ? "var(--danger-soft)" : "var(--bg-sunken)")}
-      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-    >
-      <Icon name={icon} size={16} />
+    <button type="button" onClick={onClick} className={`co-card-footer-btn${danger ? " is-danger" : ""}`}>
+      <Icon name={icon} size={15} />
       {label}
     </button>
   );

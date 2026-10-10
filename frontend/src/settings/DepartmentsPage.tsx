@@ -6,11 +6,10 @@
 // employees referencing it; the UI surfaces the count so the operator
 // knows where to look.
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ApiError, api } from "../api/client";
-import { ModalShell } from "../components/DrawerShell";
 import {
   type Department,
   type DepartmentManager,
@@ -25,7 +24,18 @@ import {
 import { useDivisions } from "../features/divisions/hooks";
 import { Icon } from "../shell/Icon";
 import { toast } from "../shell/Toaster";
-import { SettingsTabs } from "./SettingsTabs";
+import {
+  CloseFooter,
+  ConfirmModal,
+  LoadErrorPanel,
+  PersonChip,
+  SettingsFormModal,
+  SettingsPage,
+  TableCard,
+  nowrap,
+} from "./settingsUi";
+import { Field, FormFooter, FormNotice, FormSection } from "../components/FormKit";
+import { EmptyPanel, KebabMenu, FilterSelect, ResetButton, SearchField, Toolbar } from "../components/ListPageUi";
 
 import { useQuery } from "@tanstack/react-query";
 import { SkeletonChip, SkeletonLines, SkeletonRows } from "../components/Skeleton";
@@ -41,19 +51,41 @@ export function DepartmentsPage() {
   const [showImport, setShowImport] = useState(false);
   const [editing, setEditing] = useState<Department | null>(null);
   const [managingDept, setManagingDept] = useState<Department | null>(null);
+  const [q, setQ] = useState("");
+  const [divisionF, setDivisionF] = useState("");
 
-  const onDelete = (d: Department) => {
-    if (
-      !confirm(
-        t("departments.confirmDelete", {
-          name: d.name,
-        }) as string,
-      )
-    ) {
-      return;
+  const allItems = list.data?.items ?? [];
+  const divisionOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const d of allItems) {
+      if (d.division_id != null) seen.set(String(d.division_id), d.division_name ?? d.division_code ?? "");
     }
+    return [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [allItems]);
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return allItems.filter((d) => {
+      if (divisionF === "none" && d.division_id != null) return false;
+      if (divisionF && divisionF !== "none" && String(d.division_id) !== divisionF) return false;
+      if (!needle) return true;
+      return [d.code, d.name, d.division_code ?? "", d.division_name ?? ""].some((v) =>
+        v.toLowerCase().includes(needle),
+      );
+    });
+  }, [allItems, q, divisionF]);
+  const filtersActive = !!(q || divisionF);
+  const resetFilters = () => {
+    setQ("");
+    setDivisionF("");
+  };
+
+  const [deleting, setDeleting] = useState<Department | null>(null);
+  const onDelete = (d: Department) => {
     del.mutate(d.id, {
-      onSuccess: () => toast.success(t("departments.toast.deleted") as string),
+      onSuccess: () => {
+        toast.success(t("departments.toast.deleted") as string);
+        setDeleting(null);
+      },
       onError: (err) => {
         const detail =
           err instanceof ApiError
@@ -64,25 +96,29 @@ export function DepartmentsPage() {
     });
   };
 
+  const hasRecords = allItems.length > 0;
+  const showToolbar = list.isLoading || (hasRecords && !list.isError);
+
   return (
-    <>
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">{t("departments.title") as string}</h1>
-          <p className="page-sub">
-            {t("departments.subtitle") as string}
-            {list.data && (
-              <>
-                {" · "}
-                {list.data.items.length}{" "}
-                {t("departments.deptCount", {
-                  count: list.data.items.length,
-                }) as string}
-              </>
-            )}
-          </p>
-        </div>
-        <div className="page-actions">
+    <SettingsPage
+      wide
+      title={t("departments.title") as string}
+      subtitle={
+        <>
+          {t("departments.subtitle") as string}
+          {list.data && (
+            <>
+              {" · "}
+              {list.data.items.length}{" "}
+              {t("departments.deptCount", {
+                count: list.data.items.length,
+              }) as string}
+            </>
+          )}
+        </>
+      }
+      actions={
+        <>
           <button className="btn" onClick={() => setShowImport(true)}>
             <Icon name="download" size={12} />
             {t("departments.import") as string}
@@ -91,99 +127,146 @@ export function DepartmentsPage() {
             <Icon name="plus" size={12} />
             {t("departments.add") as string}
           </button>
-        </div>
-      </div>
+        </>
+      }
+    >
+      {showToolbar && (
+        <Toolbar>
+          <SearchField
+            value={q}
+            onChange={setQ}
+            placeholder={t("settingsUi.org.searchDepartments", { defaultValue: "Search by code, name or division" })}
+            clearLabel={t("settingsUi.org.clearSearch", { defaultValue: "Clear search" })}
+          />
+          <FilterSelect
+            label={t("departments.col.division")}
+            value={divisionF}
+            onChange={setDivisionF}
+            options={[
+              ["", t("settingsUi.org.allDivisions", { defaultValue: "All divisions" })],
+              ["none", t("settingsUi.org.noDivision", { defaultValue: "No division" })],
+              ...divisionOptions,
+            ]}
+          />
+          <ResetButton
+            active={filtersActive}
+            label={t("settingsUi.org.reset", { defaultValue: "Reset" })}
+            onClick={resetFilters}
+          />
+        </Toolbar>
+      )}
 
-      <SettingsTabs />
-
-      <div className="card" style={{ marginTop: 12 }}>
-        <table className="table">
-          <thead>
-            <tr>
-              <th style={{ width: 140 }}>{t("departments.col.code")}</th>
-              <th>{t("departments.col.name")}</th>
-              <th style={{ width: 180 }}>{t("departments.col.division")}</th>
-              <th style={{ width: 120 }}>{t("departments.col.employees")}</th>
-              <th style={{ minWidth: 220 }}>{t("departments.col.managers")}</th>
-              <th style={{ width: 240, textAlign: "right" }}>
-                {t("departments.col.actions")}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.isLoading && (
+      {list.isLoading ? (
+        <TableCard>
+          <table className="table">
+            <tbody>
               <SkeletonRows cols={6} />
-            )}
-            {list.data?.items.length === 0 && (
+            </tbody>
+          </table>
+        </TableCard>
+      ) : list.isError ? (
+        <LoadErrorPanel
+          title={t("settingsUi.org.departmentsLoadFailed", { defaultValue: "Couldn't load departments" })}
+          onRetry={() => void list.refetch()}
+        />
+      ) : !hasRecords ? (
+        <EmptyPanel
+          tone="accent"
+          icon={<Icon name="users" size={28} />}
+          title={t("departments.empty") as string}
+          body={t("settingsUi.org.departmentsEmptyBody", {
+            defaultValue: "Add your first department, or import a list from a CSV file.",
+          })}
+          actions={
+            <>
+              <button type="button" className="btn" onClick={() => setShowImport(true)}>
+                <Icon name="download" size={12} />
+                {t("departments.import") as string}
+              </button>
+              <button type="button" className="btn btn-primary" onClick={() => setShowAdd(true)}>
+                <Icon name="plus" size={12} />
+                {t("departments.add") as string}
+              </button>
+            </>
+          }
+        />
+      ) : filtered.length === 0 ? (
+        <EmptyPanel
+          tone="neutral"
+          icon={<Icon name="search" size={28} />}
+          title={t("settingsUi.org.noMatchTitle", { defaultValue: "No matches" })}
+          body={t("settingsUi.org.noMatchBody", {
+            defaultValue: "Nothing matches the current search or filters. Try a different term or clear the filters.",
+          })}
+          actions={
+            <button type="button" className="btn" onClick={resetFilters}>
+              <Icon name="refresh" size={12} />
+              {t("settingsUi.org.clearFilters", { defaultValue: "Clear filters" })}
+            </button>
+          }
+        />
+      ) : (
+        <TableCard>
+          <table className="table">
+            <thead>
               <tr>
-                <td
-                  colSpan={6}
-                  className="text-sm text-dim"
-                  style={{ padding: 16 }}
-                >
-                  {t("departments.empty") as string}
-                </td>
+                <th style={{ width: 140 }}>{t("departments.col.code")}</th>
+                <th>{t("departments.col.name")}</th>
+                <th style={{ width: 200 }}>{t("departments.col.division")}</th>
+                <th style={{ width: 110 }}>{t("departments.col.employees")}</th>
+                <th style={{ minWidth: 200 }}>{t("departments.col.managers")}</th>
+                <th style={{ width: 64, textAlign: "end" }}>{t("departments.col.actions")}</th>
               </tr>
-            )}
-            {list.data?.items.map((d) => (
-              <tr key={d.id}>
-                <td className="mono text-sm">{d.code}</td>
-                <td className="text-sm">{d.name}</td>
-                <td className="text-sm">
-                  {d.division_code ? (
-                    <span title={d.division_name ?? undefined}>
-                      <span className="mono text-xs text-dim">
-                        {d.division_code}
+            </thead>
+            <tbody>
+              {filtered.map((d) => (
+                <tr key={d.id}>
+                  <td className="mono text-sm" style={nowrap}>
+                    {d.code}
+                  </td>
+                  <td className="text-sm">
+                    <strong>{d.name}</strong>
+                  </td>
+                  <td className="text-sm">
+                    {d.division_code ? (
+                      <span title={d.division_name ?? undefined}>
+                        <span className="mono text-xs text-dim">{d.division_code}</span>
+                        {" · "}
+                        {d.division_name}
                       </span>
-                      {" · "}
-                      {d.division_name}
-                    </span>
-                  ) : (
-                    <span className="text-xs text-dim">{t("departments.divisionNone")}</span>
-                  )}
-                </td>
-                <td className="mono text-sm">{d.employee_count}</td>
-                <td className="text-sm">
-                  <ManagerChips departmentId={d.id} />
-                </td>
-                <td>
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: 6,
-                      justifyContent: "flex-end",
-                    }}
-                  >
-                    <button
-                      className="btn btn-sm"
-                      onClick={() => setManagingDept(d)}
-                      title={t("departments.managersBtnTitle")}
-                    >
-                      <Icon name="users" size={11} />
-                      {t("departments.managersBtn")}
-                    </button>
-                    <button
-                      className="btn btn-sm"
-                      onClick={() => setEditing(d)}
-                    >
-                      <Icon name="settings" size={11} />
-                      {t("common.edit") as string}
-                    </button>
-                    <button
-                      className="btn btn-sm"
-                      onClick={() => onDelete(d)}
-                      disabled={del.isPending}
-                    >
-                      <Icon name="x" size={11} />
-                      {t("common.delete") as string}
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+                    ) : (
+                      <span className="text-xs text-dim">{t("departments.divisionNone")}</span>
+                    )}
+                  </td>
+                  <td className="mono text-sm">{d.employee_count}</td>
+                  <td className="text-sm">
+                    <ManagerChips departmentId={d.id} />
+                  </td>
+                  <td>
+                    <div className="st-row-actions">
+                      <KebabMenu
+                        label={t("common.actions", { defaultValue: "Actions" }) as string}
+                        items={[
+                          { label: t("departments.managersBtn") as string, icon: <Icon name="users" size={13} />, onClick: () => setManagingDept(d) },
+                          { label: t("common.edit") as string, icon: <Icon name="edit" size={13} />, onClick: () => setEditing(d) },
+                          {
+                            label: t("common.delete") as string,
+                            icon: <Icon name="trash" size={13} />,
+                            danger: true,
+                            onClick: () => {
+                              if (!del.isPending) setDeleting(d);
+                            },
+                          },
+                        ]}
+                      />
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableCard>
+      )}
 
       {showAdd && (
         <DepartmentFormModal
@@ -231,7 +314,28 @@ export function DepartmentsPage() {
           onClose={() => setManagingDept(null)}
         />
       )}
-    </>
+      {deleting && (
+        <ConfirmModal
+          titleId="dept-delete-title"
+          title={t("settingsForms.dept.deleteTitle", { defaultValue: "Delete department" })}
+          subtitle={`${deleting.code} · ${deleting.name}`}
+          confirmLabel={t("settingsForms.dept.deleteAction", { defaultValue: "Delete department" })}
+          busy={del.isPending}
+          onConfirm={() => onDelete(deleting)}
+          onClose={() => setDeleting(null)}
+        >
+          <p className="st-confirm-text">{t("departments.confirmDelete", { name: deleting.name }) as string}</p>
+          {deleting.employee_count > 0 && (
+            <FormNotice tone="warning">
+              {t("settingsForms.dept.deleteHasEmployees", {
+                count: deleting.employee_count,
+                defaultValue: "{{count}} employee(s) still reference this department — the server will refuse the delete until they are moved.",
+              })}
+            </FormNotice>
+          )}
+        </ConfirmModal>
+      )}
+    </SettingsPage>
   );
 }
 
@@ -257,16 +361,9 @@ function ManagerChips({ departmentId }: { departmentId: number }) {
     return <span className="text-xs text-dim">{t("departments.chips.noManagers")}</span>;
   }
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+    <div className="st-chips" style={{ gap: 4 }}>
       {items.map((m) => (
-        <span
-          key={m.user_id}
-          className="pill pill-info"
-          title={m.email}
-          style={{ fontSize: 11 }}
-        >
-          {m.full_name}
-        </span>
+        <PersonChip key={m.user_id} name={m.full_name} title={m.email} />
       ))}
     </div>
   );
@@ -343,190 +440,97 @@ function DepartmentManagersModal({
   };
 
   return (
-    <ModalShell onClose={onClose}>
-      <div
-        style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 60,
-          display: "grid",
-          placeItems: "center",
-        }}
+    <SettingsFormModal
+      icon={<Icon name="users" size={18} />}
+      title={t("settingsForms.dept.managersTitle", { defaultValue: "Department managers" })}
+      subtitle={`${department.code} · ${department.name}`}
+      onClose={onClose}
+      onSubmit={onAssign}
+      size="lg"
+      titleId="dept-managers-title"
+      footer={
+        <CloseFooter
+          onClose={onClose}
+          note={t("settingsForms.managersNote", { defaultValue: "Changes save as soon as you assign or remove." })}
+        />
+      }
+    >
+      <FormNotice tone="info">{t("departments.managersModal.desc")}</FormNotice>
+      <FormSection
+        step={1}
+        title={t("departments.managersModal.addSection")}
+        description={t("settingsForms.managersAddDesc", { defaultValue: "Only users holding the Manager role appear in this list." })}
+        columns={1}
       >
-      <div
-        className="card"
-        style={{ width: "min(540px, 92vw)", padding: 22 }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "flex-start",
-            justifyContent: "space-between",
-            marginBottom: 14,
-          }}
-        >
-          <div>
-            <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>
-              {department.code} · {department.name}
-            </h2>
-            <p
-              className="text-xs text-dim"
-              style={{ margin: "4px 0 0", maxWidth: 440 }}
-            >
-              {t("departments.managersModal.desc")}
-            </p>
-          </div>
-          <button
-            type="button"
-            className="icon-btn"
-            onClick={onClose}
-            aria-label={t("common.close")}
-          >
-            <Icon name="x" size={14} />
-          </button>
-        </div>
-
-        <div
-          style={{
-            fontSize: 11,
-            fontWeight: 500,
-            textTransform: "uppercase",
-            letterSpacing: "0.05em",
-            color: "var(--text-tertiary)",
-            marginBottom: 6,
-          }}
-        >
-          {t("departments.managersModal.addSection")}
-        </div>
-        {!candidates.isLoading &&
-          (candidates.data?.items.length ?? 0) === 0 && (
-            <div
-              style={{
-                background: "var(--bg-sunken)",
-                border: "1px solid var(--border)",
-                borderRadius: "var(--radius-sm)",
-                padding: "10px 12px",
-                marginBottom: 10,
-                fontSize: 12.5,
-                lineHeight: 1.5,
-                color: "var(--text-secondary)",
-              }}
-            >
-              {t("departments.managersModal.noManagerUsers")}
-            </div>
-          )}
-
-        <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
-          <select
-            value={pickedId}
-            onChange={(e) =>
-              setPickedId(e.target.value === "" ? "" : Number(e.target.value))
-            }
-            disabled={
-              candidates.isLoading ||
-              assign.isPending ||
-              available.length === 0
-            }
-            style={{
-              flex: 1,
-              padding: "7px 10px",
-              fontSize: 13,
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius-sm)",
-              background: "var(--bg-elev)",
-              color: "var(--text)",
-            }}
-          >
-            <option value="">
-              {candidates.isLoading
-                ? t("departments.managersModal.loadingManagers")
-                : (candidates.data?.items.length ?? 0) === 0
-                  ? t("departments.managersModal.noManagerUsersOption")
-                  : available.length === 0
-                    ? t("departments.managersModal.allAssigned")
-                    : t("departments.managersModal.pickPlaceholder")}
-            </option>
-            {available.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.full_name} · {u.email}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={onAssign}
-            disabled={pickedId === "" || assign.isPending}
-          >
-            <Icon name="check" size={11} />
-            {assign.isPending ? t("departments.managersModal.assigning") : t("departments.managersModal.assign")}
-          </button>
-        </div>
-
-        <div
-          style={{
-            fontSize: 11,
-            fontWeight: 500,
-            textTransform: "uppercase",
-            letterSpacing: "0.05em",
-            color: "var(--text-tertiary)",
-            marginBottom: 6,
-          }}
-        >
-          {t("departments.managersModal.assignedSection")}
-        </div>
-        {assigned.isLoading && (
-          <SkeletonLines lines={2} />
+        {!candidates.isLoading && (candidates.data?.items.length ?? 0) === 0 && (
+          <FormNotice tone="warning">{t("departments.managersModal.noManagerUsers")}</FormNotice>
         )}
-        {!assigned.isLoading &&
-          (assigned.data?.items.length ?? 0) === 0 && (
-            <div className="text-sm text-dim">
-              {t("departments.managersModal.noAssigned")}
-            </div>
-          )}
-        {assigned.data?.items.map((m) => (
-          <div
-            key={m.user_id}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 10,
-              padding: "8px 10px",
-              borderRadius: "var(--radius-sm)",
-              background: "var(--bg-sunken)",
-              marginBottom: 6,
-            }}
-          >
-            <div style={{ minWidth: 0 }}>
-              <div
-                style={{
-                  fontWeight: 500,
-                  fontSize: 13,
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}
-              >
-                {m.full_name}
-              </div>
-              <div className="text-xs text-dim mono">{m.email}</div>
-            </div>
-            <button
-              type="button"
-              className="btn btn-sm"
-              onClick={() => onRemove(m)}
-              disabled={remove.isPending}
-              title={t("departments.managersModal.removeBtnTitle")}
+        <Field label={t("settingsForms.managerLabel", { defaultValue: "Manager" })} htmlFor="dept-manager-pick">
+          <div className="st-pick-row">
+            <select
+              id="dept-manager-pick"
+              className="select"
+              value={pickedId}
+              onChange={(e) => setPickedId(e.target.value === "" ? "" : Number(e.target.value))}
+              disabled={candidates.isLoading || assign.isPending || available.length === 0}
             >
-              <Icon name="x" size={11} />
-              {t("departments.managersModal.remove")}
+              <option value="">
+                {candidates.isLoading
+                  ? t("departments.managersModal.loadingManagers")
+                  : (candidates.data?.items.length ?? 0) === 0
+                    ? t("departments.managersModal.noManagerUsersOption")
+                    : available.length === 0
+                      ? t("departments.managersModal.allAssigned")
+                      : t("departments.managersModal.pickPlaceholder")}
+              </option>
+              {available.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.full_name} · {u.email}
+                </option>
+              ))}
+            </select>
+            <button type="submit" className="btn btn-primary" disabled={pickedId === "" || assign.isPending}>
+              <Icon name="plus" size={12} />
+              {assign.isPending ? t("departments.managersModal.assigning") : t("departments.managersModal.assign")}
             </button>
           </div>
-        ))}
-      </div>
-      </div>
-    </ModalShell>
+        </Field>
+      </FormSection>
+
+      <FormSection
+        step={2}
+        title={t("departments.managersModal.assignedSection")}
+        description={t("settingsForms.managersAssignedDesc", { defaultValue: "Remove a manager to stop their visibility over this unit." })}
+        columns={1}
+      >
+        {assigned.isLoading && <SkeletonLines lines={2} />}
+        {!assigned.isLoading && (assigned.data?.items.length ?? 0) === 0 && (
+          <div className="text-sm text-dim">{t("departments.managersModal.noAssigned")}</div>
+        )}
+        {(assigned.data?.items.length ?? 0) > 0 && (
+          <div className="st-list">
+            {assigned.data?.items.map((m) => (
+              <div key={m.user_id} className="st-list-row">
+                <div className="st-list-row-main">
+                  <div className="st-list-row-title">{m.full_name}</div>
+                  <div className="text-xs text-dim">{m.email}</div>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost st-danger"
+                  onClick={() => onRemove(m)}
+                  disabled={remove.isPending}
+                  title={t("departments.managersModal.removeBtnTitle")}
+                >
+                  <Icon name="x" size={11} />
+                  {t("departments.managersModal.remove")}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </FormSection>
+    </SettingsFormModal>
   );
 }
 
@@ -588,119 +592,86 @@ function DepartmentImportModal({
   };
 
   return (
-    <ModalShell onClose={onClose}>
-      <div
-        style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 60,
-          display: "grid",
-          placeItems: "center",
-        }}
-        // Backdrop is presentation-only — close via the Cancel
-        // button. Operator-policy red line; see DrawerShell.
+    <SettingsFormModal
+      icon={<Icon name="upload" size={18} />}
+      title={t("departments.importTitle") as string}
+      subtitle={t("settingsForms.dept.importSubtitle", { defaultValue: "Create or update many departments at once from a CSV file." })}
+      onClose={onClose}
+      onSubmit={() => {
+        if (!result && !submitting) void submit();
+      }}
+      titleId="dept-import-title"
+      footer={
+        result ? (
+          <CloseFooter onClose={onClose} label={t("common.done") as string} />
+        ) : (
+          <FormFooter
+            onCancel={onClose}
+            submitLabel={t("departments.importAction") as string}
+            submittingLabel={t("common.uploading") as string}
+            submitting={submitting}
+            canSubmit={!!file}
+          />
+        )
+      }
+    >
+      {error && !result && <FormNotice tone="danger">{error}</FormNotice>}
+      <FormSection
+        title={t("settingsForms.dept.importFileSection", { defaultValue: "Upload file" })}
+        description={t("departments.importHint") as string}
+        columns={1}
       >
-        <div
-          className="card"
-          style={{ width: 520, maxWidth: "92vw", maxHeight: "80vh", overflow: "auto", padding: 18 }}
+        <Field
+          label={t("settingsUi.org.csvFile", { defaultValue: "CSV file" })}
+          htmlFor="dept-import-file"
+          required
+          help={t("settingsForms.dept.importFileHelp", { defaultValue: "Headers: code,name — one department per row." })}
         >
-          <div className="card-head" style={{ marginBottom: 12 }}>
-            <h3 className="card-title">
-              {t("departments.importTitle") as string}
-            </h3>
-          </div>
-          <p className="text-xs text-dim" style={{ marginBottom: 12 }}>
-            {t("departments.importHint") as string}
-          </p>
           <input
+            id="dept-import-file"
+            className="input"
             type="file"
             accept=".csv,text/csv"
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            style={{
-              padding: "6px 10px",
-              fontSize: 13,
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius-sm)",
-              background: "var(--bg-elev)",
-              width: "100%",
-            }}
           />
-          {error && (
-            <div
-              role="alert"
-              style={{
-                background: "var(--danger-soft)",
-                color: "var(--danger-text)",
-                padding: "6px 10px",
-                borderRadius: "var(--radius-sm)",
-                fontSize: 12,
-                marginTop: 8,
-              }}
-            >
-              {error}
-            </div>
-          )}
-          {result && (
-            <div style={{ marginTop: 12 }}>
-              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                <span className="pill pill-success">{t("departments.importResult.created", { n: result.created })}</span>
-                <span className="pill pill-info">{t("departments.importResult.updated", { n: result.updated })}</span>
-                <span className={`pill ${result.errors > 0 ? "pill-warning" : "pill-neutral"}`}>
-                  {t("departments.importResult.errors", { n: result.errors })}
-                </span>
-              </div>
-              {result.errors > 0 && (
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: 60 }}>{t("departments.importResult.colRow")}</th>
-                      <th style={{ width: 120 }}>{t("departments.importResult.colCode")}</th>
-                      <th>{t("departments.importResult.colError")}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {result.rows
-                      .filter((r) => r.status === "error")
-                      .map((r) => (
-                        <tr key={r.row}>
-                          <td className="mono text-sm">{r.row}</td>
-                          <td className="mono text-sm">{r.code}</td>
-                          <td className="text-sm">{r.error ?? "—"}</td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          )}
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "flex-end",
-              gap: 6,
-              marginTop: 12,
-            }}
-          >
-            <button className="btn" onClick={onClose} disabled={submitting}>
-              {result
-                ? (t("common.done") as string)
-                : (t("common.cancel") as string)}
-            </button>
-            {!result && (
-              <button
-                className="btn btn-primary"
-                onClick={submit}
-                disabled={!file || submitting}
-              >
-                {submitting
-                  ? (t("common.uploading") as string)
-                  : (t("departments.importAction") as string)}
-              </button>
-            )}
+        </Field>
+      </FormSection>
+      {result && (
+        <FormSection title={t("settingsForms.importResultSection", { defaultValue: "Import result" })} columns={1}>
+          <div className="st-result-pills">
+            <span className="pill pill-success">{t("departments.importResult.created", { n: result.created })}</span>
+            <span className="pill pill-info">{t("departments.importResult.updated", { n: result.updated })}</span>
+            <span className={`pill ${result.errors > 0 ? "pill-warning" : "pill-neutral"}`}>
+              {t("departments.importResult.errors", { n: result.errors })}
+            </span>
           </div>
-        </div>
-      </div>
-    </ModalShell>
+          {result.errors > 0 && (
+            <div className="st-table-wrap">
+              <table className="table table-compact">
+                <thead>
+                  <tr>
+                    <th style={{ width: 60 }}>{t("departments.importResult.colRow")}</th>
+                    <th style={{ width: 120 }}>{t("departments.importResult.colCode")}</th>
+                    <th>{t("departments.importResult.colError")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.rows
+                    .filter((r) => r.status === "error")
+                    .map((r) => (
+                      <tr key={r.row}>
+                        <td className="mono text-sm">{r.row}</td>
+                        <td className="mono text-sm">{r.code}</td>
+                        <td className="text-sm">{r.error ?? "—"}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </FormSection>
+      )}
+    </SettingsFormModal>
   );
 }
 
@@ -751,17 +722,29 @@ function DepartmentFormModal({
   );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<{ code?: string | undefined; name?: string | undefined }>({});
   const divisions = useDivisions();
+
+  const blurRequired = (key: "code" | "name", value: string) => {
+    if (key === "code" && mode !== "add") return;
+    setFieldErrors((prev) => ({
+      ...prev,
+      [key]: value.trim()
+        ? undefined
+        : (t(key === "code" ? "departments.errors.codeRequired" : "departments.errors.nameRequired") as string),
+    }));
+  };
 
   const submit = async () => {
     if (mode === "add" && !code.trim()) {
-      setError(t("departments.errors.codeRequired") as string);
+      setFieldErrors({ code: t("departments.errors.codeRequired") as string });
       return;
     }
     if (!name.trim()) {
-      setError(t("departments.errors.nameRequired") as string);
+      setFieldErrors({ name: t("departments.errors.nameRequired") as string });
       return;
     }
+    setFieldErrors({});
     setError(null);
     setSubmitting(true);
     try {
@@ -787,158 +770,105 @@ function DepartmentFormModal({
     }
   };
 
+  const isAdd = mode === "add";
+  const complete = (!isAdd || !!code.trim()) && !!name.trim();
+
   return (
-    <ModalShell onClose={onClose}>
-      <div
-        style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 60,
-          display: "grid",
-          placeItems: "center",
-        }}
-        // Backdrop is presentation-only — close via the Cancel
-        // button. Operator-policy red line; see DrawerShell.
+    <SettingsFormModal
+      icon={<Icon name="users" size={18} />}
+      title={
+        isAdd
+          ? (t("departments.add") as string)
+          : t("settingsForms.dept.editTitle", { defaultValue: "Edit department" })
+      }
+      subtitle={
+        isAdd
+          ? t("settingsForms.dept.addSubtitle", { defaultValue: "Create a department employees can be assigned to." })
+          : t("settingsForms.dept.editSubtitle", { defaultValue: "Rename the department or move it to another division." })
+      }
+      onClose={onClose}
+      onSubmit={() => void submit()}
+      titleId="dept-form-title"
+      footer={
+        <FormFooter
+          onCancel={onClose}
+          submitLabel={
+            isAdd
+              ? (t("departments.add") as string)
+              : t("settingsForms.saveChanges", { defaultValue: "Save changes" })
+          }
+          submittingLabel={t("common.saving") as string}
+          submitting={submitting}
+          canSubmit={complete}
+        />
+      }
+    >
+      {error && <FormNotice tone="danger">{error}</FormNotice>}
+      <FormSection
+        title={t("settingsForms.identitySection", { defaultValue: "Identity" })}
+        description={t("settingsForms.dept.identityDesc", { defaultValue: "The code is the stable key used by imports; the name is what people see." })}
       >
-      <div
-        className="card"
-        style={{ width: 420, maxWidth: "90vw", padding: 18 }}
-      >
-        <div className="card-head" style={{ marginBottom: 12 }}>
-          <h3 className="card-title">
-            {mode === "add"
-              ? (t("departments.addTitle") as string)
-              : (t("departments.editTitle") as string)}
-          </h3>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <label
-            className="text-xs text-dim"
-            style={{ display: "block", fontWeight: 500 }}
-          >
-            {t("departments.field.code") as string}
-            <input
-              type="text"
-              value={code}
-              disabled={mode === "edit"}
-              onChange={(e) => setCode(e.target.value.toUpperCase())}
-              placeholder="ENG"
-              className="mono"
-              style={{
-                marginTop: 4,
-                width: "100%",
-                padding: "6px 10px",
-                fontSize: 14,
-                borderRadius: "var(--radius-sm)",
-                border: "1px solid var(--border)",
-                background: mode === "edit" ? "var(--bg-sunken)" : "var(--bg-elev)",
-                color: "var(--text)",
-                textTransform: "uppercase",
-              }}
-            />
-            {mode === "add" && (
-              <span className="text-xs text-dim" style={{ display: "block", marginTop: 4 }}>
-                {t("departments.hint.code") as string}
-              </span>
-            )}
-          </label>
-          <label
-            className="text-xs text-dim"
-            style={{ display: "block", fontWeight: 500 }}
-          >
-            {t("departments.field.name") as string}
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={t("departments.placeholder.name") as string}
-              style={{
-                marginTop: 4,
-                width: "100%",
-                padding: "6px 10px",
-                fontSize: 14,
-                borderRadius: "var(--radius-sm)",
-                border: "1px solid var(--border)",
-                background: "var(--bg-elev)",
-                color: "var(--text)",
-              }}
-            />
-          </label>
-          <label
-            className="text-xs text-dim"
-            style={{ display: "block", fontWeight: 500 }}
-          >
-            {t("departments.field.division")}
-            <select
-              value={divisionId}
-              onChange={(e) =>
-                setDivisionId(
-                  e.target.value === "" ? "" : Number(e.target.value),
-                )
-              }
-              style={{
-                marginTop: 4,
-                width: "100%",
-                padding: "6px 10px",
-                fontSize: 14,
-                borderRadius: "var(--radius-sm)",
-                border: "1px solid var(--border)",
-                background: "var(--bg-elev)",
-                color: "var(--text)",
-              }}
-            >
-              <option value="">{t("departments.divisionNoneForm")}</option>
-              {divisions.data?.items.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.code} · {d.name}
-                </option>
-              ))}
-            </select>
-            <span
-              className="text-xs text-dim"
-              style={{ display: "block", marginTop: 4 }}
-            >
-              {t("departments.field.divisionHint")}
-            </span>
-          </label>
-          {error && (
-            <div
-              role="alert"
-              style={{
-                background: "var(--danger-soft)",
-                color: "var(--danger-text)",
-                padding: "6px 10px",
-                borderRadius: "var(--radius-sm)",
-                fontSize: 12,
-              }}
-            >
-              {error}
-            </div>
-          )}
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "flex-end",
-              gap: 6,
-              marginTop: 6,
+        <Field
+          label={t("departments.field.code") as string}
+          htmlFor="dept-code"
+          required={isAdd}
+          error={fieldErrors.code}
+          help={isAdd ? (t("departments.hint.code") as string) : t("settingsForms.codeLocked", { defaultValue: "Codes can't be changed after create." })}
+        >
+          <input
+            id="dept-code"
+            type="text"
+            value={code}
+            disabled={!isAdd}
+            onChange={(e) => {
+              setCode(e.target.value.toUpperCase());
+              if (fieldErrors.code) setFieldErrors((p) => ({ ...p, code: undefined }));
             }}
+            onBlur={(e) => blurRequired("code", e.target.value)}
+            placeholder="ENG"
+            className="input mono"
+          />
+        </Field>
+        <Field label={t("departments.field.name") as string} htmlFor="dept-name" required error={fieldErrors.name}>
+          <input
+            id="dept-name"
+            type="text"
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value);
+              if (fieldErrors.name) setFieldErrors((p) => ({ ...p, name: undefined }));
+            }}
+            onBlur={(e) => blurRequired("name", e.target.value)}
+            placeholder={t("departments.placeholder.name") as string}
+            className="input"
+          />
+        </Field>
+      </FormSection>
+      <FormSection
+        title={t("settingsForms.placementSection", { defaultValue: "Placement" })}
+        description={t("settingsForms.dept.placementDesc", { defaultValue: "Where this department sits in the org hierarchy." })}
+      >
+        <Field
+          label={t("departments.field.division")}
+          htmlFor="dept-division"
+          help={t("departments.field.divisionHint")}
+          span={2}
+        >
+          <select
+            id="dept-division"
+            className="select"
+            value={divisionId}
+            onChange={(e) => setDivisionId(e.target.value === "" ? "" : Number(e.target.value))}
           >
-            <button className="btn" onClick={onClose} disabled={submitting}>
-              {t("common.cancel") as string}
-            </button>
-            <button
-              className="btn btn-primary"
-              onClick={submit}
-              disabled={submitting}
-            >
-              {submitting
-                ? (t("common.saving") as string)
-                : (t("common.save") as string)}
-            </button>
-          </div>
-        </div>
-      </div>
-      </div>
-    </ModalShell>
+            <option value="">{t("departments.divisionNoneForm")}</option>
+            {divisions.data?.items.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.code} · {d.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </FormSection>
+    </SettingsFormModal>
   );
 }

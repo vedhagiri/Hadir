@@ -9,130 +9,63 @@
 
 import { useTranslation } from "react-i18next";
 
-import { Icon } from "../../shell/Icon";
+import { Icon, type IconName } from "../../shell/Icon";
+import "../system/opsUi";
 
 const DOCS_URL = "/api/docs";
+
+const OVERVIEW: Array<{ key: "auth" | "tenant" | "roles" | "rateLimits"; icon: IconName }> = [
+  { key: "auth", icon: "shield" },
+  { key: "tenant", icon: "database" },
+  { key: "roles", icon: "users" },
+  { key: "rateLimits", icon: "clock" },
+];
 
 export function ApiDocsPage() {
   const { t } = useTranslation();
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <header>
-        <h1
-          style={{
-            fontFamily: "var(--font-display)",
-            fontSize: 32,
-            margin: "0 0 6px 0",
-            fontWeight: 400,
-            letterSpacing: "-0.01em",
-          }}
-        >
-          {t("apiDocs.title")}
-        </h1>
-        <p
-          style={{
-            margin: 0,
-            color: "var(--text-secondary)",
-            fontSize: 13.5,
-            maxWidth: 760,
-            lineHeight: 1.55,
-          }}
-        >
-          {t("apiDocs.subtitle")}
-        </p>
-      </header>
-
-      <section
-        className="card"
-        aria-labelledby="apidocs-overview-heading"
-        style={{
-          padding: 18,
-          display: "flex",
-          flexDirection: "column",
-          gap: 10,
-        }}
-      >
-        <h2
-          id="apidocs-overview-heading"
-          style={{
-            margin: 0,
-            fontFamily: "var(--font-display)",
-            fontSize: 20,
-            fontWeight: 400,
-          }}
-        >
-          {t("apiDocs.overview.title")}
-        </h2>
-        <ul
-          style={{
-            margin: 0,
-            paddingInlineStart: 18,
-            display: "flex",
-            flexDirection: "column",
-            gap: 6,
-            color: "var(--text-secondary)",
-            fontSize: 13,
-            lineHeight: 1.55,
-          }}
-        >
-          <li>{t("apiDocs.overview.auth")}</li>
-          <li>{t("apiDocs.overview.tenant")}</li>
-          <li>{t("apiDocs.overview.roles")}</li>
-          <li>{t("apiDocs.overview.rateLimits")}</li>
-        </ul>
-      </section>
-
-      <section
-        className="card"
-        aria-labelledby="apidocs-embed-heading"
-        style={{ padding: 0, overflow: "hidden" }}
-      >
-        <header
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "10px 14px",
-            borderBottom: "1px solid var(--border)",
-            background: "var(--bg-sunken)",
-          }}
-        >
-          <h2
-            id="apidocs-embed-heading"
-            style={{
-              margin: 0,
-              fontSize: 13,
-              fontWeight: 600,
-              color: "var(--text-secondary)",
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
-            }}
-          >
-            {t("apiDocs.embedTitle")}
-          </h2>
-          <a
-            href={DOCS_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn btn-sm"
-            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-          >
+    <>
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">{t("apiDocs.title")}</h1>
+          <p className="page-sub">{t("apiDocs.subtitle")}</p>
+        </div>
+        <div className="page-actions">
+          <a href={DOCS_URL} target="_blank" rel="noopener noreferrer" className="btn">
             <Icon name="globe" size={12} />
             {t("apiDocs.openInNewTab")}
           </a>
-        </header>
-        <iframe
-          title={t("apiDocs.embedTitle")}
-          src={DOCS_URL}
-          style={{
-            width: "100%",
-            height: "70vh",
-            border: 0,
-            display: "block",
-            background: "var(--bg)",
-          }}
-        />
+        </div>
+      </div>
+
+      <section aria-labelledby="apidocs-overview-heading">
+        <h2 id="apidocs-overview-heading" className="ops-section-label">
+          {t("apiDocs.overview.title")}
+        </h2>
+        <div className="ops-overview">
+          {OVERVIEW.map((item) => (
+            <div key={item.key} className="card ops-overview-card">
+              <span className="ops-stage-icon" style={{ width: 36, height: 36, background: "var(--accent-soft)", color: "var(--accent)" }} aria-hidden>
+                <Icon name={item.icon} size={16} />
+              </span>
+              <p>{t(`apiDocs.overview.${item.key}`)}</p>
+            </div>
+          ))}
+        </div>
       </section>
-    </div>
+
+      <section className="card ops-card-flush" aria-labelledby="apidocs-embed-heading">
+        <div className="card-head">
+          <h2 id="apidocs-embed-heading" className="card-title" style={{ margin: 0 }}>
+            {t("apiDocs.embedTitle")}
+          </h2>
+          <span className="pill pill-accent">
+            <span className="pill-dot" aria-hidden />
+            {t("apiDocs.liveBadge", { defaultValue: "Live" })}
+          </span>
+        </div>
+        <iframe title={t("apiDocs.embedTitle")} src={DOCS_URL} className="ops-iframe" />
+      </section>
+    </>
   );
 }

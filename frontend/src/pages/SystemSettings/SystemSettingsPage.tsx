@@ -1,19 +1,22 @@
 // P28.5c — System Settings page (Admin only).
 //
-// Two cards: Detection (mode + det_size + thresholds + body-box overlay)
-// and Tracker (IoU + idle timeout + max event duration). Save is per-
-// section. Validation mirrors the server; ApiError 400 surfaces the
-// offending field.
+// Sectioned cards: Clip processing, Detection (mode + det_size +
+// thresholds + body-box overlay), Tracker (IoU + idle timeout + max
+// event duration), RTSP reconnect, Clip encoding. Save is per-section.
+// Validation mirrors the server; ApiError 400 surfaces the offending
+// field.
 //
 // Per-camera ``capture_config.max_event_duration_sec`` (P28.5b) overrides
 // this tenant default — the help text under the Tracker section says so.
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../../api/client";
 import { ModalShell } from "../../components/DrawerShell";
+import { SkeletonPanel } from "../../components/Skeleton";
 import { Icon } from "../../shell/Icon";
+import { Banner, ModalPanel, SectionCard, SettingRow } from "../../features/system/opsUi";
 import {
   useClipEncodingConfig,
   useClipPipelineConfig,
@@ -59,19 +62,16 @@ export function SystemSettingsPage() {
         </div>
       </div>
 
-      <ClipPipelineCard />
-      <div style={{ height: 16 }} />
-      <DetectionCard />
-      <div style={{ height: 16 }} />
-      <TrackerCard />
-      <div style={{ height: 16 }} />
-      <ReconnectCard />
-      <div style={{ height: 16 }} />
-      <ClipEncodingCard />
+      <div className="ops-settings-stack">
+        <ClipPipelineCard />
+        <DetectionCard />
+        <TrackerCard />
+        <ReconnectCard />
+        <ClipEncodingCard />
+      </div>
     </>
   );
 }
-
 
 // ---------------------------------------------------------------------------
 // Clip processing card — UC1/UC2 toggles
@@ -99,9 +99,7 @@ function ClipPipelineCard() {
   const isOn = (uc: ClipUseCase) => draft.includes(uc);
 
   const toggle = (uc: ClipUseCase, next: boolean) => {
-    setDraft((prev) =>
-      next ? [...prev, uc] : prev.filter((x) => x !== uc),
-    );
+    setDraft((prev) => (next ? [...prev, uc] : prev.filter((x) => x !== uc)));
   };
 
   const onSave = async () => {
@@ -113,90 +111,34 @@ function ClipPipelineCard() {
       setToast(t("systemSettings.savedToast") as string);
       setTimeout(() => setToast(null), 4000);
     } catch (err) {
-      if (err instanceof ApiError) {
-        setToast(formatApiError(err, t));
-      } else {
-        setToast(t("common.errorGeneric") as string);
-      }
+      setToast(err instanceof ApiError ? formatApiError(err, t) : `✗ ${t("common.errorGeneric")}`);
     }
   };
 
+  if (remote.isLoading) return <SkeletonPanel lines={3} />;
+
   return (
-    <div className="card">
-      <div className="card-head">
-        <h3 className="card-title">
-          {t("systemSettings.clipPipeline.title")}
-        </h3>
-        <p className="card-sub">
-          {t("systemSettings.clipPipeline.subtitle")}
-        </p>
-      </div>
-      <div
-        style={{
-          padding: 16,
-          display: "flex",
-          flexDirection: "column",
-          gap: 14,
-        }}
-      >
-        {remote.isError && (
-          <span className="text-sm" style={{ color: "var(--danger-text)" }}>
-            {t("common.errorGeneric")}
-          </span>
-        )}
+    <SectionCard
+      title={t("systemSettings.clipPipeline.title")}
+      sub={t("systemSettings.clipPipeline.subtitle")}
+      footer={<CardFooter dirty={dirty} onSave={onSave} saving={put.isPending || remote.isLoading} toast={toast} />}
+    >
+      {remote.isError && <LoadError onRetry={() => void remote.refetch()} />}
 
-        {CLIP_USE_CASES.map((uc) => (
-          <ToggleRow
-            key={uc}
-            checked={isOn(uc)}
-            onChange={(v) => toggle(uc, v)}
-            label={t(`systemSettings.clipPipeline.${uc}.label`)}
-            hint={t(`systemSettings.clipPipeline.${uc}.hint`)}
-          />
-        ))}
+      {CLIP_USE_CASES.map((uc) => (
+        <ToggleRow
+          key={uc}
+          checked={isOn(uc)}
+          onChange={(v) => toggle(uc, v)}
+          label={t(`systemSettings.clipPipeline.${uc}.label`)}
+          hint={t(`systemSettings.clipPipeline.${uc}.hint`)}
+        />
+      ))}
 
-        <p
-          className="text-xs text-dim"
-          style={{ margin: 0 }}
-        >
-          {t("systemSettings.clipPipeline.offHint")}
-        </p>
-
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginTop: 8,
-            gap: 12,
-            flexWrap: "wrap",
-          }}
-        >
-          <div style={{ flex: 1, minWidth: 0 }}>
-            {toast && (
-              <span
-                className="text-sm"
-                style={{
-                  color: toast.startsWith("✗")
-                    ? "var(--danger-text)"
-                    : "var(--success-text)",
-                }}
-              >
-                {toast}
-              </span>
-            )}
-          </div>
-          <button
-            className="btn btn-primary"
-            onClick={onSave}
-            disabled={!dirty || put.isPending || remote.isLoading}
-          >
-            <Icon name="check" size={12} />
-            {put.isPending ? t("common.saving") : t("common.save")}
-          </button>
-        </div>
-      </div>
-    </div>
+      <p className="text-xs text-dim" style={{ margin: 0, padding: "12px 0 14px" }}>
+        {t("systemSettings.clipPipeline.offHint")}
+      </p>
+    </SectionCard>
   );
 }
 
@@ -210,6 +152,7 @@ function DetectionCard() {
   const [draft, setDraft] = useState<DetectionConfig>(DETECTION_DEFAULTS);
   const [toast, setToast] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
+  const ids = { detSize: useId(), minFace: useId() };
 
   // Sync draft from server on mount + on every refetch.
   useEffect(() => {
@@ -225,11 +168,7 @@ function DetectionCard() {
       setToast(t("systemSettings.savedToast") as string);
       setTimeout(() => setToast(null), 4000);
     } catch (err) {
-      if (err instanceof ApiError) {
-        setToast(formatApiError(err, t));
-      } else {
-        setToast(t("common.errorGeneric") as string);
-      }
+      setToast(err instanceof ApiError ? formatApiError(err, t) : `✗ ${t("common.errorGeneric")}`);
     }
   };
 
@@ -238,25 +177,19 @@ function DetectionCard() {
     setConfirmReset(false);
   };
 
+  if (remote.isLoading) return <SkeletonPanel lines={5} />;
+
   return (
-    <div className="card">
-      <div className="card-head">
-        <h3 className="card-title">{t("systemSettings.detection.title")}</h3>
-        <p className="card-sub">{t("systemSettings.detection.subtitle")}</p>
-      </div>
-      <div
-        style={{
-          padding: 16,
-          display: "flex",
-          flexDirection: "column",
-          gap: 14,
-        }}
+    <>
+      <SectionCard
+        title={t("systemSettings.detection.title")}
+        sub={t("systemSettings.detection.subtitle")}
+        footer={<CardFooter dirty={dirty} onSave={onSave} saving={put.isPending} onReset={() => setConfirmReset(true)} toast={toast} />}
       >
-        <FieldGroup
-          label={t("systemSettings.detection.mode.label")}
-          hint={t(`systemSettings.detection.mode.hint.${draft.mode}`)}
-        >
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {remote.isError && <LoadError onRetry={() => void remote.refetch()} />}
+
+        <SettingRow top label={t("systemSettings.detection.mode.label")} help={t(`systemSettings.detection.mode.hint.${draft.mode}`)}>
+          <div className="ops-radio-group" role="radiogroup" aria-label={t("systemSettings.detection.mode.label")}>
             <RadioOption
               checked={draft.mode === "insightface"}
               onChange={() => setDraft({ ...draft, mode: "insightface" })}
@@ -268,18 +201,14 @@ function DetectionCard() {
               label={t("systemSettings.detection.mode.yoloLabel")}
             />
           </div>
-        </FieldGroup>
+        </SettingRow>
 
-        <FieldGroup
-          label={t("systemSettings.detection.detSize.label")}
-          hint={t(`systemSettings.detection.detSize.hint.${draft.det_size}`)}
-        >
+        <SettingRow htmlFor={ids.detSize} label={t("systemSettings.detection.detSize.label")} help={t(`systemSettings.detection.detSize.hint.${draft.det_size}`)}>
           <select
+            id={ids.detSize}
+            className="select"
             value={String(draft.det_size)}
-            onChange={(e) =>
-              setDraft({ ...draft, det_size: parseInt(e.target.value, 10) })
-            }
-            style={inputStyle}
+            onChange={(e) => setDraft({ ...draft, det_size: parseInt(e.target.value, 10) })}
           >
             {DET_SIZE_OPTIONS.map((opt) => (
               <option key={opt} value={opt}>
@@ -287,13 +216,11 @@ function DetectionCard() {
               </option>
             ))}
           </select>
-        </FieldGroup>
+        </SettingRow>
 
-        <FieldGroup
-          label={t("systemSettings.detection.minDetScore.label")}
-          hint={t("systemSettings.detection.minDetScore.hint")}
-        >
+        <SettingRow label={t("systemSettings.detection.minDetScore.label")} help={t("systemSettings.detection.minDetScore.hint")}>
           <SliderRow
+            label={t("systemSettings.detection.minDetScore.label")}
             value={draft.min_det_score}
             min={0}
             max={1}
@@ -301,14 +228,13 @@ function DetectionCard() {
             onChange={(v) => setDraft({ ...draft, min_det_score: v })}
             displayDigits={2}
           />
-        </FieldGroup>
+        </SettingRow>
 
-        <FieldGroup
-          label={t("systemSettings.detection.minFaceSize.label")}
-          hint={t("systemSettings.detection.minFaceSize.hint")}
-        >
+        <SettingRow htmlFor={ids.minFace} label={t("systemSettings.detection.minFaceSize.label")} help={t("systemSettings.detection.minFaceSize.hint")}>
           <input
+            id={ids.minFace}
             type="number"
+            className="input is-short"
             min={20}
             max={300}
             value={Math.round(Math.sqrt(draft.min_face_pixels))}
@@ -316,17 +242,14 @@ function DetectionCard() {
               const px = clampInt(parseInt(e.target.value, 10), 20, 300);
               setDraft({ ...draft, min_face_pixels: px * px });
             }}
-            style={inputStyle}
           />
-        </FieldGroup>
+        </SettingRow>
 
         {draft.mode === "yolo+face" && (
           <>
-            <FieldGroup
-              label={t("systemSettings.detection.yoloConf.label")}
-              hint={t("systemSettings.detection.yoloConf.hint")}
-            >
+            <SettingRow label={t("systemSettings.detection.yoloConf.label")} help={t("systemSettings.detection.yoloConf.hint")}>
               <SliderRow
+                label={t("systemSettings.detection.yoloConf.label")}
                 value={draft.yolo_conf}
                 min={0}
                 max={1}
@@ -334,7 +257,7 @@ function DetectionCard() {
                 onChange={(v) => setDraft({ ...draft, yolo_conf: v })}
                 displayDigits={2}
               />
-            </FieldGroup>
+            </SettingRow>
 
             <ToggleRow
               checked={draft.show_body_boxes}
@@ -344,15 +267,7 @@ function DetectionCard() {
             />
           </>
         )}
-
-        <CardFooter
-          dirty={dirty}
-          onSave={onSave}
-          saving={put.isPending}
-          onReset={() => setConfirmReset(true)}
-          toast={toast}
-        />
-      </div>
+      </SectionCard>
 
       {confirmReset && (
         <ConfirmModal
@@ -364,7 +279,7 @@ function DetectionCard() {
           cancelLabel={t("common.cancel")}
         />
       )}
-    </div>
+    </>
   );
 }
 
@@ -378,6 +293,7 @@ function TrackerCard() {
   const [draft, setDraft] = useState<TrackerConfig>(TRACKER_DEFAULTS);
   const [toast, setToast] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
+  const ids = { timeout: useId(), maxDuration: useId() };
 
   useEffect(() => {
     if (remote.data) setDraft(remote.data);
@@ -392,11 +308,7 @@ function TrackerCard() {
       setToast(t("systemSettings.savedToast") as string);
       setTimeout(() => setToast(null), 4000);
     } catch (err) {
-      if (err instanceof ApiError) {
-        setToast(formatApiError(err, t));
-      } else {
-        setToast(t("common.errorGeneric") as string);
-      }
+      setToast(err instanceof ApiError ? formatApiError(err, t) : `✗ ${t("common.errorGeneric")}`);
     }
   };
 
@@ -405,25 +317,20 @@ function TrackerCard() {
     setConfirmReset(false);
   };
 
+  if (remote.isLoading) return <SkeletonPanel lines={3} />;
+
   return (
-    <div className="card">
-      <div className="card-head">
-        <h3 className="card-title">{t("systemSettings.tracker.title")}</h3>
-        <p className="card-sub">{t("systemSettings.tracker.subtitle")}</p>
-      </div>
-      <div
-        style={{
-          padding: 16,
-          display: "flex",
-          flexDirection: "column",
-          gap: 14,
-        }}
+    <>
+      <SectionCard
+        title={t("systemSettings.tracker.title")}
+        sub={t("systemSettings.tracker.subtitle")}
+        footer={<CardFooter dirty={dirty} onSave={onSave} saving={put.isPending} onReset={() => setConfirmReset(true)} toast={toast} />}
       >
-        <FieldGroup
-          label={t("systemSettings.tracker.iou.label")}
-          hint={t("systemSettings.tracker.iou.hint")}
-        >
+        {remote.isError && <LoadError onRetry={() => void remote.refetch()} />}
+
+        <SettingRow label={t("systemSettings.tracker.iou.label")} help={t("systemSettings.tracker.iou.hint")}>
           <SliderRow
+            label={t("systemSettings.tracker.iou.label")}
             value={draft.iou_threshold}
             min={0.05}
             max={0.95}
@@ -431,58 +338,34 @@ function TrackerCard() {
             onChange={(v) => setDraft({ ...draft, iou_threshold: v })}
             displayDigits={2}
           />
-        </FieldGroup>
+        </SettingRow>
 
-        <FieldGroup
-          label={t("systemSettings.tracker.timeout.label")}
-          hint={t("systemSettings.tracker.timeout.hint")}
-        >
+        <SettingRow htmlFor={ids.timeout} label={t("systemSettings.tracker.timeout.label")} help={t("systemSettings.tracker.timeout.hint")}>
           <input
+            id={ids.timeout}
             type="number"
+            className="input is-short"
             min={0.5}
             max={30}
             step={0.5}
             value={draft.timeout_sec}
-            onChange={(e) =>
-              setDraft({
-                ...draft,
-                timeout_sec: clampFloat(parseFloat(e.target.value), 0.5, 30),
-              })
-            }
-            style={inputStyle}
+            onChange={(e) => setDraft({ ...draft, timeout_sec: clampFloat(parseFloat(e.target.value), 0.5, 30) })}
           />
-        </FieldGroup>
+        </SettingRow>
 
-        <FieldGroup
-          label={t("systemSettings.tracker.maxDuration.label")}
-          hint={t("systemSettings.tracker.maxDuration.hint")}
-        >
+        <SettingRow htmlFor={ids.maxDuration} label={t("systemSettings.tracker.maxDuration.label")} help={t("systemSettings.tracker.maxDuration.hint")}>
           <input
+            id={ids.maxDuration}
             type="number"
+            className="input is-short"
             min={10}
             max={3600}
             step={1}
             value={draft.max_duration_sec}
-            onChange={(e) =>
-              setDraft({
-                ...draft,
-                max_duration_sec: clampFloat(
-                  parseFloat(e.target.value), 10, 3600,
-                ),
-              })
-            }
-            style={inputStyle}
+            onChange={(e) => setDraft({ ...draft, max_duration_sec: clampFloat(parseFloat(e.target.value), 10, 3600) })}
           />
-        </FieldGroup>
-
-        <CardFooter
-          dirty={dirty}
-          onSave={onSave}
-          saving={put.isPending}
-          onReset={() => setConfirmReset(true)}
-          toast={toast}
-        />
-      </div>
+        </SettingRow>
+      </SectionCard>
 
       {confirmReset && (
         <ConfirmModal
@@ -494,7 +377,7 @@ function TrackerCard() {
           cancelLabel={t("common.cancel")}
         />
       )}
-    </div>
+    </>
   );
 }
 
@@ -514,6 +397,7 @@ function ReconnectCard() {
   const [unit, setUnit] = useState<ReconnectUnit>("seconds");
   const [toast, setToast] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
+  const intervalId = useId();
 
   useEffect(() => {
     if (!remote.data) return;
@@ -524,20 +408,10 @@ function ReconnectCard() {
   }, [remote.data]);
 
   const unitSeconds = RECONNECT_UNIT_SECONDS[unit];
-  const minValue = Math.max(
-    1,
-    Math.ceil(RECONNECT_INTERVAL_MIN_S / unitSeconds),
-  );
+  const minValue = Math.max(1, Math.ceil(RECONNECT_INTERVAL_MIN_S / unitSeconds));
   const maxValue = Math.floor(RECONNECT_INTERVAL_MAX_S / unitSeconds);
-  const intervalSeconds = clampInt(
-    Math.round(value * unitSeconds),
-    RECONNECT_INTERVAL_MIN_S,
-    RECONNECT_INTERVAL_MAX_S,
-  );
-  const payload: ReconnectConfig = {
-    enabled,
-    interval_seconds: intervalSeconds,
-  };
+  const intervalSeconds = clampInt(Math.round(value * unitSeconds), RECONNECT_INTERVAL_MIN_S, RECONNECT_INTERVAL_MAX_S);
+  const payload: ReconnectConfig = { enabled, interval_seconds: intervalSeconds };
   const dirty = JSON.stringify(payload) !== JSON.stringify(remote.data ?? {});
 
   const onSave = async () => {
@@ -547,11 +421,7 @@ function ReconnectCard() {
       setToast(t("systemSettings.savedToast") as string);
       setTimeout(() => setToast(null), 4000);
     } catch (err) {
-      if (err instanceof ApiError) {
-        setToast(formatApiError(err, t));
-      } else {
-        setToast(t("common.errorGeneric") as string);
-      }
+      setToast(err instanceof ApiError ? formatApiError(err, t) : `✗ ${t("common.errorGeneric")}`);
     }
   };
 
@@ -563,20 +433,17 @@ function ReconnectCard() {
     setConfirmReset(false);
   };
 
+  if (remote.isLoading) return <SkeletonPanel lines={2} />;
+
   return (
-    <div className="card">
-      <div className="card-head">
-        <h3 className="card-title">{t("systemSettings.reconnect.title")}</h3>
-        <p className="card-sub">{t("systemSettings.reconnect.subtitle")}</p>
-      </div>
-      <div
-        style={{
-          padding: 16,
-          display: "flex",
-          flexDirection: "column",
-          gap: 14,
-        }}
+    <>
+      <SectionCard
+        title={t("systemSettings.reconnect.title")}
+        sub={t("systemSettings.reconnect.subtitle")}
+        footer={<CardFooter dirty={dirty} onSave={onSave} saving={put.isPending} onReset={() => setConfirmReset(true)} toast={toast} />}
       >
+        {remote.isError && <LoadError onRetry={() => void remote.refetch()} />}
+
         <ToggleRow
           checked={enabled}
           onChange={setEnabled}
@@ -585,56 +452,34 @@ function ReconnectCard() {
         />
 
         {enabled && (
-          <FieldGroup
-            label={t("systemSettings.reconnect.interval.label")}
-            hint={t("systemSettings.reconnect.interval.hint")}
-          >
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <SettingRow htmlFor={intervalId} label={t("systemSettings.reconnect.interval.label")} help={t("systemSettings.reconnect.interval.hint")}>
+            <div className="ops-inline">
               <input
+                id={intervalId}
                 type="number"
+                className="input is-short"
                 min={minValue}
                 max={maxValue}
                 step={1}
                 value={value}
-                onChange={(e) =>
-                  setValue(
-                    clampInt(parseInt(e.target.value, 10), minValue, maxValue),
-                  )
-                }
-                style={{ ...inputStyle, width: 120 }}
+                onChange={(e) => setValue(clampInt(parseInt(e.target.value, 10), minValue, maxValue))}
               />
               <select
+                className="select"
+                style={{ width: 140 }}
                 value={unit}
                 onChange={(e) => setUnit(e.target.value as ReconnectUnit)}
-                style={inputStyle}
+                aria-label={t("systemSettings.reconnect.unitLabel", { defaultValue: "Unit" })}
               >
-                <option value="seconds">
-                  {t("systemSettings.reconnect.unit.seconds")}
-                </option>
-                <option value="minutes">
-                  {t("systemSettings.reconnect.unit.minutes")}
-                </option>
-                <option value="hours">
-                  {t("systemSettings.reconnect.unit.hours")}
-                </option>
+                <option value="seconds">{t("systemSettings.reconnect.unit.seconds")}</option>
+                <option value="minutes">{t("systemSettings.reconnect.unit.minutes")}</option>
+                <option value="hours">{t("systemSettings.reconnect.unit.hours")}</option>
               </select>
             </div>
-            <span className="text-xs text-dim" style={{ marginTop: 4 }}>
-              {t("systemSettings.reconnect.effective", {
-                seconds: intervalSeconds,
-              })}
-            </span>
-          </FieldGroup>
+            <span className="field-help">{t("systemSettings.reconnect.effective", { seconds: intervalSeconds })}</span>
+          </SettingRow>
         )}
-
-        <CardFooter
-          dirty={dirty}
-          onSave={onSave}
-          saving={put.isPending}
-          onReset={() => setConfirmReset(true)}
-          toast={toast}
-        />
-      </div>
+      </SectionCard>
 
       {confirmReset && (
         <ConfirmModal
@@ -646,7 +491,7 @@ function ReconnectCard() {
           cancelLabel={t("common.cancel")}
         />
       )}
-    </div>
+    </>
   );
 }
 
@@ -657,11 +502,10 @@ function ClipEncodingCard() {
   const { t } = useTranslation();
   const remote = useClipEncodingConfig();
   const put = usePutClipEncodingConfig();
-  const [draft, setDraft] = useState<ClipEncodingConfig>(
-    CLIP_ENCODING_DEFAULTS,
-  );
+  const [draft, setDraft] = useState<ClipEncodingConfig>(CLIP_ENCODING_DEFAULTS);
   const [toast, setToast] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
+  const ids = { preset: useId(), resolution: useId() };
 
   useEffect(() => {
     if (remote.data) setDraft(remote.data);
@@ -676,11 +520,7 @@ function ClipEncodingCard() {
       setToast(t("systemSettings.savedToast") as string);
       setTimeout(() => setToast(null), 4000);
     } catch (err) {
-      if (err instanceof ApiError) {
-        setToast(formatApiError(err, t));
-      } else {
-        setToast(t("common.errorGeneric") as string);
-      }
+      setToast(err instanceof ApiError ? formatApiError(err, t) : `✗ ${t("common.errorGeneric")}`);
     }
   };
 
@@ -689,75 +529,47 @@ function ClipEncodingCard() {
     setConfirmReset(false);
   };
 
+  if (remote.isLoading) return <SkeletonPanel lines={5} />;
+
   return (
-    <div className="card">
-      <div className="card-head">
-        <h3 className="card-title">
-          {t("systemSettings.clipEncoding.title")}
-        </h3>
-        <p className="card-sub">
-          {t("systemSettings.clipEncoding.subtitle")}
-        </p>
-      </div>
-      <div
-        style={{
-          padding: 16,
-          display: "flex",
-          flexDirection: "column",
-          gap: 14,
-        }}
+    <>
+      <SectionCard
+        title={t("systemSettings.clipEncoding.title")}
+        sub={t("systemSettings.clipEncoding.subtitle")}
+        footer={<CardFooter dirty={dirty} onSave={onSave} saving={put.isPending} onReset={() => setConfirmReset(true)} toast={toast} />}
       >
-        <FieldGroup
-          label={t("systemSettings.clipEncoding.chunkDuration.label")}
-          hint={t("systemSettings.clipEncoding.chunkDuration.hint")}
-        >
+        {remote.isError && <LoadError onRetry={() => void remote.refetch()} />}
+
+        <SettingRow label={t("systemSettings.clipEncoding.chunkDuration.label")} help={t("systemSettings.clipEncoding.chunkDuration.hint")}>
           <SliderRow
+            label={t("systemSettings.clipEncoding.chunkDuration.label")}
             value={draft.chunk_duration_sec}
             min={60}
             max={600}
             step={10}
             displayDigits={0}
-            onChange={(v) =>
-              setDraft({
-                ...draft,
-                chunk_duration_sec: clampInt(v, 60, 600),
-              })
-            }
+            onChange={(v) => setDraft({ ...draft, chunk_duration_sec: clampInt(v, 60, 600) })}
           />
-        </FieldGroup>
+        </SettingRow>
 
-        <FieldGroup
-          label={t("systemSettings.clipEncoding.crf.label")}
-          hint={t("systemSettings.clipEncoding.crf.hint")}
-        >
+        <SettingRow label={t("systemSettings.clipEncoding.crf.label")} help={t("systemSettings.clipEncoding.crf.hint")}>
           <SliderRow
+            label={t("systemSettings.clipEncoding.crf.label")}
             value={draft.video_crf}
             min={18}
             max={30}
             step={1}
             displayDigits={0}
-            onChange={(v) =>
-              setDraft({
-                ...draft,
-                video_crf: clampInt(v, 18, 30),
-              })
-            }
+            onChange={(v) => setDraft({ ...draft, video_crf: clampInt(v, 18, 30) })}
           />
-        </FieldGroup>
+        </SettingRow>
 
-        <FieldGroup
-          label={t("systemSettings.clipEncoding.preset.label")}
-          hint={t("systemSettings.clipEncoding.preset.hint")}
-        >
+        <SettingRow htmlFor={ids.preset} label={t("systemSettings.clipEncoding.preset.label")} help={t("systemSettings.clipEncoding.preset.hint")}>
           <select
+            id={ids.preset}
+            className="select"
             value={draft.video_preset}
-            onChange={(e) =>
-              setDraft({
-                ...draft,
-                video_preset: e.target.value as X264Preset,
-              })
-            }
-            style={inputStyle}
+            onChange={(e) => setDraft({ ...draft, video_preset: e.target.value as X264Preset })}
           >
             {X264_PRESETS.map((p) => (
               <option key={p} value={p}>
@@ -765,57 +577,36 @@ function ClipEncodingCard() {
               </option>
             ))}
           </select>
-        </FieldGroup>
+        </SettingRow>
 
-        <FieldGroup
-          label={t("systemSettings.clipEncoding.resolution.label")}
-          hint={t("systemSettings.clipEncoding.resolution.hint")}
-        >
+        <SettingRow htmlFor={ids.resolution} label={t("systemSettings.clipEncoding.resolution.label")} help={t("systemSettings.clipEncoding.resolution.hint")}>
           <select
-            value={
-              draft.resolution_max_height == null
-                ? "native"
-                : String(draft.resolution_max_height)
-            }
+            id={ids.resolution}
+            className="select"
+            value={draft.resolution_max_height == null ? "native" : String(draft.resolution_max_height)}
             onChange={(e) =>
               setDraft({
                 ...draft,
-                resolution_max_height:
-                  e.target.value === "native"
-                    ? null
-                    : parseInt(e.target.value, 10),
+                resolution_max_height: e.target.value === "native" ? null : parseInt(e.target.value, 10),
               })
             }
-            style={inputStyle}
           >
-            <option value="native">
-              {t("systemSettings.clipEncoding.resolution.native")}
-            </option>
+            <option value="native">{t("systemSettings.clipEncoding.resolution.native")}</option>
             {RESOLUTION_OPTIONS.filter((h) => h != null).map((h) => (
               <option key={String(h)} value={String(h)}>
                 {h}p
               </option>
             ))}
           </select>
-        </FieldGroup>
+        </SettingRow>
 
         <ToggleRow
           checked={draft.keep_chunks_after_merge}
-          onChange={(v) =>
-            setDraft({ ...draft, keep_chunks_after_merge: v })
-          }
+          onChange={(v) => setDraft({ ...draft, keep_chunks_after_merge: v })}
           label={t("systemSettings.clipEncoding.keepChunks.label")}
           hint={t("systemSettings.clipEncoding.keepChunks.hint")}
         />
-
-        <CardFooter
-          dirty={dirty}
-          onSave={onSave}
-          saving={put.isPending}
-          onReset={() => setConfirmReset(true)}
-          toast={toast}
-        />
-      </div>
+      </SectionCard>
 
       {confirmReset && (
         <ConfirmModal
@@ -827,59 +618,55 @@ function ClipEncodingCard() {
           cancelLabel={t("common.cancel")}
         />
       )}
-    </div>
+    </>
   );
 }
 
 // ---------------------------------------------------------------------------
 // Shared helpers
 
+function LoadError({ onRetry }: { onRetry: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div style={{ padding: "14px 0 0" }}>
+      <Banner tone="danger" icon={<Icon name="info" size={14} />} role="alert">
+        <span>{t("systemSettings.loadFailed", { defaultValue: "Couldn't load this section's current values." })}</span>
+        <span className="ops-banner-spacer" />
+        <button type="button" className="btn btn-sm" onClick={onRetry}>
+          <Icon name="refresh" size={11} />
+          {t("common.retry", { defaultValue: "Retry" })}
+        </button>
+      </Banner>
+    </div>
+  );
+}
+
 interface CardFooterProps {
   dirty: boolean;
   saving: boolean;
   onSave: () => void;
-  onReset: () => void;
+  onReset?: () => void;
   toast: string | null;
 }
 
-function CardFooter({
-  dirty, saving, onSave, onReset, toast,
-}: CardFooterProps) {
+function CardFooter({ dirty, saving, onSave, onReset, toast }: CardFooterProps) {
   const { t } = useTranslation();
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        marginTop: 8,
-        gap: 12,
-        flexWrap: "wrap",
-      }}
-    >
+    <div className="ops-card-foot">
       <div style={{ flex: 1, minWidth: 0 }}>
         {toast && (
-          <span
-            className="text-sm"
-            style={{
-              color: toast.startsWith("✗")
-                ? "var(--danger-text)"
-                : "var(--success-text)",
-            }}
-          >
+          <span className={`ops-feedback ${toast.startsWith("✗") ? "is-err" : "is-ok"}`} role="status">
             {toast}
           </span>
         )}
       </div>
-      <div style={{ display: "flex", gap: 8 }}>
-        <button className="btn" onClick={onReset} disabled={saving}>
-          {t("systemSettings.resetButton")}
-        </button>
-        <button
-          className="btn btn-primary"
-          onClick={onSave}
-          disabled={!dirty || saving}
-        >
+      <div className="ops-card-foot-actions">
+        {onReset && (
+          <button type="button" className="btn" onClick={onReset} disabled={saving}>
+            {t("systemSettings.resetButton")}
+          </button>
+        )}
+        <button type="button" className="btn btn-primary" onClick={onSave} disabled={!dirty || saving}>
           <Icon name="check" size={12} />
           {saving ? t("common.saving") : t("common.save")}
         </button>
@@ -888,48 +675,9 @@ function CardFooter({
   );
 }
 
-function FieldGroup({
-  label, hint, children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
+function RadioOption({ checked, onChange, label }: { checked: boolean; onChange: () => void; label: string }) {
   return (
-    <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <span
-        style={{
-          fontSize: 11,
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-          color: "var(--text-tertiary)",
-        }}
-      >
-        {label}
-      </span>
-      {children}
-      {hint && <span className="text-xs text-dim">{hint}</span>}
-    </label>
-  );
-}
-
-function RadioOption({
-  checked, onChange, label,
-}: {
-  checked: boolean;
-  onChange: () => void;
-  label: string;
-}) {
-  return (
-    <label
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        cursor: "pointer",
-        fontSize: 13,
-      }}
-    >
+    <label className={`ops-radio${checked ? " is-checked" : ""}`}>
       <input type="radio" checked={checked} onChange={onChange} />
       {label}
     </label>
@@ -937,45 +685,60 @@ function RadioOption({
 }
 
 function ToggleRow({
-  checked, onChange, label, hint,
+  checked,
+  onChange,
+  label,
+  hint,
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
   label: string;
   hint?: string;
 }) {
+  const { t } = useTranslation();
+  const [focused, setFocused] = useState(false);
+  const id = useId();
   return (
-    <label
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: 2,
-        cursor: "pointer",
-      }}
-    >
-      <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-        <input
-          type="checkbox"
-          checked={checked}
-          onChange={(e) => onChange(e.target.checked)}
-        />
-        {label}
-      </span>
-      {hint && (
-        <span
-          className="text-xs text-dim"
-          style={{ marginInlineStart: 22 }}
-        >
-          {hint}
-        </span>
-      )}
-    </label>
+    <div className="ops-setting-row">
+      <div>
+        <label htmlFor={id} className="ops-setting-label">{label}</label>
+        {hint && <span className="ops-setting-hint">{hint}</span>}
+      </div>
+      <div className="ops-setting-control">
+        <label className="ops-switch-wrap" htmlFor={id}>
+          <span aria-hidden className={`ops-switch${checked ? " is-on" : ""}${focused ? " is-focus" : ""}`}>
+            <span className="ops-switch-knob" />
+          </span>
+          <input
+            id={id}
+            type="checkbox"
+            role="switch"
+            aria-checked={checked}
+            checked={checked}
+            onChange={(e) => onChange(e.target.checked)}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            className="ops-switch-input"
+          />
+          <span className={`ops-switch-state${checked ? " is-on" : ""}`}>
+            {checked ? t("systemSettings.switchOn", { defaultValue: "On" }) : t("systemSettings.switchOff", { defaultValue: "Off" })}
+          </span>
+        </label>
+      </div>
+    </div>
   );
 }
 
 function SliderRow({
-  value, min, max, step, onChange, displayDigits = 2,
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+  displayDigits = 2,
 }: {
+  label: string;
   value: number;
   min: number;
   max: number;
@@ -984,17 +747,9 @@ function SliderRow({
   displayDigits?: number;
 }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(parseFloat(e.target.value))}
-        style={{ flex: 1 }}
-      />
-      <span className="mono text-sm" style={{ width: 50, textAlign: "end" }}>
+    <div className="ops-slider">
+      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(parseFloat(e.target.value))} aria-label={label} />
+      <span className="ops-slider-value" aria-hidden>
         {value.toFixed(displayDigits)}
       </span>
     </div>
@@ -1002,7 +757,12 @@ function SliderRow({
 }
 
 function ConfirmModal({
-  title, message, confirmLabel, cancelLabel, onConfirm, onCancel,
+  title,
+  message,
+  confirmLabel,
+  cancelLabel,
+  onConfirm,
+  onCancel,
 }: {
   title: string;
   message: string;
@@ -1013,38 +773,22 @@ function ConfirmModal({
 }) {
   return (
     <ModalShell onClose={onCancel}>
-      <div
-        role="dialog"
-        aria-label={title}
-        style={{
-          position: "fixed",
-          top: "50%",
-          left: "50%",
-          transform: "translate(-50%, -50%)",
-          background: "var(--bg)",
-          border: "1px solid var(--border)",
-          borderRadius: "var(--radius-md)",
-          padding: 20,
-          minWidth: 320,
-          zIndex: 1000,
-          boxShadow: "0 12px 32px rgba(0,0,0,0.18)",
-        }}
+      <ModalPanel
+        title={title}
+        ariaLabel={title}
+        footer={
+          <>
+            <button type="button" className="btn" onClick={onCancel}>
+              {cancelLabel}
+            </button>
+            <button type="button" className="btn btn-primary" onClick={onConfirm}>
+              {confirmLabel}
+            </button>
+          </>
+        }
       >
-        <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>
-          {title}
-        </div>
-        <div className="text-sm text-secondary" style={{ marginBottom: 16 }}>
-          {message}
-        </div>
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button className="btn" onClick={onCancel}>
-            {cancelLabel}
-          </button>
-          <button className="btn btn-primary" onClick={onConfirm}>
-            {confirmLabel}
-          </button>
-        </div>
-      </div>
+        <p className="text-sm" style={{ margin: 0, color: "var(--text-secondary)" }}>{message}</p>
+      </ModalPanel>
     </ModalShell>
   );
 }
@@ -1075,14 +819,3 @@ function formatApiError(err: ApiError, t: (k: string) => string): string {
   }
   return `✗ ${t("common.errorGeneric")}`;
 }
-
-const inputStyle = {
-  padding: "8px 10px",
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius-sm)",
-  fontSize: 13,
-  background: "var(--bg)",
-  color: "var(--text)",
-  fontFamily: "var(--font-sans)",
-  outline: "none",
-} as const;

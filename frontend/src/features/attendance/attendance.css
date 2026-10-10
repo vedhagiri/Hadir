@@ -1,0 +1,341 @@
+/* Attendance & Reports area — page-specific layout on top of
+ * src/theme/modern.css. Prefix: at-. Only CSS variables from modern.css;
+ * logical properties only (RTL-safe); transitions ≤ 200ms. */
+
+/* ── Status pill with a leading dot (same shape across the area) ───── */
+.at-pill {
+  --at-dot: var(--text-tertiary);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.at-pill-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-radius: 50%;
+  background: var(--at-dot);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--at-dot) 18%, transparent);
+}
+.at-pill-text { overflow: hidden; text-overflow: ellipsis; }
+.at-pill.tone-success { --at-dot: var(--success); background: var(--success-soft); color: var(--success-text); border-color: color-mix(in oklab, var(--success) 22%, transparent); }
+.at-pill.tone-warning { --at-dot: var(--warning); background: var(--warning-soft); color: var(--warning-text); border-color: color-mix(in oklab, var(--warning) 28%, transparent); }
+.at-pill.tone-danger { --at-dot: var(--danger); background: var(--danger-soft); color: var(--danger-text); border-color: color-mix(in oklab, var(--danger) 22%, transparent); }
+.at-pill.tone-info { --at-dot: var(--info, var(--accent)); background: var(--info-soft); color: var(--info-text); border-color: color-mix(in oklab, var(--info, var(--accent)) 22%, transparent); }
+.at-pill.tone-accent { --at-dot: var(--accent); background: var(--accent-soft); color: var(--accent-text); border-color: color-mix(in oklab, var(--accent) 24%, transparent); }
+.at-pill.tone-neutral { --at-dot: var(--text-tertiary); }
+
+/* ── Toolbar helpers ─────────────────────────────────────────────── */
+.at-caption {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+.at-field { display: inline-flex; align-items: center; gap: 8px; }
+.at-control {
+  height: var(--control-h);
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--bg-elev);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  box-shadow: var(--shadow-xs);
+  transition: border-color var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
+}
+.at-control:focus { outline: 0; border-color: var(--accent); box-shadow: var(--ring); }
+.at-toggle {
+  appearance: none;
+  height: var(--control-h);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--bg-elev);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: var(--shadow-xs);
+  transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease, color var(--dur-fast) ease;
+}
+.at-toggle:hover { background: var(--bg-sunken); }
+.at-toggle[aria-pressed="true"] { background: var(--accent-soft); border-color: color-mix(in oklab, var(--accent) 55%, var(--border)); color: var(--accent-text); }
+.at-toggle.tone-danger[aria-pressed="true"] { background: var(--danger-soft); border-color: color-mix(in oklab, var(--danger) 45%, var(--border)); color: var(--danger-text); }
+.at-toggle-box {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  border: 1.5px solid currentColor;
+  display: grid;
+  place-items: center;
+  color: inherit;
+  transition: background var(--dur-fast) ease;
+}
+.at-toggle[aria-pressed="true"] .at-toggle-box { background: currentColor; }
+.at-toggle[aria-pressed="true"] .at-toggle-box svg { color: var(--bg-elev); }
+
+/* ── Card header row used above tables ───────────────────────────── */
+.at-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 16px 20px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.at-card-head .card-title { margin: 0; }
+.at-card-head-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.at-card-body { padding: 16px 20px; }
+.at-scroll-x { overflow-x: auto; }
+.at-nowrap { white-space: nowrap; }
+.at-muted { color: var(--text-tertiary); }
+.at-inline-error { padding: 16px; color: var(--danger-text); font-size: 13px; }
+
+/* ── Two-column layout (options card + preview card) ─────────────── */
+.at-two-col {
+  display: grid;
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.at-two-col > * { min-width: 0; }
+.at-sticky { position: sticky; top: 16px; }
+@media (max-width: 1100px) {
+  .at-two-col { grid-template-columns: 1fr; }
+  .at-sticky { position: static; }
+}
+
+/* ── Report-type option tiles (vertical list inside the options card) */
+.at-option-list { display: flex; flex-direction: column; gap: 8px; }
+.at-option {
+  appearance: none;
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) ease, background var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
+}
+.at-option:hover { border-color: var(--border-strong); background: var(--bg-sunken); }
+.at-option[aria-pressed="true"] {
+  border-color: color-mix(in oklab, var(--accent) 55%, var(--border));
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 12%, transparent);
+}
+.at-option-icon {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: var(--bg-sunken);
+  color: var(--text-secondary);
+}
+.at-option[aria-pressed="true"] .at-option-icon { background: var(--accent); color: white; }
+.at-option-title { font-size: 13.5px; font-weight: 600; }
+.at-option-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.45; margin-top: 2px; }
+.at-option-meta { font-size: 11.5px; color: var(--text-tertiary); margin-top: 4px; font-variant-numeric: tabular-nums; }
+
+/* ── Form stack inside an options card ───────────────────────────── */
+.at-form { display: flex; flex-direction: column; gap: 14px; }
+.at-form-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin: 4px 0 -4px;
+}
+.at-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 720px) { .at-form-row { grid-template-columns: 1fr; } }
+
+/* ── Key/value facts (drawer + profile) ──────────────────────────── */
+.at-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px 20px; }
+.at-fact-label { font-size: 11.5px; font-weight: 600; color: var(--text-tertiary); }
+.at-fact-value { font-size: 14px; font-weight: 600; margin-top: 3px; font-variant-numeric: tabular-nums; }
+.at-fact-sub { font-size: 11.5px; color: var(--text-tertiary); margin-top: 2px; }
+
+/* ── Thumbnails (face crops in tables) ───────────────────────────── */
+.at-thumb {
+  display: block;
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+}
+.at-thumb.sm { width: 36px; height: 36px; border-radius: 8px; }
+.at-thumb-empty {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  border: 1px dashed var(--border-strong);
+  background: var(--bg-sunken);
+  color: var(--text-tertiary);
+  font-size: 9px;
+  text-align: center;
+  line-height: 1.1;
+  padding: 4px;
+}
+.at-thumb-empty.sm { width: 36px; height: 36px; border-radius: 8px; }
+
+/* ── Pagination footer under a table ─────────────────────────────── */
+.at-table-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+.at-table-foot .select { min-height: var(--control-h-sm); padding: 2px 30px 2px 10px; font-size: 12.5px; }
+
+/* ── Legend row ──────────────────────────────────────────────────── */
+.at-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--text-secondary); }
+.at-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.at-legend-swatch { width: 12px; height: 12px; border-radius: 4px; border: 1px solid var(--border); }
+
+/* ── Expanded (child) rows in grouped tables ─────────────────────── */
+.table tr.at-row-expanded td { background: var(--bg-sunken); }
+.table tr.at-row-child td { background: var(--bg-sunken); color: var(--text-secondary); }
+.table tr.at-row-clickable { cursor: pointer; }
+.at-indent { padding-inline-start: 14px; }
+
+/* ── Misc ────────────────────────────────────────────────────────── */
+.at-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.at-stack { display: flex; flex-direction: column; gap: 16px; }
+.at-faded { opacity: 0.6; transition: opacity var(--dur) ease; }
+.at-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ── Slice A (daily/my attendance) ── */
+.at-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font-size: 13px;
+}
+.at-notice.tone-info { background: var(--info-soft); border-color: color-mix(in oklab, var(--info, var(--accent)) 30%, transparent); color: var(--info-text); }
+.at-notice.tone-danger { background: var(--danger-soft); border-color: color-mix(in oklab, var(--danger) 30%, transparent); color: var(--danger-text); }
+.at-notice.tone-warning { background: var(--warning-soft); border-color: color-mix(in oklab, var(--warning) 35%, transparent); color: var(--warning-text); }
+.at-notice-text { flex: 1; min-width: 0; }
+.at-notice-close { appearance: none; border: 0; background: transparent; color: inherit; cursor: pointer; padding: 2px 6px; border-radius: 6px; font-size: 16px; line-height: 1; }
+.at-notice-close:hover { background: color-mix(in oklab, currentColor 10%, transparent); }
+
+/* Sticky stack on the daily page (dynamic ``top`` offsets stay inline). */
+.at-sticky-top { position: sticky; top: 0; z-index: 30; background: var(--bg); }
+.at-sticky-head { position: sticky; z-index: 25; background: var(--bg-elev); }
+.at-sticky-note { position: sticky; z-index: 22; background: var(--bg-elev); }
+.at-sticky-th { position: sticky; z-index: 18; }
+
+.at-title-note { margin-inline-start: 8px; font-size: 12px; font-weight: 400; color: var(--text-tertiary); display: inline-flex; align-items: center; gap: 4px; }
+.at-link-x { appearance: none; background: transparent; border: 0; color: var(--accent); cursor: pointer; font-size: 14px; line-height: 1; padding: 2px; }
+
+.at-person { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.at-person-name { font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
+.at-person-name.is-inactive { color: var(--text-secondary); text-decoration: line-through; }
+.at-person-name .pill { text-decoration: none; font-size: 10px; height: 18px; }
+.at-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, color-mix(in oklab, var(--accent) 75%, white), var(--accent));
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+  letter-spacing: 0.02em;
+  box-shadow: 0 0 0 2px var(--bg-elev);
+}
+.at-avatar.sm { width: 28px; height: 28px; font-size: 10.5px; }
+
+.at-seg-btn { display: inline-flex; align-items: center; gap: 6px; }
+.at-seg-icon { font-size: 11px; }
+
+/* Send-emails modal */
+.at-modal { width: 540px; max-width: 92vw; max-height: 88vh; display: flex; flex-direction: column; }
+.at-modal .modal-body { flex: 1; overflow-y: auto; }
+.at-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.at-modal-sub { margin: 3px 0 0; font-size: 12px; color: var(--text-secondary); }
+.at-modal-foot { display: flex; justify-content: flex-end; gap: 8px; }
+.at-result-box { background: var(--bg-sunken); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px; font-size: 12.5px; }
+.at-check-row { display: flex; align-items: center; gap: 10px; padding: 8px 6px; border-radius: 8px; cursor: pointer; transition: background var(--dur-fast) ease; }
+.at-check-row:hover, .at-check-row.is-checked { background: var(--bg-sunken); }
+.at-check-row-all { padding: 6px 0 10px; border-bottom: 1px solid var(--border); border-radius: 0; margin-bottom: 6px; font-size: 12.5px; font-weight: 600; color: var(--text-secondary); }
+.at-check-row-all:hover { background: transparent; }
+.at-check-main { flex: 1; min-width: 0; }
+.at-check-name { font-size: 13px; font-weight: 600; line-height: 1.2; }
+.at-check-meta { font-size: 11px; color: var(--text-secondary); }
+.at-modal-pager { display: flex; align-items: center; justify-content: space-between; padding-top: 10px; margin-top: 6px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-secondary); }
+.at-center-note { color: var(--text-secondary); font-size: 13px; text-align: center; padding: 20px 0; }
+
+/* My attendance */
+.at-today-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 16px; margin-bottom: 16px; }
+@media (max-width: 1100px) { .at-today-grid { grid-template-columns: 1fr; } }
+.at-section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.at-section-title { font-size: 14.5px; font-weight: 700; margin: 0; font-family: var(--font-display); letter-spacing: -0.012em; }
+.at-section-sub { font-size: 12.5px; color: var(--text-tertiary); margin-top: 2px; }
+.at-glance { display: flex; gap: 14px; align-items: center; }
+.at-glance-list { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+.at-glance-row { display: flex; align-items: center; justify-content: space-between; font-size: 12px; }
+.at-legend-swatch.is-policy { height: 4px; width: 12px; border-radius: 0; background: var(--accent-soft); border: 1px dashed var(--accent-border); }
+.at-legend-swatch.is-session { height: 4px; width: 12px; border-radius: 2px; background: var(--accent); border: 0; }
+.at-roll-row {
+  appearance: none;
+  text-align: start;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  width: 100%;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background var(--dur-fast) ease;
+}
+.at-roll-row:hover { background: var(--bg-hover); }
+.at-roll-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+.at-roll-pills { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; }
+.at-inline-empty { display: flex; align-items: center; gap: 10px; padding: 14px 0; color: var(--text-secondary); font-size: 13px; }
+.at-inline-empty svg { color: var(--text-tertiary); flex: none; }

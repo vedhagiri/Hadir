@@ -67,14 +67,14 @@ export function AttendanceDrawer({ item, onClose }: Props) {
       <div className="drawer">
         <div className="drawer-head">
           <div>
-            <div className="mono text-xs text-dim">
+            <div className="text-xs text-dim">
               {t("calendar.dayDetail", { defaultValue: "Day detail" }) as string}
             </div>
-            <div style={{ fontSize: 16, fontWeight: 600, marginTop: 2 }}>
-              {item.full_name} · {item.date}
+            <div className="drawer-title" style={{ fontSize: 16, marginTop: 2 }}>
+              {item.full_name} · <span className="mono">{item.date}</span>
             </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div className="at-card-head-actions">
             <button
               type="button"
               className="btn btn-sm"
@@ -87,7 +87,7 @@ export function AttendanceDrawer({ item, onClose }: Props) {
                 }) as string
               }
             >
-              <span aria-hidden style={{ marginInlineEnd: 4 }}>↻</span>
+              <Icon name="refresh" size={12} />
               {regen.isPending
                 ? (t("attendance.regenerating", {
                     defaultValue: "Regenerating…",
@@ -117,30 +117,14 @@ export function AttendanceDrawer({ item, onClose }: Props) {
 
         {regenInfo && (
           <div
-            style={{
-              margin: "8px 16px 0",
-              padding: "8px 12px",
-              borderRadius: 6,
-              fontSize: 12.5,
-              background:
-                regenInfo.tone === "ok"
-                  ? "var(--info-soft, var(--bg-sunken))"
-                  : "var(--danger-soft, var(--bg-sunken))",
-              border:
-                regenInfo.tone === "ok"
-                  ? "1px solid var(--info, var(--border))"
-                  : "1px solid var(--danger, var(--border))",
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-            }}
+            className={`at-notice tone-${regenInfo.tone === "ok" ? "info" : "danger"}`}
+            role="status"
+            style={{ margin: "12px 24px 0" }}
           >
-            <span>{regenInfo.text}</span>
-            <div style={{ flex: 1 }} />
+            <span className="at-notice-text">{regenInfo.text}</span>
             <button
               type="button"
-              className="btn btn-sm"
-              style={{ padding: "2px 8px", fontSize: 11 }}
+              className="at-notice-close"
               onClick={() => setRegenInfo(null)}
               aria-label={t("common.close", { defaultValue: "Close" }) as string}
             >

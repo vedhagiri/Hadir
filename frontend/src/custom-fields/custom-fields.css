@@ -1,0 +1,6 @@
+/* Custom fields page (prefix cf-). */
+.cf-row { flex-wrap: nowrap; }
+.cf-row-main { flex: 1 1 220px; min-width: 0; }
+.cf-row-name { font-size: 13px; font-weight: 600; }
+.cf-row-meta { flex: 1 1 160px; }
+.cf-cap { text-transform: capitalize; }

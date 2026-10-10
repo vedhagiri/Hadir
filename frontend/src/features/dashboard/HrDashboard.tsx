@@ -37,6 +37,8 @@ import { BarChart } from "./charts/BarChart";
 import { Donut } from "./charts/Donut";
 import { LineChart, Sparkline } from "./charts/LineChart";
 import { SkeletonLines, SkeletonRows } from "../../components/Skeleton";
+import { PanelEmpty, SoftPill, Tile, nowrap } from "./DashUi";
+import type { Tone } from "./DashUi";
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
@@ -305,8 +307,11 @@ export function HrDashboard() {
         };
         byDept.set(it.department.id, row);
       }
-      row.total += 1;
       const b = classify(it);
+      // Weekend / holiday rows without a check-in aren't working-day
+      // rows — counting them would rank every department at 0%.
+      if (b === "off") continue;
+      row.total += 1;
       if (b === "present") row.present += 1;
       else if (b === "late") row.late += 1;
       else if (b === "absent") row.absent += 1;
@@ -629,8 +634,10 @@ export function HrDashboard() {
       </div>
 
       {/* KPI strip with sparklines */}
-      <div className="grid grid-4" style={{ marginBottom: 16 }}>
+      <div className="mg-stat-grid">
         <KpiCard
+          tone="success"
+          onClick={() => navigate("/daily-attendance")}
           icon="users"
           label={t("dashboard.hr.kpi.presentToday")}
           value={
@@ -663,6 +670,8 @@ export function HrDashboard() {
           sparkColor="var(--success)"
         />
         <KpiCard
+          tone="warning"
+          onClick={() => navigate("/daily-attendance")}
           icon="clock"
           label={t("dashboard.hr.kpi.lateArrivals")}
           value={dayKindLabel ? "—" : String(todaySummary?.late ?? 0)}
@@ -675,6 +684,8 @@ export function HrDashboard() {
           sparkColor="var(--warning)"
         />
         <KpiCard
+          tone={inboxSummary.data && inboxSummary.data.breached_count > 0 ? "danger" : "accent"}
+          onClick={() => navigate("/approvals")}
           icon="inbox"
           label={t("dashboard.hr.kpi.pendingApprovals")}
           value={String(inboxSummary.data?.pending_count ?? 0)}
@@ -696,6 +707,8 @@ export function HrDashboard() {
           sparkColor="var(--accent)"
         />
         <KpiCard
+          tone="danger"
+          onClick={() => navigate("/daily-attendance")}
           icon="user"
           label={t("dashboard.hr.kpi.absentToday")}
           value={dayKindLabel ? "—" : String(todaySummary?.absent ?? 0)}
@@ -821,6 +834,23 @@ export function HrDashboard() {
           </div>
         </div>
         <div className="card-body">
+          {arrivalByHour.every((b) => b.value === 0) ? (
+            <PanelEmpty
+              icon="clock"
+              title={t("dashboard.hr.arrival.emptyTitle", { defaultValue: "No check-ins yet" })}
+              body={
+                dayKindLabel
+                  ? t("dashboard.hr.arrival.emptyOff", {
+                      defaultValue: "{{kind}} — nobody was expected in today.",
+                      kind: dayKindLabel,
+                    })
+                  : t("dashboard.hr.arrival.emptyBody", {
+                      defaultValue: "Arrivals will appear here by hour as employees are recognised at the cameras.",
+                    })
+              }
+            />
+          ) : (
+          <>
           <BarChart
             data={arrivalByHour}
             fill="var(--accent)"
@@ -840,6 +870,8 @@ export function HrDashboard() {
           >
             {t("dashboard.hr.arrival.note")}
           </div>
+          </>
+          )}
         </div>
       </div>
 
@@ -872,9 +904,11 @@ export function HrDashboard() {
             }}
           >
             {punctualityLeaders.length === 0 && (
-              <div className="text-sm text-dim">
-                {t("dashboard.hr.punctuality.empty")}
-              </div>
+              <PanelEmpty
+                icon="clock"
+                title={t("dashboard.hr.punctuality.emptyTitle", { defaultValue: "Nothing to rank" })}
+                body={t("dashboard.hr.punctuality.empty")}
+              />
             )}
             {punctualityLeaders.map((r, idx) => (
               <div
@@ -1285,6 +1319,8 @@ function Counter({
 }
 
 function KpiCard({
+  tone,
+  onClick,
   icon,
   label,
   value,
@@ -1293,6 +1329,8 @@ function KpiCard({
   spark,
   sparkColor,
 }: {
+  tone: Tone;
+  onClick?: () => void;
   icon: "users" | "clock" | "inbox" | "user" | "zap";
   label: string;
   value: string;
@@ -1303,67 +1341,24 @@ function KpiCard({
 }) {
   const deltaColor =
     deltaTone === "up"
-      ? "var(--success)"
+      ? "var(--success-text)"
       : deltaTone === "down"
-        ? "var(--danger)"
-        : "var(--text-tertiary)";
+        ? "var(--danger-text)"
+        : undefined;
   return (
-    <div className="card" style={{ padding: 16 }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 4,
-        }}
-      >
-        <div
-          style={{
-            width: 30,
-            height: 30,
-            borderRadius: 7,
-            background: "var(--bg-sunken)",
-            display: "grid",
-            placeItems: "center",
-            color: "var(--text-secondary)",
-          }}
-        >
-          <Icon name={icon} size={14} />
-        </div>
-        {spark && spark.length > 1 && (
-          <Sparkline values={spark} stroke={sparkColor} />
-        )}
-      </div>
-      <div
-        style={{
-          fontFamily: "var(--font-display)",
-          fontSize: 28,
-          letterSpacing: "-0.01em",
-          marginTop: 4,
-        }}
-      >
-        {value}
-      </div>
-      <div
-        className="text-xs text-dim"
-        style={{
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
-          marginTop: 6,
-          fontWeight: 500,
-        }}
-      >
-        {label}
-      </div>
-      {delta && (
-        <div
-          className="text-xs"
-          style={{ marginTop: 2, color: deltaColor }}
-        >
-          {delta}
-        </div>
-      )}
-    </div>
+    <Tile
+      tone={tone}
+      icon={icon}
+      label={label}
+      value={value}
+      sub={delta ? <span style={deltaColor ? { color: deltaColor } : undefined}>{delta}</span> : undefined}
+      {...(onClick ? { onClick } : {})}
+      extra={
+        spark && spark.length > 1 ? (
+          <Sparkline values={spark} stroke={sparkColor} width={120} height={22} />
+        ) : undefined
+      }
+    />
   );
 }
 
@@ -1443,12 +1438,21 @@ function ScheduledReports({
       </div>
       <div className="card-body" style={{ padding: 0 }}>
         {loading && (
-          <SkeletonLines lines={4} />
+          <div style={{ padding: 14 }}>
+            <SkeletonLines lines={4} />
+          </div>
         )}
         {!loading && rows.length === 0 && (
-          <div className="text-sm text-dim" style={{ padding: 14 }}>
-            {t("dashboard.hr.schedules.empty")}
-          </div>
+          <PanelEmpty
+            icon="mail"
+            title={t("dashboard.hr.schedules.emptyTitle", { defaultValue: "No scheduled reports" })}
+            body={t("dashboard.hr.schedules.empty")}
+            action={
+              <button type="button" className="btn btn-sm" onClick={onManage}>
+                {t("dashboard.hr.schedules.manage")}
+              </button>
+            }
+          />
         )}
         {!loading &&
           rows.slice(0, 4).map((s, i) => (
@@ -1583,6 +1587,9 @@ function LiveAttendance({
           {t("dashboard.hr.live.viewAll")}
         </button>
       </div>
+      {!loading && rows.length === 0 ? (
+        <PanelEmpty icon="users" tone="accent" title={t("dashboard.hr.live.empty")} body={t("dashboard.hr.live.emptyRows")} />
+      ) : (
       <table className="table">
         <thead>
           <tr>
@@ -1599,33 +1606,20 @@ function LiveAttendance({
           {loading && (
             <SkeletonRows cols={7} />
           )}
-          {!loading && rows.length === 0 && (
-            <tr>
-              <td
-                colSpan={7}
-                className="text-sm text-dim"
-                style={{ padding: 14, textAlign: "center" }}
-              >
-                {t("dashboard.hr.live.emptyRows")}
-              </td>
-            </tr>
-          )}
           {!loading &&
             rows.map((it) => (
               <tr key={`${it.employee_id}-${it.date}`}>
                 <td>
-                  <div className="text-sm" style={{ fontWeight: 500 }}>
-                    {it.full_name}
-                  </div>
-                  <div className="text-xs text-dim mono">
+                  <div className="text-sm dsh-person-name">{it.full_name}</div>
+                  <div className="text-xs text-dim mono" style={nowrap}>
                     {it.employee_code}
                   </div>
                 </td>
                 <td className="text-sm">{it.department.name}</td>
-                <td className="text-sm">{it.policy.name}</td>
-                <td className="mono text-sm">{shortTime(it.in_time)}</td>
-                <td className="mono text-sm">{shortTime(it.out_time)}</td>
-                <td className="mono text-sm">
+                <td className="text-sm" style={nowrap}>{it.policy.name}</td>
+                <td className="mono text-sm" style={nowrap}>{shortTime(it.in_time)}</td>
+                <td className="mono text-sm" style={nowrap}>{shortTime(it.out_time)}</td>
+                <td className="mono text-sm" style={nowrap}>
                   {formatMinutes(it.total_minutes)}
                 </td>
                 <td>
@@ -1635,6 +1629,7 @@ function LiveAttendance({
             ))}
         </tbody>
       </table>
+      )}
     </div>
   );
 }
@@ -1645,20 +1640,20 @@ function AttendancePill({ it }: { it: AttendanceItem }) {
   if (b === "off") {
     if (it.is_holiday) {
       return (
-        <span className="pill pill-info">
+        <SoftPill tone="info">
           {it.holiday_name
             ? t("dashboard.hr.attPill.holidayNamed", { name: it.holiday_name })
             : t("dashboard.hr.attPill.holiday")}
-        </span>
+        </SoftPill>
       );
     }
-    return <span className="pill pill-neutral">{t("dashboard.hr.attPill.weekend")}</span>;
+    return <SoftPill tone="neutral">{t("dashboard.hr.attPill.weekend")}</SoftPill>;
   }
   if (b === "pending") {
-    return <span className="pill pill-info">{t("dashboard.hr.attPill.waitingLogin")}</span>;
+    return <SoftPill tone="info">{t("dashboard.hr.attPill.waitingLogin")}</SoftPill>;
   }
-  if (b === "onLeave") return <span className="pill pill-info">{t("dashboard.hr.attPill.onLeave")}</span>;
-  if (b === "absent") return <span className="pill pill-danger">{t("dashboard.hr.attPill.absent")}</span>;
+  if (b === "onLeave") return <SoftPill tone="info">{t("dashboard.hr.attPill.onLeave")}</SoftPill>;
+  if (b === "absent") return <SoftPill tone="danger">{t("dashboard.hr.attPill.absent")}</SoftPill>;
   if (b === "late") return <LateBadge size="md" />;
-  return <span className="pill pill-success">{t("dashboard.hr.attPill.present")}</span>;
+  return <SoftPill tone="success">{t("dashboard.hr.attPill.present")}</SoftPill>;
 }

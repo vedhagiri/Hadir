@@ -29,6 +29,8 @@ import { primaryRole } from "../../types";
 import { DatePicker } from "../../components/DatePicker";
 import { DrawerShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
+import { Field, FormFooter, FormHeader, FormNotice, FormSection, SwitchField } from "../../components/FormKit";
+import { Banner } from "./peopleUi";
 import { toast } from "../../shell/Toaster";
 import { validateReferencePhotos } from "../../util/photoValidation";
 import { useDepartments } from "../departments/hooks";
@@ -174,6 +176,10 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
   const sectionsQuery = useSections(form.department_id ?? null);
   const [photoAngle, setPhotoAngle] = useState<PhotoAngle>("front");
   const [serverError, setServerError] = useState<string | null>(null);
+  // Inline, per-field validation messages (rendered under the field by
+  // the form kit). Same rules as before — only the placement changed.
+  const [errors, setErrors] = useState<FieldErrors>({});
+  const [overrideError, setOverrideError] = useState<string | null>(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [overrideOpen, setOverrideOpen] = useState(false);
   const [overrideComment, setOverrideComment] = useState("");
@@ -305,62 +311,88 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
     createLogin,
   ]);
 
-  const onField = <K extends keyof FormState>(key: K, value: FormState[K]) =>
+  const clearError = (key: FieldKey) =>
+    setErrors((cur) => {
+      if (!(key in cur)) return cur;
+      const next = { ...cur };
+      delete next[key];
+      return next;
+    });
+
+  const onField = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((s) => ({ ...s, [key]: value }));
+    if (isFieldKey(key)) clearError(key);
+  };
+
+  // Bring the first invalid field into view and focus its control.
+  const focusFirstError = () =>
+    window.requestAnimationFrame(() => {
+      const el = document.querySelector<HTMLElement>(
+        ".pp-emp-form .fk-field.has-error",
+      );
+      if (!el) return;
+      el.scrollIntoView({ block: "center", behavior: "smooth" });
+      el.querySelector<HTMLElement>("input, select, textarea, button")?.focus({
+        preventScroll: true,
+      });
+    });
+
+  const failWith = (errs: FieldErrors) => {
+    setErrors(errs);
+    focusFirstError();
+  };
 
   const buildPayload = (): EmployeeWritePayload | null => {
     setServerError(null);
+    const errs: FieldErrors = {};
     if (isAddMode) {
-      if (!form.employee_code.trim() || !form.full_name.trim()) {
-        setServerError(t("employees.errors.codeAndNameRequired") as string);
-        return null;
+      if (!form.employee_code.trim()) {
+        errs.employee_code = t("employees.errors.codeRequired", {
+          defaultValue: "Employee ID is required.",
+        }) as string;
+      }
+      if (!form.full_name.trim()) {
+        errs.full_name = t("employees.errors.nameRequired", {
+          defaultValue: "Full name is required.",
+        }) as string;
       }
     }
     // BUG-003 / BUG-004 / BUG-005 — explicit length-cap message rather
     // than the silent maxLength truncation (which the input already
     // enforces). Belt-and-braces in case browser autofill bypasses.
     if (form.employee_code.trim().length > 64) {
-      setServerError("Employee ID must be 64 characters or fewer.");
-      return null;
+      errs.employee_code = "Employee ID must be 64 characters or fewer.";
     }
     if (form.full_name.trim().length > 200) {
-      setServerError("Full name must be 200 characters or fewer.");
-      return null;
+      errs.full_name = "Full name must be 200 characters or fewer.";
     }
     if (form.designation.trim().length > 80) {
-      setServerError("Designation must be 80 characters or fewer.");
-      return null;
+      errs.designation = "Designation must be 80 characters or fewer.";
     }
     // BUG-006 — email format validation. Empty string is allowed (the
     // field is optional); when present it must be a plausible
     // ``user@host.tld`` shape (matches the backend's lenient regex).
     if (form.email.trim()) {
       const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim());
-      if (!emailOk) {
-        setServerError("Email address is not valid.");
-        return null;
-      }
+      if (!emailOk) errs.email = "Email address is not valid.";
     }
     // BUG-007 — phone must be digit-only (with optional + and separators).
     if (form.phone.trim()) {
       const phoneOk = /^\+?[\d\s\-]{4,30}$/.test(form.phone.trim());
       if (!phoneOk) {
-        setServerError("Phone number must contain digits only (with optional + and - or spaces).");
-        return null;
+        errs.phone = "Phone number must contain digits only (with optional + and - or spaces).";
       }
     }
     // ``department_id === 0`` is the in-form sentinel for "no department
     // picked yet" — happens when the operator chose a division that
     // didn't include the previously-selected department.
     if (!form.department_id) {
-      setServerError(t("employees.errors.departmentRequired") as string);
-      return null;
+      errs.department_id = t("employees.errors.departmentRequired") as string;
     }
     if (form.status === "inactive") {
       const reason = form.deactivation_reason.trim();
       if (reason.length < 5) {
-        setServerError(t("employees.errors.reasonRequired") as string);
-        return null;
+        errs.deactivation_reason = t("employees.errors.reasonRequired") as string;
       }
     }
     if (
@@ -368,9 +400,13 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
       form.relieving_date &&
       form.relieving_date < form.joining_date
     ) {
-      setServerError(t("employees.errors.relievingBeforeJoining") as string);
+      errs.relieving_date = t("employees.errors.relievingBeforeJoining") as string;
+    }
+    if (Object.keys(errs).length > 0) {
+      failWith(errs);
       return null;
     }
+    setErrors({});
 
     const payload: EmployeeWritePayload = {
       full_name: form.full_name.trim(),
@@ -403,16 +439,18 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
     // the employee, so a bad password doesn't leave a half-created
     // state (employee yes, login no).
     if (isAddMode && createLogin) {
+      const errs: FieldErrors = {};
       if (!form.email.trim()) {
-        setServerError(t("employees.errors.emailRequiredForLogin") as string);
-        return;
+        errs.email = t("employees.errors.emailRequiredForLogin") as string;
       }
       if (loginPassword.length < 12) {
-        setServerError(t("employees.errors.passwordTooShort") as string);
-        return;
+        errs.password = t("employees.errors.passwordTooShort") as string;
       }
       if (selectedRoleCodes.length === 0) {
-        setServerError(t("employees.errors.atLeastOneRole") as string);
+        errs.roles = t("employees.errors.atLeastOneRole") as string;
+      }
+      if (Object.keys(errs).length > 0) {
+        failWith(errs);
         return;
       }
     }
@@ -511,9 +549,10 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
   const onOverrideSubmit = async () => {
     if (!pendingDelete.data || !employeeId) return;
     if (overrideComment.trim().length < 10) {
-      setServerError(t("employees.errors.overrideCommentMin") as string);
+      setOverrideError(t("employees.errors.overrideCommentMin") as string);
       return;
     }
+    setOverrideError(null);
     try {
       await adminOverride.mutateAsync({
         employeeId,
@@ -539,114 +578,178 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
   const showOverrideButton =
     isAdmin && !!pendingDelete.data && isDifferentAdminFromRequester;
 
+  const submitting = create.isPending || update.isPending;
+  const canSubmit = isAddMode ? canSubmitAdd : isDirty;
+  const titleId = "emp-form-title";
+  const photoList = photos.data?.items ?? [];
+  const selectedCount = selectedPhotoIds.size;
+  const allSelected = photoList.length > 0 && selectedCount === photoList.length;
+  // Numbered sections read as a linear flow; the count shifts by mode
+  // because some sections only exist in Add (platform access) or Edit
+  // (login & roles, reference photos).
+  let stepNo = 0;
+  const nextStep = () => ++stepNo;
+
+  const divisionPlaceholder = divisionsQuery.isLoading
+    ? (t("common.loading") as string)
+    : (divisionsQuery.data?.items.length ?? 0) === 0
+      ? "No divisions yet — add in Settings → Divisions"
+      : (t("employees.field.allDivisions") as string);
+  const sectionPlaceholder = sectionsQuery.isLoading
+    ? (t("common.loading") as string)
+    : form.department_id === 0 || form.department_id === null
+      ? "Pick a department first"
+      : (sectionsQuery.data?.items.length ?? 0) === 0
+        ? "No sections in this department — add in Settings → Sections"
+        : (t("employees.field.noSection") as string);
+
+  const togglePhoto = (id: number) =>
+    setSelectedPhotoIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
   return (
     <DrawerShell onClose={onClose}>
-      <div className="drawer">
-        <div className="drawer-head">
-          <div>
-            <div className="mono text-xs text-dim">
-              {isAddMode
-                ? (t("employees.drawer.addTitle") as string)
-                : (t("employees.drawer.editTitle") as string)}
-            </div>
-            <div style={{ fontSize: 16, fontWeight: 600, marginTop: 2 }}>
-              {isAddMode ? t("employees.drawer.newEmployee") : form.full_name || "—"}
-            </div>
-          </div>
-          <button className="icon-btn" onClick={onClose} aria-label={t("common.close") as string}>
-            <Icon name="x" size={14} />
-          </button>
-        </div>
+      <form
+        className="drawer fk-drawer fk-wide pp-emp-form"
+        role="dialog"
+        aria-labelledby={titleId}
+        noValidate
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (submitting || !canSubmit) return;
+          void onSave();
+        }}
+      >
+        <FormHeader
+          titleId={titleId}
+          icon={<Icon name={isAddMode ? "plus" : "user"} size={18} />}
+          eyebrow={
+            isAddMode
+              ? (t("employees.drawer.newEmployee") as string)
+              : detail.data
+                ? `${detail.data.employee_code} · ${detail.data.full_name}`
+                : undefined
+          }
+          title={
+            isAddMode
+              ? (t("employees.drawer.addTitle") as string)
+              : (t("employees.drawer.editTitle") as string)
+          }
+          subtitle={
+            isAddMode
+              ? (t("employees.form.addSubtitle", {
+                  defaultValue:
+                    "Create the employee record, place them in the org chart and optionally give them a login.",
+                }) as string)
+              : (t("employees.form.editSubtitle", {
+                  defaultValue:
+                    "Update details, team, login and reference photos. Changes are audited.",
+                }) as string)
+          }
+          onClose={onClose}
+        />
 
-        <div className="drawer-body">
+        <div className="drawer-body fk-body">
+          {serverError && (
+            <FormNotice
+              tone="danger"
+              title={t("employees.form.saveFailed", { defaultValue: "Couldn't save the employee" }) as string}
+            >
+              {serverError}
+            </FormNotice>
+          )}
+
+          {!isAddMode && detail.isLoading && <SkeletonLines lines={4} />}
+
           {/* Pending delete banner (Edit only) */}
           {!isAddMode && pendingDelete.data && (
-            <div
-              style={{
-                background: "var(--warning-soft)",
-                border: "1px solid var(--warning-border, var(--border))",
-                borderRadius: "var(--radius-sm)",
-                padding: "10px 12px",
-                marginBottom: 16,
-              }}
+            <Banner
+              tone="warning"
+              title={t("employees.delete.pendingBannerTitle") as string}
+              actions={
+                <>
+                  {isHr && (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={() => void onDecide("approve")}
+                        disabled={decide.isPending}
+                      >
+                        {t("employees.delete.approve") as string}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-ghost"
+                        onClick={() => {
+                          const comment = window.prompt(
+                            t("employees.delete.rejectPromptComment") as string,
+                          );
+                          if (comment && comment.trim().length >= 5) {
+                            void onDecide("reject", comment.trim());
+                          }
+                        }}
+                        disabled={decide.isPending}
+                      >
+                        {t("employees.delete.reject") as string}
+                      </button>
+                    </>
+                  )}
+                  {showOverrideButton && !overrideOpen && (
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      onClick={() => setOverrideOpen(true)}
+                    >
+                      {t("employees.delete.overrideAndApprove") as string}
+                    </button>
+                  )}
+                </>
+              }
             >
-              <div style={{ fontSize: 12.5, fontWeight: 600 }}>
-                {t("employees.delete.pendingBannerTitle") as string}
-              </div>
-              <div className="text-xs text-dim" style={{ marginTop: 4 }}>
-                {t("employees.delete.pendingBannerBody", {
-                  name:
-                    pendingDelete.data.requested_by_full_name ??
-                    t("employees.delete.unknownActor"),
-                  date: new Date(
-                    pendingDelete.data.created_at,
-                  ).toLocaleDateString(),
-                }) as string}
-              </div>
+              {t("employees.delete.pendingBannerBody", {
+                name:
+                  pendingDelete.data.requested_by_full_name ??
+                  t("employees.delete.unknownActor"),
+                date: new Date(
+                  pendingDelete.data.created_at,
+                ).toLocaleDateString(),
+              }) as string}
               {pendingDelete.data.reason && (
-                <div
-                  className="text-xs"
-                  style={{ marginTop: 4, color: "var(--text-secondary)" }}
-                >
+                <div className="pp-banner-line">
                   {t("employees.delete.reasonLabel")}: {pendingDelete.data.reason}
                 </div>
               )}
-              {isHr && (
-                <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-primary"
-                    onClick={() => void onDecide("approve")}
-                    disabled={decide.isPending}
-                  >
-                    {t("employees.delete.approve") as string}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-sm"
-                    onClick={() => {
-                      const comment = window.prompt(
-                        t("employees.delete.rejectPromptComment") as string,
-                      );
-                      if (comment && comment.trim().length >= 5) {
-                        void onDecide("reject", comment.trim());
-                      }
-                    }}
-                    disabled={decide.isPending}
-                  >
-                    {t("employees.delete.reject") as string}
-                  </button>
-                </div>
-              )}
-              {showOverrideButton && !overrideOpen && (
-                <button
-                  type="button"
-                  className="btn btn-sm"
-                  style={{ marginTop: 8 }}
-                  onClick={() => setOverrideOpen(true)}
-                >
-                  {t("employees.delete.overrideAndApprove") as string}
-                </button>
-              )}
               {overrideOpen && (
-                <div style={{ marginTop: 8 }}>
+                <div className={`pp-override-box fk-field${overrideError ? " has-error" : ""}`}>
+                  <label className="fk-label" htmlFor="emp-override-comment">
+                    {t("employees.form.overrideCommentLabel", { defaultValue: "Override comment" }) as string}
+                    <span className="fk-req">*</span>
+                  </label>
                   <textarea
+                    id="emp-override-comment"
+                    className="textarea"
                     placeholder={
                       t("employees.delete.overridePromptComment") as string
                     }
                     value={overrideComment}
-                    onChange={(e) => setOverrideComment(e.target.value)}
-                    rows={3}
-                    style={{
-                      width: "100%",
-                      padding: 8,
-                      fontSize: 12.5,
-                      border: "1px solid var(--border)",
-                      borderRadius: "var(--radius-sm)",
-                      background: "var(--bg-elev)",
+                    onChange={(e) => {
+                      setOverrideComment(e.target.value);
+                      setOverrideError(null);
                     }}
+                    rows={3}
                   />
-                  <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                  {overrideError && (
+                    <span className="fk-error" role="alert">
+                      <Icon name="info" size={12} />
+                      {overrideError}
+                    </span>
+                  )}
+                  <div className="pp-inline-actions">
                     <button
                       type="button"
                       className="btn btn-sm btn-primary"
@@ -661,6 +764,7 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
                       onClick={() => {
                         setOverrideOpen(false);
                         setOverrideComment("");
+                        setOverrideError(null);
                       }}
                     >
                       {t("common.cancel") as string}
@@ -668,406 +772,395 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
                   </div>
                 </div>
               )}
-            </div>
+            </Banner>
           )}
 
-          {/* Identity */}
-          <SectionLabel>{t("employees.section.identity") as string}</SectionLabel>
-          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 12 }}>
+          {/* 1 · Identity */}
+          <FormSection
+            step={nextStep()}
+            title={t("employees.section.identity") as string}
+            description={t("employees.form.identityHelp", {
+              defaultValue: "How this person shows up across Maugood — lists, reports and approvals.",
+            }) as string}
+          >
             <Field
               label={t("employees.field.code") as string}
-              value={form.employee_code}
-              onChange={(v) => onField("employee_code", v)}
-              disabled={!isAddMode}
-              mono
+              htmlFor="emp-code"
               required
-              maxLength={64}
-            />
+              error={errors.employee_code}
+              help={
+                isAddMode
+                  ? (t("employees.form.codeHelp", { defaultValue: "Your HR or payroll ID. Can't be changed later." }) as string)
+                  : (t("employees.form.codeLocked", { defaultValue: "Locked — the ID can't change after creation." }) as string)
+              }
+            >
+              <input
+                id="emp-code"
+                className="input mono"
+                value={form.employee_code}
+                onChange={(e) => onField("employee_code", e.target.value)}
+                disabled={!isAddMode}
+                maxLength={64}
+                autoComplete="off"
+                placeholder={isAddMode ? "e.g. EMP-0142" : undefined}
+              />
+            </Field>
             <Field
               label={t("employees.field.fullName") as string}
-              value={form.full_name}
-              onChange={(v) => onField("full_name", v)}
+              htmlFor="emp-name"
               required
-              maxLength={200}
-            />
+              error={errors.full_name}
+            >
+              <input
+                id="emp-name"
+                className="input"
+                value={form.full_name}
+                onChange={(e) => onField("full_name", e.target.value)}
+                maxLength={200}
+                autoComplete="off"
+                placeholder="e.g. Aisha Al-Balushi"
+              />
+            </Field>
             <Field
               label={t("employees.field.designation") as string}
-              value={form.designation}
-              onChange={(v) => onField("designation", v)}
-              maxLength={80}
-            />
-          </div>
-          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
-            <Field
-              label={t("employees.field.email") as string}
-              value={form.email}
-              onChange={(v) => onField("email", v)}
-              type="email"
-              maxLength={120}
-            />
+              htmlFor="emp-designation"
+              error={errors.designation}
+            >
+              <input
+                id="emp-designation"
+                className="input"
+                value={form.designation}
+                onChange={(e) => onField("designation", e.target.value)}
+                maxLength={80}
+                placeholder="e.g. Site Engineer"
+              />
+            </Field>
             <Field
               label={t("employees.field.phone") as string}
-              value={form.phone}
-              // Strip any non-digit / +/- chars on input so the field
-              // simply refuses string letters (BUG-007).
-              onChange={(v) =>
-                onField("phone", v.replace(/[^\d+\-\s]/g, ""))
+              htmlFor="emp-phone"
+              error={errors.phone}
+            >
+              <input
+                id="emp-phone"
+                className="input"
+                value={form.phone}
+                // Strip any non-digit / +/- chars on input so the field
+                // simply refuses string letters (BUG-007).
+                onChange={(e) =>
+                  onField("phone", e.target.value.replace(/[^\d+\-\s]/g, ""))
+                }
+                maxLength={30}
+                inputMode="tel"
+                placeholder="e.g. +968 9123 4567"
+              />
+            </Field>
+            <Field
+              label={t("employees.field.email") as string}
+              htmlFor="emp-email"
+              span={2}
+              required={isAddMode && (isAdmin || isHr) && createLogin}
+              error={errors.email}
+              help={
+                isAddMode && (isAdmin || isHr)
+                  ? (t("employees.form.emailHelpLogin", {
+                      defaultValue: "Used as the sign-in email when a platform login is created below.",
+                    }) as string)
+                  : (t("employees.form.emailHelp", {
+                      defaultValue: "Optional. Links this employee to their Maugood login.",
+                    }) as string)
               }
-              maxLength={30}
-              inputMode="tel"
-            />
-          </div>
+            >
+              <input
+                id="emp-email"
+                className="input"
+                type="email"
+                value={form.email}
+                onChange={(e) => onField("email", e.target.value)}
+                maxLength={120}
+                autoComplete="off"
+                placeholder="e.g. aisha@company.com"
+              />
+            </Field>
+          </FormSection>
 
-          {/* Assignment */}
-          <SectionLabel>{t("employees.section.assignment") as string}</SectionLabel>
-          {/* Division → Department → Section is the org chain. The
-              dropdowns cascade: changing the division narrows the
-              department list to those linked to it (or shows every
+          {/* 2 · Assignment — Division → Department → Section is the org
+              chain. The dropdowns cascade: changing the division narrows
+              the department list to those linked to it (or shows every
               department when no division is picked); changing the
               department clears the now-incompatible section. */}
-          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 10 }}>
-            <Select
-              label={t("employees.field.division") as string}
-              value={form.division_id === null ? "" : String(form.division_id)}
-              onChange={(v) => {
-                const newDivisionId = v === "" ? null : Number(v);
-                // If the currently-selected department isn't under
-                // the new division, clear it (and the section). When
-                // the operator un-picks the division (back to "All"),
-                // leave the existing department alone.
-                setForm((s) => {
-                  const currentDept = (departmentsQuery.data?.items ?? [])
-                    .find((d) => d.id === s.department_id);
-                  const deptStillValid =
-                    newDivisionId === null ||
-                    (currentDept?.division_id ?? null) === newDivisionId;
-                  return {
-                    ...s,
-                    division_id: newDivisionId,
-                    department_id: deptStillValid ? s.department_id : 0,
-                    section_id: deptStillValid ? s.section_id : null,
-                  };
-                });
-              }}
-              options={[
-                {
-                  value: "",
-                  // BUG-011 / BUG-036 — when the tenant hasn't
-                  // configured any divisions yet, surface the empty
-                  // state in the dropdown placeholder rather than
-                  // silently showing a single "All Divisions" entry
-                  // (which an operator can reasonably mistake for
-                  // dummy data).
-                  label:
-                    divisionsQuery.isLoading
-                      ? (t("common.loading") as string)
-                      : (divisionsQuery.data?.items.length ?? 0) === 0
-                        ? "No divisions yet — add in Settings → Divisions"
-                        : (t("employees.field.allDivisions") as string),
-                },
-                ...(divisionsQuery.data?.items ?? []).map((d) => ({
-                  value: String(d.id),
-                  label: `${d.name} (${d.code})`,
-                })),
-              ]}
-            />
-            <Select
+          <FormSection
+            step={nextStep()}
+            title={t("employees.section.assignment") as string}
+            description={t("employees.form.assignmentHelp", {
+              defaultValue: "Where they sit in the org chart and who approves their requests.",
+            }) as string}
+          >
+            <Field label={t("employees.field.division") as string} htmlFor="emp-division">
+              <select
+                id="emp-division"
+                className="select"
+                value={form.division_id === null ? "" : String(form.division_id)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  const newDivisionId = v === "" ? null : Number(v);
+                  // If the currently-selected department isn't under
+                  // the new division, clear it (and the section). When
+                  // the operator un-picks the division (back to "All"),
+                  // leave the existing department alone.
+                  setForm((s) => {
+                    const currentDept = (departmentsQuery.data?.items ?? [])
+                      .find((d) => d.id === s.department_id);
+                    const deptStillValid =
+                      newDivisionId === null ||
+                      (currentDept?.division_id ?? null) === newDivisionId;
+                    return {
+                      ...s,
+                      division_id: newDivisionId,
+                      department_id: deptStillValid ? s.department_id : 0,
+                      section_id: deptStillValid ? s.section_id : null,
+                    };
+                  });
+                }}
+              >
+                {/* BUG-011 / BUG-036 — when the tenant hasn't configured
+                    any divisions yet, surface the empty state in the
+                    placeholder rather than a lone "All divisions". */}
+                <option value="">{divisionPlaceholder}</option>
+                {(divisionsQuery.data?.items ?? []).map((d) => (
+                  <option key={d.id} value={String(d.id)}>
+                    {`${d.name} (${d.code})`}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field
               label={t("employees.field.department") as string}
+              htmlFor="emp-department"
               required
-              value={form.department_id ? String(form.department_id) : ""}
-              onChange={(v) =>
-                // Department change clears the section so the picker
-                // can't carry a stale section that belongs to the old
-                // department.
-                setForm((s) => ({
-                  ...s,
-                  department_id: Number(v),
-                  section_id: null,
-                }))
-              }
-              options={[
-                ...(form.department_id === 0
-                  ? [{ value: "", label: t("employees.field.pickDepartment") as string }]
-                  : []),
-                ...(departmentsQuery.data?.items ?? [])
+              error={errors.department_id}
+            >
+              <select
+                id="emp-department"
+                className="select"
+                value={form.department_id ? String(form.department_id) : ""}
+                onChange={(e) => {
+                  // Department change clears the section so the picker
+                  // can't carry a stale section from the old department.
+                  setForm((s) => ({
+                    ...s,
+                    department_id: Number(e.target.value),
+                    section_id: null,
+                  }));
+                  clearError("department_id");
+                }}
+              >
+                {form.department_id === 0 && (
+                  <option value="">{t("employees.field.pickDepartment") as string}</option>
+                )}
+                {(departmentsQuery.data?.items ?? [])
                   .filter((d) =>
                     form.division_id === null
                       ? true
                       : (d.division_id ?? null) === form.division_id,
                   )
-                  .map((d) => ({
-                    value: String(d.id),
-                    label: `${d.name} (${d.code})`,
-                  })),
-              ]}
-            />
-            <Select
-              label={t("employees.field.section") as string}
-              value={form.section_id === null ? "" : String(form.section_id)}
-              onChange={(v) =>
-                onField("section_id", v === "" ? null : Number(v))
-              }
-              options={[
-                {
-                  value: "",
-                  // BUG-012 / BUG-037 — same empty-state treatment as
-                  // Division. If no department is picked yet, prompt
-                  // for that first; if a department is picked but has
-                  // no sections, point at Settings → Sections.
-                  label:
-                    sectionsQuery.isLoading
-                      ? (t("common.loading") as string)
-                      : form.department_id === 0 || form.department_id === null
-                        ? "Pick a department first"
-                        : (sectionsQuery.data?.items.length ?? 0) === 0
-                          ? "No sections in this department — add in Settings → Sections"
-                          : (t("employees.field.noSection") as string),
-                },
-                ...(sectionsQuery.data?.items ?? []).map((s) => ({
-                  value: String(s.id),
-                  label: `${s.name} (${s.code})`,
-                })),
-              ]}
-            />
-          </div>
-          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
-            <Select
-              label={t("employees.field.reportsTo") as string}
-              value={form.reports_to_user_id === null ? "" : String(form.reports_to_user_id)}
-              onChange={(v) =>
-                onField("reports_to_user_id", v === "" ? null : Number(v))
-              }
-              options={[
-                { value: "", label: t("employees.field.noManager") as string },
-                ...((managers.data?.items ?? []).map((m) => ({
-                  value: String(m.id),
-                  label: `${m.full_name} · ${m.email}`,
-                })) as { value: string; label: string }[]),
-              ]}
-            />
-            <div />
-          </div>
-
-          {/* Lifecycle dates */}
-          <SectionLabel>{t("employees.section.lifecycle") as string}</SectionLabel>
-          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
-            <Field
-              label={t("employees.field.joinDate") as string}
-              value={form.joining_date}
-              onChange={(v) => onField("joining_date", v)}
-              type="date"
-            />
-            {(form.status === "active" || form.relieving_date) && (
-              <div>
-                <Field
-                  label={t("employees.field.relievingDate") as string}
-                  value={form.relieving_date}
-                  onChange={(v) => onField("relieving_date", v)}
-                  type="date"
-                />
-                {/* BUG-013 — the DatePicker doesn't expose a "clear"
-                    affordance, so once a date is picked there was no
-                    way to un-pick it. This small button reverts the
-                    relieving date to empty (which the backend treats
-                    as null on PATCH). */}
-                {form.relieving_date && (
-                  <button
-                    type="button"
-                    onClick={() => onField("relieving_date", "")}
-                    style={{
-                      marginTop: 4,
-                      background: "transparent",
-                      border: "none",
-                      padding: 0,
-                      fontSize: 11,
-                      color: "var(--text-secondary)",
-                      cursor: "pointer",
-                      textDecoration: "underline",
-                    }}
-                    aria-label="Clear relieving date"
-                  >
-                    Clear date
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Platform access (Add mode + Admin only). Surfaces an
-              optional toggle that, when on, creates a login user with
-              the chosen roles right after the employee row is
-              persisted. */}
-          {/* BUG-054 — HR can also create platform logins for new
-              employees; backend permits POST /api/users for HR. */}
-          {isAddMode && (isAdmin || isHr) && (
-            <>
-              <SectionLabel>
-                {t("employees.section.platformAccess") as string}
-              </SectionLabel>
-              <div
-                style={{
-                  border: "1px solid var(--border)",
-                  borderRadius: 8,
-                  padding: 12,
-                  marginBottom: 16,
-                  background: "var(--bg-sunken)",
-                }}
+                  .map((d) => (
+                    <option key={d.id} value={String(d.id)}>
+                      {`${d.name} (${d.code})`}
+                    </option>
+                  ))}
+              </select>
+            </Field>
+            <Field label={t("employees.field.section") as string} htmlFor="emp-section">
+              <select
+                id="emp-section"
+                className="select"
+                value={form.section_id === null ? "" : String(form.section_id)}
+                onChange={(e) =>
+                  onField("section_id", e.target.value === "" ? null : Number(e.target.value))
+                }
               >
-                <label
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    cursor: "pointer",
-                    fontSize: 13,
-                    fontWeight: 500,
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={createLogin}
-                    onChange={(e) => setCreateLogin(e.target.checked)}
+                {/* BUG-012 / BUG-037 — same empty-state treatment. */}
+                <option value="">{sectionPlaceholder}</option>
+                {(sectionsQuery.data?.items ?? []).map((sec) => (
+                  <option key={sec.id} value={String(sec.id)}>
+                    {`${sec.name} (${sec.code})`}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field
+              label={t("employees.field.reportsTo") as string}
+              htmlFor="emp-reports-to"
+              help={t("employees.form.reportsToHelp", {
+                defaultValue: "Only users with the Manager role are listed.",
+              }) as string}
+            >
+              <select
+                id="emp-reports-to"
+                className="select"
+                value={form.reports_to_user_id === null ? "" : String(form.reports_to_user_id)}
+                onChange={(e) =>
+                  onField("reports_to_user_id", e.target.value === "" ? null : Number(e.target.value))
+                }
+              >
+                <option value="">{t("employees.field.noManager") as string}</option>
+                {(managers.data?.items ?? []).map((m) => (
+                  <option key={m.id} value={String(m.id)}>
+                    {`${m.full_name} · ${m.email}`}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </FormSection>
+
+          {/* 3 · Lifecycle dates */}
+          <FormSection
+            step={nextStep()}
+            title={t("employees.section.lifecycle") as string}
+            description={t("employees.form.lifecycleHelp", {
+              defaultValue: "Attendance is only tracked between these dates. The relieving date flips the employee to inactive automatically.",
+            }) as string}
+          >
+            <Field label={t("employees.field.joinDate") as string}>
+              <DatePicker
+                value={form.joining_date}
+                onChange={(v) => {
+                  onField("joining_date", v);
+                  clearError("relieving_date");
+                }}
+                ariaLabel={t("employees.field.joinDate") as string}
+                triggerStyle={{ width: "100%", height: 38 }}
+              />
+            </Field>
+            {(form.status === "active" || form.relieving_date) ? (
+              <Field
+                label={t("employees.field.relievingDate") as string}
+                error={errors.relieving_date}
+              >
+                <div className="pp-date-row">
+                  <DatePicker
+                    value={form.relieving_date}
+                    onChange={(v) => onField("relieving_date", v)}
+                    ariaLabel={t("employees.field.relievingDate") as string}
+                    triggerStyle={{ width: "100%", height: 38 }}
                   />
-                  {t("employees.field.createLogin") as string}
-                </label>
-                <div
-                  className="text-xs text-dim"
-                  style={{ marginTop: 4 }}
-                >
-                  {t("employees.hint.createLogin") as string}
+                  {/* BUG-013 — the DatePicker has no "clear" affordance;
+                      this reverts the relieving date to empty (null on
+                      PATCH). */}
+                  {form.relieving_date && (
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      onClick={() => onField("relieving_date", "")}
+                      aria-label={t("employees.field.clearRelievingDate", { defaultValue: "Clear relieving date" }) as string}
+                      title={t("employees.field.clearDate", { defaultValue: "Clear date" }) as string}
+                    >
+                      <Icon name="x" size={13} />
+                    </button>
+                  )}
                 </div>
+              </Field>
+            ) : (
+              <div />
+            )}
+          </FormSection>
 
-                {createLogin && (
-                  <div
-                    style={{
-                      marginTop: 12,
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 12,
-                    }}
+          {/* 4a · Platform access (Add + Admin/HR). When on, a login user
+              with the chosen roles is created right after the employee
+              row is persisted. BUG-054 — HR may create logins too. */}
+          {isAddMode && (isAdmin || isHr) && (
+            <FormSection
+              step={nextStep()}
+              title={t("employees.form.platformAccessTitle", { defaultValue: "Platform access" }) as string}
+              description={t("employees.form.platformAccessHelp", {
+                defaultValue: "Optional. Give this employee a Maugood login so they can see their attendance and submit requests.",
+              }) as string}
+            >
+              <SwitchField
+                id="emp-create-login"
+                label={t("employees.form.createLoginLabel", { defaultValue: "Create a login for this employee" }) as string}
+                description={t("employees.hint.createLogin") as string}
+                checked={createLogin}
+                onChange={(next) => {
+                  setCreateLogin(next);
+                  if (!next) {
+                    clearError("password");
+                    clearError("roles");
+                    clearError("email");
+                  }
+                }}
+              />
+              {createLogin && (
+                <>
+                  <Field
+                    label={t("employees.field.roles") as string}
+                    required
+                    span={2}
+                    error={errors.roles}
+                    help={t("employees.form.rolesHelp", {
+                      defaultValue: "Pick one or more. Employee is the self-service default.",
+                    }) as string}
                   >
-                    <div>
-                      <label
-                        className="text-xs text-dim"
-                        style={{ display: "block", marginBottom: 4 }}
-                      >
-                        {t("employees.field.roles") as string}
-                      </label>
-                      <div
-                        style={{
-                          display: "flex",
-                          flexWrap: "wrap",
-                          gap: 8,
+                    <RoleChips
+                      roles={rolesQuery.data?.items ?? []}
+                      selected={selectedRoleCodes}
+                      loading={rolesQuery.isLoading}
+                      label={t("employees.field.roles") as string}
+                      onToggle={(code) => {
+                        toggleRoleCode(code);
+                        clearError("roles");
+                      }}
+                    />
+                  </Field>
+                  <Field
+                    label={t("employees.field.password") as string}
+                    htmlFor="emp-login-password"
+                    required
+                    span={2}
+                    error={errors.password}
+                    help={t("employees.hint.password") as string}
+                  >
+                    <div className="pp-input-row">
+                      <input
+                        id="emp-login-password"
+                        type="text"
+                        className="input mono"
+                        value={loginPassword}
+                        onChange={(e) => {
+                          setLoginPassword(e.target.value);
+                          clearError("password");
                         }}
-                      >
-                        {(rolesQuery.data?.items ?? []).map((role) => {
-                          const checked = selectedRoleCodes.includes(role.code);
-                          return (
-                            <label
-                              key={role.id}
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: 6,
-                                padding: "4px 10px",
-                                borderRadius: "var(--radius-sm)",
-                                border: `1px solid ${checked ? "var(--accent)" : "var(--border)"}`,
-                                background: checked
-                                  ? "var(--accent-soft)"
-                                  : "transparent",
-                                color: checked
-                                  ? "var(--accent-text)"
-                                  : "var(--text)",
-                                fontSize: 12,
-                                cursor: "pointer",
-                              }}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={() => toggleRoleCode(role.code)}
-                              />
-                              {role.name}
-                            </label>
-                          );
-                        })}
-                      </div>
+                        autoComplete="off"
+                        placeholder={t("employees.placeholder.password") as string}
+                      />
+                      <button type="button" className="btn" onClick={generatePassword}>
+                        <Icon name="refresh" size={12} />
+                        {t("employees.action.generatePassword") as string}
+                      </button>
                     </div>
-
-                    <div>
-                      <label
-                        className="text-xs text-dim"
-                        style={{ display: "block", marginBottom: 4 }}
-                      >
-                        {t("employees.field.password") as string}
-                      </label>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <input
-                          type="text"
-                          value={loginPassword}
-                          onChange={(e) => setLoginPassword(e.target.value)}
-                          placeholder={
-                            t("employees.placeholder.password") as string
-                          }
-                          style={{
-                            flex: 1,
-                            fontFamily:
-                              "var(--font-mono, ui-monospace, monospace)",
-                            fontSize: 13,
-                            padding: "6px 10px",
-                            borderRadius: "var(--radius-sm)",
-                            border: "1px solid var(--border)",
-                            background: "var(--bg-elev)",
-                            color: "var(--text)",
-                          }}
-                        />
-                        <button
-                          type="button"
-                          className="btn btn-sm"
-                          onClick={generatePassword}
-                        >
-                          <Icon name="refresh" size={11} />
-                          {t("employees.action.generatePassword") as string}
-                        </button>
-                      </div>
-                      <div
-                        className="text-xs text-dim"
-                        style={{ marginTop: 4 }}
-                      >
-                        {t("employees.hint.password") as string}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </>
+                  </Field>
+                </>
+              )}
+            </FormSection>
           )}
 
-          {/* Login & Roles (Edit + Admin/HR only). Surfaces the linked
-              user's current roles, lets Admin add/remove roles, and
-              offers a Reset password action. */}
+          {/* 4b · Login & roles (Edit + Admin/HR). Shows the linked user's
+              roles, lets Admin edit them and reset the password, or offers
+              "Enable platform access" when no login exists yet. */}
           {!isAddMode && (isAdmin || isHr) && (
-            <>
-              <SectionLabel>
-                {t("employees.section.loginRoles") as string}
-              </SectionLabel>
-              <div
-                style={{
-                  border: "1px solid var(--border)",
-                  borderRadius: 8,
-                  padding: 12,
-                  marginBottom: 16,
-                  background: "var(--bg-sunken)",
-                }}
-              >
-                {linkedUser.isLoading && (
-                  <SkeletonLines lines={2} />
-                )}
+            <FormSection
+              step={nextStep()}
+              columns={1}
+              title={t("employees.section.loginRoles") as string}
+              description={t("employees.form.loginRolesHelp", {
+                defaultValue: "The Maugood login linked to this employee by email. Role and password changes apply immediately.",
+              }) as string}
+            >
+              <div className="pp-subcard">
+                {linkedUser.isLoading && <SkeletonLines lines={2} />}
                 {linkedUser.isError && (
-                  // BUG-019 — when an employee has been added without
-                  // platform access, the drawer now offers an explicit
-                  // "Enable platform access" inline form (Admin only)
-                  // so the operator can grant a login after creation.
+                  // BUG-019 — "Enable platform access" inline form so the
+                  // operator can grant a login after creation.
                   <EnablePlatformAccessPanel
                     employeeEmail={(detail.data?.email ?? "").trim()}
                     employeeName={(detail.data?.full_name ?? "").trim()}
@@ -1091,305 +1184,144 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
                   />
                 )}
               </div>
-            </>
+            </FormSection>
           )}
 
-          {/* Reference photos (Edit only). Two distinct sub-sections:
-              "Existing" lists what's already on the employee with
-              position label + delete; "Upload" is a separate panel
-              with a position picker + file input. No more empty
-              placeholder slots — adding a photo is always explicit.*/}
+          {/* 5 · Reference photos (Edit only). Existing photos with
+              position label + delete + multi-select; then an explicit
+              upload panel (pick a position, then files). */}
           {!isAddMode && (
-            <>
-              <SectionLabel>
-                {t("employees.section.referencePhotos") as string}
-              </SectionLabel>
-
-              {/* Bulk-select toolbar — appears as soon as the operator
-                  picks a single tile via its checkbox. Stays visible
-                  while ``selectedPhotoIds.size > 0``. */}
-              {(() => {
-                const photoList = photos.data?.items ?? [];
-                const selectedCount = selectedPhotoIds.size;
-                const allSelected =
-                  photoList.length > 0 &&
-                  selectedCount === photoList.length;
-                if (photoList.length === 0) return null;
-                return (
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      flexWrap: "wrap",
-                      padding: "8px 10px",
-                      marginBottom: 10,
-                      border: "1px solid var(--border)",
-                      borderRadius: 8,
-                      background:
-                        selectedCount > 0
-                          ? "var(--accent-soft, var(--bg-sunken))"
-                          : "var(--bg-sunken)",
-                    }}
-                  >
-                    <label
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 6,
-                        cursor: "pointer",
-                        fontSize: 12.5,
+            <FormSection
+              step={nextStep()}
+              columns={1}
+              title={t("employees.section.referencePhotos") as string}
+              description={t("employees.form.photosHelp", {
+                defaultValue: "Clear, well-lit face photos used for recognition. Uploads and deletes apply immediately — no Save needed.",
+              }) as string}
+              aside={
+                photoList.length > 0 ? (
+                  <span className="pill pill-neutral">
+                    {t("employees.photos.count", { count: photoList.length }) as string}
+                  </span>
+                ) : undefined
+              }
+            >
+              {/* Bulk-select toolbar. */}
+              {photoList.length > 0 && (
+                <div className={`pp-photo-toolbar${selectedCount > 0 ? " is-active" : ""}`}>
+                  <label className="pp-check-row">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      // ``indeterminate`` is DOM-only — set via ref so the
+                      // visual state matches a partial selection.
+                      ref={(el) => {
+                        if (el) el.indeterminate = selectedCount > 0 && !allSelected;
                       }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={allSelected}
-                        // ``indeterminate`` is a DOM-only attr in React,
-                        // so set it via ref after each render so the
-                        // visual state matches partial selection.
-                        ref={(el) => {
-                          if (el)
-                            el.indeterminate =
-                              selectedCount > 0 && !allSelected;
-                        }}
-                        onChange={() => {
-                          if (allSelected) {
-                            setSelectedPhotoIds(new Set());
-                          } else {
-                            setSelectedPhotoIds(
-                              new Set(photoList.map((x) => x.id)),
-                            );
-                          }
-                        }}
-                        aria-label={
-                          t("employees.photos.selectAll", {
-                            defaultValue: "Select all reference photos",
-                          }) as string
-                        }
-                      />
-                      <span style={{ fontWeight: 600 }}>
-                        {selectedCount > 0
-                          ? (t("employees.photos.selectedCount", {
-                              defaultValue: "{{n}} selected",
+                      onChange={() => {
+                        if (allSelected) setSelectedPhotoIds(new Set());
+                        else setSelectedPhotoIds(new Set(photoList.map((x) => x.id)));
+                      }}
+                      aria-label={t("employees.photos.selectAll", {
+                        defaultValue: "Select all reference photos",
+                      }) as string}
+                    />
+                    <span className="pp-strong">
+                      {selectedCount > 0
+                        ? (t("employees.photos.selectedCount", {
+                            defaultValue: "{{n}} selected",
+                            n: selectedCount,
+                          }) as string)
+                        : (t("employees.photos.selectMode", {
+                            defaultValue: "Select photos",
+                          }) as string)}
+                    </span>
+                  </label>
+                  <div className="pp-spacer" />
+                  {selectedCount > 0 && (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-ghost"
+                        onClick={() => setSelectedPhotoIds(new Set())}
+                        disabled={bulkDelete.isPending}
+                      >
+                        {t("common.clear", { defaultValue: "Clear" }) as string}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-danger"
+                        onClick={() => setBulkConfirmOpen(true)}
+                        disabled={bulkDelete.isPending}
+                        aria-label={t("employees.photos.bulkDeleteAria", {
+                          defaultValue: "Delete {{n}} selected photo(s)",
+                          n: selectedCount,
+                        }) as string}
+                      >
+                        <Icon name="trash" size={11} />
+                        {bulkDelete.isPending
+                          ? (t("employees.photos.deleting", { defaultValue: "Deleting…" }) as string)
+                          : (t("employees.photos.deleteSelected", {
+                              defaultValue: "Delete Selected ({{n}})",
                               n: selectedCount,
-                            }) as string)
-                          : (t("employees.photos.selectMode", {
-                              defaultValue: "Select photos",
                             }) as string)}
-                      </span>
-                    </label>
-
-                    <div style={{ flex: 1 }} />
-
-                    {selectedCount > 0 && (
-                      <>
-                        <button
-                          type="button"
-                          className="btn btn-sm"
-                          onClick={() => setSelectedPhotoIds(new Set())}
-                          disabled={bulkDelete.isPending}
-                        >
-                          {t("common.clear", { defaultValue: "Clear" }) as string}
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-sm"
-                          style={{
-                            background: "var(--danger, #dc2626)",
-                            borderColor: "var(--danger, #dc2626)",
-                            color: "white",
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: 6,
-                          }}
-                          onClick={() => setBulkConfirmOpen(true)}
-                          disabled={bulkDelete.isPending}
-                          aria-label={
-                            t("employees.photos.bulkDeleteAria", {
-                              defaultValue:
-                                "Delete {{n}} selected photo(s)",
-                              n: selectedCount,
-                            }) as string
-                          }
-                        >
-                          <Icon name="trash" size={11} />
-                          {bulkDelete.isPending
-                            ? (t("employees.photos.deleting", {
-                                defaultValue: "Deleting…",
-                              }) as string)
-                            : (t("employees.photos.deleteSelected", {
-                                defaultValue: "Delete Selected ({{n}})",
-                                n: selectedCount,
-                              }) as string)}
-                        </button>
-                      </>
-                    )}
-                  </div>
-                );
-              })()}
-
-              {/* Per-bulk-action status banner. Auto-clears next time
-                  the operator opens the confirm modal. */}
-              {bulkResultMessage && (
-                <div
-                  style={{
-                    padding: "8px 12px",
-                    marginBottom: 10,
-                    borderRadius: 6,
-                    fontSize: 12.5,
-                    background:
-                      bulkResultMessage.tone === "ok"
-                        ? "var(--success-soft, var(--bg-sunken))"
-                        : "var(--warn-soft, var(--bg-sunken))",
-                    border:
-                      bulkResultMessage.tone === "ok"
-                        ? "1px solid var(--success, var(--border))"
-                        : "1px solid var(--warn, var(--border))",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                  }}
-                >
-                  <span>{bulkResultMessage.text}</span>
-                  <div style={{ flex: 1 }} />
-                  <button
-                    type="button"
-                    className="btn btn-sm"
-                    style={{ padding: "2px 8px", fontSize: 11 }}
-                    onClick={() => setBulkResultMessage(null)}
-                  >
-                    ×
-                  </button>
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
 
-              {/* Existing photos — preview + delete + position label.*/}
-              {(photos.data?.items.length ?? 0) > 0 ? (
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns:
-                      "repeat(auto-fill, minmax(112px, 1fr))",
-                    gap: 8,
-                    marginBottom: 14,
-                  }}
+              {bulkResultMessage && (
+                <Banner
+                  tone={bulkResultMessage.tone === "ok" ? "success" : "warning"}
+                  role="status"
+                  actions={
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-ghost"
+                      onClick={() => setBulkResultMessage(null)}
+                    >
+                      {t("common.dismiss", { defaultValue: "Dismiss" }) as string}
+                    </button>
+                  }
                 >
-                  {(photos.data?.items ?? []).map((p) => (
+                  {bulkResultMessage.text}
+                </Banner>
+              )}
+
+              {photoList.length > 0 ? (
+                <div className="pp-thumb-grid pp-thumb-grid-lg">
+                  {photoList.map((p) => (
                     <div
                       key={p.id}
-                      style={{
-                        border: selectedPhotoIds.has(p.id)
-                          ? "2px solid var(--accent)"
-                          : "1px solid var(--border)",
-                        borderRadius: 8,
-                        overflow: "hidden",
-                        background: "var(--bg-sunken)",
-                        position: "relative",
-                        boxShadow: selectedPhotoIds.has(p.id)
-                          ? "0 0 0 2px var(--accent-soft, transparent)"
-                          : undefined,
-                      }}
+                      className={`pp-thumb-tile${selectedPhotoIds.has(p.id) ? " is-selected" : ""}${selectedCount > 0 ? " is-selecting" : ""}`}
                     >
                       <img
                         src={`/api/employees/${employeeId}/photos/${p.id}/image`}
                         alt={p.angle}
                         onClick={() => {
-                          // While in select mode, image click toggles
-                          // the selection rather than opening the
-                          // zoom — fewer accidental zooms during a
-                          // bulk review.
-                          if (selectedPhotoIds.size > 0) {
-                            setSelectedPhotoIds((prev) => {
-                              const next = new Set(prev);
-                              if (next.has(p.id)) next.delete(p.id);
-                              else next.add(p.id);
-                              return next;
-                            });
-                          } else {
-                            setZoomPhotoId(p.id);
-                          }
-                        }}
-                        style={{
-                          display: "block",
-                          width: "100%",
-                          aspectRatio: "1 / 1",
-                          objectFit: "cover",
-                          cursor:
-                            selectedPhotoIds.size > 0
-                              ? "pointer"
-                              : "zoom-in",
-                          opacity: selectedPhotoIds.has(p.id) ? 0.85 : 1,
+                          // In select mode a click toggles the selection
+                          // rather than opening the zoom.
+                          if (selectedCount > 0) togglePhoto(p.id);
+                          else setZoomPhotoId(p.id);
                         }}
                       />
-                      {/* Per-tile checkbox — top-left. Always shown so
-                          one click into select mode is enough; the
-                          position pill moves down to stay visible. */}
-                      <label
-                        onClick={(e) => e.stopPropagation()}
-                        style={{
-                          position: "absolute",
-                          top: 6,
-                          insetInlineStart: 6,
-                          width: 22,
-                          height: 22,
-                          borderRadius: 4,
-                          background: "rgba(0,0,0,0.55)",
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          cursor: "pointer",
-                        }}
-                      >
+                      <label onClick={(e) => e.stopPropagation()} className="pp-thumb-check">
                         <input
                           type="checkbox"
                           checked={selectedPhotoIds.has(p.id)}
-                          onChange={() => {
-                            setSelectedPhotoIds((prev) => {
-                              const next = new Set(prev);
-                              if (next.has(p.id)) next.delete(p.id);
-                              else next.add(p.id);
-                              return next;
-                            });
-                          }}
-                          aria-label={
-                            t("employees.photos.selectOne", {
-                              defaultValue: "Select reference photo",
-                            }) as string
-                          }
-                          style={{
-                            margin: 0,
-                            cursor: "pointer",
-                            accentColor: "var(--accent)",
-                          }}
+                          onChange={() => togglePhoto(p.id)}
+                          aria-label={t("employees.photos.selectOne", {
+                            defaultValue: "Select reference photo",
+                          }) as string}
                         />
                       </label>
-                      {/* Position pill (now top-right, away from
-                          checkbox). */}
-                      <span
-                        className="pill pill-accent mono text-xs"
-                        style={{
-                          position: "absolute",
-                          top: 6,
-                          insetInlineEnd: 36,
-                          padding: "1px 6px",
-                          fontSize: 10,
-                        }}
-                      >
-                        {t(`employees.photos.angles.${p.angle}`, {
-                          defaultValue: p.angle,
-                        }) as string}
+                      <span className="pill pill-accent pp-thumb-angle">
+                        {t(`employees.photos.angles.${p.angle}`, { defaultValue: p.angle }) as string}
                       </span>
-                      {/* Single-delete button (top-right). */}
                       <button
                         type="button"
-                        className="icon-btn"
-                        style={{
-                          position: "absolute",
-                          top: 6,
-                          insetInlineEnd: 6,
-                          background: "rgba(0,0,0,0.55)",
-                          color: "white",
-                        }}
+                        className="icon-btn pp-thumb-del"
                         onClick={(e) => {
                           e.stopPropagation();
                           if (
@@ -1400,10 +1332,7 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
                             )
                           )
                             return;
-                          deletePhoto.mutate({
-                            employeeId: employeeId!,
-                            photoId: p.id,
-                          });
+                          deletePhoto.mutate({ employeeId: employeeId!, photoId: p.id });
                         }}
                         aria-label={t("common.delete") as string}
                         title={t("common.delete") as string}
@@ -1414,270 +1343,168 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
                   ))}
                 </div>
               ) : (
-                <div
-                  className="text-sm text-dim"
-                  style={{
-                    padding: "10px 12px",
-                    border: "1px dashed var(--border)",
-                    borderRadius: 8,
-                    marginBottom: 14,
-                  }}
-                >
+                <div className="pp-dashed-note">
                   {t("employees.photos.empty", {
-                    defaultValue:
-                      "No reference photos yet. Use the upload panel below.",
+                    defaultValue: "No reference photos yet. Use the upload panel below.",
                   }) as string}
                 </div>
               )}
 
-              {/* Upload panel — explicit position picker + file input.
-                  No empty placeholder tiles; the operator always picks
-                  a position before adding files. */}
-              <div
-                style={{
-                  border: "1px solid var(--border)",
-                  borderRadius: 8,
-                  padding: 12,
-                  marginBottom: 16,
-                  background: "var(--bg-sunken)",
-                }}
-              >
-                <div
-                  className="text-xs"
-                  style={{
-                    fontWeight: 600,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.04em",
-                    color: "var(--text-tertiary)",
-                    marginBottom: 8,
-                  }}
-                >
-                  {t("employees.photos.uploadTitle", {
-                    defaultValue: "Upload reference photos",
+              {/* Upload panel — pick a position, then files. */}
+              <div className="pp-upload-card">
+                <div className="pp-upload-head">
+                  <div className="pp-upload-title">
+                    {t("employees.photos.uploadTitle", { defaultValue: "Upload reference photos" }) as string}
+                  </div>
+                  <div className="seg" role="group" aria-label={t("employees.photos.angleLabel") as string}>
+                    {ANGLES.map((a) => (
+                      <button
+                        type="button"
+                        key={a}
+                        onClick={() => setPhotoAngle(a)}
+                        aria-pressed={photoAngle === a}
+                        className={`seg-btn${photoAngle === a ? " active" : ""}`}
+                      >
+                        {t(`employees.photos.angles.${a}`, { defaultValue: a }) as string}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <label className={`pp-upload-drop${upload.isPending ? " is-busy" : ""}`}>
+                  <input
+                    type="file"
+                    className="pp-visually-hidden"
+                    accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                    multiple
+                    disabled={upload.isPending}
+                    onChange={(e) => {
+                      const picked = Array.from(e.target.files ?? []);
+                      // Reset so re-selecting the same file re-fires.
+                      e.target.value = "";
+                      if (picked.length === 0) return;
+                      const currentCount =
+                        photos.data?.items.length ?? detail.data?.photo_count ?? 0;
+                      const { valid, errors: photoErrors } = validateReferencePhotos(
+                        picked,
+                        currentCount,
+                      );
+                      for (const msg of photoErrors) toast.error(msg);
+                      if (valid.length > 0) {
+                        upload.mutate({ employeeId: employeeId!, files: valid, angle: photoAngle });
+                      }
+                    }}
+                  />
+                  <span className="pp-upload-icon" aria-hidden>
+                    {upload.isPending ? <span className="fk-spinner" /> : <Icon name="upload" size={16} />}
+                  </span>
+                  <span className="pp-upload-text">
+                    <span className="pp-upload-cta">
+                      {upload.isPending
+                        ? (t("common.uploading") as string)
+                        : (t("employees.form.choosePhotos", {
+                            defaultValue: "Choose photos for the “{{angle}}” position",
+                            angle: t(`employees.photos.angles.${photoAngle}`, { defaultValue: photoAngle }),
+                          }) as string)}
+                    </span>
+                    <span className="pp-upload-sub">
+                      {t("employees.form.photoTypes", { defaultValue: "JPG, PNG or WEBP · several files at once" }) as string}
+                    </span>
+                  </span>
+                </label>
+                {/* BUG-010 — uploads commit instantly; spell it out. */}
+                <div className="fk-help pp-commit-hint">
+                  <Icon name="check" size={11} />
+                  {t("employees.photos.commitHint", {
+                    defaultValue: "Photo uploads commit immediately — you can close the drawer right after.",
                   }) as string}
                 </div>
-
-                <label
-                  className="text-xs text-dim"
-                  style={{ display: "block", marginBottom: 4 }}
-                >
-                  {t("employees.photos.angleLabel") as string}
-                </label>
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 6,
-                    flexWrap: "wrap",
-                    marginBottom: 10,
-                  }}
-                >
-                  {ANGLES.map((a) => (
-                    <button
-                      type="button"
-                      key={a}
-                      onClick={() => setPhotoAngle(a)}
-                      className={`pill ${photoAngle === a ? "pill-accent" : "pill-neutral"}`}
-                      style={{ cursor: "pointer", border: "none" }}
-                    >
-                      {t(`employees.photos.angles.${a}`, {
-                        defaultValue: a,
-                      }) as string}
-                    </button>
-                  ))}
-                </div>
-
-                {/* BUG-010 — operator confusion: photo uploads commit
-                    instantly, no Save needed. Spell that out so they
-                    don't get stuck looking for a "save photos" button
-                    when the form's Save is disabled (because no other
-                    field changed). */}
-                <div
-                  className="text-xs"
-                  style={{
-                    marginBottom: 8,
-                    color: "var(--accent, #0b6e4f)",
-                    fontWeight: 500,
-                  }}
-                >
-                  Photo uploads commit immediately — you can close the
-                  drawer right after.
-                </div>
-                <div className="text-xs text-dim" style={{ marginBottom: 6 }}>
+                <div className="fk-help">
                   {t("employees.photos.uploadHint", {
                     defaultValue:
                       "Multiple files share the same position. Switch the position above to add a different angle.",
                   }) as string}
                 </div>
-
-                <input
-                  type="file"
-                  accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
-                  multiple
-                  disabled={upload.isPending}
-                  onChange={(e) => {
-                    const picked = Array.from(e.target.files ?? []);
-                    // Reset the input so re-selecting the same file
-                    // re-triggers onChange.
-                    e.target.value = "";
-                    if (picked.length === 0) return;
-                    const currentCount =
-                      photos.data?.items.length ??
-                      detail.data?.photo_count ??
-                      0;
-                    const { valid, errors } = validateReferencePhotos(
-                      picked,
-                      currentCount,
-                    );
-                    for (const msg of errors) toast.error(msg);
-                    if (valid.length > 0) {
-                      upload.mutate({
-                        employeeId: employeeId!,
-                        files: valid,
-                        angle: photoAngle,
-                      });
-                    }
-                  }}
-                  style={{
-                    fontSize: 12.5,
-                    padding: "6px 8px",
-                    border: "1px solid var(--border)",
-                    borderRadius: "var(--radius-sm)",
-                    background: "var(--bg-elev)",
-                    color: "var(--text)",
-                    width: "100%",
-                  }}
-                />
-                {upload.isPending && (
-                  <SkeletonLines lines={2} />
-                )}
               </div>
-            </>
+            </FormSection>
           )}
 
-          {/* Status */}
-          <SectionLabel>{t("employees.section.status") as string}</SectionLabel>
-          <div
-            style={{
-              padding: 12,
-              border: "1px solid var(--border)",
-              borderRadius: 8,
-              marginBottom: 12,
-            }}
+          {isAddMode && (
+            <FormNotice tone="info">
+              {t("employees.form.photosAfterCreate", {
+                defaultValue: "Reference photos can be added once the employee is created — open them from the list and choose Edit.",
+              }) as string}
+            </FormNotice>
+          )}
+
+          {/* 6 · Status */}
+          <FormSection
+            step={nextStep()}
+            title={t("employees.section.status") as string}
+            description={t("employees.form.statusHelp", {
+              defaultValue: "Inactive employees stay in history but are not matched or tracked.",
+            }) as string}
           >
-            <label
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                fontSize: 13,
-                cursor: "pointer",
+            <SwitchField
+              id="emp-active"
+              label={t("employees.field.active") as string}
+              description={t("employees.field.activeHint") as string}
+              checked={form.status === "active"}
+              onChange={(next) => {
+                onField("status", next ? "active" : "inactive");
+                if (next) clearError("deactivation_reason");
               }}
-            >
-              <input
-                type="checkbox"
-                checked={form.status === "active"}
-                onChange={(e) =>
-                  onField("status", e.target.checked ? "active" : "inactive")
-                }
-              />
-              <span style={{ fontWeight: 500 }}>
-                {t("employees.field.active") as string}
-              </span>
-            </label>
-            <div className="text-xs text-dim" style={{ marginTop: 6 }}>
-              {t("employees.field.activeHint") as string}
-            </div>
-
+            />
             {form.status === "inactive" && (
-              <div style={{ marginTop: 10 }}>
-                <label
-                  className="text-xs"
-                  style={{ fontWeight: 500, color: "var(--text-secondary)" }}
-                >
-                  {t("employees.field.deactivationReasonLabel") as string}
-                </label>
-                <textarea
-                  placeholder={
-                    t("employees.field.deactivationReasonPlaceholder") as string
-                  }
-                  value={form.deactivation_reason}
-                  onChange={(e) =>
-                    onField("deactivation_reason", e.target.value)
-                  }
-                  rows={2}
-                  style={{
-                    width: "100%",
-                    marginTop: 4,
-                    padding: 8,
-                    fontSize: 12.5,
-                    border: "1px solid var(--border)",
-                    borderRadius: "var(--radius-sm)",
-                    background: "var(--bg-elev)",
-                  }}
-                />
-                {detail.data?.deactivated_at && (
-                  <div className="text-xs text-dim" style={{ marginTop: 4 }}>
-                    {t("employees.field.deactivatedAt") as string}:{" "}
-                    {new Date(detail.data.deactivated_at).toLocaleString()}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {serverError && (
-            <div
-              style={{
-                background: "var(--danger-soft)",
-                color: "var(--danger-text)",
-                padding: "8px 10px",
-                borderRadius: "var(--radius-sm)",
-                fontSize: 12.5,
-                marginTop: 8,
-              }}
-            >
-              {serverError}
-            </div>
-          )}
-        </div>
-
-        <div
-          className="drawer-foot"
-          style={{ display: "flex", justifyContent: "space-between", gap: 8 }}
-        >
-          <div style={{ display: "flex", gap: 8 }}>
-            {!isAddMode && !pendingDelete.data && (
-              <button
-                type="button"
-                className="btn btn-sm"
-                style={{ color: "var(--danger-text)" }}
-                onClick={() => setShowDeleteModal(true)}
+              <Field
+                label={t("employees.field.deactivationReasonLabel") as string}
+                htmlFor="emp-deactivation-reason"
+                required
+                span={2}
+                error={errors.deactivation_reason}
+                help={
+                  detail.data?.deactivated_at
+                    ? `${t("employees.field.deactivatedAt") as string}: ${new Date(detail.data.deactivated_at).toLocaleString()}`
+                    : (t("employees.form.reasonHelp", { defaultValue: "At least 5 characters. Saved to the audit log." }) as string)
+                }
               >
-                <Icon name="trash" size={12} /> {t("common.delete") as string}
-              </button>
+                <textarea
+                  id="emp-deactivation-reason"
+                  className="textarea"
+                  placeholder={t("employees.field.deactivationReasonPlaceholder") as string}
+                  value={form.deactivation_reason}
+                  onChange={(e) => onField("deactivation_reason", e.target.value)}
+                  rows={3}
+                />
+              </Field>
             )}
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button type="button" className="btn" onClick={onClose}>
-              {t("common.cancel") as string}
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => void onSave()}
-              disabled={
-                create.isPending ||
-                update.isPending ||
-                (isAddMode ? !canSubmitAdd : !isDirty)
-              }
-            >
-              {isAddMode
-                ? (t("employees.drawer.create") as string)
-                : (t("employees.drawer.save") as string)}
-            </button>
-          </div>
+          </FormSection>
         </div>
-      </div>
+
+        <FormFooter
+          onCancel={onClose}
+          submitLabel={
+            isAddMode
+              ? (t("employees.form.submitAdd", { defaultValue: "Add employee" }) as string)
+              : (t("employees.drawer.save") as string)
+          }
+          submitting={submitting}
+          submittingLabel={t("common.saving") as string}
+          canSubmit={canSubmit}
+          {...(!isAddMode && !pendingDelete.data
+            ? {
+                note: (
+                  <button
+                    type="button"
+                    className="btn btn-ghost pp-text-danger"
+                    onClick={() => setShowDeleteModal(true)}
+                  >
+                    <Icon name="trash" size={12} /> {t("common.delete") as string}
+                  </button>
+                ),
+              }
+            : {})}
+        />
+      </form>
 
       {!isAddMode && showDeleteModal && employeeId !== null && detail.data && (
         <DeleteConfirmModal
@@ -1701,88 +1528,43 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
           label. Per-photo failures are reported via ``bulkResultMessage``. */}
       {bulkConfirmOpen && employeeId !== null && (
         <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="bulk-photo-delete-title"
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.6)",
-            display: "grid",
-            placeItems: "center",
-            zIndex: 9998,
-            padding: 24,
-          }}
+          className="modal-scrim"
           onClick={() => {
             if (!bulkDelete.isPending) setBulkConfirmOpen(false);
           }}
         >
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="bulk-photo-delete-title"
+            className="modal pp-modal"
             onClick={(e) => e.stopPropagation()}
-            style={{
-              background: "var(--bg)",
-              border: "1px solid var(--border)",
-              borderRadius: 10,
-              boxShadow: "0 18px 48px rgba(0,0,0,0.35)",
-              width: "min(440px, 92vw)",
-              padding: 18,
-              display: "flex",
-              flexDirection: "column",
-              gap: 12,
-            }}
           >
-            <div
-              id="bulk-photo-delete-title"
-              style={{
-                fontSize: 15,
-                fontWeight: 700,
-                color: "var(--text)",
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-              }}
-            >
-              <span
-                aria-hidden
-                style={{
-                  width: 26,
-                  height: 26,
-                  borderRadius: "50%",
-                  background: "var(--danger-soft, #fee2e2)",
-                  color: "var(--danger, #dc2626)",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <Icon name="trash" size={13} />
+            <div className="modal-head pp-modal-head">
+              <span aria-hidden className="pp-modal-icon tone-danger">
+                <Icon name="trash" size={15} />
               </span>
-              {t("employees.photos.bulkConfirmTitle", {
-                defaultValue: "Delete {{n}} reference photo(s)?",
-                n: selectedPhotoIds.size,
-              }) as string}
+              <div className="pp-modal-head-text">
+                <h2 id="bulk-photo-delete-title" className="modal-title">
+                  {t("employees.photos.bulkConfirmTitle", {
+                    defaultValue: "Delete {{n}} reference photo(s)?",
+                    n: selectedPhotoIds.size,
+                  }) as string}
+                </h2>
+              </div>
             </div>
-
-            <div
-              style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.5 }}
-            >
-              {t("employees.photos.bulkConfirmBody", {
-                defaultValue:
-                  "This permanently removes the selected photos and their encrypted files. The employee's face training dataset, recognition cache, and downstream face matching will refresh on the next match — past detections are not affected.",
-              }) as string}
+            <div className="modal-body">
+              <p className="text-sm text-dim" style={{ margin: 0, lineHeight: 1.5 }}>
+                {t("employees.photos.bulkConfirmBody", {
+                  defaultValue:
+                    "This permanently removes the selected photos and their encrypted files. The employee's face training dataset, recognition cache, and downstream face matching will refresh on the next match — past detections are not affected.",
+                }) as string}
+              </p>
             </div>
-
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "flex-end",
-                gap: 8,
-                marginTop: 4,
-              }}
-            >
+            <div className="modal-foot">
               <button
                 type="button"
-                className="btn btn-sm"
+                className="btn"
                 onClick={() => setBulkConfirmOpen(false)}
                 disabled={bulkDelete.isPending}
               >
@@ -1790,15 +1572,7 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
               </button>
               <button
                 type="button"
-                className="btn btn-sm"
-                style={{
-                  background: "var(--danger, #dc2626)",
-                  borderColor: "var(--danger, #dc2626)",
-                  color: "white",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                }}
+                className="btn btn-danger"
                 disabled={bulkDelete.isPending || selectedPhotoIds.size === 0}
                 onClick={() => {
                   setBulkResultMessage(null);
@@ -1888,200 +1662,95 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
           // Backdrop / Esc no longer close — operator-policy red
           // line. The X button in the top-right of the lightbox is
           // the only close affordance.
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.7)",
-            display: "grid",
-            placeItems: "center",
-            zIndex: 9999,
-            padding: 32,
-          }}
+          className="pp-lightbox"
+          style={{ zIndex: 9999 }}
         >
-          <div style={{ position: "relative", maxWidth: "90vw", maxHeight: "90vh" }}>
-            <img
-              src={`/api/employees/${employeeId}/photos/${zoomPhotoId}/image`}
-              alt="Reference photo"
-              style={{
-                maxWidth: "90vw",
-                maxHeight: "90vh",
-                objectFit: "contain",
-                borderRadius: 8,
-                boxShadow: "0 12px 48px rgba(0,0,0,0.5)",
-              }}
-            />
-            <button
-              type="button"
-              className="icon-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                setZoomPhotoId(null);
-              }}
-              aria-label="Close photo viewer"
-              style={{
-                position: "absolute",
-                top: 8,
-                insetInlineEnd: 8,
-                background: "rgba(0,0,0,0.6)",
-                color: "white",
-              }}
-            >
-              <Icon name="x" size={14} />
-            </button>
-          </div>
+          <img
+            src={`/api/employees/${employeeId}/photos/${zoomPhotoId}/image`}
+            alt="Reference photo"
+          />
+          <button
+            type="button"
+            className="pp-lightbox-close"
+            onClick={(e) => {
+              e.stopPropagation();
+              setZoomPhotoId(null);
+            }}
+            aria-label={t("employees.photos.closeViewer", { defaultValue: "Close photo viewer" }) as string}
+          >
+            <Icon name="x" size={18} />
+          </button>
         </div>
       )}
     </DrawerShell>
   );
 }
 
-function Field({
-  label,
-  value,
-  onChange,
-  type = "text",
-  mono,
-  required,
-  disabled,
-  maxLength,
-  inputMode,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  type?: string;
-  mono?: boolean;
-  required?: boolean;
-  disabled?: boolean;
-  maxLength?: number;
-  inputMode?: "text" | "tel" | "email" | "numeric" | "decimal";
-}) {
-  return (
-    <div>
-      <label
-        className="text-xs"
-        style={{ fontWeight: 500, color: "var(--text-secondary)" }}
-      >
-        {label}
-        {required && (
-          <span
-            aria-hidden="true"
-            style={{
-              color: "var(--danger-text, #e02020)",
-              marginInlineStart: 3,
-              fontWeight: 600,
-            }}
-          >
-            *
-          </span>
-        )}
-      </label>
-      {type === "date" ? (
-        <div style={{ marginTop: 4 }}>
-          <DatePicker
-            value={value}
-            onChange={onChange}
-            disabled={disabled ?? false}
-            ariaLabel={label}
-            triggerStyle={{ width: "100%" }}
-          />
-        </div>
-      ) : (
-        <input
-          type={type}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          disabled={disabled}
-          maxLength={maxLength}
-          inputMode={inputMode}
-          className={mono ? "mono" : ""}
-          style={{
-            width: "100%",
-            marginTop: 4,
-            padding: "6px 8px",
-            fontSize: 13,
-            border: "1px solid var(--border)",
-            borderRadius: "var(--radius-sm)",
-            background: disabled ? "var(--bg-sunken)" : "var(--bg-elev)",
-            color: disabled ? "var(--text-tertiary)" : "var(--text)",
-            fontFamily: mono ? "var(--font-mono)" : undefined,
-          }}
-        />
-      )}
-    </div>
-  );
+type FieldKey =
+  | "employee_code"
+  | "full_name"
+  | "designation"
+  | "email"
+  | "phone"
+  | "department_id"
+  | "relieving_date"
+  | "deactivation_reason"
+  | "password"
+  | "roles";
+
+type FieldErrors = Partial<Record<FieldKey, string>>;
+
+const FIELD_KEYS: readonly string[] = [
+  "employee_code",
+  "full_name",
+  "designation",
+  "email",
+  "phone",
+  "department_id",
+  "relieving_date",
+  "deactivation_reason",
+];
+
+function isFieldKey(k: string): k is FieldKey {
+  return FIELD_KEYS.includes(k);
 }
 
-function Select({
-  label,
-  value,
-  onChange,
-  options,
-  required,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: { value: string; label: string }[];
-  required?: boolean;
-}) {
-  return (
-    <div>
-      <label
-        className="text-xs"
-        style={{ fontWeight: 500, color: "var(--text-secondary)" }}
-      >
-        {label}
-        {required && (
-          <span
-            aria-hidden="true"
-            style={{
-              color: "var(--danger-text, #e02020)",
-              marginInlineStart: 3,
-              fontWeight: 600,
-            }}
-          >
-            *
-          </span>
-        )}
-      </label>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        style={{
-          width: "100%",
-          marginTop: 4,
-          padding: "6px 8px",
-          fontSize: 13,
-          border: "1px solid var(--border)",
-          borderRadius: "var(--radius-sm)",
-          background: "var(--bg-elev)",
-          color: "var(--text)",
-        }}
-      >
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
+// Swallow Enter inside the inline sub-forms (enable access / reset
+// password) so it doesn't implicitly submit the surrounding employee
+// form — those panels have their own explicit action buttons.
+function stopEnter(e: React.KeyboardEvent<HTMLInputElement>) {
+  if (e.key === "Enter") e.preventDefault();
 }
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
+/** Multi-select role chips (checkbox semantics). */
+function RoleChips({
+  roles,
+  selected,
+  onToggle,
+  label,
+  loading,
+}: {
+  roles: { id: number; code: string; name: string }[];
+  selected: string[];
+  onToggle: (code: string) => void;
+  label: string;
+  loading?: boolean;
+}) {
+  const { t } = useTranslation();
+  if (loading && roles.length === 0) {
+    return <span className="fk-help">{t("common.loading") as string}</span>;
+  }
   return (
-    <div
-      style={{
-        fontSize: 12,
-        fontWeight: 600,
-        textTransform: "uppercase",
-        letterSpacing: "0.05em",
-        color: "var(--text-tertiary)",
-        marginBottom: 8,
-      }}
-    >
-      {children}
+    <div className="pp-chips" role="group" aria-label={label}>
+      {roles.map((role) => {
+        const checked = selected.includes(role.code);
+        return (
+          <label key={role.id} className={`pp-choice${checked ? " is-on" : ""}`}>
+            <input type="checkbox" checked={checked} onChange={() => onToggle(role.code)} />
+            {role.name}
+          </label>
+        );
+      })}
     </div>
   );
 }
@@ -2174,132 +1843,92 @@ function EnablePlatformAccessPanel({
 
   if (!canEnable) {
     return (
-      <div>
-        <div className="text-sm" style={{ marginBottom: 6, fontWeight: 500 }}>
-          {t("employees.login.notLinked") as string}
-        </div>
-        <div className="text-xs text-dim">
-          {t("employees.login.notLinkedHint") as string}
+      <div className="pp-login-empty">
+        <span className="pp-login-empty-icon" aria-hidden>
+          <Icon name="user" size={16} />
+        </span>
+        <div>
+          <div className="pp-login-title">{t("employees.login.notLinked") as string}</div>
+          <div className="fk-help">{t("employees.login.notLinkedHint") as string}</div>
         </div>
       </div>
     );
   }
 
   return (
-    <div>
-      <div className="text-sm" style={{ marginBottom: 6, fontWeight: 500 }}>
-        {t("employees.login.notLinked") as string}
+    <div className="pp-stack-12">
+      <div className="pp-login-empty">
+        <span className="pp-login-empty-icon" aria-hidden>
+          <Icon name="user" size={16} />
+        </span>
+        <div className="pp-grow">
+          <div className="pp-login-title">{t("employees.login.notLinked") as string}</div>
+          <div className="fk-help">
+            This employee can log in to Maugood after you enable platform access.
+            {!hasEmail && " Add an email in the Identity section above first."}
+          </div>
+        </div>
+        {!open && (
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => {
+              setOpen(true);
+              setError(null);
+            }}
+            disabled={!hasEmail}
+          >
+            <Icon name="plus" size={11} />
+            {t("employees.login.enableAccess", { defaultValue: "Enable platform access" }) as string}
+          </button>
+        )}
       </div>
-      <div className="text-xs text-dim" style={{ marginBottom: 10 }}>
-        This employee can log in to Maugood after you enable platform access.
-        {!hasEmail && " Add an email in the Identity section above first."}
-      </div>
-      {!open && (
-        <button
-          type="button"
-          className="btn btn-sm btn-primary"
-          onClick={() => {
-            setOpen(true);
-            setError(null);
-          }}
-          disabled={!hasEmail}
-          style={{
-            background: "var(--accent, #0b6e4f)",
-            color: "#fff",
-            fontWeight: 600,
-          }}
-        >
-          Enable platform access
-        </button>
-      )}
       {open && (
-        <div
-          style={{
-            border: "1px solid var(--border)",
-            borderRadius: 8,
-            padding: 12,
-            marginTop: 8,
-            background: "var(--bg)",
-          }}
-        >
-          <div className="text-xs text-dim" style={{ marginBottom: 8 }}>
-            A login will be created for <strong>{employeeEmail}</strong>. The
-            password must be at least 12 characters.
-          </div>
-          <div style={{ marginBottom: 10 }}>
-            <label
-              className="text-xs"
-              style={{ display: "block", marginBottom: 4, fontWeight: 500 }}
+        <div className="pp-subform">
+          <p className="fk-help pp-m0">
+            {t("employees.login.enableHint", {
+              defaultValue: "A login will be created for {{email}}. The password must be at least 12 characters.",
+              email: employeeEmail,
+            }) as string}
+          </p>
+          <div className="fk-grid fk-grid-1">
+            <Field
+              label={t("employees.field.password") as string}
+              htmlFor="pp-enable-password"
+              required
             >
-              {t("employees.field.password") as string}
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="new-password"
-              style={{
-                width: "100%",
-                padding: "6px 8px",
-                fontSize: 13,
-                border: "1px solid var(--border)",
-                borderRadius: "var(--radius-sm)",
-              }}
-              placeholder="Minimum 12 characters"
-            />
+              <input
+                id="pp-enable-password"
+                className="input"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={stopEnter}
+                autoComplete="new-password"
+                placeholder={t("employees.placeholder.minPassword", { defaultValue: "Minimum 12 characters" }) as string}
+              />
+            </Field>
+            <Field label={t("employees.field.roles") as string} required>
+              <RoleChips
+                roles={availableRoles}
+                selected={roleCodes}
+                onToggle={toggleRole}
+                label={t("employees.field.roles") as string}
+              />
+            </Field>
           </div>
-          <div style={{ marginBottom: 10 }}>
-            <label
-              className="text-xs"
-              style={{ display: "block", marginBottom: 4, fontWeight: 500 }}
+          {error && <FormNotice tone="danger">{error}</FormNotice>}
+          <div className="pp-inline-actions">
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              onClick={onSubmit}
+              disabled={busy}
             >
-              {t("employees.field.roles") as string}
-            </label>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {availableRoles.map((r) => {
-                const checked = roleCodes.includes(r.code);
-                return (
-                  <label
-                    key={r.code}
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 4,
-                      padding: "4px 9px",
-                      borderRadius: 999,
-                      border: `1px solid ${checked ? "var(--accent, #0b6e4f)" : "var(--border)"}`,
-                      background: checked
-                        ? "var(--accent-soft, rgba(11, 110, 79, 0.10))"
-                        : "var(--bg-elev)",
-                      fontSize: 11,
-                      fontWeight: 600,
-                      cursor: "pointer",
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleRole(r.code)}
-                      style={{ accentColor: "var(--accent, #0b6e4f)" }}
-                    />
-                    {r.name}
-                  </label>
-                );
-              })}
-            </div>
-          </div>
-          {error && (
-            <div
-              style={{
-                color: "var(--danger-text)",
-                fontSize: 12,
-                marginBottom: 8,
-              }}
-            >
-              {error}
-            </div>
-          )}
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              {busy
+                ? (t("employees.login.enabling", { defaultValue: "Enabling…" }) as string)
+                : (t("employees.login.enableConfirm", { defaultValue: "Enable access" }) as string)}
+            </button>
             <button
               type="button"
               className="btn btn-sm"
@@ -2310,20 +1939,7 @@ function EnablePlatformAccessPanel({
               }}
               disabled={busy}
             >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="btn btn-sm btn-primary"
-              onClick={onSubmit}
-              disabled={busy}
-              style={{
-                background: "var(--accent, #0b6e4f)",
-                color: "#fff",
-                fontWeight: 600,
-              }}
-            >
-              {busy ? "Enabling…" : "Enable access"}
+              {t("common.cancel") as string}
             </button>
           </div>
         </div>
@@ -2331,7 +1947,6 @@ function EnablePlatformAccessPanel({
     </div>
   );
 }
-
 
 function LinkedUserPanel({
   user,
@@ -2428,57 +2043,34 @@ function LinkedUserPanel({
   };
 
   return (
-    <div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 8,
-        }}
-      >
-        <div>
-          <div className="text-sm" style={{ fontWeight: 500 }}>
-            {user.email}
-          </div>
-          <div className="text-xs text-dim mono">
-            {t("employees.login.userId") as string}: #{user.id} ·{" "}
+    <div className="pp-stack-12">
+      <div className="pp-login-head">
+        <span className="pp-login-empty-icon is-linked" aria-hidden>
+          <Icon name="shield" size={16} />
+        </span>
+        <div className="pp-grow">
+          <div className="pp-login-title">{user.email}</div>
+          <div className="fk-help">
+            {t("employees.login.userId") as string}: <span className="mono">#{user.id}</span> ·{" "}
             {user.is_active
               ? (t("employees.login.active") as string)
               : (t("employees.login.inactive") as string)}
           </div>
         </div>
-        <div style={{ display: "flex", gap: 6 }}>
-          {canEditRoles && !editing && (
-            <button
-              type="button"
-              className="btn btn-sm"
-              onClick={() => setEditing(true)}
-            >
-              <Icon name="settings" size={11} />
-              {t("employees.action.editRoles") as string}
-            </button>
-          )}
+        <div className="pp-head-actions">
           {user.source === "entra" && (
-            <span
-              className="text-xs"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 5,
-                padding: "3px 9px",
-                borderRadius: 999,
-                background: "color-mix(in srgb, #2563eb 10%, var(--bg))",
-                color: "#2563eb",
-                border: "1px solid color-mix(in srgb, #2563eb 30%, var(--border))",
-                whiteSpace: "nowrap",
-              }}
-            >
+            <span className="pill pill-info pp-nowrap">
               <Icon name="shield" size={11} />
               {t("employees.login.ssoOnly") as string}
             </span>
           )}
-          {canResetPassword && (
+          {canEditRoles && !editing && (
+            <button type="button" className="btn btn-sm" onClick={() => setEditing(true)}>
+              <Icon name="edit" size={11} />
+              {t("employees.action.editRoles") as string}
+            </button>
+          )}
+          {canResetPassword && !resetOpen && (
             <button
               type="button"
               className="btn btn-sm"
@@ -2494,103 +2086,71 @@ function LinkedUserPanel({
         </div>
       </div>
 
-      {/* Roles row — read-only chips by default; toggleable when editing */}
-      <div
-        style={{
-          marginTop: 10,
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 6,
-        }}
-      >
-        {(editing
-          ? availableRoles.map((r) => r.code)
-          : user.role_codes
-        ).map((code) => {
-          const isOn = editing ? draft.includes(code) : true;
-          return (
-            <span
-              key={code}
-              onClick={editing ? () => toggleDraft(code) : undefined}
-              className={`pill ${isOn ? "pill-success" : "pill-neutral"}`}
-              style={{
-                cursor: editing ? "pointer" : "default",
-                opacity: editing && !isOn ? 0.55 : 1,
+      {/* Roles — read-only pills by default; toggleable chips when editing */}
+      {editing ? (
+        <div className="pp-subform">
+          <RoleChips
+            roles={availableRoles}
+            selected={draft}
+            onToggle={toggleDraft}
+            label={t("employees.field.roles") as string}
+          />
+          <div className="pp-inline-actions">
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              onClick={saveRoles}
+              disabled={saving}
+            >
+              {saving ? (t("common.saving") as string) : (t("common.save") as string)}
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => {
+                setDraft(user.role_codes);
+                setEditing(false);
               }}
             >
+              {t("common.cancel") as string}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="pp-chips">
+          {user.role_codes.map((code) => (
+            <span key={code} className="pill pill-success">
               {availableRoles.find((r) => r.code === code)?.name ?? code}
             </span>
-          );
-        })}
-      </div>
-
-      {editing && (
-        <div style={{ marginTop: 10, display: "flex", gap: 6 }}>
-          <button
-            type="button"
-            className="btn btn-sm btn-primary"
-            onClick={saveRoles}
-            disabled={saving}
-          >
-            {saving
-              ? (t("common.saving") as string)
-              : (t("common.save") as string)}
-          </button>
-          <button
-            type="button"
-            className="btn btn-sm"
-            onClick={() => {
-              setDraft(user.role_codes);
-              setEditing(false);
-            }}
-          >
-            {t("common.cancel") as string}
-          </button>
+          ))}
         </div>
       )}
 
       {resetOpen && (
-        <div
-          style={{
-            marginTop: 12,
-            padding: 10,
-            border: "1px solid var(--border)",
-            borderRadius: 8,
-            background: "var(--bg-elev)",
-          }}
-        >
-          <div className="text-sm" style={{ fontWeight: 500, marginBottom: 6 }}>
-            {t("employees.action.resetPassword") as string}
-          </div>
-          <div className="text-xs text-dim" style={{ marginBottom: 8 }}>
-            {t("employees.hint.resetPassword") as string}
-          </div>
-          <div style={{ display: "flex", gap: 6 }}>
-            <input
-              type="text"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              style={{
-                flex: 1,
-                fontFamily: "var(--font-mono, ui-monospace, monospace)",
-                fontSize: 13,
-                padding: "6px 10px",
-                borderRadius: "var(--radius-sm)",
-                border: "1px solid var(--border)",
-                background: "var(--bg-elev)",
-                color: "var(--text)",
-              }}
-            />
-            <button
-              type="button"
-              className="btn btn-sm"
-              onClick={generate}
-            >
-              <Icon name="refresh" size={11} />
-              {t("employees.action.generatePassword") as string}
-            </button>
-          </div>
-          <div style={{ marginTop: 8, display: "flex", gap: 6 }}>
+        <div className="pp-subform">
+          <Field
+            label={t("employees.action.resetPassword") as string}
+            htmlFor="pp-reset-password"
+            help={t("employees.hint.resetPassword") as string}
+          >
+            <div className="pp-input-row">
+              <input
+                id="pp-reset-password"
+                type="text"
+                className="input mono"
+                aria-label={t("employees.field.password") as string}
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                onKeyDown={stopEnter}
+                autoComplete="off"
+              />
+              <button type="button" className="btn btn-sm" onClick={generate}>
+                <Icon name="refresh" size={11} />
+                {t("employees.action.generatePassword") as string}
+              </button>
+            </div>
+          </Field>
+          <div className="pp-inline-actions">
             <button
               type="button"
               className="btn btn-sm btn-primary"

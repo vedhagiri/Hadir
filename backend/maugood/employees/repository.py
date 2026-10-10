@@ -40,6 +40,11 @@ class EmployeeRow:
     status: str
     photo_count: int
     created_at: datetime
+    # The photo the employees list shows as the avatar thumbnail: the
+    # approved front-angle photo when there is one, else the oldest
+    # approved photo. None when no photo is approved yet (pending
+    # uploads never become someone's avatar).
+    primary_photo_id: Optional[int] = None
     # P29 (#3): division — the tier above department. Resolved
     # through the department's FK so the employee_id alone reaches
     # all three tiers in one query. Nullable because divisions are
@@ -93,8 +98,29 @@ def _photo_count_subquery():
     )
 
 
+def _primary_photo_subquery():
+    """Scalar-correlated id of the avatar photo (approved; front first)."""
+
+    return (
+        select(employee_photos.c.id)
+        .where(
+            employee_photos.c.tenant_id == employees.c.tenant_id,
+            employee_photos.c.employee_id == employees.c.id,
+            employee_photos.c.approval_status == "approved",
+        )
+        .order_by(
+            (employee_photos.c.angle != "front").asc(),
+            employee_photos.c.id.asc(),
+        )
+        .limit(1)
+        .correlate(employees)
+        .scalar_subquery()
+    )
+
+
 def _employee_select(scope: TenantScope):
     photo_count = _photo_count_subquery().label("photo_count")
+    primary_photo_id = _primary_photo_subquery().label("primary_photo_id")
     # P28.7: outerjoin to ``users`` so the response carries the
     # reports_to manager's display name without a second query in
     # the router.
@@ -121,6 +147,7 @@ def _employee_select(scope: TenantScope):
             sections.c.name.label("section_name"),
             employees.c.status,
             photo_count,
+            primary_photo_id,
             employees.c.created_at,
             employees.c.designation,
             employees.c.phone,
@@ -194,6 +221,11 @@ def _row_to_employee(row) -> EmployeeRow:
         section_name=row.section_name,
         status=str(row.status),
         photo_count=int(row.photo_count),
+        primary_photo_id=(
+            int(row.primary_photo_id)
+            if getattr(row, "primary_photo_id", None) is not None
+            else None
+        ),
         created_at=row.created_at,
         designation=row.designation,
         phone=row.phone,

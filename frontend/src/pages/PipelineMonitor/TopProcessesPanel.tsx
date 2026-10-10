@@ -60,7 +60,7 @@ function useProcesses(enabled: boolean) {
 const cellStyle: React.CSSProperties = {
   textAlign: "start",
   padding: "8px 16px",
-  borderBottom: "1px solid var(--border-soft, #f3f4f6)",
+  borderBottom: "1px solid var(--border)",
 };
 const headStyle: React.CSSProperties = {
   ...cellStyle,
@@ -68,7 +68,7 @@ const headStyle: React.CSSProperties = {
   fontWeight: 600,
   letterSpacing: "0.04em",
   textTransform: "uppercase",
-  color: "var(--text-secondary, #6b7280)",
+  color: "var(--text-secondary)",
 };
 
 export function TopProcessesPanel({ isAdmin }: { isAdmin: boolean }) {
@@ -95,7 +95,7 @@ export function TopProcessesPanel({ isAdmin }: { isAdmin: boolean }) {
           alignItems: "baseline",
           justifyContent: "space-between",
           padding: "12px 16px",
-          borderBottom: "1px solid var(--border, #e5e7eb)",
+          borderBottom: "1px solid var(--border)",
           flexWrap: "wrap",
           gap: 8,
         }}
@@ -167,7 +167,7 @@ export function TopProcessesPanel({ isAdmin }: { isAdmin: boolean }) {
                   style={{
                     ...cellStyle,
                     fontVariantNumeric: "tabular-nums",
-                    color: "var(--accent, #818cf8)",
+                    color: "var(--accent)",
                   }}
                   className="mono"
                 >
@@ -185,8 +185,8 @@ export function TopProcessesPanel({ isAdmin }: { isAdmin: boolean }) {
                         fontWeight: 600,
                         padding: "1px 7px",
                         borderRadius: 10,
-                        background: "var(--accent, #2563eb)",
-                        color: "var(--accent-fg, #ffffff)",
+                        background: "var(--accent)",
+                        color: "white",
                         verticalAlign: "middle",
                       }}
                     >
@@ -203,9 +203,9 @@ export function TopProcessesPanel({ isAdmin }: { isAdmin: boolean }) {
                     fontVariantNumeric: "tabular-nums",
                     color:
                       row.cpu_percent >= 40
-                        ? "var(--danger-text, #ef4444)"
+                        ? "var(--danger-text)"
                         : row.cpu_percent >= 15
-                        ? "var(--warning-text, #f59e0b)"
+                        ? "var(--warning-text)"
                         : "inherit",
                     fontWeight: row.cpu_percent >= 15 ? 600 : 400,
                   }}

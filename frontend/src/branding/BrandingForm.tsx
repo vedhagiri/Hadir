@@ -14,6 +14,14 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import { ApiError } from "../api/client";
 import {
+  ConfirmModal,
+  FormField,
+  InlineAlert,
+  LoadErrorPanel,
+  SettingsCard,
+} from "../settings/settingsUi";
+import { Icon } from "../shell/Icon";
+import {
   useBrandingOptions,
 } from "./hooks";
 import type {
@@ -23,7 +31,7 @@ import type {
   BrandingPaletteKey,
   BrandingResponse,
 } from "./types";
-import { SkeletonLines } from "../components/Skeleton";
+import { SkeletonPanel } from "../components/Skeleton";
 
 interface Props {
   branding: BrandingResponse;
@@ -69,6 +77,7 @@ export function BrandingForm({
   const [logoBusy, setLogoBusy] = useState(false);
   const [logoError, setLogoError] = useState<string | null>(null);
   const [logoCacheBust, setLogoCacheBust] = useState<number>(0);
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const fileInput = useRef<HTMLInputElement | null>(null);
 
   // Reset local state if the persisted branding changes (e.g. after
@@ -80,13 +89,19 @@ export function BrandingForm({
   }, [branding.primary_color_key, branding.font_key, branding.display_name]);
 
   if (options.isLoading) {
-    return <SkeletonLines lines={3} />;
+    return (
+      <div className="st-stack">
+        <SkeletonPanel lines={2} />
+        <SkeletonPanel lines={4} />
+      </div>
+    );
   }
   if (options.error || !options.data) {
     return (
-      <p style={{ color: "var(--danger-text)" }}>
-        {t("branding.loadFailedOptions")}
-      </p>
+      <LoadErrorPanel
+        title={t("branding.loadFailedOptions")}
+        onRetry={() => void options.refetch()}
+      />
     );
   }
 
@@ -180,7 +195,7 @@ export function BrandingForm({
   };
 
   const onRemoveLogo = async () => {
-    if (!confirm(t("branding.confirmRemove"))) return;
+    setConfirmRemove(false);
     setLogoError(null);
     setLogoBusy(true);
     try {
@@ -204,73 +219,127 @@ export function BrandingForm({
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-      <Section title={t("branding.section.displayName")}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <input
-            type="text"
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            placeholder={t("branding.displayNamePlaceholder")}
-            maxLength={200}
-            aria-label={t("branding.section.displayName")}
-            style={{
-              padding: "8px 10px",
-              fontSize: 13,
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius-sm)",
-              background: "var(--bg-elev)",
-              color: "var(--text)",
-              fontFamily: "var(--font-sans)",
-              outline: "none",
-              maxWidth: 380,
-            }}
-          />
-          <span style={{ fontSize: 11.5, color: "var(--text-tertiary)" }}>
-            {t("branding.displayNameHint")}
-          </span>
-        </div>
-      </Section>
-
-      <Section title={t("branding.section.primaryColour")}>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          {palette.map((p) => (
-            <Swatch
-              key={p.key}
-              entry={p}
-              selected={primaryKey === p.key}
-              onSelect={() => setPrimaryKey(p.key)}
+    <div className="st-stack">
+      {/* --- Identity + appearance: one save action for the three fields --- */}
+      <SettingsCard
+        icon={<Icon name="sparkles" size={17} />}
+        title={t("settingsUi.branding.appearanceTitle", { defaultValue: "Workspace identity" })}
+        description={t("settingsUi.branding.appearanceDesc", {
+          defaultValue: "Name, accent colour and typeface. Changes apply after you save.",
+        })}
+        footerNote={
+          dirty
+            ? t("settingsUi.branding.unsaved", { defaultValue: "You have unsaved changes." })
+            : t("settingsUi.branding.allSaved", { defaultValue: "Everything is saved." })
+        }
+        footer={
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={onSave}
+            disabled={!dirty || busy}
+          >
+            <Icon name="check" size={12} />
+            {busy ? t("branding.saving") : t("branding.saveChanges")}
+          </button>
+        }
+      >
+        <div className="st-stack">
+          <FormField
+            label={t("branding.section.displayName")}
+            help={t("branding.displayNameHint")}
+            htmlFor="branding-display-name"
+          >
+            <input
+              id="branding-display-name"
+              type="text"
+              className="input"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder={t("branding.displayNamePlaceholder")}
+              maxLength={200}
+              aria-label={t("branding.section.displayName")}
+              style={{ maxWidth: 420 }}
             />
-          ))}
+          </FormField>
+
+          <div>
+            <p className="st-section-title">{t("branding.section.primaryColour")}</p>
+            <p className="field-help" style={{ marginBottom: 10 }}>
+              {t("settingsUi.branding.colourDesc", {
+                defaultValue: "Used for buttons, links, highlights and the active menu item.",
+              })}
+            </p>
+            <div className="st-inline" role="group" aria-label={t("branding.section.primaryColour")} style={{ gap: 12 }}>
+              {palette.map((p) => (
+                <Swatch
+                  key={p.key}
+                  entry={p}
+                  selected={primaryKey === p.key}
+                  onSelect={() => setPrimaryKey(p.key)}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <p className="st-section-title">{t("branding.section.font")}</p>
+            <p className="field-help" style={{ marginBottom: 10 }}>
+              {t("settingsUi.branding.fontDesc", {
+                defaultValue: "The typeface used across the whole workspace.",
+              })}
+            </p>
+            <div
+              role="group"
+              aria-label={t("branding.section.font")}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(min(220px, 100%), 1fr))",
+                gap: 8,
+              }}
+            >
+              {fonts.map((f) => (
+                <FontOption
+                  key={f.key}
+                  entry={f}
+                  selected={fontKey === f.key}
+                  onSelect={() => setFontKey(f.key)}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <p className="st-section-title">{t("branding.section.livePreview")}</p>
+            <p className="field-help" style={{ marginBottom: 10 }}>
+              {t("settingsUi.branding.previewDesc", {
+                defaultValue: "How your choices look before you save them.",
+              })}
+            </p>
+            <Preview palette={selectedPalette} font={selectedFont} />
+          </div>
+
+          {serverError && <InlineAlert tone="danger">{serverError}</InlineAlert>}
         </div>
-      </Section>
+      </SettingsCard>
 
-      <Section title={t("branding.section.font")}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {fonts.map((f) => (
-            <FontOption
-              key={f.key}
-              entry={f}
-              selected={fontKey === f.key}
-              onSelect={() => setFontKey(f.key)}
-            />
-          ))}
-        </div>
-      </Section>
-
-      <Section title={t("branding.section.livePreview")}>
-        <Preview palette={selectedPalette} font={selectedFont} />
-      </Section>
-
-      <Section title={t("branding.section.logo")}>
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
+      {/* --- Logo: uploads apply immediately, no Save needed --- */}
+      <SettingsCard
+        icon={<Icon name="upload" size={17} />}
+        title={t("branding.section.logo")}
+        description={t("settingsUi.branding.logoDesc", {
+          defaultValue: "Shown at the top of the sidebar and on PDF reports.",
+        })}
+      >
+        <div className="st-inline" style={{ alignItems: "flex-start", gap: 16 }}>
           <div
             style={{
               width: 96,
               height: 96,
+              flex: "0 0 96px",
               border: "1px solid var(--border)",
-              borderRadius: "var(--radius-sm)",
-              background: "var(--bg)",
+              borderRadius: "var(--radius)",
+              background: "var(--bg-sunken)",
               display: "grid",
               placeItems: "center",
               overflow: "hidden",
@@ -283,12 +352,10 @@ export function BrandingForm({
                 style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
               />
             ) : (
-              <span style={{ color: "var(--text-tertiary)", fontSize: 11 }}>
-                {t("branding.noLogo")}
-              </span>
+              <span className="text-xs text-dim">{t("branding.noLogo")}</span>
             )}
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div className="field" style={{ flex: "1 1 240px" }}>
             <input
               ref={fileInput}
               type="file"
@@ -296,64 +363,33 @@ export function BrandingForm({
               hidden
               onChange={onLogoChange}
             />
-            <div style={{ display: "flex", gap: 8 }}>
+            <div className="st-inline">
               <button
                 type="button"
+                className="btn"
                 onClick={onPickLogo}
                 disabled={logoBusy}
-                style={btnPrimary}
               >
+                <Icon name="upload" size={12} />
                 {branding.has_logo ? t("branding.replaceLogo") : t("branding.uploadLogo")}
               </button>
               {branding.has_logo && (
                 <button
                   type="button"
-                  onClick={onRemoveLogo}
+                  className="btn btn-ghost st-danger"
+                  onClick={() => setConfirmRemove(true)}
                   disabled={logoBusy}
-                  style={btnSecondary}
                 >
+                  <Icon name="trash" size={12} />
                   {t("branding.remove")}
                 </button>
               )}
             </div>
-            <span style={{ fontSize: 11.5, color: "var(--text-tertiary)" }}>
-              {t("branding.logoHint")}
-            </span>
-            {logoError && (
-              <span style={{ fontSize: 12, color: "var(--danger-text)" }}>
-                {logoError}
-              </span>
-            )}
+            <span className="field-help">{t("branding.logoHint")}</span>
+            {logoError && <InlineAlert tone="danger">{logoError}</InlineAlert>}
           </div>
         </div>
-      </Section>
-
-      {serverError && (
-        <div
-          role="alert"
-          style={{
-            background: "var(--danger-soft)",
-            color: "var(--danger-text)",
-            border: "1px solid var(--border)",
-            padding: "8px 10px",
-            borderRadius: "var(--radius-sm)",
-            fontSize: 12.5,
-          }}
-        >
-          {serverError}
-        </div>
-      )}
-
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <button
-          type="button"
-          onClick={onSave}
-          disabled={!dirty || busy}
-          style={btnPrimary}
-        >
-          {busy ? t("branding.saving") : t("branding.saveChanges")}
-        </button>
-      </div>
+      </SettingsCard>
 
       {/*
         applyToDocument: when true, push the in-progress preview to the
@@ -361,6 +397,21 @@ export function BrandingForm({
         they pick a swatch. Done in an effect so it runs after render
         and only when applyToDocument is requested.
       */}
+      {confirmRemove && (
+        <ConfirmModal
+          titleId="branding-remove-logo-title"
+          title={t("settingsUi.forms.branding.removeLogoTitle", { defaultValue: "Remove logo" })}
+          subtitle={t("settingsUi.forms.branding.removeLogoSub", {
+            defaultValue: "The workspace falls back to the default Maugood mark.",
+          })}
+          confirmLabel={t("branding.remove")}
+          busy={logoBusy}
+          onConfirm={() => void onRemoveLogo()}
+          onClose={() => setConfirmRemove(false)}
+        >
+          <p className="st-confirm-text">{t("branding.confirmRemove")}</p>
+        </ConfirmModal>
+      )}
       {applyToDocument && (
         <LivePreviewMount palette={selectedPalette} font={selectedFont} />
       )}
@@ -385,31 +436,6 @@ function LivePreviewMount({
   return null;
 }
 
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <h2
-        style={{
-          fontSize: 11,
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-          color: "var(--text-tertiary)",
-          margin: 0,
-        }}
-      >
-        {title}
-      </h2>
-      {children}
-    </div>
-  );
-}
-
 function Swatch({
   entry,
   selected,
@@ -432,39 +458,35 @@ function Swatch({
       onClick={onSelect}
       title={label}
       aria-pressed={selected}
+      className="btn btn-ghost"
       style={{
-        width: 56,
-        display: "flex",
+        width: 64,
+        height: "auto",
         flexDirection: "column",
-        alignItems: "center",
-        gap: 4,
-        background: "transparent",
-        border: "none",
-        cursor: "pointer",
-        padding: 0,
+        gap: 6,
+        padding: "8px 4px",
       }}
     >
+      {/* The swatch colour itself is data from the curated palette. */}
       <span
+        aria-hidden
         style={{
-          width: 36,
-          height: 36,
+          width: 32,
+          height: 32,
           background: entry.accent,
           borderRadius: 999,
-          border: selected
-            ? `2px solid ${entry.accent_text}`
-            : "2px solid transparent",
-          boxShadow: selected ? "0 0 0 3px var(--bg)" : "none",
-          outline: selected
-            ? `2px solid ${entry.accent}`
-            : "1px solid var(--border)",
+          boxShadow: selected
+            ? `0 0 0 2px var(--bg-elev), 0 0 0 4px ${entry.accent}`
+            : "0 0 0 1px var(--border)",
+          transition: "box-shadow var(--dur-fast) ease",
         }}
       />
       <span
+        className="text-xs"
         style={{
-          fontSize: 11,
           color: selected ? "var(--text)" : "var(--text-secondary)",
           textTransform: "capitalize",
-          fontWeight: selected ? 600 : 400,
+          fontWeight: selected ? 600 : 500,
         }}
       >
         {label}
@@ -495,25 +517,11 @@ function FontOption({
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
-      style={{
-        textAlign: "left",
-        background: selected ? "var(--accent-soft)" : "var(--bg-elev)",
-        border: selected
-          ? "1px solid var(--accent-border)"
-          : "1px solid var(--border)",
-        padding: "10px 12px",
-        borderRadius: "var(--radius-sm)",
-        cursor: "pointer",
-        fontFamily: entry.stack,
-        display: "flex",
-        flexDirection: "column",
-        gap: 2,
-      }}
+      className={`radio-card${selected ? " active" : ""}`}
+      style={{ textAlign: "start", flexDirection: "column", gap: 2, fontFamily: entry.stack }}
     >
       <span style={{ fontSize: 14, fontWeight: 600 }}>{label}</span>
-      <span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
-        {t("branding.fontSample")}
-      </span>
+      <span className="text-xs text-dim">{t("branding.fontSample")}</span>
     </button>
   );
 }
@@ -528,19 +536,12 @@ function Preview({
   const { t } = useTranslation();
   return (
     <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: 12,
-        padding: 16,
-        border: "1px solid var(--border)",
-        borderRadius: "var(--radius-md)",
-        background: "var(--bg)",
-        fontFamily: font.stack,
-      }}
+      className="st-fact"
+      style={{ display: "flex", flexDirection: "column", gap: 12, padding: 16, fontFamily: font.stack }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <div className="st-inline" style={{ gap: 12 }}>
         <span
+          aria-hidden
           style={{
             width: 22,
             height: 22,
@@ -552,13 +553,11 @@ function Preview({
           {t("branding.preview.tenantDashboard")}
         </h3>
         <span
+          className="pill"
           style={{
-            fontSize: 11,
-            padding: "2px 8px",
-            borderRadius: 999,
             background: palette.accent_soft,
             color: palette.accent_text,
-            border: `1px solid ${palette.accent_border}`,
+            borderColor: palette.accent_border,
             textTransform: "uppercase",
             letterSpacing: "0.04em",
           }}
@@ -569,18 +568,17 @@ function Preview({
       <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>
         {t("branding.preview.body")}
       </p>
-      <div style={{ display: "flex", gap: 8 }}>
+      <div className="st-inline">
         <button
           type="button"
+          tabIndex={-1}
+          aria-hidden
+          className="btn"
           style={{
             background: palette.accent,
             color: "white",
-            border: "none",
-            padding: "6px 14px",
-            borderRadius: "var(--radius-sm)",
+            borderColor: palette.accent,
             cursor: "default",
-            fontWeight: 600,
-            fontSize: 13,
             fontFamily: font.stack,
           }}
         >
@@ -588,14 +586,13 @@ function Preview({
         </button>
         <button
           type="button"
+          tabIndex={-1}
+          aria-hidden
+          className="btn"
           style={{
-            background: "var(--bg-elev)",
             color: palette.accent_text,
-            border: `1px solid ${palette.accent_border}`,
-            padding: "6px 14px",
-            borderRadius: "var(--radius-sm)",
+            borderColor: palette.accent_border,
             cursor: "default",
-            fontSize: 13,
             fontFamily: font.stack,
           }}
         >
@@ -605,24 +602,3 @@ function Preview({
     </div>
   );
 }
-
-const btnPrimary = {
-  background: "var(--accent)",
-  color: "white",
-  border: "none",
-  padding: "8px 14px",
-  borderRadius: "var(--radius-sm)",
-  cursor: "pointer",
-  fontWeight: 600,
-  fontSize: 13,
-} as const;
-
-const btnSecondary = {
-  background: "transparent",
-  color: "var(--text)",
-  border: "1px solid var(--border)",
-  padding: "8px 14px",
-  borderRadius: "var(--radius-sm)",
-  cursor: "pointer",
-  fontSize: 13,
-} as const;

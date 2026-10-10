@@ -13,7 +13,8 @@ import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { extractApiError } from "../../api/client";
-import { ModalShell } from "../../components/DrawerShell";
+import { ChoiceCards, Field, FormFooter, FormNotice } from "../../components/FormKit";
+import { FormFootBar, FormModal, FormSteps } from "../../requests/workflowUi";
 import { Icon } from "../../shell/Icon";
 import { useImportCameras, usePreviewCameraImport } from "./hooks";
 import type {
@@ -69,7 +70,7 @@ export function CameraImportModal({ onClose }: Props) {
     setParseError(null);
   };
 
-  const onDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+  const onDrop = useCallback((e: React.DragEvent<HTMLElement>) => {
     e.preventDefault();
     setDragOver(false);
     const f = e.dataTransfer.files?.[0];
@@ -129,419 +130,250 @@ export function CameraImportModal({ onClose }: Props) {
     : 0;
   const busy = previewMutation.isPending || importMutation.isPending;
 
+  const stepIndex = step === "select" ? 0 : step === "preview" ? 1 : 2;
+  const stepLabels = [
+    t("formWizard.upload", { defaultValue: "Upload" }),
+    t("formWizard.review", { defaultValue: "Review" }),
+    t("formWizard.done", { defaultValue: "Done" }),
+  ];
+
+  const footer =
+    step === "select" ? (
+      <FormFooter
+        onCancel={onClose}
+        showRequiredNote={false}
+        submitLabel={
+          <>
+            <Icon name="eye" size={12} />
+            {t("cameras.importModal.previewRows")}
+          </>
+        }
+        submittingLabel={t("cameras.importModal.parsing")}
+        submitting={previewMutation.isPending}
+        canSubmit={!!file && !busy}
+      />
+    ) : step === "preview" ? (
+      <FormFooter
+        onCancel={onClose}
+        note={
+          <button type="button" className="btn btn-ghost" onClick={back} disabled={busy}>
+            <Icon name="chevronLeft" size={11} />
+            {t("cameras.importModal.back")}
+          </button>
+        }
+        submitLabel={
+          <>
+            <Icon name="upload" size={12} />
+            {t("cameras.importModal.confirmImport", { n: applyCount })}
+          </>
+        }
+        submittingLabel={t("cameras.importModal.importing")}
+        submitting={importMutation.isPending}
+        canSubmit={!busy && applyCount > 0}
+      />
+    ) : (
+      <FormFootBar>
+        <button type="button" className="btn btn-primary" onClick={onClose}>
+          <Icon name="check" size={12} />
+          {t("common.done")}
+        </button>
+      </FormFootBar>
+    );
+
   return (
-    <ModalShell onClose={onClose}>
-      <div
-        style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 60,
-          display: "grid",
-          placeItems: "center",
-        }}
-      >
-        <div
-          className="card"
-          style={{
-            width:
-              step === "preview" ? "min(960px, 96vw)" : "min(560px, 92vw)",
-            maxHeight: "86vh",
-            overflow: "auto",
-          }}
-        >
-          <div className="card-head">
-            <div>
-              <h3 className="card-title">
-                {step === "preview"
-                  ? t("cameras.importModal.titlePreview")
-                  : step === "result"
-                    ? t("cameras.importModal.titleResult")
-                    : t("cameras.importModal.titleSelect")}
-              </h3>
-              <p className="card-sub">
-                {step === "select" && t("cameras.importModal.subSelect")}
-                {step === "preview" && preview && (
-                  t("cameras.importModal.subPreview", {
-                    create: preview.summary.create,
-                    update: preview.summary.update,
-                    skip: preview.summary.skip,
-                    error: preview.summary.error,
-                  })
-                )}
-                {step === "result" && t("cameras.importModal.subResult")}
-              </p>
-            </div>
-            <button
-              className="icon-btn"
-              onClick={onClose}
-              disabled={busy}
-              title="Close"
-              aria-label="Close"
-            >
-              <Icon name="x" size={14} />
-            </button>
-          </div>
-
-          <div
-            className="card-body"
-            style={{ display: "flex", flexDirection: "column", gap: 12 }}
-          >
-            {step === "select" && (
-              <>
-                <div
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    setDragOver(true);
-                  }}
-                  onDragLeave={() => setDragOver(false)}
-                  onDrop={onDrop}
-                  style={{
-                    border: `1px dashed ${
-                      dragOver ? "var(--accent-border)" : "var(--border-strong)"
-                    }`,
-                    background: dragOver
-                      ? "var(--accent-soft)"
-                      : "var(--bg-sunken)",
-                    borderRadius: "var(--radius)",
-                    padding: 24,
-                    textAlign: "center",
-                    fontSize: 13,
-                    color: "var(--text-secondary)",
-                  }}
-                >
-                  <div style={{ marginBottom: 8 }}>
-                    <Icon name="upload" size={20} />
-                  </div>
-                  <div>
-                    {t("cameras.importModal.dropZone")}{" "}
-                    <label
-                      style={{
-                        textDecoration: "underline",
-                        cursor: "pointer",
-                        color: "var(--text)",
-                      }}
-                    >
-                      {t("cameras.importModal.chooseFile")}
-                      <input
-                        type="file"
-                        accept=".json,application/json"
-                        onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
-                        style={{ display: "none" }}
-                      />
-                    </label>
-                  </div>
-                  {file && (
-                    <div
-                      className="mono text-sm"
-                      style={{ marginTop: 10, color: "var(--text)" }}
-                    >
-                      {file.name} · {Math.round(file.size / 1024)} KB
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <div
-                    className="text-xs"
-                    style={{
-                      textTransform: "uppercase",
-                      letterSpacing: "0.05em",
-                      color: "var(--text-tertiary)",
-                      marginBottom: 6,
-                    }}
-                  >
-                    {t("cameras.importModal.existingLabel")}
-                  </div>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <ModeButton
-                      active={onExisting === "update"}
-                      label={t("cameras.importModal.modeUpdate")}
-                      hint={t("cameras.importModal.modeUpdateHint")}
-                      onClick={() => setOnExisting("update")}
-                    />
-                    <ModeButton
-                      active={onExisting === "skip"}
-                      label={t("cameras.importModal.modeSkip")}
-                      hint={t("cameras.importModal.modeSkipHint")}
-                      onClick={() => setOnExisting("skip")}
-                    />
-                  </div>
-                </div>
-
-                {(parseError || previewMutation.error) && (
-                  <div
-                    role="alert"
-                    style={{
-                      background: "var(--danger-soft)",
-                      color: "var(--danger-text)",
-                      padding: "8px 10px",
-                      borderRadius: "var(--radius-sm)",
-                      fontSize: 12.5,
-                    }}
-                  >
-                    {parseError ??
-                      extractApiError(
-                        previewMutation.error,
-                        t("cameras.importModal.previewError"),
-                      )}
-                  </div>
-                )}
-
-                <div
-                  style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}
-                >
-                  <button className="btn" onClick={onClose} disabled={busy}>
-                    {t("common.cancel")}
-                  </button>
-                  <button
-                    className="btn btn-primary"
-                    onClick={runPreview}
-                    disabled={!file || busy}
-                  >
-                    <Icon name="eye" size={12} />
-                    {previewMutation.isPending ? t("cameras.importModal.parsing") : t("cameras.importModal.previewRows")}
-                  </button>
-                </div>
-              </>
-            )}
-
-            {step === "preview" && preview && (
-              <>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <span className="pill pill-success">
-                    {preview.summary.create} create
-                  </span>
-                  <span className="pill pill-info">
-                    {preview.summary.update} update
-                  </span>
-                  <span className="pill pill-neutral">
-                    {preview.summary.skip} skip
-                  </span>
-                  {preview.summary.error > 0 && (
-                    <span className="pill pill-warning">
-                      {preview.summary.error} error(s)
-                    </span>
-                  )}
-                </div>
-
-                <div
-                  style={{
-                    border: "1px solid var(--border)",
-                    borderRadius: "var(--radius-sm)",
-                    overflow: "auto",
-                    maxHeight: 420,
-                  }}
-                >
-                  <table className="table" style={{ minWidth: 820 }}>
-                    <thead>
-                      <tr>
-                        <th style={{ width: 50 }}>{t("cameras.importModal.colNum")}</th>
-                        <th style={{ width: 90 }}>{t("cameras.importModal.colAction")}</th>
-                        <th>{t("cameras.importModal.colCode")}</th>
-                        <th>{t("cameras.importModal.colName")}</th>
-                        <th>{t("cameras.importModal.colHost")}</th>
-                        <th>{t("cameras.importModal.colDetails")}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {preview.rows.map((r) => (
-                        <tr key={r.index}>
-                          <td className="mono text-xs">{r.index}</td>
-                          <td>
-                            <span className={`pill ${ACTION_PILL[r.action]}`}>
-                              {r.action}
-                            </span>
-                          </td>
-                          <td className="mono text-sm">
-                            {r.camera_code ?? "—"}
-                          </td>
-                          <td className="text-sm">{r.name ?? "—"}</td>
-                          <td className="mono text-xs">{r.rtsp_host ?? "—"}</td>
-                          <td
-                            className="text-sm text-dim"
-                            style={{ maxWidth: 280 }}
-                          >
-                            {r.message}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                {importMutation.error && (
-                  <div
-                    role="alert"
-                    style={{
-                      background: "var(--danger-soft)",
-                      color: "var(--danger-text)",
-                      padding: "8px 10px",
-                      borderRadius: "var(--radius-sm)",
-                      fontSize: 12.5,
-                    }}
-                  >
-                    {extractApiError(
-                      importMutation.error,
-                      t("cameras.importModal.importError"),
-                    )}
-                  </div>
-                )}
-
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    gap: 8,
-                  }}
-                >
-                  <button className="btn" onClick={back} disabled={busy}>
-                    <Icon name="chevronLeft" size={11} />
-                    {t("cameras.importModal.back")}
-                  </button>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button className="btn" onClick={onClose} disabled={busy}>
-                      {t("common.cancel")}
-                    </button>
-                    <button
-                      className="btn btn-primary"
-                      onClick={runImport}
-                      disabled={busy || applyCount === 0}
-                    >
-                      <Icon name="upload" size={12} />
-                      {importMutation.isPending
-                        ? t("cameras.importModal.importing")
-                        : t("cameras.importModal.confirmImport", { n: applyCount })}
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
-
-            {step === "result" && result && (
-              <>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <span className="pill pill-success">
-                    {t("cameras.importModal.pillCreated", { n: result.created })}
-                  </span>
-                  <span className="pill pill-info">
-                    {t("cameras.importModal.pillUpdated", { n: result.updated })}
-                  </span>
-                  <span className="pill pill-neutral">
-                    {t("cameras.importModal.pillSkipped", { n: result.skipped })}
-                  </span>
-                  <span
-                    className={`pill ${
-                      result.errors > 0 ? "pill-warning" : "pill-neutral"
-                    }`}
-                  >
-                    {t("cameras.importModal.pillErrors", { n: result.errors })}
-                  </span>
-                </div>
-
-                {result.rows.some(
-                  (r) => r.action === "error" || r.action === "skipped",
-                ) && (
-                  <div
-                    style={{
-                      border: "1px solid var(--border)",
-                      borderRadius: "var(--radius-sm)",
-                      overflow: "auto",
-                      maxHeight: 300,
-                    }}
-                  >
-                    <table className="table" style={{ minWidth: 620 }}>
-                      <thead>
-                        <tr>
-                          <th style={{ width: 50 }}>{t("cameras.importModal.colNum")}</th>
-                          <th style={{ width: 90 }}>{t("cameras.importModal.colAction")}</th>
-                          <th>{t("cameras.importModal.colCode")}</th>
-                          <th>{t("cameras.importModal.colDetails")}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {result.rows
-                          .filter(
-                            (r) =>
-                              r.action === "error" || r.action === "skipped",
-                          )
-                          .map((r) => (
-                            <tr key={r.index}>
-                              <td className="mono text-xs">{r.index}</td>
-                              <td>
-                                <span
-                                  className={`pill ${
-                                    r.action === "error"
-                                      ? "pill-warning"
-                                      : "pill-neutral"
-                                  }`}
-                                >
-                                  {r.action}
-                                </span>
-                              </td>
-                              <td className="mono text-sm">
-                                {r.camera_code ?? "—"}
-                              </td>
-                              <td className="text-sm text-dim">{r.message}</td>
-                            </tr>
-                          ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "flex-end",
-                    gap: 8,
-                    marginTop: 8,
-                  }}
-                >
-                  <button className="btn btn-primary" onClick={onClose}>
-                    <Icon name="check" size={12} />
-                    {t("common.done")}
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-    </ModalShell>
-  );
-}
-
-function ModeButton({
-  active,
-  label,
-  hint,
-  onClick,
-}: {
-  active: boolean;
-  label: string;
-  hint: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      style={{
-        flex: 1,
-        textAlign: "start",
-        padding: "8px 10px",
-        borderRadius: "var(--radius-sm)",
-        border: `1px solid ${active ? "var(--accent-border)" : "var(--border)"}`,
-        background: active ? "var(--accent-soft)" : "var(--bg-sunken)",
-        cursor: "pointer",
-        color: "var(--text)",
+    <FormModal
+      onClose={onClose}
+      onSubmit={() => {
+        if (step === "select") void runPreview();
+        else if (step === "preview") void runImport();
       }}
+      busy={busy}
+      size={step === "preview" ? "xl" : "md"}
+      icon={<Icon name="upload" size={18} />}
+      title={
+        step === "preview"
+          ? t("cameras.importModal.titlePreview")
+          : step === "result"
+            ? t("cameras.importModal.titleResult")
+            : t("cameras.importModal.titleSelect")
+      }
+      subtitle={
+        step === "select"
+          ? t("cameras.importModal.subtitleShort", {
+              defaultValue: "Bring cameras in from a Maugood camera export (.json).",
+            })
+          : step === "preview" && preview
+            ? t("cameras.importModal.subPreview", {
+                create: preview.summary.create,
+                update: preview.summary.update,
+                skip: preview.summary.skip,
+                error: preview.summary.error,
+              })
+            : t("cameras.importModal.subResult")
+      }
+      steps={<FormSteps steps={stepLabels} current={stepIndex} />}
+      footer={footer}
     >
-      <div style={{ fontSize: 13, fontWeight: 600 }}>{label}</div>
-      <div className="text-xs text-dim" style={{ marginTop: 2 }}>
-        {hint}
-      </div>
-    </button>
+      {step === "select" && (
+        <>
+          <p className="wf-fk-lead">{t("cameras.importModal.subSelect")}</p>
+          {(parseError || previewMutation.error) && (
+            <FormNotice tone="danger">
+              {parseError ??
+                extractApiError(previewMutation.error, t("cameras.importModal.previewError"))}
+            </FormNotice>
+          )}
+          <Field label={t("cameras.importModal.fileLabel", { defaultValue: "Export file" })} required>
+            <label
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(true);
+              }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={onDrop}
+              className={`wf-fk-dropzone${dragOver ? " is-over" : ""}`}
+            >
+              <span className="wf-fk-dropzone-icon" aria-hidden>
+                <Icon name="upload" size={16} />
+              </span>
+              <span>
+                {t("cameras.importModal.dropZone")}{" "}
+                <span className="wf-link-btn">{t("cameras.importModal.chooseFile")}</span>
+              </span>
+              <span className="wf-fk-dropzone-hint">.json</span>
+              <input
+                type="file"
+                className="wf-file-input"
+                accept=".json,application/json"
+                onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
+              />
+            </label>
+          </Field>
+          {file && (
+            <div className="wf-fk-file">
+              <span className="wf-fk-file-icon" aria-hidden>
+                <Icon name="fileText" size={16} />
+              </span>
+              <span className="wf-fk-file-text">
+                <span className="wf-fk-file-name mono">{file.name}</span>
+                <span className="wf-fk-file-meta">{Math.round(file.size / 1024)} KB</span>
+              </span>
+            </div>
+          )}
+          <Field label={t("cameras.importModal.existingLabel")}>
+            <ChoiceCards<OnExisting>
+              label={t("cameras.importModal.existingLabel")}
+              value={onExisting}
+              onChange={setOnExisting}
+              options={[
+                {
+                  value: "update",
+                  title: t("cameras.importModal.modeUpdate"),
+                  description: t("cameras.importModal.modeUpdateHint"),
+                  icon: <Icon name="refresh" size={16} />,
+                },
+                {
+                  value: "skip",
+                  title: t("cameras.importModal.modeSkip"),
+                  description: t("cameras.importModal.modeSkipHint"),
+                  icon: <Icon name="chevronRight" size={16} />,
+                },
+              ]}
+            />
+          </Field>
+        </>
+      )}
+
+      {step === "preview" && preview && (
+        <>
+          {importMutation.error && (
+            <FormNotice tone="danger">
+              {extractApiError(importMutation.error, t("cameras.importModal.importError"))}
+            </FormNotice>
+          )}
+          <div className="wf-row">
+            <span className="pill pill-success">{preview.summary.create} create</span>
+            <span className="pill pill-info">{preview.summary.update} update</span>
+            <span className="pill pill-neutral">{preview.summary.skip} skip</span>
+            {preview.summary.error > 0 && (
+              <span className="pill pill-warning">{preview.summary.error} error(s)</span>
+            )}
+          </div>
+
+          <div className="wf-scroll-table co-import-table">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th className="co-col-num">{t("cameras.importModal.colNum")}</th>
+                  <th className="co-col-action">{t("cameras.importModal.colAction")}</th>
+                  <th>{t("cameras.importModal.colCode")}</th>
+                  <th>{t("cameras.importModal.colName")}</th>
+                  <th>{t("cameras.importModal.colHost")}</th>
+                  <th>{t("cameras.importModal.colDetails")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {preview.rows.map((r) => (
+                  <tr key={r.index}>
+                    <td className="mono text-xs">{r.index}</td>
+                    <td>
+                      <span className={`pill ${ACTION_PILL[r.action]}`}>{r.action}</span>
+                    </td>
+                    <td className="mono text-sm">{r.camera_code ?? "—"}</td>
+                    <td className="text-sm">{r.name ?? "—"}</td>
+                    <td className="mono text-xs">{r.rtsp_host ?? "—"}</td>
+                    <td className="text-sm text-dim co-col-details">{r.message}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {step === "result" && result && (
+        <>
+          <div className="wf-row">
+            <span className="pill pill-success">{t("cameras.importModal.pillCreated", { n: result.created })}</span>
+            <span className="pill pill-info">{t("cameras.importModal.pillUpdated", { n: result.updated })}</span>
+            <span className="pill pill-neutral">{t("cameras.importModal.pillSkipped", { n: result.skipped })}</span>
+            <span className={`pill ${result.errors > 0 ? "pill-warning" : "pill-neutral"}`}>
+              {t("cameras.importModal.pillErrors", { n: result.errors })}
+            </span>
+          </div>
+
+          {result.rows.some((r) => r.action === "error" || r.action === "skipped") && (
+            <div className="wf-scroll-table">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th className="co-col-num">{t("cameras.importModal.colNum")}</th>
+                    <th className="co-col-action">{t("cameras.importModal.colAction")}</th>
+                    <th>{t("cameras.importModal.colCode")}</th>
+                    <th>{t("cameras.importModal.colDetails")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.rows
+                    .filter((r) => r.action === "error" || r.action === "skipped")
+                    .map((r) => (
+                      <tr key={r.index}>
+                        <td className="mono text-xs">{r.index}</td>
+                        <td>
+                          <span className={`pill ${r.action === "error" ? "pill-warning" : "pill-neutral"}`}>
+                            {r.action}
+                          </span>
+                        </td>
+                        <td className="mono text-sm">{r.camera_code ?? "—"}</td>
+                        <td className="text-sm text-dim">{r.message}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </FormModal>
   );
 }

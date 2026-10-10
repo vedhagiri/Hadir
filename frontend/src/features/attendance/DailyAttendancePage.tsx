@@ -31,7 +31,19 @@ import {
 import type { SendTodayResult } from "./hooks";
 import { formatMinutes } from "./timeFormat";
 import type { AttendanceItem } from "./types";
-import { SkeletonRows } from "../../components/Skeleton";
+import { SkeletonCards, SkeletonRows } from "../../components/Skeleton";
+import {
+  EmptyPanel,
+  FilterSelect,
+  ResetButton,
+  SearchField,
+  StatCard,
+  StatGrid,
+  Toolbar,
+  pct,
+} from "../../components/ListPageUi";
+import { Icon } from "../../shell/Icon";
+import { ATT_ICON, DotPill, FieldGroup, StrokeIcon, fieldDateStyle } from "./attendanceUi";
 
 type ScopeMode = "company" | "department" | "team" | "individual";
 
@@ -141,19 +153,30 @@ export function DailyAttendancePage() {
   const toggleStatus = (s: DayStatus) =>
     setStatusFilter((cur) => (cur === s ? null : s));
 
-  // Sticky-stack measurement. Four sticky regions stack on each other
-  // (each with its own ``top`` = sum of the heights of everything above
-  // it), so there's no card-split seam and no z-index overlap:
+  const filtersActive =
+    !!searchQuery ||
+    statusFilter !== null ||
+    (scopeMode === "department" && departmentId !== null) ||
+    (scopeMode === "individual" && employeeId !== null);
+  const resetFilters = () => {
+    setSearchQuery("");
+    setStatusFilter(null);
+    setDepartmentId(null);
+    setEmployeeId(null);
+  };
+
+  // Sticky-stack measurement. The page header, filters and stat tiles
+  // scroll away normally (pinning them ate most of a laptop screen);
+  // only the table's own chrome stacks under the topbar, each layer
+  // with ``top`` = sum of the heights above it, so there's no seam and
+  // no z-index overlap:
   //
-  //   ┌──────────────────────────────┐  ← topStickyRef
-  //   │ page header + regen + filter │     top: 0
-  //   │ + stat tiles                 │
-  //   ├──────────────────────────────┤  ← cardHeadRef  (inside card)
-  //   │ "Attendance for {date}" head │     top: topH
+  //   ┌──────────────────────────────┐  ← cardHeadRef  (inside card)
+  //   │ "Attendance for {date}" head │     top: 0
   //   ├──────────────────────────────┤  ← anomalyRef   (inside card)
-  //   │ anomaly info banner          │     top: topH + cardHeadH
+  //   │ anomaly info banner          │     top: cardHeadH
   //   ├──────────────────────────────┤  ← <th>          (inside card)
-  //   │ EMPLOYEE  DEPT  STATUS …     │     top: topH + cardHeadH + anomalyH
+  //   │ EMPLOYEE  DEPT  STATUS …     │     top: cardHeadH + anomalyH
   //   ├──────────────────────────────┤
   //   │ scrolling tbody rows         │
   //
@@ -162,10 +185,8 @@ export function DailyAttendancePage() {
   // ``getBoundingClientRect().height`` (not offsetHeight) + Math.round
   // so any sub-pixel jitter from inherited transforms doesn't oscillate
   // the offsets every frame.
-  const topStickyRef = useRef<HTMLDivElement | null>(null);
   const cardHeadRef = useRef<HTMLDivElement | null>(null);
   const anomalyRef = useRef<HTMLDivElement | null>(null);
-  const [topH, setTopH] = useState(0);
   const [cardHeadH, setCardHeadH] = useState(0);
   const [anomalyH, setAnomalyH] = useState(0);
   useLayoutEffect(() => {
@@ -187,7 +208,6 @@ export function DailyAttendancePage() {
       return ro;
     };
     const obs = [
-      measure(topStickyRef.current, setTopH),
       measure(cardHeadRef.current, setCardHeadH),
       measure(anomalyRef.current, setAnomalyH),
     ];
@@ -195,7 +215,7 @@ export function DailyAttendancePage() {
       for (const ro of obs) ro?.disconnect();
     };
   }, []);
-  const theadTop = topH + cardHeadH + anomalyH;
+  const theadTop = cardHeadH + anomalyH;
 
   // Every report download is gated through the confidentiality modal.
   const { gate: gateDownload, modal: confidentialModal } =
@@ -254,6 +274,19 @@ export function DailyAttendancePage() {
     return { total: items.length, ...c };
   }, [list.data]);
 
+  // The in-scope card's subline surfaces the buckets that don't get a
+  // card of their own (off day / waiting) so no count is hidden.
+  const inScopeSub = (() => {
+    const parts: string[] = [];
+    if (stats.offDay > 0)
+      parts.push(t("dailyAttendance.statSub.offDay", { defaultValue: "{{count}} off day", count: stats.offDay }));
+    if (stats.pending > 0)
+      parts.push(t("dailyAttendance.statSub.waiting", { defaultValue: "{{count}} waiting", count: stats.pending }));
+    return parts.length
+      ? parts.join(" · ")
+      : t("dailyAttendance.statSub.inScope", { defaultValue: "In this view" });
+  })();
+
   // Apply the status-card filter + live search to the rendered rows
   // only — stats stay on the unfiltered list so the "in scope" totals
   // remain accurate while the visible list is narrowed.
@@ -272,6 +305,14 @@ export function DailyAttendancePage() {
     }
     return items;
   }, [list.data, searchQuery, statusFilter]);
+
+  // Five render states (brief addendum): loading → skeleton; error →
+  // danger panel + retry; no records for the date → stats + table hidden,
+  // accent panel with the regenerate action; records but no filter match
+  // → stats + toolbar stay, neutral "no results" panel; otherwise rows.
+  const hasRecords = (list.data?.items.length ?? 0) > 0;
+  const showEmpty =
+    !!list.data && !list.isLoading && filteredItems.length === 0;
 
   const onRegenerate = () => {
     setRegenInfo(null);
@@ -339,41 +380,9 @@ export function DailyAttendancePage() {
 
   return (
     <>
-      {/* Top sticky region — page header, action buttons, filter row
-          (with live employee search), and the summary stat tiles.
-          Anchored at top:0 of the .content scroll container. The card
-          head / anomaly / thead each pin under this with their own
-          measured offsets (see ``topH``, ``cardHeadH``, ``anomalyH``). */}
-      {/* Sticky bg cover for ``.content``'s padding-top:20px zone.
-          Without this 20px strip the sticky page-header below pins at
-          the padding-edge top, leaving an open 20px gap between the
-          topbar and the wrapper where scrolling tbody rows briefly
-          show through (the bleed in the original bug screenshot).
-          ``top: -20`` + ``marginTop: -20`` aligns the sticky pin
-          with the wrapper's natural position so the cover sits at
-          y=topbar-bottom through every scroll position. */}
-      <div
-        aria-hidden
-        style={{
-          position: "sticky",
-          top: -20,
-          zIndex: 31,
-          height: 0,
-          marginTop: -20,
-          paddingTop: 20,
-          background: "var(--bg)",
-        }}
-      />
-      <div
-        ref={topStickyRef}
-        style={{
-          position: "sticky",
-          top: 0,
-          zIndex: 30,
-          background: "var(--bg)",
-          paddingBottom: 0,
-        }}
-      >
+      {/* Page header, action buttons, filter row and stat tiles —
+          scroll with the page; only the table chrome below pins. */}
+      <div>
       <div className="page-header">
         <div>
           <h1 className="page-title">{t("dailyAttendance.title")}</h1>
@@ -388,7 +397,7 @@ export function DailyAttendancePage() {
               onClick={() => setSendModalOpen(true)}
               title={t("dailyAttendance.sendEmailsTooltip")}
             >
-              <span aria-hidden style={{ marginInlineEnd: 4 }}>✉</span>
+              <Icon name="mail" size={13} />
               {t("dailyAttendance.sendEmails")}
             </button>
           )}
@@ -402,7 +411,7 @@ export function DailyAttendancePage() {
                 : t("dailyAttendance.regenTooltipDenied")
             }
           >
-            <span aria-hidden style={{ marginInlineEnd: 4 }}>↻</span>
+            <Icon name="refresh" size={13} />
             {regenerate.isPending
               ? t("dailyAttendance.regenerating")
               : t("dailyAttendance.regenerate")}
@@ -412,111 +421,103 @@ export function DailyAttendancePage() {
             onClick={requestXlsx}
             disabled={!list.data}
           >
-            <span aria-hidden style={{ marginInlineEnd: 4 }}>⬇</span>
+            <Icon name="download" size={13} />
             {t("dailyAttendance.downloadXlsx")}
           </button>
         </div>
       </div>
 
       {regenInfo && (
-        <div
-          className="card"
-          style={{
-            padding: "10px 14px",
-            marginBottom: 12,
-            background: "var(--info-soft, var(--bg-sunken))",
-            borderColor: "var(--info, var(--border))",
-            fontSize: 13,
-          }}
-        >
-          {regenInfo}
+        <div className="at-notice tone-info" role="status">
+          <span className="at-notice-text">{regenInfo}</span>
+          <button
+            type="button"
+            className="at-notice-close"
+            onClick={() => setRegenInfo(null)}
+            aria-label={t("common.close", { defaultValue: "Close" })}
+          >
+            ×
+          </button>
         </div>
       )}
 
 
-      {/* Filter row */}
-      <div
-        className="card"
-        style={{
-          padding: "12px 14px",
-          marginBottom: 16,
-          display: "flex",
-          alignItems: "center",
-          gap: 14,
-          flexWrap: "wrap",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span
-            style={{
-              fontSize: 11,
-              fontWeight: 600,
-              letterSpacing: "0.06em",
-              color: "var(--text-tertiary)",
-              textTransform: "uppercase",
-            }}
-          >
-            {t("dailyAttendance.date")}
-          </span>
+      {/* Summary — counts come from the rows already loaded for the
+          scope; each card doubles as the status filter. */}
+      {list.isLoading ? (
+        <div className="mg-stat-grid">
+          <SkeletonCards count={5} minWidth={200} />
+        </div>
+      ) : hasRecords ? (
+        <StatGrid>
+          <StatCard
+            tone="info"
+            icon={ATT_ICON.people}
+            label={t("dailyAttendance.stat.inScope")}
+            value={stats.total}
+            sub={inScopeSub}
+            active={statusFilter === null}
+            onClick={() => setStatusFilter(null)}
+          />
+          <StatCard
+            tone="success"
+            icon={ATT_ICON.present}
+            label={t("dailyAttendance.stat.present")}
+            value={stats.present}
+            sub={`${pct(stats.present, stats.total)}%`}
+            active={statusFilter === "present"}
+            onClick={() => toggleStatus("present")}
+          />
+          <StatCard
+            tone="warning"
+            icon={ATT_ICON.late}
+            label={t("dailyAttendance.stat.late")}
+            value={stats.late}
+            sub={`${pct(stats.late, stats.total)}%`}
+            active={statusFilter === "late"}
+            onClick={() => toggleStatus("late")}
+          />
+          <StatCard
+            tone="danger"
+            icon={ATT_ICON.absent}
+            label={t("dailyAttendance.stat.absent")}
+            value={stats.absent}
+            sub={`${pct(stats.absent, stats.total)}%`}
+            active={statusFilter === "absent"}
+            onClick={() => toggleStatus("absent")}
+          />
+          <StatCard
+            tone="neutral"
+            icon={ATT_ICON.leave}
+            label={t("dailyAttendance.stat.onLeave")}
+            value={stats.onLeave}
+            sub={`${pct(stats.onLeave, stats.total)}%`}
+            active={statusFilter === "onLeave"}
+            onClick={() => toggleStatus("onLeave")}
+          />
+        </StatGrid>
+      ) : null}
+
+      {/* Filter toolbar */}
+      <Toolbar>
+        <FieldGroup label={t("dailyAttendance.date")}>
           <DatePicker
             value={date}
             onChange={setDate}
             max={todayIso()}
             ariaLabel={t("dailyAttendance.dateAria")}
+            triggerStyle={fieldDateStyle}
           />
-        </div>
+        </FieldGroup>
 
         {/* Live search — name or employee code. Filters the rendered
             rows only; stats above stay on the full scope. */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            background: "var(--bg-elev)",
-            border: "1px solid var(--border)",
-            borderRadius: 999,
-            padding: "4px 10px",
-            minWidth: 220,
-          }}
-        >
-          <span aria-hidden style={{ opacity: 0.6, fontSize: 13 }}>🔎</span>
-          <input
-            type="search"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={t("dailyAttendance.searchPlaceholder")}
-            aria-label={t("dailyAttendance.searchAria")}
-            style={{
-              flex: 1,
-              border: "none",
-              outline: "none",
-              background: "transparent",
-              color: "var(--text)",
-              fontSize: 13,
-              padding: "2px 0",
-              minWidth: 140,
-            }}
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              onClick={() => setSearchQuery("")}
-              aria-label={t("dailyAttendance.clearSearchAria")}
-              style={{
-                background: "transparent",
-                border: "none",
-                color: "var(--text-tertiary)",
-                cursor: "pointer",
-                fontSize: 14,
-                lineHeight: 1,
-                padding: 2,
-              }}
-            >
-              ×
-            </button>
-          )}
-        </div>
+        <SearchField
+          value={searchQuery}
+          onChange={setSearchQuery}
+          placeholder={t("dailyAttendance.searchPlaceholder")}
+          clearLabel={t("dailyAttendance.clearSearchAria")}
+        />
 
         <div className="seg" role="tablist" aria-label={t("dailyAttendance.scopeAria")}>
           <SegBtn
@@ -550,42 +551,48 @@ export function DailyAttendancePage() {
         </div>
 
         {scopeMode === "department" && isAdminLike && (
-          <select
-            value={departmentId ?? ""}
-            onChange={(e) =>
-              setDepartmentId(
-                e.target.value === "" ? null : Number(e.target.value),
-              )
-            }
-            style={selectStyle}
-          >
-            <option value="">{t("dailyAttendance.allDepartments")}</option>
-            {(departmentsQuery.data?.items ?? []).map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </select>
+          <FilterSelect
+            label={t("dailyAttendance.filter.department", { defaultValue: "Department" })}
+            value={departmentId === null ? "" : String(departmentId)}
+            onChange={(v) => setDepartmentId(v === "" ? null : Number(v))}
+            options={[
+              ["", t("dailyAttendance.allDepartments")],
+              ...(departmentsQuery.data?.items ?? []).map(
+                (d) => [String(d.id), d.name] as [string, string],
+              ),
+            ]}
+          />
         )}
 
         {scopeMode === "individual" && (
-          <select
-            value={employeeId ?? ""}
-            onChange={(e) =>
-              setEmployeeId(
-                e.target.value === "" ? null : Number(e.target.value),
-              )
-            }
-            style={{ ...selectStyle, minWidth: 220 }}
-          >
-            <option value="">{t("dailyAttendance.selectEmployee")}</option>
-            {(employeesQuery.data?.items ?? []).map((emp) => (
-              <option key={emp.id} value={emp.id}>
-                {emp.full_name} · {emp.employee_code}
-              </option>
-            ))}
-          </select>
+          <FilterSelect
+            label={t("dailyAttendance.filter.employee", { defaultValue: "Employee" })}
+            value={employeeId === null ? "" : String(employeeId)}
+            onChange={(v) => setEmployeeId(v === "" ? null : Number(v))}
+            options={[
+              ["", t("dailyAttendance.selectEmployee")],
+              ...(employeesQuery.data?.items ?? []).map(
+                (emp) =>
+                  [String(emp.id), `${emp.full_name} · ${emp.employee_code}`] as [string, string],
+              ),
+            ]}
+          />
         )}
+
+        <FilterSelect
+          label={t("dailyAttendance.filter.status", { defaultValue: "Status" })}
+          value={statusFilter ?? ""}
+          onChange={(v) => setStatusFilter(v === "" ? null : (v as DayStatus))}
+          options={[
+            ["", t("dailyAttendance.filter.allStatus", { defaultValue: "All status" })],
+            ["present", t(STAT_LABEL_KEY.present)],
+            ["late", t(STAT_LABEL_KEY.late)],
+            ["absent", t(STAT_LABEL_KEY.absent)],
+            ["onLeave", t(STAT_LABEL_KEY.onLeave)],
+            ["offDay", t(STAT_LABEL_KEY.offDay)],
+            ["pending", t(STAT_LABEL_KEY.pending)],
+          ]}
+        />
 
         {scopeMode === "team" && isManager && (
           <span
@@ -598,136 +605,75 @@ export function DailyAttendancePage() {
         {scopeMode === "team" && !isManager && (
           <span
             className="text-xs text-dim"
-            style={{ fontStyle: "italic" }}
             title={t("dailyAttendance.teamHintOtherTitle")}
           >
             {t("dailyAttendance.teamHintOther")}
           </span>
         )}
 
-        <div style={{ flex: 1 }} />
-
-        <span
-          className="text-xs text-dim"
-          style={{ whiteSpace: "nowrap" }}
-        >
-          {list.data
-            ? t("dailyAttendance.inScope", { count: stats.total })
-            : "—"}
-        </span>
-      </div>
-
-      {/* 5 stat cards */}
-      <div
-        className="grid"
-        style={{
-          gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-          gap: 10,
-          marginBottom: 16,
-        }}
-      >
-        <StatTile
-          label={t("dailyAttendance.stat.inScope")}
-          value={stats.total}
-          onClick={() => setStatusFilter(null)}
-          active={statusFilter === null}
+        <ResetButton
+          active={filtersActive}
+          label={t("dailyAttendance.filter.reset", { defaultValue: "Reset" })}
+          onClick={resetFilters}
         />
-        <StatTile
-          label={t("dailyAttendance.stat.present")}
-          value={stats.present}
-          tone="success"
-          onClick={() => toggleStatus("present")}
-          active={statusFilter === "present"}
-        />
-        <StatTile
-          label={t("dailyAttendance.stat.late")}
-          value={stats.late}
-          tone="warning"
-          onClick={() => toggleStatus("late")}
-          active={statusFilter === "late"}
-        />
-        <StatTile
-          label={t("dailyAttendance.stat.absent")}
-          value={stats.absent}
-          tone="danger"
-          onClick={() => toggleStatus("absent")}
-          active={statusFilter === "absent"}
-        />
-        {stats.pending > 0 && (
-          <StatTile
-            label={t("dailyAttendance.stat.waiting")}
-            value={stats.pending}
-            tone="info"
-            onClick={() => toggleStatus("pending")}
-            active={statusFilter === "pending"}
-          />
-        )}
-        {stats.offDay > 0 && (
-          <StatTile
-            label={t("dailyAttendance.stat.offDay")}
-            value={stats.offDay}
-            onClick={() => toggleStatus("offDay")}
-            active={statusFilter === "offDay"}
-          />
-        )}
-        <StatTile
-          label={t("dailyAttendance.stat.onLeave")}
-          value={stats.onLeave}
-          tone="info"
-          onClick={() => toggleStatus("onLeave")}
-          active={statusFilter === "onLeave"}
-        />
-      </div>
+      </Toolbar>
 
       </div>{/* /top sticky wrapper — page-header + filter + stats end here */}
 
-      {/* Single table card. Inside it, three child regions each use
+      {/* Error → danger panel + retry (replaces the card entirely). */}
+      {list.isError && !list.isLoading ? (
+        <div className="card">
+          <EmptyPanel
+            tone="danger"
+            icon={<StrokeIcon>{ATT_ICON.alert}</StrokeIcon>}
+            title={t("dailyAttendance.error.title", { defaultValue: "Couldn't load attendance" })}
+            body={
+              (list.error instanceof Error && list.error.message) ||
+              t("dailyAttendance.loadFailed")
+            }
+            actions={
+              <button type="button" className="btn" onClick={() => void list.refetch()}>
+                <Icon name="refresh" size={12} />
+                {t("common.retry", { defaultValue: "Retry" })}
+              </button>
+            }
+          />
+        </div>
+      ) : !list.isLoading && list.data && !hasRecords ? (
+        /* No records at all for this date → stats + table hidden. */
+        <div className="card">
+          <DailyEmptyState
+            hasRows={false}
+            searchQuery={searchQuery}
+            statusLabel={null}
+            onClear={resetFilters}
+            onRegenerate={isAdminLike ? onRegenerate : null}
+            regenerating={regenerate.isPending}
+          />
+        </div>
+      ) : (
+      /* Single table card. Inside it, three child regions each use
           position: sticky with a stacked ``top`` offset:
             1. card-head  → pins below the top-sticky wrapper
             2. anomaly    → pins below card-head
             3. each <th>  → pins below anomaly
-          No card-splitting, no visible seam, no z-index overlap. */}
+          No card-splitting, no visible seam, no z-index overlap. */
       <div className="card">
         <div
           ref={cardHeadRef}
-          className="card-head"
-          style={{
-            position: "sticky",
-            top: topH,
-            zIndex: 25,
-            background: "var(--bg-elev, #fff)",
-            // The card-head's natural border-bottom needs to stay
-            // visible when pinned so it reads as a divider, not a
-            // floating row.
-          }}
+          className="card-head at-sticky-head"
+          style={{ top: 0 }}
         >
           <div>
             <h3 className="card-title">
               {t("dailyAttendance.cardTitle", { date: list.data?.date ?? date })}
               {searchQuery && (
-                <span
-                  style={{
-                    marginInlineStart: 8,
-                    fontSize: 12,
-                    color: "var(--text-tertiary)",
-                    fontWeight: 400,
-                  }}
-                >
+                <span className="at-title-note">
                   · {t("dailyAttendance.matchFor", { count: filteredItems.length, query: searchQuery })}
                 </span>
               )}
               {statusFilter && (
-                <span
-                  style={{
-                    marginInlineStart: 8,
-                    fontSize: 12,
-                    color: "var(--text-tertiary)",
-                    fontWeight: 400,
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 4,
-                  }}
-                >
+                <span className="at-title-note">
                   · {t("dailyAttendance.statusFilter.showing", {
                     label: t(STAT_LABEL_KEY[statusFilter]),
                     count: filteredItems.length,
@@ -736,15 +682,7 @@ export function DailyAttendancePage() {
                     type="button"
                     onClick={() => setStatusFilter(null)}
                     aria-label={t("dailyAttendance.statusFilter.clearAria")}
-                    style={{
-                      background: "transparent",
-                      border: "none",
-                      color: "var(--accent)",
-                      cursor: "pointer",
-                      fontSize: 14,
-                      lineHeight: 1,
-                      padding: 2,
-                    }}
+                    className="at-link-x"
                   >
                     ×
                   </button>
@@ -752,13 +690,13 @@ export function DailyAttendancePage() {
               )}
             </h3>
           </div>
-          <div style={{ display: "flex", gap: 6 }}>
+          <div className="at-card-head-actions">
             <button
               className="btn btn-sm"
               onClick={requestPdf}
               disabled={!list.data || pdfBusy}
             >
-              <span aria-hidden style={{ marginInlineEnd: 4 }}>📄</span>
+              <Icon name="fileText" size={12} />
               {t("dailyAttendance.pdf")}
             </button>
             <button
@@ -766,23 +704,31 @@ export function DailyAttendancePage() {
               onClick={requestXlsx}
               disabled={!list.data}
             >
-              <span aria-hidden style={{ marginInlineEnd: 4 }}>⬇</span>
+              <Icon name="download" size={12} />
               {t("dailyAttendance.xlsx")}
             </button>
           </div>
         </div>
         <div
           ref={anomalyRef}
-          style={{
-            position: "sticky",
-            top: topH + cardHeadH,
-            zIndex: 22,
-            background: "var(--bg-elev, #fff)",
-          }}
+          className="at-sticky-note"
+          style={{ top: cardHeadH }}
         >
           <AnomalyInfoBanner message={t("dailyAttendance.anomalyNote")} />
         </div>
 
+        {showEmpty ? (
+          /* Records exist but search / status filter matches nothing. */
+          <DailyEmptyState
+            hasRows
+            searchQuery={searchQuery}
+            statusLabel={statusFilter ? t(STAT_LABEL_KEY[statusFilter]) : null}
+            onClear={resetFilters}
+            onRegenerate={null}
+            regenerating={false}
+          />
+        ) : (
+        <div className="at-scroll-x">
         <table className="table">
           <thead>
             <tr>
@@ -796,15 +742,7 @@ export function DailyAttendancePage() {
                 "employee", "department", "status",
                 "in", "out", "hours", "ot", "flags",
               ] as const).map((key) => (
-                <th
-                  key={key}
-                  style={{
-                    position: "sticky",
-                    top: theadTop,
-                    zIndex: 18,
-                    background: "var(--bg-elev, #fff)",
-                  }}
-                >
+                <th key={key} className="at-sticky-th" style={{ top: theadTop }}>
                   {t(`dailyAttendance.col.${key}`)}
                 </th>
               ))}
@@ -814,67 +752,34 @@ export function DailyAttendancePage() {
             {list.isLoading && (
               <SkeletonRows cols={8} />
             )}
-            {list.isError && (
-              <tr>
-                <td
-                  colSpan={8}
-                  className="text-sm"
-                  style={{ padding: 16, color: "var(--danger-text)" }}
-                >
-                  {t("dailyAttendance.loadFailed")}
-                </td>
-              </tr>
-            )}
             {filteredItems.map((it) => (
               <tr
                 key={`${it.employee_id}-${it.date}`}
                 onClick={() => setDrawerItem(it)}
-                style={{ cursor: "pointer" }}
+                className="at-row-clickable"
               >
                 <td>
-                  <div
-                    style={{ display: "flex", alignItems: "center", gap: 10 }}
-                  >
-                    <Avatar name={it.full_name} seed={it.employee_code} />
+                  <div className="at-person">
+                    <Avatar name={it.full_name} />
                     <div>
                       <div
-                        style={{
-                          fontWeight: 500,
-                          fontSize: 13,
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 6,
-                          color:
-                            it.employee_status === "inactive"
-                              ? "var(--text-secondary)"
-                              : undefined,
-                          textDecoration:
-                            it.employee_status === "inactive"
-                              ? "line-through"
-                              : undefined,
-                        }}
+                        className={`at-person-name${it.employee_status === "inactive" ? " is-inactive" : ""}`}
                       >
                         {it.full_name}
                         {it.employee_status === "inactive" && (
-                          <span
-                            className="pill pill-neutral"
-                            style={{
-                              fontSize: 10,
-                              textDecoration: "none",
-                            }}
-                          >
+                          <span className="pill pill-neutral">
                             {t("dailyAttendance.archived")}
                           </span>
                         )}
                       </div>
-                      <div className="mono text-xs text-dim">
+                      <div className="mono text-xs text-dim at-nowrap">
                         {it.employee_code}
                       </div>
                     </div>
                   </div>
                 </td>
                 <td className="text-sm">{it.department.name}</td>
-                <td>
+                <td className="at-nowrap">
                   <StatusPill item={it} />
                 </td>
                 <td className="mono text-sm">{fmtTime(it.in_time)}</td>
@@ -888,87 +793,12 @@ export function DailyAttendancePage() {
                 </td>
               </tr>
             ))}
-            {list.data && list.data.items.length === 0 && !list.isLoading && (
-              <tr>
-                <td
-                  colSpan={8}
-                  className="text-sm text-dim"
-                  style={{ padding: 16 }}
-                >
-                  {t("dailyAttendance.emptyDate.prefix")}{" "}
-                  <em>{t("dailyAttendance.regenerate")}</em>
-                  {t("dailyAttendance.emptyDate.suffix")}
-                </td>
-              </tr>
-            )}
-            {list.data &&
-              list.data.items.length > 0 &&
-              filteredItems.length === 0 &&
-              !list.isLoading &&
-              searchQuery && (
-                <tr>
-                  <td
-                    colSpan={8}
-                    className="text-sm text-dim"
-                    style={{ padding: 16 }}
-                  >
-                    {t("dailyAttendance.emptySearch.prefix", { query: searchQuery })}{" "}
-                    <button
-                      type="button"
-                      onClick={() => setSearchQuery("")}
-                      style={{
-                        background: "transparent",
-                        border: "none",
-                        color: "var(--accent)",
-                        cursor: "pointer",
-                        padding: 0,
-                        font: "inherit",
-                        textDecoration: "underline",
-                      }}
-                    >
-                      {t("dailyAttendance.emptySearch.clear")}
-                    </button>
-                    .
-                  </td>
-                </tr>
-              )}
-            {list.data &&
-              list.data.items.length > 0 &&
-              filteredItems.length === 0 &&
-              !list.isLoading &&
-              !searchQuery &&
-              statusFilter && (
-                <tr>
-                  <td
-                    colSpan={8}
-                    className="text-sm text-dim"
-                    style={{ padding: 16 }}
-                  >
-                    {t("dailyAttendance.statusFilter.empty", {
-                      label: t(STAT_LABEL_KEY[statusFilter]),
-                    })}{" "}
-                    <button
-                      type="button"
-                      onClick={() => setStatusFilter(null)}
-                      style={{
-                        background: "transparent",
-                        border: "none",
-                        color: "var(--accent)",
-                        cursor: "pointer",
-                        padding: 0,
-                        font: "inherit",
-                        textDecoration: "underline",
-                      }}
-                    >
-                      {t("dailyAttendance.statusFilter.clear")}
-                    </button>
-                    .
-                  </td>
-                </tr>
-              )}
           </tbody>
         </table>
+        </div>
+        )}
       </div>
+      )}
 
       {drawerItem && (
         <AttendanceDrawer item={drawerItem} onClose={() => setDrawerItem(null)} />
@@ -1005,10 +835,10 @@ export function DailyAttendancePage() {
 // SendEmailModal
 // ---------------------------------------------------------------------------
 
-const STATUS_COLOR: Record<string, string> = {
-  present: "#0a8a52",
-  late: "#b45309",
-  absent: "#b91c1c",
+const STATUS_PILL: Record<string, string> = {
+  present: "pill pill-success",
+  late: "pill pill-warning",
+  absent: "pill pill-danger",
 };
 
 function SendEmailModal({
@@ -1026,6 +856,7 @@ function SendEmailModal({
   onClose: () => void;
   onSent: (r: SendTodayResult) => void;
 }) {
+  const { t } = useTranslation();
   // Only employees that could plausibly receive an email (skip weekends/holidays).
   const sendable = items.filter(
     (it) => !it.is_weekend && !it.is_holiday && (it.absent || it.in_time),
@@ -1091,117 +922,64 @@ function SendEmailModal({
       <div
         role="dialog"
         aria-labelledby="send-email-modal-title"
-        style={{
-          position: "fixed",
-          top: "50%",
-          left: "50%",
-          transform: "translate(-50%, -50%)",
-          width: 540,
-          maxWidth: "92vw",
-          maxHeight: "88vh",
-          background: "var(--bg)",
-          border: "1px solid var(--border-strong)",
-          borderRadius: "var(--radius)",
-          zIndex: 60,
-          boxShadow: "var(--shadow-lg)",
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-        }}
+        className="modal at-modal"
       >
         {/* Header */}
-        <div
-          style={{
-            padding: "16px 20px 12px",
-            borderBottom: "1px solid var(--border)",
-            display: "flex",
-            alignItems: "flex-start",
-            justifyContent: "space-between",
-            flexShrink: 0,
-          }}
-        >
+        <div className="modal-head at-modal-head">
           <div>
-            <h2
-              id="send-email-modal-title"
-              style={{ margin: 0, fontSize: 17, fontWeight: 700 }}
-            >
-              ✉ Send Attendance Emails
+            <h2 id="send-email-modal-title" className="modal-title">
+              {t("dailyAttendance.sendModal.title", { defaultValue: "Send attendance emails" })}
             </h2>
-            <p style={{ margin: "3px 0 0", fontSize: 12, color: "var(--text-secondary)" }}>
-              Date: <strong>{date}</strong> · {selectedIds.size} of{" "}
-              {sendable.length} employee{sendable.length !== 1 ? "s" : ""} selected
+            <p className="at-modal-sub">
+              {t("dailyAttendance.sendModal.sub", {
+                defaultValue: "Date: {{date}} · {{selected}} of {{total}} employees selected",
+                date,
+                selected: selectedIds.size,
+                total: sendable.length,
+              })}
             </p>
           </div>
           <button
             className="icon-btn"
-            aria-label="Close"
+            aria-label={t("common.close", { defaultValue: "Close" })}
             onClick={onClose}
-            style={{ marginTop: 2 }}
           >
-            ×
+            <Icon name="x" size={14} />
           </button>
         </div>
 
         {/* Body */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "12px 20px" }}>
+        <div className="modal-body">
 
           {/* Error */}
           {error && (
-            <div
-              style={{
-                background: "var(--danger-soft)",
-                color: "var(--danger-text)",
-                border: "1px solid var(--danger-border, #fecaca)",
-                borderRadius: 8,
-                padding: "8px 12px",
-                fontSize: 12.5,
-                marginBottom: 12,
-              }}
-            >
-              {error}
+            <div className="at-notice tone-danger" role="alert">
+              <span className="at-notice-text">{error}</span>
             </div>
           )}
 
           {/* Result view */}
           {result && (
-            <div style={{ marginBottom: 14 }}>
-              <div
-                style={{
-                  background: "var(--bg-sunken)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 10,
-                  padding: "10px 14px",
-                  fontSize: 12.5,
-                }}
-              >
+            <div className="at-stack">
+              <div className="at-result-box">
                 <strong>
-                  {result.sent} sent · {result.already_queued} already sent ·{" "}
-                  {result.failed} failed · {result.skipped + result.toggle_off} skipped
+                  {t("dailyAttendance.sendModal.summary", {
+                    defaultValue: "{{sent}} sent · {{already}} already sent · {{failed}} failed · {{skipped}} skipped",
+                    sent: result.sent,
+                    already: result.already_queued,
+                    failed: result.failed,
+                    skipped: result.skipped + result.toggle_off,
+                  })}
                 </strong>
-                <div
-                  style={{
-                    marginTop: 8,
-                    display: "flex",
-                    flexWrap: "wrap",
-                    gap: 5,
-                  }}
-                >
+                <div className="at-row" style={{ marginTop: 8, gap: 5 }}>
                   {result.results.map((r) => {
                     const ok = r.outcome === "sent" || r.outcome === "already_sent";
                     const bad = r.outcome === "failed";
                     return (
                       <span
                         key={`${r.employee_id}-${r.status ?? "none"}`}
-                        className="pill pill-neutral"
+                        className={`pill ${ok ? "pill-success" : bad ? "pill-danger" : "pill-neutral"}`}
                         title={r.error ?? r.recipient_email ?? undefined}
-                        style={{
-                          fontSize: 11.5,
-                          color: ok
-                            ? "var(--success, #0a8a52)"
-                            : bad
-                              ? "var(--danger-text, #b91c1c)"
-                              : "var(--text-secondary)",
-                        }}
                       >
                         {r.employee_name} ·{" "}
                         {r.status ?? "—"} ·{" "}
@@ -1214,31 +992,24 @@ function SendEmailModal({
 
               {/* Resend prompt — only when some were already sent */}
               {alreadySentCount > 0 && (
-                <div
-                  style={{
-                    marginTop: 10,
-                    background: "color-mix(in srgb, #f59e0b 10%, transparent)",
-                    border: "1px solid #f59e0b",
-                    borderRadius: 10,
-                    padding: "12px 16px",
-                    fontSize: 13,
-                  }}
-                >
+                <div className="at-notice tone-warning" style={{ display: "block" }}>
                   <div style={{ fontWeight: 600, marginBottom: 4 }}>
-                    ⚠ {alreadySentCount} employee
-                    {alreadySentCount !== 1 ? "s" : ""} already received an
-                    email.
+                    {t("dailyAttendance.sendModal.alreadySent", {
+                      defaultValue: "{{count}} employees already received an email.",
+                      count: alreadySentCount,
+                    })}
                   </div>
-                  <div style={{ color: "var(--text-secondary)", fontSize: 12, marginBottom: 10 }}>
-                    Do you want to send again to those employees?
+                  <div className="text-sm" style={{ marginBottom: 10 }}>
+                    {t("dailyAttendance.sendModal.resendQuestion", { defaultValue: "Do you want to send again to those employees?" })}
                   </div>
                   <button
-                    className="btn"
-                    style={{ borderColor: "#f59e0b", color: "#92400e" }}
+                    className="btn btn-sm"
                     disabled={isPending}
                     onClick={() => void doSend(true)}
                   >
-                    {isPending ? "Sending…" : `Send again to ${alreadySentCount} employee${alreadySentCount !== 1 ? "s" : ""}`}
+                    {isPending
+                      ? t("dailyAttendance.sendModal.sending", { defaultValue: "Sending…" })
+                      : t("dailyAttendance.sendModal.resend", { defaultValue: "Send again to {{count}} employees", count: alreadySentCount })}
                   </button>
                 </div>
               )}
@@ -1249,32 +1020,19 @@ function SendEmailModal({
           {!result && (
             <>
               {sendable.length === 0 ? (
-                <p style={{ color: "var(--text-secondary)", fontSize: 13, textAlign: "center", padding: "20px 0" }}>
-                  No employees with attendance status for this date.
+                <p className="at-center-note">
+                  {t("dailyAttendance.sendModal.noneSendable", { defaultValue: "No employees with attendance status for this date." })}
                 </p>
               ) : (
                 <>
                   {/* Select all row */}
-                  <label
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      padding: "6px 0 10px",
-                      borderBottom: "1px solid var(--border)",
-                      marginBottom: 6,
-                      cursor: "pointer",
-                      fontSize: 12.5,
-                      fontWeight: 600,
-                      color: "var(--text-secondary)",
-                    }}
-                  >
+                  <label className="at-check-row at-check-row-all">
                     <input
                       type="checkbox"
                       checked={allSelected}
                       onChange={toggleAll}
                     />
-                    Select all ({sendable.length})
+                    {t("dailyAttendance.sendModal.selectAll", { defaultValue: "Select all ({{count}})", count: sendable.length })}
                   </label>
 
                   {/* Per-employee rows (current page only) */}
@@ -1290,43 +1048,23 @@ function SendEmailModal({
                     return (
                       <label
                         key={it.employee_id}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 10,
-                          padding: "8px 6px",
-                          borderRadius: 8,
-                          cursor: "pointer",
-                          background: checked
-                            ? "var(--bg-elev)"
-                            : "transparent",
-                          transition: "background 0.1s",
-                        }}
+                        className={`at-check-row${checked ? " is-checked" : ""}`}
                       >
                         <input
                           type="checkbox"
                           checked={checked}
                           onChange={() => toggle(it.employee_id)}
                         />
-                        <Avatar name={it.full_name} seed={it.employee_code} />
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.2 }}>
-                            {it.full_name}
-                          </div>
-                          <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                            {it.employee_code} · {it.department.name}
+                        <Avatar name={it.full_name} small />
+                        <div className="at-check-main">
+                          <div className="at-check-name">{it.full_name}</div>
+                          <div className="at-check-meta">
+                            <span className="mono">{it.employee_code}</span> · {it.department.name}
                           </div>
                         </div>
                         {status && (
-                          <span
-                            className="pill pill-neutral"
-                            style={{
-                              fontSize: 11,
-                              color: STATUS_COLOR[status] ?? "var(--text-secondary)",
-                              flexShrink: 0,
-                            }}
-                          >
-                            {status}
+                          <span className={STATUS_PILL[status] ?? "pill pill-neutral"}>
+                            {t(STAT_LABEL_KEY[status])}
                           </span>
                         )}
                       </label>
@@ -1335,36 +1073,30 @@ function SendEmailModal({
 
                   {/* Pagination strip */}
                   {totalPages > 1 && (
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        paddingTop: 10,
-                        marginTop: 6,
-                        borderTop: "1px solid var(--border)",
-                        fontSize: 12,
-                        color: "var(--text-secondary)",
-                      }}
-                    >
+                    <div className="at-modal-pager">
                       <button
                         className="btn btn-sm"
                         disabled={modalPage === 1}
                         onClick={() => setModalPage((p) => p - 1)}
-                        style={{ minWidth: 72 }}
                       >
-                        ← Previous
+                        <Icon name="chevronLeft" size={12} />
+                        {t("common.previous", { defaultValue: "Previous" })}
                       </button>
                       <span>
-                        Page {modalPage} of {totalPages} &nbsp;·&nbsp; {sendable.length} total
+                        {t("dailyAttendance.sendModal.pageOf", {
+                          defaultValue: "Page {{page}} of {{total}} · {{count}} total",
+                          page: modalPage,
+                          total: totalPages,
+                          count: sendable.length,
+                        })}
                       </span>
                       <button
                         className="btn btn-sm"
                         disabled={modalPage === totalPages}
                         onClick={() => setModalPage((p) => p + 1)}
-                        style={{ minWidth: 72 }}
                       >
-                        Next →
+                        {t("common.next", { defaultValue: "Next" })}
+                        <Icon name="chevronRight" size={12} />
                       </button>
                     </div>
                   )}
@@ -1375,24 +1107,15 @@ function SendEmailModal({
         </div>
 
         {/* Footer */}
-        <div
-          style={{
-            padding: "12px 20px",
-            borderTop: "1px solid var(--border)",
-            display: "flex",
-            justifyContent: "flex-end",
-            gap: 8,
-            flexShrink: 0,
-          }}
-        >
+        <div className="modal-foot at-modal-foot">
           {result ? (
             <button className="btn btn-primary" onClick={onClose}>
-              Done
+              {t("common.done", { defaultValue: "Done" })}
             </button>
           ) : (
             <>
               <button className="btn" onClick={onClose}>
-                Cancel
+                {t("common.cancel", { defaultValue: "Cancel" })}
               </button>
               <button
                 className="btn btn-primary"
@@ -1400,8 +1123,8 @@ function SendEmailModal({
                 onClick={() => void doSend(false)}
               >
                 {isPending
-                  ? "Sending…"
-                  : `Send to ${selectedIds.size} employee${selectedIds.size !== 1 ? "s" : ""}`}
+                  ? t("dailyAttendance.sendModal.sending", { defaultValue: "Sending…" })
+                  : t("dailyAttendance.sendModal.sendTo", { defaultValue: "Send to {{count}} employees", count: selectedIds.size })}
               </button>
             </>
           )}
@@ -1429,85 +1152,16 @@ function SegBtn({
   return (
     <button
       type="button"
-      className={`seg-btn${active ? " active" : ""}`}
+      className={`seg-btn at-seg-btn${active ? " active" : ""}`}
       onClick={onClick}
       role="tab"
       aria-selected={active}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-      }}
     >
-      <span aria-hidden style={{ fontSize: 11 }}>
+      <span aria-hidden className="at-seg-icon">
         {icon}
       </span>
       {children}
     </button>
-  );
-}
-
-function StatTile({
-  label,
-  value,
-  tone,
-  onClick,
-  active,
-}: {
-  label: string;
-  value: number;
-  tone?: "success" | "warning" | "danger" | "info";
-  onClick?: () => void;
-  active?: boolean;
-}) {
-  const toneBg: Record<string, string> = {
-    success: "var(--success-soft)",
-    warning: "var(--warning-soft)",
-    danger: "var(--danger-soft)",
-    info: "var(--info-soft, var(--bg-sunken))",
-  };
-  const toneColor: Record<string, string> = {
-    success: "var(--success-text)",
-    warning: "var(--warning-text)",
-    danger: "var(--danger-text)",
-    info: "var(--info-text, var(--text-secondary))",
-  };
-  const bg = tone ? toneBg[tone] : "var(--bg-elev)";
-  const labelColor = tone ? toneColor[tone] : "var(--text-tertiary)";
-  const clickable = !!onClick;
-  return (
-    <div
-      className="stat"
-      onClick={onClick}
-      role={clickable ? "button" : undefined}
-      tabIndex={clickable ? 0 : undefined}
-      aria-pressed={clickable ? !!active : undefined}
-      onKeyDown={
-        clickable
-          ? (e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                onClick?.();
-              }
-            }
-          : undefined
-      }
-      style={{
-        background: bg,
-        border: tone ? "1px solid transparent" : undefined,
-        cursor: clickable ? "pointer" : undefined,
-        // Outline (not border) for the active ring so toggling it never
-        // shifts the tile's layout.
-        outline: active ? "2px solid var(--accent)" : undefined,
-        outlineOffset: active ? "-2px" : undefined,
-        position: "relative",
-      }}
-    >
-      <div className="stat-label" style={{ color: labelColor }}>
-        {label}
-      </div>
-      <div className="stat-value">{value}</div>
-    </div>
   );
 }
 
@@ -1517,33 +1171,101 @@ function StatusPill({ item }: { item: AttendanceItem }) {
   // workday verdicts so a row on a non-working day never reads as
   // "Absent" or falls through to "Present" with no in_time.
   if (item.leave_type_id !== null) {
-    return <span className="pill pill-info">{t("dailyAttendance.pill.onLeave")}</span>;
+    return <DotPill tone="info">{t("dailyAttendance.pill.onLeave")}</DotPill>;
   }
   if (item.is_holiday && !item.in_time) {
     return (
-      <span className="pill pill-info">
+      <DotPill tone="accent">
         {item.holiday_name
           ? t("dailyAttendance.pill.holidayNamed", { name: item.holiday_name })
           : t("dailyAttendance.pill.holiday")}
-      </span>
+      </DotPill>
     );
   }
   if (item.is_weekend && !item.in_time) {
-    return <span className="pill pill-neutral">{t("dailyAttendance.pill.weekend")}</span>;
+    return <DotPill tone="neutral">{t("dailyAttendance.pill.weekend")}</DotPill>;
   }
   if (item.pending) {
-    return <span className="pill pill-info">{t("dailyAttendance.pill.waitingLogin")}</span>;
+    return <DotPill tone="info">{t("dailyAttendance.pill.waitingLogin")}</DotPill>;
   }
   // No in_time on a workday → Absent, regardless of the engine's
   // ``absent`` flag. Operators read "Present" as "checked in
   // today"; rows without a recorded check-in shouldn't be Present.
   if (!item.in_time) {
-    return <span className="pill pill-danger">{t("dailyAttendance.pill.absent")}</span>;
+    return <DotPill tone="danger">{t("dailyAttendance.pill.absent")}</DotPill>;
   }
   if (item.late) {
-    return <span className="pill pill-warning">{t("dailyAttendance.pill.late")}</span>;
+    return <DotPill tone="warning">{t("dailyAttendance.pill.late")}</DotPill>;
   }
-  return <span className="pill pill-success">{t("dailyAttendance.pill.present")}</span>;
+  return <DotPill tone="success">{t("dailyAttendance.pill.present")}</DotPill>;
+}
+
+/** Empty state for the daily table — the message follows what made the
+ *  list empty: nothing computed for the date, a search with no hits, a
+ *  status card with nothing in it, or a mix of filters. */
+function DailyEmptyState({
+  hasRows,
+  searchQuery,
+  statusLabel,
+  onClear,
+  onRegenerate,
+  regenerating,
+}: {
+  hasRows: boolean;
+  searchQuery: string;
+  statusLabel: string | null;
+  onClear: () => void;
+  onRegenerate: (() => void) | null;
+  regenerating: boolean;
+}) {
+  const { t } = useTranslation();
+  if (!hasRows) {
+    return (
+      <EmptyPanel
+        tone="accent"
+        icon={<StrokeIcon>{ATT_ICON.calendar}</StrokeIcon>}
+        title={t("dailyAttendance.empty.noneTitle", { defaultValue: "No attendance for this date yet" })}
+        body={`${t("dailyAttendance.emptyDate.prefix")} ${t("dailyAttendance.regenerate")}${t("dailyAttendance.emptyDate.suffix")}`}
+        actions={
+          onRegenerate ? (
+            <button type="button" className="btn btn-primary" onClick={onRegenerate} disabled={regenerating}>
+              <Icon name="refresh" size={12} />
+              {regenerating ? t("dailyAttendance.regenerating") : t("dailyAttendance.regenerate")}
+            </button>
+          ) : undefined
+        }
+      />
+    );
+  }
+  let title: string;
+  let body: string;
+  let icon = <Icon name="filter" size={28} />;
+  if (searchQuery && !statusLabel) {
+    icon = <Icon name="search" size={28} />;
+    title = t("dailyAttendance.empty.searchTitle", { defaultValue: "No one matches \"{{q}}\"", q: searchQuery });
+    body = t("dailyAttendance.empty.searchBody", { defaultValue: "Try a different name or employee ID, or clear the search." });
+  } else if (statusLabel && !searchQuery) {
+    icon = <Icon name="check" size={28} />;
+    title = t("dailyAttendance.statusFilter.empty", { label: statusLabel });
+    body = t("dailyAttendance.empty.statusBody", { defaultValue: "Nobody in this view falls in that status for the selected date." });
+  } else {
+    title = t("dailyAttendance.empty.filtersTitle", { defaultValue: "No employees match these filters" });
+    body = t("dailyAttendance.empty.filtersBody", { defaultValue: "Loosen the search or status filter to see more people." });
+  }
+  return (
+    <EmptyPanel
+      tone="neutral"
+      icon={icon}
+      title={title}
+      body={body}
+      actions={
+        <button type="button" className="btn" onClick={onClear}>
+          <Icon name="refresh" size={12} />
+          {t("dailyAttendance.empty.clearFilters", { defaultValue: "Clear filters" })}
+        </button>
+      }
+    />
+  );
 }
 
 function FlagText({ item }: { item: AttendanceItem }) {
@@ -1560,10 +1282,9 @@ function FlagText({ item }: { item: AttendanceItem }) {
   return <span className="text-xs">{parts.join(" · ")}</span>;
 }
 
-// Avatar — colored circle with up to two initials. Color is derived
-// deterministically from ``seed`` (employee_code) so the same person
-// gets the same colour across pages.
-function Avatar({ name, seed }: { name: string; seed: string }) {
+// Avatar — accent-gradient circle with up to two initials (the shared
+// ``.avatar`` look from the shell, sized for table rows).
+function Avatar({ name, small }: { name: string; small?: boolean }) {
   const initials = (() => {
     const parts = name.trim().split(/\s+/);
     if (parts.length === 0) return "?";
@@ -1571,41 +1292,8 @@ function Avatar({ name, seed }: { name: string; seed: string }) {
     const last = parts.length > 1 ? parts[parts.length - 1]?.[0] ?? "" : "";
     return (first + last).toUpperCase() || "?";
   })();
-  const palette = [
-    "#1f7ae0",
-    "#0aa57c",
-    "#d97706",
-    "#c026d3",
-    "#dc2626",
-    "#0891b2",
-    "#7c3aed",
-    "#65a30d",
-    "#b45309",
-    "#be185d",
-  ];
-  let hash = 0;
-  for (let i = 0; i < seed.length; i += 1) {
-    hash = (hash * 31 + seed.charCodeAt(i)) | 0;
-  }
-  const bg = palette[Math.abs(hash) % palette.length] ?? palette[0];
   return (
-    <span
-      aria-hidden
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        width: 36,
-        height: 36,
-        borderRadius: "50%",
-        background: bg,
-        color: "white",
-        fontSize: 12,
-        fontWeight: 600,
-        flexShrink: 0,
-        letterSpacing: "0.02em",
-      }}
-    >
+    <span aria-hidden className={`at-avatar${small ? " sm" : ""}`}>
       {initials}
     </span>
   );
@@ -1628,16 +1316,6 @@ function useShortTime(): (iso: string | null) => string {
   };
 }
 
-const selectStyle = {
-  padding: "6px 10px",
-  fontSize: 12.5,
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius-sm)",
-  background: "var(--bg-elev)",
-  color: "var(--text)",
-  fontFamily: "var(--font-sans)",
-  outline: "none",
-} as const;
 
 // Re-export FlagPills for any consumer that imports it from here
 // (the AttendanceDrawer used to use it).
@@ -1653,7 +1331,7 @@ export function FlagPills({ item }: { item: AttendanceItem }) {
     return <span className="pill pill-danger">{t("dailyAttendance.pillLower.absent")}</span>;
   }
   return (
-    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+    <div className="at-row" style={{ gap: 4 }}>
       {item.late && <span className="pill pill-warning">{t("dailyAttendance.pillLower.late")}</span>}
       {item.early_out && <span className="pill pill-warning">{t("dailyAttendance.pillLower.early")}</span>}
       {item.short_hours && <span className="pill pill-info">{t("dailyAttendance.pillLower.short")}</span>}

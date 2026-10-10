@@ -14,7 +14,9 @@ import { DrawerShell } from "../../components/DrawerShell";
 import { extractApiError } from "../../api/client";
 
 import { Icon } from "../../shell/Icon";
+import { Field, FormFooter, FormHeader, FormNotice, FormSection, SwitchField } from "../../components/FormKit";
 import { usePatchDevice } from "./hooks";
+import "./devices.css";
 import {
   DRIVER_OPTIONS,
   type Device,
@@ -36,6 +38,7 @@ export function DeviceDrawer({ initial, onClose }: Props) {
   const [driver, setDriver] = useState<DeviceDriver>(initial.driver);
   const [enabled, setEnabled] = useState(initial.enabled);
   const [error, setError] = useState<string | null>(null);
+  const [nameError, setNameError] = useState<string | null>(null);
 
   useEffect(() => {
     setName(initial.name);
@@ -43,14 +46,16 @@ export function DeviceDrawer({ initial, onClose }: Props) {
     setDriver(initial.driver);
     setEnabled(initial.enabled);
     setError(null);
+    setNameError(null);
   }, [initial]);
 
   const submitting = patch.isPending;
 
   const submit = async () => {
     setError(null);
+    setNameError(null);
     if (!name.trim()) {
-      setError(
+      setNameError(
         t("devices.errors.nameRequired", { defaultValue: "Name is required." }),
       );
       return;
@@ -81,248 +86,145 @@ export function DeviceDrawer({ initial, onClose }: Props) {
 
   return (
     <DrawerShell onClose={onClose}>
-      <div className="drawer">
-        <div className="drawer-head">
-          <div>
-            <div className="mono text-xs text-dim">
-              {t("devices.label", { defaultValue: "DEVICE" })}
-            </div>
-            <div style={{ fontSize: 16, fontWeight: 600, marginTop: 2 }}>
-              {`${t("devices.editTitle", { defaultValue: "Edit device" })} · ${initial.name}`}
-            </div>
-          </div>
-          <button
-            className="icon-btn"
-            onClick={onClose}
-            aria-label={t("common.close")}
-          >
-            <Icon name="x" size={14} />
-          </button>
-        </div>
+      <form
+        className="drawer fk-drawer"
+        role="dialog"
+        aria-labelledby="dv-edit-title"
+        noValidate
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!submitting) void submit();
+        }}
+      >
+        <FormHeader
+          titleId="dv-edit-title"
+          icon={<Icon name="edit" size={18} />}
+          eyebrow={initial.name}
+          title={t("devices.editTitle", { defaultValue: "Edit device" })}
+          subtitle={t("devices.editSubtitle", {
+            defaultValue: "Rename or relabel this terminal. The push URL and token never change here.",
+          })}
+          onClose={onClose}
+        />
 
-        <div
-          className="drawer-body"
-          style={{ display: "flex", flexDirection: "column", gap: 12 }}
-        >
-          {/* Learned from the first event — read-only when we have it. */}
-          {initial.serial_number && (
+        <div className="drawer-body fk-body">
+          {error && <FormNotice tone="danger">{error}</FormNotice>}
+
+          <FormSection
+            step={1}
+            title={t("devices.sections.identity", { defaultValue: "Identity" })}
+            description={t("devices.wizard.identityHelp", {
+              defaultValue: "How the terminal is labelled in Maugood.",
+            })}
+          >
             <Field
-              label={t("devices.fields.serial", {
-                defaultValue: "Serial number",
+              label={t("devices.fields.name", { defaultValue: "Device name" })}
+              htmlFor="dv-edit-name"
+              required
+              error={nameError}
+              help={t("devices.hints.name", {
+                defaultValue: "Shown in reports and the device list.",
               })}
             >
-              <div
-                className="mono"
-                style={{
-                  ...inputStyle,
-                  background: "var(--bg-sunken)",
-                  color: "var(--text-secondary)",
-                  fontWeight: 600,
+              <input
+                id="dv-edit-name"
+                className="input"
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  setNameError(null);
                 }}
-              >
-                {initial.serial_number}
-              </div>
+                placeholder={t("devices.placeholders.name", {
+                  defaultValue: "e.g. Entrance",
+                })}
+                autoFocus
+                maxLength={120}
+              />
             </Field>
-          )}
 
-          <Field
-            label={t("devices.fields.name", { defaultValue: "Device name" })}
-            hint={t("devices.hints.name", {
-              defaultValue: "Shown in reports and the device list.",
-            })}
-          >
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={t("devices.placeholders.name", {
-                defaultValue: "e.g. Entrance",
+            <Field
+              label={t("devices.fields.location", {
+                defaultValue: "Branch / location",
               })}
-              style={inputStyle}
-              autoFocus
-              maxLength={120}
-            />
-          </Field>
-
-          <Field
-            label={t("devices.fields.location", {
-              defaultValue: "Branch / location",
-            })}
-          >
-            <input
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              placeholder={t("devices.placeholders.location", {
-                defaultValue: "e.g. Head Office",
-              })}
-              style={inputStyle}
-              maxLength={200}
-            />
-          </Field>
-
-          <Field
-            label={t("devices.fields.driver", { defaultValue: "Driver" })}
-            hint={t("devices.hints.driver", {
-              defaultValue: "Terminal vendor / integration protocol.",
-            })}
-          >
-            <select
-              value={driver}
-              onChange={(e) => setDriver(e.target.value as DeviceDriver)}
-              style={inputStyle}
+              htmlFor="dv-edit-location"
             >
-              {DRIVER_OPTIONS.map((d) => (
-                <option key={d.value} value={d.value}>
-                  {d.label}
-                </option>
-              ))}
-            </select>
-          </Field>
+              <input
+                id="dv-edit-location"
+                className="input"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                placeholder={t("devices.placeholders.location", {
+                  defaultValue: "e.g. Head Office",
+                })}
+                maxLength={200}
+              />
+            </Field>
 
-          <div
-            style={{
-              padding: "10px 12px",
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius-sm)",
-            }}
+            {/* Learned from the first event — read-only when we have it. */}
+            {initial.serial_number && (
+              <Field
+                label={t("devices.fields.serial", {
+                  defaultValue: "Serial number",
+                })}
+                span={2}
+                help={t("devices.hints.serial", {
+                  defaultValue: "Reported by the terminal itself — read-only.",
+                })}
+              >
+                <div className="dv-readonly">{initial.serial_number}</div>
+              </Field>
+            )}
+          </FormSection>
+
+          <FormSection
+            step={2}
+            title={t("devices.sections.integration", { defaultValue: "Integration" })}
+            description={t("devices.wizard.integrationHelp", {
+              defaultValue: "Which kind of terminal this is and whether to accept its events.",
+            })}
           >
-            <ToggleRow
+            <Field
+              label={t("devices.fields.driver", { defaultValue: "Driver" })}
+              htmlFor="dv-edit-driver"
+              span={2}
+              help={t("devices.hints.driver", {
+                defaultValue: "Terminal vendor / integration protocol.",
+              })}
+            >
+              <select
+                id="dv-edit-driver"
+                className="select"
+                value={driver}
+                onChange={(e) => setDriver(e.target.value as DeviceDriver)}
+              >
+                {DRIVER_OPTIONS.map((d) => (
+                  <option key={d.value} value={d.value}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <SwitchField
+              id="dv-edit-enabled"
               checked={enabled}
               onChange={setEnabled}
               label={t("devices.fields.enabled", { defaultValue: "Enabled" })}
-              hint={t("devices.hints.enabled", {
+              description={t("devices.hints.enabled", {
                 defaultValue: "Accept events from this terminal.",
               })}
             />
-          </div>
-
-          {error && (
-            <div
-              role="alert"
-              style={{
-                background: "var(--danger-soft)",
-                color: "var(--danger-text)",
-                padding: "8px 10px",
-                borderRadius: "var(--radius-sm)",
-                fontSize: 12.5,
-              }}
-            >
-              {error}
-            </div>
-          )}
+          </FormSection>
         </div>
 
-        <div className="drawer-foot">
-          <button className="btn" onClick={onClose} disabled={submitting}>
-            {t("common.cancel")}
-          </button>
-          <button
-            className="btn btn-primary"
-            onClick={submit}
-            disabled={submitting || !name.trim()}
-          >
-            <Icon name="check" size={12} />
-            {submitting ? t("common.saving") : t("common.save")}
-          </button>
-        </div>
-      </div>
+        <FormFooter
+          onCancel={onClose}
+          submitLabel={t("common.save", { defaultValue: "Save changes" })}
+          submitting={submitting}
+          submittingLabel={t("common.saving")}
+          canSubmit={!!name.trim()}
+        />
+      </form>
     </DrawerShell>
   );
 }
-
-function ToggleRow({
-  checked,
-  onChange,
-  label,
-  hint,
-  disabled = false,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  label: string;
-  hint?: string;
-  disabled?: boolean;
-}) {
-  return (
-    <label
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: 2,
-        cursor: disabled ? "not-allowed" : "pointer",
-        opacity: disabled ? 0.55 : 1,
-      }}
-    >
-      <span
-        style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}
-      >
-        <input
-          type="checkbox"
-          checked={checked}
-          disabled={disabled}
-          onChange={(e) => onChange(e.target.checked)}
-        />
-        {label}
-      </span>
-      {hint && (
-        <span className="text-xs text-dim" style={{ marginInlineStart: 22 }}>
-          {hint}
-        </span>
-      )}
-    </label>
-  );
-}
-
-function Field({
-  label,
-  hint,
-  required,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  required?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <span
-        style={{
-          fontSize: 11,
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-          color: "var(--text-tertiary)",
-          display: "flex",
-          alignItems: "center",
-          gap: 3,
-        }}
-      >
-        {label}
-        {required && (
-          <span
-            aria-hidden
-            style={{
-              color: "var(--danger-text)",
-              fontWeight: 700,
-              fontSize: 13,
-              lineHeight: 1,
-            }}
-          >
-            *
-          </span>
-        )}
-      </span>
-      {children}
-      {hint && <span className="text-xs text-dim">{hint}</span>}
-    </label>
-  );
-}
-
-const inputStyle: React.CSSProperties = {
-  padding: "8px 10px",
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius-sm)",
-  background: "var(--bg)",
-  color: "var(--text)",
-  fontSize: 13,
-  width: "100%",
-};

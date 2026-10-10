@@ -1,0 +1,2 @@
+/* ERP export settings form (prefix erp-). */
+.erp-form { display: flex; flex-direction: column; gap: 24px; }

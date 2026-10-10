@@ -364,6 +364,7 @@ def _row_to_out(row: repo.EmployeeRow) -> EmployeeOut:
         ),
         status=row.status,  # type: ignore[arg-type]  -- DB CHECK limits to active|inactive|deleted (P25)
         photo_count=row.photo_count,
+        primary_photo_id=row.primary_photo_id,
         created_at=row.created_at,
         designation=row.designation,
         phone=row.phone,
@@ -3560,6 +3561,52 @@ def get_photo_image_endpoint(
         raise HTTPException(status_code=500, detail="could not read photo") from exc
 
     return Response(content=plain, media_type="image/jpeg")
+
+
+# Longest edge of a list-avatar thumbnail, in pixels (renders at 28–40
+# CSS px, so 96 stays sharp on 2x screens).
+_THUMB_MAX_PX = 96
+
+
+@router.get("/{employee_id}/photos/{photo_id}/thumb")
+def get_photo_thumb_endpoint(
+    employee_id: int,
+    photo_id: int,
+    user: Annotated[CurrentUser, ADMIN_HR_MANAGER],
+) -> Response:
+    """Small avatar thumbnail for list views.
+
+    Same gates as the full image (auth, tenant scope, Manager scope,
+    404 on cross-tenant / unknown ids) but deliberately **not**
+    audit-logged per view: the employees list renders up to 50 of these
+    per page, which would flood the append-only audit log. Viewing the
+    full-size photo (``/image``) stays audited as before. Product
+    decision, Oct 2026.
+    """
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    with get_engine().begin() as conn:
+        _assert_manager_can_view(user, conn, scope, employee_id)
+        row = photos_io.get_photo(
+            conn, scope, photo_id=photo_id, employee_id=employee_id
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail="photo not found")
+
+    try:
+        plain = photos_io.read_decrypted(row.file_path)
+    except (FileNotFoundError, RuntimeError) as exc:
+        logger.warning("photo thumb read failed for id=%s: %s", photo_id, exc)
+        raise HTTPException(status_code=500, detail="could not read photo") from exc
+
+    thumb = photos_io.make_thumbnail(plain, max_px=_THUMB_MAX_PX)
+    return Response(
+        content=thumb,
+        media_type="image/jpeg",
+        # Private: per-user, never shared caches. Short lifetime so a
+        # replaced photo shows up promptly.
+        headers={"Cache-Control": "private, max-age=300"},
+    )
 
 
 @router.delete(

@@ -9,6 +9,9 @@ import { useNavigate } from "react-router-dom";
 import { z } from "zod";
 
 import { ApiError } from "../api/client";
+import { Panel } from "../features/dashboard/DashUi";
+import { Icon } from "../shell/Icon";
+import "./sa.css";
 import { useProvisionTenant } from "./SuperAdminProvider";
 
 const provisionSchema = z.object({
@@ -99,87 +102,78 @@ export function ProvisionTenantPage() {
 
   return (
     <div>
-      <h1 style={{ fontFamily: "var(--font-display)", fontSize: 28, margin: "0 0 16px 0", fontWeight: 400 }}>
-        Provision tenant
-      </h1>
-      <p style={{ color: "var(--text-secondary)", fontSize: 13, marginBottom: 16 }}>
-        Creates the schema, materialises every per-tenant table, seeds default
-        roles, departments, and shift policy, and creates the first Admin
-        user. Audited as <code>super_admin.tenant.provisioned</code>.
-      </p>
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Provision tenant</h1>
+          <p className="page-sub">Create a new organisation with its own isolated schema and first Admin account.</p>
+        </div>
+      </div>
 
-      <form
-        onSubmit={onSubmit}
-        noValidate
-        style={{
-          background: "var(--bg-elev)",
-          border: "1px solid var(--border)",
-          borderRadius: "var(--radius-md)",
-          padding: 20,
-          display: "flex",
-          flexDirection: "column",
-          gap: 14,
-          maxWidth: 540,
-        }}
-      >
+      <div className="sa-provision">
+      <Panel title="Tenant details" sub="All fields except the Admin's full name are required">
+      <form onSubmit={onSubmit} noValidate className="sa-form">
         <Field label="Schema slug" hint="e.g. tenant_acme  •  lowercase, digits, underscores; no hyphens, no spaces" error={errors.slug?.message}>
-          <input type="text" autoComplete="off" {...register("slug")} style={inputStyle} />
+          <input type="text" autoComplete="off" className="input" {...register("slug")} />
         </Field>
         <Field label="Display name" hint="e.g. Acme Corp" error={errors.name?.message}>
-          <input type="text" autoComplete="off" {...register("name")} style={inputStyle} />
+          <input type="text" autoComplete="off" className="input" {...register("name")} />
         </Field>
         <Field label="Admin email" error={errors.admin_email?.message}>
-          <input type="email" autoComplete="off" {...register("admin_email")} style={inputStyle} />
+          <input type="email" autoComplete="off" className="input" {...register("admin_email")} />
         </Field>
         <Field label="Admin full name (optional)" error={errors.admin_full_name?.message}>
-          <input type="text" autoComplete="off" {...register("admin_full_name")} style={inputStyle} />
+          <input type="text" autoComplete="off" className="input" {...register("admin_full_name")} />
         </Field>
         <Field
           label="Admin password"
           hint="Minimum 8 characters. Stored as Argon2id; never logged."
           error={errors.admin_password?.message}
         >
-          <input
-            type="password"
-            autoComplete="new-password"
-            {...register("admin_password")}
-            style={inputStyle}
-          />
+          <input type="password" className="input" autoComplete="new-password" {...register("admin_password")} />
         </Field>
 
         {serverError && (
-          <div
-            role="alert"
-            style={{
-              background: "var(--danger-soft)",
-              color: "var(--danger-text)",
-              border: "1px solid var(--border)",
-              padding: "8px 10px",
-              borderRadius: "var(--radius-sm)",
-              fontSize: 12.5,
-            }}
-          >
+          <div role="alert" className="sa-alert">
             {serverError}
           </div>
         )}
 
-        <button
-          type="submit"
-          disabled={isSubmitting || provision.isPending}
-          style={{
-            justifyContent: "center",
-            background: "#c0392b",
-            color: "white",
-            border: "none",
-            padding: "8px 14px",
-            borderRadius: "var(--radius-sm)",
-            cursor: "pointer",
-            fontWeight: 600,
-          }}
-        >
-          {isSubmitting || provision.isPending ? "Provisioning…" : "Provision tenant"}
-        </button>
+        <div className="sa-form-foot">
+          <button type="button" className="btn" onClick={() => navigate("/super-admin/tenants")}>
+            Cancel
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={isSubmitting || provision.isPending}>
+            {isSubmitting || provision.isPending ? "Provisioning…" : "Provision tenant"}
+          </button>
+        </div>
       </form>
+      </Panel>
+
+      <Panel title="What happens" sub="Runs in one transaction — any failure rolls everything back">
+        <ol className="sa-steps">
+          {[
+            "Creates the tenant's Postgres schema and registers it in the tenant registry.",
+            "Materialises every per-tenant table at the current migration head.",
+            "Seeds the default roles, departments and shift policy.",
+            "Creates the first Admin user with the password you set.",
+          ].map((step, i) => (
+            <li key={i} className="sa-step">
+              <span aria-hidden className="sa-step-n">
+                {i + 1}
+              </span>
+              <span>{step}</span>
+            </li>
+          ))}
+        </ol>
+        <div className="sa-note">
+          <Icon name="shield" size={13} />
+          <span>
+            Audited as <code className="sa-code">super_admin.tenant.provisioned</code>. The password is stored as Argon2id and never
+            logged.
+          </span>
+        </div>
+      </Panel>
+      </div>
     </div>
   );
 }
@@ -196,31 +190,11 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <span
-        style={{
-          fontSize: 11,
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-          color: "var(--text-tertiary)",
-        }}
-      >
-        {label}
-      </span>
+    <label className="field">
+      <span className="field-label">{label}</span>
       {children}
-      {hint && <span style={{ fontSize: 11.5, color: "var(--text-tertiary)" }}>{hint}</span>}
-      {error && <span style={{ color: "var(--danger-text)", fontSize: 11.5 }}>{error}</span>}
+      {hint && <span className="field-help">{hint}</span>}
+      {error && <span className="sa-field-error">{error}</span>}
     </label>
   );
 }
-
-const inputStyle = {
-  padding: "8px 10px",
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius-sm)",
-  fontSize: 13,
-  background: "var(--bg)",
-  color: "var(--text)",
-  fontFamily: "var(--font-sans)",
-  outline: "none",
-} as const;

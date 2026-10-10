@@ -1,0 +1,183 @@
+/* Topbar user menu + sign-out confirmation (shell-level CSS, same
+ * precedent as transitions.css / sidebar-rail.css). Tokens come from
+ * theme/modern.css; logical properties so RTL mirrors for free. */
+
+.um-trigger {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--bg-elev);
+  background: linear-gradient(135deg, color-mix(in oklab, var(--accent) 70%, white), var(--accent));
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  box-shadow: 0 0 0 1.5px var(--accent-border), var(--shadow-xs);
+  transition: box-shadow var(--dur-fast) ease, transform var(--dur-fast) var(--ease-out);
+}
+.um-trigger:hover { box-shadow: 0 0 0 2px var(--accent), var(--shadow-sm); }
+.um-trigger[aria-expanded="true"] { box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 35%, transparent); }
+
+.um-panel {
+  width: 300px;
+  overflow-y: auto;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-lg);
+  transform-origin: top right;
+  animation: mg-pop-in 160ms var(--ease-out) both;
+}
+[dir="rtl"] .um-panel { transform-origin: top left; }
+
+.um-head { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.um-head-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.um-eyebrow {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.um-role {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  border: 1px solid color-mix(in oklab, var(--accent) 24%, transparent);
+}
+.um-role-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.um-identity { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.um-avatar {
+  width: 42px;
+  height: 42px;
+  flex: none;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--text);
+  color: var(--bg-elev);
+  font-size: 14px;
+  font-weight: 700;
+}
+.um-identity-text { display: flex; flex-direction: column; min-width: 0; }
+.um-name { font-size: 14px; font-weight: 700; color: var(--text); line-height: 1.3; }
+.um-email {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.um-section { padding: 6px; }
+.um-section + .um-section { border-top: 1px solid var(--border); }
+.um-section-label {
+  padding: 6px 10px 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-quaternary);
+}
+.um-item {
+  appearance: none;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: start;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
+}
+.um-item svg { color: var(--text-tertiary); flex: none; transition: color var(--dur-fast) ease; }
+.um-item:hover:not(:disabled), .um-item:focus-visible { background: var(--bg-hover); color: var(--text); }
+.um-item:hover:not(:disabled) svg { color: var(--text-secondary); }
+.um-item:disabled { cursor: wait; opacity: 0.6; }
+.um-item-label { flex: 1; min-width: 0; }
+.um-item-meta { font-size: 11px; color: var(--text-tertiary); }
+.um-item-chev { display: inline-flex; color: var(--text-quaternary); }
+[dir="rtl"] .um-item-chev { transform: scaleX(-1); }
+.um-item.is-current { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
+.um-item.is-current svg { color: var(--accent); }
+.um-item.is-danger { color: var(--danger-text); }
+.um-item.is-danger svg { color: var(--danger-text); }
+.um-item.is-danger:hover:not(:disabled) { background: var(--danger-soft); color: var(--danger-text); }
+.um-item.is-danger:hover:not(:disabled) svg { color: var(--danger-text); }
+.um-error { padding: 4px 10px 6px; font-size: 11.5px; color: var(--danger-text); }
+
+/* ---- Sign-out confirmation ------------------------------------------ */
+.um-modal-host {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  pointer-events: none;
+}
+.um-signout {
+  pointer-events: auto;
+  position: relative;
+  width: min(420px, 100%);
+  padding: 32px 28px 26px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.um-signout-x { position: absolute; top: 14px; inset-inline-end: 14px; }
+.um-signout-mark { width: 44px; height: 44px; object-fit: contain; margin-bottom: 14px; }
+.um-signout-title {
+  margin: 0 0 8px;
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+.um-signout-body { margin: 0; max-width: 320px; font-size: 13.5px; line-height: 1.6; color: var(--text-secondary); }
+.um-signout-note {
+  width: 100%;
+  margin-top: 18px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--warning-soft);
+  border: 1px solid color-mix(in oklab, var(--warning) 28%, transparent);
+  color: var(--warning-text);
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-align: start;
+}
+.um-signout-note svg { flex: none; margin-top: 2px; }
+.um-signout-actions {
+  width: 100%;
+  margin-top: 20px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.um-signout-actions .btn { height: 42px; font-size: 13.5px; }

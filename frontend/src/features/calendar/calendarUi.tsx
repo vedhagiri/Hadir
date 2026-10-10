@@ -8,6 +8,7 @@ import { useTranslation } from "react-i18next";
 
 import { Icon } from "../../shell/Icon";
 import type { Employee } from "../employees/types";
+import "../cameras/coreUi";
 
 export type SummaryKey = "present" | "late" | "absent" | "leave" | "holiday" | "weekend";
 
@@ -18,12 +19,10 @@ export const TONE: Record<SummaryKey, { fg: string; soft: string; dot: string }>
   late: { fg: "var(--warning-text)", soft: "var(--warning-soft)", dot: "var(--warning)" },
   absent: { fg: "var(--danger-text)", soft: "var(--danger-soft)", dot: "var(--danger)" },
   leave: { fg: "var(--info-text)", soft: "var(--info-soft)", dot: "var(--info)" },
-  holiday: { fg: "#7e3fd1", soft: "#f3ebff", dot: "#9b5cf0" },
+  holiday: { fg: "var(--co-holiday-fg)", soft: "var(--co-holiday-soft)", dot: "var(--co-holiday-dot)" },
   weekend: { fg: "var(--text-secondary)", soft: "var(--bg-sunken)", dot: "var(--info-soft)" },
 };
 
-/** Light-blue tint used for weekend cells (matches the approved mock). */
-export const WEEKEND_CELL_BG = "color-mix(in oklab, var(--info-soft) 70%, var(--bg-elev))";
 
 // ---------------------------------------------------------------------------
 // Month navigator: ‹  [ 📅 October 2026 ]  ›   (native month input inside)
@@ -151,16 +150,7 @@ export function SummaryStrip({
   const { t } = useTranslation();
   const keys: SummaryKey[] = ["present", "late", "absent", "leave", "holiday", "weekend"];
   return (
-    <div
-      className="card"
-      style={{
-        padding: 12,
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-        gap: 10,
-        marginBottom: 16,
-      }}
-    >
+    <div className="card co-summary">
       {keys.map((k) => {
         const tone = TONE[k];
         const prev = previous?.[k];
@@ -169,52 +159,25 @@ export function SummaryStrip({
         const change =
           prev === undefined ? null : prev === 0 ? (counts[k] === 0 ? 0 : null) : Math.round(((counts[k] - prev) / prev) * 100);
         return (
-          <div
-            key={k}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              padding: "12px 14px",
-              borderRadius: 12,
-              background: `color-mix(in oklab, ${tone.soft} 55%, var(--bg-elev))`,
-            }}
-          >
+          <div key={k} className="co-summary-tile">
             <span
               aria-hidden
-              style={{
-                width: 42,
-                height: 42,
-                flex: "0 0 42px",
-                borderRadius: 11,
-                display: "grid",
-                placeItems: "center",
-                background: tone.soft,
-                color: k === "weekend" ? "var(--text-secondary)" : tone.fg,
-              }}
+              className="co-summary-icon"
+              style={{ background: tone.soft, color: k === "weekend" ? "var(--text-secondary)" : tone.fg }}
             >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 {ICON_PATHS[k]}
               </svg>
             </span>
             <div style={{ minWidth: 0, flex: 1 }}>
-              <div className="mono" style={{ fontSize: 22, fontWeight: 700, lineHeight: 1.1, color: k === "leave" ? tone.fg : "var(--text)" }}>
-                {counts[k]}
-              </div>
-              <div style={{ fontSize: 12.5, color: "var(--text-secondary)" }}>
-                {t(`calendar.status.${k}`) as string}
-              </div>
+              <div className="co-summary-value">{counts[k]}</div>
+              <div className="co-summary-label">{t(`calendar.status.${k}`) as string}</div>
             </div>
             {change !== null && (
               <span
-                className="mono"
+                className="co-summary-delta"
                 title={t("calendar.vsPrevMonth", { defaultValue: "Change vs previous month" }) as string}
-                style={{
-                  fontSize: 12.5,
-                  fontWeight: 700,
-                  color: change === 0 ? "var(--text-tertiary)" : k === "weekend" ? "var(--text-secondary)" : tone.fg,
-                  whiteSpace: "nowrap",
-                }}
+                style={{ color: change === 0 ? "var(--text-tertiary)" : k === "weekend" ? "var(--text-secondary)" : tone.fg }}
               >
                 {change > 0 ? "↗ " : change < 0 ? "↘ " : ""}
                 {Math.abs(change)}%
@@ -231,37 +194,22 @@ export function SummaryStrip({
 // Legend + small pieces
 // ---------------------------------------------------------------------------
 
-export function Legend() {
+export function Legend({ hint }: { hint?: string }) {
   const { t } = useTranslation();
   const keys: SummaryKey[] = ["present", "late", "absent", "leave", "holiday", "weekend"];
   return (
-    <div
-      style={{
-        display: "flex",
-        flexWrap: "wrap",
-        gap: 22,
-        marginTop: 16,
-        paddingTop: 14,
-        borderTop: "1px solid var(--border)",
-        fontSize: 12.5,
-        color: "var(--text-secondary)",
-      }}
-    >
+    <div className="cal-legend">
       {keys.map((k) => (
-        <span key={k} style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+        <span key={k} className="co-cal-legend-item">
           <span
             aria-hidden
-            style={{
-              width: 12,
-              height: 12,
-              borderRadius: "50%",
-              background: TONE[k].dot,
-              border: k === "weekend" ? "1px solid var(--border)" : "none",
-            }}
+            className="dot"
+            style={{ background: TONE[k].dot, border: k === "weekend" ? "1px solid var(--border)" : "none" }}
           />
           {t(`calendar.status.${k}`) as string}
         </span>
       ))}
+      {hint && <span className="co-cal-hint">{hint}</span>}
     </div>
   );
 }
@@ -278,20 +226,7 @@ export function Dot({ color }: { color: string }) {
 export function WeekendPill() {
   const { t } = useTranslation();
   return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 5,
-        padding: "2px 8px",
-        fontSize: 11,
-        fontWeight: 600,
-        borderRadius: 6,
-        background: "var(--bg-elev)",
-        color: "var(--info-text)",
-        border: "1px solid color-mix(in oklab, var(--info) 45%, transparent)",
-      }}
-    >
+    <span className="co-cal-pill tone-weekend">
       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden>
         <circle cx="12" cy="12" r="9" />
         <circle cx="12" cy="12" r="3" fill="currentColor" />
@@ -301,23 +236,12 @@ export function WeekendPill() {
   );
 }
 
+export function HolidayPill({ children }: { children: ReactNode }) {
+  return <span className="co-cal-pill tone-holiday">{children}</span>;
+}
+
 export function GreyPill({ children }: { children: ReactNode }) {
-  return (
-    <span
-      style={{
-        display: "inline-block",
-        padding: "2px 8px",
-        fontSize: 11,
-        fontWeight: 500,
-        borderRadius: 6,
-        background: "var(--bg-sunken)",
-        color: "var(--text-secondary)",
-        border: "1px solid var(--border)",
-      }}
-    >
-      {children}
-    </span>
-  );
+  return <span className="co-cal-pill">{children}</span>;
 }
 
 export const DOW_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
@@ -325,21 +249,48 @@ export const DOW_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as con
 export function DowHeader() {
   const { t } = useTranslation();
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(7, 1fr)",
-        gap: 6,
-        marginBottom: 6,
-        background: "var(--bg-sunken)",
-        borderRadius: 8,
-      }}
-    >
+    <div className="co-cal-dow-row">
       {DOW_KEYS.map((k) => (
-        <div key={k} style={{ textAlign: "center", padding: "8px 0", fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+        <div key={k} className="cal-dow">
           {t(`calendar.dow.${k}`) as string}
         </div>
       ))}
+    </div>
+  );
+}
+
+/** Leading blank cells before the 1st of the month. */
+export function PadCells({ count }: { count: number }) {
+  return (
+    <>
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={`pad-${i}`} aria-hidden className="cal-day is-pad" />
+      ))}
+    </>
+  );
+}
+
+/** Inline empty message for a month with no attendance records at all
+ *  — replaces the all-grey grid (brief addendum). */
+export function EmptyMonth({ month }: { month: string }) {
+  const { t, i18n } = useTranslation();
+  const label = new Date(`${month}-01T00:00:00`).toLocaleDateString(
+    i18n.language === "ar" ? "ar-OM" : "en-GB",
+    { month: "long", year: "numeric" },
+  );
+  return (
+    <div className="co-cal-empty" role="status">
+      <span aria-hidden className="co-cal-empty-icon">
+        <Icon name="calendar" size={18} />
+      </span>
+      <div>
+        <div className="co-cal-empty-title">
+          {t("calendar.emptyMonthTitle", { month: label, defaultValue: "No attendance recorded for {{month}}" }) as string}
+        </div>
+        <div className="co-cal-empty-body">
+          {t("calendar.emptyMonthBody", { defaultValue: "Days fill in as cameras and terminals report presence. Use the month navigator to look at another month." }) as string}
+        </div>
+      </div>
     </div>
   );
 }
@@ -371,80 +322,39 @@ export function ProfileHeader({
   if (dept) facts.push({ icon: <BuildingIcon />, value: dept, label: t("calendar.profile.department", { defaultValue: "Department" }) as string });
 
   return (
-    <div
-      className="card"
-      style={{ padding: "16px 20px", display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap", marginBottom: 20 }}
-    >
-      <div
-        aria-hidden
-        style={{
-          width: 64,
-          height: 64,
-          borderRadius: "50%",
-          background: avatarBg(fullName),
-          color: "#fff",
-          display: "grid",
-          placeItems: "center",
-          fontSize: 22,
-          fontWeight: 700,
-          flex: "0 0 64px",
-        }}
-      >
+    <div className="card co-profile">
+      <div aria-hidden className="co-profile-avatar" style={{ background: avatarBg(fullName) }}>
         {initials(fullName)}
       </div>
-      <div style={{ flex: "1 1 240px", minWidth: 0 }}>
+      <div className="co-profile-main">
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 22, fontWeight: 700, color: "var(--text)" }}>{fullName}</span>
-          <span
-            style={{
-              fontSize: 12,
-              fontWeight: 600,
-              padding: "2px 10px",
-              borderRadius: 6,
-              background: active ? "var(--success-soft)" : "var(--bg-sunken)",
-              color: active ? "var(--success-text)" : "var(--text-secondary)",
-            }}
-          >
+          <span className="co-profile-name">{fullName}</span>
+          <span className={`pill ${active ? "pill-success" : "pill-neutral"}`}>
             {active ? (t("calendar.profile.active", { defaultValue: "Active" }) as string) : (t("calendar.profile.inactive", { defaultValue: "Inactive" }) as string)}
           </span>
         </div>
-        <div className="text-sm" style={{ color: "var(--text-secondary)", marginTop: 4, display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <div className="co-profile-sub">
           <span className="mono">{employeeCode}</span>
           {employee?.designation && (
             <>
-              <span aria-hidden style={{ color: "var(--border)" }}>|</span>
+              <span aria-hidden className="co-profile-sep">|</span>
               <span>{employee.designation}</span>
             </>
           )}
           {dept && (
             <>
-              <span aria-hidden style={{ color: "var(--border)" }}>|</span>
+              <span aria-hidden className="co-profile-sep">|</span>
               <span>{dept}</span>
             </>
           )}
         </div>
       </div>
       {facts.map((f, i) => (
-        <div
-          key={i}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            paddingInlineStart: 18,
-            borderInlineStart: "1px solid var(--border)",
-            minWidth: 0,
-          }}
-        >
-          <span
-            aria-hidden
-            style={{ width: 38, height: 38, borderRadius: 10, background: "var(--info-soft)", color: "var(--info-text)", display: "grid", placeItems: "center" }}
-          >
-            {f.icon}
-          </span>
+        <div key={i} className="co-profile-fact">
+          <span aria-hidden className="co-profile-fact-icon">{f.icon}</span>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 600, fontSize: 13.5, color: "var(--text)", overflowWrap: "anywhere" }}>{f.value}</div>
-            <div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>{f.label}</div>
+            <div className="co-profile-fact-value">{f.value}</div>
+            <div className="co-profile-fact-label">{f.label}</div>
           </div>
         </div>
       ))}
@@ -477,7 +387,8 @@ export function initials(fullName: string): string {
 }
 
 export function avatarBg(fullName: string): string {
-  const palette = ["#f59e0b", "#f97316", "#8b5cf6", "#2563eb", "#06b6d4", "#0ea5e9", "#1d4ed8", "#ef4444", "#10b981", "#7c3aed"];
+  // Hue wheel in OKLCH so every avatar sits at the same lightness/chroma.
+  const palette = [40, 70, 300, 255, 200, 230, 265, 25, 160, 290].map((h) => `oklch(0.62 0.16 ${h})`);
   let hash = 0;
   for (let i = 0; i < fullName.length; i++) hash = (hash * 31 + fullName.charCodeAt(i)) >>> 0;
   return palette[hash % palette.length] as string;

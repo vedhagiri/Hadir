@@ -15,6 +15,7 @@ import { extractApiError } from "../../api/client";
 import { ModalShell } from "../../components/DrawerShell";
 import { Icon } from "../../shell/Icon";
 import { useSoftDeleteEmployee, useSubmitDeleteRequest } from "./hooks";
+import { Banner } from "./peopleUi";
 import type { Employee } from "./types";
 
 interface Props {
@@ -67,186 +68,116 @@ export function DeleteConfirmModal({ employee, onClose, onSubmitted }: Props) {
 
   return (
     <ModalShell onClose={onClose}>
-      <div
-        // Fullscreen wrapper centers the modal card via grid. More
-        // robust than top:50%/transform:translate against parent
-        // stacking contexts; also gives us a backdrop-click target
-        // outside the card.
-        style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 60,
-          display: "grid",
-          placeItems: "center",
-          padding: 16,
-        }}
-        // Backdrop is presentation-only — close via the Cancel
-        // button. Operator-policy red line; see DrawerShell.
-      >
-      <div
-        role="dialog"
-        aria-modal="true"
-        style={{
-          background: "var(--bg-elev)",
-          border: "1px solid var(--border)",
-          borderRadius: "var(--radius)",
-          boxShadow: "var(--shadow-lg)",
-          width: 460,
-          maxWidth: "calc(100vw - 32px)",
-          padding: 18,
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            marginBottom: 12,
-          }}
-        >
-          <div
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: "50%",
-              background: "var(--danger-soft)",
-              display: "grid",
-              placeItems: "center",
-              color: "var(--danger-text)",
-            }}
-          >
-            <Icon name="trash" size={14} />
-          </div>
-          <div style={{ fontSize: 15, fontWeight: 600 }}>
-            {mode === "deactivate"
-              ? `Delete ${employee.full_name}?`
-              : `Permanently delete ${employee.full_name}?`}
+      {/* Backdrop is presentation-only — close via the Cancel
+          button. Operator-policy red line; see DrawerShell. */}
+      <div role="dialog" aria-modal="true" className="modal pp-modal">
+        <div className="modal-head pp-modal-head">
+          <span aria-hidden className="pp-modal-icon tone-danger">
+            <Icon name="trash" size={15} />
+          </span>
+          <div className="pp-modal-head-text">
+            <h2 className="modal-title">
+              {mode === "deactivate"
+                ? (t("employees.delete.titleDeactivate", {
+                    defaultValue: "Delete {{name}}?",
+                    name: employee.full_name,
+                  }) as string)
+                : (t("employees.delete.titlePermanent", {
+                    defaultValue: "Permanently delete {{name}}?",
+                    name: employee.full_name,
+                  }) as string)}
+            </h2>
           </div>
         </div>
 
-        {/* Mode picker — two radio cards so the operator picks
-            deliberately between reversible and permanent. */}
-        <div
-          role="radiogroup"
-          aria-label="Delete mode"
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: 8,
-            marginBottom: 14,
-          }}
-        >
-          <ModeCard
-            checked={mode === "deactivate"}
-            onSelect={() => setMode("deactivate")}
-            title="Deactivate"
-            sub="Sets status to Inactive. Reversible — can be reactivated."
-            recommended
-          />
-          <ModeCard
-            checked={mode === "permanent"}
-            onSelect={() => setMode("permanent")}
-            title="Permanent"
-            sub="Submits a delete request that purges photos + history after approval."
-            danger
-          />
-        </div>
-
-        {mode === "deactivate" ? (
+        <div className="modal-body">
+          {/* Mode picker — two radio cards so the operator picks
+              deliberately between reversible and permanent. */}
           <div
-            className="text-sm text-dim"
-            style={{
-              padding: "10px 12px",
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius-sm)",
-              background: "var(--bg)",
-              marginBottom: 4,
-            }}
+            role="radiogroup"
+            aria-label={t("employees.delete.modeLabel", { defaultValue: "Delete mode" }) as string}
+            className="pp-mode-grid"
           >
-            The employee row will be marked <strong>Inactive</strong>{" "}
-            immediately. Their attendance + clip history is preserved
-            and they can be reactivated from the Inactive tab.
-          </div>
-        ) : (
-          <>
-            <label
-              className="text-xs"
-              style={{ fontWeight: 500, color: "var(--text-secondary)" }}
-            >
-              {t("employees.delete.reasonLabel") as string}{" "}
-              <span style={{ color: "var(--text-tertiary, var(--text-secondary))" }}>
-                (optional)
-              </span>
-            </label>
-            <textarea
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              rows={3}
-              maxLength={500}
-              placeholder="Optional — add context for the audit trail (max 500 chars)."
-              style={{
-                width: "100%",
-                marginTop: 4,
-                padding: 8,
-                fontSize: 13,
-                border: "1px solid var(--border)",
-                borderRadius: "var(--radius-sm)",
-                background: "var(--bg-elev)",
-                color: "var(--text)",
-              }}
+            <ModeCard
+              checked={mode === "deactivate"}
+              onSelect={() => setMode("deactivate")}
+              title={t("employees.delete.modeDeactivate", { defaultValue: "Deactivate" }) as string}
+              sub={t("employees.delete.modeDeactivateSub", {
+                defaultValue: "Sets status to Inactive. Reversible — can be reactivated.",
+              }) as string}
+              recommended={t("employees.delete.recommended", { defaultValue: "Recommended" }) as string}
             />
-            <div className="text-xs text-dim" style={{ marginTop: 4 }}>
-              The reason is recorded in the audit log if provided.
-            </div>
-          </>
-        )}
-
-        {error && (
-          <div
-            style={{
-              background: "var(--danger-soft)",
-              color: "var(--danger-text)",
-              padding: "6px 8px",
-              borderRadius: "var(--radius-sm)",
-              fontSize: 12,
-              marginTop: 10,
-            }}
-          >
-            {error}
+            <ModeCard
+              checked={mode === "permanent"}
+              onSelect={() => setMode("permanent")}
+              title={t("employees.delete.modePermanent", { defaultValue: "Permanent" }) as string}
+              sub={t("employees.delete.modePermanentSub", {
+                defaultValue: "Submits a delete request that purges photos + history after approval.",
+              }) as string}
+              danger
+            />
           </div>
-        )}
 
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "flex-end",
-            gap: 8,
-            marginTop: 16,
-          }}
-        >
+          {mode === "deactivate" ? (
+            <Banner>
+              {t("employees.delete.deactivateBody", {
+                defaultValue:
+                  "The employee row will be marked Inactive immediately. Their attendance + clip history is preserved and they can be reactivated from the Inactive filter.",
+              }) as string}
+            </Banner>
+          ) : (
+            <div className="field">
+              <label className="field-label" htmlFor="pp-delete-reason">
+                {t("employees.delete.reasonLabel") as string}{" "}
+                <span className="text-dim">({t("common.optional", { defaultValue: "optional" }) as string})</span>
+              </label>
+              <textarea
+                id="pp-delete-reason"
+                className="textarea"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                rows={3}
+                maxLength={500}
+                placeholder={t("employees.delete.reasonPlaceholder", {
+                  defaultValue: "Optional — add context for the audit trail (max 500 chars).",
+                }) as string}
+              />
+              <div className="field-help">
+                {t("employees.delete.reasonHint", {
+                  defaultValue: "The reason is recorded in the audit log if provided.",
+                }) as string}
+              </div>
+            </div>
+          )}
+
+          {error && (
+            <div style={{ marginTop: 12 }}>
+              <Banner tone="danger" role="alert" title={error} />
+            </div>
+          )}
+        </div>
+
+        <div className="modal-foot">
           <button type="button" className="btn" onClick={onClose} disabled={busy}>
             {t("common.cancel") as string}
           </button>
           <button
             type="button"
-            className="btn btn-primary"
-            style={{ background: "var(--danger)", color: "white" }}
+            className="btn btn-danger"
             onClick={() => void onSubmit()}
             disabled={busy}
           >
             {busy
-              ? "Working…"
+              ? (t("employees.delete.working", { defaultValue: "Working…" }) as string)
               : mode === "deactivate"
-                ? "Deactivate now"
-                : "Submit delete request"}
+                ? (t("employees.delete.deactivateNow", { defaultValue: "Deactivate now" }) as string)
+                : (t("employees.delete.submitRequest", { defaultValue: "Submit delete request" }) as string)}
           </button>
         </div>
-      </div>
       </div>
     </ModalShell>
   );
 }
-
 
 function ModeCard({
   checked,
@@ -260,7 +191,7 @@ function ModeCard({
   onSelect: () => void;
   title: string;
   sub: string;
-  recommended?: boolean;
+  recommended?: string;
   danger?: boolean;
 }) {
   return (
@@ -269,60 +200,13 @@ function ModeCard({
       onClick={onSelect}
       role="radio"
       aria-checked={checked}
-      style={{
-        textAlign: "start",
-        padding: "10px 12px",
-        border: checked
-          ? `2px solid ${danger ? "var(--danger)" : "var(--accent, #0b6e4f)"}`
-          : "1px solid var(--border)",
-        borderRadius: "var(--radius-sm)",
-        background: checked
-          ? danger
-            ? "var(--danger-soft)"
-            : "var(--accent-soft, rgba(11,110,79,0.10))"
-          : "var(--bg)",
-        cursor: "pointer",
-        fontFamily: "var(--font-sans)",
-        display: "flex",
-        flexDirection: "column",
-        gap: 4,
-      }}
+      className={`radio-card${checked ? " active" : ""}${danger ? " is-danger" : ""}`}
     >
-      <span
-        style={{
-          fontSize: 12.5,
-          fontWeight: 700,
-          color: checked
-            ? danger
-              ? "var(--danger-text)"
-              : "var(--accent, #0b6e4f)"
-            : "var(--text)",
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-        }}
-      >
+      <span className={`pp-mode-title${checked && danger ? " pp-text-danger" : ""}`}>
         {title}
-        {recommended && (
-          <span
-            style={{
-              fontSize: 9,
-              fontWeight: 700,
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
-              color: "#0b6e4f",
-              background: "rgba(11,110,79,0.12)",
-              padding: "1px 6px",
-              borderRadius: 999,
-            }}
-          >
-            Recommended
-          </span>
-        )}
+        {recommended && <span className="pill pill-success">{recommended}</span>}
       </span>
-      <span style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.4 }}>
-        {sub}
-      </span>
+      <span className="pp-mode-sub">{sub}</span>
     </button>
   );
 }

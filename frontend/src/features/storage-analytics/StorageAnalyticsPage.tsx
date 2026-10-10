@@ -6,6 +6,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 
 import { Icon } from "../../shell/Icon";
 import { useCameras } from "../cameras/hooks";
@@ -27,7 +28,10 @@ import type {
   DailyStorageRow,
   StorageWindowMode,
 } from "./types";
-import { SkeletonChart, SkeletonChip } from "../../components/Skeleton";
+import { SkeletonCards, SkeletonChart, SkeletonChip } from "../../components/Skeleton";
+import { EmptyPanel, FIELD_H, FilterSelect, ResetButton, StatGrid, Toolbar } from "../../components/ListPageUi";
+import { StatTile, TILE_ICON } from "../person-clips/StatTile";
+import "../person-clips/clips.css";
 
 function todayIso(): string {
   const d = new Date();
@@ -87,40 +91,6 @@ function fmtDate(iso: string, today: string, yesterday: string, locale: string):
   return d.toLocaleDateString(locale, { month: "short", day: "numeric" });
 }
 
-// ── SVG donut ring ────────────────────────────────────────────────────────────
-
-function DonutRing({
-  pctValue,
-  color,
-  size = 64,
-}: {
-  pctValue: number;
-  color: string;
-  size?: number;
-}) {
-  const r = 22;
-  const cx = size / 2;
-  const circ = 2 * Math.PI * r;
-  const dash = Math.min((pctValue / 100) * circ, circ);
-  return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
-      <circle cx={cx} cy={cx} r={r} fill="none" stroke="var(--bg-sunken)" strokeWidth="6" />
-      <circle
-        cx={cx}
-        cy={cx}
-        r={r}
-        fill="none"
-        stroke={color}
-        strokeWidth="6"
-        strokeDasharray={`${dash} ${circ}`}
-        strokeLinecap="round"
-        transform={`rotate(-90 ${cx} ${cx})`}
-        style={{ transition: "stroke-dasharray 0.5s ease" }}
-      />
-    </svg>
-  );
-}
-
 // ── Mini progress bar ─────────────────────────────────────────────────────────
 
 function MiniBar({ value, max, color = "var(--accent)" }: { value: number; max: number; color?: string }) {
@@ -164,19 +134,19 @@ function MatchPill({ matched, total }: { matched: number; total: number }) {
 
 // ── Empty state ───────────────────────────────────────────────────────────────
 
-function EmptyState({ message }: { message: string }) {
+function EmptyState({ message, tone = "neutral" }: { message: string; tone?: "neutral" | "danger" }) {
+  const { t } = useTranslation();
   return (
-    <div
-      style={{
-        padding: "48px 24px",
-        textAlign: "center",
-        color: "var(--text-tertiary)",
-        fontSize: 13,
-      }}
-    >
-      <Icon name="database" size={28} style={{ opacity: 0.3, marginBottom: 10, display: "block", margin: "0 auto 10px" }} />
-      {message}
-    </div>
+    <EmptyPanel
+      tone={tone}
+      icon={<Icon name={tone === "danger" ? "info" : "database"} size={28} />}
+      title={message}
+      body={
+        tone === "danger"
+          ? t("storageAnalytics.emptyErrorBody", { defaultValue: "Something went wrong while fetching this data. Try refreshing." })
+          : t("storageAnalytics.emptyBody", { defaultValue: "Try a wider time window or another camera." })
+      }
+    />
   );
 }
 
@@ -193,7 +163,7 @@ function CameraTable({ rows }: { rows: CameraStorageRow[] }) {
   return (
     <table className="table">
       <thead>
-        <tr>
+        <tr style={{ background: "var(--bg-sunken)" }}>
           <th>{t("storageAnalytics.col.camera")}</th>
           <th style={{ textAlign: "end" }}>{t("storageAnalytics.col.clips")}</th>
           <th style={{ minWidth: 160 }}>{t("storageAnalytics.col.storageUsed")}</th>
@@ -207,7 +177,12 @@ function CameraTable({ rows }: { rows: CameraStorageRow[] }) {
         {rows.map((row) => (
           <tr key={row.camera_id}>
             <td>
-              <div style={{ fontWeight: 500, fontSize: 13 }}>{row.camera_name}</div>
+              <div style={{ fontWeight: 500, fontSize: 13, whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 8 }}>
+                <span aria-hidden style={{ display: "inline-flex", color: "var(--text-tertiary)" }}>
+                  <Icon name="camera" size={13} />
+                </span>
+                {row.camera_name}
+              </div>
             </td>
             <td style={{ textAlign: "end", fontVariantNumeric: "tabular-nums" }}>
               {row.clip_count.toLocaleString()}
@@ -255,7 +230,7 @@ function DailyTable({ rows }: { rows: DailyStorageRow[] }) {
   return (
     <table className="table">
       <thead>
-        <tr>
+        <tr style={{ background: "var(--bg-sunken)" }}>
           <th>{t("storageAnalytics.col.date")}</th>
           <th style={{ minWidth: 140 }}>{t("storageAnalytics.col.clips")}</th>
           <th style={{ minWidth: 160 }}>{t("storageAnalytics.col.storageAdded")}</th>
@@ -350,7 +325,7 @@ function CleanupHistory({
   };
 
   return (
-    <div className="card" style={{ marginTop: 16, overflow: "hidden" }}>
+    <div className="card" style={{ marginTop: 14, overflow: "hidden" }}>
       <div className="card-head">
         <div
           className="card-title"
@@ -390,15 +365,16 @@ function CleanupHistory({
             <SkeletonChart height={220} />
           )}
           {history.isError && (
-            <EmptyState message={t("clipCleanup.history.loadFailed")} />
+            <EmptyState tone="danger" message={t("clipCleanup.history.loadFailed")} />
           )}
           {!history.isLoading && !history.isError && items.length === 0 && (
             <EmptyState message={t("clipCleanup.history.empty")} />
           )}
           {!history.isError && items.length > 0 && (
+            <div style={{ overflowX: "auto" }}>
             <table className="table">
               <thead>
-                <tr>
+                <tr style={{ background: "var(--bg-sunken)" }}>
                   <th>{t("clipCleanup.history.colWhen")}</th>
                   <th>{t("clipCleanup.history.colBy")}</th>
                   <th>{t("clipCleanup.history.colScope")}</th>
@@ -473,6 +449,7 @@ function CleanupHistory({
                 })}
               </tbody>
             </table>
+            </div>
           )}
         </>
       )}
@@ -575,16 +552,18 @@ export function StorageAnalyticsPage() {
 
   const ov = analytics.data?.overview;
   const matchRate = ov ? pct(ov.matched_face_crops, ov.total_face_crops) : 0;
-  const matchColor =
-    matchRate >= 70
-      ? "var(--success)"
-      : matchRate >= 40
-        ? "var(--warning)"
-        : "var(--danger)";
-
   const totalClipsCompact = ov ? fmtBytesCompact(ov.total_bytes) : null;
   const avgBytesPerClip =
     ov && ov.total_clips > 0 ? Math.round(ov.total_bytes / ov.total_clips) : 0;
+
+  const filtersActive = cameraId !== null || winMode !== "30";
+  const resetFilters = () => {
+    setCameraId(null);
+    setWinMode("30");
+  };
+  // Addendum — no clips in the current window: hide the stat grid +
+  // tables, show one EmptyPanel (Clear filters when a filter narrowed it).
+  const noRecords = !analytics.isLoading && !analytics.isError && ov !== undefined && ov.total_clips === 0;
 
   const processingSegments: BarSegment[] = [
     { count: ov?.completed_clips ?? 0, color: "var(--success)", label: t("storageAnalytics.proc.completed") },
@@ -607,7 +586,7 @@ export function StorageAnalyticsPage() {
         <div className="page-actions">
           <button
             type="button"
-            className="btn btn-sm"
+            className="btn"
             onClick={() => void analytics.refetch()}
             disabled={analytics.isFetching}
             aria-label={t("storageAnalytics.refreshAria")}
@@ -619,67 +598,42 @@ export function StorageAnalyticsPage() {
       </div>
 
       {/* ── Filter bar ── */}
-      <div className="filter-bar">
-        <div className="filter-group">
-          <span style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 500 }}>
-            {t("storageAnalytics.window")}
-          </span>
-          <div className="seg" role="group" aria-label={t("storageAnalytics.daysWindowAria")}>
-            {WINDOW_OPTIONS.map(({ value, labelKey }) => (
-              <button
-                key={value}
-                type="button"
-                className={`seg-btn${winMode === value ? " active" : ""}`}
-                onClick={() => setWinMode(value)}
-                aria-pressed={winMode === value}
-              >
-                {t(labelKey)}
-              </button>
-            ))}
-          </div>
+      <Toolbar>
+        <div className="seg" role="group" aria-label={t("storageAnalytics.daysWindowAria")} style={{ height: FIELD_H, boxSizing: "border-box", alignItems: "center" }}>
+          {WINDOW_OPTIONS.map(({ value, labelKey }) => (
+            <button
+              key={value}
+              type="button"
+              className={`seg-btn${winMode === value ? " active" : ""}`}
+              onClick={() => setWinMode(value)}
+              aria-pressed={winMode === value}
+            >
+              {t(labelKey)}
+            </button>
+          ))}
         </div>
 
         {winMode === "range" && (
-          <div className="filter-group">
-            <DateRangePicker
-              start={startDate}
-              end={endDate}
-              maxDate={todayIso()}
-              onChange={(s, e) => {
-                setStartDate(s);
-                setEndDate(e);
-              }}
-            />
-          </div>
+          <DateRangePicker
+            start={startDate}
+            end={endDate}
+            maxDate={todayIso()}
+            onChange={(s, e) => {
+              setStartDate(s);
+              setEndDate(e);
+            }}
+          />
         )}
 
-        <div className="filter-group">
-          <Icon name="camera" size={13} style={{ color: "var(--text-tertiary)" }} />
-          <select
-            value={cameraId ?? ""}
-            onChange={(e) =>
-              setCameraId(e.target.value === "" ? null : Number(e.target.value))
-            }
-            style={{
-              fontSize: 12.5,
-              padding: "3px 8px",
-              borderRadius: 6,
-              border: "1px solid var(--border)",
-              background: "var(--bg-elev)",
-              color: "var(--text)",
-            }}
-            aria-label={t("storageAnalytics.filterByCamera")}
-          >
-            <option value="">{t("storageAnalytics.allCameras")}</option>
-            {cameras.data?.items.map((cam) => (
-              <option key={cam.id} value={cam.id}>
-                {cam.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="filter-spacer" />
+        <FilterSelect
+          label={t("storageAnalytics.cameraLabel", { defaultValue: "Camera" })}
+          value={cameraId === null ? "" : String(cameraId)}
+          onChange={(v) => setCameraId(v === "" ? null : Number(v))}
+          options={[
+            ["", t("storageAnalytics.allCameras")],
+            ...(cameras.data?.items ?? []).map((cam) => [String(cam.id), cam.name] as [string, string]),
+          ]}
+        />
 
         {analytics.isError && (
           <span className="pill pill-danger">
@@ -687,9 +641,7 @@ export function StorageAnalyticsPage() {
             {t("storageAnalytics.failed")}
           </span>
         )}
-        {analytics.isFetching && !analytics.isError && (
-          <SkeletonChip />
-        )}
+        {analytics.isFetching && !analytics.isError && <SkeletonChip />}
         {analytics.data && !analytics.isFetching && (
           <span className="pill pill-neutral" style={{ fontFamily: "var(--font-mono)", fontSize: 10.5 }}>
             {winMode === "overall"
@@ -700,120 +652,128 @@ export function StorageAnalyticsPage() {
             {cameraId !== null ? ` · ${t("storageAnalytics.oneCamera")}` : ""}
           </span>
         )}
-      </div>
+
+        <ResetButton
+          active={filtersActive}
+          label={t("storageAnalytics.reset", { defaultValue: "Reset" })}
+          onClick={resetFilters}
+        />
+      </Toolbar>
 
       {/* ── Stat cards ── */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-          gap: 10,
-          marginBottom: 12,
-        }}
-      >
-        {/* Total clips */}
-        <div className="stat">
-          <div className="stat-label">{t("storageAnalytics.stat.totalClips")}</div>
-          <div className="stat-value">
-            {ov ? ov.total_clips.toLocaleString() : "—"}
-          </div>
-          <div className="stat-delta delta-flat">
-            {ov ? t("storageAnalytics.stat.avgDuration", { duration: fmtDuration(ov.avg_clip_duration_sec) }) : ""}
-          </div>
+      {analytics.isLoading ? (
+        <div style={{ marginBottom: 14 }}>
+          <SkeletonCards count={5} minWidth={200} />
         </div>
-
-        {/* Storage used */}
-        <div className="stat">
-          <div className="stat-label">{t("storageAnalytics.stat.storageUsed")}</div>
-          <div className="stat-value" style={{ display: "flex", alignItems: "baseline", gap: 3 }}>
-            {totalClipsCompact ? (
-              <>
-                {totalClipsCompact.value}
-                <span style={{ fontSize: 14, fontWeight: 400, color: "var(--text-secondary)" }}>
-                  {totalClipsCompact.unit}
-                </span>
-              </>
-            ) : (
-              "—"
-            )}
-          </div>
-          <div className="stat-delta delta-flat">
-            {avgBytesPerClip > 0 ? t("storageAnalytics.stat.perClip", { size: fmtBytes(avgBytesPerClip) }) : ""}
-          </div>
+      ) : analytics.isError ? (
+        <div className="card" style={{ marginBottom: 14 }}>
+          <EmptyPanel
+            tone="danger"
+            icon={<Icon name="info" size={28} />}
+            title={t("storageAnalytics.errorTitle", { defaultValue: "Couldn’t load storage analytics" })}
+            body={t("storageAnalytics.emptyErrorBody", { defaultValue: "Something went wrong while fetching this data. Try refreshing." })}
+            actions={
+              <button type="button" className="btn" onClick={() => void analytics.refetch()}>
+                <Icon name="refresh" size={12} />
+                {t("storageAnalytics.retry", { defaultValue: "Retry" })}
+              </button>
+            }
+          />
         </div>
-
-        {/* Face crops */}
-        <div className="stat">
-          <div className="stat-label">{t("storageAnalytics.stat.faceCrops")}</div>
-          <div className="stat-value">
-            {ov ? ov.total_face_crops.toLocaleString() : "—"}
-          </div>
-          <div className="stat-delta delta-flat">
-            {ov
-              ? t("storageAnalytics.stat.matchedCount", { count: ov.matched_face_crops })
-              : ""}
-          </div>
-        </div>
-
-        {/* Unmatched */}
-        <div className="stat">
-          <div className="stat-label">{t("storageAnalytics.stat.unmatched")}</div>
-          <div
-            className="stat-value"
-            style={{ color: ov && ov.unmatched_face_crops > 0 ? "var(--danger-text)" : undefined }}
-          >
-            {ov ? ov.unmatched_face_crops.toLocaleString() : "—"}
-          </div>
-          <div className="stat-delta delta-flat">
-            {ov && ov.total_face_crops > 0
-              ? t("storageAnalytics.stat.pctOfCrops", { pct: pct(ov.unmatched_face_crops, ov.total_face_crops) })
-              : ""}
-          </div>
-        </div>
-
-        {/* Match rate + donut */}
-        <div className="stat" style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ flex: 1 }}>
-            <div className="stat-label">{t("storageAnalytics.stat.matchRate")}</div>
-            <div
-              className="stat-value"
-              style={{ color: ov && ov.total_face_crops > 0 ? matchColor : undefined }}
-            >
-              {ov && ov.total_face_crops > 0 ? `${matchRate}%` : "—"}
-            </div>
-            <div className="stat-delta delta-flat">
-              {ov && ov.total_face_crops > 0
-                ? `${ov.matched_face_crops.toLocaleString()} / ${ov.total_face_crops.toLocaleString()}`
-                : t("storageAnalytics.stat.noCropsYet")}
-            </div>
-          </div>
-          {ov && ov.total_face_crops > 0 && (
-            <DonutRing pctValue={matchRate} color={matchColor} size={60} />
+      ) : noRecords ? (
+        <div className="card" style={{ marginBottom: 14 }}>
+          {filtersActive ? (
+            <EmptyPanel
+              icon={<Icon name="filter" size={28} />}
+              title={t("storageAnalytics.emptyFilteredTitle", { defaultValue: "No clips in this window" })}
+              body={t("storageAnalytics.emptyBody", { defaultValue: "Try a wider time window or another camera." })}
+              actions={
+                <button type="button" className="btn" onClick={resetFilters}>
+                  <Icon name="refresh" size={12} />
+                  {t("storageAnalytics.clearFilters", { defaultValue: "Clear filters" })}
+                </button>
+              }
+            />
+          ) : (
+            <EmptyPanel
+              tone="accent"
+              icon={<Icon name="database" size={28} />}
+              title={t("storageAnalytics.emptyAllTitle", { defaultValue: "No clips stored yet" })}
+              body={t("storageAnalytics.emptyAllBody", { defaultValue: "Storage figures appear once cameras in “Save Clips” mode start recording." })}
+              actions={
+                <Link className="btn btn-primary" to="/cameras">
+                  <Icon name="camera" size={12} />
+                  {t("storageAnalytics.goToCameras", { defaultValue: "Go to cameras" })}
+                </Link>
+              }
+            />
           )}
         </div>
-      </div>
+      ) : (
+        <StatGrid>
+          <StatTile
+            tone="info"
+            icon={TILE_ICON.video}
+            label={t("storageAnalytics.stat.totalClips")}
+            value={ov ? ov.total_clips.toLocaleString() : "—"}
+            {...(ov ? { sub: t("storageAnalytics.stat.avgDuration", { duration: fmtDuration(ov.avg_clip_duration_sec) }) } : {})}
+          />
+          <StatTile
+            tone="neutral"
+            icon={TILE_ICON.storage}
+            label={t("storageAnalytics.stat.storageUsed")}
+            value={totalClipsCompact ? `${totalClipsCompact.value} ${totalClipsCompact.unit}` : "—"}
+            {...(avgBytesPerClip > 0 ? { sub: t("storageAnalytics.stat.perClip", { size: fmtBytes(avgBytesPerClip) }) } : {})}
+          />
+          <StatTile
+            tone="success"
+            icon={TILE_ICON.face}
+            label={t("storageAnalytics.stat.faceCrops")}
+            value={ov ? ov.total_face_crops.toLocaleString() : "—"}
+            {...(ov ? { sub: t("storageAnalytics.stat.matchedCount", { count: ov.matched_face_crops }) } : {})}
+          />
+          <StatTile
+            tone={ov && ov.unmatched_face_crops > 0 ? "danger" : "neutral"}
+            icon={TILE_ICON.users}
+            label={t("storageAnalytics.stat.unmatched")}
+            value={ov ? ov.unmatched_face_crops.toLocaleString() : "—"}
+            {...(ov && ov.total_face_crops > 0
+              ? { sub: t("storageAnalytics.stat.pctOfCrops", { pct: pct(ov.unmatched_face_crops, ov.total_face_crops) }) }
+              : {})}
+          />
+          <StatTile
+            tone={!ov || ov.total_face_crops === 0 ? "neutral" : matchRate >= 70 ? "success" : matchRate >= 40 ? "warning" : "danger"}
+            icon={TILE_ICON.check}
+            label={t("storageAnalytics.stat.matchRate")}
+            value={ov && ov.total_face_crops > 0 ? `${matchRate}%` : "—"}
+            sub={
+              ov && ov.total_face_crops > 0
+                ? `${ov.matched_face_crops.toLocaleString()} / ${ov.total_face_crops.toLocaleString()}`
+                : t("storageAnalytics.stat.noCropsYet")
+            }
+          />
+        </StatGrid>
+      )}
 
       {/* ── Clip cleanup launcher (Admin-only; the route already gates this page) ── */}
       <div
+        className="card"
         style={{
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
           gap: 12,
           flexWrap: "wrap",
-          padding: "12px 14px",
-          marginBottom: 16,
-          borderRadius: 10,
-          background: "var(--bg-elev)",
-          border: "1px solid var(--border)",
+          padding: "14px 18px",
+          marginBottom: 14,
         }}
       >
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 600, display: "flex", alignItems: "center", gap: 7 }}>
+          <div className="card-title" style={{ display: "flex", alignItems: "center", gap: 7 }}>
             <Icon name="trash" size={15} style={{ color: "var(--text-tertiary)" }} />
             {t("clipCleanup.title")}
           </div>
-          <div style={{ fontSize: 11.5, color: "var(--text-tertiary)", marginTop: 3 }}>
+          <div className="card-sub">
             {t("clipCleanup.subtitle")}
           </div>
         </div>
@@ -853,7 +813,7 @@ export function StorageAnalyticsPage() {
 
           <button
             type="button"
-            className="btn btn-primary btn-sm"
+            className="btn btn-sm"
             onClick={() => setCleanupOpen(true)}
             aria-label={t("clipCleanup.openAria")}
           >
@@ -921,7 +881,7 @@ export function StorageAnalyticsPage() {
 
       {/* ── Processing status card ── */}
       {ov && ov.total_clips > 0 && (
-        <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card" style={{ marginBottom: 14 }}>
           <div className="card-head">
             <div className="card-title">{t("storageAnalytics.processingStatus")}</div>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -986,6 +946,8 @@ export function StorageAnalyticsPage() {
       )}
 
       {/* ── Tabs ── */}
+      {!noRecords && !analytics.isError && (
+      <>
       <div className="tabs">
         <button
           type="button"
@@ -1008,7 +970,7 @@ export function StorageAnalyticsPage() {
       </div>
 
       {/* ── Table card ── */}
-      <div className="card" style={{ overflow: "hidden" }}>
+      <div className="card" style={{ padding: 12, overflowX: "auto" }}>
         {analytics.isLoading && (
           <SkeletonChart height={220} />
         )}
@@ -1019,6 +981,8 @@ export function StorageAnalyticsPage() {
           <DailyTable rows={analytics.data?.daily ?? []} />
         )}
       </div>
+      </>
+      )}
 
       {/* ── Cleanup history (run-level log of past clip-video cleanups) ── */}
       <CleanupHistory cameraNameById={cameraNameById} />
@@ -1057,8 +1021,8 @@ function DailyCleanupCard() {
     <div
       style={{
         padding: "14px 16px",
-        marginBottom: 16,
-        borderRadius: 10,
+        marginBottom: 14,
+        borderRadius: 12,
         background: "var(--bg-elev)",
         border: "1px solid var(--border)",
       }}

@@ -11,10 +11,11 @@ import { formatMinutes } from "../attendance/timeFormat";
 import {
   Dot,
   DowHeader,
+  EmptyMonth,
   GreyPill,
   Legend,
+  PadCells,
   TONE,
-  WEEKEND_CELL_BG,
   WeekendPill,
   isoToday,
 } from "./calendarUi";
@@ -35,8 +36,12 @@ export function PersonView({ person, onPickDay, hideHeader = false }: Props) {
   const todayIso = isoToday();
   const shift = policyLabel(person.days);
 
+  const hasRecords = person.days.some(
+    (d) => d.in_time || (d.total_minutes != null && d.total_minutes > 0) || ["present", "escalation_present", "late", "absent", "leave", "waiting"].includes(d.status),
+  );
+
   return (
-    <div className="card" style={{ padding: 16 }}>
+    <div className="card co-cal">
       {!hideHeader && (
         <div className="flex items-center justify-between" style={{ marginBottom: 12, gap: 12 }}>
           <div>
@@ -50,16 +55,20 @@ export function PersonView({ person, onPickDay, hideHeader = false }: Props) {
           )}
         </div>
       )}
-      <DowHeader />
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6 }}>
-        {Array.from({ length: leadingPad }).map((_, i) => (
-          <div key={`pad-${i}`} aria-hidden style={{ border: "1px solid var(--border)", borderRadius: 10, minHeight: 82, background: "var(--bg-elev)" }} />
-        ))}
-        {person.days.map((d) => (
-          <DayCell key={d.date} day={d} isToday={d.date === todayIso} onClick={() => onPickDay(d.date)} />
-        ))}
-      </div>
-      <Legend />
+      {hasRecords ? (
+        <>
+          <DowHeader />
+          <div className="cal-month-grid">
+            <PadCells count={leadingPad} />
+            {person.days.map((d) => (
+              <DayCell key={d.date} day={d} isToday={d.date === todayIso} onClick={() => onPickDay(d.date)} />
+            ))}
+          </div>
+          <Legend />
+        </>
+      ) : (
+        <EmptyMonth month={person.month} />
+      )}
     </div>
   );
 }
@@ -88,12 +97,33 @@ function statusLine(day: PersonDay, t: ReturnType<typeof useTranslation>["t"]): 
   }
 }
 
+/** Design status class for the tinted cell background. */
+function cellStatusClass(day: PersonDay, isWeekend: boolean): string | null {
+  if (isWeekend && !day.in_time) return "status-weekend";
+  switch (day.status) {
+    case "present":
+    case "weekend":
+      return day.in_time ? "status-present" : null;
+    case "escalation_present":
+      return "status-present status-escalation";
+    case "late":
+      return "status-late";
+    case "absent":
+      return "status-absent";
+    case "leave":
+      return "status-leave";
+    case "holiday":
+      return "status-holiday";
+    default:
+      return null;
+  }
+}
+
 function DayCell({ day, isToday, onClick }: { day: PersonDay; isToday: boolean; onClick: () => void }) {
   const { t } = useTranslation();
   const dayNum = parseInt(day.date.slice(8, 10), 10);
   const clickable = day.status !== "future";
   const isWeekend = day.is_weekend || day.status === "weekend";
-  const bg = isWeekend ? WEEKEND_CELL_BG : day.status === "holiday" ? TONE.holiday.soft : "var(--bg-elev)";
   const line = statusLine(day, t);
   const total = day.total_minutes != null && day.total_minutes > 0 ? formatMinutes(day.total_minutes) : null;
   const tooltip = [
@@ -107,6 +137,9 @@ function DayCell({ day, isToday, onClick }: { day: PersonDay; isToday: boolean; 
   ]
     .filter(Boolean)
     .join(" — ");
+  const cls = ["cal-day is-compact", isToday && "today", !clickable && "is-future", cellStatusClass(day, isWeekend)]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <button
@@ -115,36 +148,17 @@ function DayCell({ day, isToday, onClick }: { day: PersonDay; isToday: boolean; 
       disabled={!clickable}
       title={tooltip}
       aria-label={tooltip}
-      style={{
-        appearance: "none",
-        textAlign: "start",
-        font: "inherit",
-        position: "relative",
-        background: bg,
-        border: isToday ? "2px solid var(--accent)" : "1px solid var(--border)",
-        borderRadius: 10,
-        padding: isToday ? "7px 11px 9px" : "8px 12px 10px",
-        cursor: clickable ? "pointer" : "default",
-        opacity: day.status === "future" ? 0.5 : 1,
-        display: "flex",
-        flexDirection: "column",
-        gap: 5,
-        minHeight: 82,
-        overflow: "hidden",
-      }}
+      className={cls}
     >
-      {day.status === "escalation_present" && (
-        <span aria-hidden style={{ position: "absolute", insetInlineStart: 0, top: 0, bottom: 0, width: 3, background: "var(--accent)" }} />
-      )}
-      <span className="mono" style={{ alignSelf: "flex-end", fontSize: 15, fontWeight: 700, color: "var(--text)" }}>{dayNum}</span>
+      <span className="cal-day-num">{dayNum}</span>
       {line && (
-        <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "var(--text)", minWidth: 0 }}>
+        <span className="co-cal-line" style={{ fontSize: 12.5, color: "var(--text)" }}>
           <Dot color={line.color} />
-          <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{line.label}</span>
+          <span className="co-cal-line-label" style={{ color: "inherit" }}>{line.label}</span>
         </span>
       )}
       {day.in_time && (
-        <span className="mono" style={{ display: "flex", justifyContent: "space-between", gap: 6, fontSize: 11.5, color: "var(--text-secondary)", flexWrap: "wrap" }}>
+        <span className="cal-hours">
           <span>
             {day.in_time.slice(0, 5)}
             {day.out_time ? ` - ${day.out_time.slice(0, 5)}` : ""}
@@ -152,7 +166,7 @@ function DayCell({ day, isToday, onClick }: { day: PersonDay; isToday: boolean; 
           {total && <span>{total}</span>}
         </span>
       )}
-      <span style={{ marginTop: "auto" }}>
+      <span className="cal-flag">
         {isWeekend && !day.in_time ? (
           <WeekendPill />
         ) : day.status === "no_record" ? (

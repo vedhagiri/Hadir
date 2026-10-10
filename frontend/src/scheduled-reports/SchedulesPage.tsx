@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../api/client";
-import { SettingsTabs } from "../settings/SettingsTabs";
 import { Icon } from "../shell/Icon";
 import { describeCron } from "./cronPreview";
 import {
@@ -20,7 +19,19 @@ import type {
   ReportSchedule,
   ReportScheduleCreateInput,
 } from "./types";
-import { SkeletonRows } from "../components/Skeleton";
+import { SkeletonTable } from "../components/Skeleton";
+import { DrawerShell } from "../components/DrawerShell";
+import { ChoiceCards, Field, FormFooter, FormHeader, FormNotice, FormSection } from "../components/FormKit";
+import { EmptyPanel } from "../components/ListPageUi";
+import {
+  ConfirmModal,
+  InlineAlert,
+  LoadErrorPanel,
+  SettingsCard,
+  SettingsPage,
+  SoftPill,
+  type PillTone,
+} from "../settings/settingsUi";
 
 export function SchedulesPage() {
   const { t } = useTranslation();
@@ -60,79 +71,32 @@ export function SchedulesPage() {
     patch.mutate({ id: s.id, input: { active: !s.active } });
   };
 
-  const onDelete = (s: ReportSchedule) => {
-    if (window.confirm(t("schedules.confirmDelete", { name: s.name }))) {
-      remove.mutate(s.id);
-    }
+  const [deleting, setDeleting] = useState<ReportSchedule | null>(null);
+  const onDelete = (s: ReportSchedule) => setDeleting(s);
+  const confirmDelete = () => {
+    if (!deleting) return;
+    remove.mutate(deleting.id, { onSettled: () => setDeleting(null) });
   };
 
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <SettingsTabs />
-      <header
-        style={{
-          display: "flex",
-          alignItems: "flex-start",
-          justifyContent: "space-between",
-        }}
-      >
-        <div>
-          <h1
-            style={{
-              fontFamily: "var(--font-display)",
-              fontSize: 28,
-              margin: "0 0 4px 0",
-              fontWeight: 400,
-            }}
-          >
-            {t("schedules.title")}
-          </h1>
-          <p
-            style={{
-              margin: 0,
-              color: "var(--text-secondary)",
-              fontSize: 13,
-            }}
-          >
-            {t("schedules.subtitle")}
-          </p>
-        </div>
-        <button
-          className="btn btn-primary"
-          onClick={() => setShowCreate((s) => !s)}
-        >
-          <Icon name="plus" size={12} />{" "}
-          {showCreate ? t("schedules.close") : t("schedules.newSchedule")}
-        </button>
-      </header>
+  const items = schedules.data ?? [];
+  const activeCount = items.filter((x) => x.active).length;
+  const runs = recentRuns.data ?? [];
 
-      {error && (
-        <div
-          role="alert"
-          style={{
-            background: "var(--danger-soft)",
-            color: "var(--danger-text)",
-            border: "1px solid var(--border)",
-            padding: "8px 10px",
-            borderRadius: "var(--radius-sm)",
-            fontSize: 12.5,
-          }}
-        >
-          {error}
-        </div>
-      )}
-      {info && (
-        <div
-          style={{
-            background: "var(--bg-sunken)",
-            padding: "8px 10px",
-            borderRadius: "var(--radius-sm)",
-            fontSize: 12.5,
-          }}
-        >
-          {info}
-        </div>
-      )}
+  const headerAction = (
+    <button
+      type="button"
+      className="btn btn-primary"
+      onClick={() => setShowCreate(true)}
+      aria-expanded={showCreate}
+    >
+      <Icon name="plus" size={12} /> {t("schedules.newSchedule")}
+    </button>
+  );
+
+  return (
+    <SettingsPage title={t("schedules.title")} subtitle={t("schedules.subtitle")} actions={headerAction} wide>
+      {error && <InlineAlert tone="danger">{error}</InlineAlert>}
+      {info && <InlineAlert tone="success">{info}</InlineAlert>}
 
       {showCreate && (
         <CreateForm
@@ -140,143 +104,216 @@ export function SchedulesPage() {
           onClose={() => setShowCreate(false)}
         />
       )}
+      {deleting && (
+        <ConfirmModal
+          titleId="sch-delete-title"
+          title={t("settingsUi.forms.schedules.deleteTitle", { defaultValue: "Delete schedule" })}
+          subtitle={t("settingsUi.forms.schedules.deleteSub", {
+            defaultValue: "The schedule stops sending. Past runs stay in the log.",
+          })}
+          confirmLabel={t("schedules.delete")}
+          busy={remove.isPending}
+          onConfirm={confirmDelete}
+          onClose={() => setDeleting(null)}
+        >
+          <p className="st-confirm-text">{t("schedules.confirmDelete", { name: deleting.name })}</p>
+        </ConfirmModal>
+      )}
 
-      <div className="card">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>{t("schedules.col.name")}</th>
-              <th>{t("schedules.col.format")}</th>
-              <th>{t("schedules.col.schedule")}</th>
-              <th>{t("schedules.col.recipients")}</th>
-              <th>{t("schedules.col.lastRun")}</th>
-              <th>{t("schedules.col.nextRun")}</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {schedules.isLoading ? (
-              <SkeletonRows cols={7} />
-            ) : (schedules.data ?? []).length === 0 ? (
-              <tr>
-                <td colSpan={7} className="text-sm text-dim">
-                  {t("schedules.emptySchedules")}
-                </td>
-              </tr>
-            ) : (
-              schedules.data!.map((s) => (
-                <tr key={s.id}>
-                  <td>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>
-                      {s.name}
-                    </div>
-                    <div className="text-xs text-dim">
-                      {t("schedules.windowDays", { days: s.filter_config.window_days })}
-                    </div>
-                  </td>
-                  <td>
-                    <span
-                      className={`pill ${s.format === "pdf" ? "pill-info" : "pill-neutral"}`}
-                    >
-                      {s.format}
-                    </span>
-                  </td>
-                  <td>
-                    <div style={{ fontSize: 13 }}>
-                      {describeCron(s.schedule_cron)}
-                    </div>
-                    <div className="text-xs text-dim mono">
-                      {s.schedule_cron}
-                    </div>
-                  </td>
-                  <td className="text-xs">{s.recipients.length}</td>
-                  <td>
-                    {s.last_run_at ? (
-                      <>
-                        <div className="text-xs">
-                          {new Date(s.last_run_at).toLocaleString()}
-                        </div>
-                        <span
-                          className={`pill ${s.last_run_status === "succeeded" ? "pill-success" : "pill-warning"}`}
-                        >
-                          {t(`schedules.status.${s.last_run_status}`, s.last_run_status ?? "")}
-                        </span>
-                      </>
-                    ) : (
-                      <span className="text-dim">—</span>
-                    )}
-                  </td>
-                  <td className="text-xs">
-                    {s.next_run_at
-                      ? new Date(s.next_run_at).toLocaleString()
-                      : "—"}
-                  </td>
-                  <td style={{ textAlign: "right" }}>
-                    <button
-                      className="btn btn-sm"
-                      onClick={() => void onRunNow(s)}
-                      disabled={runNow.isPending}
-                    >
-                      {t("schedules.runNow")}
-                    </button>{" "}
-                    <button
-                      className="btn btn-sm"
-                      onClick={() => onToggleActive(s)}
-                      disabled={patch.isPending}
-                    >
-                      {s.active ? t("schedules.pause") : t("schedules.resume")}
-                    </button>{" "}
-                    <button
-                      className="btn btn-sm"
-                      onClick={() => onDelete(s)}
-                      disabled={remove.isPending}
-                      style={{ color: "var(--danger-text)" }}
-                    >
-                      {t("schedules.delete")}
-                    </button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <h2 style={{ fontSize: 16, margin: 0 }}>{t("schedules.recentRunsTitle")}</h2>
-        <div className="card">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>{t("schedules.runs.run")}</th>
-                <th>{t("schedules.runs.schedule")}</th>
-                <th>{t("schedules.runs.status")}</th>
-                <th>{t("schedules.runs.delivery")}</th>
-                <th>{t("schedules.runs.size")}</th>
-                <th>{t("schedules.runs.started")}</th>
-                <th>{t("schedules.runs.finished")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(recentRuns.data ?? []).length === 0 ? (
+      <SettingsCard
+        icon={<Icon name="calendar" size={17} />}
+        title={t("settingsUi.schedules.listTitle", { defaultValue: "Schedules" })}
+        description={t("settingsUi.schedules.listDesc", {
+          defaultValue: "Each schedule emails an attendance report to its recipients on a repeating timetable.",
+        })}
+        actions={
+          !schedules.isLoading && items.length > 0 ? (
+            <SoftPill tone={activeCount > 0 ? "success" : "neutral"}>
+              {t("settingsUi.schedules.activeCount", {
+                defaultValue: "{{active}} of {{total}} active",
+                active: activeCount,
+                total: items.length,
+              })}
+            </SoftPill>
+          ) : undefined
+        }
+        tight
+      >
+        {schedules.isLoading ? (
+          <SkeletonTable rows={3} cols={7} />
+        ) : schedules.isError ? (
+          <LoadErrorPanel
+            title={t("settingsUi.schedules.loadFailed", { defaultValue: "Couldn't load schedules" })}
+            onRetry={() => void schedules.refetch()}
+          />
+        ) : items.length === 0 ? (
+          <EmptyPanel
+            tone="accent"
+            icon={<Icon name="calendar" size={28} />}
+            title={t("schedules.emptySchedules")}
+            body={t("settingsUi.schedules.emptyBody", {
+              defaultValue: "Create a schedule to email a PDF or Excel attendance report automatically, for example every Monday morning.",
+            })}
+            actions={
+              !showCreate ? (
+                <button type="button" className="btn" onClick={() => setShowCreate(true)}>
+                  <Icon name="plus" size={12} />
+                  {t("schedules.newSchedule")}
+                </button>
+              ) : undefined
+            }
+          />
+        ) : (
+          <div className="st-table-wrap">
+            <table className="table">
+              <thead>
                 <tr>
-                  <td colSpan={7} className="text-sm text-dim">
-                    {t("schedules.emptyRuns")}
-                  </td>
+                  <th>{t("schedules.col.name")}</th>
+                  <th>{t("schedules.col.format")}</th>
+                  <th>{t("schedules.col.schedule")}</th>
+                  <th>{t("schedules.col.recipients")}</th>
+                  <th>{t("schedules.col.lastRun")}</th>
+                  <th>{t("schedules.col.nextRun")}</th>
+                  <th
+                    style={{ textAlign: "end" }}
+                    aria-label={t("settingsUi.actions", { defaultValue: "Actions" })}
+                  />
                 </tr>
-              ) : (
-                recentRuns.data!.slice(0, 20).map((r) => (
+              </thead>
+              <tbody>
+                {items.map((s) => (
+                  <tr key={s.id}>
+                    <td>
+                      <div className="st-inline">
+                        <span style={{ fontWeight: 600 }}>{s.name}</span>
+                        {s.active ? (
+                          <SoftPill tone="success">{t("settingsUi.schedules.active", { defaultValue: "Active" })}</SoftPill>
+                        ) : (
+                          <SoftPill tone="neutral">{t("settingsUi.schedules.paused", { defaultValue: "Paused" })}</SoftPill>
+                        )}
+                      </div>
+                      <div className="text-xs text-dim">
+                        {t("schedules.windowDays", { days: s.filter_config.window_days })}
+                      </div>
+                    </td>
+                    <td>
+                      <SoftPill tone={s.format === "pdf" ? "info" : "success"} dot={false}>
+                        {s.format.toUpperCase()}
+                      </SoftPill>
+                    </td>
+                    <td>
+                      <div>{describeCron(s.schedule_cron)}</div>
+                      <div className="text-xs text-dim mono" style={{ whiteSpace: "nowrap" }}>
+                        {s.schedule_cron}
+                      </div>
+                    </td>
+                    <td title={s.recipients.join(", ")}>{s.recipients.length}</td>
+                    <td>
+                      {s.last_run_at ? (
+                        <div className="st-inline">
+                          <span className="text-xs mono" style={{ whiteSpace: "nowrap" }}>
+                            {new Date(s.last_run_at).toLocaleString()}
+                          </span>
+                          <SoftPill tone={runTone(s.last_run_status)}>
+                            {t(`schedules.status.${s.last_run_status}`, s.last_run_status ?? "")}
+                          </SoftPill>
+                        </div>
+                      ) : (
+                        <span className="text-dim">—</span>
+                      )}
+                    </td>
+                    <td className="text-xs mono" style={{ whiteSpace: "nowrap" }}>
+                      {s.next_run_at
+                        ? new Date(s.next_run_at).toLocaleString()
+                        : "—"}
+                    </td>
+                    <td>
+                      <div className="st-row-actions">
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-ghost"
+                          onClick={() => void onRunNow(s)}
+                          disabled={runNow.isPending}
+                        >
+                          <Icon name="play" size={11} />
+                          {t("schedules.runNow")}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-ghost"
+                          onClick={() => onToggleActive(s)}
+                          disabled={patch.isPending}
+                        >
+                          <Icon name={s.active ? "pause" : "play"} size={11} />
+                          {s.active ? t("schedules.pause") : t("schedules.resume")}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-ghost st-danger"
+                          onClick={() => onDelete(s)}
+                          disabled={remove.isPending}
+                        >
+                          <Icon name="trash" size={11} />
+                          {t("schedules.delete")}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SettingsCard>
+
+      <SettingsCard
+        icon={<Icon name="activity" size={17} />}
+        title={t("schedules.recentRunsTitle")}
+        description={t("settingsUi.schedules.runsDesc", {
+          defaultValue: "The last 20 deliveries across every schedule, newest first.",
+        })}
+        tight
+      >
+        {recentRuns.isLoading ? (
+          <SkeletonTable rows={3} cols={7} />
+        ) : recentRuns.isError ? (
+          <LoadErrorPanel
+            title={t("settingsUi.schedules.runsLoadFailed", { defaultValue: "Couldn't load recent runs" })}
+            onRetry={() => void recentRuns.refetch()}
+          />
+        ) : runs.length === 0 ? (
+          <EmptyPanel
+            icon={<Icon name="activity" size={28} />}
+            title={t("schedules.emptyRuns")}
+            body={t("settingsUi.schedules.emptyRunsBody", {
+              defaultValue: "Runs appear here once a schedule fires or you press Run now.",
+            })}
+          />
+        ) : (
+          <div className="st-table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>{t("schedules.runs.run")}</th>
+                  <th>{t("schedules.runs.schedule")}</th>
+                  <th>{t("schedules.runs.status")}</th>
+                  <th>{t("schedules.runs.delivery")}</th>
+                  <th>{t("schedules.runs.size")}</th>
+                  <th>{t("schedules.runs.started")}</th>
+                  <th>{t("schedules.runs.finished")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {runs.slice(0, 20).map((r) => (
                   <tr key={r.id}>
                     <td className="mono text-xs">#{r.id}</td>
-                    <td className="text-xs">
+                    <td className="mono text-xs">
                       {r.schedule_id ? `#${r.schedule_id}` : "—"}
                     </td>
                     <td>
-                      <span
-                        className={`pill ${r.status === "succeeded" ? "pill-success" : r.status === "failed" ? "pill-danger" : "pill-warning"}`}
-                      >
+                      <SoftPill tone={runTone(r.status)} {...(r.error_message ? { title: r.error_message } : {})}>
                         {t(`schedules.status.${r.status}`, r.status)}
-                      </span>
+                      </SoftPill>
                     </td>
                     <td className="text-xs">{r.delivery_mode ?? "—"}</td>
                     <td className="mono text-xs">
@@ -284,23 +321,30 @@ export function SchedulesPage() {
                         ? `${(r.file_size_bytes / 1024).toFixed(0)} KB`
                         : "—"}
                     </td>
-                    <td className="text-xs">
+                    <td className="text-xs mono" style={{ whiteSpace: "nowrap" }}>
                       {new Date(r.started_at).toLocaleString()}
                     </td>
-                    <td className="text-xs">
+                    <td className="text-xs mono" style={{ whiteSpace: "nowrap" }}>
                       {r.finished_at
                         ? new Date(r.finished_at).toLocaleString()
                         : "—"}
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SettingsCard>
+    </SettingsPage>
   );
+}
+
+function runTone(status: string | null): PillTone {
+  if (status === "succeeded") return "success";
+  if (status === "failed") return "danger";
+  if (status === "running") return "info";
+  return "warning";
 }
 
 // ---------------------------------------------------------------------------
@@ -319,20 +363,25 @@ function CreateForm({
   const [recipientsText, setRecipientsText] = useState("");
   const [cronExpr, setCronExpr] = useState("0 8 * * 1");
   const [error, setError] = useState<string | null>(null);
+  const [recipientsError, setRecipientsError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const cronLabel = describeCron(cronExpr);
+  const dirty = name !== "" || recipientsText !== "";
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setRecipientsError(null);
     const recipients = recipientsText
       .split(/[,\n]/)
       .map((s) => s.trim())
       .filter(Boolean);
     if (recipients.length === 0) {
-      setError(t("schedules.errRecipientsRequired"));
+      setRecipientsError(t("schedules.errRecipientsRequired"));
       return;
     }
+    setSubmitting(true);
     try {
       await onCreate({
         name: name.trim(),
@@ -347,124 +396,136 @@ function CreateForm({
       onClose();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("schedules.errSave"));
+    } finally {
+      setSubmitting(false);
     }
   };
 
   return (
-    <form
-      onSubmit={submit}
-      style={{
-        background: "var(--bg-elev)",
-        border: "1px solid var(--border)",
-        borderRadius: "var(--radius)",
-        padding: 14,
-        display: "grid",
-        gridTemplateColumns: "1.4fr 1fr 1fr 1fr",
-        gap: 10,
-        alignItems: "end",
-      }}
-    >
-      <Field label={t("schedules.field.name")}>
-        <input
-          className="input"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder={t("schedules.field.namePlaceholder")}
+    <DrawerShell onClose={onClose} dirty={dirty}>
+      <form className="drawer fk-drawer" onSubmit={submit} noValidate aria-labelledby="sch-create-title">
+        <FormHeader
+          icon={<Icon name="calendar" size={18} />}
+          title={t("settingsUi.forms.schedules.addTitle", { defaultValue: "New report schedule" })}
+          subtitle={t("settingsUi.schedules.createDesc", {
+            defaultValue: "Pick a format, how many days each report covers, when it runs and who receives it.",
+          })}
+          onClose={onClose}
+          titleId="sch-create-title"
         />
-      </Field>
-      <Field label={t("schedules.field.format")}>
-        <select
-          className="input"
-          value={format}
-          onChange={(e) => setFormat(e.target.value as ReportFormat)}
-        >
-          <option value="pdf">PDF</option>
-          <option value="xlsx">Excel</option>
-        </select>
-      </Field>
-      <Field label={t("schedules.field.windowDays")}>
-        <input
-          className="input"
-          type="number"
-          min={1}
-          max={180}
-          value={windowDays}
-          onChange={(e) => setWindowDays(Number(e.target.value))}
-        />
-      </Field>
-      <Field
-        label={t("schedules.field.cron")}
-        {...(cronLabel === cronExpr ? {} : { hint: cronLabel })}
-      >
-        <input
-          className="input mono"
-          value={cronExpr}
-          onChange={(e) => setCronExpr(e.target.value)}
-          placeholder="0 8 * * 1"
-        />
-      </Field>
-      <div style={{ gridColumn: "1 / -1" }}>
-        <Field label={t("schedules.field.recipients")}>
-          <textarea
-            className="input"
-            rows={2}
-            value={recipientsText}
-            onChange={(e) => setRecipientsText(e.target.value)}
-            placeholder={t("schedules.field.recipientsPlaceholder")}
-            style={{ resize: "vertical" }}
-          />
-        </Field>
-      </div>
-      {error && (
-        <div
-          style={{
-            gridColumn: "1 / -1",
-            color: "var(--danger-text)",
-            fontSize: 12,
-          }}
-        >
-          {error}
+        <div className="drawer-body fk-body">
+          {error && <FormNotice tone="danger">{error}</FormNotice>}
+          <FormSection
+            step={1}
+            title={t("settingsUi.forms.schedules.reportSection", { defaultValue: "Report" })}
+            description={t("settingsUi.forms.schedules.reportSectionDesc", {
+              defaultValue: "What the email contains and how many days it covers.",
+            })}
+          >
+            <Field label={t("schedules.field.name")} htmlFor="sch-name" required span={2}>
+              <input
+                id="sch-name"
+                className="input"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder={t("schedules.field.namePlaceholder")}
+              />
+            </Field>
+            <Field label={t("schedules.field.format")} span={2}>
+              <ChoiceCards<ReportFormat>
+                label={t("schedules.field.format")}
+                value={format}
+                onChange={setFormat}
+                options={[
+                  {
+                    value: "pdf",
+                    title: "PDF",
+                    description: t("settingsUi.forms.schedules.pdfDesc", { defaultValue: "Branded, print-ready report." }),
+                    icon: <Icon name="fileText" size={15} />,
+                  },
+                  {
+                    value: "xlsx",
+                    title: "Excel",
+                    description: t("settingsUi.forms.schedules.xlsxDesc", { defaultValue: "Spreadsheet for further analysis." }),
+                    icon: <Icon name="excel" size={15} />,
+                  },
+                ]}
+              />
+            </Field>
+            <Field
+              label={t("schedules.field.windowDays")}
+              htmlFor="sch-window"
+              required
+              help={t("settingsUi.forms.schedules.windowHelp", { defaultValue: "Between 1 and 180 days, ending on the run date." })}
+            >
+              <input
+                id="sch-window"
+                className="input"
+                type="number"
+                min={1}
+                max={180}
+                value={windowDays}
+                onChange={(e) => setWindowDays(Number(e.target.value))}
+              />
+            </Field>
+          </FormSection>
+          <FormSection
+            step={2}
+            title={t("settingsUi.forms.schedules.timingSection", { defaultValue: "Timetable" })}
+            description={t("settingsUi.forms.schedules.timingSectionDesc", {
+              defaultValue: "A cron expression in the tenant's timezone.",
+            })}
+          >
+            <Field
+              label={t("schedules.field.cron")}
+              htmlFor="sch-cron"
+              required
+              help={cronLabel === cronExpr ? t("settingsUi.forms.schedules.cronHelp", { defaultValue: "minute hour day month weekday — e.g. 0 8 * * 1" }) : cronLabel}
+            >
+              <input
+                id="sch-cron"
+                className="input mono"
+                value={cronExpr}
+                onChange={(e) => setCronExpr(e.target.value)}
+                placeholder="0 8 * * 1"
+              />
+            </Field>
+          </FormSection>
+          <FormSection
+            step={3}
+            title={t("settingsUi.forms.schedules.recipientsSection", { defaultValue: "Recipients" })}
+            description={t("settingsUi.forms.schedules.recipientsSectionDesc", {
+              defaultValue: "Separate addresses with commas or new lines.",
+            })}
+          >
+            <Field
+              label={t("schedules.field.recipients")}
+              htmlFor="sch-recipients"
+              required
+              span={2}
+              error={recipientsError}
+            >
+              <textarea
+                id="sch-recipients"
+                className="textarea"
+                rows={3}
+                value={recipientsText}
+                onChange={(e) => {
+                  setRecipientsText(e.target.value);
+                  if (recipientsError) setRecipientsError(null);
+                }}
+                placeholder={t("schedules.field.recipientsPlaceholder")}
+              />
+            </Field>
+          </FormSection>
         </div>
-      )}
-      <div style={{ gridColumn: "1 / -1", display: "flex", gap: 8 }}>
-        <button type="button" className="btn" onClick={onClose}>
-          {t("schedules.cancel")}
-        </button>
-        <button type="submit" className="btn btn-primary">
-          {t("schedules.saveSchedule")}
-        </button>
-      </div>
-    </form>
-  );
-}
-
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <span
-        style={{
-          fontSize: 11,
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-          color: "var(--text-tertiary)",
-        }}
-      >
-        {label}
-      </span>
-      {children}
-      {hint && (
-        <span style={{ fontSize: 11.5, color: "var(--text-tertiary)" }}>
-          {hint}
-        </span>
-      )}
-    </label>
+        <FormFooter
+          onCancel={onClose}
+          submitLabel={t("schedules.saveSchedule")}
+          submitting={submitting}
+          canSubmit={name.trim() !== "" && cronExpr.trim() !== ""}
+        />
+      </form>
+    </DrawerShell>
   );
 }

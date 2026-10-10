@@ -6,7 +6,6 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../api/client";
-import { SettingsTabs } from "../settings/SettingsTabs";
 import { Icon } from "../shell/Icon";
 import {
   useCreateReasonCategory,
@@ -16,6 +15,10 @@ import {
 } from "./hooks";
 import type { ReasonCategory, RequestType } from "./types";
 import { SkeletonTable } from "../components/Skeleton";
+import { EmptyPanel } from "../components/ListPageUi";
+import { Field, FormFooter, FormNotice, FormSection } from "../components/FormKit";
+import { ConfirmModal, SettingsFormModal } from "../settings/settingsUi";
+import { Alert, SectionHead, SoftPill, TableCard, WF_ICON, WfSvg, errorDetail } from "./workflowUi";
 
 export function ReasonCategoriesPage() {
   const { t } = useTranslation();
@@ -30,46 +33,35 @@ export function ReasonCategoriesPage() {
   );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <SettingsTabs />
-      <header>
-        <h1
-          style={{
-            fontFamily: "var(--font-display)",
-            fontSize: 28,
-            margin: "0 0 4px 0",
-            fontWeight: 400,
-          }}
-        >
-          {t("reasonCategories.title")}
-        </h1>
-        <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 13 }}>
-          {t("reasonCategories.subtitle")}
-        </p>
-      </header>
-
-      {error && (
-        <div
-          role="alert"
-          style={{
-            background: "var(--danger-soft)",
-            color: "var(--danger-text)",
-            border: "1px solid var(--border)",
-            padding: "8px 10px",
-            borderRadius: "var(--radius-sm)",
-            fontSize: 12.5,
-          }}
-        >
-          {error}
+    <div className="wf-page">
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">{t("reasonCategories.title")}</h1>
+          <p className="page-sub">{t("reasonCategories.subtitle")}</p>
         </div>
-      )}
+      </div>
+
+      {error && <Alert>{error}</Alert>}
 
       {all.isLoading ? (
-        <SkeletonTable rows={6} cols={4} />
+        <>
+          <SkeletonTable rows={4} cols={4} />
+          <SkeletonTable rows={4} cols={4} />
+        </>
       ) : all.error ? (
-        <p style={{ color: "var(--danger-text)" }}>
-          {t("reasonCategories.loadFailed")}
-        </p>
+        <div className="card">
+          <EmptyPanel
+            tone="danger"
+            icon={<WfSvg>{WF_ICON.alert}</WfSvg>}
+            title={t("reasonCategories.loadFailed")}
+            body={errorDetail(all.error, t("common.errorGeneric"))}
+            actions={
+              <button type="button" className="btn" onClick={() => void all.refetch()}>
+                <Icon name="refresh" size={12} /> {t("common.retry", { defaultValue: "Retry" })}
+              </button>
+            }
+          />
+        </div>
       ) : (
         <>
           <CategoryTable
@@ -109,10 +101,18 @@ function CategoryTable({
   const [showCreate, setShowCreate] = useState(false);
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<ReasonCategory | null>(null);
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const closeCreate = () => {
+    setShowCreate(false);
+    setFormError(null);
+  };
+
+  const submit = async () => {
+    if (!code.trim() || !name.trim()) return;
     onError(null);
+    setFormError(null);
     try {
       await create.mutateAsync({
         request_type: requestType,
@@ -123,101 +123,134 @@ function CategoryTable({
       setName("");
       setShowCreate(false);
     } catch (err) {
-      onError(err instanceof ApiError ? err.message : t("reasonCategories.saveFailed"));
+      setFormError(err instanceof ApiError ? err.message : t("reasonCategories.saveFailed"));
     }
   };
+  const typeLabel =
+    requestType === "leave"
+      ? t("settingsUi.forms.reasons.leave", { defaultValue: "leave" })
+      : t("settingsUi.forms.reasons.exception", { defaultValue: "exception" });
 
   return (
-    <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-        }}
-      >
-        <h2 style={{ fontSize: 16, margin: 0 }}>{title}</h2>
-        <button
-          className="btn btn-sm"
-          onClick={() => setShowCreate((s) => !s)}
-        >
-          <Icon name="plus" size={12} />{" "}
-          {showCreate ? t("reasonCategories.closeBtn") : t("reasonCategories.addBtn")}
-        </button>
-      </div>
-      {showCreate && (
-        <form
-          onSubmit={submit}
-          style={{
-            background: "var(--bg-sunken)",
-            border: "1px solid var(--border)",
-            borderRadius: "var(--radius)",
-            padding: 10,
-            display: "grid",
-            gridTemplateColumns: "1fr 1.4fr auto",
-            gap: 8,
-            alignItems: "end",
-          }}
-        >
-          <Field label={t("reasonCategories.fieldCode")}>
-            <input
-              className="input mono"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              placeholder={t("reasonCategories.codePlaceholder")}
-            />
-          </Field>
-          <Field label={t("reasonCategories.fieldName")}>
-            <input
-              className="input"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={t("reasonCategories.namePlaceholder")}
-            />
-          </Field>
-          <button
-            type="submit"
-            className="btn btn-primary btn-sm"
-            disabled={create.isPending}
-          >
-            {create.isPending ? t("reasonCategories.saving") : t("reasonCategories.save")}
+    <section className="wf-stack">
+      <SectionHead
+        title={title}
+        sub={t("reasonCategories.countSub", {
+          defaultValue: "{{active}} of {{total}} shown to employees",
+          active: rows.filter((r) => r.active).length,
+          total: rows.length,
+        })}
+        actions={
+          <button type="button" className="btn btn-sm" onClick={() => setShowCreate(true)}>
+            <Icon name="plus" size={12} /> {t("reasonCategories.addBtn")}
           </button>
-        </form>
+        }
+      />
+      {showCreate && (
+        <SettingsFormModal
+          titleId={`rc-create-title-${requestType}`}
+          icon={<Icon name="clipboard" size={18} />}
+          title={t("settingsUi.forms.reasons.addTitle", { defaultValue: "Add {{type}} reason", type: typeLabel })}
+          subtitle={t("settingsUi.forms.reasons.addSub", {
+            defaultValue: "Employees pick this reason when they file {{type}} requests. New reasons are shown straight away.",
+            type: typeLabel,
+          })}
+          onClose={closeCreate}
+          onSubmit={() => void submit()}
+          footer={
+            <FormFooter
+              onCancel={closeCreate}
+              submitLabel={t("settingsUi.forms.reasons.addCta", { defaultValue: "Add reason" })}
+              submittingLabel={t("reasonCategories.saving")}
+              submitting={create.isPending}
+              canSubmit={code.trim() !== "" && name.trim() !== ""}
+            />
+          }
+        >
+          {formError && <FormNotice tone="danger">{formError}</FormNotice>}
+          <FormSection
+            title={t("settingsUi.forms.reasons.section", { defaultValue: "Reason" })}
+            description={t("settingsUi.forms.reasons.sectionDesc", {
+              defaultValue: "A short unique code plus the label employees see.",
+            })}
+          >
+            <Field label={t("reasonCategories.fieldCode")} required htmlFor={`rc-code-${requestType}`}>
+              <input
+                id={`rc-code-${requestType}`}
+                className="input mono"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                placeholder={t("reasonCategories.codePlaceholder")}
+                required
+              />
+            </Field>
+            <Field label={t("reasonCategories.fieldName")} required htmlFor={`rc-name-${requestType}`}>
+              <input
+                id={`rc-name-${requestType}`}
+                className="input"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder={t("reasonCategories.namePlaceholder")}
+                required
+              />
+            </Field>
+          </FormSection>
+        </SettingsFormModal>
       )}
-      <div className="card">
-        <table className="table">
-          <thead>
-            <tr>
-              <th style={{ width: 80 }}>{t("reasonCategories.colOrder")}</th>
-              <th>{t("reasonCategories.colCode")}</th>
-              <th>{t("reasonCategories.colName")}</th>
-              <th>{t("reasonCategories.colStatus")}</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? (
+      {deleting && (
+        <ConfirmModal
+          titleId="rc-delete-title"
+          title={t("settingsUi.forms.reasons.deleteTitle", { defaultValue: "Delete reason" })}
+          subtitle={deleting.name}
+          confirmLabel={t("reasonCategories.delete")}
+          busy={del.isPending}
+          onConfirm={() => del.mutate(deleting.id, { onSettled: () => setDeleting(null) })}
+          onClose={() => setDeleting(null)}
+        >
+          <p className="st-confirm-text">{t("reasonCategories.confirmDelete", { code: deleting.code })}</p>
+        </ConfirmModal>
+      )}
+      {rows.length === 0 ? (
+        <div className="card">
+          <EmptyPanel
+            tone="accent"
+            icon={<WfSvg>{WF_ICON.file}</WfSvg>}
+            title={t("reasonCategories.emptyTitle", { defaultValue: "No reasons in this list" })}
+            body={t("reasonCategories.empty")}
+            actions={
+              <button type="button" className="btn" onClick={() => setShowCreate(true)}>
+                <Icon name="plus" size={12} /> {t("reasonCategories.addBtn")}
+              </button>
+            }
+          />
+        </div>
+      ) : (
+        <TableCard>
+          <table className="table">
+            <thead>
               <tr>
-                <td colSpan={5} className="text-sm text-dim">
-                  {t("reasonCategories.empty")}
-                </td>
+                <th style={{ width: 80 }}>{t("reasonCategories.colOrder")}</th>
+                <th>{t("reasonCategories.colCode")}</th>
+                <th>{t("reasonCategories.colName")}</th>
+                <th>{t("reasonCategories.colStatus")}</th>
+                <th />
               </tr>
-            ) : (
-              rows.map((r) => (
+            </thead>
+            <tbody>
+              {rows.map((r) => (
                 <tr key={r.id}>
                   <td className="mono text-xs">{r.display_order}</td>
-                  <td className="mono">{r.code}</td>
+                  <td className="mono wf-nowrap">{r.code}</td>
                   <td>{r.name}</td>
                   <td>
-                    <span
-                      className={`pill ${r.active ? "pill-success" : "pill-neutral"}`}
-                    >
+                    <SoftPill tone={r.active ? "success" : "neutral"}>
                       {r.active ? t("reasonCategories.statusActive") : t("reasonCategories.statusInactive")}
-                    </span>
+                    </SoftPill>
                   </td>
-                  <td style={{ textAlign: "right" }}>
+                  <td className="wf-nowrap" style={{ textAlign: "end" }}>
                     <button
-                      className="btn btn-sm"
+                      type="button"
+                      className="btn btn-sm btn-ghost"
                       onClick={() =>
                         patch.mutate({
                           id: r.id,
@@ -227,62 +260,22 @@ function CategoryTable({
                       disabled={patch.isPending}
                     >
                       {r.active ? t("reasonCategories.hide") : t("reasonCategories.activate")}
-                    </button>{" "}
+                    </button>
                     <button
-                      className="btn btn-sm"
-                      onClick={() => {
-                        if (
-                          window.confirm(
-                            t("reasonCategories.confirmDelete", { code: r.code }),
-                          )
-                        ) {
-                          del.mutate(r.id);
-                        }
-                      }}
-                      style={{ color: "var(--danger-text)" }}
+                      type="button"
+                      className="btn btn-sm btn-ghost wf-danger-text"
+                      onClick={() => setDeleting(r)}
                       disabled={del.isPending}
                     >
-                      {t("reasonCategories.delete")}
+                      <Icon name="trash" size={11} /> {t("reasonCategories.delete")}
                     </button>
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+              ))}
+            </tbody>
+          </table>
+        </TableCard>
+      )}
     </section>
-  );
-}
-
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: 4,
-        fontSize: 12,
-        color: "var(--text-secondary)",
-      }}
-    >
-      <span
-        style={{
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
-          fontWeight: 500,
-          fontSize: 11,
-        }}
-      >
-        {label}
-      </span>
-      {children}
-    </label>
   );
 }

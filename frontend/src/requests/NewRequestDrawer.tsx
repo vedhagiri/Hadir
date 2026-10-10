@@ -1,16 +1,18 @@
 // Right-sliding drawer the Employee uses to file a new request.
 //
-// Two-step UX kept on a single screen: pick type (radio) → form swaps
-// fields between exception (single date) and leave (date range +
-// leave-type dropdown). Reason category is sourced from
+// Two-step UX kept on a single screen: pick type (choice cards) →
+// form swaps fields between exception (single date) and leave (date
+// range + leave-type dropdown). Reason category is sourced from
 // /api/request-reason-categories and filtered to the chosen type.
 // Optional attachment uploaded after the parent row is created.
 
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../api/client";
 import { DatePicker } from "../components/DatePicker";
 import { DrawerShell } from "../components/DrawerShell";
+import { ChoiceCards, Field, FormFooter, FormHeader, FormNotice, FormSection } from "../components/FormKit";
 import { useLeaveTypes } from "../leave-calendar/hooks";
 import { Icon } from "../shell/Icon";
 import {
@@ -20,6 +22,7 @@ import {
   useUploadAttachment,
 } from "./hooks";
 import type { RequestType } from "./types";
+import { errorDetail } from "./workflowUi";
 
 interface Props {
   onClose: () => void;
@@ -36,6 +39,7 @@ export function NewRequestDrawer({
   initialType,
   initialStartDate,
 }: Props) {
+  const { t } = useTranslation();
   const [type, setType] = useState<RequestType>(initialType ?? "exception");
   const [reasonCategory, setReasonCategory] = useState("");
   const [reasonText, setReasonText] = useState("");
@@ -44,6 +48,11 @@ export function NewRequestDrawer({
   const [leaveTypeId, setLeaveTypeId] = useState<number | "">("");
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
+  // Per-field validation (shown inline under the field that failed).
+  const [errors, setErrors] = useState<{ reason?: string | undefined; start?: string | undefined; leaveType?: string | undefined; file?: string | undefined }>({});
+  const clearError = (k: "reason" | "start" | "leaveType" | "file") =>
+    setErrors((prev) => (prev[k] ? { ...prev, [k]: undefined } : prev));
+  const [dragOver, setDragOver] = useState(false);
 
   const categories = useReasonCategories(type);
   const leaveTypes = useLeaveTypes();
@@ -65,9 +74,13 @@ export function NewRequestDrawer({
   const maxMb = attachmentConfig.data?.max_mb ?? 5;
 
   const validateFile = (file: File): string | null => {
-    if (file.size === 0) return "file is empty";
+    if (file.size === 0) return t("newRequest.fileEmpty", { defaultValue: "The file is empty." });
     if (file.size > maxMb * 1024 * 1024) {
-      return `file is ${(file.size / 1024 / 1024).toFixed(1)}MB; max is ${maxMb}MB`;
+      return t("newRequest.fileTooLarge", {
+        defaultValue: "File is {{size}}MB; the maximum is {{max}}MB.",
+        size: (file.size / 1024 / 1024).toFixed(1),
+        max: maxMb,
+      });
     }
     return null;
   };
@@ -80,42 +93,44 @@ export function NewRequestDrawer({
     }
     const err = validateFile(f);
     if (err) {
-      setServerError(err);
+      setErrors((prev) => ({ ...prev, file: err }));
       e.target.value = "";
       setPendingFile(null);
       return;
     }
-    setServerError(null);
+    clearError("file");
     setPendingFile(f);
   };
 
-  const onDrop = (e: React.DragEvent<HTMLDivElement>) => {
+  const onDrop = (e: React.DragEvent<HTMLElement>) => {
     e.preventDefault();
+    setDragOver(false);
     const f = e.dataTransfer.files?.[0];
     if (!f) return;
     const err = validateFile(f);
     if (err) {
-      setServerError(err);
+      setErrors((prev) => ({ ...prev, file: err }));
       return;
     }
-    setServerError(null);
+    clearError("file");
     setPendingFile(f);
   };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     setServerError(null);
 
     if (!reasonCategory) {
-      setServerError("pick a reason category");
+      setErrors((prev) => ({ ...prev, reason: t("newRequest.pickReason", { defaultValue: "Pick a reason category." }) }));
       return;
     }
     if (!startDate) {
-      setServerError("pick a start date");
+      setErrors((prev) => ({ ...prev, start: t("newRequest.pickStart", { defaultValue: "Pick a start date." }) }));
       return;
     }
     if (type === "leave" && !leaveTypeId) {
-      setServerError("pick a leave type");
+      setErrors((prev) => ({ ...prev, leaveType: t("newRequest.pickLeaveType", { defaultValue: "Pick a leave type." }) }));
       return;
     }
 
@@ -141,131 +156,157 @@ export function NewRequestDrawer({
           // The request itself landed; surface the upload failure but
           // don't roll back. Operator can re-attach from the detail
           // drawer later.
-          if (uploadErr instanceof ApiError) {
-            setServerError(
-              `Request created, but the attachment failed: ${uploadErr.message}`,
-            );
-          } else {
-            setServerError(
-              "Request created, but the attachment failed to upload.",
-            );
-          }
+          setServerError(
+            t("newRequest.attachmentFailed", {
+              defaultValue: "Request created, but the attachment failed: {{reason}}",
+              reason:
+                uploadErr instanceof ApiError
+                  ? uploadErr.message
+                  : t("common.errorGeneric"),
+            }),
+          );
         }
       }
       onCreated(created.id);
       onClose();
     } catch (err) {
-      if (err instanceof ApiError) {
-        const body = err.body as { detail?: unknown } | null;
-        setServerError(
-          typeof body?.detail === "string"
-            ? body.detail
-            : `Save failed (${err.status}).`,
-        );
-      } else {
-        setServerError("Save failed.");
-      }
+      setServerError(
+        err instanceof ApiError
+          ? errorDetail(err, t("newRequest.saveFailed", { defaultValue: "Save failed" }))
+          : t("newRequest.saveFailed", { defaultValue: "Save failed" }),
+      );
     }
   };
 
+  const busy = create.isPending || upload.isPending;
+  const selectPlaceholder = t("newRequest.selectPlaceholder", { defaultValue: "— Select —" });
+  const startLabel =
+    type === "exception"
+      ? t("newRequest.targetDate", { defaultValue: "Target date" })
+      : t("newRequest.startDate", { defaultValue: "Start date" });
+  const canSubmit = reasonCategory !== "" && startDate !== "" && (type !== "leave" || leaveTypeId !== "");
+
   return (
     <DrawerShell onClose={onClose}>
-      <div className="drawer">
-        <div className="drawer-head">
-          <div>
-            <div className="mono text-xs text-dim">New request</div>
-            <div style={{ fontSize: 16, fontWeight: 600, marginTop: 2 }}>
-              Submit for approval
-            </div>
-          </div>
-          <button className="icon-btn" onClick={onClose} aria-label="Close">
-            <Icon name="x" size={14} />
-          </button>
-        </div>
-        <form onSubmit={submit} style={{ display: "contents" }}>
-          <div className="drawer-body">
-            {/* Type radio */}
-            <SectionLabel>Request type</SectionLabel>
-            <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-              {(["exception", "leave"] as RequestType[]).map((t) => (
-                <label
-                  key={t}
-                  className={`pill ${type === t ? "pill-accent" : "pill-neutral"}`}
-                  style={{ cursor: "pointer", textTransform: "capitalize" }}
-                >
-                  <input
-                    type="radio"
-                    name="type"
-                    value={t}
-                    checked={type === t}
-                    onChange={() => setType(t)}
-                    style={{ display: "none" }}
-                  />
-                  {t}
-                </label>
-              ))}
-            </div>
+      <form className="drawer fk-drawer" onSubmit={submit}>
+        <FormHeader
+          icon={<Icon name="send" size={18} />}
+          title={t("myRequests.newRequest")}
+          subtitle={t("newRequest.formSubtitle", {
+            defaultValue: "Ask for leave or explain an attendance exception. It goes to your manager for approval.",
+          })}
+          onClose={onClose}
+        />
+        <div className="drawer-body fk-body">
+          {serverError && <FormNotice tone="danger">{serverError}</FormNotice>}
 
-            <SectionLabel>Reason category</SectionLabel>
-            <select
-              className="input"
-              value={reasonCategory}
-              onChange={(e) => setReasonCategory(e.target.value)}
-              style={{ marginBottom: 12 }}
-            >
-              <option value="">— Select —</option>
-              {categories.data
-                ?.filter((c) => c.active)
-                .map((c) => (
-                  <option key={c.id} value={c.code}>
-                    {c.name}
-                  </option>
-                ))}
-            </select>
-
-            <SectionLabel>
-              {type === "exception" ? "Target date" : "Date range"}
-            </SectionLabel>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns:
-                  type === "exception" ? "1fr" : "1fr 1fr",
-                gap: 8,
-                marginBottom: 12,
+          <FormSection
+            step={1}
+            title={t("newRequest.sectionType", { defaultValue: "Request type" })}
+            description={t("newRequest.sectionTypeDesc", { defaultValue: "Pick what you are asking for. The fields below adapt to it." })}
+          >
+            <ChoiceCards<RequestType>
+              label={t("newRequest.sectionType", { defaultValue: "Request type" })}
+              value={type}
+              onChange={(v) => {
+                setType(v);
+                setErrors({});
               }}
-            >
+              options={[
+                {
+                  value: "exception",
+                  title: t("myRequests.filters.exception"),
+                  description: t("newRequest.exceptionHelp", { defaultValue: "Explain a late arrival, early departure or missed detection on one day." }),
+                  icon: <Icon name="clock" size={16} />,
+                },
+                {
+                  value: "leave",
+                  title: t("myRequests.filters.leave"),
+                  description: t("newRequest.leaveHelp", { defaultValue: "Time away from work. Needs a date range and a leave type." }),
+                  icon: <Icon name="calendar" size={16} />,
+                },
+              ]}
+            />
+          </FormSection>
+
+          <FormSection
+            step={2}
+            title={t("newRequest.sectionWhen", { defaultValue: "When" })}
+            description={
+              type === "leave"
+                ? t("newRequest.sectionWhenLeaveDesc", { defaultValue: "The first and last day you will be away." })
+                : t("newRequest.sectionWhenExceptionDesc", { defaultValue: "The day the exception applies to." })
+            }
+          >
+            <Field label={startLabel} required error={errors.start}>
               <DatePicker
                 value={startDate}
-                onChange={setStartDate}
-                ariaLabel={type === "exception" ? "Target date" : "Start date"}
+                onChange={(v) => {
+                  setStartDate(v);
+                  clearError("start");
+                }}
+                ariaLabel={startLabel}
                 triggerStyle={{ width: "100%" }}
               />
-              {type === "leave" && (
+            </Field>
+            {type === "leave" && (
+              <Field label={t("newRequest.endDate", { defaultValue: "End date" })} help={t("newRequest.endDateHelp", { defaultValue: "Leave blank for a single day." })}>
                 <DatePicker
                   value={endDate}
                   onChange={setEndDate}
                   min={startDate}
-                  ariaLabel="End date"
+                  ariaLabel={t("newRequest.endDate", { defaultValue: "End date" })}
                   triggerStyle={{ width: "100%" }}
                 />
-              )}
-            </div>
+              </Field>
+            )}
+          </FormSection>
 
+          <FormSection
+            step={3}
+            title={t("newRequest.sectionWhy", { defaultValue: "Reason" })}
+            description={t("newRequest.sectionWhyDesc", { defaultValue: "Why you need this. Your approver sees the category and your notes." })}
+          >
+            <Field
+              label={t("newRequest.reasonCategory", { defaultValue: "Reason category" })}
+              htmlFor="nr-reason"
+              required
+              error={errors.reason}
+              span={type === "leave" ? 1 : 2}
+            >
+              <select
+                id="nr-reason"
+                className="select"
+                value={reasonCategory}
+                onChange={(e) => {
+                  setReasonCategory(e.target.value);
+                  clearError("reason");
+                }}
+              >
+                <option value="">{selectPlaceholder}</option>
+                {categories.data
+                  ?.filter((c) => c.active)
+                  .map((c) => (
+                    <option key={c.id} value={c.code}>
+                      {c.name}
+                    </option>
+                  ))}
+              </select>
+            </Field>
             {type === "leave" && (
-              <>
-                <SectionLabel>Leave type</SectionLabel>
+              <Field label={t("newRequest.leaveType", { defaultValue: "Leave type" })} htmlFor="nr-leave-type" required error={errors.leaveType}>
                 <select
-                  className="input"
+                  id="nr-leave-type"
+                  className="select"
                   value={leaveTypeId}
-                  onChange={(e) =>
+                  onChange={(e) => {
                     setLeaveTypeId(
                       e.target.value === "" ? "" : Number(e.target.value),
-                    )
-                  }
-                  style={{ marginBottom: 12 }}
+                    );
+                    clearError("leaveType");
+                  }}
                 >
-                  <option value="">— Select —</option>
+                  <option value="">{selectPlaceholder}</option>
                   {leaveTypes.data
                     ?.filter((lt) => lt.active)
                     .map((lt) => (
@@ -274,131 +315,86 @@ export function NewRequestDrawer({
                       </option>
                     ))}
                 </select>
-              </>
+              </Field>
             )}
-
-            <SectionLabel>Notes (optional)</SectionLabel>
-            <textarea
-              className="input"
-              rows={3}
-              value={reasonText}
-              onChange={(e) => setReasonText(e.target.value)}
-              maxLength={1000}
-              style={{ marginBottom: 14, resize: "vertical" }}
-            />
-            <div
-              style={{
-                fontSize: 11,
-                color: "var(--text-secondary)",
-                marginTop: -10,
-                marginBottom: 14,
-                textAlign: "end",
-              }}
+            <Field
+              label={t("newRequest.notes", { defaultValue: "Notes" })}
+              htmlFor="nr-notes"
+              span={2}
+              help={
+                <span className="wf-fk-help-row">
+                  <span>{t("common.optional")}</span>
+                  <span className="wf-fk-counter mono">{reasonText.length} / 1000</span>
+                </span>
+              }
             >
-              {reasonText.length} / 1000
-            </div>
+              <textarea
+                id="nr-notes"
+                className="textarea"
+                rows={3}
+                value={reasonText}
+                onChange={(e) => setReasonText(e.target.value)}
+                maxLength={1000}
+                placeholder={t("newRequest.notesPlaceholder", { defaultValue: "e.g. Doctor's appointment in the morning." })}
+              />
+            </Field>
+          </FormSection>
 
-            <SectionLabel>Attachment (optional)</SectionLabel>
-            <div
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={onDrop}
-              style={{
-                border: "1px dashed var(--border-strong)",
-                background: "var(--bg-sunken)",
-                borderRadius: "var(--radius)",
-                padding: 16,
-                textAlign: "center",
-                fontSize: 12.5,
-                color: "var(--text-secondary)",
-                marginBottom: 6,
-              }}
-            >
-              <Icon name="upload" size={16} />{" "}
+          <FormSection
+            step={4}
+            title={t("newRequest.sectionAttachment", { defaultValue: "Attachment" })}
+            description={t("newRequest.sectionAttachmentDesc", { defaultValue: "Optional. A doctor's note or other proof helps your approver decide." })}
+            columns={1}
+          >
+            <Field label={t("newRequest.attachmentLabel", { defaultValue: "Supporting document" })} {...(pendingFile ? {} : { htmlFor: "nr-file" })} error={errors.file}>
               {pendingFile ? (
-                <>
-                  <span className="mono">{pendingFile.name}</span> —{" "}
-                  {(pendingFile.size / 1024).toFixed(0)} KB
-                </>
+                <div className="wf-fk-file">
+                  <span className="wf-fk-file-icon" aria-hidden>
+                    <Icon name="fileText" size={16} />
+                  </span>
+                  <span className="wf-fk-file-text">
+                    <span className="wf-fk-file-name mono">{pendingFile.name}</span>
+                    <span className="wf-fk-file-meta">{(pendingFile.size / 1024).toFixed(0)} KB</span>
+                  </span>
+                  <button type="button" className="btn btn-sm btn-ghost" onClick={() => setPendingFile(null)}>
+                    {t("newRequest.removeFile", { defaultValue: "Remove" })}
+                  </button>
+                </div>
               ) : (
-                <>
-                  Drop a file here, or{" "}
-                  <label
-                    style={{
-                      textDecoration: "underline",
-                      cursor: "pointer",
-                      color: "var(--text)",
-                    }}
-                  >
-                    choose
-                    <input
-                      type="file"
-                      accept={accepted}
-                      onChange={onPickFile}
-                      style={{ display: "none" }}
-                    />
-                  </label>
-                </>
+                <label
+                  htmlFor="nr-file"
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setDragOver(true);
+                  }}
+                  onDragLeave={() => setDragOver(false)}
+                  onDrop={onDrop}
+                  className={`wf-fk-dropzone${dragOver ? " is-over" : ""}`}
+                >
+                  <span className="wf-fk-dropzone-icon" aria-hidden>
+                    <Icon name="upload" size={16} />
+                  </span>
+                  <span>
+                    {t("newRequest.dropHere", { defaultValue: "Drop a file here, or" })}{" "}
+                    <span className="wf-link-btn">{t("newRequest.choose", { defaultValue: "choose a file" })}</span>
+                  </span>
+                  <span className="wf-fk-dropzone-hint">
+                    {t("newRequest.fileHint", { defaultValue: "Max {{max}}MB · images, PDF, DOCX · optional", max: maxMb })}
+                  </span>
+                  <input id="nr-file" type="file" className="wf-file-input" accept={accepted} onChange={onPickFile} />
+                </label>
               )}
-              <div className="text-xs text-dim" style={{ marginTop: 4 }}>
-                Max {maxMb}MB · images, PDF, DOCX
-              </div>
-            </div>
-
-            {serverError && (
-              <div
-                role="alert"
-                style={{
-                  background: "var(--danger-soft)",
-                  color: "var(--danger-text)",
-                  border: "1px solid var(--border)",
-                  padding: "8px 10px",
-                  borderRadius: "var(--radius-sm)",
-                  fontSize: 12.5,
-                  marginTop: 8,
-                }}
-              >
-                {serverError}
-              </div>
-            )}
-          </div>
-          <div className="drawer-foot">
-            <button
-              type="button"
-              className="btn"
-              onClick={onClose}
-              disabled={create.isPending || upload.isPending}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={create.isPending || upload.isPending}
-            >
-              {create.isPending || upload.isPending
-                ? "Submitting…"
-                : "Submit request"}
-            </button>
-          </div>
-        </form>
-      </div>
+            </Field>
+          </FormSection>
+        </div>
+        <FormFooter
+          onCancel={onClose}
+          submitLabel={t("newRequest.submit", { defaultValue: "Submit request" })}
+          submittingLabel={t("newRequest.submitting", { defaultValue: "Submitting…" })}
+          submitting={busy}
+          canSubmit={canSubmit}
+        />
+      </form>
     </DrawerShell>
-  );
-}
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        fontSize: 12,
-        fontWeight: 600,
-        textTransform: "uppercase",
-        letterSpacing: "0.05em",
-        color: "var(--text-tertiary)",
-        marginBottom: 6,
-      }}
-    >
-      {children}
-    </div>
   );
 }

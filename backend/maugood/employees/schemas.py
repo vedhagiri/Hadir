@@ -78,6 +78,9 @@ class EmployeeOut(BaseModel):
     section: Optional[SectionOut] = None
     status: StatusOut
     photo_count: int
+    # Avatar thumbnail for list views — fetch via
+    # GET /api/employees/{id}/photos/{primary_photo_id}/thumb.
+    primary_photo_id: Optional[int] = None
     created_at: datetime
     # P28.7 lifecycle + HR org-chart fields. All optional / nullable —
     # existing rows have NULL until HR backfills them.

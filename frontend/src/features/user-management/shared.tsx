@@ -1,5 +1,9 @@
 // Small shared bits for the AD Users surface.
 
+import { useTranslation } from "react-i18next";
+
+import { rolePillClass } from "../employees/EmployeesPage";
+import { Switch } from "../employees/peopleUi";
 import type { RoleCode } from "./types";
 
 export const ROLE_META: Record<
@@ -14,6 +18,8 @@ export const ROLE_META: Record<
 
 export const ROLE_ORDER: RoleCode[] = ["Admin", "HR", "Manager", "Employee"];
 
+// Stable per-name avatar colour. Hashes into the same palette the
+// Employees page uses so a person looks the same on both surfaces.
 const AVATAR_COLORS = [
   "#0b6e4f",
   "#2563eb",
@@ -38,67 +44,44 @@ export function avatarInitials(name: string): string {
 }
 
 export function RoleBadges({ codes }: { codes: string[] }) {
+  const { t } = useTranslation();
   if (codes.length === 0) {
-    return <span style={{ color: "var(--text-tertiary)", fontSize: 12 }}>No role</span>;
+    return (
+      <span className="text-xs text-dim">
+        {t("userManagement.noRole", { defaultValue: "No role" })}
+      </span>
+    );
   }
   return (
-    <span style={{ display: "inline-flex", gap: 5, flexWrap: "wrap" }}>
+    <span className="pp-card-pills">
       {codes.map((c) => (
-        <span
-          key={c}
-          className="pill pill-accent"
-          style={{ fontSize: 10.5, letterSpacing: "0.02em" }}
-        >
-          {c}
+        <span key={c} className={`pill ${rolePillClass(c)}`}>
+          {t(`role.${c}`, { defaultValue: c })}
         </span>
       ))}
     </span>
   );
 }
 
+/** Access on/off switch — the shared People-area Switch. */
 export function AccessToggle({
   checked,
   onChange,
   disabled,
+  label,
 }: {
   checked: boolean;
   onChange: () => void;
   disabled?: boolean;
+  /** Accessible name for the switch. */
+  label?: string;
 }) {
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      disabled={disabled}
-      onClick={onChange}
-      style={{
-        position: "relative",
-        width: 40,
-        height: 22,
-        flexShrink: 0,
-        borderRadius: 999,
-        border: "none",
-        cursor: disabled ? "default" : "pointer",
-        padding: 0,
-        transition: "background 120ms ease",
-        background: checked ? "var(--accent)" : "var(--border-strong)",
-        opacity: disabled ? 0.6 : 1,
-      }}
-    >
-      <span
-        style={{
-          position: "absolute",
-          top: 2,
-          insetInlineStart: checked ? 20 : 2,
-          width: 18,
-          height: 18,
-          borderRadius: 999,
-          background: "#fff",
-          transition: "inset-inline-start 120ms ease",
-          boxShadow: "0 1px 2px rgba(0,0,0,0.25)",
-        }}
-      />
-    </button>
+    <Switch
+      checked={checked}
+      onChange={onChange}
+      {...(disabled !== undefined ? { disabled } : {})}
+      {...(label !== undefined ? { label } : {})}
+    />
   );
 }

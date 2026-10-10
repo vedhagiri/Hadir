@@ -1,0 +1,231 @@
+/* Form kit (components/FormKit.tsx). Prefix fk-. Tokens from
+ * theme/modern.css; logical properties so RTL mirrors for free. */
+
+/* ---- Drawer frame --------------------------------------------------- */
+.fk-drawer { width: min(680px, 100vw); }
+.fk-drawer.fk-wide { width: min(860px, 100vw); }
+.fk-body { display: flex; flex-direction: column; gap: 28px; padding: 24px 28px 32px; }
+
+/* ---- Header --------------------------------------------------------- */
+.fk-head { align-items: flex-start; gap: 14px; padding: 20px 24px 18px; }
+.fk-head-icon {
+  width: 42px;
+  height: 42px;
+  flex: none;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 18%, transparent);
+}
+.fk-head-text { flex: 1; min-width: 0; }
+.fk-eyebrow {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: 2px;
+}
+.fk-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+  color: var(--text);
+}
+.fk-subtitle { margin: 4px 0 0; font-size: 13px; line-height: 1.5; color: var(--text-secondary); }
+.fk-head-actions { display: flex; align-items: center; gap: 6px; margin-inline-start: auto; }
+
+/* ---- Sections ------------------------------------------------------- */
+.fk-section { display: flex; flex-direction: column; gap: 16px; }
+.fk-section + .fk-section { padding-top: 24px; border-top: 1px solid var(--border); }
+.fk-section-head { display: flex; align-items: flex-start; gap: 12px; }
+.fk-step {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--text);
+  color: var(--bg-elev);
+  margin-top: 1px;
+}
+.fk-section-text { flex: 1; min-width: 0; }
+.fk-section-title { margin: 0; font-size: 14.5px; font-weight: 700; letter-spacing: -0.01em; color: var(--text); }
+.fk-section-desc { margin: 3px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--text-tertiary); }
+.fk-section-aside { flex: none; }
+
+/* ---- Field grid ----------------------------------------------------- */
+.fk-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 18px; }
+.fk-grid.fk-grid-1 { grid-template-columns: minmax(0, 1fr); }
+.fk-span-2, .fk-grid > .fk-switch-row, .fk-grid > .fk-choices, .fk-grid > .fk-notice, .fk-grid > .fk-full { grid-column: 1 / -1; }
+
+.fk-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.fk-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.fk-req { color: var(--danger); font-weight: 700; }
+.fk-help { font-size: 11.5px; line-height: 1.45; color: var(--text-tertiary); }
+.fk-error {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--danger-text);
+}
+/* !important: modern.css styles drawer/modal inputs with a long
+   :not(...) chain whose specificity would otherwise win over this
+   error state, leaving invalid fields without a red outline. */
+.fk-field.has-error :is(.input, .select, .textarea, input, select, textarea) {
+  border-color: var(--danger) !important;
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--danger) 14%, transparent) !important;
+}
+.fk-field :is(.input, .select, .textarea) { width: 100%; }
+
+/* ---- Switch rows ---------------------------------------------------- */
+.fk-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-elev);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) ease, background var(--dur-fast) ease;
+}
+.fk-switch-row:hover { border-color: var(--border-strong); background: var(--bg-sunken); }
+.fk-switch-row.is-disabled { cursor: not-allowed; opacity: 0.6; }
+.fk-switch-text { display: flex; flex-direction: column; min-width: 0; }
+.fk-switch-label { font-size: 13px; font-weight: 600; color: var(--text); }
+.fk-switch-desc { font-size: 12px; line-height: 1.45; color: var(--text-tertiary); margin-top: 2px; }
+.fk-switch { position: relative; flex: none; }
+.fk-switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: inherit; }
+.fk-switch-track {
+  display: block;
+  width: 38px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  position: relative;
+  transition: background var(--dur-fast) ease;
+}
+.fk-switch-thumb {
+  position: absolute;
+  top: 3px;
+  inset-inline-start: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 26, 44, 0.25);
+  transition: transform var(--dur) var(--ease-out);
+}
+.fk-switch input:checked + .fk-switch-track { background: var(--accent); }
+.fk-switch input:checked + .fk-switch-track .fk-switch-thumb { transform: translateX(16px); }
+[dir="rtl"] .fk-switch input:checked + .fk-switch-track .fk-switch-thumb { transform: translateX(-16px); }
+.fk-switch input:focus-visible + .fk-switch-track { box-shadow: var(--ring); }
+
+/* ---- Choice cards --------------------------------------------------- */
+.fk-choices { display: grid; gap: 10px; }
+.fk-choices-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.fk-choices-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.fk-choice {
+  appearance: none;
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--bg-elev);
+  transition: border-color var(--dur-fast) ease, box-shadow var(--dur-fast) ease, background var(--dur-fast) ease;
+}
+.fk-choice:hover:not(:disabled) { border-color: var(--text-quaternary); background: var(--bg-sunken); }
+.fk-choice[aria-checked="true"] {
+  border-color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 5%, var(--bg-elev));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 14%, transparent);
+}
+.fk-choice:disabled { opacity: 0.5; cursor: not-allowed; }
+.fk-choice-icon {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  background: var(--bg-sunken);
+  color: var(--text-secondary);
+}
+.fk-choice[aria-checked="true"] .fk-choice-icon { background: var(--accent); color: #fff; }
+.fk-choice-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.fk-choice-title { font-size: 13px; font-weight: 600; }
+.fk-choice-desc { font-size: 12px; line-height: 1.45; color: var(--text-tertiary); margin-top: 2px; }
+.fk-choice-check {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  border: 1.5px solid var(--border-strong);
+  color: #fff;
+}
+.fk-choice[aria-checked="true"] .fk-choice-check { background: var(--accent); border-color: var(--accent); }
+
+/* ---- Notices -------------------------------------------------------- */
+.fk-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.fk-notice svg { flex: none; margin-top: 2px; }
+.fk-notice-title { font-weight: 700; margin-bottom: 2px; }
+.fk-notice.tone-info { background: var(--info-soft); color: var(--info-text); border-color: color-mix(in oklab, var(--info) 22%, transparent); }
+.fk-notice.tone-warning { background: var(--warning-soft); color: var(--warning-text); border-color: color-mix(in oklab, var(--warning) 28%, transparent); }
+.fk-notice.tone-danger { background: var(--danger-soft); color: var(--danger-text); border-color: color-mix(in oklab, var(--danger) 22%, transparent); }
+.fk-notice.tone-success { background: var(--success-soft); color: var(--success-text); border-color: color-mix(in oklab, var(--success) 22%, transparent); }
+
+/* ---- Footer --------------------------------------------------------- */
+.fk-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 24px; }
+.fk-foot-note { font-size: 12px; color: var(--text-tertiary); }
+.fk-foot-actions { display: flex; align-items: center; gap: 10px; margin-inline-start: auto; }
+.fk-foot-actions .btn { min-width: 96px; }
+.fk-spinner {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-inline-end-color: transparent;
+  animation: maugood-spin 700ms linear infinite;
+}
+
+/* ---- Modal variant: same parts inside a centred .modal ------------- */
+.fk-modal { width: min(520px, 96vw); display: flex; flex-direction: column; max-height: 90vh; }
+.fk-modal .fk-body { overflow-y: auto; padding: 20px 24px 24px; gap: 20px; }
+.fk-modal .fk-head { border-bottom: 1px solid var(--border); }
+.fk-modal .fk-foot { border-top: 1px solid var(--border); background: var(--bg-sunken); }

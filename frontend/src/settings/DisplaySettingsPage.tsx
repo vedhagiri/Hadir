@@ -17,7 +17,8 @@ import {
   type Density,
   type Theme,
 } from "../theme";
-import { SettingsTabs } from "./SettingsTabs";
+import { Icon } from "../shell/Icon";
+import { SettingRow, SettingsCard, SettingsPage } from "./settingsUi";
 
 function useTheme(): Theme {
   return useSyncExternalStore(subscribe, getTheme, getTheme);
@@ -33,124 +34,80 @@ export function DisplaySettingsPage() {
   const density = useDensity();
 
   return (
-    <>
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">
-            {t("settings.tabs.display") as string}
-          </h1>
-          <p className="page-sub">
-            {t("display.pageSub") as string}
-          </p>
-        </div>
-      </div>
-
-      <SettingsTabs />
-
-      <div className="card" style={{ padding: 20, maxWidth: 560 }}>
-        <Section
+    <SettingsPage
+      title={t("settings.tabs.display") as string}
+      subtitle={t("display.pageSub") as string}
+    >
+      <SettingsCard
+        icon={<Icon name={theme === "dark" ? "moon" : "sun"} size={17} />}
+        title={t("settingsUi.display.cardTitle", { defaultValue: "Appearance" })}
+        description={t("settingsUi.display.cardDesc", {
+          defaultValue: "These preferences are saved to your account and follow you to any browser.",
+        })}
+      >
+        <SettingRow
           label={t("display.themeLabel") as string}
-          description={t("display.themeDescription") as string}
-          options={THEMES.map((v) => ({
-            value: v,
-            label: t(`display.theme.${v}`) as string,
-          }))}
-          value={theme}
-          onPick={(v) => void setTheme(v as Theme)}
-        />
-        <div
-          style={{
-            height: 1,
-            background: "var(--border)",
-            margin: "20px 0",
-          }}
-        />
-        <Section
+          help={t("display.themeDescription") as string}
+        >
+          <Segmented
+            label={t("display.themeLabel") as string}
+            options={THEMES.map((v) => ({
+              value: v,
+              label: t(`display.theme.${v}`) as string,
+            }))}
+            value={theme}
+            onPick={(v) => void setTheme(v as Theme)}
+          />
+        </SettingRow>
+        <SettingRow
+          last
           label={t("display.densityLabel") as string}
-          description={t("display.densityDescription") as string}
-          options={DENSITIES.map((v) => ({
-            value: v,
-            label: t(`display.density.${v}`) as string,
-          }))}
-          value={density}
-          onPick={(v) => void setDensity(v as Density)}
-        />
-      </div>
-    </>
+          help={t("display.densityDescription") as string}
+        >
+          <Segmented
+            label={t("display.densityLabel") as string}
+            options={DENSITIES.map((v) => ({
+              value: v,
+              label: t(`display.density.${v}`) as string,
+            }))}
+            value={density}
+            onPick={(v) => void setDensity(v as Density)}
+          />
+        </SettingRow>
+      </SettingsCard>
+    </SettingsPage>
   );
 }
 
-interface SectionProps<T extends string> {
+interface SegmentedProps<T extends string> {
   label: string;
-  description: string;
   options: { value: T; label: string }[];
   value: T;
   onPick: (v: T) => void;
 }
 
-function Section<T extends string>({
+function Segmented<T extends string>({
   label,
-  description,
   options,
   value,
   onPick,
-}: SectionProps<T>) {
+}: SegmentedProps<T>) {
   return (
-    <div role="group" aria-label={label}>
-      <div
-        style={{
-          fontSize: 13,
-          fontWeight: 600,
-          color: "var(--text)",
-          marginBottom: 4,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        className="text-xs text-dim"
-        style={{ marginBottom: 10, lineHeight: 1.5 }}
-      >
-        {description}
-      </div>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: `repeat(${options.length}, 1fr)`,
-          gap: 4,
-          background: "var(--bg-sunken)",
-          padding: 4,
-          borderRadius: "var(--radius-sm)",
-          maxWidth: 360,
-        }}
-      >
-        {options.map((opt) => {
-          const active = opt.value === value;
-          return (
-            <button
-              key={opt.value}
-              type="button"
-              onClick={() => onPick(opt.value)}
-              aria-pressed={active}
-              style={{
-                padding: "8px 10px",
-                fontSize: 13,
-                borderRadius: 4,
-                background: active ? "var(--bg-elev)" : "transparent",
-                color: active ? "var(--text)" : "var(--text-secondary)",
-                fontWeight: active ? 600 : 500,
-                border: active
-                  ? "1px solid var(--border)"
-                  : "1px solid transparent",
-                boxShadow: active ? "var(--shadow-sm)" : "none",
-                cursor: "pointer",
-              }}
-            >
-              {opt.label}
-            </button>
-          );
-        })}
-      </div>
+    <div className="seg" role="group" aria-label={label}>
+      {options.map((opt) => {
+        const active = opt.value === value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            className={`seg-btn${active ? " active" : ""}`}
+            onClick={() => onPick(opt.value)}
+            aria-pressed={active}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
     </div>
   );
 }

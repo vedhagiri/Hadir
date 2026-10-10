@@ -4,7 +4,7 @@
 
 import { useTranslation } from "react-i18next";
 
-import { SettingsTabs } from "../settings/SettingsTabs";
+import { LoadErrorPanel, SettingsPage } from "../settings/settingsUi";
 import { BrandingForm } from "./BrandingForm";
 import {
   useDeleteMyLogo,
@@ -12,7 +12,7 @@ import {
   usePatchMyBranding,
   useUploadMyLogo,
 } from "./hooks";
-import { SkeletonLines } from "../components/Skeleton";
+import { SkeletonPanel } from "../components/Skeleton";
 
 export function BrandingPage() {
   const { t } = useTranslation();
@@ -21,31 +21,26 @@ export function BrandingPage() {
   const upload = useUploadMyLogo();
   const remove = useDeleteMyLogo();
 
-  if (branding.isLoading) return <SkeletonLines lines={3} />;
-  if (branding.error)
-    return (
-      <p style={{ color: "var(--danger-text)" }}>{t("branding.loadFailedPage")}</p>
+  let body: React.ReactNode;
+  if (branding.isLoading) {
+    body = (
+      <>
+        <SkeletonPanel lines={2} />
+        <SkeletonPanel lines={3} />
+        <SkeletonPanel lines={4} />
+      </>
     );
-  if (!branding.data) return <p>{t("branding.signInRequired")}</p>;
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <SettingsTabs />
-      <header>
-        <h1
-          style={{
-            fontFamily: "var(--font-display)",
-            fontSize: 28,
-            margin: "0 0 4px 0",
-            fontWeight: 400,
-          }}
-        >
-          {t("branding.title")}
-        </h1>
-        <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 13 }}>
-          {t("branding.subtitle")}
-        </p>
-      </header>
+  } else if (branding.error) {
+    body = (
+      <LoadErrorPanel
+        title={t("branding.loadFailedPage")}
+        onRetry={() => void branding.refetch()}
+      />
+    );
+  } else if (!branding.data) {
+    body = <LoadErrorPanel title={t("branding.signInRequired")} />;
+  } else {
+    body = (
       <BrandingForm
         branding={branding.data}
         logoUrl="/api/branding/logo"
@@ -54,6 +49,12 @@ export function BrandingPage() {
         onLogoDelete={() => remove.mutateAsync()}
         applyToDocument
       />
-    </div>
+    );
+  }
+
+  return (
+    <SettingsPage title={t("branding.title")} subtitle={t("branding.subtitle")}>
+      {body}
+    </SettingsPage>
   );
 }

@@ -50,7 +50,11 @@
     "collapseSidebar": "Collapse sidebar",
     "expandSidebar": "Expand sidebar",
     "optional": "optional",
-    "buildInfo": "Build information"
+    "buildInfo": "Build information",
+    "retry": "Retry",
+    "actions": "Actions",
+    "clear": "Clear",
+    "clearSearch": "Clear search"
   },
   "login": {
     "title": "Sign in to Maugood",
@@ -60,13 +64,13 @@
     "passwordLabel": "Password",
     "showPassword": "Show password",
     "hidePassword": "Hide password",
-      "required": "Required",
-      "footer": {
+    "required": "Required",
+    "footer": {
       "poweredBy": "Powered by",
-        "tagline": "CCTV-based AI attendance platform",
-        "rights": "All rights reserved.",
-        "version": "Version {{version}}"
-      },
+      "tagline": "CCTV-based AI attendance platform",
+      "rights": "All rights reserved.",
+      "version": "Version {{version}}"
+    },
     "passwordPlaceholder": "Your Maugood password",
     "submit": "Sign in",
     "submitting": "Signing in…",
@@ -92,7 +96,7 @@
     }
   },
   "userManagement": {
-    "title": "User Management",
+    "title": "AD Users",
     "subtitle": "Users synced from Microsoft Entra. Sync to pull the latest directory, then grant access and roles here.",
     "sync": "Sync Users",
     "syncing": "Syncing…",
@@ -110,7 +114,9 @@
       "createEmployeeHint": "Each synced user appears in the Employees module and can be managed like any other employee. Clicking a user opens their employee profile. No password is generated.",
       "note": "Access stays off until you enable it per user. Nothing signs anyone in.",
       "confirm": "Sync now",
-      "cancel": "Cancel"
+      "cancel": "Cancel",
+      "optionsTitle": "Sync options",
+      "optionsHelp": "Decide what new users get on their first sync. You can change any of it later."
     },
     "updateFailed": "Couldn't update the user.",
     "loadFailed": "Couldn't load AD users.",
@@ -179,7 +185,28 @@
     "saveMapping": "Save mapping",
     "mappingSaveFailed": "Couldn't save the mapping.",
     "cancel": "Cancel",
-    "saving": "Saving…"
+    "saving": "Saving…",
+    "stats": {
+      "total": "All users",
+      "totalSub": "From Microsoft Entra",
+      "enabled": "Access enabled",
+      "pctSub": "{{pct}}% can sign in",
+      "disabled": "Access disabled",
+      "disabledSub": "Can’t sign in",
+      "noRole": "No role assigned",
+      "noRoleSub": "Assign one in the user drawer"
+    },
+    "clearSearch": "Clear search",
+    "allRoles": "All roles",
+    "reset": "Reset",
+    "emptyTitle": "No users synced yet",
+    "noMatchBody": "Try a different name or email, or clear the filters to see everyone.",
+    "clearFilters": "Clear filters",
+    "mappingRulesTitle": "Mapping rules",
+    "mappingRulesHelp": "Members of a group get its role on the next sync. Rows without a group are ignored.",
+    "mappingGroupCol": "Entra group",
+    "accessApplyNow": "Takes effect immediately and is written to the audit log.",
+    "changeRoleHelp": "One role per user. The change applies immediately and is audited."
   },
   "topbar": {
     "logout": "Log out",
@@ -188,7 +215,16 @@
     "switchFailed": "Switch failed.",
     "active": "active",
     "settings": "Settings",
-    "userMenu": "User menu"
+    "userMenu": "User menu",
+    "signedInAs": "Signed in as",
+    "profile": "My profile",
+    "signOut": {
+      "title": "Sign out?",
+      "body": "Your session will end on this device. You'll need to sign in again to continue.",
+      "note": "Any unsaved changes on the current page will be lost.",
+      "stay": "Stay signed in",
+      "confirm": "Sign out"
+    }
   },
   "nav": {
     "sections": {
@@ -209,7 +245,7 @@
       "calendar": "Calendar",
       "cameras": "Cameras",
       "employees": "Employees",
-      "users": "Users",
+      "users": "AD Users",
       "policies": "Shift policies",
       "leave-policy": "Leave & calendar",
       "daily-attendance": "Daily attendance",
@@ -285,7 +321,21 @@
       "Developers": "Developers",
       "API Reference": "API reference",
       "Frame Diagnostics": "Frame diagnostics",
-      "Live Capture Diagnostics": "Live capture diagnostics"
+      "Live Capture Diagnostics": "Live capture diagnostics",
+      "Workspace": "Workspace",
+      "Branding": "Branding",
+      "Authentication": "Authentication",
+      "Email": "Email",
+      "Schedules": "Schedules",
+      "ERP export": "ERP export",
+      "Divisions": "Divisions",
+      "Departments": "Departments",
+      "Sections": "Sections",
+      "Custom fields": "Custom fields",
+      "Request reasons": "Request reasons",
+      "Notifications": "Notifications",
+      "Display": "Display",
+      "AD Users": "AD Users"
     },
     "ariaLabel": "Sidebar navigation"
   },
@@ -337,8 +387,59 @@
         "reason": "Reason",
         "submitted": "Submitted",
         "action": "Action"
-      }
-    }
+      },
+      "emptyTitle": "Nothing waiting for you",
+      "loadError": "Couldn't load delete requests",
+      "rejectTitle": "Reject delete request",
+      "rejectSubtitle": "{{name}} stays on file. The requester sees your reason.",
+      "rejectReason": "Reason for rejection",
+      "rejectHelp": "At least 5 characters."
+    },
+    "stats": {
+      "pending": "Pending my decision",
+      "pendingSub": "Waiting for your approval",
+      "sla": "Past SLA",
+      "slaSub": "Pending beyond the business-hours target",
+      "decided": "Decided by me",
+      "decidedSub": "Approved or rejected by you"
+    },
+    "searchPlaceholder": "Search by employee, code or reason",
+    "clearSearch": "Clear search",
+    "filters": {
+      "allTypes": "All types",
+      "sla": "SLA",
+      "slaAll": "Any",
+      "slaBreached": "Past SLA only",
+      "reset": "Reset",
+      "clear": "Clear filters"
+    },
+    "emptyPending": {
+      "title": "Nothing waiting for you",
+      "body": "You're all caught up. New exception and leave requests that need your decision will appear here."
+    },
+    "emptyDecided": {
+      "title": "No decisions yet",
+      "body": "Requests you approve or reject will be listed here for reference."
+    },
+    "emptyAll": {
+      "title": "No requests filed yet",
+      "body": "When employees submit exception or leave requests they will show up here."
+    },
+    "emptyFiltered": {
+      "title": "No requests match these filters",
+      "body": "Try a different search or clear the filters to see every request in this tab."
+    },
+    "attachmentsTitle": "{{n}} attachment(s)",
+    "caughtUp": {
+      "body": "No pending approvals right now.",
+      "title": "You're all caught up!"
+    },
+    "employeeHint": "Approvals are for managers, HR and admins. Your own requests live on the My requests page.",
+    "loadError": {
+      "title": "Couldn't load approvals"
+    },
+    "slaBreachedTitle": "Past SLA threshold (business hours)",
+    "slaOkTitle": "Within SLA"
   },
   "myRequests": {
     "title": "My requests",
@@ -353,7 +454,9 @@
       "open": "Open",
       "approved": "Approved",
       "rejected": "Rejected",
-      "cancelled": "Cancelled"
+      "cancelled": "Cancelled",
+      "reset": "Reset",
+      "clear": "Clear filters"
     },
     "columns": {
       "id": "ID",
@@ -363,7 +466,28 @@
       "status": "Status",
       "submitted": "Submitted"
     },
-    "empty": "No requests yet."
+    "empty": "No requests yet.",
+    "stats": {
+      "openSub": "Waiting for manager or HR",
+      "approvedSub": "Fully approved",
+      "rejectedSub": "Declined by manager, HR or admin"
+    },
+    "emptyAll": {
+      "title": "No requests yet",
+      "body": "Need time off or want to explain a late arrival? File a leave or exception request and track it here."
+    },
+    "emptyFiltered": {
+      "title": "No requests match these filters",
+      "body": "Change the type or status filter to see more of your requests."
+    },
+    "track": {
+      "submitted": "Submitted",
+      "manager": "Manager",
+      "hr": "HR"
+    },
+    "loadError": {
+      "title": "Couldn't load your requests"
+    }
   },
   "notifications": {
     "title": "Notifications",
@@ -393,7 +517,16 @@
       "subtitle": "Pick which events show up in your bell and which arrive in your inbox. Defaults are both on for every category — flip a checkbox to opt out. Email preferences are honoured the next time the delivery worker runs (within ~30 seconds).",
       "category": "Category",
       "inApp": "In-app bell",
-      "email": "Email"
+      "email": "Email",
+      "hint": {
+        "approval_assigned": "A request is waiting for your decision.",
+        "approval_decided": "One of your requests was approved or rejected.",
+        "overtime_flagged": "Overtime was recorded for you or your team.",
+        "camera_unreachable": "A camera has been offline for more than 5 minutes.",
+        "report_ready": "A report you generated is ready to download.",
+        "admin_override": "An administrator overrode a request decision."
+      },
+      "loadError": "Couldn't load preferences"
     },
     "attendanceEmail": {
       "title": "Attendance emails to employees",
@@ -418,7 +551,34 @@
         "pending": "Pending"
       },
       "managerCopy": "Manager"
-    }
+    },
+    "stats": {
+      "all": "All notifications",
+      "allSub": "Most recent 100",
+      "unread": "Unread",
+      "unreadSub": "Not opened yet",
+      "read": "Read",
+      "readSub": "Already seen"
+    },
+    "searchPlaceholder": "Search notifications",
+    "clearSearch": "Clear search",
+    "filters": {
+      "allCategories": "All categories",
+      "reset": "Reset",
+      "clear": "Clear filters"
+    },
+    "emptyAll": {
+      "title": "You're all caught up"
+    },
+    "emptyFiltered": {
+      "title": "No notifications match",
+      "body": "Try a different search or clear the filters."
+    },
+    "loadError": {
+      "title": "Couldn't load notifications"
+    },
+    "open": "Open",
+    "unreadLabel": "New"
   },
   "settings": {
     "tabs": {
@@ -454,6 +614,28 @@
       "timeFormat12h": "12-hour (AM/PM)",
       "weekendTitle": "Weekend days",
       "weekendDesc": "Days marked as weekend never count as Absent — work captured on these days flows to overtime."
+    },
+    "groups": {
+      "workspace": "Workspace",
+      "access": "Access",
+      "delivery": "Delivery",
+      "data": "Organisation data",
+      "personal": "Personal"
+    },
+    "hints": {
+      "workspace": "Timezone, date & weekend",
+      "branding": "Logo, colour & font",
+      "authentication": "Microsoft & Google sign-in",
+      "email": "SMTP / Microsoft Graph",
+      "schedules": "Recurring report emails",
+      "erpExport": "File drop for payroll",
+      "divisions": "Top-level org units",
+      "departments": "Teams & managers",
+      "sections": "Sub-units of departments",
+      "customFields": "Extra employee fields",
+      "reasonCategories": "Leave & exception reasons",
+      "notifications": "What you get alerted about",
+      "display": "Theme & density"
     }
   },
   "departments": {
@@ -714,7 +896,8 @@
         "title": "Report",
         "body": "Excel and PDF reports surface the same rows operators see day-to-day, scheduled or on-demand. Schedules drop files via email or a tenant-pinned ERP file-drop. Every report run is audited and accessible only to the roles your BRD says it should be."
       }
-    }
+    },
+    "stepOf": "step {{n}} / {{total}}"
   },
   "apiDocs": {
     "title": "API Reference",
@@ -727,7 +910,8 @@
       "rateLimits": "Login endpoints are rate-limited per (email, IP). Signed report download URLs are rate-limited per IP."
     },
     "embedTitle": "Live spec",
-    "openInNewTab": "Open in new tab"
+    "openInNewTab": "Open in new tab",
+    "liveBadge": "Live"
   },
   "cameras": {
     "label": "Camera",
@@ -952,9 +1136,13 @@
           "title": "No disabled cameras",
           "body": "Every camera has its capture worker switched on."
         }
-      }
+      },
+      "loadErrorTitle": "Couldn't load cameras"
     },
-    "view": {"list": "List view", "grid": "Grid view"},
+    "view": {
+      "list": "List view",
+      "grid": "Grid view"
+    },
     "previewModal": {
       "title": "Preview · {{name}}",
       "sub": "on-demand single frame",
@@ -997,7 +1185,29 @@
       "pillCreated": "created {{n}}",
       "pillUpdated": "updated {{n}}",
       "pillSkipped": "skipped {{n}}",
-      "pillErrors": "errors {{n}}"
+      "pillErrors": "errors {{n}}",
+      "subtitleShort": "Bring cameras in from a Maugood camera export (.json).",
+      "fileLabel": "Export file"
+    },
+    "sections": {
+      "identity": "Identity",
+      "connection": "Connection",
+      "pipeline": "Pipeline"
+    },
+    "drawer": {
+      "editTitle": "Edit camera",
+      "addSubtitle": "Connect an RTSP stream and choose what the pipeline does with it.",
+      "editSubtitle": "Update {{name}}'s connection, pipeline switches and capture settings.",
+      "identityDesc": "How this camera is named and grouped across lists and reports.",
+      "connectionDesc": "The stream address. It is encrypted at rest and never shown again after saving.",
+      "rtspCreateHelp": "Include the username and password if the camera needs them.",
+      "rtspStored": "•••••• stored — type to replace",
+      "pipelineDesc": "Turn each stage on or off, and choose whether video is kept.",
+      "logsOnlyDesc": "Detection events only. No video is stored.",
+      "saveClipsDesc": "Records MP4 clips alongside events. Uses more disk.",
+      "captureDesc": "Advanced. The defaults suit most cameras.",
+      "hideSettings": "Hide",
+      "showSettings": "Show"
     }
   },
   "systemSettings": {
@@ -1095,7 +1305,8 @@
         "minutes": "Minutes",
         "hours": "Hours"
       },
-      "effective": "Retries every {{seconds}} seconds."
+      "effective": "Retries every {{seconds}} seconds.",
+      "unitLabel": "Unit"
     },
     "clipEncoding": {
       "title": "Clip recording",
@@ -1122,7 +1333,10 @@
         "label": "Keep chunks after merge",
         "hint": "When on, each intermediate chunk MP4 is also saved alongside the merged clip (encrypted). Useful for crash recovery; uses more disk."
       }
-    }
+    },
+    "switchOn": "On",
+    "switchOff": "Off",
+    "loadFailed": "Couldn't load this section's current values."
   },
   "liveCapture": {
     "col": {
@@ -1511,7 +1725,9 @@
       "pageNumber": "Page {{page}} of {{totalPages}}",
       "drillBanner_one": "{{label}} · showing {{count}} OT check-in",
       "drillBanner_other": "{{label}} · showing {{count}} OT check-ins"
-    }
+    },
+    "emptyMonthTitle": "No attendance recorded for {{month}}",
+    "emptyMonthBody": "Days fill in as cameras and terminals report presence. Use the month navigator to look at another month."
   },
   "employees": {
     "title": "Employees",
@@ -1541,7 +1757,8 @@
       "manager": "Manager",
       "status": "Status",
       "photos": "Photos",
-      "actions": "Actions"
+      "actions": "Actions",
+      "code": "Employee ID"
     },
     "exportSelected": "Export {{count}} selected",
     "exportNoData": "No employee data available to export",
@@ -1579,7 +1796,9 @@
         "events": "Camera events",
         "clips": "Matched Clips",
         "team": "Team Members"
-      }
+      },
+      "list": "List view",
+      "grid": "Grid view"
     },
     "team": {
       "scopeLabel": "Scope",
@@ -1597,7 +1816,11 @@
         "division": "Division",
         "department": "Department",
         "section": "Section"
-      }
+      },
+      "directReportsLabel": "Direct reports",
+      "searchPlaceholder": "Search by ID, name, designation or department…",
+      "emptyBody": "Set this person as “Reports to” on an employee to build their team.",
+      "noResults": "No members match your search."
     },
     "attendance": {
       "loadFailed": "Could not load attendance for this date.",
@@ -1632,7 +1855,8 @@
       "dateLabel": "Date",
       "allDates": "All dates",
       "today": "Today",
-      "resetToToday": "Reset to today's date"
+      "resetToToday": "Reset to today's date",
+      "emptyBody": "Camera detections matched to this person will appear here."
     },
     "drawer": {
       "addTitle": "Add employee",
@@ -1676,7 +1900,9 @@
       "deactivatedAt": "Deactivated at",
       "createLogin": "Also create a platform login account for this employee",
       "roles": "Roles",
-      "password": "Initial password"
+      "password": "Initial password",
+      "clearRelievingDate": "Clear relieving date",
+      "clearDate": "Clear date"
     },
     "hint": {
       "createLogin": "When on, the employee gets a login with the chosen roles using the email above. They can sign in immediately with the password you set; deliver it out-of-band.",
@@ -1684,7 +1910,8 @@
       "resetPassword": "The new password is copied to your clipboard on apply. Deliver it out-of-band — it's never echoed back later."
     },
     "placeholder": {
-      "password": "12+ characters; click ↑ to generate"
+      "password": "12+ characters; click ↑ to generate",
+      "minPassword": "Minimum 12 characters"
     },
     "photos": {
       "angleLabel": "Photo position",
@@ -1702,7 +1929,23 @@
         "left": "Left",
         "right": "Right",
         "other": "Other"
-      }
+      },
+      "preview": "Photo preview",
+      "selectAll": "Select all reference photos",
+      "selectedCount": "{{n}} selected",
+      "selectMode": "Select photos",
+      "bulkDeleteAria": "Delete {{n}} selected photo(s)",
+      "deleting": "Deleting…",
+      "selectOne": "Select reference photo",
+      "commitHint": "Photo uploads commit immediately — you can close the drawer right after.",
+      "bulkConfirmTitle": "Delete {{n}} reference photo(s)?",
+      "bulkConfirmBody": "This permanently removes the selected photos and their encrypted files. The employee's face training dataset, recognition cache, and downstream face matching will refresh on the next match — past detections are not affected.",
+      "bulkResultDeleted": "Deleted {{n}} photo(s).",
+      "bulkResultNotFound": "{{n}} were already removed.",
+      "bulkResultErrors": "{{n}} failed — re-try or check the audit log.",
+      "bulkResultFailed": "Bulk delete failed — please try again.",
+      "bulkConfirmAction": "Delete {{n}} photos",
+      "closeViewer": "Close photo viewer"
     },
     "action": {
       "edit": "Edit",
@@ -1720,7 +1963,11 @@
       "userId": "User ID",
       "active": "Active",
       "inactive": "Inactive",
-      "ssoOnly": "Microsoft SSO"
+      "ssoOnly": "Microsoft SSO",
+      "enableAccess": "Enable platform access",
+      "enableHint": "A login will be created for {{email}}. The password must be at least 12 characters.",
+      "enabling": "Enabling…",
+      "enableConfirm": "Enable access"
     },
     "toast": {
       "created": "{{name}} added.",
@@ -1737,7 +1984,9 @@
       "overrideCommentMin": "Admin override comment must be at least 10 characters.",
       "emailRequiredForLogin": "An email is required to create a login account.",
       "passwordTooShort": "Password must be at least 12 characters.",
-      "atLeastOneRole": "Select at least one role for the new login."
+      "atLeastOneRole": "Select at least one role for the new login.",
+      "codeRequired": "Employee ID is required.",
+      "nameRequired": "Full name is required."
     },
     "delete": {
       "hrTitle": "Delete employee",
@@ -1761,7 +2010,82 @@
       "overrideAndApprove": "Override and approve",
       "overridePromptComment": "Required comment (min 10 chars) — this will be audit-logged with your identity.",
       "confirmOverride": "Override + delete",
-      "unknownActor": "another admin"
+      "unknownActor": "another admin",
+      "titleDeactivate": "Delete {{name}}?",
+      "titlePermanent": "Permanently delete {{name}}?",
+      "modeLabel": "Delete mode",
+      "modeDeactivate": "Deactivate",
+      "modeDeactivateSub": "Sets status to Inactive. Reversible — can be reactivated.",
+      "recommended": "Recommended",
+      "modePermanent": "Permanent",
+      "modePermanentSub": "Submits a delete request that purges photos + history after approval.",
+      "deactivateBody": "The employee row will be marked Inactive immediately. Their attendance + clip history is preserved and they can be reactivated from the Inactive filter.",
+      "working": "Working…",
+      "deactivateNow": "Deactivate now",
+      "submitRequest": "Submit delete request"
+    },
+    "filters": {
+      "clearSearch": "Clear search",
+      "reset": "Reset",
+      "department": "Department",
+      "status": "Status"
+    },
+    "emptyState": {
+      "clearFilters": "Clear filters",
+      "filtersTitle": "No employees match these filters",
+      "filtersBody": "Try a different name, ID or email, or clear the filters to see everyone.",
+      "noneTitle": "No employees yet",
+      "noneBody": "Add people one at a time or import a spreadsheet. Once they have reference photos the cameras can recognise them.",
+      "searchTitle": "No one matches “{{q}}”"
+    },
+    "stats": {
+      "peopleFilteredSub": "Matching your filters · click to clear",
+      "enrolled": "Enrolled",
+      "enrolledSub": "{{pct}}% of this page",
+      "needPhotos": "Need photos",
+      "needPhotosSub": "Not recognisable yet",
+      "people": "People",
+      "peopleActiveSub": "Currently active",
+      "pendingDelete": "Pending deletion",
+      "pendingDeleteSub": "Awaiting a decision"
+    },
+    "grid": {
+      "openAria": "Open {{name}}"
+    },
+    "page": {
+      "sub": "Everyone the cameras can recognise — add people, keep their details current and upload reference photos."
+    },
+    "clips": {
+      "matchedCount": "{{count}} clips where this person was matched",
+      "loadFailed": "Couldn’t load matched clips",
+      "emptyTitle": "No matched clips yet",
+      "emptyBody": "When this person is identified in a clip (via UC1 / UC2 on the Clip Analytics page), it will show up here."
+    },
+    "form": {
+      "addSubtitle": "Create the employee record, place them in the org chart and optionally give them a login.",
+      "editSubtitle": "Update details, team, login and reference photos. Changes are audited.",
+      "saveFailed": "Couldn't save the employee",
+      "overrideCommentLabel": "Override comment",
+      "identityHelp": "How this person shows up across Maugood — lists, reports and approvals.",
+      "codeHelp": "Your HR or payroll ID. Can't be changed later.",
+      "codeLocked": "Locked — the ID can't change after creation.",
+      "emailHelpLogin": "Used as the sign-in email when a platform login is created below.",
+      "emailHelp": "Optional. Links this employee to their Maugood login.",
+      "assignmentHelp": "Where they sit in the org chart and who approves their requests.",
+      "reportsToHelp": "Only users with the Manager role are listed.",
+      "lifecycleHelp": "Attendance is only tracked between these dates. The relieving date flips the employee to inactive automatically.",
+      "platformAccessTitle": "Platform access",
+      "platformAccessHelp": "Optional. Give this employee a Maugood login so they can see their attendance and submit requests.",
+      "createLoginLabel": "Create a login for this employee",
+      "rolesHelp": "Pick one or more. Employee is the self-service default.",
+      "loginRolesHelp": "The Maugood login linked to this employee by email. Role and password changes apply immediately.",
+      "photosHelp": "Clear, well-lit face photos used for recognition. Uploads and deletes apply immediately — no Save needed.",
+      "choosePhotos": "Choose photos for the “{{angle}}” position",
+      "photoTypes": "JPG, PNG or WEBP · several files at once",
+      "photosAfterCreate": "Reference photos can be added once the employee is created — open them from the list and choose Edit.",
+      "statusHelp": "Inactive employees stay in history but are not matched or tracked.",
+      "reasonHelp": "At least 5 characters. Saved to the audit log.",
+      "submitAdd": "Add employee"
     }
   },
   "formerEmployees": {
@@ -1781,7 +2105,19 @@
       "confidence": "Confidence",
       "reason": "Deactivation reason",
       "deactivatedAt": "Deactivated at"
-    }
+    },
+    "search": "Search name, code or camera…",
+    "clearSearch": "Clear search",
+    "reset": "Reset",
+    "matching": "{{count}} matching",
+    "emptySearchTitle": "No sightings match \"{{q}}\"",
+    "emptySearchBody": "Try a different name, code or camera.",
+    "emptyTitle": "No former employees seen",
+    "totalInRange": "{{count}} sightings in range",
+    "rangeSub": "{{from}} → {{to}}",
+    "errorTitle": "Couldn't load the report",
+    "retry": "Retry",
+    "widen30": "Check the last 30 days"
   },
   "personClips": {
     "title": "Person Clips",
@@ -1918,6 +2254,47 @@
       "run": "Run",
       "starting": "Starting…",
       "reprocessClip": "Reprocess clip"
+    },
+    "statsSub": {
+      "total": "click to show every clip",
+      "storage": "recorded video on disk",
+      "cameras": "cameras with saved clips"
+    },
+    "toolbar": {
+      "camera": "Camera",
+      "reset": "Reset",
+      "selectAllAria": "Select all clips on this page",
+      "all": "All",
+      "selected": "{{n}} selected",
+      "clearSelection": "Clear",
+      "deleteSelected": "Delete selected",
+      "errorBody": "Something went wrong while fetching clips. Try again in a moment.",
+      "retry": "Retry",
+      "emptyFilteredTitle": "No clips match these filters",
+      "emptyFilteredBody": "Try another camera, time range or face-matching status.",
+      "clearFilters": "Clear filters",
+      "emptyTitle": "No clips recorded yet",
+      "goToCameras": "Go to cameras"
+    },
+    "tabsAria": "Person Clips sections",
+    "card": {
+      "selectAria": "Select clip {{id}}",
+      "recordingAria": "Recording in progress",
+      "encodingAria": "Encoding in progress",
+      "playAria": "Play clip",
+      "loadFailed": "Load failed",
+      "matchingPct": "Matching {{pct}}%",
+      "person": "Person",
+      "persons_one": "person",
+      "persons_other": "persons",
+      "unknown": "+{{n}} unknown",
+      "matching": "Matching…",
+      "matched": "Matched",
+      "encodingDuration": "Encoding duration",
+      "matchDuration": "Face matching duration",
+      "viewDetails": "View details",
+      "viewDetailsAria": "View clip details",
+      "deleteAria": "Delete clip"
     }
   },
   "faceCrops": {
@@ -1946,7 +2323,30 @@
     "reprocessTitle": "Reprocess Face Crops",
     "reprocessBody": "Face crops already exist for these clips. Do you want to reprocess them again?",
     "skipExisting": "Skip Existing",
-    "reprocess": "Reprocess"
+    "reprocess": "Reprocess",
+    "pageSub": "Faces extracted from recorded clips, grouped by the event they came from.",
+    "stats": {
+      "crops": "Face crops",
+      "cropsSub": "across {{n}} events",
+      "processed": "Clips processed",
+      "ofTotal": "of {{n}} clips",
+      "pending": "Pending",
+      "pendingRunning": "processing now",
+      "pendingSub": "waiting for extraction",
+      "failed": "Failed",
+      "failedSub": "retried on next run"
+    },
+    "cameraLabel": "Camera",
+    "reset": "Reset",
+    "loadFailedBody": "Something went wrong while fetching face crops. Try again in a moment.",
+    "retry": "Retry",
+    "emptyFilteredTitle": "No face crops from this camera",
+    "emptyFilteredBody": "Pick another camera or show crops from every camera.",
+    "showAll": "Show all cameras",
+    "cropAria": "Face {{face}} from clip {{clip}}",
+    "qualityTitle": "Quality score",
+    "previewAria": "Face crop preview",
+    "cropLabel": "Crop #{{id}}"
   },
   "operations": {
     "workers": {
@@ -1954,7 +2354,9 @@
       "subtitle": "Real-time status of capture workers for your tenant",
       "loadFailed": "Could not load workers.",
       "empty": "No cameras configured yet. Add a camera to start capturing.",
-      "goToCameras": "Go to Cameras"
+      "goToCameras": "Go to Cameras",
+      "loadFailedTitle": "Couldn't load workers",
+      "emptyTitle": "No capture workers yet"
     },
     "actions": {
       "refreshNow": "Refresh now",
@@ -1968,7 +2370,11 @@
       "stagesIssues": "Stages with issues",
       "errors5min": "Errors last 5 min",
       "detectionsLastHour": "Detections last hour",
-      "matchesLastHour": "Successful matches last hour"
+      "matchesLastHour": "Successful matches last hour",
+      "runningSub": "Running / configured",
+      "stagesIssuesSub": "{{red}} red · {{amber}} amber",
+      "errors5minSub": "Across all workers",
+      "lastHourSub": "Last 60 minutes"
     },
     "status": {
       "starting": "Starting",
@@ -2006,7 +2412,10 @@
       "unavailable": "RTSP metadata unavailable",
       "brand": "Brand",
       "model": "Model",
-      "mountLocation": "Mount location"
+      "mountLocation": "Mount location",
+      "manualSection": "Manual details",
+      "saveFailed": "Could not save",
+      "saveFailedStatus": "Error {{status}}"
     },
     "restart": {
       "singleTitle": "Restart worker for {{name}}?",
@@ -2026,7 +2435,8 @@
       "noneRecent": "No recent worker errors.",
       "auditLog": "Audit log entries",
       "noneAudit": "No audit-log error entries for this camera.",
-      "viewFullLog": "View full audit log →"
+      "viewFullLog": "View full audit log →",
+      "loadFailedBody": "The worker's error buffer could not be read."
     }
   },
   "unidentifiedFaces": {
@@ -2099,7 +2509,14 @@
       "done": "Done",
       "errorFailed": "Mapping failed. Please try again.",
       "successDetail": "Marked {{events}} event(s) as identified and added {{photos}} reference photo(s) for {{name}}."
-    }
+    },
+    "pageSub": "Faces the cameras saw but could not match to an employee. Review them and map each face to the right person.",
+    "loadFailedTitle": "Couldn't load unidentified faces",
+    "retry": "Retry",
+    "noResultsTitle": "No results for these filters",
+    "clearFilters": "Clear filters",
+    "emptyNoneBody": "Every face the cameras saw in this range was matched to an employee. Widen the date range above, or come back as new detections arrive.",
+    "viewCameraLogs": "View camera logs"
   },
   "leaveCalendar": {
     "title": "Leave & Calendar",
@@ -2212,6 +2629,49 @@
       "saveFailed": "Save failed",
       "deleteFailed": "Delete failed",
       "importFailed": "Import failed"
+    },
+    "typesSub": "{{total}} types · {{paid}} paid · {{active}} active",
+    "leavesSub": "{{n}} approved leave records",
+    "emptyTypes": {
+      "title": "No leave types yet",
+      "body": "Add the kinds of leave your company offers, like Annual or Sick, so they can be used on requests."
+    },
+    "emptyHolidays": {
+      "title": "No holidays for {{year}}",
+      "body": "Add public holidays one by one or import them from an Excel file. Attendance on these days counts as overtime."
+    },
+    "emptyLeaves": {
+      "title": "No approved leave on record",
+      "body": "Leave approved through requests appears here automatically. You can also record leave for an employee directly."
+    },
+    "form": {
+      "newTypeTitle": "New leave type",
+      "typeSubtitle": "A kind of leave employees can request, like Annual or Sick.",
+      "createType": "Create leave type",
+      "typeDetails": "Leave type details",
+      "typeDetailsDesc": "The code is permanent; the name can be changed later.",
+      "codeHelp": "Short and unique. Cannot be changed later.",
+      "codePlaceholder": "e.g. ANNUAL",
+      "namePlaceholder": "e.g. Annual leave",
+      "paidLabel": "Paid leave",
+      "paidDesc": "Days taken on this leave are paid.",
+      "deleteSubtitle": "Check the details below before deleting.",
+      "editTypeSubtitle": "Rename this leave type or change whether it is paid.",
+      "holidaySubtitle": "A public holiday. Attendance on this day counts as overtime.",
+      "holidayDetails": "Holiday details",
+      "holidayDetailsDesc": "The date and the name shown on the calendar.",
+      "holidayPlaceholder": "e.g. National Day",
+      "importSubtitle": "Add a year's holidays at once from an Excel file.",
+      "importFile": "Holiday workbook",
+      "editHolidaySubtitle": "Move this holiday to another date or rename it.",
+      "leaveSubtitle": "Record leave that was approved outside the request flow.",
+      "createLeave": "Record leave",
+      "whoTitle": "Employee and type",
+      "whoDesc": "Who is on leave and which kind of leave it is.",
+      "datesTitle": "Dates",
+      "datesDesc": "First and last day of the leave, inclusive.",
+      "notesPlaceholder": "e.g. Approved by email on 3 March",
+      "editLeaveSubtitle": "Correct the employee, type, dates or notes of this leave."
     }
   },
   "myProfile": {
@@ -2251,7 +2711,11 @@
       "approved": "Approved",
       "pending": "Pending",
       "rejected": "Rejected"
-    }
+    },
+    "noLinkTitle": "No employee record linked",
+    "loadFailedBody": "Check your connection and try again.",
+    "retry": "Try again",
+    "noPhotosTitle": "Add your first reference photo"
   },
   "schedules": {
     "title": "Report schedules",
@@ -2486,7 +2950,19 @@
     "saveChanges": "Save changes",
     "saving": "Saving…",
     "errSave": "Save failed.",
-    "errSaveStatus": "Save failed ({{status}})."
+    "errSaveStatus": "Save failed ({{status}}).",
+    "form": {
+      "fieldRequired": "This field is required.",
+      "credentialsTitle": "App credentials",
+      "credentialsDesc": "Copy these from the app registration in the provider's console.",
+      "redirectTitle": "Redirect URI",
+      "redirectDesc": "Register this exact URL with the provider so it can send users back here.",
+      "statusTitle": "Sign-in status",
+      "statusDesc": "Turn the button on the login page on or off.",
+      "discardHint": "Choose Cancel to keep editing.",
+      "removeSubtitle": "Users will no longer see this sign-in option.",
+      "secretStoredPlaceholder": "•••••• stored — type to replace"
+    }
   },
   "branding": {
     "title": "Branding",
@@ -2605,6 +3081,21 @@
       "count": "Rows",
       "affectedRows": "Affected rows",
       "reportsTo": "Reports to"
+    },
+    "form": {
+      "subtitle": "Upload an Excel or CSV file, review every row, then confirm the import.",
+      "stepsLabel": "Import steps",
+      "stepUpload": "Upload file",
+      "stepReview": "Review & import",
+      "replaceFile": "click or drop to replace",
+      "fileTypes": ".xlsx or .csv · first sheet is read",
+      "requiredCols": "Required columns",
+      "optionalCols": "Optional columns",
+      "noWritesYet": "Nothing is saved until you confirm on the next step.",
+      "created": "Created",
+      "updated": "Updated",
+      "skipped": "Skipped (errors)",
+      "allGood": "Every row was imported."
     }
   },
   "myAttendance": {
@@ -2640,7 +3131,9 @@
       "late": "Late",
       "earlyOut": "Early out",
       "short": "Short",
-      "otSuffix": "+{{value}} OT"
+      "otSuffix": "+{{value}} OT",
+      "emptyTitle": "No attendance yet",
+      "errorTitle": "Couldn't load recent attendance"
     },
     "today": {
       "header": "Today · {{date}}",
@@ -2684,7 +3177,10 @@
       "weekend": "Weekend",
       "upcoming": "Upcoming",
       "noRecord": "No record"
-    }
+    },
+    "noEmployeeLinkedTitle": "No employee record linked",
+    "viewProfile": "View my profile",
+    "calendarErrorTitle": "Couldn't load your calendar"
   },
   "dailyAttendance": {
     "title": "Daily attendance",
@@ -2807,16 +3303,105 @@
       "toggle_off": "Toggle off"
     },
     "resendLabel": "Resend even if already sent",
-    "resendTooltip": "Tick to re-send notifications that were already delivered for this date — useful for testing or after fixing an email problem."
+    "resendTooltip": "Tick to re-send notifications that were already delivered for this date — useful for testing or after fixing an email problem.",
+    "statSub": {
+      "inScope": "In this view",
+      "offDay": "{{count}} off day",
+      "waiting": "{{count}} waiting"
+    },
+    "filter": {
+      "department": "Department",
+      "employee": "Employee",
+      "status": "Status",
+      "allStatus": "All status",
+      "reset": "Reset"
+    },
+    "empty": {
+      "noneTitle": "No attendance for this date yet",
+      "searchTitle": "No one matches \"{{q}}\"",
+      "searchBody": "Try a different name or employee ID, or clear the search.",
+      "statusBody": "Nobody in this view falls in that status for the selected date.",
+      "filtersTitle": "No employees match these filters",
+      "filtersBody": "Loosen the search or status filter to see more people.",
+      "clearFilters": "Clear filters"
+    },
+    "error": {
+      "title": "Couldn't load attendance"
+    },
+    "sendModal": {
+      "title": "Send attendance emails",
+      "sub": "Date: {{date}} · {{selected}} of {{total}} employees selected",
+      "summary": "{{sent}} sent · {{already}} already sent · {{failed}} failed · {{skipped}} skipped",
+      "alreadySent": "{{count}} employees already received an email.",
+      "resendQuestion": "Do you want to send again to those employees?",
+      "sending": "Sending…",
+      "resend": "Send again to {{count}} employees",
+      "noneSendable": "No employees with attendance status for this date.",
+      "selectAll": "Select all ({{count}})",
+      "pageOf": "Page {{page}} of {{total}} · {{count}} total",
+      "sendTo": "Send to {{count}} employees"
+    }
   },
   "dashboard": {
     "common": {
       "loading": "Loading…",
-      "unidentified": "Unidentified"
+      "unidentified": "Unidentified",
+      "retry": "Retry",
+      "loadFailedBody": "The API did not respond. Try again in a moment."
     },
     "employee": {
       "greeting": "Hi, {{name}}",
-      "subtitle": "Your attendance · live"
+      "subtitle": "Your attendance · live",
+      "newRequest": "My requests",
+      "state": {
+        "leave": "On leave",
+        "weekend": "Weekend",
+        "holiday": "Holiday",
+        "pending": "Not checked in yet",
+        "absent": "Absent",
+        "late": "Late",
+        "complete": "Day complete",
+        "clockedIn": "Clocked in",
+        "none": "No record"
+      },
+      "tiles": {
+        "today": "Today",
+        "inOut": "In {{in}} · Out {{out}}",
+        "inOnly": "In {{in}}",
+        "noCheckIn": "No check-in recorded",
+        "thisWeek": "This week",
+        "daysPresent": "days present · {{pct}}% attendance",
+        "hours": "Hours this week",
+        "lateCount": "{{count}} late arrival(s)",
+        "noLate": "no late arrivals",
+        "pending": "Pending requests",
+        "awaiting": "awaiting decision",
+        "nothingPending": "nothing pending"
+      },
+      "week": {
+        "title": "Last 7 days",
+        "sub": "Check-in, check-out and hours per day",
+        "viewAll": "View full attendance",
+        "emptyTitle": "No attendance yet",
+        "empty": "Your days will appear here once the cameras record your first check-in.",
+        "cols": {
+          "day": "Day",
+          "in": "In",
+          "out": "Out",
+          "hours": "Hours",
+          "status": "Status"
+        },
+        "loadFailed": "Couldn't load your attendance"
+      },
+      "requests": {
+        "title": "My requests",
+        "sub": "Your latest leave and exception requests",
+        "viewAll": "View all",
+        "emptyTitle": "No requests yet",
+        "empty": "Need a leave day or an attendance correction? File a request and your manager will review it.",
+        "submit": "Submit a request",
+        "loadFailed": "Couldn't load your requests"
+      }
     },
     "admin": {
       "title": "Dashboard",
@@ -2841,7 +3426,11 @@
           "camera": "Camera",
           "identified": "Identified",
           "confidence": "Confidence"
-        }
+        },
+        "viewAll": "View all",
+        "emptyTitle": "No detections yet",
+        "loadFailed": "Couldn't load recent events",
+        "goCameras": "Open cameras"
       },
       "capture": {
         "title": "Capture pipeline",
@@ -2859,7 +3448,9 @@
         "postgresTotal": "Postgres total",
         "reportsAttachments": "Reports + attachments",
         "reportsAttachmentsDetail": "reports {{reports}} · attachments {{attachments}}",
-        "tenantSubtotal": "Tenant-scoped disk + DB use: {{size}}"
+        "tenantSubtotal": "Tenant-scoped disk + DB use: {{size}}",
+        "title": "Storage & data",
+        "loadFailed": "Couldn't load storage stats"
       },
       "disk": {
         "title": "Storage volume",
@@ -2869,7 +3460,8 @@
         "usedAria": "Disk used: {{pct}}%",
         "legendTenant": "This tenant",
         "legendWhole": "Whole disk used",
-        "legendFree": "Free"
+        "legendFree": "Free",
+        "usedLabel": "Disk used"
       }
     },
     "manager": {
@@ -2886,14 +3478,23 @@
         "onTime": "On time",
         "late": "Late",
         "absent": "Absent",
-        "overtime": "Overtime"
+        "overtime": "Overtime",
+        "showAll": "Show everyone",
+        "ofTeam": "of {{total}} today"
       },
       "cols": {
         "employee": "Employee",
         "in": "In",
         "out": "Out",
         "flags": "Flags"
-      }
+      },
+      "openTeamAttendance": "Team attendance",
+      "filteredCount": "{{shown}} of {{total}} · {{filter}}",
+      "clearFilter": "Clear filter",
+      "noMatchTitle": "Nobody in this group",
+      "noMatchBody": "No team member is marked “{{filter}}” today.",
+      "emptyTitle": "No records yet today",
+      "loadFailed": "Couldn't load today's attendance"
     },
     "hr": {
       "title": "HR Dashboard",
@@ -2970,13 +3571,17 @@
       "arrival": {
         "title": "Arrival distribution · today",
         "subtitle": "Check-ins bucketed by hour (local time)",
-        "note": "Hours 06–11 highlighted; counts only rows with a check-in"
+        "note": "Hours 06–11 highlighted; counts only rows with a check-in",
+        "emptyTitle": "No check-ins yet",
+        "emptyOff": "{{kind}} — nobody was expected in today.",
+        "emptyBody": "Arrivals will appear here by hour as employees are recognised at the cameras."
       },
       "punctuality": {
         "title": "Punctuality leaderboard",
         "subtitle": "On-time % by department · today",
         "empty": "No working-day rows to rank yet today.",
-        "row": "{{onTime}} on-time · {{late}} late · {{absent}} absent · {{total}} total"
+        "row": "{{onTime}} on-time · {{late}} late · {{absent}} absent · {{total}} total",
+        "emptyTitle": "Nothing to rank"
       },
       "pending": {
         "title": "Pending requests",
@@ -3024,7 +3629,8 @@
         "run": "Run",
         "relMin": "in {{count}} min",
         "relHour": "in {{count}} h",
-        "relDay": "in {{count}} day(s)"
+        "relDay": "in {{count}} day(s)",
+        "emptyTitle": "No scheduled reports"
       },
       "live": {
         "titleToday": "Today's attendance · live",
@@ -3093,7 +3699,23 @@
     "empty": "No events match. Try widening filters.",
     "pageOf": "Page {{page}} of {{total}}",
     "prev": "Prev",
-    "next": "Next"
+    "next": "Next",
+    "subtitle": "Every face the cameras detected, newest first. Repeat sightings are grouped.",
+    "filter": {
+      "camera": "Camera",
+      "status": "Status",
+      "reset": "Reset"
+    },
+    "emptyState": {
+      "noneTitle": "No detections yet",
+      "filtersTitle": "No detections match these filters",
+      "filtersBody": "Try another camera, status or time range, or clear the filters.",
+      "clearFilters": "Clear filters",
+      "errorTitle": "Couldn't load detection events",
+      "retry": "Retry",
+      "noneBody": "Detections appear here as cameras see faces. Make sure at least one camera is enabled and reachable.",
+      "manageCameras": "Manage cameras"
+    }
   },
   "clipAnalytics": {
     "title": "Clip Analytics",
@@ -3435,6 +4057,41 @@
       "body": "Files on disk and any processing results will be removed. This cannot be undone.",
       "capped": "Capped at {{cap}} clips per request. If more match the filter, run the action again.",
       "overCap": "Only the first {{cap}} of {{n}} selected will be deleted in this request."
+    },
+    "toolbar": {
+      "clearSearch": "Clear search",
+      "status": "Status",
+      "processedUcs": "Processed",
+      "mode": "Mode",
+      "from": "From",
+      "to": "To",
+      "errorBody": "Something went wrong while fetching clips. Try again in a moment.",
+      "retry": "Retry",
+      "emptyFilteredTitle": "No clips match these filters",
+      "emptyFilteredBody": "Try a different search, camera, status or date range.",
+      "clearFilters": "Clear filters",
+      "emptyTitle": "No clips yet",
+      "goToCameras": "Go to cameras"
+    },
+    "identifySelected": {
+      "label": "Identify selected",
+      "labelN": "Identify selected ({{count}})",
+      "titleNone": "Tick clips to process just those",
+      "titleN": "Process {{count}} selected clip(s)",
+      "modalTitle": "Identify selected clips",
+      "modalSub": "Process only the {{count}} clip(s) you ticked — not the whole tenant.",
+      "useCases": "Use cases",
+      "mode": "Mode",
+      "overwrite": "Reprocess (overwrite)",
+      "overwriteHelp": "Re-run these clips even if already processed.",
+      "skip": "Skip already processed",
+      "skipHelp": "Only run the selected clips that have no result yet.",
+      "pickOne": "Pick at least one use case.",
+      "submitted": "Submitted {{jobs}} job(s) for {{clips}} clip(s)",
+      "skipped": "{{n}} skipped (already done).",
+      "failed": "Could not start processing.",
+      "submitting": "Submitting…",
+      "process": "Process {{count}} clip(s)"
     }
   },
   "bulkPhotoUpload": {
@@ -3559,6 +4216,14 @@
       "viewEmployee": "View {{name}}",
       "backToEmployees": "Back to Employees",
       "notCached": "Employee record not in current page cache"
+    },
+    "guide": {
+      "codeTitle": "Start with the employee ID",
+      "codeBody": "Use the exact ID shown on the Employees page. Unknown IDs are flagged in the review step — nobody is created automatically.",
+      "angleTitle": "Add the angle after an underscore",
+      "reviewTitle": "Check the matches, then upload",
+      "reviewBody": "You can fix or skip any photo before anything is saved. Clear, front-facing photos work best.",
+      "title": "How to name your photos"
     }
   },
   "storageAnalytics": {
@@ -3637,7 +4302,18 @@
       "pending": "{{count}} pending",
       "recording": "{{count}} recording",
       "failed": "{{count}} failed"
-    }
+    },
+    "cameraLabel": "Camera",
+    "reset": "Reset",
+    "emptyBody": "Try a wider time window or another camera.",
+    "emptyErrorBody": "Something went wrong while fetching this data. Try refreshing.",
+    "errorTitle": "Couldn’t load storage analytics",
+    "retry": "Retry",
+    "emptyFilteredTitle": "No clips in this window",
+    "clearFilters": "Clear filters",
+    "emptyAllTitle": "No clips stored yet",
+    "emptyAllBody": "Storage figures appear once cameras in “Save Clips” mode start recording.",
+    "goToCameras": "Go to cameras"
   },
   "frameDiagnostics": {
     "tempBadge": "Temporary diagnostic tab.",
@@ -3673,7 +4349,21 @@
       "kind": "Kind",
       "reason": "Reason",
       "metrics": "Metrics"
-    }
+    },
+    "title": "Frame Diagnostics",
+    "subtitle": "Capture frame drops, reconnects and slow detections while logging is on, then export them for analysis.",
+    "loggingLabel": "Logging",
+    "perCore": "CPU per core",
+    "reset": "Reset",
+    "clearFilters": "Clear filters",
+    "emptyFilteredTitle": "No events match these filters",
+    "emptyFilteredBody": "Try another anomaly kind or camera.",
+    "emptyOnTitle": "No anomalies yet",
+    "emptyOffTitle": "Logging is off",
+    "loadFailedTitle": "Couldn't load diagnostics",
+    "loadFailedBody": "The diagnostics endpoints didn't respond. Check the backend and try again.",
+    "hostCpuSub": "All cores, live",
+    "cores": "cores"
   },
   "liveDiagnostics": {
     "title": "Live Capture Diagnostics",
@@ -3729,7 +4419,12 @@
       "encodingQueue": "Encoding queue",
       "identifyRunning": "Identify running",
       "encodingQueueValue": "{{queued}} queued · {{processing}} processing",
-      "identifyRunningValue": "{{running}} · {{pending}} pending"
+      "identifyRunningValue": "{{running}} · {{pending}} pending",
+      "rtspIssues": "{{failed}} failed · {{reconnecting}} reconnecting",
+      "allHealthy": "All healthy",
+      "recordingSub": "Cameras recording clips",
+      "failedToday": "{{n}} failed today",
+      "noFailuresToday": "No failures today"
     },
     "tabs": {
       "cameras": "Cameras",
@@ -3768,7 +4463,8 @@
       },
       "emptyPrefix": "No active camera workers. Add a camera under",
       "emptyLink": "Cameras",
-      "emptySuffix": "and enable its worker to populate this view."
+      "emptySuffix": "and enable its worker to populate this view.",
+      "emptyTitle": "No cameras in the pipeline"
     },
     "cell": {
       "disabled": "Disabled",
@@ -3791,7 +4487,8 @@
       "adminOnly": "Pipeline Monitor is Admin-only. Switch to your Admin role to view it.",
       "unavailable": "Pipeline Monitor temporarily unavailable (HTTP {{status}}). Retrying…",
       "loadFailedStatus": "Could not load pipeline (HTTP {{status}}).",
-      "loadFailed": "Could not load pipeline. Check your connection and try again."
+      "loadFailed": "Could not load pipeline. Check your connection and try again.",
+      "title": "Couldn't load the pipeline"
     },
     "labels": {
       "pending": "Pending",
@@ -3829,7 +4526,8 @@
         "fps": "FPS (read / analyze)",
         "errors5m": "Errors / 5m"
       },
-      "empty": "No RTSP workers running."
+      "empty": "No RTSP workers running.",
+      "emptyTitle": "No RTSP workers running"
     },
     "recording": {
       "cards": {
@@ -3846,7 +4544,8 @@
         "frames": "Frames",
         "chunks": "Chunks"
       },
-      "empty": "No active capture workers — nothing to report on."
+      "empty": "No active capture workers — nothing to report on.",
+      "emptyTitle": "Nothing recording"
     },
     "identify": {
       "cards": {
@@ -3858,7 +4557,9 @@
       },
       "perUseCase": "Per use case",
       "currentlyProcessing": "Currently processing",
-      "empty": "No Identify Event jobs running. Trigger one from the Clip Analytics page (⋮ → Identify Event) and it will appear here in real time."
+      "empty": "No Identify Event jobs running. Trigger one from the Clip Analytics page (⋮ → Identify Event) and it will appear here in real time.",
+      "clipChip": "Clip #{{id}}",
+      "batchWorker": "Batch worker:"
     },
     "queue": {
       "loadError": "Could not load the queue pipeline. Requires Admin/HR role.",
@@ -3875,7 +4576,12 @@
       "activeWorkers": "Active workers",
       "waitingInQueue": "waiting in queue",
       "croppingNow": "cropping now",
-      "matchingNow": "matching now"
+      "matchingNow": "matching now",
+      "loadErrorTitle": "Couldn't load the queue pipeline",
+      "busyOf": "{{busy}} / {{total}} busy",
+      "clipCount": "{{count}} clips",
+      "ucs": "UCs:",
+      "skipExisting": "skip existing"
     },
     "workers": {
       "loadError": "Could not load worker snapshot. Endpoint requires Admin or HR role.",
@@ -3890,11 +4596,48 @@
       "syncNow": "Sync now",
       "restartComplete": "Restart complete",
       "captureRestarted": "Capture workers: {{done}}/{{total}} restarted",
-      "recoveryLine": "Recovery: {{scanned}} scanned · {{a}} status-only · {{b}} match-only · {{c}} full restart"
+      "recoveryLine": "Recovery: {{scanned}} scanned · {{a}} status-only · {{b}} match-only · {{c}} full restart",
+      "loadErrorTitle": "Couldn't load workers",
+      "nextRun": "next {{time}}"
     },
     "uc": {
       "uc1": "Body detection first, then face inside each box.",
       "uc2": "Stores face crops with pose-aware quality scoring."
+    },
+    "adminOnlyTitle": "Admins only",
+    "retry": "Try again",
+    "queueHistory": {
+      "button": "Queue history",
+      "title": "Queue history",
+      "subtitle": "Cleared clips ({{total}}) — not deleted; reprocess any time.",
+      "reprocessing": "Reprocessing…",
+      "reprocessSelected": "Reprocess selected ({{count}})",
+      "reprocessAll": "Reprocess all",
+      "reprocessAllTitle": "Re-queue every reprocessable cleared clip",
+      "reprocess": "Reprocess",
+      "noneReprocessed": "None of the {{count}} selected clip(s) could be reprocessed — clip file missing.",
+      "nothingToReprocess": "Nothing to reprocess{{label}}.",
+      "requeued": "Re-queued {{clips}} clip(s) · {{jobs}} job(s) submitted",
+      "skippedMissing": "{{count}} skipped (clip file missing).",
+      "failed": "Reprocess failed",
+      "pageSummary": "Page {{page}} of {{pages}} · {{total}} cleared",
+      "clearedCount": "{{count}} cleared clips",
+      "emptyTitle": "No cleared clips",
+      "emptyBody": "Clips removed with “Clear queues” will appear here so you can reprocess them later.",
+      "selectAll": "Select all reprocessable on page",
+      "selectClip": "Select clip {{id}}",
+      "col": {
+        "clip": "Clip",
+        "camera": "Camera",
+        "uc": "UC",
+        "queued": "Queued",
+        "cleared": "Cleared",
+        "by": "By",
+        "reason": "Reason",
+        "action": "Action"
+      },
+      "missing": "Clip file missing",
+      "missingTitle": "The clip video is no longer on disk (deleted or retention-cleaned), so it can't be reprocessed."
     }
   },
   "resources": {
@@ -4056,7 +4799,12 @@
         "depth": "Queued",
         "scope": "Scope",
         "action": ""
-      }
+      },
+      "reasonLabel": "Reason (optional)",
+      "reasonPlaceholder": "e.g. backlog — reprocess overnight",
+      "reasonHelp": "Cleared clips are kept in Queue history and can be reprocessed later — they are not deleted.",
+      "loadFailedTitle": "Couldn't load queue depths",
+      "loadFailedBody": "The queue snapshot request failed."
     },
     "action": {
       "clear": "Clear",
@@ -4099,7 +4847,16 @@
     "after": "after",
     "page": "Page {{page}} of {{total}}",
     "prev": "Prev",
-    "next": "Next"
+    "next": "Next",
+    "clearActor": "Clear actor",
+    "clearFilters": "Clear filters",
+    "emptyFilteredTitle": "No entries match these filters",
+    "emptyTitle": "No audit entries yet",
+    "emptyBody": "Every change made in the app is recorded here as soon as it happens.",
+    "reset": "Reset",
+    "loadFailedTitle": "Couldn't load the audit log",
+    "loadFailedBody": "The audit log request failed. Check the API and try again.",
+    "colDetails": "Details"
   },
   "systemHealth": {
     "title": "System health",
@@ -4139,7 +4896,13 @@
     "sigEmbeddings": "Enrolled embeddings",
     "sigEmbeddingsSub": "{{enrolled}} of {{active}} active employees",
     "statusOk": "ok",
-    "statusCheck": "check"
+    "statusCheck": "check",
+    "noCamerasTitle": "No cameras yet",
+    "subLoading": "Live backend, camera fleet and scheduler signals.",
+    "refresh": "Refresh",
+    "loadFailedTitle": "Couldn't load system health",
+    "loadFailedBody": "The backend didn't answer the health probe. Check that the API is reachable and try again.",
+    "addCamera": "Add camera"
   },
   "photoApprovals": {
     "title": "Photo approvals",
@@ -4161,7 +4924,28 @@
     "rejected": "Photo rejected",
     "actionFailed": "Action failed",
     "unknownRole": "User",
-    "approvedAt": "Approved"
+    "approvedAt": "Approved",
+    "subHint": "Photos employees upload themselves are only used for recognition after you approve them.",
+    "stats": {
+      "pendingSub": "Waiting for your review",
+      "people": "Employees waiting",
+      "peopleSub": "People with at least one pending photo",
+      "approvedSub": "Already in use for recognition",
+      "approvedOpen": "Open to load the approval history"
+    },
+    "filters": {
+      "search": "Search by employee name, ID or uploader…",
+      "angle": "Angle",
+      "allAngles": "All angles"
+    },
+    "emptyState": {
+      "pendingTitle": "All caught up",
+      "approvedTitle": "No approvals yet",
+      "noMatchTitle": "No photos match your search",
+      "noMatchBody": "Try another name or ID, or clear the filters.",
+      "pendingBody": "No pending approvals right now."
+    },
+    "uploadedAt": "Uploaded"
   },
   "policies": {
     "title": "Shift policies",
@@ -4277,7 +5061,23 @@
       "errorNameRequired": "Policy name is required.",
       "errorRangeStartRequired": "Range start is required.",
       "errorRangeEndRequired": "Range end is required.",
-      "errorRangeEndOrder": "Range end must be on or after range start."
+      "errorRangeEndOrder": "Range end must be on or after range start.",
+      "editTitle": "Edit shift policy",
+      "newTitle": "New shift policy",
+      "editSubtitle": "Change the rules of {{name}}. Attendance recomputes with the new values.",
+      "newSubtitle": "Define when employees are expected at work and how lateness is judged.",
+      "identityDesc": "A name people will recognise, and the day it takes effect.",
+      "namePlaceholder": "e.g. Head office day shift",
+      "typeDesc": "How attendance is judged. The fields below change with the type.",
+      "dateRangeDesc": "The calendar days this policy overrides the regular one.",
+      "shiftFixedDesc": "Start and end of the working day. Arrivals within the grace minutes are not late.",
+      "shiftFlexDesc": "When people may arrive and leave. The day counts if the required hours are met.",
+      "graceHelp": "0 to 180 minutes",
+      "hoursHelp": "1 to 24 hours",
+      "typeDescFixed": "Set start and end times with a grace period.",
+      "typeDescFlex": "Arrive and leave within windows; the hours must add up.",
+      "typeDescRamadan": "Shorter fixed hours for a date range.",
+      "typeDescCustom": "Fixed or Flex rules for a specific date range."
     },
     "toast": {
       "isNowDefault": "\"{{name}}\" is now the default shift policy.",
@@ -4331,7 +5131,36 @@
       "colReason": "Reason",
       "errTooLarge": "File is too large.",
       "errNotXlsx": "Only .xlsx files are accepted.",
-      "errGeneric": "Import failed. Check the file and try again."
+      "errGeneric": "Import failed. Check the file and try again.",
+      "columnsLead": "Required column:",
+      "columnsOptional": "Optional:",
+      "subtitleShort": "Create several shift policies at once from an Excel workbook.",
+      "fileLabel": "Workbook (.xlsx)"
+    },
+    "stats": {
+      "all": "All policies",
+      "allSub": "{{n}} active"
+    },
+    "groups": {
+      "standard": "Standard",
+      "standardSub": "Fixed and Flex shifts",
+      "ramadan": "Ramadan",
+      "ramadanSub": "Ramadan-hours shifts",
+      "custom": "Custom",
+      "customSub": "Date-range overrides"
+    },
+    "emptyTitle": "No shift policies yet",
+    "selectTitle": "Pick a policy",
+    "chips": {
+      "unassigned": "Not assigned yet",
+      "company": "Whole company",
+      "departments": "Departments · {{n}}",
+      "employees": "Employees · {{n}}"
+    },
+    "emptyGroup": {
+      "body": "Pick another group above or create a policy of this type.",
+      "clear": "Show all policies",
+      "title": "No {{group}} policies"
     }
   },
   "reports": {
@@ -4394,7 +5223,8 @@
       "startBeforeEnd": "Start date must be on or before end date.",
       "downloadFailed": "Download failed ({{status}}).",
       "networkError": "Network error.",
-      "downloaded": "Downloaded {{filename}}."
+      "downloaded": "Downloaded {{filename}}.",
+      "rangeLabel": "Range"
     },
     "eventLog": {
       "cardTitle": "Preview · Event Log",
@@ -4447,7 +5277,10 @@
       "loadFailed": "Could not load the preview.",
       "noData": "No data to export. Adjust the filters above and try again.",
       "footerRows_one": "{{count}} preview row · full dataset would be ~{{total}} rows",
-      "footerRows_other": "{{count}} preview rows · full dataset would be ~{{total}} rows"
+      "footerRows_other": "{{count}} preview rows · full dataset would be ~{{total}} rows",
+      "downloadXlsx": "Download XLSX",
+      "errorTitle": "Couldn't load the preview",
+      "retry": "Retry"
     },
     "pager": {
       "zeroRows": "0 rows",
@@ -4460,6 +5293,22 @@
       "pageOf": "Page {{page}} / {{total}}",
       "prev": "‹ Prev",
       "next": "Next ›"
+    },
+    "emptyState": {
+      "attendanceTitle": "No attendance in this range",
+      "deptTitle": "No departments to summarise",
+      "eventsTitle": "No detections on this day",
+      "widenRange": "Show last 7 days",
+      "goRegenerate": "Regenerate from events",
+      "useToday": "Use today",
+      "openCameraLogs": "Open camera logs",
+      "openDaily": "Open daily attendance"
+    },
+    "options": {
+      "title": "Report options",
+      "sub": "Pick a report type, a range and a format.",
+      "type": "Report type",
+      "download": "Download"
     }
   },
   "employeeReport": {
@@ -4518,7 +5367,17 @@
       "noMatches": "No matches.",
       "typeToSearch": "Type to search."
     },
-    "downloadFailed": "Download failed ({{status}})."
+    "downloadFailed": "Download failed ({{status}}).",
+    "empty": {
+      "title": "No days match this filter",
+      "body": "Pick another summary card or widen the date range.",
+      "showAll": "Show all days"
+    },
+    "errorTitle": "Couldn't load attendance",
+    "retry": "Retry",
+    "noRecordsTitle": "No attendance recorded in this range",
+    "noRecordsBody": "{{name}} has no check-ins or approved leave between {{start}} and {{end}}.",
+    "widen30": "Show last 30 days"
   },
   "rematch": {
     "ariaLabel": "Re-match detections",
@@ -4574,7 +5433,9 @@
     "activate": "Activate",
     "delete": "Delete",
     "saveFailed": "Save failed.",
-    "confirmDelete": "Delete '{{code}}'? Existing requests keep their original code, but new submissions won't see it."
+    "confirmDelete": "Delete '{{code}}'? Existing requests keep their original code, but new submissions won't see it.",
+    "countSub": "{{active}} of {{total}} shown to employees",
+    "emptyTitle": "No reasons in this list"
   },
   "erpExport": {
     "title": "ERP file-drop export",
@@ -4774,16 +5635,16 @@
   "devices": {
     "list": {
       "viewList": "List view",
-    "viewGrid": "Grid view",
-    "model": "Model",
-    "openHint": "Click for events and people",
-    "moreActions": "More actions",
-    "peopleSeen": "people seen",
-    "lastEventHint": "Last successful event",
-    "viewDetails": "View details",
-    "colMethods": "Verification",
-    "methodsPending": "after first scan",
-    "subtitle": "Manage the fingerprint and face terminals that record attendance",
+      "viewGrid": "Grid view",
+      "model": "Model",
+      "openHint": "Click for events and people",
+      "moreActions": "More actions",
+      "peopleSeen": "people seen",
+      "lastEventHint": "Last successful event",
+      "viewDetails": "View details",
+      "colMethods": "Verification",
+      "methodsPending": "after first scan",
+      "subtitle": "Manage the fingerprint and face terminals that record attendance",
       "total": "Total devices",
       "totalSub": "{{seen}} people seen",
       "totalSubUnmapped": "{{seen}} people seen · {{unmapped}} unmapped",
@@ -4810,7 +5671,702 @@
       "emptySearchTitle": "No results for “{{q}}”",
       "emptySearchBody": "Check the spelling, or search by device name, location, serial number or model.",
       "emptyFiltersTitle": "No devices match these filters",
-      "emptyFiltersBody": "Try removing one of the filters, or clear them to see every device."
+      "emptyFiltersBody": "Try removing one of the filters, or clear them to see every device.",
+      "loadErrorTitle": "Couldn't load devices",
+      "loadErrorBody": "The device list could not be fetched."
+    },
+    "sections": {
+      "identity": "Identity",
+      "integration": "Integration"
+    },
+    "label": "DEVICE",
+    "editTitle": "Edit device",
+    "editSubtitle": "Rename or relabel this terminal. The push URL and token never change here.",
+    "errors": {
+      "nameRequired": "Name is required.",
+      "saveFailed": "Could not save the device."
+    },
+    "fields": {
+      "name": "Device name",
+      "location": "Branch / location",
+      "driver": "Driver",
+      "enabled": "Enabled",
+      "serial": "Serial number",
+      "model": "Model"
+    },
+    "hints": {
+      "name": "Shown in reports and the device list.",
+      "driver": "Terminal vendor / integration protocol.",
+      "enabled": "Accept events from this terminal.",
+      "serial": "Reported by the terminal itself — read-only."
+    },
+    "placeholders": {
+      "name": "e.g. Entrance",
+      "location": "e.g. Head Office"
+    },
+    "wizard": {
+      "title": "Add device",
+      "subtitle1": "Register a face or fingerprint terminal so its taps become attendance.",
+      "subtitle2": "Type these values into the terminal's web page — it will start sending events.",
+      "stepsLabel": "Add device steps",
+      "step1": "Device details",
+      "step2": "Connect the terminal",
+      "identityHelp": "How the terminal is labelled in Maugood.",
+      "integrationHelp": "Which kind of terminal this is and whether to accept its events.",
+      "noNetworkNeeded": "No IP address, port or device password needed — the terminal connects to us. Its serial and model are learned from the first event it sends.",
+      "continue": "Continue",
+      "finish": "Finish",
+      "createdTitle": "“{{name}}” is registered",
+      "createdBody": "It shows as “Not reporting yet” until the terminal sends its first event."
+    },
+    "setup": {
+      "title": "Terminal setup",
+      "subtitle": "The values to type into the terminal's web page. Treat the URL like a password."
+    }
+  },
+  "clipLogs": {
+    "title": "Clip Logs",
+    "subSaved": "Every recorded clip from cameras in “Save Clips” mode — {{n}} in total.",
+    "subLogs": "Presence logs from cameras in “Logs Only” mode (no video) — {{n}} in total.",
+    "modeAria": "Recording mode",
+    "savedClips": "Saved Clips",
+    "logsOnly": "Logs Only",
+    "camera": "Camera",
+    "allCameras": "All cameras",
+    "from": "From",
+    "to": "To",
+    "reset": "Reset",
+    "errorTitle": "Couldn’t load clip logs",
+    "errorBody": "Something went wrong while fetching this list. Try again in a moment.",
+    "retry": "Retry",
+    "emptyFilteredTitle": "No entries match these filters",
+    "emptyFilteredBody": "Try another camera or widen the date range.",
+    "clearFilters": "Clear filters",
+    "emptySavedTitle": "No saved clips yet",
+    "emptyLogsTitle": "No presence logs yet",
+    "emptySavedBody": "Cameras set to “Save Clips” mode list their recorded clips here.",
+    "emptyLogsBody": "Cameras set to “Logs Only” mode list their presence logs here.",
+    "colCamera": "Camera",
+    "colDate": "Date",
+    "colStart": "Start",
+    "colEnd": "End",
+    "colDuration": "Duration",
+    "colPersons": "Persons",
+    "colSize": "Size",
+    "pageSummary": "Page {{page}} of {{pages}} · {{rows}} rows",
+    "goToCameras": "Go to cameras"
+  },
+  "pipelineAnalytics": {
+    "title": "Pipeline Analytics",
+    "sub": "Where UC1 / UC2 clip-processing time goes — queue, load, decode, detection, crop and match. Downloads honour the filters below.",
+    "stats": {
+      "clips": "Clips in view",
+      "clipsSub": "matching the current filters",
+      "uc1": "UC1 avg time",
+      "uc2": "UC2 avg time",
+      "ucSub": "{{n}} clips · P95 {{p95}}",
+      "noData": "no clips in this view"
+    },
+    "useCase": "Use case",
+    "both": "Both",
+    "status": "Status",
+    "statusAll": "All",
+    "statusCompleted": "Completed",
+    "statusFailed": "Failed",
+    "statusProcessing": "Processing",
+    "statusPending": "Pending",
+    "today": "Today",
+    "fromDate": "From date",
+    "toDate": "To date",
+    "from": "From",
+    "to": "To",
+    "reset": "Reset",
+    "compareTitle": "UC1 vs UC2 comparison",
+    "compareSub": "Average and worst-case time per processing stage.",
+    "emptyCompareTitle": "No processed clips for these filters",
+    "emptyCompareBody": "Widen the date range or status filter to compare the two pipelines.",
+    "clearFilters": "Clear filters",
+    "colMetric": "Metric",
+    "compareNote": "Queue wait, face crop, CPU and memory are captured for clips processed after this release; older clips show “—”.",
+    "perClipTitle": "Per-clip metrics",
+    "perClipSub": "Stage timings for each processed clip, newest first.",
+    "errorTitle": "Couldn’t load per-clip metrics",
+    "errorBody": "Something went wrong while fetching this list. Try again in a moment.",
+    "retry": "Retry",
+    "emptyFilteredTitle": "No clips match these filters",
+    "emptyTitle": "No processed clips yet",
+    "emptyFilteredBody": "Try another use case, status or date range.",
+    "emptyBody": "Metrics appear here once clips have been processed by UC1 or UC2.",
+    "pageSummary": "Page {{page}} of {{pages}} · {{rows}} rows",
+    "colUc1": "UC1 (yolo+face)",
+    "colUc2": "UC2 (insightface)",
+    "goToClipAnalytics": "Open Clip Analytics",
+    "compare": {
+      "clips": "Clips processed",
+      "avgTotal": "Avg total time",
+      "p95Total": "P95 total time",
+      "maxTotal": "Max total time",
+      "queue": "Avg queue wait",
+      "load": "Avg clip load (decrypt+read)",
+      "decode": "Avg frame decode",
+      "extract": "Avg detection (extract)",
+      "lockWait": "detect lock-wait",
+      "detectCompute": "detect compute",
+      "crop": "Avg face crop",
+      "match": "Avg face match",
+      "framesSampled": "Avg frames sampled",
+      "framesSkipped": "Avg frames motion-skipped",
+      "framesDetected": "Avg frames detected",
+      "facesDetected": "Avg faces detected",
+      "cropsSaved": "Avg faces / crops saved",
+      "cpu": "Avg CPU",
+      "memory": "Avg memory",
+      "peakMemory": "Peak memory"
+    },
+    "cols": {
+      "clip": "Clip",
+      "camera": "Camera",
+      "uc": "UC",
+      "total": "Total",
+      "queue": "Queue",
+      "load": "Load",
+      "decode": "Decode",
+      "lock": "Lock",
+      "detect": "Detect",
+      "crop": "Crop",
+      "match": "Match",
+      "frames": "Frames",
+      "faces": "Faces",
+      "crops": "Crops",
+      "cpu": "CPU",
+      "mem": "Mem",
+      "size": "Size"
+    },
+    "export": {
+      "download": "Download",
+      "downloading": "Downloading…",
+      "failed": "Export failed",
+      "allDates": "all dates",
+      "aria": "Download pipeline analytics",
+      "title": "Download analytics",
+      "sub": "{{range}} · status & camera filter applied",
+      "format": "Format",
+      "csvTitle": "CSV only",
+      "csvDesc": "Performance metrics spreadsheet.",
+      "zipTitle": "ZIP + video clips",
+      "zipDesc": "Metrics + decrypted MP4s (max 150). Contains PII.",
+      "bundling": "Bundling…",
+      "exporting": "Exporting…",
+      "downloadZip": "Download ZIP",
+      "downloadCsv": "Download CSV"
+    }
+  },
+  "myTeam": {
+    "subHint": "Open anyone to see their attendance and camera events.",
+    "stats": {
+      "members": "Team members",
+      "membersSub": "Assigned to you",
+      "inactiveSub": "Deactivated or relieved"
+    },
+    "emptyTitle": "No team members yet",
+    "searchPlaceholder": "Search by name, code, or email…",
+    "allDepartments": "All departments",
+    "loadFailed": "Could not load your team.",
+    "empty": "No team members assigned to you yet. Ask an Admin to set up your division / department / section so the team-rules can resolve a team."
+  },
+  "managerAssignments": {
+    "errors": {
+      "assign": "Assign failed",
+      "unassign": "Unassign failed",
+      "primary": "Primary toggle failed"
+    },
+    "title": "Manager assignments",
+    "sub": "Drag an employee onto a manager to assign them. Drop on “Unassigned” to remove the assignment. Use the star to mark one manager as the primary contact.",
+    "loadFailed": "Couldn’t load manager assignments.",
+    "loadFailedBody": "Check your connection and try again.",
+    "retry": "Try again",
+    "stats": {
+      "managers": "Managers",
+      "managersSub": "Users with the Manager role",
+      "assigned": "Assigned",
+      "assignedSub": "Employees with a manager",
+      "unassigned": "Unassigned",
+      "unassignedSub": "Waiting for a manager",
+      "primary": "Primary set",
+      "primarySub": "Starred primary contacts"
+    },
+    "search": "Search employees or managers by name, ID or department…",
+    "clearSearch": "Clear search",
+    "reset": "Reset",
+    "noManagersTitle": "No managers yet",
+    "noManagersBody": "Give a user the Manager role on the Users page and they will appear here.",
+    "noMatchTitle": "No managers match your search",
+    "noMatchBody": "Try another name, or clear the search.",
+    "unassignedTitle": "Unassigned employees",
+    "unassignedHint": "Drag onto a manager to assign. Drop a chip here to unassign it.",
+    "unassignedEmpty": "No unassigned employees — drop here to remove an assignment.",
+    "countTitle": "Assigned employees",
+    "noDepartments": "No departments",
+    "cardEmpty": "No employees assigned. Drop a chip here to assign.",
+    "unsetPrimary": "Unset primary",
+    "markPrimary": "Mark primary",
+    "primaryTitle": "Primary manager",
+    "markPrimaryTitle": "Mark as primary manager",
+    "noPeopleTitle": "Nothing to assign yet",
+    "noPeopleBody": "Add employees and give at least one user the Manager role, then come back here to pair them up."
+  },
+  "settingsUi": {
+    "actions": "Actions",
+    "branding": {
+      "colourDesc": "Used for buttons, links, highlights and the active menu item.",
+      "fontDesc": "The typeface used across the whole workspace.",
+      "logoDesc": "Shown at the top of the sidebar and on PDF reports.",
+      "previewDesc": "How your choices look before you save them.",
+      "appearanceTitle": "Workspace identity",
+      "appearanceDesc": "Name, accent colour and typeface. Changes apply after you save.",
+      "unsaved": "You have unsaved changes.",
+      "allSaved": "Everything is saved."
+    },
+    "customFields": {
+      "addDesc": "The code must be lower-case letters, numbers and underscores. It becomes the Excel column header.",
+      "addTitle": "Add a field",
+      "count": "{{count}} fields",
+      "emptyBody": "Add extra details to every employee record, such as a badge number or blood group.",
+      "emptyTitle": "No custom fields yet",
+      "listDesc": "Drag a field by its handle to change the order it appears in on the employee record.",
+      "listTitle": "Fields"
+    },
+    "display": {
+      "cardDesc": "These preferences are saved to your account and follow you to any browser.",
+      "cardTitle": "Appearance"
+    },
+    "email": {
+      "tabAttendance": "Attendance emails",
+      "tabProvider": "Provider",
+      "stepSmtp": "SMTP server",
+      "stepAzure": "Azure credentials",
+      "stepSender": "Sender identity",
+      "steps": "Steps",
+      "stepOf": "Step {{n}} of {{total}} · {{label}}",
+      "configSaved": "Configuration saved.",
+      "editProviderTitle": "Edit {{provider}} configuration",
+      "addProviderTitle": "Add email provider",
+      "back": "Back",
+      "storedPlaceholder": "•••••• (stored)",
+      "chooseProvider": "Choose the email service to use for outbound delivery.",
+      "smtpDesc": "Gmail, Outlook, Brevo, or any custom SMTP relay",
+      "graphDesc": "Microsoft 365 / Azure with app credentials",
+      "smtpIntro": "Enter your SMTP relay server details. These are provided by your email service.",
+      "graphIntro": "Register an app in Azure Active Directory and paste the credentials below.",
+      "senderIntro": "The name and address that recipients will see in their inbox.",
+      "enterPassword": "Enter password",
+      "enterSecret": "Enter client secret",
+      "tlsHint": "(recommended for port 587)",
+      "bccLabel": "BCC (monitoring address)",
+      "bccHelp": "Optional. Every outbound email is also copied here.",
+      "enableSending": "Enable email sending",
+      "providerRemoved": "{{provider}} configuration removed.",
+      "removeFailed": "Failed to remove provider.",
+      "addProvider": "Add {{provider}}",
+      "stored": "stored",
+      "notSet": "Not set",
+      "notConfigured": "Not configured",
+      "deliveryActive": "Email delivery is active",
+      "deliveryPaused": "Email delivery is paused",
+      "deliveryActiveBody": "Attendance reports and scheduled emails are being delivered.",
+      "deliveryPausedQueued": "Delivery paused · {{count}} email(s) queued but not yet sent.",
+      "deliveryPausedBody": "No emails will be sent until you re-enable delivery.",
+      "pauseDelivery": "Pause delivery",
+      "resumeDelivery": "Resume delivery",
+      "providersHeading": "Email providers",
+      "noProvidersTitle": "No email provider yet",
+      "noProvidersBody": "Connect an SMTP relay or Microsoft Graph so scheduled reports and notifications can be delivered.",
+      "active": "Active",
+      "inactive": "Inactive",
+      "updatedAt": "Updated {{when}}",
+      "remove": "Remove",
+      "removeProvider": "Remove {{provider}}",
+      "smtpServer": "SMTP server",
+      "removeTitle": "Remove {{provider}}?",
+      "removeSubtitle": "This will clear the stored credentials.",
+      "removing": "Removing…",
+      "removeConfirm": "Yes, remove",
+      "removeBody": "Are you sure you want to remove the {{provider}} configuration? All stored credentials will be cleared and cannot be recovered.",
+      "removeOnlyProvider": "This is your only configured provider. Removing it will disable email delivery.",
+      "sent": "Sent",
+      "recipient": "Recipient email",
+      "queueCancelled": "{{count}} pending email(s) in the queue were cancelled immediately.",
+      "triggersTitle": "Email triggers",
+      "triggersDesc": "When enabled, employees receive a status email on the day their attendance is processed.",
+      "on": "On",
+      "off": "Off",
+      "status": {
+        "present": "Present",
+        "late": "Late",
+        "absent": "Absent"
+      },
+      "recentTitle": "Recent deliveries",
+      "recentDesc": "All attendance email attempts — search by name, filter by date.",
+      "queueTitle": "Emails waiting to be sent",
+      "inQueue": "{{count}} in queue",
+      "queueEmpty": "Queue empty",
+      "searchEmployee": "Search employee name…",
+      "clearSearch": "Clear search",
+      "from": "From",
+      "to": "To",
+      "dateFrom": "From date",
+      "dateTo": "To date",
+      "reset": "Reset",
+      "logLoadFailed": "Couldn't load the delivery log",
+      "noResultsTitle": "No results",
+      "noResultsBody": "No deliveries match the current search or date range.",
+      "clearFilters": "Clear filters",
+      "noLogTitle": "No attendance emails sent yet",
+      "noLogBody": "Deliveries appear here once a trigger above is on and attendance is processed.",
+      "colEmployee": "Employee",
+      "colDate": "Date",
+      "colStatus": "Status",
+      "colRecipient": "Recipient",
+      "colDelivery": "Delivery",
+      "colAttempts": "Attempts",
+      "managerTag": "Mgr",
+      "outcome": {
+        "sent": "Sent",
+        "skipped": "Skipped",
+        "failed": "Failed",
+        "pending": "Pending"
+      },
+      "pageOf": "Page {{page}} of {{pages}} · {{total}} total",
+      "fieldRequired": "This field is required.",
+      "wizardSubtitle": "Connect the service Maugood uses to send reports and notifications.",
+      "storedReplacePlaceholder": "•••••• stored — type to replace",
+      "enableSendingDesc": "When off, nothing is sent and new emails are not queued."
+    },
+    "erp": {
+      "configTitle": "Export settings",
+      "enabledHelp": "When on, the file is written automatically on the cron schedule below.",
+      "neverRun": "Never run",
+      "off": "Off",
+      "on": "On",
+      "pageSub": "Drop a daily attendance file into a folder your ERP picks up automatically.",
+      "scheduledOff": "Not scheduled",
+      "scheduledOn": "Scheduled",
+      "windowHelp": "How many days back each file covers. 1 = today only."
+    },
+    "org": {
+      "allDivisions": "All divisions",
+      "clearFilters": "Clear filters",
+      "clearSearch": "Clear search",
+      "departmentsEmptyBody": "Add your first department, or import a list from a CSV file.",
+      "divisionsEmptyBody": "Divisions group departments together. Add your first division to get started.",
+      "noDivision": "No division",
+      "noMatchBody": "Nothing matches the current search or filters. Try a different term or clear the filters.",
+      "noMatchTitle": "No matches",
+      "reset": "Reset",
+      "searchDepartments": "Search by code, name or division",
+      "searchDivisions": "Search by code or name",
+      "searchSections": "Search by code, name or department",
+      "sectionsEmptyBody": "Sections split a department into smaller teams. Add the first one to get started.",
+      "departmentsLoadFailed": "Couldn't load departments",
+      "divisionsLoadFailed": "Couldn't load divisions",
+      "sectionsLoadFailed": "Couldn't load sections",
+      "csvFile": "CSV file"
+    },
+    "schedules": {
+      "active": "Active",
+      "activeCount": "{{active}} of {{total}} active",
+      "createDesc": "Pick a format, how many days each report covers, when it runs and who receives it.",
+      "emptyBody": "Create a schedule to email a PDF or Excel attendance report automatically, for example every Monday morning.",
+      "emptyRunsBody": "Runs appear here once a schedule fires or you press Run now.",
+      "listDesc": "Each schedule emails an attendance report to its recipients on a repeating timetable.",
+      "listTitle": "Schedules",
+      "paused": "Paused",
+      "runsDesc": "The last 20 deliveries across every schedule, newest first.",
+      "loadFailed": "Couldn't load schedules",
+      "runsLoadFailed": "Couldn't load recent runs"
+    },
+    "workspace": {
+      "tzSaved": "Timezone set to {{tz}}",
+      "weekendSaved": "Weekend days updated",
+      "dateFormatSaved": "Date format set to {{fmt}}",
+      "timeFormatSaved": "Time format set to {{fmt}}",
+      "previousTz": "the previous timezone",
+      "tzChangedTitle": "Timezone changed — historical attendance may be stale.",
+      "tzChangedBodyA": "Today's attendance was automatically recomputed in",
+      "tzChangedBodyB": "Past dates were computed in",
+      "tzChangedBodyC": "in / out / total / late / overtime numbers near midnight may be off by the time difference. Regenerate a date range to refresh them.",
+      "regenerateCta": "Regenerate historical attendance…",
+      "dismiss": "Dismiss",
+      "regenTitle": "Regenerate historical attendance",
+      "regenSubA": "Recomputes attendance for every active employee on each date in the range. Uses the current timezone",
+      "regenSubB": "Maximum 92 days per call.",
+      "regenErrDates": "Both start and end dates are required.",
+      "regenErrRange": "Invalid date range.",
+      "regenErrTooLong": "Range is {{days}} days; maximum is 92. Split into smaller ranges.",
+      "regenRunning": "Regenerating…",
+      "regenRun": "Run regenerate",
+      "regenStart": "Start (inclusive)",
+      "regenStartAria": "Start date",
+      "regenEnd": "End (inclusive)",
+      "regenEndAria": "End date",
+      "regenDaysInRange": "{{count}} days in range",
+      "regenResultA": "Recomputed",
+      "regenResultRows": "attendance rows",
+      "regenResultAcross": "across",
+      "regenResultDays": "days",
+      "invalidTz": "Invalid timezone: {{tz}}",
+      "tenantClock": "Tenant clock:",
+      "saveFailed": "Save failed."
+    },
+    "auth": {
+      "notConfiguredTitle": "Connect {{provider}}"
+    },
+    "retry": "Retry",
+    "loadErrorBody": "The server did not respond as expected. Check your connection and try again.",
+    "forms": {
+      "saveChanges": "Save changes",
+      "branding": {
+        "removeLogoTitle": "Remove logo",
+        "removeLogoSub": "The workspace falls back to the default Maugood mark."
+      },
+      "customFields": {
+        "addTitle": "Add custom field",
+        "editTitle": "Edit custom field",
+        "editSub": "Rename the field or change whether it's required. The code and type stay fixed.",
+        "identitySection": "Field",
+        "identitySectionDesc": "The label HR sees and the code used in Excel files.",
+        "typeSectionDesc": "The type can't be changed after the field is created.",
+        "typeTextDesc": "Free text, e.g. a badge number.",
+        "typeNumberDesc": "Whole or decimal numbers.",
+        "typeDateDesc": "A calendar date.",
+        "typeSelectDesc": "One value from a fixed list.",
+        "optionsHelp": "{{count}} options — the list employees pick from.",
+        "requiredDesc": "HR must fill this in when saving an employee."
+      },
+      "erp": {
+        "scheduleSection": "Schedule",
+        "scheduleSectionDesc": "Turn the automatic export on and choose when it runs.",
+        "fileSection": "File",
+        "fileSectionDesc": "The file format and the folder it's written to.",
+        "csvDesc": "UTF-8, one row per employee per day.",
+        "jsonDesc": "Rows plus a metadata block."
+      },
+      "reasons": {
+        "addTitle": "Add {{type}} reason",
+        "addSub": "Employees pick this reason when they file {{type}} requests. New reasons are shown straight away.",
+        "addCta": "Add reason",
+        "section": "Reason",
+        "sectionDesc": "A short unique code plus the label employees see.",
+        "deleteTitle": "Delete reason",
+        "exception": "exception",
+        "leave": "leave"
+      },
+      "schedules": {
+        "addTitle": "New report schedule",
+        "deleteTitle": "Delete schedule",
+        "deleteSub": "The schedule stops sending. Past runs stay in the log.",
+        "reportSection": "Report",
+        "reportSectionDesc": "What the email contains and how many days it covers.",
+        "pdfDesc": "Branded, print-ready report.",
+        "xlsxDesc": "Spreadsheet for further analysis.",
+        "windowHelp": "Between 1 and 180 days, ending on the run date.",
+        "timingSection": "Timetable",
+        "timingSectionDesc": "A cron expression in the tenant's timezone.",
+        "cronHelp": "minute hour day month weekday — e.g. 0 8 * * 1",
+        "recipientsSection": "Recipients",
+        "recipientsSectionDesc": "Separate addresses with commas or new lines."
+      }
+    }
+  },
+  "requestStatus": {
+    "submitted": "Submitted",
+    "manager_approved": "Manager approved",
+    "manager_rejected": "Rejected by manager",
+    "hr_approved": "Approved",
+    "hr_rejected": "Rejected by HR",
+    "admin_approved": "Admin override · approved",
+    "admin_rejected": "Admin override · rejected",
+    "cancelled": "Cancelled"
+  },
+  "people": {
+    "loadErrorBody": "The server didn't respond as expected. Check your connection and try again.",
+    "retry": "Retry"
+  },
+  "newRequest": {
+    "attachmentFailed": "Request created, but the attachment failed: {{reason}}",
+    "choose": "choose a file",
+    "dropHere": "Drop a file here, or",
+    "endDate": "End date",
+    "endDateHelp": "Leave blank for a single day.",
+    "exceptionHelp": "Explain a late arrival, early departure or missed detection on one day.",
+    "fileEmpty": "The file is empty.",
+    "fileHint": "Max {{max}}MB · images, PDF, DOCX · optional",
+    "fileTooLarge": "File is {{size}}MB; the maximum is {{max}}MB.",
+    "leaveHelp": "Time away from work. Needs a date range and a leave type.",
+    "leaveType": "Leave type",
+    "notes": "Notes",
+    "pickLeaveType": "Pick a leave type.",
+    "pickReason": "Pick a reason category.",
+    "pickStart": "Pick a start date.",
+    "reasonCategory": "Reason category",
+    "removeFile": "Remove",
+    "saveFailed": "Save failed",
+    "sectionAttachment": "Attachment",
+    "sectionType": "Request type",
+    "sectionWhen": "When",
+    "sectionWhy": "Reason",
+    "selectPlaceholder": "— Select —",
+    "startDate": "Start date",
+    "submit": "Submit request",
+    "submitting": "Submitting…",
+    "targetDate": "Target date",
+    "title": "Submit for approval",
+    "formSubtitle": "Ask for leave or explain an attendance exception. It goes to your manager for approval.",
+    "sectionTypeDesc": "Pick what you are asking for. The fields below adapt to it.",
+    "sectionWhenLeaveDesc": "The first and last day you will be away.",
+    "sectionWhenExceptionDesc": "The day the exception applies to.",
+    "sectionWhyDesc": "Why you need this. Your approver sees the category and your notes.",
+    "notesPlaceholder": "e.g. Doctor's appointment in the morning.",
+    "sectionAttachmentDesc": "Optional. A doctor's note or other proof helps your approver decide.",
+    "attachmentLabel": "Supporting document"
+  },
+  "overrideModal": {
+    "bannerBody": "This will be audit-logged and visible to all parties (the original {{stage}} decider, the employee, and any administrator reviewing the request later).",
+    "bannerTitle": "Overriding the {{stage}} decision.",
+    "comment": "Comment (required, min {{min}} characters)",
+    "commentCount": "{{n}} characters.",
+    "commentPlaceholder": "Why are you overriding this decision? This is the audit record.",
+    "commentShort": "{{n}} / {{min}} — comment must be at least {{min}} characters.",
+    "decision": "Decision",
+    "eyebrow": "Admin override",
+    "failed": "Override failed",
+    "overrideApprove": "Override · Approve",
+    "overrideReject": "Override · Reject",
+    "stageHr": "HR",
+    "stageManager": "Manager",
+    "stagePendingHr": "the pending HR review",
+    "stagePendingManager": "the pending Manager",
+    "stagePrior": "the prior",
+    "submitting": "Submitting…",
+    "title": "Override request #{{id}}",
+    "tooShort": "Comment must be at least {{min}} characters (you typed {{n}}).",
+    "subtitle": "Replace the current decision on this request with your own.",
+    "decisionDesc": "The outcome that replaces the current decision."
+  },
+  "requestDetail": {
+    "addFile": "Add another file",
+    "adminCommentRequired": "Admin override requires a comment.",
+    "approve": "Approve",
+    "attachments": "Attachments",
+    "awaitingDecision": "awaiting decision",
+    "cancelFailed": "Cancel failed",
+    "cancelRequest": "Cancel request",
+    "cancelling": "Cancelling…",
+    "commentPlaceholder": "Optional on approve · required on reject",
+    "decisionComment": "Decision comment",
+    "decisionFailed": "Decision failed",
+    "details": "Details",
+    "download": "Download",
+    "downloadFailed": "Could not download attachment.",
+    "end": "End",
+    "leaveType": "Leave type",
+    "noAttachments": "No files attached.",
+    "notReached": "Not reached",
+    "overriddenByAdmin": "Overridden by admin",
+    "overridePlaceholder": "Override comment (required)…",
+    "reason": "Reason",
+    "reject": "Reject",
+    "rejectCommentRequired": "Rejection requires a comment.",
+    "removeAttachment": "Remove attachment",
+    "start": "Start",
+    "submittedBy": "Submitted by",
+    "uploadFailed": "Upload failed",
+    "workflow": "Workflow"
+  },
+  "roles": {
+    "Admin": "Administrator",
+    "HR": "HR",
+    "Manager": "Manager",
+    "Employee": "Employee"
+  },
+  "form": {
+    "required": "required",
+    "requiredNote": "Required fields"
+  },
+  "settingsForms": {
+    "codeLocked": "Codes can't be changed after create.",
+    "codePattern": "Use 1-16 uppercase letters, digits or underscores.",
+    "codeRequired": "Code is required.",
+    "dept": {
+      "addSubtitle": "Create a department employees can be assigned to.",
+      "deleteAction": "Delete department",
+      "deleteTitle": "Delete department",
+      "deleteHasEmployees": "{{count}} employee(s) still reference this department — the server will refuse the delete until they are moved.",
+      "editSubtitle": "Rename the department or move it to another division.",
+      "editTitle": "Edit department",
+      "identityDesc": "The code is the stable key used by imports; the name is what people see.",
+      "importFileHelp": "Headers: code,name — one department per row.",
+      "importFileSection": "Upload file",
+      "importSubtitle": "Create or update many departments at once from a CSV file.",
+      "managersTitle": "Department managers",
+      "placementDesc": "Where this department sits in the org hierarchy."
+    },
+    "division": {
+      "addSubtitle": "Create a top-level unit that groups departments.",
+      "deleteAction": "Delete division",
+      "deleteTitle": "Delete division",
+      "editSubtitle": "Rename this division. Its code stays fixed.",
+      "identityDesc": "The code is used in Excel imports; the name is what people see.",
+      "managersTitle": "Division managers"
+    },
+    "identitySection": "Identity",
+    "importResultSection": "Import result",
+    "managerLabel": "Manager",
+    "managersAddDesc": "Only users holding the Manager role appear in this list.",
+    "managersAssignedDesc": "Remove a manager to stop their visibility over this unit.",
+    "managersNote": "Changes save as soon as you assign or remove.",
+    "nameRequired": "Name is required.",
+    "placementSection": "Placement",
+    "saveChanges": "Save changes",
+    "section": {
+      "addSubtitle": "Create a team inside a department with its own managers.",
+      "deleteAction": "Delete section",
+      "deleteTitle": "Delete section",
+      "departmentRequired": "Pick a department.",
+      "editSubtitle": "Rename this section. Department and code stay fixed.",
+      "identityDesc": "The code is unique within its department; the name is what people see.",
+      "managersTitle": "Section managers"
+    }
+  },
+  "formWizard": {
+    "upload": "Upload",
+    "review": "Review",
+    "done": "Done"
+  },
+  "employeeProfile": {
+    "back": "Employees",
+    "notFound": {
+      "title": "Employee not found",
+      "body": "This employee doesn't exist or isn't visible to you. They may have been deleted.",
+      "action": "Back to employees"
+    },
+    "loadFailed": "Couldn't load this employee",
+    "facts": {
+      "joined": "Joined",
+      "tenure": "Tenure {{tenure}}",
+      "tenureYm": "{{y}} yr {{m}} mo",
+      "tenureM": "{{m}} mo",
+      "notStarted": "Not started yet",
+      "manager": "Line manager",
+      "lastSeen": "Last seen",
+      "lastSeenSub": "{{camera}} · {{count}} detections",
+      "never": "Not yet",
+      "neverSub": "No camera detections yet"
+    },
+    "deactivationReason": "Deactivation reason",
+    "photos": {
+      "empty": "No reference photos yet — add some from Edit so this person can be recognised.",
+      "open": "Open {{angle}} photo"
     }
   }
 }

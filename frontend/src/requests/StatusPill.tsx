@@ -1,18 +1,22 @@
 // Tiny shared status pill for the request workflow. Maps each of the
-// eight statuses to a tone (success / danger / warning / neutral) +
-// a human-readable label.
+// eight statuses to a soft tone (success / danger / warning / info /
+// neutral) + a human-readable label, rendered with a leading dot.
+
+import { useTranslation } from "react-i18next";
 
 import type { RequestStatus } from "./types";
+import { SoftPill } from "./workflowUi";
+import type { SoftTone } from "./workflowUi";
 
-const TONE: Record<RequestStatus, string> = {
-  submitted: "pill-warning",
-  manager_approved: "pill-info",
-  manager_rejected: "pill-danger",
-  hr_approved: "pill-success",
-  hr_rejected: "pill-danger",
-  admin_approved: "pill-success",
-  admin_rejected: "pill-danger",
-  cancelled: "pill-neutral",
+const TONE: Record<RequestStatus, SoftTone> = {
+  submitted: "warning",
+  manager_approved: "info",
+  manager_rejected: "danger",
+  hr_approved: "success",
+  hr_rejected: "danger",
+  admin_approved: "success",
+  admin_rejected: "danger",
+  cancelled: "neutral",
 };
 
 const LABEL: Record<RequestStatus, string> = {
@@ -26,11 +30,16 @@ const LABEL: Record<RequestStatus, string> = {
   cancelled: "Cancelled",
 };
 
+export function statusTone(status: RequestStatus): SoftTone {
+  return TONE[status] ?? "neutral";
+}
+
 export function StatusPill({ status }: { status: RequestStatus }) {
+  const { t } = useTranslation();
   return (
-    <span className={`pill ${TONE[status] ?? "pill-neutral"}`}>
-      {LABEL[status] ?? status}
-    </span>
+    <SoftPill tone={statusTone(status)}>
+      {t(`requestStatus.${status}`, { defaultValue: LABEL[status] ?? status })}
+    </SoftPill>
   );
 }
 

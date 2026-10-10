@@ -10,6 +10,9 @@ import "./styles/styles.css";
 import "./styles/styles-enhancements.css";
 import "./styles/styles-enhancements2.css";
 import "./styles/styles-enhancements3.css";
+// Oct 2026 redesign: the modern UI layer. Loaded last so it layers over
+// the verbatim design archive without editing it.
+import "./theme/modern.css";
 
 // P21: i18next config — must run before any component that calls
 // ``useTranslation`` mounts. The init also flips <html lang> + <html

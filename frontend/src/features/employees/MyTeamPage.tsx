@@ -21,7 +21,24 @@ import {
   rolePillClass,
 } from "./EmployeesPage";
 import type { EmployeeListResponse } from "./types";
-import { SkeletonRows } from "../../components/Skeleton";
+import { SkeletonCards, SkeletonGrid, SkeletonRows } from "../../components/Skeleton";
+import { Pagination } from "../../components/Pagination";
+import {
+  CardFact,
+  CardGrid,
+  EmptyPanel,
+  FilterSelect,
+  ResetButton,
+  SearchField,
+  StatCard,
+  StatGrid,
+  Toolbar,
+  ViewToggle,
+  gridCardStyle,
+  pct,
+  useViewMode,
+} from "../../components/ListPageUi";
+import { DotPill, LoadErrorPanel, PEOPLE_ICON, StatTile } from "./peopleUi";
 
 const PAGE_SIZE = 50;
 const SEARCH_MIN_CHARS = 3;
@@ -34,6 +51,7 @@ export function MyTeamPage() {
   const [departmentId, setDepartmentId] = useState<number | null>(null);
   const [page, setPage] = useState(1);
   const [viewId, setViewId] = useState<number | null>(null);
+  const [view, setView] = useViewMode("maugood.myTeam.view");
 
   useEffect(() => {
     const trimmed = q.trim();
@@ -71,6 +89,28 @@ export function MyTeamPage() {
   const rangeStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const rangeEnd = Math.min(total, page * PAGE_SIZE);
 
+  const enrolledOnPage = items.filter((e) => e.photo_count > 0).length;
+  const missingOnPage = items.length - enrolledOnPage;
+  const inactiveOnPage = items.filter((e) => e.status !== "active").length;
+  const filtersActive = q.trim() !== "" || departmentId !== null;
+  const resetFilters = () => {
+    setQ("");
+    setDebouncedQ("");
+    setDepartmentId(null);
+  };
+
+  // Five-state rendering: stats + toolbar hide when the manager has no
+  // team at all (nothing to filter) or the request failed.
+  const noRecords = !list.isLoading && !list.isError && !filtersActive && total === 0;
+  const showStats = !list.isError && !noRecords;
+
+  const openOnKey = (id: number) => (ev: React.KeyboardEvent) => {
+    if (ev.key === "Enter" || ev.key === " ") {
+      ev.preventDefault();
+      setViewId(id);
+    }
+  };
+
   return (
     <>
       <div className="page-header">
@@ -86,273 +126,289 @@ export function MyTeamPage() {
                   ? "1 team member assigned to you"
                   : `${total} team members assigned to you`,
             }) as string}
+            {" · "}
+            {t("myTeam.subHint", {
+              defaultValue: "Open anyone to see their attendance and camera events.",
+            }) as string}
           </p>
         </div>
       </div>
 
-      <div className="card">
-        {/* Filter row */}
-        <div
-          style={{
-            display: "flex",
-            gap: 10,
-            alignItems: "center",
-            padding: 14,
-            borderBottom: "1px solid var(--border)",
-          }}
-        >
-          <div className="topbar-search" style={{ flex: 1 }}>
-            <Icon name="search" size={13} />
-            <input
-              placeholder={t("myTeam.searchPlaceholder", {
-                defaultValue: "Search by name, code, or email…",
-              }) as string}
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-            />
-          </div>
-          <select
-            value={departmentId ?? ""}
-            onChange={(e) =>
-              setDepartmentId(
-                e.target.value === "" ? null : Number(e.target.value),
-              )
+      {list.isLoading ? (
+        <SkeletonCards count={4} minWidth={220} />
+      ) : showStats ? (
+        <StatGrid>
+          <StatCard
+            tone="info"
+            icon={PEOPLE_ICON.people}
+            label={t("myTeam.stats.members", { defaultValue: "Team members" }) as string}
+            value={total}
+            sub={
+              filtersActive
+                ? (t("employees.stats.peopleFilteredSub", {
+                    defaultValue: "Matching your filters · click to clear",
+                  }) as string)
+                : (t("myTeam.stats.membersSub", { defaultValue: "Assigned to you" }) as string)
             }
-            style={{
-              padding: "6px 10px",
-              fontSize: 12.5,
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius-sm)",
-              background: "var(--bg-elev)",
-              color: "var(--text)",
-              minWidth: 200,
-            }}
-          >
-            <option value="">
-              {t("myTeam.allDepartments", {
-                defaultValue: "All departments",
-              }) as string}
-            </option>
-            {(departments.data?.items ?? []).map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </select>
-          <span
-            className="mono text-xs text-dim"
-            style={{ whiteSpace: "nowrap" }}
-          >
-            {total === 0 ? "0" : `${rangeStart}–${rangeEnd}`} / {total}
-          </span>
-        </div>
+            active={!filtersActive}
+            onClick={resetFilters}
+          />
+          <StatTile
+            tone="success"
+            icon={PEOPLE_ICON.camera}
+            label={t("employees.stats.enrolled", { defaultValue: "Enrolled" }) as string}
+            value={enrolledOnPage}
+            sub={t("employees.stats.enrolledSub", {
+              defaultValue: "{{pct}}% of this page",
+              pct: pct(enrolledOnPage, items.length),
+            }) as string}
+          />
+          <StatTile
+            tone="warning"
+            icon={PEOPLE_ICON.cameraOff}
+            label={t("employees.stats.needPhotos", { defaultValue: "Need photos" }) as string}
+            value={missingOnPage}
+            sub={t("employees.stats.needPhotosSub", { defaultValue: "Not recognisable yet" }) as string}
+          />
+          <StatTile
+            tone="neutral"
+            icon={PEOPLE_ICON.clock}
+            label={t("employees.statusValue.inactive") as string}
+            value={inactiveOnPage}
+            sub={t("myTeam.stats.inactiveSub", { defaultValue: "Deactivated or relieved" }) as string}
+          />
+        </StatGrid>
+      ) : null}
 
-        {/* Table — mirrors EmployeesPage's row layout. */}
-        <table className="table">
-          <thead>
-            <tr>
-              <th style={{ width: 110 }}>
-                {t("employees.col.code", {
-                  defaultValue: "Employee ID",
-                }) as string}
-              </th>
-              <th>
-                {t("employees.col.employee", {
-                  defaultValue: "Employee",
-                }) as string}
-              </th>
-              <th>
-                {t("employees.col.department", {
-                  defaultValue: "Department",
-                }) as string}
-              </th>
-              <th>
-                {t("employees.col.role", {
-                  defaultValue: "Role",
-                }) as string}
-              </th>
-              <th style={{ width: 130 }}>
-                {t("employees.col.photos", {
-                  defaultValue: "Photos",
-                }) as string}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.isLoading && (
-              <SkeletonRows cols={5} />
-            )}
-            {list.isError && (
-              <tr>
-                <td
-                  colSpan={5}
-                  className="text-sm"
-                  style={{
-                    padding: 14,
-                    textAlign: "center",
-                    color: "var(--danger-text)",
-                  }}
-                >
-                  {t("myTeam.loadFailed", {
-                    defaultValue: "Could not load your team.",
-                  }) as string}
-                </td>
-              </tr>
-            )}
-            {!list.isLoading && !list.isError && items.length === 0 && (
-              <tr>
-                <td
-                  colSpan={5}
-                  className="text-sm text-dim"
-                  style={{ padding: 14, textAlign: "center" }}
-                >
-                  {t("myTeam.empty", {
-                    defaultValue:
-                      "No team members assigned to you yet. Ask an Admin to set up your division / department / section so the team-rules can resolve a team.",
-                  }) as string}
-                </td>
-              </tr>
-            )}
-            {items.map((e) => {
-              const role = primaryRoleFromCodes(e.role_codes ?? []);
-              const inactive = e.status !== "active";
-              return (
-                <tr
-                  key={e.id}
-                  onClick={() => setViewId(e.id)}
-                  style={{ cursor: "pointer", opacity: inactive ? 0.6 : 1 }}
-                >
-                  <td className="mono text-sm">{e.employee_code}</td>
-                  <td>
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 10,
-                      }}
-                    >
-                      <div
-                        className="avatar"
-                        style={{
-                          background: avatarBg(e.full_name),
-                          color: "var(--text-on-accent, #fff)",
-                          fontWeight: 600,
-                        }}
-                      >
+      {showStats && !list.isLoading && (
+      <Toolbar>
+        <SearchField
+          value={q}
+          onChange={setQ}
+          placeholder={t("myTeam.searchPlaceholder", {
+            defaultValue: "Search by name, code, or email…",
+          }) as string}
+          clearLabel={t("employees.filters.clearSearch", { defaultValue: "Clear search" }) as string}
+        />
+        <FilterSelect
+          label={t("employees.filters.department", { defaultValue: "Department" }) as string}
+          value={departmentId === null ? "" : String(departmentId)}
+          onChange={(v) => setDepartmentId(v === "" ? null : Number(v))}
+          options={[
+            [
+              "",
+              t("myTeam.allDepartments", { defaultValue: "All departments" }) as string,
+            ],
+            ...(departments.data?.items ?? []).map(
+              (d) => [String(d.id), d.name] as [string, string],
+            ),
+          ]}
+        />
+        <span className="pp-count">
+          {total === 0 ? "0" : `${rangeStart}–${rangeEnd}`} / {total}
+        </span>
+        <ResetButton
+          active={filtersActive}
+          label={t("employees.filters.reset", { defaultValue: "Reset" }) as string}
+          onClick={resetFilters}
+        />
+        <ViewToggle
+          value={view}
+          onChange={setView}
+          listLabel={t("employees.view.list", { defaultValue: "List view" }) as string}
+          gridLabel={t("employees.view.grid", { defaultValue: "Grid view" }) as string}
+        />
+      </Toolbar>
+      )}
+
+      <div className="card">
+        {list.isError ? (
+          <LoadErrorPanel
+            title={t("myTeam.loadFailed", { defaultValue: "Could not load your team." }) as string}
+            onRetry={() => void list.refetch()}
+          />
+        ) : !list.isLoading && items.length === 0 ? (
+          filtersActive ? (
+            <EmptyPanel
+              icon={<Icon name={debouncedQ ? "search" : "filter"} size={28} />}
+              title={t("employees.emptyState.filtersTitle", {
+                defaultValue: "No employees match these filters",
+              }) as string}
+              body={t("employees.emptyState.filtersBody", {
+                defaultValue:
+                  "Try a different name, ID or email, or clear the filters to see everyone.",
+              }) as string}
+              actions={
+                <button type="button" className="btn" onClick={resetFilters}>
+                  <Icon name="refresh" size={12} />
+                  {t("employees.emptyState.clearFilters", { defaultValue: "Clear filters" }) as string}
+                </button>
+              }
+            />
+          ) : (
+            <EmptyPanel
+              tone="accent"
+              icon={<Icon name="users" size={30} />}
+              title={t("myTeam.emptyTitle", { defaultValue: "No team members yet" }) as string}
+              body={t("myTeam.empty", {
+                defaultValue:
+                  "No team members assigned to you yet. Ask an Admin to set up your division / department / section so the team-rules can resolve a team.",
+              }) as string}
+            />
+          )
+        ) : view === "grid" ? (
+          list.isLoading ? (
+            <SkeletonGrid count={6} avatar minWidth={260} />
+          ) : (
+            <CardGrid minWidth={260}>
+              {items.map((e) => {
+                const role = primaryRoleFromCodes(e.role_codes ?? []);
+                const inactive = e.status !== "active";
+                return (
+                  <div
+                    key={e.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={t("employees.grid.openAria", {
+                      defaultValue: "Open {{name}}",
+                      name: e.full_name,
+                    }) as string}
+                    onClick={() => setViewId(e.id)}
+                    onKeyDown={openOnKey(e.id)}
+                    className={`card clickable${inactive ? " pp-card-muted" : ""}`}
+                    style={{ ...gridCardStyle, cursor: "pointer" }}
+                  >
+                    <div className="pp-card-top">
+                      <div className="avatar pp-avatar pp-avatar-md" style={{ background: avatarBg(e.full_name) }}>
                         {initials(e.full_name)}
                       </div>
-                      <div>
-                        <div style={{ fontWeight: 500 }}>{e.full_name}</div>
-                        <div className="text-xs text-dim">
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <span className="pp-truncate" title={e.full_name} style={{ fontWeight: 600, fontSize: 14.5 }}>
+                          {e.full_name}
+                        </span>
+                        <span className="pp-truncate text-xs text-dim" style={{ marginTop: 2 }}>
                           {e.designation ?? e.department.name}
-                        </div>
+                        </span>
                       </div>
                     </div>
-                  </td>
-                  <td className="text-sm">{e.department.name}</td>
-                  <td>
-                    {role ? (
-                      <span className={`pill ${rolePillClass(role)}`}>
-                        {t(`role.${role}` as const, {
-                          defaultValue: role,
-                        }) as string}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-dim">—</span>
-                    )}
-                  </td>
-                  <td>
-                    {e.photo_count > 0 ? (
-                      <span
-                        className="pill pill-accent"
-                        title={t("employees.photos.tooltip", {
-                          count: e.photo_count,
-                        }) as string}
-                      >
-                        <Icon name="camera" size={11} />
-                        <span style={{ marginInlineStart: 4 }}>
-                          {t("employees.photos.count", {
-                            count: e.photo_count,
+                    <div className="pp-card-pills">
+                      {role && (
+                        <span className={`pill ${rolePillClass(role)}`}>
+                          {t(`role.${role}` as const, { defaultValue: role }) as string}
+                        </span>
+                      )}
+                      <DotPill tone={inactive ? "neutral" : "success"}>
+                        {t(inactive ? "employees.statusValue.inactive" : "employees.statusValue.active") as string}
+                      </DotPill>
+                    </div>
+                    <div className="pp-card-facts">
+                      <CardFact label={t("employees.col.code", { defaultValue: "Employee ID" }) as string}>
+                        <span className="mono pp-nowrap">{e.employee_code}</span>
+                      </CardFact>
+                      <CardFact label={t("employees.col.department", { defaultValue: "Department" }) as string}>
+                        {e.department.name}
+                      </CardFact>
+                      <CardFact label={t("employees.col.photos", { defaultValue: "Photos" }) as string}>
+                        <TeamPhotoPill count={e.photo_count} />
+                      </CardFact>
+                    </div>
+                  </div>
+                );
+              })}
+            </CardGrid>
+          )
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th style={{ width: 110 }}>
+                  {t("employees.col.code", {
+                    defaultValue: "Employee ID",
+                  }) as string}
+                </th>
+                <th>
+                  {t("employees.col.employee", {
+                    defaultValue: "Employee",
+                  }) as string}
+                </th>
+                <th>
+                  {t("employees.col.department", {
+                    defaultValue: "Department",
+                  }) as string}
+                </th>
+                <th>
+                  {t("employees.col.role", {
+                    defaultValue: "Role",
+                  }) as string}
+                </th>
+                <th style={{ width: 130 }}>
+                  {t("employees.col.photos", {
+                    defaultValue: "Photos",
+                  }) as string}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.isLoading && <SkeletonRows cols={5} />}
+              {items.map((e) => {
+                const role = primaryRoleFromCodes(e.role_codes ?? []);
+                const inactive = e.status !== "active";
+                return (
+                  <tr
+                    key={e.id}
+                    tabIndex={0}
+                    onClick={() => setViewId(e.id)}
+                    onKeyDown={openOnKey(e.id)}
+                    className={`pp-row-link${inactive ? " pp-row-muted" : ""}`}
+                  >
+                    <td className="mono text-sm pp-nowrap">{e.employee_code}</td>
+                    <td>
+                      <div className="pp-person">
+                        <div className="avatar pp-avatar" style={{ background: avatarBg(e.full_name) }}>
+                          {initials(e.full_name)}
+                        </div>
+                        <div>
+                          <div className="pp-person-name">{e.full_name}</div>
+                          <div className="text-xs text-dim">
+                            {e.designation ?? e.department.name}
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="text-sm">{e.department.name}</td>
+                    <td>
+                      {role ? (
+                        <span className={`pill ${rolePillClass(role)}`}>
+                          {t(`role.${role}` as const, {
+                            defaultValue: role,
                           }) as string}
                         </span>
-                      </span>
-                    ) : (
-                      <span className="text-xs text-dim">
-                        {t("employees.photos.none", {
-                          defaultValue: "No photos",
-                        }) as string}
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                      ) : (
+                        <span className="text-xs text-dim">—</span>
+                      )}
+                    </td>
+                    <td>
+                      <TeamPhotoPill count={e.photo_count} />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
 
-        {/* Pager */}
         {total > 0 && (
-          <div
-            style={{
-              padding: "10px 14px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              borderTop: "1px solid var(--border)",
-              fontSize: 12.5,
-              color: "var(--text-secondary)",
-              flexWrap: "wrap",
-              gap: 8,
-            }}
-          >
-            <span>
-              {rangeStart}–{rangeEnd} of {total}
-            </span>
-            <div style={{ display: "flex", gap: 6 }}>
-              <button
-                className="btn btn-sm"
-                onClick={() => setPage(1)}
-                disabled={page <= 1}
-                aria-label="First page"
-              >
-                «
-              </button>
-              <button
-                className="btn btn-sm"
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page <= 1}
-              >
-                <Icon name="chevronLeft" size={11} />
-                {t("common.previous") as string}
-              </button>
-              <span
-                className="mono text-xs"
-                style={{
-                  minWidth: 80,
-                  textAlign: "center",
-                  alignSelf: "center",
-                }}
-              >
-                {page} / {totalPages}
-              </span>
-              <button
-                className="btn btn-sm"
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page >= totalPages}
-              >
-                {t("common.next") as string}
-                <Icon name="chevronRight" size={11} />
-              </button>
-              <button
-                className="btn btn-sm"
-                onClick={() => setPage(totalPages)}
-                disabled={page >= totalPages}
-                aria-label="Last page"
-              >
-                »
-              </button>
-            </div>
-          </div>
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            disabled={list.isFetching}
+            summary={
+              <>
+                {rangeStart}–{rangeEnd} / {total}
+              </>
+            }
+          />
         )}
       </div>
 
@@ -369,5 +425,24 @@ export function MyTeamPage() {
         />
       )}
     </>
+  );
+}
+
+function TeamPhotoPill({ count }: { count: number }) {
+  const { t } = useTranslation();
+  return count > 0 ? (
+    <span
+      className="pill pill-accent pp-nowrap"
+      title={t("employees.photos.tooltip", { count }) as string}
+    >
+      <Icon name="camera" size={11} />
+      <span style={{ marginInlineStart: 4 }}>
+        {t("employees.photos.count", { count }) as string}
+      </span>
+    </span>
+  ) : (
+    <span className="text-xs text-dim pp-nowrap">
+      {t("employees.photos.none", { defaultValue: "No photos" }) as string}
+    </span>
   );
 }

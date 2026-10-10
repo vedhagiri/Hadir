@@ -1,0 +1,44 @@
+/* Devices area — Add / Edit / Setup / Detail chrome on top of the form
+ * kit (components/form-kit.css). Prefix dv-. */
+
+/* Centred host for ModalShell (the shell only renders the scrim). */
+.dv-modal-host {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  pointer-events: none;
+}
+.dv-modal-host > * { pointer-events: auto; }
+.dv-modal-host .fk-modal.dv-wizard { width: min(600px, 96vw); }
+.dv-token { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.dv-token .pill { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Read-only value inside a Field (serial number) */
+.dv-readonly {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* Device detail drawer */
+.fk-drawer.dv-detail { width: min(860px, 100vw); }
+.dv-meta-strip {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-sunken);
+}
+.dv-meta-actions { display: flex; gap: 8px; margin-inline-start: auto; }
+.dv-detail-tabs { padding: 0 24px; margin-bottom: 0; gap: 2px; }
+.dv-head-status { display: inline-flex; align-items: center; }

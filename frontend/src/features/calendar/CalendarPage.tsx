@@ -27,7 +27,10 @@ import {
 } from "./hooks";
 
 import { Icon } from "../../shell/Icon";
+import { EmptyPanel } from "../../components/ListPageUi";
 import { SkeletonCalendar } from "../../components/Skeleton";
+import { AlertGlyph } from "../cameras/coreUi";
+import { extractApiError } from "../../api/client";
 
 type Tab = "company" | "person";
 
@@ -155,7 +158,7 @@ export function CalendarPage() {
   const personSelected = effectiveTab === "person" && employeeId !== null;
 
   const exportButton = (
-    <a className="btn" href={exportHref} target="_blank" rel="noopener noreferrer" style={headerBtn}>
+    <a className="btn" href={exportHref} target="_blank" rel="noopener noreferrer">
       <Icon name="download" size={14} />
       {t("calendar.exportMonth") as string}
     </a>
@@ -173,9 +176,9 @@ export function CalendarPage() {
                 setPickedCompanyDate(null);
                 autoFilledRef.current = true;
               }}
-              style={backLink}
+              className="co-back"
             >
-              <span aria-hidden className="icon-arrow-left">←</span>
+              <span aria-hidden className="icon-chevron-left" style={{ display: "inline-flex" }}><Icon name="chevronLeft" size={14} /></span>
               {t("calendar.backToList", { defaultValue: "Back to employees" }) as string}
             </button>
           )}
@@ -193,7 +196,7 @@ export function CalendarPage() {
                 }) as string}
               </p>
             </div>
-            <div className="page-actions" style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <div className="page-actions">
               <MonthNav month={month} onChange={setMonth} />
               {exportButton}
             </div>
@@ -210,26 +213,14 @@ export function CalendarPage() {
                   : (t("calendar.personSub") as string)}
               </p>
             </div>
-            <div className="page-actions" style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <div className="page-actions">
               <MonthNav month={month} onChange={setMonth} />
               {exportButton}
             </div>
           </div>
 
           {isCompanyAllowed && (
-            <div
-              role="group"
-              aria-label={t("calendar.title") as string}
-              style={{
-                display: "inline-flex",
-                gap: 4,
-                border: "1px solid var(--border)",
-                borderRadius: 10,
-                padding: 4,
-                background: "var(--bg-elev)",
-                marginBottom: 16,
-              }}
-            >
+            <div role="group" aria-label={t("calendar.title") as string} className="seg co-seg" style={{ display: "inline-flex" }}>
               <TabButton active={effectiveTab === "company"} onClick={() => setTab("company")}>
                 {t("calendar.tabCompany") as string}
               </TabButton>
@@ -247,8 +238,19 @@ export function CalendarPage() {
             <SkeletonCalendar />
           )}
           {company.isError && (
-            <div className="text-sm" style={{ color: "var(--danger-text)" }}>
-              {t("calendar.loadFailed") as string}
+            <div className="card">
+              <EmptyPanel
+                tone="danger"
+                icon={<AlertGlyph />}
+                title={t("calendar.loadFailed") as string}
+                body={extractApiError(company.error, "")}
+                actions={
+                  <button type="button" className="btn" onClick={() => void company.refetch()}>
+                    <Icon name="refresh" size={12} />
+                    {t("common.retry", { defaultValue: "Retry" })}
+                  </button>
+                }
+              />
             </div>
           )}
           {company.data && (
@@ -303,8 +305,19 @@ export function CalendarPage() {
             <SkeletonCalendar />
           )}
           {employeeId !== null && person.isError && (
-            <div className="text-sm" style={{ color: "var(--danger-text)" }}>
-              {t("calendar.loadFailed") as string}
+            <div className="card">
+              <EmptyPanel
+                tone="danger"
+                icon={<AlertGlyph />}
+                title={t("calendar.loadFailed") as string}
+                body={extractApiError(person.error, "")}
+                actions={
+                  <button type="button" className="btn" onClick={() => void person.refetch()}>
+                    <Icon name="refresh" size={12} />
+                    {t("common.retry", { defaultValue: "Retry" })}
+                  </button>
+                }
+              />
             </div>
           )}
           {employeeId !== null && person.data && (
@@ -355,22 +368,7 @@ function TabButton({
   children: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      style={{
-        background: active ? "var(--accent)" : "transparent",
-        color: active ? "#fff" : "var(--text)",
-        border: "none",
-        borderRadius: 8,
-        padding: "8px 26px",
-        fontSize: 13,
-        fontWeight: 600,
-        cursor: "pointer",
-        boxShadow: active ? "0 2px 6px color-mix(in oklab, var(--accent) 35%, transparent)" : "none",
-      }}
-    >
+    <button type="button" onClick={onClick} aria-pressed={active} className={`seg-btn${active ? " active" : ""}`} style={{ padding: "0 22px" }}>
       {children}
     </button>
   );
@@ -400,24 +398,6 @@ function personCounts(days: PersonDay[]): SummaryCounts {
     weekend: days.filter((d) => d.is_weekend || d.status === "weekend").length,
   };
 }
-
-const headerBtn = { height: 38, borderRadius: 10, gap: 8, fontWeight: 600, display: "inline-flex", alignItems: "center" } as const;
-
-const backLink = {
-  appearance: "none",
-  background: "transparent",
-  border: "none",
-  padding: "4px 0",
-  marginBottom: 12,
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 8,
-  fontSize: 14,
-  fontWeight: 600,
-  color: "var(--text)",
-  cursor: "pointer",
-  font: "inherit",
-} as const;
 
 function currentMonth(): string {
   const d = new Date();

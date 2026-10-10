@@ -9,10 +9,12 @@ import { useTranslation } from "react-i18next";
 import {
   Dot,
   DowHeader,
+  EmptyMonth,
   GreyPill,
+  HolidayPill,
   Legend,
+  PadCells,
   TONE,
-  WEEKEND_CELL_BG,
   WeekendPill,
   isoToday,
 } from "./calendarUi";
@@ -30,21 +32,26 @@ export function CompanyView({ month, days, onPickDate }: Props) {
   const leadingPad = first.getDay();
   const todayIso = isoToday();
 
+  const hasRecords = days.some(
+    (d) => d.present_count + d.late_count + d.absent_count + d.waiting_count + d.leave_count > 0,
+  );
+
   return (
-    <div className="card" style={{ padding: 16 }}>
-      <DowHeader />
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6 }}>
-        {Array.from({ length: leadingPad }).map((_, i) => (
-          <div key={`pad-${i}`} aria-hidden style={{ border: "1px solid var(--border)", borderRadius: 10, minHeight: 92, background: "var(--bg-elev)" }} />
-        ))}
-        {days.map((d) => (
-          <DayCell key={d.date} day={d} isToday={d.date === todayIso} onClick={() => onPickDate(d.date)} />
-        ))}
-      </div>
-      <Legend />
-      <div className="text-xs text-dim" style={{ marginTop: 8 }}>
-        {t("calendar.companyHint", { month }) as string}
-      </div>
+    <div className="card co-cal">
+      {hasRecords ? (
+        <>
+          <DowHeader />
+          <div className="cal-month-grid">
+            <PadCells count={leadingPad} />
+            {days.map((d) => (
+              <DayCell key={d.date} day={d} isToday={d.date === todayIso} onClick={() => onPickDate(d.date)} />
+            ))}
+          </div>
+          <Legend hint={t("calendar.companyHint", { month }) as string} />
+        </>
+      ) : (
+        <EmptyMonth month={month} />
+      )}
     </div>
   );
 }
@@ -52,7 +59,9 @@ export function CompanyView({ month, days, onPickDate }: Props) {
 function DayCell({ day, isToday, onClick }: { day: CompanyDay; isToday: boolean; onClick: () => void }) {
   const { t } = useTranslation();
   const dayNum = parseInt(day.date.slice(8, 10), 10);
-  const bg = day.is_weekend ? WEEKEND_CELL_BG : day.is_holiday ? TONE.holiday.soft : "var(--bg-elev)";
+  const cls = ["cal-day", isToday && "today", day.is_weekend && "status-weekend", !day.is_weekend && day.is_holiday && "status-holiday"]
+    .filter(Boolean)
+    .join(" ");
 
   const counts = [
     { key: "present", value: day.present_count, color: TONE.present.dot, fg: TONE.present.fg },
@@ -64,40 +73,20 @@ function DayCell({ day, isToday, onClick }: { day: CompanyDay; isToday: boolean;
   const empty = counts.length === 0;
 
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={tooltipFor(day)}
-      style={{
-        appearance: "none",
-        textAlign: "start",
-        font: "inherit",
-        background: bg,
-        border: isToday ? "2px solid var(--accent)" : "1px solid var(--border)",
-        borderRadius: 10,
-        padding: isToday ? "7px 11px 9px" : "8px 12px 10px",
-        cursor: "pointer",
-        display: "flex",
-        flexDirection: "column",
-        gap: 4,
-        minHeight: 92,
-      }}
-    >
-      <span className="mono" style={{ alignSelf: "flex-end", fontSize: 15, fontWeight: 700, color: "var(--text)" }}>{dayNum}</span>
+    <button type="button" onClick={onClick} title={tooltipFor(day)} className={cls}>
+      <span className="cal-day-num">{dayNum}</span>
       {counts.map((c) => (
-        <span key={c.key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+        <span key={c.key} className="co-cal-line">
           <Dot color={c.color} />
-          <span className="mono" style={{ fontWeight: 700, color: c.fg, minWidth: 22 }}>{c.value}</span>
-          <span style={{ color: "var(--text-secondary)" }}>{t(`calendar.status.${c.key}`) as string}</span>
+          <span className="co-cal-line-num" style={{ color: c.fg }}>{c.value}</span>
+          <span className="co-cal-line-label">{t(`calendar.status.${c.key}`) as string}</span>
         </span>
       ))}
-      <span style={{ marginTop: "auto" }}>
+      <span className="cal-flag">
         {day.is_weekend ? (
           <WeekendPill />
         ) : day.is_holiday ? (
-          <span style={{ display: "inline-block", padding: "2px 8px", fontSize: 11, fontWeight: 600, borderRadius: 6, background: "var(--bg-elev)", color: TONE.holiday.fg, border: `1px solid ${TONE.holiday.dot}` }}>
-            {day.holiday_name || (t("calendar.status.holiday") as string)}
-          </span>
+          <HolidayPill>{day.holiday_name || (t("calendar.status.holiday") as string)}</HolidayPill>
         ) : empty ? (
           <GreyPill>{t("calendar.status.no_record") as string}</GreyPill>
         ) : null}

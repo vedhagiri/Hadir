@@ -14,6 +14,7 @@ import { AnomalyInfoBanner } from "../../components/AnomalyNote";
 import { DrawerShell } from "../../components/DrawerShell";
 import { LateBadge } from "../../components/LateBadge";
 import { Icon } from "../../shell/Icon";
+import { InlineAlert } from "../cameras/coreUi";
 import { useTenantDateTime } from "../../util/datetime";
 import { useMe } from "../../auth/AuthProvider";
 import { primaryRole } from "../../types";
@@ -291,17 +292,17 @@ export function DayDetailDrawer({
       <div className="drawer">
         <div className="drawer-head">
           <div>
-            <div className="mono text-xs text-dim">
+            <div className="text-xs text-dim">
               {t("calendar.dayDetail") as string}
             </div>
-            <div style={{ fontSize: 16, fontWeight: 600, marginTop: 2 }}>
-              {detail.data?.full_name ?? ""} · {isoDate}
+            <div className="co-dd-title">
+              {detail.data?.full_name ?? ""} · <span className="mono">{isoDate}</span>
             </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div className="co-dd-actions">
             <button
               type="button"
-              className="btn btn-sm"
+              className="btn btn-sm btn-ghost"
               onClick={triggerRegen}
               disabled={regen.isPending}
               title={
@@ -311,7 +312,7 @@ export function DayDetailDrawer({
                 }) as string
               }
             >
-              <span aria-hidden style={{ marginInlineEnd: 4 }}>↻</span>
+              <Icon name="refresh" size={12} />
               {regen.isPending
                 ? (t("attendance.regenerating", {
                     defaultValue: "Regenerating…",
@@ -336,16 +337,12 @@ export function DayDetailDrawer({
                 (d.status === "weekend" && !worked) ||
                 (d.status === "holiday" && !worked);
               return disableExport ? (
-                <span
-                  className="btn btn-sm"
-                  aria-disabled="true"
-                  style={{ opacity: 0.4, pointerEvents: "none", cursor: "not-allowed" }}
-                >
+                <span className="btn btn-sm btn-ghost" aria-disabled="true">
                   <Icon name="download" size={12} />
                   {t("calendar.export") as string}
                 </span>
               ) : (
-                <a className="btn btn-sm" href={exportHref} target="_blank" rel="noopener noreferrer">
+                <a className="btn btn-sm btn-ghost" href={exportHref} target="_blank" rel="noopener noreferrer">
                   <Icon name="download" size={12} />
                   {t("calendar.export") as string}
                 </a>
@@ -362,36 +359,10 @@ export function DayDetailDrawer({
         </div>
 
         {regenInfo && (
-          <div
-            style={{
-              margin: "8px 16px 0",
-              padding: "8px 12px",
-              borderRadius: 6,
-              fontSize: 12.5,
-              background:
-                regenInfo.tone === "ok"
-                  ? "var(--info-soft, var(--bg-sunken))"
-                  : "var(--danger-soft, var(--bg-sunken))",
-              border:
-                regenInfo.tone === "ok"
-                  ? "1px solid var(--info, var(--border))"
-                  : "1px solid var(--danger, var(--border))",
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-            }}
-          >
-            <span>{regenInfo.text}</span>
-            <div style={{ flex: 1 }} />
-            <button
-              type="button"
-              className="btn btn-sm"
-              style={{ padding: "2px 8px", fontSize: 11 }}
-              onClick={() => setRegenInfo(null)}
-              aria-label={t("calendar.close") as string}
-            >
-              ×
-            </button>
+          <div className="co-dd-notice">
+            <InlineAlert tone={regenInfo.tone === "ok" ? "info" : "danger"} onClose={() => setRegenInfo(null)}>
+              {regenInfo.text}
+            </InlineAlert>
           </div>
         )}
 
@@ -4234,50 +4205,18 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <>
-      <div
-        style={{
-          fontSize: 12,
-          fontWeight: 600,
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
-          color: "var(--text-tertiary)",
-          marginBottom: 8,
-          marginTop: 4,
-        }}
-      >
-        {label}
-      </div>
-      <div style={{ marginBottom: 16 }}>{children}</div>
-    </>
+    <section className="co-dd-section">
+      <div className="co-dd-section-head">{label}</div>
+      <div>{children}</div>
+    </section>
   );
 }
 
 function Tile({ label, value }: { label: string; value: string }) {
   return (
-    <div
-      style={{
-        padding: "10px 12px",
-        background: "var(--bg-sunken)",
-        borderRadius: 8,
-      }}
-    >
-      <div
-        className="text-xs text-dim"
-        style={{
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
-          fontWeight: 500,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        className="mono"
-        style={{ fontSize: 15, fontWeight: 500, marginTop: 2 }}
-      >
-        {value}
-      </div>
+    <div className="co-dd-tile">
+      <div className="co-dd-tile-label">{label}</div>
+      <div className="co-dd-tile-value">{value}</div>
     </div>
   );
 }

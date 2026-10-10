@@ -6,9 +6,7 @@
 //   3. Approved Leaves — ledger view (the submission + approval
 //      workflow lands in P14/P15; this is the storage view).
 //
-// The Tenant Settings panel at the top of the page exposes
-// weekend_days + timezone — the load-bearing inputs the engine
-// reads at recompute time.
+// Tenant timezone + weekend-day controls live at /settings/workspace.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -17,7 +15,7 @@ import { useTranslation } from "react-i18next";
 import { ApiError } from "../api/client";
 import type { Employee } from "../features/employees/types";
 import { DatePicker } from "../components/DatePicker";
-import { ModalShell } from "../components/DrawerShell";
+import { Field, FormFooter, FormNotice, FormSection, SwitchField } from "../components/FormKit";
 import { Icon } from "../shell/Icon";
 import { useEmployeeList } from "../features/employees/hooks";
 import {
@@ -40,7 +38,20 @@ import type {
   Holiday,
   LeaveType,
 } from "./types";
-import { SkeletonLines } from "../components/Skeleton";
+import { SkeletonTable } from "../components/Skeleton";
+import { EmptyPanel } from "../components/ListPageUi";
+import {
+  Alert,
+  FormFootBar,
+  FormModal,
+  SectionHead,
+  TabButton,
+  TabStrip,
+  TableCard,
+  WF_ICON,
+  WfSvg,
+  errorDetail,
+} from "../requests/workflowUi";
 
 
 type Tab = "types" | "holidays" | "leaves";
@@ -50,38 +61,25 @@ export function LeaveCalendarPage() {
   const { t } = useTranslation();
   const [tab, setTab] = useState<Tab>("types");
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <header>
-        <h1
-          style={{
-            fontFamily: "var(--font-display)",
-            fontSize: 28,
-            margin: "0 0 4px 0",
-            fontWeight: 400,
-          }}
-        >
-          {t("leaveCalendar.title")}
-        </h1>
-        <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 13 }}>
-          {t("leaveCalendar.subtitle")}
-        </p>
-      </header>
+    <div className="wf-page">
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">{t("leaveCalendar.title")}</h1>
+          <p className="page-sub">{t("leaveCalendar.subtitle")}</p>
+        </div>
+      </div>
 
-      {/* Tenant timezone + weekend-day controls moved to
-          Settings → Workspace so they live alongside the other
-          tenant-wide configuration knobs. */}
-
-      <div style={{ display: "flex", gap: 4 }}>
-        <TabButton tab={tab} value="types" onClick={setTab}>
+      <TabStrip label={t("leaveCalendar.title")}>
+        <TabButton active={tab === "types"} onClick={() => setTab("types")}>
           {t("leaveCalendar.tabs.types")}
         </TabButton>
-        <TabButton tab={tab} value="holidays" onClick={setTab}>
+        <TabButton active={tab === "holidays"} onClick={() => setTab("holidays")}>
           {t("leaveCalendar.tabs.holidays")}
         </TabButton>
-        <TabButton tab={tab} value="leaves" onClick={setTab}>
+        <TabButton active={tab === "leaves"} onClick={() => setTab("leaves")}>
           {t("leaveCalendar.tabs.leaves")}
         </TabButton>
-      </div>
+      </TabStrip>
 
       {tab === "types" && <LeaveTypesTab />}
       {tab === "holidays" && <HolidaysTab />}
@@ -91,44 +89,27 @@ export function LeaveCalendarPage() {
 }
 
 
-function TabButton({
-  tab,
-  value,
-  onClick,
-  children,
-}: {
-  tab: Tab;
-  value: Tab;
-  onClick: (t: Tab) => void;
-  children: React.ReactNode;
-}) {
-  const active = tab === value;
+// ---- Shared: load-error panel --------------------------------------------
+
+
+function LoadError({ title, error, onRetry }: { title: string; error: unknown; onRetry: () => void }) {
+  const { t } = useTranslation();
   return (
-    <button
-      type="button"
-      onClick={() => onClick(value)}
-      style={{
-        background: active ? "var(--accent-soft)" : "transparent",
-        color: active ? "var(--accent-text)" : "var(--text)",
-        border: "1px solid var(--border)",
-        borderBottom: active ? "1px solid var(--accent-border)" : "1px solid var(--border)",
-        padding: "6px 14px",
-        borderRadius: "var(--radius-sm)",
-        cursor: "pointer",
-        fontSize: 13,
-        fontWeight: active ? 600 : 500,
-      }}
-    >
-      {children}
-    </button>
+    <div className="card">
+      <EmptyPanel
+        tone="danger"
+        icon={<WfSvg>{WF_ICON.alert}</WfSvg>}
+        title={title}
+        body={errorDetail(error, t("common.errorGeneric"))}
+        actions={
+          <button type="button" className="btn" onClick={onRetry}>
+            <Icon name="refresh" size={12} /> {t("common.retry", { defaultValue: "Retry" })}
+          </button>
+        }
+      />
+    </div>
   );
 }
-
-
-// Tenant timezone + weekend-day controls live at
-// ``/settings/workspace`` now. The hooks
-// (``useTenantSettings``, ``usePatchTenantSettings``) are still
-// imported here because other panels on this page consume them.
 
 
 // ---- Leave types tab -----------------------------------------------------
@@ -145,11 +126,9 @@ function LeaveTypesTab() {
   const [name, setName] = useState("");
   const [isPaid, setIsPaid] = useState(true);
 
-  if (list.isLoading) return <SkeletonLines lines={3} />;
+  if (list.isLoading) return <SkeletonTable rows={5} cols={5} />;
   if (list.error)
-    return (
-      <p style={{ color: "var(--danger-text)" }}>{t("leaveCalendar.loadFailedTypes")}</p>
-    );
+    return <LoadError title={t("leaveCalendar.loadFailedTypes")} error={list.error} onRetry={() => void list.refetch()} />;
   const rows = list.data ?? [];
 
   const canSubmit = code.trim() !== "" && name.trim() !== "";
@@ -181,168 +160,182 @@ function LeaveTypesTab() {
     }
   };
 
+  const newBtn = (
+    <button type="button" className="btn btn-primary" onClick={() => setShowForm(true)}>
+      {t("leaveCalendar.newType")}
+    </button>
+  );
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      {/* BUG-020 — title + button aligned in a header row instead of a
-          bare button stuck against the left edge. */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-        }}
-      >
-        <h3
-          style={{
-            margin: 0,
-            fontSize: 14,
-            fontWeight: 700,
-            color: "var(--text)",
-          }}
-        >
-          {t("leaveCalendar.tabs.types")}
-        </h3>
-        <button type="button" onClick={() => setShowForm(true)} style={btnPrimary}>
-          {t("leaveCalendar.newType")}
-        </button>
-      </div>
-      {showForm && (
-        <ModalShell onClose={closeForm}>
-          <div
-            role="dialog"
-            aria-labelledby="new-leave-type-title"
-            style={{
-              position: "fixed",
-              top: "50%",
-              left: "50%",
-              transform: "translate(-50%, -50%)",
-              width: 480,
-              maxWidth: "90vw",
-              background: "var(--bg)",
-              border: "1px solid var(--border-strong)",
-              borderRadius: "var(--radius)",
-              padding: 20,
-              zIndex: 60,
-              boxShadow: "var(--shadow-lg)",
-              display: "flex",
-              flexDirection: "column",
-              gap: 14,
-            }}
-          >
-            <header
-              style={{
-                display: "flex",
-                alignItems: "flex-start",
-                justifyContent: "space-between",
-              }}
-            >
-              <h2 id="new-leave-type-title" style={{ margin: 0, fontSize: 18 }}>
-                {t("leaveCalendar.newType")}
-              </h2>
-              <button
-                className="icon-btn"
-                type="button"
-                onClick={closeForm}
-                aria-label={t("leaveCalendar.actions.close")}
-              >
-                <Icon name="x" size={14} />
-              </button>
-            </header>
-            <form
-              onSubmit={onCreate}
-              style={{ display: "flex", flexDirection: "column", gap: 14 }}
-            >
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: 12,
-                }}
-              >
-                <Field label={t("leaveCalendar.fields.code")} required>
-                  <input
-                    type="text"
-                    value={code}
-                    onChange={(e) => setCode(e.target.value)}
-                    required
-                    maxLength={32}
-                    style={inputStyle}
-                  />
-                </Field>
-                <Field label={t("leaveCalendar.fields.paidQ")}>
-                  <select
-                    value={isPaid ? "yes" : "no"}
-                    onChange={(e) => setIsPaid(e.target.value === "yes")}
-                    style={inputStyle}
-                  >
-                    <option value="yes">{t("leaveCalendar.fields.paid")}</option>
-                    <option value="no">{t("leaveCalendar.fields.unpaid")}</option>
-                  </select>
-                </Field>
-              </div>
-              <Field label={t("leaveCalendar.fields.name")} required>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                  maxLength={80}
-                  style={inputStyle}
-                />
-              </Field>
-              {error && <div style={errorBox}>{error}</div>}
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "flex-end",
-                  gap: 8,
-                  marginTop: 4,
-                }}
-              >
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={closeForm}
-                  disabled={create.isPending}
-                >
-                  {t("leaveCalendar.actions.cancel")}
-                </button>
-                <button
-                  type="submit"
-                  disabled={!canSubmit || create.isPending}
-                  style={{ ...btnPrimary, opacity: canSubmit ? 1 : 0.5 }}
-                >
-                  {create.isPending ? t("leaveCalendar.actions.saving") : t("leaveCalendar.actions.create")}
-                </button>
-              </div>
-            </form>
-          </div>
-        </ModalShell>
+    <div className="wf-stack">
+      {rows.length > 0 && (
+        <SectionHead
+          title={t("leaveCalendar.tabs.types")}
+          sub={t("leaveCalendar.typesSub", {
+            defaultValue: "{{total}} types · {{paid}} paid · {{active}} active",
+            total: rows.length,
+            paid: rows.filter((r) => r.is_paid).length,
+            active: rows.filter((r) => r.active).length,
+          })}
+          actions={newBtn}
+        />
       )}
-      <table style={tableStyle}>
-        <thead>
-          <tr style={{ background: "var(--bg)" }}>
-            <th style={th}>{t("leaveCalendar.cols.code")}</th>
-            <th style={th}>{t("leaveCalendar.cols.name")}</th>
-            <th style={th}>{t("leaveCalendar.cols.paid")}</th>
-            <th style={th}>{t("leaveCalendar.cols.active")}</th>
-            <th style={th}></th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <LeaveTypeRow key={r.id} row={r} />
-          ))}
-          {rows.length === 0 && (
-            <tr>
-              <td colSpan={5} style={{ ...td, color: "var(--text-tertiary)", textAlign: "center" }}>
-                {t("leaveCalendar.empty")}
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+      {showForm && (
+        <FormModal
+          onClose={closeForm}
+          onSubmit={(e) => void onCreate(e)}
+          busy={create.isPending}
+          size="md"
+          icon={<Icon name="clipboard" size={18} />}
+          title={t("leaveCalendar.form.newTypeTitle", { defaultValue: "New leave type" })}
+          subtitle={t("leaveCalendar.form.typeSubtitle", {
+            defaultValue: "A kind of leave employees can request, like Annual or Sick.",
+          })}
+          footer={
+            <FormFooter
+              onCancel={closeForm}
+              submitLabel={t("leaveCalendar.form.createType", { defaultValue: "Create leave type" })}
+              submittingLabel={t("leaveCalendar.actions.saving")}
+              submitting={create.isPending}
+              canSubmit={canSubmit}
+            />
+          }
+        >
+          {error && <FormNotice tone="danger">{error}</FormNotice>}
+          <FormSection
+            title={t("leaveCalendar.form.typeDetails", { defaultValue: "Leave type details" })}
+            description={t("leaveCalendar.form.typeDetailsDesc", { defaultValue: "The code is permanent; the name can be changed later." })}
+          >
+            <Field label={t("leaveCalendar.fields.code")} htmlFor="lt-code" required help={t("leaveCalendar.form.codeHelp", { defaultValue: "Short and unique. Cannot be changed later." })}>
+              <input id="lt-code" type="text" className="input mono" value={code} onChange={(e) => setCode(e.target.value)} required maxLength={32} placeholder={t("leaveCalendar.form.codePlaceholder", { defaultValue: "e.g. ANNUAL" })} />
+            </Field>
+            <Field label={t("leaveCalendar.fields.name")} htmlFor="lt-name" required>
+              <input id="lt-name" type="text" className="input" value={name} onChange={(e) => setName(e.target.value)} required maxLength={80} placeholder={t("leaveCalendar.form.namePlaceholder", { defaultValue: "e.g. Annual leave" })} />
+            </Field>
+            <SwitchField
+              id="lt-paid"
+              checked={isPaid}
+              onChange={setIsPaid}
+              label={t("leaveCalendar.form.paidLabel", { defaultValue: "Paid leave" })}
+              description={t("leaveCalendar.form.paidDesc", { defaultValue: "Days taken on this leave are paid." })}
+            />
+          </FormSection>
+        </FormModal>
+      )}
+      {rows.length === 0 ? (
+        <div className="card">
+          <EmptyPanel
+            tone="accent"
+            icon={<WfSvg>{WF_ICON.file}</WfSvg>}
+            title={t("leaveCalendar.emptyTypes.title", { defaultValue: "No leave types yet" })}
+            body={t("leaveCalendar.emptyTypes.body", { defaultValue: "Add the kinds of leave your company offers, like Annual or Sick, so they can be used on requests." })}
+            actions={newBtn}
+          />
+        </div>
+      ) : (
+        <TableCard>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>{t("leaveCalendar.cols.code")}</th>
+                <th>{t("leaveCalendar.cols.name")}</th>
+                <th>{t("leaveCalendar.cols.paid")}</th>
+                <th>{t("leaveCalendar.cols.active")}</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <LeaveTypeRow key={r.id} row={r} />
+              ))}
+            </tbody>
+          </table>
+        </TableCard>
+      )}
+    </div>
+  );
+}
+
+
+function ChipToggle({ on, onLabel, offLabel, onClick, disabled }: { on: boolean; onLabel: string; offLabel: string; onClick: () => void; disabled: boolean }) {
+  return (
+    <button type="button" onClick={onClick} disabled={disabled} aria-pressed={on} className={`wf-chip-btn${on ? " is-on" : ""}`}>
+      <span aria-hidden className="pill-dot" />
+      {on ? onLabel : offLabel}
+    </button>
+  );
+}
+
+
+function ConfirmDeleteModal({
+  titleId,
+  title,
+  body,
+  error,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  titleId: string;
+  title: React.ReactNode;
+  body: string;
+  error: string | null;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <FormModal
+      onClose={onClose}
+      onSubmit={() => onConfirm()}
+      busy={busy}
+      size="sm"
+      icon={<Icon name="trash" size={18} />}
+      title={title}
+      subtitle={t("leaveCalendar.form.deleteSubtitle", { defaultValue: "Check the details below before deleting." })}
+      footer={
+        <FormFooter
+          onCancel={onClose}
+          danger
+          showRequiredNote={false}
+          submitLabel={t("leaveCalendar.actions.delete")}
+          submittingLabel={t("leaveCalendar.actions.deleting")}
+          submitting={busy}
+        />
+      }
+    >
+      {error && <FormNotice tone="danger">{error}</FormNotice>}
+      <p className="wf-fk-lead" id={titleId}>{body}</p>
+    </FormModal>
+  );
+}
+
+
+function RowActions({
+  onEdit,
+  onDelete,
+  editAria,
+  deleteAria,
+  editDisabled,
+  deleteDisabled,
+}: {
+  onEdit: () => void;
+  onDelete: () => void;
+  editAria: string;
+  deleteAria: string;
+  editDisabled: boolean;
+  deleteDisabled: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="wf-row wf-row-end" style={{ flexWrap: "nowrap" }}>
+      <button type="button" className="btn btn-sm btn-ghost" onClick={onEdit} disabled={editDisabled} aria-label={editAria}>
+        <Icon name="edit" size={12} /> {t("leaveCalendar.actions.edit")}
+      </button>
+      <button type="button" className="btn btn-sm btn-ghost wf-danger-text" onClick={onDelete} disabled={deleteDisabled} aria-label={deleteAria}>
+        <Icon name="trash" size={12} /> {t("leaveCalendar.actions.delete")}
+      </button>
     </div>
   );
 }
@@ -383,18 +376,23 @@ function LeaveTypeRow({ row }: { row: LeaveType }) {
   const [editName, setEditName] = useState(row.name);
   const [editPaid, setEditPaid] = useState(row.is_paid);
   const [editError, setEditError] = useState<string | null>(null);
+  // True when ``editError`` is the name-required message (shown inline).
+  const [editNameError, setEditNameError] = useState(false);
   const openEdit = () => {
     setEditName(row.name);
     setEditPaid(row.is_paid);
     setEditError(null);
+    setEditNameError(false);
     setEditOpen(true);
   };
   const canSaveEdit = editName.trim() !== "";
   const onSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     setEditError(null);
+    setEditNameError(false);
     if (!canSaveEdit) {
       setEditError(t("leaveCalendar.errors.nameRequired"));
+      setEditNameError(true);
       return;
     }
     try {
@@ -406,230 +404,104 @@ function LeaveTypeRow({ row }: { row: LeaveType }) {
   };
 
   return (
-    <tr style={{ borderTop: "1px solid var(--border)" }}>
-      <td style={{ ...td, fontFamily: "var(--font-mono)", fontSize: 12 }}>
-        {row.code}
-      </td>
-      <td style={td}>{row.name}</td>
-      <td style={td}>
-        <button
-          type="button"
+    <tr>
+      <td className="mono text-sm">{row.code}</td>
+      <td>{row.name}</td>
+      <td>
+        <ChipToggle
+          on={row.is_paid}
+          onLabel={t("leaveCalendar.fields.paid")}
+          offLabel={t("leaveCalendar.fields.unpaid")}
           onClick={() => void onToggle("is_paid")}
           disabled={patch.isPending}
-          style={chipStyle(row.is_paid)}
-        >
-          {row.is_paid ? t("leaveCalendar.fields.paid") : t("leaveCalendar.fields.unpaid")}
-        </button>
+        />
       </td>
-      <td style={td}>
-        <button
-          type="button"
+      <td>
+        <ChipToggle
+          on={row.active}
+          onLabel={t("leaveCalendar.fields.activeLower")}
+          offLabel={t("leaveCalendar.fields.inactiveLower")}
           onClick={() => void onToggle("active")}
           disabled={patch.isPending}
-          style={chipStyle(row.active)}
-        >
-          {row.active ? t("leaveCalendar.fields.activeLower") : t("leaveCalendar.fields.inactiveLower")}
-        </button>
+        />
       </td>
-      <td style={{ ...td, textAlign: "right" }}>
-        <div
-          style={{
-            display: "inline-flex",
-            gap: 6,
-            alignItems: "center",
-          }}
-        >
-          <button
-            type="button"
-            onClick={openEdit}
-            disabled={patch.isPending}
-            style={{
-              ...btnGhost,
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-            }}
-            aria-label={t("leaveCalendar.actions.editTypeAria", { name: row.name })}
-          >
-            <Icon name="edit" size={12} /> {t("leaveCalendar.actions.edit")}
-          </button>
-          <button
-            type="button"
-            onClick={askDelete}
-            disabled={del.isPending}
-            style={{
-              ...btnGhost,
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              color: "var(--danger-text)",
-            }}
-            aria-label={t("leaveCalendar.actions.deleteTypeAria", { name: row.name })}
-          >
-            <Icon name="trash" size={12} /> {t("leaveCalendar.actions.delete")}
-          </button>
-        </div>
+      <td className="wf-nowrap" style={{ textAlign: "end" }}>
+        <RowActions
+          onEdit={openEdit}
+          onDelete={askDelete}
+          editAria={t("leaveCalendar.actions.editTypeAria", { name: row.name })}
+          deleteAria={t("leaveCalendar.actions.deleteTypeAria", { name: row.name })}
+          editDisabled={patch.isPending}
+          deleteDisabled={del.isPending}
+        />
         {confirmOpen && (
-          <ModalShell onClose={() => setConfirmOpen(false)}>
-            <div
-              role="dialog"
-              aria-labelledby="lt-delete-title"
-              style={{
-                position: "fixed",
-                top: "50%",
-                left: "50%",
-                transform: "translate(-50%, -50%)",
-                width: 420,
-                maxWidth: "90vw",
-                background: "var(--bg)",
-                border: "1px solid var(--border-strong)",
-                borderRadius: "var(--radius)",
-                padding: 20,
-                zIndex: 60,
-                boxShadow: "var(--shadow-lg)",
-                textAlign: "left",
-              }}
-            >
-              <h2 id="lt-delete-title" style={{ margin: "0 0 8px 0", fontSize: 16 }}>
-                {t("leaveCalendar.deleteTypeTitle")}{" "}
-                <span className="mono">{row.code}</span>?
-              </h2>
-              <p style={{ fontSize: 13, color: "var(--text-secondary)", margin: 0 }}>
-                {t("leaveCalendar.deleteTypeBody", { name: row.name })}
-              </p>
-              {delError && (
-                <div
-                  style={{
-                    color: "var(--danger-text)",
-                    fontSize: 12,
-                    margin: "10px 0 0 0",
-                  }}
-                >
-                  {delError}
-                </div>
-              )}
-              <div
-                style={{
-                  display: "flex",
-                  gap: 8,
-                  marginTop: 16,
-                  justifyContent: "flex-end",
-                }}
-              >
-                <button
-                  type="button"
-                  className="btn btn-sm"
-                  onClick={() => setConfirmOpen(false)}
-                  disabled={del.isPending}
-                >
-                  {t("leaveCalendar.actions.cancel")}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-sm"
-                  onClick={() => void onConfirmDelete()}
-                  disabled={del.isPending}
-                  style={{
-                    background: "var(--danger-bg)",
-                    color: "var(--danger-text)",
-                    borderColor: "var(--danger-border)",
-                  }}
-                >
-                  {del.isPending ? t("leaveCalendar.actions.deleting") : t("leaveCalendar.actions.delete")}
-                </button>
-              </div>
-            </div>
-          </ModalShell>
+          <ConfirmDeleteModal
+            titleId="lt-delete-title"
+            title={
+              <>
+                {t("leaveCalendar.deleteTypeTitle")} <span className="mono">{row.code}</span>?
+              </>
+            }
+            body={t("leaveCalendar.deleteTypeBody", { name: row.name })}
+            error={delError}
+            busy={del.isPending}
+            onClose={() => setConfirmOpen(false)}
+            onConfirm={() => void onConfirmDelete()}
+          />
         )}
         {editOpen && (
-          <ModalShell onClose={() => setEditOpen(false)}>
-            <div
-              role="dialog"
-              aria-labelledby="lt-edit-title"
-              style={{ ...modalPanel, width: 460, textAlign: "left" }}
+          <FormModal
+            onClose={() => setEditOpen(false)}
+            onSubmit={(e) => void onSaveEdit(e)}
+            busy={patch.isPending}
+            size="md"
+            icon={<Icon name="clipboard" size={18} />}
+            title={t("leaveCalendar.editType")}
+            subtitle={t("leaveCalendar.form.editTypeSubtitle", { defaultValue: "Rename this leave type or change whether it is paid." })}
+            footer={
+              <FormFooter
+                onCancel={() => setEditOpen(false)}
+                submitLabel={t("leaveCalendar.actions.saveChanges")}
+                submittingLabel={t("leaveCalendar.actions.saving")}
+                submitting={patch.isPending}
+                canSubmit={canSaveEdit}
+              />
+            }
+          >
+            {editError && !editNameError && <FormNotice tone="danger">{editError}</FormNotice>}
+            <FormSection
+              title={t("leaveCalendar.form.typeDetails", { defaultValue: "Leave type details" })}
+              description={t("leaveCalendar.form.typeDetailsDesc", { defaultValue: "The code is permanent; the name can be changed later." })}
             >
-              <header style={modalHeader}>
-                <h2 id="lt-edit-title" style={{ margin: 0, fontSize: 18 }}>
-                  {t("leaveCalendar.editType")}
-                </h2>
-                <button
-                  className="icon-btn"
-                  type="button"
-                  onClick={() => setEditOpen(false)}
-                  aria-label={t("leaveCalendar.actions.close")}
-                >
-                  <Icon name="x" size={14} />
-                </button>
-              </header>
-              <form
-                onSubmit={onSaveEdit}
-                style={{ display: "flex", flexDirection: "column", gap: 14 }}
-              >
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
-                    gap: 12,
+              <Field label={t("leaveCalendar.fields.code")} htmlFor="lt-edit-code" help={t("leaveCalendar.codeLocked")}>
+                <input id="lt-edit-code" type="text" className="input mono" value={row.code} disabled title={t("leaveCalendar.codeLocked")} />
+              </Field>
+              <Field label={t("leaveCalendar.fields.name")} htmlFor="lt-edit-name" required error={editNameError ? editError : null}>
+                <input
+                  id="lt-edit-name"
+                  type="text"
+                  className="input"
+                  value={editName}
+                  onChange={(e) => {
+                    setEditName(e.target.value);
+                    if (editNameError) {
+                      setEditNameError(false);
+                      setEditError(null);
+                    }
                   }}
-                >
-                  <Field label={t("leaveCalendar.fields.code")}>
-                    <input
-                      type="text"
-                      value={row.code}
-                      disabled
-                      title={t("leaveCalendar.codeLocked")}
-                      style={{ ...inputStyle, opacity: 0.7 }}
-                    />
-                  </Field>
-                  <Field label={t("leaveCalendar.fields.paidQ")}>
-                    <select
-                      value={editPaid ? "yes" : "no"}
-                      onChange={(e) => setEditPaid(e.target.value === "yes")}
-                      style={inputStyle}
-                    >
-                      <option value="yes">{t("leaveCalendar.fields.paid")}</option>
-                      <option value="no">{t("leaveCalendar.fields.unpaid")}</option>
-                    </select>
-                  </Field>
-                </div>
-                <Field label={t("leaveCalendar.fields.name")} required>
-                  <input
-                    type="text"
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    required
-                    maxLength={80}
-                    style={inputStyle}
-                  />
-                </Field>
-                {editError && <div style={errorBox}>{editError}</div>}
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "flex-end",
-                    gap: 8,
-                    marginTop: 4,
-                  }}
-                >
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() => setEditOpen(false)}
-                    disabled={patch.isPending}
-                  >
-                    {t("leaveCalendar.actions.cancel")}
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={!canSaveEdit || patch.isPending}
-                    style={{ ...btnPrimary, opacity: canSaveEdit ? 1 : 0.5 }}
-                  >
-                    {patch.isPending ? t("leaveCalendar.actions.saving") : t("leaveCalendar.actions.saveChanges")}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </ModalShell>
+                  required
+                  maxLength={80}
+                />
+              </Field>
+              <SwitchField
+                id="lt-edit-paid"
+                checked={editPaid}
+                onChange={setEditPaid}
+                label={t("leaveCalendar.form.paidLabel", { defaultValue: "Paid leave" })}
+                description={t("leaveCalendar.form.paidDesc", { defaultValue: "Days taken on this leave are paid." })}
+              />
+            </FormSection>
+          </FormModal>
         )}
       </td>
     </tr>
@@ -662,11 +534,9 @@ function HolidaysTab() {
   // whole page.
   const [importSummary, setImportSummary] = useState<string | null>(null);
 
-  if (list.isLoading) return <SkeletonLines lines={3} />;
+  if (list.isLoading) return <SkeletonTable rows={5} cols={4} />;
   if (list.error)
-    return (
-      <p style={{ color: "var(--danger-text)" }}>{t("leaveCalendar.loadFailedHolidays")}</p>
-    );
+    return <LoadError title={t("leaveCalendar.loadFailedHolidays")} error={list.error} onRetry={() => void list.refetch()} />;
   const rows = list.data ?? [];
   const thisYear = today.getFullYear();
   const yearOptions = Array.from({ length: 9 }, (_, i) => thisYear - 3 + i);
@@ -720,29 +590,24 @@ function HolidaysTab() {
     }
   };
 
+  const openAdd = () => {
+    setError(null);
+    setShowAdd(true);
+  };
+  const addBtn = (
+    <button type="button" className="btn btn-primary" onClick={openAdd}>
+      {t("leaveCalendar.addHoliday")}
+    </button>
+  );
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-          flexWrap: "wrap",
-        }}
-      >
-        <label
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-            fontSize: 12,
-            color: "var(--text-secondary)",
-          }}
-        >
-          <span style={{ fontWeight: 600 }}>{t("leaveCalendar.year")}</span>
+    <div className="wf-stack">
+      <div className="wf-row wf-row-between">
+        <label className="wf-year-field">
+          <span>{t("leaveCalendar.year")}</span>
           <input
             type="number"
+            className="input"
             value={yearText}
             list="holiday-year-options"
             min={2000}
@@ -758,7 +623,6 @@ function HolidaysTab() {
               }
             }}
             onBlur={() => setYearText(String(year))}
-            style={{ ...inputStyle, width: 120 }}
           />
           <datalist id="holiday-year-options">
             {yearOptions.map((y) => (
@@ -766,7 +630,7 @@ function HolidaysTab() {
             ))}
           </datalist>
         </label>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div className="wf-row">
           <button
             type="button"
             className="btn"
@@ -775,245 +639,138 @@ function HolidaysTab() {
               setImportSummary(null);
               setShowImport(true);
             }}
-            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
           >
             <Icon name="upload" size={13} /> {t("leaveCalendar.import.button")}
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              setError(null);
-              setShowAdd(true);
-            }}
-            style={btnPrimary}
-          >
-            {t("leaveCalendar.addHoliday")}
-          </button>
+          {addBtn}
         </div>
       </div>
       {/* BUG-025 — explicit import summary banner, replaces the old
           silent same-date no-op. */}
-      {importSummary && (
-        <div
-          style={{
-            padding: "8px 12px",
-            border: "1px solid #0b6e4f55",
-            background: "#0b6e4f0d",
-            color: "#0b6e4f",
-            borderRadius: 8,
-            fontSize: 12.5,
-          }}
-        >
-          {importSummary}
+      {importSummary && <Alert tone="success" role="status">{importSummary}</Alert>}
+
+      {rows.length === 0 ? (
+        <div className="card">
+          <EmptyPanel
+            tone="accent"
+            icon={<WfSvg>{WF_ICON.calendar}</WfSvg>}
+            title={t("leaveCalendar.emptyHolidays.title", { defaultValue: "No holidays for {{year}}", year })}
+            body={t("leaveCalendar.emptyHolidays.body", { defaultValue: "Add public holidays one by one or import them from an Excel file. Attendance on these days counts as overtime." })}
+            actions={addBtn}
+          />
         </div>
+      ) : (
+        <TableCard>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>{t("leaveCalendar.cols.date")}</th>
+                <th>{t("leaveCalendar.cols.day")}</th>
+                <th>{t("leaveCalendar.cols.name")}</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <HolidayRow key={r.id} row={r} />
+              ))}
+            </tbody>
+          </table>
+        </TableCard>
       )}
 
-      <table style={tableStyle}>
-        <thead>
-          <tr style={{ background: "var(--bg)" }}>
-            <th style={th}>{t("leaveCalendar.cols.date")}</th>
-            <th style={th}>{t("leaveCalendar.cols.day")}</th>
-            <th style={th}>{t("leaveCalendar.cols.name")}</th>
-            <th style={th}></th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <HolidayRow key={r.id} row={r} />
-          ))}
-          {rows.length === 0 && (
-            <tr>
-              <td
-                colSpan={4}
-                style={{ ...td, color: "var(--text-tertiary)", textAlign: "center" }}
-              >
-                {t("leaveCalendar.empty")}
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-
       {showAdd && (
-        <ModalShell onClose={closeAdd}>
-          <div
-            role="dialog"
-            aria-labelledby="new-holiday-title"
-            style={modalPanel}
+        <FormModal
+          onClose={closeAdd}
+          onSubmit={(e) => void onAdd(e)}
+          busy={create.isPending}
+          size="md"
+          icon={<Icon name="calendar" size={18} />}
+          title={t("leaveCalendar.newHoliday").replace(/^\+\s*/, "")}
+          subtitle={t("leaveCalendar.form.holidaySubtitle", {
+            defaultValue: "A public holiday. Attendance on this day counts as overtime.",
+          })}
+          footer={
+            <FormFooter
+              onCancel={closeAdd}
+              submitLabel={t("leaveCalendar.addHoliday")}
+              submittingLabel={t("leaveCalendar.actions.saving")}
+              submitting={create.isPending}
+              canSubmit={canAddHoliday}
+            />
+          }
+        >
+          {error && <FormNotice tone="danger">{error}</FormNotice>}
+          <FormSection
+            title={t("leaveCalendar.form.holidayDetails", { defaultValue: "Holiday details" })}
+            description={t("leaveCalendar.form.holidayDetailsDesc", { defaultValue: "The date and the name shown on the calendar." })}
           >
-            <header style={modalHeader}>
-              <h2 id="new-holiday-title" style={{ margin: 0, fontSize: 18 }}>
-                {t("leaveCalendar.newHoliday")}
-              </h2>
-              <button
-                className="icon-btn"
-                type="button"
-                onClick={closeAdd}
-                aria-label={t("leaveCalendar.actions.close")}
-              >
-                <Icon name="x" size={14} />
-              </button>
-            </header>
-            <form
-              onSubmit={onAdd}
-              style={{ display: "flex", flexDirection: "column", gap: 14 }}
-            >
-              <Field label={t("leaveCalendar.fields.date")} required>
-                <DatePicker
-                  value={date}
-                  onChange={setDate}
-                  ariaLabel={t("leaveCalendar.fields.holidayDateAria")}
-                  triggerStyle={{ width: "100%" }}
-                />
-              </Field>
-              <Field label={t("leaveCalendar.fields.name")} required>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                  maxLength={120}
-                  style={inputStyle}
-                />
-              </Field>
-              {error && <div style={errorBox}>{error}</div>}
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "flex-end",
-                  gap: 8,
-                  marginTop: 4,
-                }}
-              >
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={closeAdd}
-                  disabled={create.isPending}
-                >
-                  {t("leaveCalendar.actions.cancel")}
-                </button>
-                <button
-                  type="submit"
-                  disabled={!canAddHoliday || create.isPending}
-                  style={{ ...btnPrimary, opacity: canAddHoliday ? 1 : 0.5 }}
-                >
-                  {create.isPending ? t("leaveCalendar.actions.saving") : t("leaveCalendar.addHoliday")}
-                </button>
-              </div>
-            </form>
-          </div>
-        </ModalShell>
+            <Field label={t("leaveCalendar.fields.date")} required>
+              <DatePicker value={date} onChange={setDate} ariaLabel={t("leaveCalendar.fields.holidayDateAria")} triggerStyle={{ width: "100%" }} />
+            </Field>
+            <Field label={t("leaveCalendar.fields.name")} htmlFor="hol-name" required>
+              <input id="hol-name" type="text" className="input" value={name} onChange={(e) => setName(e.target.value)} required maxLength={120} placeholder={t("leaveCalendar.form.holidayPlaceholder", { defaultValue: "e.g. National Day" })} />
+            </Field>
+          </FormSection>
+        </FormModal>
       )}
 
       {showImport && (
-        <ModalShell onClose={() => setShowImport(false)}>
-          <div
-            role="dialog"
-            aria-labelledby="import-holidays-title"
-            style={modalPanel}
-          >
-            <header style={modalHeader}>
-              <h2
-                id="import-holidays-title"
-                style={{ margin: 0, fontSize: 18 }}
-              >
-                {t("leaveCalendar.import.title")}
-              </h2>
-              <button
-                className="icon-btn"
-                type="button"
-                onClick={() => setShowImport(false)}
-                aria-label={t("leaveCalendar.actions.close")}
-              >
-                <Icon name="x" size={14} />
+        <FormModal
+          onClose={() => setShowImport(false)}
+          busy={importer.isPending}
+          size="md"
+          icon={<Icon name="upload" size={18} />}
+          title={t("leaveCalendar.import.title")}
+          subtitle={t("leaveCalendar.form.importSubtitle", {
+            defaultValue: "Add a year's holidays at once from an Excel file.",
+          })}
+          footer={
+            <FormFootBar>
+              <button type="button" className="btn" onClick={() => setShowImport(false)} disabled={importer.isPending}>
+                {t("leaveCalendar.actions.done")}
               </button>
-            </header>
-            <p
-              style={{
-                margin: 0,
-                fontSize: 13,
-                color: "var(--text-secondary)",
-                lineHeight: 1.5,
-              }}
-            >
-              {t("leaveCalendar.import.instructionsLead")}{" "}
-              <strong>.xlsx</strong>{" "}
-              {t("leaveCalendar.import.instructionsCols")}{" "}
-              <span className="mono">date</span> (YYYY-MM-DD),{" "}
-              <span className="mono">name</span>,{" "}
-              {t("leaveCalendar.import.instructionsOptional")}{" "}
-              <span className="mono">description</span>.{" "}
-              {t("leaveCalendar.import.instructionsSkip")}
-            </p>
-            <a
-              href="/api/holidays/import-template"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                fontSize: 13,
-                color: "var(--accent-strong, var(--accent))",
-                textDecoration: "none",
-              }}
-            >
-              <Icon name="download" size={13} /> {t("leaveCalendar.import.template")}
-            </a>
-            <label
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 6,
-                padding: "22px 16px",
-                border: "1.5px dashed var(--border-strong)",
-                borderRadius: "var(--radius)",
-                cursor: importer.isPending ? "wait" : "pointer",
-                color: "var(--text-secondary)",
-                fontSize: 13,
-                textAlign: "center",
-              }}
-            >
-              <Icon name="upload" size={18} />
-              {importer.isPending
-                ? t("leaveCalendar.import.importing")
-                : t("leaveCalendar.import.choosePrompt")}
+            </FormFootBar>
+          }
+        >
+          {error && <FormNotice tone="danger">{error}</FormNotice>}
+          {importSummary && <FormNotice tone="success">{importSummary}</FormNotice>}
+          <p className="wf-fk-lead">
+            {t("leaveCalendar.import.instructionsLead")}{" "}
+            <strong>.xlsx</strong>{" "}
+            {t("leaveCalendar.import.instructionsCols")}{" "}
+            <span className="mono">date</span> (YYYY-MM-DD),{" "}
+            <span className="mono">name</span>,{" "}
+            {t("leaveCalendar.import.instructionsOptional")}{" "}
+            <span className="mono">description</span>.{" "}
+            {t("leaveCalendar.import.instructionsSkip")}
+          </p>
+          <Field label={t("leaveCalendar.form.importFile", { defaultValue: "Holiday workbook" })}>
+            <label className={`wf-fk-dropzone${importer.isPending ? " is-busy" : ""}`}>
+              <span className="wf-fk-dropzone-icon" aria-hidden>
+                <Icon name="upload" size={16} />
+              </span>
+              <span>
+                {importer.isPending
+                  ? t("leaveCalendar.import.importing")
+                  : t("leaveCalendar.import.choosePrompt")}
+              </span>
+              <span className="wf-fk-dropzone-hint">.xlsx</span>
               <input
                 type="file"
                 accept=".xlsx"
-                hidden
+                className="wf-file-input"
                 disabled={importer.isPending}
                 onChange={onImport}
               />
             </label>
-            {importSummary && (
-              <div
-                style={{
-                  padding: "8px 12px",
-                  border: "1px solid #0b6e4f55",
-                  background: "#0b6e4f0d",
-                  color: "#0b6e4f",
-                  borderRadius: 8,
-                  fontSize: 12.5,
-                }}
-              >
-                {importSummary}
-              </div>
-            )}
-            {error && <div style={errorBox}>{error}</div>}
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => setShowImport(false)}
-                disabled={importer.isPending}
-              >
-                {t("leaveCalendar.actions.done")}
-              </button>
-            </div>
+          </Field>
+          <div>
+            <a href="/api/holidays/import-template" className="btn btn-sm">
+              <Icon name="download" size={13} /> {t("leaveCalendar.import.template")}
+            </a>
           </div>
-        </ModalShell>
+        </FormModal>
       )}
     </div>
   );
@@ -1070,180 +827,65 @@ function HolidayRow({ row }: { row: Holiday }) {
     timeZone: "UTC",
   });
   return (
-    <tr style={{ borderTop: "1px solid var(--border)" }}>
-      <td style={td}>{row.date}</td>
-      <td style={td}>{weekday}</td>
-      <td style={td}>{row.name}</td>
-      <td style={{ ...td, textAlign: "right" }}>
-        <button
-          type="button"
-          onClick={openEdit}
-          disabled={patch.isPending}
-          style={{
-            ...btnGhost,
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            marginInlineEnd: 6,
-          }}
-          aria-label={t("leaveCalendar.actions.editHolidayAria", { name: row.name })}
-        >
-          <Icon name="edit" size={12} /> {t("leaveCalendar.actions.edit")}
-        </button>
-        <button
-          type="button"
-          onClick={() => {
+    <tr>
+      <td className="mono">{row.date}</td>
+      <td className="wf-muted">{weekday}</td>
+      <td>{row.name}</td>
+      <td className="wf-nowrap" style={{ textAlign: "end" }}>
+        <RowActions
+          onEdit={openEdit}
+          onDelete={() => {
             setDelError(null);
             setConfirmOpen(true);
           }}
-          disabled={del.isPending}
-          style={{
-            ...btnGhost,
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            color: "var(--danger-text)",
-          }}
-          aria-label={t("leaveCalendar.actions.deleteHolidayAria", { name: row.name })}
-        >
-          <Icon name="trash" size={12} /> {t("leaveCalendar.actions.delete")}
-        </button>
+          editAria={t("leaveCalendar.actions.editHolidayAria", { name: row.name })}
+          deleteAria={t("leaveCalendar.actions.deleteHolidayAria", { name: row.name })}
+          editDisabled={patch.isPending}
+          deleteDisabled={del.isPending}
+        />
         {confirmOpen && (
-          <ModalShell onClose={() => setConfirmOpen(false)}>
-            <div
-              role="dialog"
-              aria-labelledby="holiday-delete-title"
-              style={{ ...modalPanel, width: 420, gap: 0, textAlign: "left" }}
-            >
-              <h2
-                id="holiday-delete-title"
-                style={{ margin: "0 0 8px 0", fontSize: 16 }}
-              >
-                {t("leaveCalendar.deleteHolidayTitle")}
-              </h2>
-              <p
-                style={{
-                  fontSize: 13,
-                  color: "var(--text-secondary)",
-                  margin: 0,
-                }}
-              >
-                {t("leaveCalendar.deleteHolidayBody", { name: row.name, date: row.date })}
-              </p>
-              {delError && (
-                <div
-                  style={{
-                    color: "var(--danger-text)",
-                    fontSize: 12,
-                    margin: "10px 0 0 0",
-                  }}
-                >
-                  {delError}
-                </div>
-              )}
-              <div
-                style={{
-                  display: "flex",
-                  gap: 8,
-                  marginTop: 16,
-                  justifyContent: "flex-end",
-                }}
-              >
-                <button
-                  type="button"
-                  className="btn btn-sm"
-                  onClick={() => setConfirmOpen(false)}
-                  disabled={del.isPending}
-                >
-                  {t("leaveCalendar.actions.cancel")}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-sm"
-                  onClick={() => void onConfirmDelete()}
-                  disabled={del.isPending}
-                  style={{
-                    background: "var(--danger-bg)",
-                    color: "var(--danger-text)",
-                    borderColor: "var(--danger-border)",
-                  }}
-                >
-                  {del.isPending ? t("leaveCalendar.actions.deleting") : t("leaveCalendar.actions.delete")}
-                </button>
-              </div>
-            </div>
-          </ModalShell>
+          <ConfirmDeleteModal
+            titleId="holiday-delete-title"
+            title={t("leaveCalendar.deleteHolidayTitle")}
+            body={t("leaveCalendar.deleteHolidayBody", { name: row.name, date: row.date })}
+            error={delError}
+            busy={del.isPending}
+            onClose={() => setConfirmOpen(false)}
+            onConfirm={() => void onConfirmDelete()}
+          />
         )}
         {editOpen && (
-          <ModalShell onClose={() => setEditOpen(false)}>
-            <div
-              role="dialog"
-              aria-labelledby="holiday-edit-title"
-              style={{ ...modalPanel, width: 460, textAlign: "left" }}
+          <FormModal
+            onClose={() => setEditOpen(false)}
+            onSubmit={(e) => void onSaveEdit(e)}
+            busy={patch.isPending}
+            size="md"
+            icon={<Icon name="calendar" size={18} />}
+            title={t("leaveCalendar.editHoliday")}
+            subtitle={t("leaveCalendar.form.editHolidaySubtitle", { defaultValue: "Move this holiday to another date or rename it." })}
+            footer={
+              <FormFooter
+                onCancel={() => setEditOpen(false)}
+                submitLabel={t("leaveCalendar.actions.saveChanges")}
+                submittingLabel={t("leaveCalendar.actions.saving")}
+                submitting={patch.isPending}
+                canSubmit={canSaveEdit}
+              />
+            }
+          >
+            {editError && <FormNotice tone="danger">{editError}</FormNotice>}
+            <FormSection
+              title={t("leaveCalendar.form.holidayDetails", { defaultValue: "Holiday details" })}
+              description={t("leaveCalendar.form.holidayDetailsDesc", { defaultValue: "The date and the name shown on the calendar." })}
             >
-              <header style={modalHeader}>
-                <h2 id="holiday-edit-title" style={{ margin: 0, fontSize: 18 }}>
-                  {t("leaveCalendar.editHoliday")}
-                </h2>
-                <button
-                  className="icon-btn"
-                  type="button"
-                  onClick={() => setEditOpen(false)}
-                  aria-label={t("leaveCalendar.actions.close")}
-                >
-                  <Icon name="x" size={14} />
-                </button>
-              </header>
-              <form
-                onSubmit={onSaveEdit}
-                style={{ display: "flex", flexDirection: "column", gap: 14 }}
-              >
-                <Field label={t("leaveCalendar.fields.date")} required>
-                  <DatePicker
-                    value={editDate}
-                    onChange={setEditDate}
-                    ariaLabel={t("leaveCalendar.fields.holidayDateAria")}
-                    triggerStyle={{ width: "100%" }}
-                  />
-                </Field>
-                <Field label={t("leaveCalendar.fields.name")} required>
-                  <input
-                    type="text"
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    required
-                    maxLength={120}
-                    style={inputStyle}
-                  />
-                </Field>
-                {editError && <div style={errorBox}>{editError}</div>}
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "flex-end",
-                    gap: 8,
-                    marginTop: 4,
-                  }}
-                >
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() => setEditOpen(false)}
-                    disabled={patch.isPending}
-                  >
-                    {t("leaveCalendar.actions.cancel")}
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={!canSaveEdit || patch.isPending}
-                    style={{ ...btnPrimary, opacity: canSaveEdit ? 1 : 0.5 }}
-                  >
-                    {patch.isPending ? t("leaveCalendar.actions.saving") : t("leaveCalendar.actions.saveChanges")}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </ModalShell>
+              <Field label={t("leaveCalendar.fields.date")} required>
+                <DatePicker value={editDate} onChange={setEditDate} ariaLabel={t("leaveCalendar.fields.holidayDateAria")} triggerStyle={{ width: "100%" }} />
+              </Field>
+              <Field label={t("leaveCalendar.fields.name")} htmlFor={`hol-edit-name-${row.id}`} required>
+                <input id={`hol-edit-name-${row.id}`} type="text" className="input" value={editName} onChange={(e) => setEditName(e.target.value)} required maxLength={120} />
+              </Field>
+            </FormSection>
+          </FormModal>
         )}
       </td>
     </tr>
@@ -1274,13 +916,12 @@ function ApprovedLeavesTab() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [notes, setNotes] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<LeaveFieldErrors>({});
 
   if (leaves.isLoading || types.isLoading || employees.isLoading)
-    return <SkeletonLines lines={3} />;
+    return <SkeletonTable rows={5} cols={6} />;
   if (leaves.error)
-    return (
-      <p style={{ color: "var(--danger-text)" }}>{t("leaveCalendar.loadFailedLeaves")}</p>
-    );
+    return <LoadError title={t("leaveCalendar.loadFailedLeaves")} error={leaves.error} onRetry={() => void leaves.refetch()} />;
   const rows = leaves.data ?? [];
   const typeOptions = (types.data ?? []).filter((t) => t.active);
   const employeeOptions = (employees.data?.items ?? []).slice().sort((a, b) =>
@@ -1305,29 +946,31 @@ function ApprovedLeavesTab() {
     setStartDate("");
     setEndDate("");
     setNotes("");
+    setFieldErrors({});
   };
 
   const onCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setFieldErrors({});
     if (!employeeId) {
-      setError(t("leaveCalendar.errors.selectEmployee"));
+      setFieldErrors({ employee: t("leaveCalendar.errors.selectEmployee") });
       return;
     }
     if (!leaveTypeId) {
-      setError(t("leaveCalendar.errors.selectLeaveType"));
+      setFieldErrors({ type: t("leaveCalendar.errors.selectLeaveType") });
       return;
     }
     if (!startDate) {
-      setError(t("leaveCalendar.errors.chooseStart"));
+      setFieldErrors({ start: t("leaveCalendar.errors.chooseStart") });
       return;
     }
     if (!endDate) {
-      setError(t("leaveCalendar.errors.chooseEnd"));
+      setFieldErrors({ end: t("leaveCalendar.errors.chooseEnd") });
       return;
     }
     if (endDate < startDate) {
-      setError(t("leaveCalendar.errors.endBeforeStart"));
+      setFieldErrors({ end: t("leaveCalendar.errors.endBeforeStart") });
       return;
     }
     try {
@@ -1344,164 +987,211 @@ function ApprovedLeavesTab() {
     }
   };
 
+  const newBtn = (
+    <button type="button" className="btn btn-primary" onClick={() => setShowForm(true)}>
+      {t("leaveCalendar.newLeave")}
+    </button>
+  );
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <button type="button" onClick={() => setShowForm(true)} style={btnPrimary}>
-          {t("leaveCalendar.newLeave")}
-        </button>
-      </div>
-      {showForm && (
-        <ModalShell onClose={closeForm}>
-          <div
-            role="dialog"
-            aria-labelledby="new-leave-title"
-            style={{ ...modalPanel, width: 640 }}
-          >
-            <header style={modalHeader}>
-              <h2 id="new-leave-title" style={{ margin: 0, fontSize: 18 }}>
-                {t("leaveCalendar.newLeave")}
-              </h2>
-              <button
-                className="icon-btn"
-                type="button"
-                onClick={closeForm}
-                aria-label={t("leaveCalendar.actions.close")}
-              >
-                <Icon name="x" size={14} />
-              </button>
-            </header>
-            <form
-              onSubmit={onCreate}
-              style={{ display: "flex", flexDirection: "column", gap: 14 }}
-            >
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: 12,
-                }}
-              >
-                <Field label={t("leaveCalendar.fields.employee")} required>
-                  <EmployeeSearchSelect
-                    options={employeeOptions}
-                    value={employeeId}
-                    onChange={setEmployeeId}
-                    placeholder={t("leaveCalendar.fields.employeeSearchPlaceholder")}
-                  />
-                </Field>
-                <Field label={t("leaveCalendar.fields.leaveType")} required>
-                  <select
-                    value={leaveTypeId}
-                    onChange={(e) => setLeaveTypeId(e.target.value)}
-                    required
-                    style={inputStyle}
-                  >
-                    <option value="">{t("leaveCalendar.fields.selectPlaceholder")}</option>
-                    {typeOptions.map((opt) => (
-                      <option key={opt.id} value={opt.id}>
-                        {opt.name}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label={t("leaveCalendar.fields.start")} required>
-                  <DatePicker
-                    value={startDate}
-                    onChange={setStartDate}
-                    ariaLabel={t("leaveCalendar.fields.startDateAria")}
-                    triggerStyle={{ width: "100%" }}
-                  />
-                </Field>
-                <Field label={t("leaveCalendar.fields.end")} required>
-                  <DatePicker
-                    value={endDate}
-                    onChange={setEndDate}
-                    min={startDate}
-                    ariaLabel={t("leaveCalendar.fields.endDateAria")}
-                    triggerStyle={{ width: "100%" }}
-                  />
-                </Field>
-              </div>
-              <Field label={t("leaveCalendar.fields.notes")}>
-                <input
-                  type="text"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  maxLength={500}
-                  style={inputStyle}
-                />
-              </Field>
-              {error && <div style={errorBox}>{error}</div>}
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "flex-end",
-                  gap: 8,
-                  marginTop: 4,
-                }}
-              >
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={closeForm}
-                  disabled={create.isPending}
-                >
-                  {t("leaveCalendar.actions.cancel")}
-                </button>
-                <button
-                  type="submit"
-                  disabled={!canSubmit || create.isPending}
-                  style={{ ...btnPrimary, opacity: canSubmit ? 1 : 0.5 }}
-                >
-                  {create.isPending ? t("leaveCalendar.actions.saving") : t("leaveCalendar.actions.create")}
-                </button>
-              </div>
-            </form>
-          </div>
-        </ModalShell>
-      )}
-      <table style={tableStyle}>
-        <thead>
-          <tr style={{ background: "var(--bg)" }}>
-            <th style={th}>{t("leaveCalendar.cols.employee")}</th>
-            <th style={th}>{t("leaveCalendar.cols.type")}</th>
-            <th style={th}>{t("leaveCalendar.cols.start")}</th>
-            <th style={th}>{t("leaveCalendar.cols.end")}</th>
-            <th style={th}>{t("leaveCalendar.cols.notes")}</th>
-            <th style={th}></th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => {
-            const emp = employeeLookup.get(r.employee_id);
-            return (
-              <ApprovedLeaveRow
-                key={r.id}
-                row={r}
-                employeeLabel={
-                  emp
-                    ? `${emp.employee_code} — ${emp.full_name}`
-                    : `#${r.employee_id}`
-                }
-                typeOptions={typeOptions}
-                employeeOptions={employeeOptions}
-              />
-            );
+    <div className="wf-stack">
+      {rows.length > 0 && (
+        <SectionHead
+          title={t("leaveCalendar.tabs.leaves")}
+          sub={t("leaveCalendar.leavesSub", {
+            defaultValue: "{{n}} approved leave records",
+            n: rows.length,
           })}
-          {rows.length === 0 && (
-            <tr>
-              <td
-                colSpan={6}
-                style={{ ...td, color: "var(--text-tertiary)", textAlign: "center" }}
-              >
-                {t("leaveCalendar.empty")}
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+          actions={newBtn}
+        />
+      )}
+      {showForm && (
+        <FormModal
+          onClose={closeForm}
+          onSubmit={(e) => void onCreate(e)}
+          busy={create.isPending}
+          size="lg"
+          icon={<Icon name="calendar" size={18} />}
+          title={t("leaveCalendar.newLeave").replace(/^\+\s*/, "")}
+          subtitle={t("leaveCalendar.form.leaveSubtitle", {
+            defaultValue: "Record leave that was approved outside the request flow.",
+          })}
+          footer={
+            <FormFooter
+              onCancel={closeForm}
+              submitLabel={t("leaveCalendar.form.createLeave", { defaultValue: "Record leave" })}
+              submittingLabel={t("leaveCalendar.actions.saving")}
+              submitting={create.isPending}
+              canSubmit={canSubmit}
+            />
+          }
+        >
+          <LeaveForm
+            idPrefix="al-new"
+            employeeOptions={employeeOptions}
+            typeOptions={typeOptions}
+            employeeId={employeeId}
+            setEmployeeId={setEmployeeId}
+            leaveTypeId={leaveTypeId}
+            setLeaveTypeId={setLeaveTypeId}
+            startDate={startDate}
+            setStartDate={setStartDate}
+            endDate={endDate}
+            setEndDate={setEndDate}
+            notes={notes}
+            setNotes={setNotes}
+            serverError={error}
+            fieldErrors={fieldErrors}
+          />
+        </FormModal>
+      )}
+      {rows.length === 0 ? (
+        <div className="card">
+          <EmptyPanel
+            tone="accent"
+            icon={<WfSvg>{WF_ICON.calendar}</WfSvg>}
+            title={t("leaveCalendar.emptyLeaves.title", { defaultValue: "No approved leave on record" })}
+            body={t("leaveCalendar.emptyLeaves.body", { defaultValue: "Leave approved through requests appears here automatically. You can also record leave for an employee directly." })}
+            actions={newBtn}
+          />
+        </div>
+      ) : (
+        <TableCard>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>{t("leaveCalendar.cols.employee")}</th>
+                <th>{t("leaveCalendar.cols.type")}</th>
+                <th>{t("leaveCalendar.cols.start")}</th>
+                <th>{t("leaveCalendar.cols.end")}</th>
+                <th>{t("leaveCalendar.cols.notes")}</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => {
+                const emp = employeeLookup.get(r.employee_id);
+                return (
+                  <ApprovedLeaveRow
+                    key={r.id}
+                    row={r}
+                    employeeLabel={
+                      emp
+                        ? `${emp.employee_code} — ${emp.full_name}`
+                        : `#${r.employee_id}`
+                    }
+                    typeOptions={typeOptions}
+                    employeeOptions={employeeOptions}
+                  />
+                );
+              })}
+            </tbody>
+          </table>
+        </TableCard>
+      )}
     </div>
+  );
+}
+
+
+type LeaveFieldErrors = {
+  employee?: string | undefined;
+  type?: string | undefined;
+  start?: string | undefined;
+  end?: string | undefined;
+};
+
+/** Shared body of the New / Edit approved-leave modals. */
+function LeaveForm({
+  idPrefix,
+  employeeOptions,
+  typeOptions,
+  employeeId,
+  setEmployeeId,
+  leaveTypeId,
+  setLeaveTypeId,
+  startDate,
+  setStartDate,
+  endDate,
+  setEndDate,
+  notes,
+  setNotes,
+  serverError,
+  fieldErrors,
+}: {
+  idPrefix: string;
+  employeeOptions: Employee[];
+  typeOptions: LeaveType[];
+  employeeId: string;
+  setEmployeeId: (v: string) => void;
+  leaveTypeId: string;
+  setLeaveTypeId: (v: string) => void;
+  startDate: string;
+  setStartDate: (v: string) => void;
+  endDate: string;
+  setEndDate: (v: string) => void;
+  notes: string;
+  setNotes: (v: string) => void;
+  serverError: string | null;
+  fieldErrors: LeaveFieldErrors;
+}) {
+  const { t } = useTranslation();
+  // Live order check so the reason the submit button is disabled is visible.
+  const endError =
+    fieldErrors.end ??
+    (startDate && endDate && endDate < startDate ? t("leaveCalendar.errors.endBeforeStart") : undefined);
+  return (
+    <>
+      {serverError && <FormNotice tone="danger">{serverError}</FormNotice>}
+      <FormSection
+        step={1}
+        title={t("leaveCalendar.form.whoTitle", { defaultValue: "Employee and type" })}
+        description={t("leaveCalendar.form.whoDesc", { defaultValue: "Who is on leave and which kind of leave it is." })}
+      >
+        <Field label={t("leaveCalendar.fields.employee")} htmlFor={`${idPrefix}-employee`} required error={fieldErrors.employee}>
+          <EmployeeSearchSelect
+            id={`${idPrefix}-employee`}
+            options={employeeOptions}
+            value={employeeId}
+            onChange={setEmployeeId}
+            placeholder={t("leaveCalendar.fields.employeeSearchPlaceholder")}
+          />
+        </Field>
+        <Field label={t("leaveCalendar.fields.leaveType")} htmlFor={`${idPrefix}-type`} required error={fieldErrors.type}>
+          <select id={`${idPrefix}-type`} className="select" value={leaveTypeId} onChange={(e) => setLeaveTypeId(e.target.value)} required>
+            <option value="">{t("leaveCalendar.fields.selectPlaceholder")}</option>
+            {typeOptions.map((opt) => (
+              <option key={opt.id} value={opt.id}>
+                {opt.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </FormSection>
+      <FormSection
+        step={2}
+        title={t("leaveCalendar.form.datesTitle", { defaultValue: "Dates" })}
+        description={t("leaveCalendar.form.datesDesc", { defaultValue: "First and last day of the leave, inclusive." })}
+      >
+        <Field label={t("leaveCalendar.fields.start")} required error={fieldErrors.start}>
+          <DatePicker value={startDate} onChange={setStartDate} ariaLabel={t("leaveCalendar.fields.startDateAria")} triggerStyle={{ width: "100%" }} />
+        </Field>
+        <Field label={t("leaveCalendar.fields.end")} required error={endError}>
+          <DatePicker value={endDate} onChange={setEndDate} min={startDate} ariaLabel={t("leaveCalendar.fields.endDateAria")} triggerStyle={{ width: "100%" }} />
+        </Field>
+        <Field label={t("leaveCalendar.fields.notes")} htmlFor={`${idPrefix}-notes`} span={2} help={t("common.optional")}>
+          <input
+            id={`${idPrefix}-notes`}
+            type="text"
+            className="input"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            maxLength={500}
+            placeholder={t("leaveCalendar.form.notesPlaceholder", { defaultValue: "e.g. Approved by email on 3 March" })}
+          />
+        </Field>
+      </FormSection>
+    </>
   );
 }
 
@@ -1540,7 +1230,9 @@ function ApprovedLeaveRow({
   const [eEnd, setEEnd] = useState(row.end_date);
   const [eNotes, setENotes] = useState(row.notes ?? "");
   const [editError, setEditError] = useState<string | null>(null);
+  const [editFieldErrors, setEditFieldErrors] = useState<LeaveFieldErrors>({});
   const openEdit = () => {
+    setEditFieldErrors({});
     setEEmployee(String(row.employee_id));
     setEType(String(row.leave_type_id));
     setEStart(row.start_date);
@@ -1558,24 +1250,25 @@ function ApprovedLeaveRow({
   const onSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     setEditError(null);
+    setEditFieldErrors({});
     if (!eEmployee) {
-      setEditError(t("leaveCalendar.errors.selectEmployee"));
+      setEditFieldErrors({ employee: t("leaveCalendar.errors.selectEmployee") });
       return;
     }
     if (!eType) {
-      setEditError(t("leaveCalendar.errors.selectLeaveType"));
+      setEditFieldErrors({ type: t("leaveCalendar.errors.selectLeaveType") });
       return;
     }
     if (!eStart) {
-      setEditError(t("leaveCalendar.errors.chooseStart"));
+      setEditFieldErrors({ start: t("leaveCalendar.errors.chooseStart") });
       return;
     }
     if (!eEnd) {
-      setEditError(t("leaveCalendar.errors.chooseEnd"));
+      setEditFieldErrors({ end: t("leaveCalendar.errors.chooseEnd") });
       return;
     }
     if (eEnd < eStart) {
-      setEditError(t("leaveCalendar.errors.endBeforeStart"));
+      setEditFieldErrors({ end: t("leaveCalendar.errors.endBeforeStart") });
       return;
     }
     try {
@@ -1593,228 +1286,77 @@ function ApprovedLeaveRow({
   };
 
   return (
-    <tr style={{ borderTop: "1px solid var(--border)" }}>
-      <td style={td}>{employeeLabel}</td>
-      <td style={td}>{row.leave_type_name}</td>
-      <td style={td}>{row.start_date}</td>
-      <td style={td}>{row.end_date}</td>
-      <td style={{ ...td, color: "var(--text-secondary)", fontSize: 12.5 }}>
-        {row.notes ?? "—"}
-      </td>
-      <td style={{ ...td, textAlign: "right" }}>
-        <button
-          type="button"
-          onClick={openEdit}
-          disabled={patch.isPending}
-          style={{
-            ...btnGhost,
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            marginInlineEnd: 6,
-          }}
-          aria-label={t("leaveCalendar.actions.editLeaveAria", { name: employeeLabel })}
-        >
-          <Icon name="edit" size={12} /> {t("leaveCalendar.actions.edit")}
-        </button>
-        <button
-          type="button"
-          onClick={() => {
+    <tr>
+      <td>{employeeLabel}</td>
+      <td>{row.leave_type_name}</td>
+      <td className="mono">{row.start_date}</td>
+      <td className="mono">{row.end_date}</td>
+      <td className="wf-muted text-sm">{row.notes ?? "—"}</td>
+      <td className="wf-nowrap" style={{ textAlign: "end" }}>
+        <RowActions
+          onEdit={openEdit}
+          onDelete={() => {
             setDelError(null);
             setConfirmOpen(true);
           }}
-          disabled={del.isPending}
-          style={{
-            ...btnGhost,
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            color: "var(--danger-text)",
-          }}
-          aria-label={t("leaveCalendar.actions.deleteLeaveAria", { name: employeeLabel })}
-        >
-          <Icon name="trash" size={12} /> {t("leaveCalendar.actions.delete")}
-        </button>
+          editAria={t("leaveCalendar.actions.editLeaveAria", { name: employeeLabel })}
+          deleteAria={t("leaveCalendar.actions.deleteLeaveAria", { name: employeeLabel })}
+          editDisabled={patch.isPending}
+          deleteDisabled={del.isPending}
+        />
         {confirmOpen && (
-          <ModalShell onClose={() => setConfirmOpen(false)}>
-            <div
-              role="dialog"
-              aria-labelledby="leave-delete-title"
-              style={{ ...modalPanel, width: 420, gap: 0, textAlign: "left" }}
-            >
-              <h2
-                id="leave-delete-title"
-                style={{ margin: "0 0 8px 0", fontSize: 16 }}
-              >
-                {t("leaveCalendar.deleteLeaveTitle")}
-              </h2>
-              <p
-                style={{
-                  fontSize: 13,
-                  color: "var(--text-secondary)",
-                  margin: 0,
-                }}
-              >
-                {t("leaveCalendar.deleteLeaveBody", {
-                  type: row.leave_type_name,
-                  name: employeeLabel,
-                  start: row.start_date,
-                  end: row.end_date,
-                })}
-              </p>
-              {delError && (
-                <div
-                  style={{
-                    color: "var(--danger-text)",
-                    fontSize: 12,
-                    margin: "10px 0 0 0",
-                  }}
-                >
-                  {delError}
-                </div>
-              )}
-              <div
-                style={{
-                  display: "flex",
-                  gap: 8,
-                  marginTop: 16,
-                  justifyContent: "flex-end",
-                }}
-              >
-                <button
-                  type="button"
-                  className="btn btn-sm"
-                  onClick={() => setConfirmOpen(false)}
-                  disabled={del.isPending}
-                >
-                  {t("leaveCalendar.actions.cancel")}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-sm"
-                  onClick={() => void onConfirmDelete()}
-                  disabled={del.isPending}
-                  style={{
-                    background: "var(--danger-bg)",
-                    color: "var(--danger-text)",
-                    borderColor: "var(--danger-border)",
-                  }}
-                >
-                  {del.isPending ? t("leaveCalendar.actions.deleting") : t("leaveCalendar.actions.delete")}
-                </button>
-              </div>
-            </div>
-          </ModalShell>
+          <ConfirmDeleteModal
+            titleId="leave-delete-title"
+            title={t("leaveCalendar.deleteLeaveTitle")}
+            body={t("leaveCalendar.deleteLeaveBody", {
+              type: row.leave_type_name,
+              name: employeeLabel,
+              start: row.start_date,
+              end: row.end_date,
+            })}
+            error={delError}
+            busy={del.isPending}
+            onClose={() => setConfirmOpen(false)}
+            onConfirm={() => void onConfirmDelete()}
+          />
         )}
         {editOpen && (
-          <ModalShell onClose={() => setEditOpen(false)}>
-            <div
-              role="dialog"
-              aria-labelledby="leave-edit-title"
-              style={{ ...modalPanel, width: 640, textAlign: "left" }}
-            >
-              <header style={modalHeader}>
-                <h2 id="leave-edit-title" style={{ margin: 0, fontSize: 18 }}>
-                  {t("leaveCalendar.editLeave")}
-                </h2>
-                <button
-                  className="icon-btn"
-                  type="button"
-                  onClick={() => setEditOpen(false)}
-                  aria-label={t("leaveCalendar.actions.close")}
-                >
-                  <Icon name="x" size={14} />
-                </button>
-              </header>
-              <form
-                onSubmit={onSaveEdit}
-                style={{ display: "flex", flexDirection: "column", gap: 14 }}
-              >
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
-                    gap: 12,
-                  }}
-                >
-                  <Field label={t("leaveCalendar.fields.employee")} required>
-                    <EmployeeSearchSelect
-                      options={employeeOptions}
-                      value={eEmployee}
-                      onChange={setEEmployee}
-                      placeholder={t("leaveCalendar.fields.employeeSearchPlaceholder")}
-                    />
-                  </Field>
-                  <Field label={t("leaveCalendar.fields.leaveType")} required>
-                    <select
-                      value={eType}
-                      onChange={(e) => setEType(e.target.value)}
-                      required
-                      style={inputStyle}
-                    >
-                      <option value="">{t("leaveCalendar.fields.selectPlaceholder")}</option>
-                      {typeOptions.map((opt) => (
-                        <option key={opt.id} value={opt.id}>
-                          {opt.name}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label={t("leaveCalendar.fields.start")} required>
-                    <DatePicker
-                      value={eStart}
-                      onChange={setEStart}
-                      ariaLabel={t("leaveCalendar.fields.startDateAria")}
-                      triggerStyle={{ width: "100%" }}
-                    />
-                  </Field>
-                  <Field label={t("leaveCalendar.fields.end")} required>
-                    <DatePicker
-                      value={eEnd}
-                      onChange={setEEnd}
-                      min={eStart}
-                      ariaLabel={t("leaveCalendar.fields.endDateAria")}
-                      triggerStyle={{ width: "100%" }}
-                    />
-                  </Field>
-                </div>
-                <Field label={t("leaveCalendar.fields.notes")}>
-                  <input
-                    type="text"
-                    value={eNotes}
-                    onChange={(e) => setENotes(e.target.value)}
-                    maxLength={500}
-                    style={inputStyle}
-                  />
-                </Field>
-                {editError && <div style={errorBox}>{editError}</div>}
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "flex-end",
-                    gap: 8,
-                    marginTop: 4,
-                  }}
-                >
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() => setEditOpen(false)}
-                    disabled={patch.isPending}
-                  >
-                    {t("leaveCalendar.actions.cancel")}
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={!canSaveEdit || patch.isPending}
-                    style={{ ...btnPrimary, opacity: canSaveEdit ? 1 : 0.5 }}
-                  >
-                    {patch.isPending ? t("leaveCalendar.actions.saving") : t("leaveCalendar.actions.saveChanges")}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </ModalShell>
+          <FormModal
+            onClose={() => setEditOpen(false)}
+            onSubmit={(e) => void onSaveEdit(e)}
+            busy={patch.isPending}
+            size="lg"
+            icon={<Icon name="calendar" size={18} />}
+            title={t("leaveCalendar.editLeave")}
+            subtitle={t("leaveCalendar.form.editLeaveSubtitle", { defaultValue: "Correct the employee, type, dates or notes of this leave." })}
+            footer={
+              <FormFooter
+                onCancel={() => setEditOpen(false)}
+                submitLabel={t("leaveCalendar.actions.saveChanges")}
+                submittingLabel={t("leaveCalendar.actions.saving")}
+                submitting={patch.isPending}
+                canSubmit={canSaveEdit}
+              />
+            }
+          >
+            <LeaveForm
+              idPrefix={`al-edit-${row.id}`}
+              employeeOptions={employeeOptions}
+              typeOptions={typeOptions}
+              employeeId={eEmployee}
+              setEmployeeId={setEEmployee}
+              leaveTypeId={eType}
+              setLeaveTypeId={setEType}
+              startDate={eStart}
+              setStartDate={setEStart}
+              endDate={eEnd}
+              setEndDate={setEEnd}
+              notes={eNotes}
+              setNotes={setENotes}
+              serverError={editError}
+              fieldErrors={editFieldErrors}
+            />
+          </FormModal>
         )}
       </td>
     </tr>
@@ -1825,40 +1367,14 @@ function ApprovedLeaveRow({
 // ---- Shared bits ---------------------------------------------------------
 
 
-function Field({
-  label,
-  required,
-  children,
-}: {
-  label: string;
-  required?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <span style={labelStyle}>
-        {label}
-        {required && (
-          <span
-            aria-hidden="true"
-            style={{ color: "var(--danger-text)", marginInlineStart: 4 }}
-          >
-            *
-          </span>
-        )}
-      </span>
-      {children}
-    </label>
-  );
-}
-
-
 function EmployeeSearchSelect({
+  id,
   options,
   value,
   onChange,
   placeholder,
 }: {
+  id?: string;
   options: Employee[];
   value: string;
   onChange: (v: string) => void;
@@ -1937,10 +1453,13 @@ function EmployeeSearchSelect({
     : "";
 
   return (
-    <div ref={wrapRef} style={{ position: "relative" }}>
+    <div ref={wrapRef} className="wf-combo">
       <input
         ref={inputRef}
+        id={id}
         type="text"
+        className="input"
+        style={{ width: "100%" }}
         value={open ? query : triggerLabel}
         onChange={(e) => {
           setQuery(e.target.value);
@@ -1952,32 +1471,19 @@ function EmployeeSearchSelect({
         }}
         placeholder={placeholder ?? t("leaveCalendar.searchPlaceholder")}
         autoComplete="off"
-        style={inputStyle}
         aria-haspopup="listbox"
         aria-expanded={open}
       />
       {selected && !open && (
         <button
           type="button"
+          className="wf-combo-clear"
           onClick={() => {
             onChange("");
             setQuery("");
             setOpen(true);
           }}
           aria-label={t("leaveCalendar.clearSelectionAria")}
-          style={{
-            position: "absolute",
-            insetInlineEnd: 6,
-            top: "50%",
-            transform: "translateY(-50%)",
-            border: "none",
-            background: "transparent",
-            color: "var(--text-tertiary)",
-            cursor: "pointer",
-            fontSize: 14,
-            lineHeight: 1,
-            padding: "2px 6px",
-          }}
         >
           ×
         </button>
@@ -1988,36 +1494,18 @@ function EmployeeSearchSelect({
           <div
             ref={popoverRef}
             role="listbox"
+            className="wf-combo-pop"
             style={{
-              position: "fixed",
               top: pos.flipUp ? undefined : pos.top,
               bottom: pos.flipUp
                 ? window.innerHeight - pos.top
                 : undefined,
               left: pos.left,
               width: pos.width,
-              zIndex: 1000,
-              // ``--surface`` is not defined in the design CSS, which
-              // made the popover transparent and let the form fields +
-              // table behind it bleed through. Use the elevated bg var.
-              background: "var(--bg-elev)",
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius-sm)",
-              boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-              maxHeight: 260,
-              overflowY: "auto",
             }}
           >
             {filtered.length === 0 ? (
-              <div
-                style={{
-                  padding: "8px 10px",
-                  color: "var(--text-tertiary)",
-                  fontSize: 12.5,
-                }}
-              >
-                {t("leaveCalendar.noMatches")}
-              </div>
+              <div className="wf-combo-empty">{t("leaveCalendar.noMatches")}</div>
             ) : (
               filtered.map((e) => {
                 const isSel = selected?.id === e.id;
@@ -2027,28 +1515,18 @@ function EmployeeSearchSelect({
                     type="button"
                     role="option"
                     aria-selected={isSel}
+                    className="wf-combo-opt"
                     onMouseDown={(ev) => ev.preventDefault()}
                     onClick={() => {
                       onChange(String(e.id));
                       setOpen(false);
                       setQuery("");
                     }}
-                    style={{
-                      display: "block",
-                      width: "100%",
-                      textAlign: "start",
-                      padding: "6px 10px",
-                      border: "none",
-                      background: isSel ? "var(--bg-sunken)" : "transparent",
-                      color: "var(--text)",
-                      cursor: "pointer",
-                      fontSize: 13,
-                    }}
                   >
-                    <span style={{ fontWeight: 600 }}>
+                    <span className="mono" style={{ fontWeight: 600 }}>
                       {e.employee_code}
                     </span>
-                    <span style={{ color: "var(--text-secondary)" }}>
+                    <span className="wf-muted">
                       {" "}
                       — {e.full_name}
                     </span>
@@ -2079,112 +1557,4 @@ function handleApi(
     return;
   }
   setError(fallback);
-}
-
-
-const labelStyle = {
-  fontSize: 11,
-  textTransform: "uppercase" as const,
-  letterSpacing: "0.04em",
-  color: "var(--text-tertiary)",
-};
-
-const inputStyle = {
-  padding: "6px 8px",
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius-sm)",
-  fontSize: 13,
-  background: "var(--bg)",
-  color: "var(--text)",
-  fontFamily: "var(--font-sans)",
-  outline: "none",
-} as const;
-
-const btnPrimary = {
-  background: "var(--accent)",
-  color: "white",
-  border: "none",
-  padding: "6px 12px",
-  borderRadius: "var(--radius-sm)",
-  cursor: "pointer",
-  fontWeight: 600,
-  fontSize: 13,
-} as const;
-
-const btnGhost = {
-  background: "transparent",
-  color: "var(--text)",
-  border: "1px solid var(--border)",
-  padding: "4px 10px",
-  borderRadius: "var(--radius-sm)",
-  cursor: "pointer",
-  fontSize: 12.5,
-} as const;
-
-const tableStyle = {
-  width: "100%",
-  borderCollapse: "collapse" as const,
-  fontSize: 13,
-  background: "var(--bg-elev)",
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius-md)",
-  overflow: "hidden",
-};
-
-const th = {
-  padding: "10px 12px",
-  textAlign: "left" as const,
-  fontSize: 11,
-  textTransform: "uppercase" as const,
-  letterSpacing: "0.04em",
-  color: "var(--text-tertiary)",
-};
-
-const td = { padding: "10px 12px" };
-
-const errorBox = {
-  background: "var(--danger-soft)",
-  color: "var(--danger-text)",
-  border: "1px solid var(--border)",
-  padding: "6px 10px",
-  borderRadius: "var(--radius-sm)",
-  fontSize: 12.5,
-} as const;
-
-const modalPanel: React.CSSProperties = {
-  position: "fixed",
-  top: "50%",
-  left: "50%",
-  transform: "translate(-50%, -50%)",
-  width: 480,
-  maxWidth: "90vw",
-  background: "var(--bg)",
-  border: "1px solid var(--border-strong)",
-  borderRadius: "var(--radius)",
-  padding: 20,
-  zIndex: 60,
-  boxShadow: "var(--shadow-lg)",
-  display: "flex",
-  flexDirection: "column",
-  gap: 14,
-};
-
-const modalHeader: React.CSSProperties = {
-  display: "flex",
-  alignItems: "flex-start",
-  justifyContent: "space-between",
-};
-
-function chipStyle(active: boolean): React.CSSProperties {
-  return {
-    fontSize: 11,
-    padding: "2px 8px",
-    borderRadius: 999,
-    border: active
-      ? "1px solid var(--accent-border)"
-      : "1px solid var(--border)",
-    background: active ? "var(--accent-soft)" : "var(--bg)",
-    color: active ? "var(--accent-text)" : "var(--text)",
-    cursor: "pointer",
-  };
 }

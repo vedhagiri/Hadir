@@ -4,6 +4,10 @@
 // operator is in the red-accented console and shouldn't see their
 // own shell repaint while editing another tenant's branding.
 
+import { useTranslation } from "react-i18next";
+
+import { SkeletonPanel } from "../components/Skeleton";
+import { LoadErrorPanel } from "../settings/settingsUi";
 import { BrandingForm } from "./BrandingForm";
 import {
   useDeleteTenantLogo,
@@ -13,15 +17,19 @@ import {
 } from "./hooks";
 
 export function SuperAdminBrandingTab({ tenantId }: { tenantId: number }) {
+  const { t } = useTranslation();
   const branding = useTenantBranding(tenantId);
   const patch = usePatchTenantBranding(tenantId);
   const upload = useUploadTenantLogo(tenantId);
   const remove = useDeleteTenantLogo(tenantId);
 
-  if (branding.isLoading) return <p>Loading branding…</p>;
+  if (branding.isLoading) return <SkeletonPanel lines={4} />;
   if (branding.error)
     return (
-      <p style={{ color: "var(--danger-text)" }}>Couldn’t load branding.</p>
+      <LoadErrorPanel
+        title={t("branding.loadFailedPage")}
+        onRetry={() => void branding.refetch()}
+      />
     );
   if (!branding.data) return null;
 

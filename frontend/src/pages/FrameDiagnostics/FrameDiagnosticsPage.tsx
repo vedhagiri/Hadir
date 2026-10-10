@@ -19,6 +19,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
 import { api } from "../../api/client";
+import { EmptyPanel, FilterSelect, ResetButton, Toolbar } from "../../components/ListPageUi";
+import { SkeletonCards, SkeletonTable } from "../../components/Skeleton";
+import { Banner, METRIC_ICON, MetricGrid, MetricTile, SoftPill, StatusDot, type PillTone } from "../../features/system/opsUi";
+import { Icon } from "../../shell/Icon";
 
 const POLL_MS = 3000;
 
@@ -66,23 +70,27 @@ interface SystemSnapshot {
   cameras: CameraLive[];
 }
 
-// Soft palette — anomaly kinds get distinct accent borders so the
-// operator can eyeball patterns ("most recent burst is all
-// ffmpeg_restart").
-const KIND_COLOUR: Record<string, string> = {
-  frame_slow: "#b45309",
-  reader_read_failed: "#dc2626",
-  rtsp_reconnect: "#dc2626",
-  ffmpeg_restart: "#dc2626",
-  segmenter_thrashing: "#7c2d12",
-  detection_slow: "#b45309",
-  analyzer_starved: "#b45309",
+// Anomaly kinds map to a tone so the operator can eyeball patterns
+// ("most recent burst is all ffmpeg_restart").
+const KIND_TONE: Record<string, PillTone> = {
+  frame_slow: "warning",
+  reader_read_failed: "danger",
+  rtsp_reconnect: "danger",
+  ffmpeg_restart: "danger",
+  segmenter_thrashing: "danger",
+  detection_slow: "warning",
+  analyzer_starved: "warning",
+};
+
+const STAGE_TONE: Record<string, PillTone> = {
+  green: "success",
+  amber: "warning",
+  red: "danger",
 };
 
 function tsToTime(ts: number): string {
   const d = new Date(ts * 1000);
-  return d.toLocaleTimeString(undefined, { hour12: false }) +
-    "." + String(d.getMilliseconds()).padStart(3, "0");
+  return d.toLocaleTimeString(undefined, { hour12: false }) + "." + String(d.getMilliseconds()).padStart(3, "0");
 }
 
 function fmtDuration(seconds: number): string {
@@ -127,9 +135,7 @@ export function FrameDiagnosticsPage() {
 
   const events = useQuery<{ events: EventRow[] }>({
     queryKey: ["diagnostics", "events"],
-    queryFn: () => api<{ events: EventRow[] }>(
-      "/api/diagnostics/events?limit=500",
-    ),
+    queryFn: () => api<{ events: EventRow[] }>("/api/diagnostics/events?limit=500"),
     refetchInterval: POLL_MS,
     refetchIntervalInBackground: false,
   });
@@ -149,11 +155,14 @@ export function FrameDiagnosticsPage() {
 
   const filteredEvents = useMemo(() => {
     const rows = events.data?.events ?? [];
-    return rows.filter((e) => {
-      if (kindFilter && e.kind !== kindFilter) return false;
-      if (cameraFilter && String(e.camera_id) !== cameraFilter) return false;
-      return true;
-    }).slice().reverse(); // newest first
+    return rows
+      .filter((e) => {
+        if (kindFilter && e.kind !== kindFilter) return false;
+        if (cameraFilter && String(e.camera_id) !== cameraFilter) return false;
+        return true;
+      })
+      .slice()
+      .reverse(); // newest first
   }, [events.data, kindFilter, cameraFilter]);
 
   // Kind tallies (per-kind count of events visible after filtering)
@@ -174,21 +183,16 @@ export function FrameDiagnosticsPage() {
     }
     for (const e of events.data?.events ?? []) {
       if (e.camera_id != null && !set.has(String(e.camera_id))) {
-        set.set(
-          String(e.camera_id),
-          `${e.camera_name ?? "(unknown)"} (id ${e.camera_id})`,
-        );
+        set.set(String(e.camera_id), `${e.camera_name ?? "(unknown)"} (id ${e.camera_id})`);
       }
     }
     return Array.from(set.entries());
   }, [snap.data, events.data]);
 
   const exportJson = () => {
-    const blob = new Blob(
-      [JSON.stringify({ state: state.data, snap: snap.data,
-        events: events.data?.events ?? [] }, null, 2)],
-      { type: "application/json" },
-    );
+    const blob = new Blob([JSON.stringify({ state: state.data, snap: snap.data, events: events.data?.events ?? [] }, null, 2)], {
+      type: "application/json",
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -209,260 +213,301 @@ export function FrameDiagnosticsPage() {
   void tick;
 
   const liveDuration = state.data
-    ? state.data.session_started_ago_s
-      + (state.data.enabled ? (Date.now() / 1000) - (state.data.session_started_at + state.data.session_started_ago_s) : 0)
+    ? state.data.session_started_ago_s +
+      (state.data.enabled ? Date.now() / 1000 - (state.data.session_started_at + state.data.session_started_ago_s) : 0)
     : 0;
 
+  const running = !!state.data?.enabled;
+  const stripMark = (v: string) => v.replace(/^[●○]\s*/, "");
+  const cpu = snap.data?.host_cpu_percent_overall ?? 0;
+  const memPct = snap.data?.host_memory_percent ?? 0;
+  const filtersActive = !!kindFilter || !!cameraFilter;
+  const totalEvents = events.data?.events.length ?? 0;
+  const loading = state.isLoading || snap.isLoading;
+  const failed = state.isError || snap.isError || events.isError;
+  const clearFilters = () => {
+    setKindFilter("");
+    setCameraFilter("");
+  };
+  const retryAll = () => void qc.invalidateQueries({ queryKey: ["diagnostics"] });
+
   return (
-    <div style={{ padding: "20px 24px", maxWidth: 1400 }}>
-      <div style={{
-        marginBottom: 16,
-        background: "rgba(245, 158, 11, 0.08)",
-        border: "1px solid #f59e0b",
-        borderRadius: 8,
-        padding: "10px 14px",
-        fontSize: 13,
-      }}>
-        <strong>{t("frameDiagnostics.tempBadge")}</strong>{" "}
-        {t("frameDiagnostics.tempHint")}
+    <>
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">{t("frameDiagnostics.title", { defaultValue: "Frame Diagnostics" })}</h1>
+          <p className="page-sub">
+            {t("frameDiagnostics.subtitle", {
+              defaultValue: "Capture frame drops, reconnects and slow detections while logging is on, then export them for analysis.",
+            })}
+          </p>
+        </div>
+        <div className="page-actions">
+          <button type="button" className="btn" onClick={() => clearLogs.mutate()} disabled={clearLogs.isPending || totalEvents === 0}>
+            <Icon name="trash" size={12} />
+            {t("frameDiagnostics.clear")}
+          </button>
+          <button type="button" className="btn" onClick={exportJson} disabled={totalEvents === 0}>
+            <Icon name="download" size={12} />
+            {t("frameDiagnostics.exportJson")}
+          </button>
+          <button
+            type="button"
+            className={`btn ${running ? "btn-danger" : "btn-primary"}`}
+            onClick={() => (running ? stop.mutate() : start.mutate())}
+            disabled={start.isPending || stop.isPending}
+          >
+            <Icon name={running ? "pause" : "play"} size={12} />
+            {stripMark(running ? t("frameDiagnostics.stopLogging") : t("frameDiagnostics.startLogging")).replace(/^▶\s*|^■\s*/, "")}
+          </button>
+        </div>
       </div>
 
-      {/* Controls */}
-      <div style={{
-        display: "flex", gap: 8, marginBottom: 16, alignItems: "center",
-        flexWrap: "wrap",
-      }}>
-        <button
-          className="btn btn-sm"
-          onClick={() => (state.data?.enabled ? stop.mutate() : start.mutate())}
-          disabled={start.isPending || stop.isPending}
-          style={{
-            background: state.data?.enabled ? "#dc2626" : "#0b6e4f",
-            color: "white", fontWeight: 600,
-            border: "none", padding: "6px 14px", borderRadius: 6,
-          }}
-        >
-          {state.data?.enabled
-            ? t("frameDiagnostics.stopLogging")
-            : t("frameDiagnostics.startLogging")}
-        </button>
-        <button
-          className="btn btn-sm"
-          onClick={() => clearLogs.mutate()}
-          disabled={clearLogs.isPending}
-        >{t("frameDiagnostics.clear")}</button>
-        <button className="btn btn-sm" onClick={exportJson}>{t("frameDiagnostics.exportJson")}</button>
-        <div style={{ flex: 1 }} />
-        <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-          {state.data?.enabled ? (
-            <>
-              <span style={{ color: "#0b6e4f", fontWeight: 600 }}>{t("frameDiagnostics.running")}</span>
-              {" — "}{t("frameDiagnostics.session")}{" "}{fmtDuration(liveDuration)}{" — "}
-              {t("frameDiagnostics.eventsCaptured", { count: state.data.event_count })}
-            </>
+      <div style={{ marginBottom: 16 }}>
+        <Banner tone="warning" role="note" icon={<Icon name="info" size={14} />}>
+          <span>
+            <strong>{t("frameDiagnostics.tempBadge")}</strong> {t("frameDiagnostics.tempHint")}
+          </span>
+        </Banner>
+      </div>
+
+      {loading && (
+        <div className="ops-stack">
+          <SkeletonCards count={4} />
+          <SkeletonTable rows={3} cols={7} />
+        </div>
+      )}
+
+      {!loading && failed && (
+        <div className="card">
+          <EmptyPanel
+            tone="danger"
+            icon={<Icon name="info" size={30} />}
+            title={t("frameDiagnostics.loadFailedTitle", { defaultValue: "Couldn't load diagnostics" })}
+            body={t("frameDiagnostics.loadFailedBody", { defaultValue: "The diagnostics endpoints didn't respond. Check the backend and try again." })}
+            actions={
+              <button type="button" className="btn" onClick={retryAll}>
+                <Icon name="refresh" size={12} />
+                {t("common.retry", { defaultValue: "Retry" })}
+              </button>
+            }
+          />
+        </div>
+      )}
+
+      {!loading && !failed && (
+        <>
+          <MetricGrid>
+            <MetricTile
+              tone={running ? "success" : "neutral"}
+              icon={running ? METRIC_ICON.record : METRIC_ICON.clock}
+              label={t("frameDiagnostics.loggingLabel", { defaultValue: "Logging" })}
+              value={stripMark(running ? t("frameDiagnostics.running") : t("frameDiagnostics.stopped"))}
+              sub={
+                state.data
+                  ? running
+                    ? `${t("frameDiagnostics.session")} ${fmtDuration(liveDuration)} · ${t("frameDiagnostics.eventsCaptured", { count: state.data.event_count })}`
+                    : t("frameDiagnostics.eventsInRing", { count: state.data.event_count })
+                  : ""
+              }
+            />
+            <MetricTile
+              tone={cpu > 70 ? "danger" : cpu > 50 ? "warning" : "info"}
+              icon={METRIC_ICON.cpu}
+              label={t("frameDiagnostics.hostCpu")}
+              value={`${cpu}%`}
+              sub={t("frameDiagnostics.hostCpuSub", { defaultValue: "All cores, live" })}
+            />
+            <MetricTile
+              tone={memPct > 75 ? "danger" : "info"}
+              icon={METRIC_ICON.memory}
+              label={t("frameDiagnostics.memory")}
+              value={`${snap.data?.host_memory_used_gb ?? 0} / ${snap.data?.host_memory_total_gb ?? 0} GB`}
+              sub={`${memPct}%`}
+            />
+            <MetricTile
+              tone="neutral"
+              icon={METRIC_ICON.activity}
+              label={t("frameDiagnostics.processes")}
+              value={String(snap.data?.process_count ?? 0)}
+              sub={`${t("frameDiagnostics.threads")}: ${snap.data?.thread_count ?? 0}`}
+            />
+          </MetricGrid>
+
+          {snap.data && (
+            <div className="card ops-card-flush" style={{ marginBottom: 16 }}>
+              <div className="card-head">
+                <h3 className="card-title" style={{ margin: 0 }}>{t("frameDiagnostics.perCore", { defaultValue: "CPU per core" })}</h3>
+                <span className="text-xs text-dim">{snap.data.host_cpu_percent_per_core.length} {t("frameDiagnostics.cores", { defaultValue: "cores" })}</span>
+              </div>
+              <div className="ops-card-body is-tight">
+                <div className="ops-core-bars">
+                  {snap.data.host_cpu_percent_per_core.map((c, i) => (
+                    <div
+                      key={i}
+                      className="ops-core-bar"
+                      title={`core ${i}: ${c}%`}
+                      style={{ ["--tone-fg" as string]: c > 80 ? "var(--danger)" : c > 50 ? "var(--warning)" : "var(--success)" } as React.CSSProperties}
+                    >
+                      <span style={{ width: `${Math.min(100, c)}%` }} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {snap.data.cameras.length > 0 && (
+                <div style={{ overflowX: "auto", borderTop: "1px solid var(--border)" }}>
+                  <table className="table table-compact">
+                    <thead>
+                      <tr>
+                        <th>{t("frameDiagnostics.col.camera")}</th>
+                        <th>{t("frameDiagnostics.col.tenant")}</th>
+                        <th>{t("frameDiagnostics.col.status")}</th>
+                        <th>{t("frameDiagnostics.col.fpsReader")}</th>
+                        <th>{t("frameDiagnostics.col.fpsAnalyzer")}</th>
+                        <th>{t("frameDiagnostics.col.motionSkip")}</th>
+                        <th>{t("frameDiagnostics.col.stages")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {snap.data.cameras.map((c) => (
+                        <tr key={`${c.tenant_id}-${c.camera_id}`}>
+                          <td style={{ whiteSpace: "nowrap", fontWeight: 600 }}>{c.camera_name}</td>
+                          <td className="mono">{c.tenant_id}</td>
+                          <td>
+                            <SoftPill tone={c.status === "running" ? "success" : c.status === "reconnecting" || c.status === "starting" ? "warning" : "danger"}>
+                              {c.status}
+                            </SoftPill>
+                          </td>
+                          <td>
+                            <FpsCell observed={c.fps_reader} target={c.native_fps ?? null} />
+                          </td>
+                          <td className="mono">{c.fps_analyzer.toFixed(1)}</td>
+                          <td className="mono">{c.motion_skipped_60s}</td>
+                          <td style={{ whiteSpace: "nowrap" }}>
+                            <span style={{ display: "inline-flex", gap: 5 }}>
+                              {(["rtsp", "detection", "matching", "attendance"] as const).map((stage) => {
+                                const s = c.pipeline_stages[stage] ?? "unknown";
+                                return (
+                                  <span key={stage} title={`${stage}: ${s}`}>
+                                    <StatusDot tone={STAGE_TONE[s] ?? "neutral"} />
+                                  </span>
+                                );
+                              })}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {totalEvents === 0 ? (
+            <div className="card">
+              <EmptyPanel
+                tone={running ? "success" : "accent"}
+                icon={<Icon name="activity" size={30} />}
+                title={running ? t("frameDiagnostics.emptyOnTitle", { defaultValue: "No anomalies yet" }) : t("frameDiagnostics.emptyOffTitle", { defaultValue: "Logging is off" })}
+                body={running ? t("frameDiagnostics.emptyOn") : t("frameDiagnostics.emptyOff")}
+                actions={
+                  running ? undefined : (
+                    <button type="button" className="btn btn-primary" onClick={() => start.mutate()} disabled={start.isPending}>
+                      <Icon name="play" size={12} />
+                      {stripMark(t("frameDiagnostics.startLogging")).replace(/^▶\s*/, "")}
+                    </button>
+                  )
+                }
+              />
+            </div>
           ) : (
             <>
-              <span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{t("frameDiagnostics.stopped")}</span>
-              {state.data ? ` — ${t("frameDiagnostics.eventsInRing", { count: state.data.event_count })}` : ""}
+              {/* Kind tallies + filters */}
+              <Toolbar>
+                <span style={{ fontWeight: 600, fontSize: 13 }}>{t("frameDiagnostics.anomalyKinds")}:</span>
+                {Object.entries(kindCounts).map(([k, n]) => (
+                  <button
+                    key={k}
+                    type="button"
+                    aria-pressed={kindFilter === k}
+                    onClick={() => setKindFilter(kindFilter === k ? "" : k)}
+                    className={`ops-kind-chip tone-${KIND_TONE[k] ?? "neutral"}`}
+                  >
+                    {k} <span className="count">×{n}</span>
+                  </button>
+                ))}
+                <div style={{ flex: 1 }} />
+                <FilterSelect
+                  label={t("frameDiagnostics.col.camera")}
+                  value={cameraFilter}
+                  onChange={setCameraFilter}
+                  options={[["", t("frameDiagnostics.allCameras")], ...cameraOptions]}
+                />
+                <ResetButton active={filtersActive} label={t("frameDiagnostics.reset", { defaultValue: "Reset" })} onClick={clearFilters} />
+              </Toolbar>
+
+              {/* Event table */}
+              <div className="card ops-card-flush">
+                {filteredEvents.length === 0 ? (
+                  <EmptyPanel
+                    tone="neutral"
+                    icon={<Icon name="filter" size={30} />}
+                    title={t("frameDiagnostics.emptyFilteredTitle", { defaultValue: "No events match these filters" })}
+                    body={t("frameDiagnostics.emptyFilteredBody", { defaultValue: "Try another anomaly kind or camera." })}
+                    actions={
+                      <button type="button" className="btn" onClick={clearFilters}>
+                        {t("frameDiagnostics.clearFilters", { defaultValue: "Clear filters" })}
+                      </button>
+                    }
+                  />
+                ) : (
+                  <div className="ops-table-wrap is-scroll" style={{ border: 0, borderRadius: "inherit" }}>
+                    <table className="table table-compact">
+                      <thead>
+                        <tr>
+                          <th>{t("frameDiagnostics.col.time")}</th>
+                          <th>{t("frameDiagnostics.col.kind")}</th>
+                          <th>{t("frameDiagnostics.col.camera")}</th>
+                          <th>{t("frameDiagnostics.col.reason")}</th>
+                          <th>{t("frameDiagnostics.col.metrics")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredEvents.map((e, i) => (
+                          <tr key={i}>
+                            <td className="mono" style={{ whiteSpace: "nowrap" }}>{tsToTime(e.ts)}</td>
+                            <td style={{ whiteSpace: "nowrap" }}>
+                              <span className={`ops-kind tone-${KIND_TONE[e.kind] ?? "neutral"}`}>{e.kind}</span>
+                            </td>
+                            <td style={{ whiteSpace: "nowrap" }}>{e.camera_name ?? (e.camera_id != null ? `id ${e.camera_id}` : "—")}</td>
+                            <td>{e.reason}</td>
+                            <td className="mono text-dim">{fmtMetricsInline(e.metrics)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </>
           )}
-        </div>
-      </div>
-
-      {/* Live system snapshot */}
-      <div style={{
-        background: "var(--bg-elev)", border: "1px solid var(--border)",
-        borderRadius: 8, padding: 14, marginBottom: 16,
-      }}>
-        <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-          <Stat label={t("frameDiagnostics.hostCpu")} value={`${snap.data?.host_cpu_percent_overall ?? 0}%`}
-            warn={(snap.data?.host_cpu_percent_overall ?? 0) > 70} />
-          <Stat label={t("frameDiagnostics.memory")} value={`${snap.data?.host_memory_used_gb ?? 0} / ${snap.data?.host_memory_total_gb ?? 0} GB`}
-            warn={(snap.data?.host_memory_percent ?? 0) > 75} />
-          <Stat label={t("frameDiagnostics.processes")} value={String(snap.data?.process_count ?? 0)} />
-          <Stat label={t("frameDiagnostics.threads")} value={String(snap.data?.thread_count ?? 0)} />
-        </div>
-        {/* Per-core CPU bars */}
-        {snap.data && (
-          <div style={{ marginTop: 10, display: "flex", gap: 4, flexWrap: "wrap" }}>
-            {snap.data.host_cpu_percent_per_core.map((c, i) => (
-              <div key={i} style={{
-                flex: "1 0 60px", height: 6, background: "var(--border)",
-                borderRadius: 3, overflow: "hidden", position: "relative",
-              }}
-                title={`core ${i}: ${c}%`}>
-                <div style={{
-                  width: `${Math.min(100, c)}%`, height: "100%",
-                  background: c > 80 ? "#dc2626" : c > 50 ? "#f59e0b" : "#0b6e4f",
-                }} />
-              </div>
-            ))}
-          </div>
-        )}
-        {/* Per-camera live stats */}
-        {snap.data && snap.data.cameras.length > 0 && (
-          <div style={{ marginTop: 14, fontSize: 12 }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ textAlign: "left", color: "var(--text-secondary)" }}>
-                  <th style={th}>{t("frameDiagnostics.col.camera")}</th>
-                  <th style={th}>{t("frameDiagnostics.col.tenant")}</th>
-                  <th style={th}>{t("frameDiagnostics.col.status")}</th>
-                  <th style={th}>{t("frameDiagnostics.col.fpsReader")}</th>
-                  <th style={th}>{t("frameDiagnostics.col.fpsAnalyzer")}</th>
-                  <th style={th}>{t("frameDiagnostics.col.motionSkip")}</th>
-                  <th style={th}>{t("frameDiagnostics.col.stages")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {snap.data.cameras.map((c) => (
-                  <tr key={`${c.tenant_id}-${c.camera_id}`}>
-                    <td style={td}><strong>{c.camera_name}</strong></td>
-                    <td style={td}>{c.tenant_id}</td>
-                    <td style={td}>
-                      <span style={{
-                        color: c.status === "running" ? "#0b6e4f" : "#dc2626",
-                        fontWeight: 600,
-                      }}>{c.status}</span>
-                    </td>
-                    <td style={td}>
-                      <FpsCell observed={c.fps_reader} target={c.native_fps ?? null} />
-                    </td>
-                    <td style={td}>{c.fps_analyzer.toFixed(1)}</td>
-                    <td style={td}>{c.motion_skipped_60s}</td>
-                    <td style={td}>
-                      {(["rtsp", "detection", "matching", "attendance"] as const).map((stage) => (
-                        <StageDot key={stage} state={c.pipeline_stages[stage] ?? "unknown"} />
-                      ))}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Kind tallies + filters */}
-      <div style={{
-        display: "flex", gap: 12, alignItems: "center",
-        marginBottom: 12, flexWrap: "wrap",
-      }}>
-        <span style={{ fontWeight: 600, fontSize: 13 }}>{t("frameDiagnostics.anomalyKinds")}:</span>
-        {Object.entries(kindCounts).length === 0 && (
-          <span style={{ color: "var(--text-secondary)", fontSize: 12 }}>
-            {state.data?.enabled ? t("frameDiagnostics.waiting") : t("frameDiagnostics.loggingStopped")}
-          </span>
-        )}
-        {Object.entries(kindCounts).map(([k, n]) => (
-          <button key={k}
-            onClick={() => setKindFilter(kindFilter === k ? "" : k)}
-            style={{
-              border: `1px solid ${KIND_COLOUR[k] ?? "var(--border)"}`,
-              background: kindFilter === k ? (KIND_COLOUR[k] ?? "var(--border)") : "transparent",
-              color: kindFilter === k ? "white" : (KIND_COLOUR[k] ?? "var(--text)"),
-              padding: "2px 10px", borderRadius: 999,
-              fontSize: 11, fontWeight: 600, cursor: "pointer",
-            }}
-          >{k} <span style={{ opacity: 0.8 }}>×{n}</span></button>
-        ))}
-        <div style={{ flex: 1 }} />
-        <select value={cameraFilter} onChange={(e) => setCameraFilter(e.target.value)}
-          style={{ fontSize: 12, padding: "4px 8px", border: "1px solid var(--border)" }}>
-          <option value="">{t("frameDiagnostics.allCameras")}</option>
-          {cameraOptions.map(([id, label]) => (
-            <option key={id} value={id}>{label}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* Event table */}
-      <div style={{
-        background: "var(--bg)", border: "1px solid var(--border)",
-        borderRadius: 8, overflow: "hidden",
-      }}>
-        <div style={{ maxHeight: 600, overflowY: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-            <thead style={{ position: "sticky", top: 0, background: "var(--bg-elev)" }}>
-              <tr style={{ textAlign: "left", color: "var(--text-secondary)" }}>
-                <th style={th}>{t("frameDiagnostics.col.time")}</th>
-                <th style={th}>{t("frameDiagnostics.col.kind")}</th>
-                <th style={th}>{t("frameDiagnostics.col.camera")}</th>
-                <th style={th}>{t("frameDiagnostics.col.reason")}</th>
-                <th style={th}>{t("frameDiagnostics.col.metrics")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredEvents.length === 0 && (
-                <tr><td colSpan={5} style={{ ...td, textAlign: "center", padding: 24, color: "var(--text-secondary)" }}>
-                  {state.data?.enabled
-                    ? t("frameDiagnostics.emptyOn")
-                    : t("frameDiagnostics.emptyOff")}
-                </td></tr>
-              )}
-              {filteredEvents.map((e, i) => (
-                <tr key={i} style={{ borderTop: "1px solid var(--border)" }}>
-                  <td style={{ ...td, whiteSpace: "nowrap", fontFamily: "monospace" }}>
-                    {tsToTime(e.ts)}
-                  </td>
-                  <td style={td}>
-                    <span style={{
-                      color: KIND_COLOUR[e.kind] ?? "var(--text)",
-                      fontWeight: 600,
-                    }}>{e.kind}</span>
-                  </td>
-                  <td style={td}>
-                    {e.camera_name ?? (e.camera_id != null ? `id ${e.camera_id}` : "—")}
-                  </td>
-                  <td style={td}>{e.reason}</td>
-                  <td style={{ ...td, fontFamily: "monospace", color: "var(--text-secondary)" }}>
-                    {fmtMetricsInline(e.metrics)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
+        </>
+      )}
+    </>
   );
 }
 
 // --- tiny inline components ------------------------------------------------
 
-const th = { padding: "6px 10px", fontSize: 11, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.04em" };
-const td = { padding: "6px 10px", verticalAlign: "top" as const };
-
-function Stat({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
-  return (
-    <div>
-      <div style={{ fontSize: 10, color: "var(--text-secondary)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 600, color: warn ? "#dc2626" : "var(--text)" }}>{value}</div>
-    </div>
-  );
-}
-
 function FpsCell({ observed, target }: { observed: number; target: number | null }) {
   const ratio = target && target > 0 ? observed / target : 1;
-  const colour = ratio >= 0.95 ? "#0b6e4f" : ratio >= 0.7 ? "#b45309" : "#dc2626";
+  const cls = ratio >= 0.95 ? "is-ok" : ratio >= 0.7 ? "is-warn" : "is-bad";
   return (
-    <span style={{ color: colour, fontWeight: 600, fontFamily: "monospace" }}>
-      {observed.toFixed(1)}{target ? ` / ${target}` : ""}
+    <span className={`mono ops-fps ${cls}`}>
+      {observed.toFixed(1)}
+      {target ? ` / ${target}` : ""}
     </span>
-  );
-}
-
-function StageDot({ state }: { state: string }) {
-  const color =
-    state === "green" ? "#0b6e4f"
-    : state === "amber" ? "#f59e0b"
-    : state === "red" ? "#dc2626"
-    : "var(--border)";
-  return (
-    <span title={state} style={{
-      display: "inline-block",
-      width: 10, height: 10, borderRadius: "50%",
-      background: color, marginRight: 4,
-    }} />
   );
 }

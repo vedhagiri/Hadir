@@ -10,7 +10,6 @@ import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 
 import { ApiError, api } from "../api/client";
-import { ModalShell } from "../components/DrawerShell";
 import { useDepartments } from "../features/departments/hooks";
 import {
   type Section,
@@ -25,8 +24,19 @@ import {
 } from "../features/sections/hooks";
 import { Icon } from "../shell/Icon";
 import { toast } from "../shell/Toaster";
-import { SettingsTabs } from "./SettingsTabs";
+import {
+  CloseFooter,
+  ConfirmModal,
+  LoadErrorPanel,
+  PersonChip,
+  SettingsFormModal,
+  SettingsPage,
+  TableCard,
+  nowrap,
+} from "./settingsUi";
+import { EmptyPanel, KebabMenu, FilterSelect, ResetButton, SearchField, Toolbar } from "../components/ListPageUi";
 import { SkeletonChip, SkeletonLines, SkeletonRows } from "../components/Skeleton";
+import { Field, FormFooter, FormNotice, FormSection } from "../components/FormKit";
 
 export function SectionsPage() {
   const { t } = useTranslation();
@@ -40,11 +50,31 @@ export function SectionsPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<Section | null>(null);
   const [managing, setManaging] = useState<Section | null>(null);
+  const [q, setQ] = useState("");
 
+  const allItems = list.data?.items ?? [];
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return allItems;
+    return allItems.filter((s) =>
+      [s.code, s.name, s.department_code ?? "", s.department_name ?? ""].some((v) =>
+        v.toLowerCase().includes(needle),
+      ),
+    );
+  }, [allItems, q]);
+  const filtersActive = !!q || filterDept !== "";
+  const resetFilters = () => {
+    setQ("");
+    setFilterDept("");
+  };
+
+  const [deleting, setDeleting] = useState<Section | null>(null);
   const onDelete = (s: Section) => {
-    if (!confirm(t("sectionsPage.confirmDelete", { name: s.name }))) return;
     del.mutate(s.id, {
-      onSuccess: () => toast.success(t("sectionsPage.toastDeleted")),
+      onSuccess: () => {
+        toast.success(t("sectionsPage.toastDeleted"));
+        setDeleting(null);
+      },
       onError: (err) => {
         const detail =
           err instanceof ApiError
@@ -55,116 +85,161 @@ export function SectionsPage() {
     });
   };
 
+  const noDepartments = !departments.data || departments.data.items.length === 0;
+  // The list is server-filtered by department, so "no records at all"
+  // is only certain when no filter is applied.
+  const trulyEmpty = !list.isLoading && !list.isError && allItems.length === 0 && !filtersActive;
+  const showToolbar = !list.isError && !trulyEmpty;
+
+  const addButton = (
+    <button
+      type="button"
+      className="btn btn-primary"
+      onClick={() => setShowAdd(true)}
+      disabled={noDepartments}
+      title={noDepartments ? t("sectionsPage.needDepartmentFirst") : ""}
+    >
+      <Icon name="plus" size={11} />
+      {t("sectionsPage.addSection")}
+    </button>
+  );
+
   return (
-    <>
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">{t("sectionsPage.title")}</h1>
-          <p className="page-sub">
-            {t("sectionsPage.subtitle")}
-          </p>
-        </div>
-        <div className="page-actions">
-          <select
-            value={filterDept}
-            onChange={(e) =>
-              setFilterDept(e.target.value === "" ? "" : Number(e.target.value))
-            }
-            style={pickerStyle}
-            aria-label={t("sectionsPage.filterByDepartment")}
-          >
-            <option value="">{t("sectionsPage.allDepartments")}</option>
-            {departments.data?.items.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.code} · {d.name}
-              </option>
-            ))}
-          </select>
-          <button
-            className="btn btn-primary"
-            onClick={() => setShowAdd(true)}
-            disabled={!departments.data || departments.data.items.length === 0}
-            title={
-              !departments.data || departments.data.items.length === 0
-                ? t("sectionsPage.needDepartmentFirst")
-                : ""
-            }
-          >
-            <Icon name="plus" size={11} />
-            {t("sectionsPage.addSection")}
-          </button>
-        </div>
-      </div>
+    <SettingsPage
+      wide
+      title={t("sectionsPage.title")}
+      subtitle={t("sectionsPage.subtitle")}
+      actions={addButton}
+    >
+      {showToolbar && (
+        <Toolbar>
+          <SearchField
+            value={q}
+            onChange={setQ}
+            placeholder={t("settingsUi.org.searchSections", { defaultValue: "Search by code, name or department" })}
+            clearLabel={t("settingsUi.org.clearSearch", { defaultValue: "Clear search" })}
+          />
+          <FilterSelect
+            label={t("sectionsPage.col.department")}
+            value={filterDept === "" ? "" : String(filterDept)}
+            onChange={(v) => setFilterDept(v === "" ? "" : Number(v))}
+            options={[
+              ["", t("sectionsPage.allDepartments")],
+              ...(departments.data?.items ?? []).map(
+                (d) => [String(d.id), `${d.code} · ${d.name}`] as [string, string],
+              ),
+            ]}
+          />
+          <ResetButton
+            active={filtersActive}
+            label={t("settingsUi.org.reset", { defaultValue: "Reset" })}
+            onClick={resetFilters}
+          />
+        </Toolbar>
+      )}
 
-      <SettingsTabs />
-
-      <div className="card" style={{ marginTop: 12 }}>
-        <table className="table">
-          <thead>
-            <tr>
-              <th style={{ width: 140 }}>{t("sectionsPage.col.code")}</th>
-              <th>{t("sectionsPage.col.name")}</th>
-              <th style={{ width: 220 }}>{t("sectionsPage.col.department")}</th>
-              <th style={{ width: 120 }}>{t("sectionsPage.col.employees")}</th>
-              <th style={{ minWidth: 220 }}>{t("sectionsPage.col.managers")}</th>
-              <th style={{ width: 240, textAlign: "right" }}>{t("sectionsPage.col.actions")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.isLoading && (
+      {list.isLoading ? (
+        <TableCard>
+          <table className="table">
+            <tbody>
               <SkeletonRows cols={6} />
-            )}
-            {list.data?.items.length === 0 && (
+            </tbody>
+          </table>
+        </TableCard>
+      ) : list.isError ? (
+        <LoadErrorPanel
+          title={t("settingsUi.org.sectionsLoadFailed", { defaultValue: "Couldn't load sections" })}
+          onRetry={() => void list.refetch()}
+        />
+      ) : trulyEmpty ? (
+        <EmptyPanel
+          tone="accent"
+          icon={<Icon name="fileText" size={28} />}
+          title={t("sectionsPage.emptyAll")}
+          body={
+            noDepartments
+              ? t("sectionsPage.needDepartmentFirst")
+              : t("settingsUi.org.sectionsEmptyBody", {
+                  defaultValue: "Sections split a department into smaller teams. Add the first one to get started.",
+                })
+          }
+          actions={addButton}
+        />
+      ) : filtered.length === 0 ? (
+        <EmptyPanel
+          tone="neutral"
+          icon={<Icon name="search" size={28} />}
+          title={
+            q
+              ? t("settingsUi.org.noMatchTitle", { defaultValue: "No matches" })
+              : t("sectionsPage.emptyDept")
+          }
+          body={t("settingsUi.org.noMatchBody", {
+            defaultValue: "Nothing matches the current search or filters. Try a different term or clear the filters.",
+          })}
+          actions={
+            <button type="button" className="btn" onClick={resetFilters}>
+              <Icon name="refresh" size={12} />
+              {t("settingsUi.org.clearFilters", { defaultValue: "Clear filters" })}
+            </button>
+          }
+        />
+      ) : (
+        <TableCard>
+          <table className="table">
+            <thead>
               <tr>
-                <td colSpan={6} className="text-sm text-dim" style={{ padding: 16 }}>
-                  {filterDept === ""
-                    ? t("sectionsPage.emptyAll")
-                    : t("sectionsPage.emptyDept")}
-                </td>
+                <th style={{ width: 140 }}>{t("sectionsPage.col.code")}</th>
+                <th>{t("sectionsPage.col.name")}</th>
+                <th style={{ width: 220 }}>{t("sectionsPage.col.department")}</th>
+                <th style={{ width: 110 }}>{t("sectionsPage.col.employees")}</th>
+                <th style={{ minWidth: 200 }}>{t("sectionsPage.col.managers")}</th>
+                <th style={{ width: 64, textAlign: "end" }}>{t("sectionsPage.col.actions")}</th>
               </tr>
-            )}
-            {list.data?.items.map((s) => (
-              <tr key={s.id}>
-                <td className="mono text-sm">{s.code}</td>
-                <td className="text-sm">{s.name}</td>
-                <td className="text-sm">
-                  <span className="mono text-xs text-dim">{s.department_code}</span>
-                  {" · "}
-                  {s.department_name}
-                </td>
-                <td className="mono text-sm">{s.employee_count}</td>
-                <td className="text-sm">
-                  <SectionManagerChips sectionId={s.id} />
-                </td>
-                <td>
-                  <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                    <button
-                      className="btn btn-sm"
-                      onClick={() => setManaging(s)}
-                      title={t("sectionsPage.managersBtnTitle")}
-                    >
-                      <Icon name="users" size={11} />
-                      {t("sectionsPage.managersBtn")}
-                    </button>
-                    <button className="btn btn-sm" onClick={() => setEditing(s)}>
-                      <Icon name="settings" size={11} />
-                      {t("common.edit") as string}
-                    </button>
-                    <button
-                      className="btn btn-sm"
-                      onClick={() => onDelete(s)}
-                      disabled={del.isPending}
-                    >
-                      <Icon name="x" size={11} />
-                      {t("common.delete") as string}
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {filtered.map((s) => (
+                <tr key={s.id}>
+                  <td className="mono text-sm" style={nowrap}>
+                    {s.code}
+                  </td>
+                  <td className="text-sm">
+                    <strong>{s.name}</strong>
+                  </td>
+                  <td className="text-sm">
+                    <span className="mono text-xs text-dim">{s.department_code}</span>
+                    {" · "}
+                    {s.department_name}
+                  </td>
+                  <td className="mono text-sm">{s.employee_count}</td>
+                  <td className="text-sm">
+                    <SectionManagerChips sectionId={s.id} />
+                  </td>
+                  <td>
+                    <div className="st-row-actions">
+                      <KebabMenu
+                        label={t("common.actions", { defaultValue: "Actions" }) as string}
+                        items={[
+                          { label: t("sectionsPage.managersBtn") as string, icon: <Icon name="users" size={13} />, onClick: () => setManaging(s) },
+                          { label: t("common.edit") as string, icon: <Icon name="edit" size={13} />, onClick: () => setEditing(s) },
+                          {
+                            label: t("common.delete") as string,
+                            icon: <Icon name="trash" size={13} />,
+                            danger: true,
+                            onClick: () => {
+                              if (!del.isPending) setDeleting(s);
+                            },
+                          },
+                        ]}
+                      />
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableCard>
+      )}
 
       {showAdd && (
         <SectionFormModal
@@ -219,7 +294,21 @@ export function SectionsPage() {
           onClose={() => setManaging(null)}
         />
       )}
-    </>
+
+      {deleting && (
+        <ConfirmModal
+          titleId="section-delete-title"
+          title={t("settingsForms.section.deleteTitle", { defaultValue: "Delete section" })}
+          subtitle={`${deleting.department_code ?? ""}/${deleting.code} · ${deleting.name}`}
+          confirmLabel={t("settingsForms.section.deleteAction", { defaultValue: "Delete section" })}
+          busy={del.isPending}
+          onConfirm={() => onDelete(deleting)}
+          onClose={() => setDeleting(null)}
+        >
+          <p className="st-confirm-text">{t("sectionsPage.confirmDelete", { name: deleting.name })}</p>
+        </ConfirmModal>
+      )}
+    </SettingsPage>
   );
 }
 
@@ -249,9 +338,24 @@ function SectionFormModal({
     initial?.department_id ?? defaultDepartmentId ?? "",
   );
   const isEdit = !!initial;
+  const [errors, setErrors] = useState<{ department?: string | undefined; code?: string | undefined; name?: string | undefined }>({});
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const deptError = (v: number | ""): string | undefined =>
+    isEdit || v !== "" ? undefined : t("settingsForms.section.departmentRequired", { defaultValue: "Pick a department." });
+  const codeError = (v: string): string | undefined => {
+    if (isEdit) return undefined;
+    if (!v.trim()) return t("settingsForms.codeRequired", { defaultValue: "Code is required." });
+    if (!/^[A-Z0-9_]{1,16}$/.test(v.trim()))
+      return t("settingsForms.codePattern", { defaultValue: "Use 1-16 uppercase letters, digits or underscores." });
+    return undefined;
+  };
+  const nameError = (v: string): string | undefined =>
+    v.trim() ? undefined : t("settingsForms.nameRequired", { defaultValue: "Name is required." });
+
+  const handleSubmit = () => {
+    const next = { department: deptError(departmentId), code: codeError(code), name: nameError(name) };
+    setErrors(next);
+    if (next.department || next.code || next.name) return;
     if (!code.trim() || !name.trim() || departmentId === "") return;
     onSubmit({
       code: code.trim().toUpperCase(),
@@ -261,50 +365,45 @@ function SectionFormModal({
   };
 
   return (
-    <ModalShell onClose={onClose}>
-      <div
-        style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 60,
-          display: "grid",
-          placeItems: "center",
-        }}
+    <SettingsFormModal
+      icon={<Icon name="user" size={18} />}
+      title={isEdit ? t("sectionsPage.editTitle") : t("sectionsPage.addTitle")}
+      subtitle={
+        isEdit
+          ? t("settingsForms.section.editSubtitle", { defaultValue: "Rename this section. Department and code stay fixed." })
+          : t("settingsForms.section.addSubtitle", { defaultValue: "Create a team inside a department with its own managers." })
+      }
+      onClose={onClose}
+      onSubmit={handleSubmit}
+      titleId="section-form-title"
+      footer={
+        <FormFooter
+          onCancel={onClose}
+          submitLabel={isEdit ? t("settingsForms.saveChanges", { defaultValue: "Save changes" }) : t("sectionsPage.addSection")}
+          submittingLabel={t("sectionsPage.saving")}
+          submitting={submitting}
+          canSubmit={!!code.trim() && !!name.trim() && departmentId !== ""}
+        />
+      }
+    >
+      <FormSection
+        step={1}
+        title={t("settingsForms.placementSection", { defaultValue: "Placement" })}
+        description={t("sectionsPage.field.departmentHint")}
+        columns={1}
       >
-      <form
-        onSubmit={handleSubmit}
-        className="card"
-        style={{ width: "min(440px, 92vw)", padding: 22 }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "flex-start",
-            justifyContent: "space-between",
-            marginBottom: 14,
-          }}
-        >
-          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>
-            {isEdit ? t("sectionsPage.editTitle") : t("sectionsPage.addTitle")}
-          </h2>
-          <button
-            type="button"
-            className="icon-btn"
-            onClick={onClose}
-            aria-label={t("sectionsPage.close")}
-          >
-            <Icon name="x" size={14} />
-          </button>
-        </div>
-
-        <Field label={t("sectionsPage.field.department")} hint={t("sectionsPage.field.departmentHint")}>
+        <Field label={t("sectionsPage.field.department")} htmlFor="section-department" required={!isEdit} error={errors.department}>
           <select
+            id="section-department"
+            className="select"
             value={departmentId}
-            onChange={(e) =>
-              setDepartmentId(e.target.value === "" ? "" : Number(e.target.value))
-            }
+            onChange={(e) => {
+              const v = e.target.value === "" ? "" : Number(e.target.value);
+              setDepartmentId(v);
+              if (errors.department) setErrors((p) => ({ ...p, department: deptError(v) }));
+            }}
+            onBlur={() => setErrors((p) => ({ ...p, department: deptError(departmentId) }))}
             disabled={isEdit}
-            style={inputStyle}
             required
           >
             <option value="">{t("sectionsPage.pickDepartment")}</option>
@@ -315,41 +414,52 @@ function SectionFormModal({
             ))}
           </select>
         </Field>
-        <Field label={t("sectionsPage.field.code")} hint={t("sectionsPage.field.codeHint")}>
+      </FormSection>
+      <FormSection
+        step={2}
+        title={t("settingsForms.identitySection", { defaultValue: "Identity" })}
+        description={t("settingsForms.section.identityDesc", { defaultValue: "The code is unique within its department; the name is what people see." })}
+      >
+        <Field
+          label={t("sectionsPage.field.code")}
+          htmlFor="section-code"
+          required={!isEdit}
+          error={errors.code}
+          help={isEdit ? t("settingsForms.codeLocked", { defaultValue: "Codes can't be changed after create." }) : t("sectionsPage.field.codeHint")}
+        >
           <input
+            id="section-code"
+            className="input mono"
             value={code}
-            onChange={(e) => setCode(e.target.value.toUpperCase())}
+            onChange={(e) => {
+              setCode(e.target.value.toUpperCase());
+              if (errors.code) setErrors((p) => ({ ...p, code: undefined }));
+            }}
+            onBlur={(e) => setErrors((p) => ({ ...p, code: codeError(e.target.value) }))}
             disabled={isEdit}
             placeholder={t("sectionsPage.field.codePlaceholder")}
-            style={inputStyle}
             required
             maxLength={16}
             pattern="[A-Z0-9_]{1,16}"
           />
         </Field>
-        <Field label={t("sectionsPage.field.name")}>
+        <Field label={t("sectionsPage.field.name")} htmlFor="section-name" required error={errors.name}>
           <input
+            id="section-name"
+            className="input"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => {
+              setName(e.target.value);
+              if (errors.name) setErrors((p) => ({ ...p, name: undefined }));
+            }}
+            onBlur={(e) => setErrors((p) => ({ ...p, name: nameError(e.target.value) }))}
             placeholder={t("sectionsPage.field.namePlaceholder")}
-            style={inputStyle}
             required
             maxLength={120}
           />
         </Field>
-
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
-          <button type="button" className="btn btn-sm" onClick={onClose}>
-            {t("sectionsPage.cancel")}
-          </button>
-          <button type="submit" className="btn btn-sm btn-primary" disabled={submitting}>
-            <Icon name="check" size={11} />
-            {submitting ? t("sectionsPage.saving") : isEdit ? t("sectionsPage.save") : t("sectionsPage.create")}
-          </button>
-        </div>
-      </form>
-      </div>
-    </ModalShell>
+      </FormSection>
+    </SettingsFormModal>
   );
 }
 
@@ -371,16 +481,9 @@ function SectionManagerChips({ sectionId }: { sectionId: number }) {
   if (items.length === 0)
     return <span className="text-xs text-dim">{t("sectionsPage.noManagersInline")}</span>;
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+    <div className="st-chips" style={{ gap: 4 }}>
       {items.map((m) => (
-        <span
-          key={m.user_id}
-          className="pill pill-info"
-          title={m.email}
-          style={{ fontSize: 11 }}
-        >
-          {m.full_name}
-        </span>
+        <PersonChip key={m.user_id} name={m.full_name} title={m.email} />
       ))}
     </div>
   );
@@ -456,179 +559,92 @@ function SectionManagersModal({
   };
 
   return (
-    <ModalShell onClose={onClose}>
-      <div
-        style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 60,
-          display: "grid",
-          placeItems: "center",
-        }}
+    <SettingsFormModal
+      icon={<Icon name="users" size={18} />}
+      title={t("settingsForms.section.managersTitle", { defaultValue: "Section managers" })}
+      subtitle={`${section.department_code}/${section.code} · ${section.name}`}
+      onClose={onClose}
+      onSubmit={onAssign}
+      size="lg"
+      titleId="section-managers-title"
+      footer={
+        <CloseFooter
+          onClose={onClose}
+          label={t("sectionsPage.close")}
+          note={t("settingsForms.managersNote", { defaultValue: "Changes save as soon as you assign or remove." })}
+        />
+      }
+    >
+      <FormNotice tone="info">{t("sectionsPage.managers.scopeHint")}</FormNotice>
+      <FormSection
+        step={1}
+        title={t("sectionsPage.managers.addLabel")}
+        description={t("settingsForms.managersAddDesc", { defaultValue: "Only users holding the Manager role appear in this list." })}
+        columns={1}
       >
-      <div className="card" style={{ width: "min(540px, 92vw)", padding: 22 }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "flex-start",
-            justifyContent: "space-between",
-            marginBottom: 14,
-          }}
-        >
-          <div>
-            <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>
-              {section.department_code}/{section.code} · {section.name}
-            </h2>
-            <p
-              className="text-xs text-dim"
-              style={{ margin: "4px 0 0", maxWidth: 440 }}
+        <Field label={t("settingsForms.managerLabel", { defaultValue: "Manager" })} htmlFor="section-manager-pick">
+          <div className="st-pick-row">
+            <select
+              id="section-manager-pick"
+              className="select"
+              value={pickedId}
+              onChange={(e) => setPickedId(e.target.value === "" ? "" : Number(e.target.value))}
+              disabled={candidates.isLoading || assign.isPending}
             >
-              {t("sectionsPage.managers.scopeHint")}
-            </p>
-          </div>
-          <button
-            type="button"
-            className="icon-btn"
-            onClick={onClose}
-            aria-label={t("sectionsPage.close")}
-          >
-            <Icon name="x" size={14} />
-          </button>
-        </div>
-
-        <div style={sectionLabel}>{t("sectionsPage.managers.addLabel")}</div>
-        <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
-          <select
-            value={pickedId}
-            onChange={(e) =>
-              setPickedId(e.target.value === "" ? "" : Number(e.target.value))
-            }
-            disabled={candidates.isLoading || assign.isPending}
-            style={pickerStyle}
-          >
-            <option value="">
-              {candidates.isLoading
-                ? t("sectionsPage.managers.loadingCandidates")
-                : available.length === 0
-                  ? t("sectionsPage.managers.allAssigned")
-                  : t("sectionsPage.managers.pickPlaceholder")}
-            </option>
-            {available.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.full_name} · {u.email}
+              <option value="">
+                {candidates.isLoading
+                  ? t("sectionsPage.managers.loadingCandidates")
+                  : available.length === 0
+                    ? t("sectionsPage.managers.allAssigned")
+                    : t("sectionsPage.managers.pickPlaceholder")}
               </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={onAssign}
-            disabled={pickedId === "" || assign.isPending}
-          >
-            <Icon name="check" size={11} />
-            {assign.isPending ? t("sectionsPage.managers.assigning") : t("sectionsPage.managers.assignBtn")}
-          </button>
-        </div>
+              {available.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.full_name} · {u.email}
+                </option>
+              ))}
+            </select>
+            <button type="submit" className="btn btn-primary" disabled={pickedId === "" || assign.isPending}>
+              <Icon name="plus" size={12} />
+              {assign.isPending ? t("sectionsPage.managers.assigning") : t("sectionsPage.managers.assignBtn")}
+            </button>
+          </div>
+        </Field>
+      </FormSection>
 
-        <div style={sectionLabel}>{t("sectionsPage.managers.currentlyAssigned")}</div>
+      <FormSection
+        step={2}
+        title={t("sectionsPage.managers.currentlyAssigned")}
+        description={t("settingsForms.managersAssignedDesc", { defaultValue: "Remove a manager to stop their visibility over this unit." })}
+        columns={1}
+      >
         {assigned.isLoading && <SkeletonLines lines={2} />}
         {!assigned.isLoading && (assigned.data?.items.length ?? 0) === 0 && (
           <div className="text-sm text-dim">{t("sectionsPage.managers.emptyAssigned")}</div>
         )}
-        {assigned.data?.items.map((m) => (
-          <div
-            key={m.user_id}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 10,
-              padding: "8px 10px",
-              borderRadius: "var(--radius-sm)",
-              background: "var(--bg-sunken)",
-              marginBottom: 6,
-            }}
-          >
-            <div style={{ minWidth: 0 }}>
-              <div
-                style={{
-                  fontWeight: 500,
-                  fontSize: 13,
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}
-              >
-                {m.full_name}
+        {(assigned.data?.items.length ?? 0) > 0 && (
+          <div className="st-list">
+            {assigned.data?.items.map((m) => (
+              <div key={m.user_id} className="st-list-row">
+                <div className="st-list-row-main">
+                  <div className="st-list-row-title">{m.full_name}</div>
+                  <div className="text-xs text-dim">{m.email}</div>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost st-danger"
+                  onClick={() => onRemove(m)}
+                  disabled={remove.isPending}
+                  title={t("sectionsPage.managers.removeBtnTitle")}
+                >
+                  <Icon name="x" size={11} />
+                  {t("sectionsPage.managers.removeBtn")}
+                </button>
               </div>
-              <div className="text-xs text-dim mono">{m.email}</div>
-            </div>
-            <button
-              type="button"
-              className="btn btn-sm"
-              onClick={() => onRemove(m)}
-              disabled={remove.isPending}
-              title={t("sectionsPage.managers.removeBtnTitle")}
-            >
-              <Icon name="x" size={11} />
-              {t("sectionsPage.managers.removeBtn")}
-            </button>
+            ))}
           </div>
-        ))}
-      </div>
-      </div>
-    </ModalShell>
-  );
-}
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "7px 10px",
-  fontSize: 13,
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius-sm)",
-  background: "var(--bg-elev)",
-  color: "var(--text)",
-};
-
-const pickerStyle: React.CSSProperties = {
-  padding: "7px 10px",
-  fontSize: 13,
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius-sm)",
-  background: "var(--bg-elev)",
-  color: "var(--text)",
-};
-
-const sectionLabel: React.CSSProperties = {
-  fontSize: 11,
-  fontWeight: 500,
-  textTransform: "uppercase",
-  letterSpacing: "0.05em",
-  color: "var(--text-tertiary)",
-  marginBottom: 6,
-};
-
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 12 }}>
-      <label style={{ fontSize: 12, fontWeight: 500, color: "var(--text-secondary)" }}>
-        {label}
-      </label>
-      {children}
-      {hint && (
-        <span className="text-xs text-dim" style={{ marginTop: 2 }}>
-          {hint}
-        </span>
-      )}
-    </div>
+        )}
+      </FormSection>
+    </SettingsFormModal>
   );
 }

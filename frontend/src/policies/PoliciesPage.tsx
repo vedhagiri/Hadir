@@ -6,7 +6,7 @@
 // Right column: detail panel for the selected policy — visual shift-
 // window timeline, in/out fields, required + overtime, flag rules.
 //
-// "+ New policy" opens the existing PolicyForm in a drawer; the
+// "+ New policy" opens the existing PolicyForm in a modal; the
 // inline-form approach from the v1.0 P9 build was too noisy for the
 // prototype's clean two-column shell.
 //
@@ -20,7 +20,25 @@ import type { TFunction } from "i18next";
 
 import { ApiError } from "../api/client";
 import { DatePicker } from "../components/DatePicker";
-import { ModalShell } from "../components/DrawerShell";
+import { DrawerShell } from "../components/DrawerShell";
+import {
+  ChoiceCards,
+  Field,
+  FormFooter,
+  FormHeader,
+  FormNotice,
+  FormSection,
+} from "../components/FormKit";
+import { EmptyPanel, StatCard, StatGrid } from "../components/ListPageUi";
+import {
+  FormFootBar,
+  FormModal,
+  SectionLabel,
+  SoftPill,
+  WF_ICON,
+  WfSvg,
+  errorDetail,
+} from "../requests/workflowUi";
 import { Icon } from "../shell/Icon";
 import { toast } from "../shell/Toaster";
 import { PolicyImportModal } from "./PolicyImportModal";
@@ -38,7 +56,7 @@ import type {
   PolicyResponse,
   PolicyType,
 } from "./types";
-import { SkeletonTable } from "../components/Skeleton";
+import { SkeletonCards, SkeletonPanel } from "../components/Skeleton";
 
 // ---------------------------------------------------------------------------
 // Page
@@ -58,13 +76,15 @@ export function PoliciesPage() {
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  // Edit drawer — opens with a specific policy preloaded into the form.
+  // Edit modal — opens with a specific policy preloaded into the form.
   // ``null`` keeps it closed; ``PolicyResponse`` opens it pre-filled.
   const [editing, setEditing] = useState<PolicyResponse | null>(null);
   // Delete-confirmation modal. ``null`` keeps it closed; setting it
   // to a policy opens the modal with Soft / Permanent options.
   const [deleting, setDeleting] = useState<PolicyResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Group filter driven by the summary cards ("" = every group).
+  const [groupFilter, setGroupFilter] = useState<"" | PolicyGroup>("");
 
   const policyList = policies.data ?? [];
   const assignmentList = assignments.data ?? [];
@@ -131,6 +151,15 @@ export function PoliciesPage() {
   };
 
   const selected = policyList.find((p) => p.id === selectedId) ?? null;
+
+  const groupCounts = useMemo(() => {
+    const c: Record<PolicyGroup, number> = { standard: 0, ramadan: 0, custom: 0 };
+    for (const p of policyList) c[policyGroup(p.type)] += 1;
+    return c;
+  }, [policyList]);
+  const visiblePolicies = groupFilter
+    ? policyList.filter((p) => policyGroup(p.type) === groupFilter)
+    : policyList;
 
   const onCreate = async (input: {
     name: string;
@@ -202,252 +231,201 @@ export function PoliciesPage() {
     }
   };
 
+  const newPolicyBtn = (
+    <button type="button" className="btn btn-primary" onClick={() => setDrawerOpen(true)}>
+      <Icon name="plus" size={12} />
+      {t("policies.newPolicy")}
+    </button>
+  );
+
   return (
-    <>
+    <div className="wf-page">
       <div className="page-header">
         <div>
           <h1 className="page-title">{t("policies.title")}</h1>
           <p className="page-sub">{t("policies.sub")}</p>
         </div>
         <div className="page-actions">
-          <button
-            className="btn"
-            onClick={() => setImportOpen(true)}
-            title={t("policies.importTitle")}
-          >
+          <button type="button" className="btn" onClick={() => setImportOpen(true)} title={t("policies.importTitle")}>
             <Icon name="upload" size={12} />
             {t("policies.import")}
           </button>
-          <button
-            className="btn btn-primary"
-            onClick={() => setDrawerOpen(true)}
-          >
-            <Icon name="plus" size={12} />
-            {t("policies.newPolicy")}
-          </button>
+          {newPolicyBtn}
         </div>
       </div>
 
-      {policies.isLoading && (
-        <SkeletonTable rows={5} cols={5} />
-      )}
-      {policies.isError && (
-        <p style={{ color: "var(--danger-text)" }}>
-          {t("policies.loadError")}
-        </p>
-      )}
-
-      {!policies.isLoading && !policies.isError && (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(280px, 1fr) minmax(0, 2fr)",
-            gap: 16,
-            alignItems: "start",
-          }}
-        >
-          {/* Left — list */}
-          <div className="card">
-            <div className="card-head">
-              <h3 className="card-title">{t("policies.listTitle")}</h3>
-              <span className="text-xs text-dim">{policyList.length}</span>
-            </div>
-            <div style={{ padding: 4 }}>
-              {policyList.length === 0 && (
-                <div
-                  className="text-sm text-dim"
-                  style={{ padding: 16, textAlign: "center" }}
-                >
-                  {t("policies.empty")}
-                </div>
-              )}
-              {policyList.map((p) => {
-                const isSelected = p.id === selectedId;
-                const isActive = p.active_until === null;
-                const isDefault = p.id === defaultPolicyId;
-                const rowAssignments = assignmentsByPolicy[p.id] ?? [];
-                const subtitle = renderSubtitle(p, rowAssignments, t);
-                return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => setSelectedId(p.id)}
-                    style={{
-                      display: "flex",
-                      alignItems: "flex-start",
-                      gap: 8,
-                      width: "100%",
-                      textAlign: "start",
-                      background: isSelected
-                        ? "var(--accent-soft)"
-                        : "transparent",
-                      border: "none",
-                      borderRadius: "var(--radius-sm)",
-                      padding: "10px 12px",
-                      cursor: "pointer",
-                      color: isSelected
-                        ? "var(--accent-text)"
-                        : "var(--text)",
-                      transition:
-                        "background 120ms ease-out, color 120ms ease-out",
-                    }}
-                  >
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div
-                        style={{
-                          fontWeight: isSelected ? 600 : 500,
-                          fontSize: 13.5,
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 6,
-                          flexWrap: "wrap",
-                        }}
-                      >
-                        <span>{p.name}</span>
-                        {isDefault && (
-                          <span
-                            className="pill pill-accent"
-                            title={t("policies.defaultTitle")}
-                            style={{
-                              fontSize: 9.5,
-                              padding: "1px 6px",
-                              letterSpacing: "0.02em",
-                              textTransform: "uppercase",
-                              fontWeight: 700,
-                            }}
-                          >
-                            {t("policies.default")}
-                          </span>
-                        )}
-                      </div>
-                      <div
-                        className="mono text-xs text-dim"
-                        style={{ marginTop: 2, lineHeight: 1.4 }}
-                      >
-                        {subtitle}
-                      </div>
-                    </div>
-                    <span
-                      className={`pill ${
-                        isActive ? "pill-success" : "pill-neutral"
-                      }`}
-                      style={{
-                        flexShrink: 0,
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 4,
-                        fontSize: 10.5,
-                      }}
-                    >
-                      <span
-                        aria-hidden
-                        style={{
-                          display: "inline-block",
-                          width: 6,
-                          height: 6,
-                          borderRadius: "50%",
-                          background: isActive
-                            ? "var(--success)"
-                            : "var(--text-tertiary)",
-                        }}
-                      />
-                      {isActive ? t("policies.active") : t("policies.off")}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+      {policies.isLoading ? (
+        <>
+          <SkeletonCards count={4} />
+          <div className="wf-split">
+            <SkeletonPanel lines={5} />
+            <SkeletonPanel lines={9} />
           </div>
-
-          {/* Right — detail */}
-          <div className="card" style={{ padding: 18 }}>
-            {selected === null ? (
-              <div
-                className="text-sm text-dim"
-                style={{ padding: 32, textAlign: "center" }}
-              >
-                {t("policies.selectPrompt")}
-              </div>
-            ) : (
-              <PolicyDetail
-                policy={selected}
-                assignments={assignmentsByPolicy[selected.id] ?? []}
-                isDefault={selected.id === defaultPolicyId}
-                onSetDefault={() => onSetDefault(selected.id)}
-                settingDefault={setDefault.isPending}
-                onDelete={() => setDeleting(selected)}
-                onEdit={() => setEditing(selected)}
-              />
-            )}
-          </div>
+        </>
+      ) : policies.isError ? (
+        <div className="card">
+          <EmptyPanel
+            tone="danger"
+            icon={<WfSvg>{WF_ICON.alert}</WfSvg>}
+            title={t("policies.loadError")}
+            body={errorDetail(policies.error, t("common.errorGeneric"))}
+            actions={
+              <button type="button" className="btn" onClick={() => void policies.refetch()}>
+                <Icon name="refresh" size={12} /> {t("common.retry", { defaultValue: "Retry" })}
+              </button>
+            }
+          />
         </div>
+      ) : policyList.length === 0 ? (
+        <div className="card">
+          <EmptyPanel
+            tone="accent"
+            icon={<WfSvg>{WF_ICON.clock}</WfSvg>}
+            title={t("policies.emptyTitle", { defaultValue: "No shift policies yet" })}
+            body={t("policies.empty")}
+            actions={newPolicyBtn}
+          />
+        </div>
+      ) : (
+        <>
+          <StatGrid>
+            <StatCard
+              tone="info"
+              icon={<path d="M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />}
+              label={t("policies.stats.all", { defaultValue: "All policies" })}
+              value={policyList.length}
+              sub={t("policies.stats.allSub", {
+                defaultValue: "{{n}} active",
+                n: policyList.filter((p) => p.active_until === null).length,
+              })}
+              active={groupFilter === ""}
+              onClick={() => setGroupFilter("")}
+            />
+            {POLICY_GROUPS.map((g) => (
+              <StatCard
+                key={g}
+                tone={g === "standard" ? "success" : g === "ramadan" ? "warning" : "neutral"}
+                icon={GROUP_ICON[g]}
+                label={groupLabel(g, t)}
+                value={groupCounts[g]}
+                sub={groupSub(g, t)}
+                active={groupFilter === g}
+                onClick={() => setGroupFilter(groupFilter === g ? "" : g)}
+              />
+            ))}
+          </StatGrid>
+
+          <div className="wf-split">
+            {/* Left — list, grouped Standard / Ramadan / Custom */}
+            <div className="card">
+              <div className="card-head wf-row wf-row-between">
+                <h3 className="card-title">{t("policies.listTitle")}</h3>
+                <span className="text-xs text-dim mono">
+                  {groupFilter
+                    ? `${visiblePolicies.length} / ${policyList.length}`
+                    : policyList.length}
+                </span>
+              </div>
+              <div className="wf-list-pad">
+                {visiblePolicies.length === 0 && (
+                  <EmptyPanel
+                    tone="neutral"
+                    icon={<WfSvg>{WF_ICON.search}</WfSvg>}
+                    title={t("policies.emptyGroup.title", { defaultValue: "No {{group}} policies", group: groupFilter ? groupLabel(groupFilter, t) : "" })}
+                    body={t("policies.emptyGroup.body", { defaultValue: "Pick another group above or create a policy of this type." })}
+                    actions={
+                      <button type="button" className="btn" onClick={() => setGroupFilter("")}>
+                        {t("policies.emptyGroup.clear", { defaultValue: "Show all policies" })}
+                      </button>
+                    }
+                  />
+                )}
+                {POLICY_GROUPS.map((g) => {
+                  const rows = visiblePolicies.filter((p) => policyGroup(p.type) === g);
+                  if (rows.length === 0) return null;
+                  return (
+                    <div key={g} style={{ marginBottom: 4 }}>
+                      <div className="wf-group-head">
+                        <span>{groupLabel(g, t)}</span>
+                        <span className="mono">{rows.length}</span>
+                      </div>
+                      {rows.map((p) => {
+                        const isSelected = p.id === selectedId;
+                        const isActive = p.active_until === null;
+                        const isDefault = p.id === defaultPolicyId;
+                        const rowAssignments = assignmentsByPolicy[p.id] ?? [];
+                        const subtitle = renderSubtitle(p, rowAssignments, t);
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => setSelectedId(p.id)}
+                            aria-pressed={isSelected}
+                            className="wf-policy-row"
+                          >
+                            <div className="wf-grow">
+                              <div className="wf-policy-row-name">
+                                <span>{p.name}</span>
+                                {isDefault && (
+                                  <span title={t("policies.defaultTitle")}>
+                                    <SoftPill tone="accent" dot={false}>
+                                      {t("policies.default")}
+                                    </SoftPill>
+                                  </span>
+                                )}
+                              </div>
+                              <div className="wf-policy-row-sub">{subtitle}</div>
+                            </div>
+                            <span style={{ flexShrink: 0 }}>
+                              <SoftPill tone={isActive ? "success" : "neutral"}>
+                                {isActive ? t("policies.active") : t("policies.off")}
+                              </SoftPill>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Right — detail */}
+            <div className="card">
+              <div className="card-body">
+                {selected === null ? (
+                  <EmptyPanel
+                    icon={<WfSvg>{WF_ICON.clock}</WfSvg>}
+                    title={t("policies.selectTitle", { defaultValue: "Pick a policy" })}
+                    body={t("policies.selectPrompt")}
+                  />
+                ) : (
+                  <PolicyDetail
+                    policy={selected}
+                    assignments={assignmentsByPolicy[selected.id] ?? []}
+                    isDefault={selected.id === defaultPolicyId}
+                    onSetDefault={() => onSetDefault(selected.id)}
+                    settingDefault={setDefault.isPending}
+                    onDelete={() => setDeleting(selected)}
+                    onEdit={() => setEditing(selected)}
+                  />
+                )}
+              </div>
+            </div>
+          </div>
+        </>
       )}
 
       {drawerOpen && (
-        <ModalShell onClose={() => setDrawerOpen(false)}>
-          <div
-            style={{
-              position: "fixed",
-              inset: 0,
-              zIndex: 60,
-              display: "grid",
-              placeItems: "center",
-              padding: 16,
-            }}
-          >
-            <div
-              className="card"
-              role="dialog"
-              aria-modal="true"
-              aria-label={t("policies.newModal.ariaLabel")}
-              style={{
-                width: "min(620px, 96vw)",
-                maxHeight: "86vh",
-                overflow: "auto",
-              }}
-            >
-              <div className="card-head">
-                <div>
-                  <div className="mono text-xs text-dim">{t("policies.newModal.label")}</div>
-                  <h3 className="card-title" style={{ marginTop: 2 }}>
-                    {t("policies.newModal.title")}
-                  </h3>
-                </div>
-                <button
-                  className="icon-btn"
-                  onClick={() => setDrawerOpen(false)}
-                  aria-label={t("common.close")}
-                  title={t("common.close")}
-                  disabled={create.isPending}
-                >
-                  <Icon name="x" size={14} />
-                </button>
-              </div>
-              <div className="card-body">
-                {error && (
-                  <div
-                    role="alert"
-                    style={{
-                      background: "var(--danger-soft)",
-                      color: "var(--danger-text)",
-                      border: "1px solid var(--border)",
-                      padding: "8px 10px",
-                      borderRadius: "var(--radius-sm)",
-                      fontSize: 12.5,
-                      marginBottom: 12,
-                    }}
-                  >
-                    {error}
-                  </div>
-                )}
-                <PolicyForm onSubmit={onCreate} busy={create.isPending} />
-              </div>
-            </div>
-          </div>
-        </ModalShell>
+        <PolicyForm
+          onSubmit={onCreate}
+          busy={create.isPending}
+          onClose={() => setDrawerOpen(false)}
+          serverError={error}
+        />
       )}
       {editing && (
-        <PolicyEditDrawer
+        <PolicyEditModal
           policy={editing}
           onClose={() => setEditing(null)}
         />
@@ -463,7 +441,7 @@ export function PoliciesPage() {
           onConfirm={(hard) => onDelete(deleting, hard)}
         />
       )}
-    </>
+    </div>
   );
 }
 
@@ -502,80 +480,46 @@ function DeletePolicyModal({
   };
 
   return (
-    <ModalShell onClose={busy ? () => {} : onClose}>
-      <div
-        style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 60,
-          display: "grid",
-          placeItems: "center",
-          padding: 16,
-        }}
-      >
-        <div
-          className="card"
-          role="dialog"
-          aria-modal="true"
-          aria-label={t("policies.deleteModal.ariaLabel", { name: policy.name })}
-          style={{
-            width: "min(540px, 96vw)",
-            maxHeight: "86vh",
-            overflow: "auto",
-          }}
-        >
-          <div className="card-head">
-            <div>
-              <div className="mono text-xs text-dim">{t("policies.deleteModal.label")}</div>
-              <h3 className="card-title" style={{ marginTop: 2 }}>
-                {t("policies.deleteModal.title", { name: policy.name })}
-              </h3>
-            </div>
-            <button
-              className="icon-btn"
-              onClick={onClose}
-              aria-label={t("common.close")}
-              title={t("common.close")}
-              disabled={busy}
-            >
-              <Icon name="x" size={14} />
-            </button>
-          </div>
-          <div className="card-body" style={{ display: "grid", gap: 12 }}>
-            <p
-              className="text-sm text-dim"
-              style={{ margin: 0, lineHeight: 1.5 }}
-            >
-              {t("policies.deleteModal.body")}
-            </p>
+    <FormModal
+      onClose={onClose}
+      busy={busy}
+      size="md"
+      icon={<Icon name="trash" size={18} />}
+      eyebrow={t("policies.deleteModal.label")}
+      title={t("policies.deleteModal.title", { name: policy.name })}
+      subtitle={t("policies.deleteModal.body")}
+      footer={
+        <FormFootBar>
+          <button type="button" className="btn" onClick={onClose} disabled={busy}>
+            {t("common.cancel")}
+          </button>
+        </FormFootBar>
+      }
+    >
+      <DeleteOption
+        title={t("policies.deleteModal.softTitle")}
+        description={t("policies.deleteModal.softDesc")}
+        actionLabel={t("policies.deleteModal.softAction")}
+        workingLabel={t("policies.deleteModal.working")}
+        actionClass="btn"
+        busy={pending === "soft"}
+        disabled={busy}
+        onClick={() => run(false)}
+      />
 
-            <DeleteOption
-              title={t("policies.deleteModal.softTitle")}
-              description={t("policies.deleteModal.softDesc")}
-              actionLabel={t("policies.deleteModal.softAction")}
-              workingLabel={t("policies.deleteModal.working")}
-              actionClass="btn"
-              busy={pending === "soft"}
-              disabled={busy}
-              onClick={() => run(false)}
-            />
-
-            <DeleteOption
-              title={t("policies.deleteModal.hardTitle")}
-              description={t("policies.deleteModal.hardDesc")}
-              actionLabel={t("policies.deleteModal.hardAction")}
-              workingLabel={t("policies.deleteModal.working")}
-              actionClass="btn btn-danger"
-              busy={pending === "hard"}
-              disabled={busy}
-              danger
-              onClick={() => run(true)}
-              error={hardError}
-            />
-          </div>
-        </div>
-      </div>
-    </ModalShell>
+      <DeleteOption
+        title={t("policies.deleteModal.hardTitle")}
+        description={t("policies.deleteModal.hardDesc")}
+        actionLabel={t("policies.deleteModal.hardAction")}
+        workingLabel={t("policies.deleteModal.working")}
+        actionClass="btn btn-danger"
+        busy={pending === "hard"}
+        disabled={busy}
+        danger
+        onClick={() => run(true)}
+        error={hardError}
+      />
+    </FormModal>
   );
 }
 
@@ -603,39 +547,11 @@ function DeleteOption({
   error?: string | null;
 }) {
   return (
-    <div
-      style={{
-        border: `1px solid ${danger ? "var(--danger)" : "var(--border)"}`,
-        borderRadius: "var(--radius-sm)",
-        padding: 12,
-        background: danger ? "var(--danger-soft)" : "var(--bg)",
-        display: "grid",
-        gap: 8,
-      }}
-    >
-      <div style={{ fontWeight: 600, fontSize: 13.5 }}>{title}</div>
-      <div
-        className="text-xs text-dim"
-        style={{ lineHeight: 1.5, margin: 0 }}
-      >
-        {description}
-      </div>
-      {error && (
-        <div
-          role="alert"
-          style={{
-            background: "var(--bg)",
-            border: "1px solid var(--danger)",
-            color: "var(--danger-text)",
-            padding: "6px 8px",
-            borderRadius: "var(--radius-sm)",
-            fontSize: 12,
-          }}
-        >
-          {error}
-        </div>
-      )}
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+    <div className={`wf-option${danger ? " is-danger" : ""}`}>
+      <div className="wf-option-title">{title}</div>
+      <div className="text-xs wf-muted wf-option-desc">{description}</div>
+      {error && <FormNotice tone="danger">{error}</FormNotice>}
+      <div className="wf-row wf-row-end">
         <button
           type="button"
           className={actionClass}
@@ -659,7 +575,7 @@ function DeleteOption({
 // switch types).
 // ---------------------------------------------------------------------------
 
-function PolicyEditDrawer({
+function PolicyEditModal({
   policy,
   onClose,
 }: {
@@ -705,74 +621,13 @@ function PolicyEditDrawer({
   };
 
   return (
-    <ModalShell onClose={onClose}>
-      <div
-        style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 60,
-          display: "grid",
-          placeItems: "center",
-          padding: 16,
-        }}
-      >
-        <div
-          className="card"
-          role="dialog"
-          aria-modal="true"
-          aria-label={t("policies.editModal.ariaLabel", { name: policy.name })}
-          style={{
-            width: "min(620px, 96vw)",
-            maxHeight: "86vh",
-            overflow: "auto",
-          }}
-        >
-          <div className="card-head">
-            <div>
-              <div className="mono text-xs text-dim">{t("policies.editModal.label")}</div>
-              <h3
-                className="card-title"
-                style={{ marginTop: 2 }}
-              >
-                {t("policies.editModal.title", { name: policy.name })}
-              </h3>
-            </div>
-            <button
-              className="icon-btn"
-              onClick={onClose}
-              aria-label={t("common.close")}
-              title={t("common.close")}
-              disabled={patch.isPending}
-            >
-              <Icon name="x" size={14} />
-            </button>
-          </div>
-          <div className="card-body">
-            {error && (
-              <div
-                role="alert"
-                style={{
-                  background: "var(--danger-soft)",
-                  color: "var(--danger-text)",
-                  border: "1px solid var(--border)",
-                  padding: "8px 10px",
-                  borderRadius: "var(--radius-sm)",
-                  fontSize: 12.5,
-                  marginBottom: 12,
-                }}
-              >
-                {error}
-              </div>
-            )}
-            <PolicyForm
-              onSubmit={onSave}
-              busy={patch.isPending}
-              initial={policy}
-            />
-          </div>
-        </div>
-      </div>
-    </ModalShell>
+    <PolicyForm
+      onSubmit={onSave}
+      busy={patch.isPending}
+      initial={policy}
+      onClose={onClose}
+      serverError={error}
+    />
   );
 }
 
@@ -808,49 +663,20 @@ function PolicyDetail({
   return (
     <>
       {/* Header — name + type pill + actions */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          marginBottom: 4,
-        }}
-      >
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              flexWrap: "wrap",
-            }}
-          >
-            <h2
-              style={{ margin: 0, fontSize: 18, fontWeight: 600 }}
-            >
-              {policy.name}
-            </h2>
-            <span className="pill pill-accent">{policy.type}</span>
-            {isDefault && (
-              <span
-                className="pill pill-accent"
-                title={t("policies.detail.defaultPillTitle")}
-                style={{
-                  fontSize: 10.5,
-                  padding: "2px 8px",
-                  letterSpacing: "0.02em",
-                  textTransform: "uppercase",
-                  fontWeight: 700,
-                }}
-              >
-                {t("policies.default")}
-              </span>
-            )}
-            {!isActive && <span className="pill pill-neutral">{t("policies.off")}</span>}
-          </div>
+      <div className="wf-detail-head">
+        <div className="wf-grow wf-row">
+          <h2 className="wf-detail-title">{policy.name}</h2>
+          <SoftPill tone="info" dot={false}>{policy.type}</SoftPill>
+          {isDefault && (
+            <span title={t("policies.detail.defaultPillTitle")}>
+              <SoftPill tone="accent">{t("policies.default")}</SoftPill>
+            </span>
+          )}
+          {!isActive && <SoftPill tone="neutral">{t("policies.off")}</SoftPill>}
         </div>
         {!isDefault && isActive && (
           <button
+            type="button"
             className="btn btn-sm"
             onClick={onSetDefault}
             disabled={settingDefault}
@@ -860,15 +686,12 @@ function PolicyDetail({
             {settingDefault ? t("policies.detail.settingDefault") : t("policies.detail.setAsDefault")}
           </button>
         )}
-        <button
-          className="btn btn-sm"
-          onClick={onEdit}
-          title={t("policies.detail.editTitle")}
-        >
+        <button type="button" className="btn btn-sm" onClick={onEdit} title={t("policies.detail.editTitle")}>
           <Icon name="edit" size={11} /> {t("policies.detail.edit")}
         </button>
         <button
-          className="icon-btn"
+          type="button"
+          className="icon-btn wf-danger-text"
           aria-label={t("policies.detail.deleteAria")}
           onClick={onDelete}
           title={t("policies.detail.deleteTitle")}
@@ -876,10 +699,7 @@ function PolicyDetail({
           <Icon name="trash" size={13} />
         </button>
       </div>
-      <p
-        className="text-sm text-dim"
-        style={{ marginTop: 0, marginBottom: 16 }}
-      >
+      <p className="text-sm wf-muted" style={{ marginTop: 0, marginBottom: 10 }}>
         {t("policies.detail.mustComplete", { n: requiredHours })}
         {assignments.length > 0 && (
           <>
@@ -888,20 +708,16 @@ function PolicyDetail({
           </>
         )}
       </p>
+      <div style={{ marginBottom: 16 }}>
+        <AssignmentChips assignments={assignments} />
+      </div>
 
       {/* SHIFT WINDOW — visual timeline ribbon */}
       <SectionLabel>{t("policies.detail.shiftWindow")}</SectionLabel>
       <ShiftWindowRibbon policy={policy} />
 
       {/* IN/OUT + REQUIRED + OVERTIME */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 12,
-          marginTop: 16,
-        }}
-      >
+      <div className="wf-detail-grid">
         <DetailField
           label={t("policies.detail.inTime")}
           value={
@@ -920,16 +736,6 @@ function PolicyDetail({
           }
           hint={isFlexShape ? t("policies.detail.flexHint") : undefined}
         />
-      </div>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 12,
-          marginTop: 12,
-          marginBottom: 16,
-        }}
-      >
         <DetailField label={t("policies.detail.requiredHours")} value={String(requiredHours)} />
         <DetailField
           label={t("policies.detail.overtimeThreshold")}
@@ -981,7 +787,6 @@ function ShiftWindowRibbon({ policy }: { policy: PolicyResponse }) {
     label: string;
     start: number;
     end: number;
-    fill: string;
     accent?: boolean;
   }> = [];
 
@@ -991,29 +796,18 @@ function ShiftWindowRibbon({ policy }: { policy: PolicyResponse }) {
     const outS = minutesOf(cfg.out_window_start);
     const outE = minutesOf(cfg.out_window_end);
     if (inS !== null && inE !== null) {
-      bands.push({
-        label: t("policies.detail.bandArrive"),
-        start: inS,
-        end: inE,
-        fill: "var(--info-soft)",
-      });
+      bands.push({ label: t("policies.detail.bandArrive"), start: inS, end: inE });
     }
     if (inE !== null && outS !== null && inE < outS) {
       bands.push({
         label: t("policies.detail.bandWork", { n: cfg.required_hours ?? 8 }),
         start: inE,
         end: outS,
-        fill: "var(--accent-soft)",
         accent: true,
       });
     }
     if (outS !== null && outE !== null) {
-      bands.push({
-        label: t("policies.detail.bandDepart"),
-        start: outS,
-        end: outE,
-        fill: "var(--info-soft)",
-      });
+      bands.push({ label: t("policies.detail.bandDepart"), start: outS, end: outE });
     }
   } else {
     const s = minutesOf(cfg.start);
@@ -1023,25 +817,13 @@ function ShiftWindowRibbon({ policy }: { policy: PolicyResponse }) {
         label: t("policies.detail.bandShift", { n: cfg.required_hours ?? 8 }),
         start: s,
         end: e,
-        fill: "var(--accent-soft)",
         accent: true,
       });
     }
   }
 
   return (
-    <div
-      style={{
-        position: "relative",
-        height: 64,
-        marginTop: 4,
-        background: "var(--bg-sunken)",
-        border: "1px solid var(--border)",
-        borderRadius: "var(--radius-sm)",
-        padding: "8px 0 0 0",
-        overflow: "hidden",
-      }}
-    >
+    <div className="wf-ribbon">
       {/* Hour ticks */}
       {Array.from({ length: HOURS_END - HOURS_START + 1 }).map((_, i) => {
         const hour = HOURS_START + i;
@@ -1049,15 +831,8 @@ function ShiftWindowRibbon({ policy }: { policy: PolicyResponse }) {
         return (
           <div
             key={hour}
-            style={{
-              position: "absolute",
-              insetInlineStart: `${left}%`,
-              top: 0,
-              bottom: 18,
-              width: 1,
-              background: "var(--border)",
-              opacity: hour % 3 === 0 ? 0.7 : 0.3,
-            }}
+            className="wf-ribbon-tick"
+            style={{ insetInlineStart: `${left}%`, opacity: hour % 3 === 0 ? 0.9 : 0.4 }}
             aria-hidden
           />
         );
@@ -1069,49 +844,15 @@ function ShiftWindowRibbon({ policy }: { policy: PolicyResponse }) {
         return (
           <div
             key={i}
-            style={{
-              position: "absolute",
-              insetInlineStart: `${left}%`,
-              width: `${width}%`,
-              top: 8,
-              bottom: 22,
-              background: b.fill,
-              border: b.accent
-                ? "1px solid var(--accent)"
-                : "1px solid transparent",
-              borderRadius: 4,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 11,
-              color: b.accent
-                ? "var(--accent-text)"
-                : "var(--text-secondary)",
-              fontWeight: 500,
-              overflow: "hidden",
-              whiteSpace: "nowrap",
-            }}
+            className={`wf-ribbon-band${b.accent ? " is-accent" : ""}`}
+            style={{ insetInlineStart: `${left}%`, width: `${width}%` }}
           >
             {b.label}
           </div>
         );
       })}
       {/* Hour labels along the bottom */}
-      <div
-        style={{
-          position: "absolute",
-          insetInlineStart: 0,
-          insetInlineEnd: 0,
-          bottom: 4,
-          display: "flex",
-          justifyContent: "space-between",
-          fontSize: 10,
-          color: "var(--text-tertiary)",
-          fontFamily: "var(--font-mono)",
-          padding: "0 4px",
-        }}
-        aria-hidden
-      >
+      <div className="wf-ribbon-hours" aria-hidden>
         {[6, 8, 10, 12, 14, 16, 18].map((h) => (
           <span key={h}>{String(h).padStart(2, "0")}:00</span>
         ))}
@@ -1145,53 +886,78 @@ function FlagRulesList() {
     },
   ];
   return (
-    <div
-      style={{
-        border: "1px solid var(--border)",
-        borderRadius: "var(--radius-sm)",
-        overflow: "hidden",
-        marginTop: 4,
-      }}
-    >
-      {rows.map((r, i) => (
-        <div
-          key={r.label}
-          style={{
-            display: "grid",
-            gridTemplateColumns: "120px 1fr 1.5fr auto",
-            alignItems: "center",
-            gap: 12,
-            padding: "10px 12px",
-            borderTop: i === 0 ? "none" : "1px solid var(--border)",
-            fontSize: 12.5,
-          }}
-        >
-          <div style={{ fontWeight: 600 }}>{r.label}</div>
-          <div className="mono text-xs text-dim">{r.when}</div>
+    <div className="wf-rules">
+      {rows.map((r) => (
+        <div key={r.label} className="wf-rule">
+          <div className="wf-rule-name">{r.label}</div>
+          <div className="text-xs text-dim">{r.when}</div>
           <div className="text-xs">{r.action}</div>
-          <span
-            className="pill pill-success"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 4,
-              fontSize: 10.5,
-            }}
-          >
-            <span
-              aria-hidden
-              style={{
-                display: "inline-block",
-                width: 6,
-                height: 6,
-                borderRadius: "50%",
-                background: "var(--success)",
-              }}
-            />
-            {t("policies.detail.flagOn")}
-          </span>
+          <SoftPill tone="success">{t("policies.detail.flagOn")}</SoftPill>
         </div>
       ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Policy groups (summary cards + grouped list)
+// ---------------------------------------------------------------------------
+
+type PolicyGroup = "standard" | "ramadan" | "custom";
+const POLICY_GROUPS: PolicyGroup[] = ["standard", "ramadan", "custom"];
+
+function policyGroup(type: PolicyType): PolicyGroup {
+  if (type === "Ramadan") return "ramadan";
+  if (type === "Custom") return "custom";
+  return "standard";
+}
+
+function groupLabel(g: PolicyGroup, t: TFunction): string {
+  if (g === "ramadan") return t("policies.groups.ramadan", { defaultValue: "Ramadan" });
+  if (g === "custom") return t("policies.groups.custom", { defaultValue: "Custom" });
+  return t("policies.groups.standard", { defaultValue: "Standard" });
+}
+
+function groupSub(g: PolicyGroup, t: TFunction): string {
+  if (g === "ramadan") return t("policies.groups.ramadanSub", { defaultValue: "Ramadan-hours shifts" });
+  if (g === "custom") return t("policies.groups.customSub", { defaultValue: "Date-range overrides" });
+  return t("policies.groups.standardSub", { defaultValue: "Fixed and Flex shifts" });
+}
+
+const GROUP_ICON: Record<PolicyGroup, React.ReactNode> = {
+  standard: <><rect x="3" y="4" width="18" height="17" rx="2" /><path d="M8 2v4M16 2v4M3 10h18" /></>,
+  ramadan: <path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z" />,
+  custom: <><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" /></>,
+};
+
+/** Assignment scope chips: "Company default", "2 departments", "5 employees". */
+function AssignmentChips({ assignments }: { assignments: AssignmentResponse[] }) {
+  const { t } = useTranslation();
+  const tenant = assignments.filter((a) => a.scope_type === "tenant").length;
+  const dept = assignments.filter((a) => a.scope_type === "department").length;
+  const emp = assignments.filter((a) => a.scope_type === "employee").length;
+  if (assignments.length === 0) {
+    return (
+      <SoftPill tone="neutral" dot={false}>
+        {t("policies.chips.unassigned", { defaultValue: "Not assigned yet" })}
+      </SoftPill>
+    );
+  }
+  return (
+    <div className="wf-row">
+      {tenant > 0 && (
+        <SoftPill tone="accent">{t("policies.chips.company", { defaultValue: "Whole company" })}</SoftPill>
+      )}
+      {dept > 0 && (
+        <SoftPill tone="info">
+          {t("policies.chips.departments", { defaultValue: "Departments · {{n}}", n: dept })}
+        </SoftPill>
+      )}
+      {emp > 0 && (
+        <SoftPill tone="info">
+          {t("policies.chips.employees", { defaultValue: "Employees · {{n}}", n: emp })}
+        </SoftPill>
+      )}
     </div>
   );
 }
@@ -1239,26 +1005,8 @@ function renderTimeRange(p: PolicyResponse): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// Detail-side primitives (read-only field row + section label)
+// Detail-side primitive (read-only field row)
 // ---------------------------------------------------------------------------
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        fontSize: 11,
-        fontWeight: 600,
-        textTransform: "uppercase",
-        letterSpacing: "0.05em",
-        color: "var(--text-tertiary)",
-        marginTop: 16,
-        marginBottom: 8,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
 
 function DetailField({
   label,
@@ -1270,55 +1018,28 @@ function DetailField({
   hint?: string | undefined;
 }) {
   return (
-    <div>
-      <div
-        className="text-xs"
-        style={{
-          fontWeight: 600,
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-          color: "var(--text-tertiary)",
-          marginBottom: 4,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        className="mono"
-        style={{
-          fontSize: 14,
-          fontWeight: 500,
-          padding: "8px 10px",
-          border: "1px solid var(--border)",
-          borderRadius: "var(--radius-sm)",
-          background: "var(--bg-elev)",
-          color: "var(--text)",
-        }}
-      >
-        {value}
-      </div>
-      {hint && (
-        <div className="text-xs text-dim" style={{ marginTop: 4 }}>
-          {hint}
-        </div>
-      )}
+    <div className="field">
+      <div className="field-label">{label}</div>
+      <div className="wf-detail-field-value">{value}</div>
+      {hint && <div className="field-help">{hint}</div>}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// PolicyForm — mounted inside the New-policy drawer.
+// PolicyForm — mounted inside the New-policy / Edit modals.
 //
-// Carried over from the v1.0 P9 build verbatim so the existing
-// validators + Ramadan-default pre-fill continue to work. Only the
-// outer surface changed (was an inline form, now sits in a drawer).
+// Carried over from the v1.0 P9 build so the existing validators +
+// Ramadan-default pre-fill continue to work. Only the outer surface
+// changed (design `.field` / `.input` / `.select` classes).
 // ---------------------------------------------------------------------------
 
 function PolicyForm({
   onSubmit,
   busy,
   initial,
-  submitLabel,
+  onClose,
+  serverError,
 }: {
   onSubmit: (input: {
     name: string;
@@ -1328,7 +1049,9 @@ function PolicyForm({
   }) => Promise<void>;
   busy: boolean;
   initial?: PolicyResponse | null | undefined;
-  submitLabel?: string | undefined;
+  onClose: () => void;
+  /** Non-field server error, shown as a notice at the top of the body. */
+  serverError?: string | null | undefined;
 }) {
   const { t } = useTranslation();
   const isEdit = !!initial;
@@ -1419,6 +1142,7 @@ function PolicyForm({
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
+    e.stopPropagation();
 
     // Validate required fields the browser can't catch on its own.
     const nextErrors: typeof errors = {};
@@ -1486,320 +1210,234 @@ function PolicyForm({
     });
   };
 
-  return (
-    <form
-      onSubmit={submit}
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: 10,
-      }}
-    >
-      <SectionCaption>{t("policies.form.sectionIdentity")}</SectionCaption>
-      <div style={grid2}>
-        <FormField label={t("policies.form.fieldName")} required error={errors.name} span>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => {
-              setName(e.target.value);
-              clearError("name");
-            }}
-            required
-            maxLength={120}
-            aria-invalid={!!errors.name}
-            style={{
-              ...inputStyle,
-              borderColor: errors.name
-                ? "var(--danger-text, #dc2626)"
-                : "var(--border)",
-            }}
-          />
-        </FormField>
-        <FormField label={t("policies.form.fieldType")} required>
-          <select
-            value={type}
-            onChange={(e) => onTypeChange(e.target.value as PolicyType)}
-            disabled={isEdit}
-            title={isEdit ? t("policies.form.typeLockedTitle") : undefined}
-            style={{
-              ...inputStyle,
-              cursor: isEdit ? "not-allowed" : "pointer",
-              opacity: isEdit ? 0.7 : 1,
-            }}
-          >
-            <option value="Fixed">Fixed</option>
-            <option value="Flex">Flex</option>
-            <option value="Ramadan">Ramadan</option>
-            <option value="Custom">Custom</option>
-          </select>
-        </FormField>
-        <FormField label={t("policies.form.fieldActiveFrom")} required>
-          <DatePicker
-            value={activeFrom}
-            onChange={setActiveFrom}
-            ariaLabel={t("policies.form.fieldActiveFrom")}
-            triggerStyle={{ width: "100%" }}
-          />
-        </FormField>
-      </div>
+  const isRange = type === "Ramadan" || type === "Custom";
+  const typeLabel: Record<PolicyType, string> = {
+    Fixed: "Fixed",
+    Flex: "Flex",
+    Ramadan: "Ramadan",
+    Custom: "Custom",
+  };
 
-      {/* Date-range picker — Ramadan + Custom only */}
-      {(type === "Ramadan" || type === "Custom") && (
-        <>
-          <SectionCaption>{t("policies.form.sectionDateRange")}</SectionCaption>
-          <div style={grid2}>
-            <FormField label={t("policies.form.fieldRangeStart")} required error={errors.rangeStart}>
-              <DatePicker
-                value={rangeStart}
-                onChange={(v) => {
-                  setRangeStart(v);
-                  clearError("rangeStart");
+  return (
+    <DrawerShell onClose={onClose}>
+      <form className="drawer fk-drawer" onSubmit={submit}>
+        <FormHeader
+          icon={<Icon name="clock" size={18} />}
+          title={isEdit ? t("policies.form.editTitle", { defaultValue: "Edit shift policy" }) : t("policies.form.newTitle", { defaultValue: "New shift policy" })}
+          subtitle={
+            isEdit
+              ? t("policies.form.editSubtitle", {
+                  defaultValue: "Change the rules of {{name}}. Attendance recomputes with the new values.",
+                  name: initial?.name ?? "",
+                })
+              : t("policies.form.newSubtitle", {
+                  defaultValue: "Define when employees are expected at work and how lateness is judged.",
+                })
+          }
+          onClose={onClose}
+        />
+        <div className="drawer-body fk-body">
+          {serverError && <FormNotice tone="danger">{serverError}</FormNotice>}
+
+          <FormSection
+            step={1}
+            title={t("policies.form.sectionIdentity")}
+            description={t("policies.form.identityDesc", { defaultValue: "A name people will recognise, and the day it takes effect." })}
+          >
+            <Field label={t("policies.form.fieldName")} htmlFor="pol-name" required error={errors.name}>
+              <input
+                id="pol-name"
+                type="text"
+                className="input"
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  clearError("name");
                 }}
-                ariaLabel={t("policies.form.fieldRangeStart")}
+                required
+                maxLength={120}
+                aria-invalid={!!errors.name}
+                placeholder={t("policies.form.namePlaceholder", { defaultValue: "e.g. Head office day shift" })}
+              />
+            </Field>
+            <Field label={t("policies.form.fieldActiveFrom")} required>
+              <DatePicker
+                value={activeFrom}
+                onChange={setActiveFrom}
+                ariaLabel={t("policies.form.fieldActiveFrom")}
                 triggerStyle={{ width: "100%" }}
               />
-            </FormField>
-            <FormField label={t("policies.form.fieldRangeEnd")} required error={rangeEndError}>
-              <DatePicker
-                value={rangeEnd}
-                onChange={(v) => {
-                  setRangeEnd(v);
-                  clearError("rangeEnd");
-                }}
-                min={rangeStart}
-                ariaLabel={t("policies.form.fieldRangeEnd")}
-                triggerStyle={{ width: "100%" }}
-              />
-            </FormField>
-            {type === "Custom" && (
-              <FormField label={t("policies.form.fieldInnerType")} required span>
-                <select
-                  value={innerType}
-                  onChange={(e) =>
-                    setInnerType(e.target.value as "Fixed" | "Flex")
-                  }
-                  style={inputStyle}
-                >
-                  <option value="Fixed">{t("policies.form.innerFixed")}</option>
-                  <option value="Flex">{t("policies.form.innerFlex")}</option>
-                </select>
-              </FormField>
+            </Field>
+          </FormSection>
+
+          <FormSection
+            step={2}
+            title={t("policies.form.fieldType")}
+            description={
+              isEdit
+                ? t("policies.form.typeLockedTitle")
+                : t("policies.form.typeDesc", { defaultValue: "How attendance is judged. The fields below change with the type." })
+            }
+          >
+            <ChoiceCards<PolicyType>
+              label={t("policies.form.fieldType")}
+              value={type}
+              onChange={isEdit ? () => undefined : onTypeChange}
+              options={(["Fixed", "Flex", "Ramadan", "Custom"] as PolicyType[]).map((v) => ({
+                value: v,
+                title: typeLabel[v],
+                disabled: isEdit && v !== type,
+                icon: <Icon name={TYPE_ICON[v]} size={16} />,
+                description: t(`policies.form.typeDesc${v}`, { defaultValue: TYPE_DESC[v] }),
+              }))}
+            />
+          </FormSection>
+
+          {/* Date-range picker — Ramadan + Custom only */}
+          {isRange && (
+            <FormSection
+              step={3}
+              title={t("policies.form.sectionDateRange")}
+              description={t("policies.form.dateRangeDesc", { defaultValue: "The calendar days this policy overrides the regular one." })}
+            >
+              <Field label={t("policies.form.fieldRangeStart")} required error={errors.rangeStart}>
+                <DatePicker
+                  value={rangeStart}
+                  onChange={(v) => {
+                    setRangeStart(v);
+                    clearError("rangeStart");
+                  }}
+                  ariaLabel={t("policies.form.fieldRangeStart")}
+                  triggerStyle={{ width: "100%" }}
+                />
+              </Field>
+              <Field label={t("policies.form.fieldRangeEnd")} required error={rangeEndError}>
+                <DatePicker
+                  value={rangeEnd}
+                  onChange={(v) => {
+                    setRangeEnd(v);
+                    clearError("rangeEnd");
+                  }}
+                  min={rangeStart}
+                  ariaLabel={t("policies.form.fieldRangeEnd")}
+                  triggerStyle={{ width: "100%" }}
+                />
+              </Field>
+              {type === "Custom" && (
+                <Field label={t("policies.form.fieldInnerType")} required span={2}>
+                  <ChoiceCards<"Fixed" | "Flex">
+                    label={t("policies.form.fieldInnerType")}
+                    value={innerType}
+                    onChange={setInnerType}
+                    options={[
+                      { value: "Fixed", title: t("policies.form.innerFixed") },
+                      { value: "Flex", title: t("policies.form.innerFlex") },
+                    ]}
+                  />
+                </Field>
+              )}
+            </FormSection>
+          )}
+
+          <FormSection
+            step={isRange ? 4 : 3}
+            title={t("policies.form.sectionShiftWindow")}
+            description={
+              isFixedShape
+                ? t("policies.form.shiftFixedDesc", { defaultValue: "Start and end of the working day. Arrivals within the grace minutes are not late." })
+                : t("policies.form.shiftFlexDesc", { defaultValue: "When people may arrive and leave. The day counts if the required hours are met." })
+            }
+          >
+            {isFixedShape ? (
+              <>
+                <Field label={t("policies.form.fieldStart")} htmlFor="pol-start" required>
+                  <input id="pol-start" type="time" className="input" value={start} onChange={(e) => setStart(e.target.value)} required />
+                </Field>
+                <Field label={t("policies.form.fieldEnd")} htmlFor="pol-end" required>
+                  <input id="pol-end" type="time" className="input" value={end} onChange={(e) => setEnd(e.target.value)} required />
+                </Field>
+                <Field label={t("policies.form.fieldGrace")} htmlFor="pol-grace" help={t("policies.form.graceHelp", { defaultValue: "0 to 180 minutes" })}>
+                  <input
+                    id="pol-grace"
+                    type="number"
+                    className="input"
+                    min={0}
+                    max={180}
+                    value={grace}
+                    onChange={(e) =>
+                      setGrace(Number.parseInt(e.target.value, 10) || 0)
+                    }
+                  />
+                </Field>
+                <Field label={t("policies.form.fieldRequiredHours")} htmlFor="pol-hours" required help={t("policies.form.hoursHelp", { defaultValue: "1 to 24 hours" })}>
+                  <input
+                    id="pol-hours"
+                    type="number"
+                    className="input"
+                    min={1}
+                    max={24}
+                    value={requiredHours}
+                    onChange={(e) =>
+                      setRequiredHours(Number.parseInt(e.target.value, 10) || 1)
+                    }
+                    required
+                  />
+                </Field>
+              </>
+            ) : (
+              <>
+                <Field label={t("policies.form.fieldInWindowStart")} htmlFor="pol-in-start" required>
+                  <input id="pol-in-start" type="time" className="input" value={inStart} onChange={(e) => setInStart(e.target.value)} required />
+                </Field>
+                <Field label={t("policies.form.fieldInWindowEnd")} htmlFor="pol-in-end" required>
+                  <input id="pol-in-end" type="time" className="input" value={inEnd} onChange={(e) => setInEnd(e.target.value)} required />
+                </Field>
+                <Field label={t("policies.form.fieldOutWindowStart")} htmlFor="pol-out-start" required>
+                  <input id="pol-out-start" type="time" className="input" value={outStart} onChange={(e) => setOutStart(e.target.value)} required />
+                </Field>
+                <Field label={t("policies.form.fieldOutWindowEnd")} htmlFor="pol-out-end" required>
+                  <input id="pol-out-end" type="time" className="input" value={outEnd} onChange={(e) => setOutEnd(e.target.value)} required />
+                </Field>
+                <Field label={t("policies.form.fieldRequiredHours")} htmlFor="pol-hours" required help={t("policies.form.hoursHelp", { defaultValue: "1 to 24 hours" })}>
+                  <input
+                    id="pol-hours"
+                    type="number"
+                    className="input"
+                    min={1}
+                    max={24}
+                    value={requiredHours}
+                    onChange={(e) =>
+                      setRequiredHours(Number.parseInt(e.target.value, 10) || 1)
+                    }
+                    required
+                  />
+                </Field>
+              </>
             )}
-          </div>
-        </>
-      )}
-
-      <SectionCaption>{t("policies.form.sectionShiftWindow")}</SectionCaption>
-      {isFixedShape ? (
-        <div style={grid2}>
-          <FormField label={t("policies.form.fieldStart")} required>
-            <input
-              type="time"
-              value={start}
-              onChange={(e) => setStart(e.target.value)}
-              required
-              style={inputStyle}
-            />
-          </FormField>
-          <FormField label={t("policies.form.fieldEnd")} required>
-            <input
-              type="time"
-              value={end}
-              onChange={(e) => setEnd(e.target.value)}
-              required
-              style={inputStyle}
-            />
-          </FormField>
-          <FormField label={t("policies.form.fieldGrace")}>
-            <input
-              type="number"
-              min={0}
-              max={180}
-              value={grace}
-              onChange={(e) =>
-                setGrace(Number.parseInt(e.target.value, 10) || 0)
-              }
-              style={inputStyle}
-            />
-          </FormField>
-          <FormField label={t("policies.form.fieldRequiredHours")} required>
-            <input
-              type="number"
-              min={1}
-              max={24}
-              value={requiredHours}
-              onChange={(e) =>
-                setRequiredHours(Number.parseInt(e.target.value, 10) || 1)
-              }
-              required
-              style={inputStyle}
-            />
-          </FormField>
+          </FormSection>
         </div>
-      ) : (
-        <div style={grid2}>
-          <FormField label={t("policies.form.fieldInWindowStart")} required>
-            <input
-              type="time"
-              value={inStart}
-              onChange={(e) => setInStart(e.target.value)}
-              required
-              style={inputStyle}
-            />
-          </FormField>
-          <FormField label={t("policies.form.fieldInWindowEnd")} required>
-            <input
-              type="time"
-              value={inEnd}
-              onChange={(e) => setInEnd(e.target.value)}
-              required
-              style={inputStyle}
-            />
-          </FormField>
-          <FormField label={t("policies.form.fieldOutWindowStart")} required>
-            <input
-              type="time"
-              value={outStart}
-              onChange={(e) => setOutStart(e.target.value)}
-              required
-              style={inputStyle}
-            />
-          </FormField>
-          <FormField label={t("policies.form.fieldOutWindowEnd")} required>
-            <input
-              type="time"
-              value={outEnd}
-              onChange={(e) => setOutEnd(e.target.value)}
-              required
-              style={inputStyle}
-            />
-          </FormField>
-          <FormField label={t("policies.form.fieldRequiredHours")} required span>
-            <input
-              type="number"
-              min={1}
-              max={24}
-              value={requiredHours}
-              onChange={(e) =>
-                setRequiredHours(Number.parseInt(e.target.value, 10) || 1)
-              }
-              required
-              style={inputStyle}
-            />
-          </FormField>
-        </div>
-      )}
-
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "flex-end",
-          alignItems: "center",
-          marginTop: 4,
-        }}
-      >
-        <button
-          type="submit"
-          disabled={busy || !isValid}
-          title={!isValid ? t("policies.form.submitRequired") : undefined}
-          className="btn btn-primary"
-        >
-          {busy
-            ? t("policies.form.saving")
-            : (submitLabel ?? (isEdit ? t("policies.form.saveChanges") : t("policies.form.createPolicy")))}
-        </button>
-      </div>
-    </form>
+        <FormFooter
+          onCancel={onClose}
+          submitLabel={isEdit ? t("policies.form.saveChanges") : t("policies.form.createPolicy")}
+          submittingLabel={t("policies.form.saving")}
+          submitting={busy}
+          canSubmit={isValid}
+        />
+      </form>
+    </DrawerShell>
   );
 }
 
-function FormField({
-  label,
-  required,
-  error,
-  span,
-  children,
-}: {
-  label: string;
-  required?: boolean;
-  error?: string | undefined;
-  span?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <label
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: 4,
-        ...(span ? { gridColumn: "1 / -1" } : {}),
-      }}
-    >
-      <span
-        style={{
-          fontSize: 11,
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-          color: "var(--text-tertiary)",
-        }}
-      >
-        {label}
-        {required && (
-          <span
-            aria-hidden
-            title="Required"
-            style={{ color: "var(--danger-text, #dc2626)", marginInlineStart: 3 }}
-          >
-            *
-          </span>
-        )}
-      </span>
-      {children}
-      {error && (
-        <span
-          role="alert"
-          style={{ fontSize: 11, color: "var(--danger-text, #dc2626)" }}
-        >
-          {error}
-        </span>
-      )}
-    </label>
-  );
-}
+const TYPE_ICON: Record<PolicyType, "clock" | "activity" | "moon" | "sparkles"> = {
+  Fixed: "clock",
+  Flex: "activity",
+  Ramadan: "moon",
+  Custom: "sparkles",
+};
 
-const inputStyle = {
-  padding: "6px 8px",
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius-sm)",
-  fontSize: 13,
-  background: "var(--bg)",
-  color: "var(--text)",
-  fontFamily: "var(--font-sans)",
-  outline: "none",
-} as const;
-
-const grid2 = {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr",
-  gap: 12,
-} as const;
-
-function SectionCaption({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        fontSize: 10.5,
-        textTransform: "uppercase",
-        letterSpacing: "0.06em",
-        color: "var(--text-tertiary)",
-        fontWeight: 700,
-        marginTop: 6,
-        paddingBottom: 4,
-        borderBottom: "1px solid var(--border)",
-      }}
-    >
-      {children}
-    </div>
-  );
-}
+const TYPE_DESC: Record<PolicyType, string> = {
+  Fixed: "Set start and end times with a grace period.",
+  Flex: "Arrive and leave within windows; the hours must add up.",
+  Ramadan: "Shorter fixed hours for a date range.",
+  Custom: "Fixed or Flex rules for a specific date range.",
+};
