@@ -37,8 +37,6 @@ import {
 import type { Employee } from "./types";
 import { SkeletonCards, SkeletonGrid, SkeletonRows } from "../../components/Skeleton";
 import {
-  CardFact,
-  CardGrid,
   EmptyPanel,
   FilterSelect,
   KebabMenu,
@@ -48,7 +46,6 @@ import {
   StatGrid,
   Toolbar,
   ViewToggle,
-  gridCardStyle,
   pct,
   useViewMode,
 } from "../../components/ListPageUi";
@@ -422,7 +419,7 @@ export function EmployeesPage() {
           list.isLoading ? (
             <SkeletonGrid count={8} avatar minWidth={280} />
           ) : (
-            <CardGrid minWidth={280}>
+            <div className={`pp-ecard-grid${selected.size > 0 ? " has-selection" : ""}`}>
               {visibleItems.map((e) => {
                 const pendingDeleteId = pendingByEmployee.get(e.id);
                 const inactive = e.status !== "active";
@@ -445,11 +442,11 @@ export function EmployeesPage() {
                         openProfile(e.id);
                       }
                     }}
-                    className={`card clickable${isSelected ? " pp-card-selected" : ""}${inactive ? " pp-card-muted" : ""}`}
-                    style={{ ...gridCardStyle, cursor: "pointer" }}
+                    className={`pp-ecard${isSelected ? " is-selected" : ""}${inactive ? " is-inactive" : ""}`}
                   >
-                    <div className="pp-card-top">
-                      <span onClick={(ev) => ev.stopPropagation()} style={{ display: "inline-flex" }}>
+                    {/* Top row: select + actions */}
+                    <div className="pp-ecard-top">
+                      <span onClick={(ev) => ev.stopPropagation()} className="pp-ecard-check">
                         <input
                           type="checkbox"
                           checked={isSelected}
@@ -457,16 +454,12 @@ export function EmployeesPage() {
                           aria-label={t("employees.selectRow") as string}
                         />
                       </span>
-                      <EmployeeAvatar employee={e} size="md" />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <span className="pp-truncate" style={{ fontWeight: 600, fontSize: 14.5 }} title={e.full_name}>
-                          {e.full_name}
+                      {pendingDeleteId !== undefined && (
+                        <span className="pill pill-danger" title={t("employees.delete.pendingTooltip") as string}>
+                          {t("employees.delete.pendingBadge") as string}
                         </span>
-                        <span className="pp-truncate text-xs text-dim" style={{ marginTop: 2 }}>
-                          {e.designation ?? e.department.name}
-                        </span>
-                      </div>
-                      <span onClick={(ev) => ev.stopPropagation()}>
+                      )}
+                      <span onClick={(ev) => ev.stopPropagation()} className="pp-ecard-menu">
                         <RowActionsMenu
                           onView={() => openProfile(e.id)}
                           onEdit={() => setDrawerId(e.id)}
@@ -474,45 +467,79 @@ export function EmployeesPage() {
                         />
                       </span>
                     </div>
-                    <div className="pp-card-pills">
+
+                    {/* Identity: photo / initials with status dot, name, title, role */}
+                    <div className="pp-ecard-identity">
+                      <span className="pp-ecard-avatar">
+                        <EmployeeAvatar employee={e} size="lg" />
+                        <span
+                          className={`pp-ecard-dot${inactive ? " is-off" : ""}`}
+                          aria-hidden
+                        />
+                      </span>
+                      <span className="pp-ecard-name" title={e.full_name}>
+                        {e.full_name}
+                      </span>
+                      <span className="pp-ecard-title" title={e.designation ?? e.department.name}>
+                        {e.designation ?? e.department.name}
+                      </span>
                       {role && (
-                        <span className={`pill ${rolePillClass(role)}`}>
+                        <span className={`pill ${rolePillClass(role)} pp-ecard-role`}>
                           {t(`role.${role}` as const, { defaultValue: role }) as string}
                         </span>
                       )}
+                    </div>
+
+                    {/* Facts */}
+                    <dl className="pp-ecard-facts">
+                      <div className="pp-ecard-fact">
+                        <dt>
+                          <Icon name="clipboard" size={13} />
+                          {t("employees.col.id") as string}
+                        </dt>
+                        <dd className="mono">{e.employee_code}</dd>
+                      </div>
+                      <div className="pp-ecard-fact">
+                        <dt>
+                          <Icon name="users" size={13} />
+                          {t("employees.col.department") as string}
+                        </dt>
+                        <dd title={e.department.name}>{e.department.name}</dd>
+                      </div>
+                      <div className="pp-ecard-fact">
+                        <dt>
+                          <Icon name="mail" size={13} />
+                          {t("employees.col.email") as string}
+                        </dt>
+                        <dd title={e.email ?? undefined}>{e.email ?? "—"}</dd>
+                      </div>
+                    </dl>
+
+                    {/* Footer: status + photo readiness */}
+                    <div className="pp-ecard-foot">
                       {inactive ? (
                         <DotPill tone="neutral">{t("employees.statusFilter.inactive") as string}</DotPill>
                       ) : (
                         <DotPill tone="success">{t("employees.statusValue.active") as string}</DotPill>
                       )}
-                      {pendingDeleteId !== undefined && (
-                        <span className="pill pill-danger" title={t("employees.delete.pendingTooltip") as string}>
-                          {t("employees.delete.pendingBadge") as string}
+                      {e.photo_count > 0 ? (
+                        <PhotoCountPill count={e.photo_count} />
+                      ) : (
+                        <span
+                          className="pill pill-warning pp-nowrap"
+                          title={t("employees.card.needsPhotosTitle", {
+                            defaultValue: "No reference photo yet — the cameras can't recognise this person.",
+                          }) as string}
+                        >
+                          <Icon name="camera" size={11} />
+                          {t("employees.card.needsPhotos", { defaultValue: "Needs photos" }) as string}
                         </span>
                       )}
-                    </div>
-                    <div className="pp-card-facts">
-                      <CardFact label={t("employees.col.id") as string}>
-                        <span className="mono pp-nowrap">{e.employee_code}</span>
-                      </CardFact>
-                      <CardFact label={t("employees.col.department") as string}>
-                        <span className="pp-truncate" style={{ maxWidth: 170 }}>
-                          {e.department.name}
-                        </span>
-                      </CardFact>
-                      <CardFact label={t("employees.col.email") as string}>
-                        <span className="pp-truncate text-xs" title={e.email ?? undefined} style={{ maxWidth: 170 }}>
-                          {e.email ?? "—"}
-                        </span>
-                      </CardFact>
-                      <CardFact label={t("employees.col.photos") as string}>
-                        <PhotoCountPill count={e.photo_count} />
-                      </CardFact>
                     </div>
                   </div>
                 );
               })}
-            </CardGrid>
+            </div>
           )
         ) : (
           /* BUG-014 — sticky header. The page itself scrolls (the
@@ -871,13 +898,13 @@ export function employeeThumbUrl(employeeId: number, photoId: number): string {
  * the photo fades in only once it has loaded; a failed load keeps the
  * initials, so a row never shows a broken image.
  */
-export function EmployeeAvatar({ employee, size }: { employee: Employee; size?: "md" }) {
+export function EmployeeAvatar({ employee, size }: { employee: Employee; size?: "md" | "lg" }) {
   const [state, setState] = useState<"loading" | "loaded" | "failed">("loading");
   const photoId = employee.primary_photo_id ?? null;
   const src = photoId != null ? employeeThumbUrl(employee.id, photoId) : null;
   return (
     <div
-      className={`avatar pp-avatar${size === "md" ? " pp-avatar-md" : ""} pp-avatar-photo`}
+      className={`avatar pp-avatar${size ? ` pp-avatar-${size}` : ""} pp-avatar-photo`}
       style={{ background: avatarBg(employee.full_name) }}
       aria-hidden
     >

@@ -178,6 +178,135 @@
 .pp-card-selected { border-color: var(--accent) !important; background: color-mix(in oklab, var(--accent-soft) 45%, var(--bg-elev)) !important; }
 .pp-card-muted { opacity: 0.7; }
 
+/* ---- Employees grid: profile card (Oct 2026) ------------------------ */
+.pp-ecard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 16px 0;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  overflow: hidden;
+  transition: transform var(--dur) var(--ease-out), box-shadow var(--dur) var(--ease-out), border-color var(--dur-fast) ease;
+}
+.pp-ecard::before {
+  /* soft accent wash behind the avatar */
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 76px;
+  background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 7%, var(--bg-elev)), var(--bg-elev));
+  pointer-events: none;
+}
+.pp-ecard:hover { transform: translateY(-2px); box-shadow: var(--shadow); border-color: var(--border-strong); }
+.pp-ecard:focus-visible { outline: none; box-shadow: var(--ring), var(--shadow); }
+.pp-ecard.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 16%, transparent), var(--shadow-sm);
+}
+.pp-ecard.is-inactive .pp-ecard-identity,
+.pp-ecard.is-inactive .pp-ecard-facts { opacity: 0.65; }
+
+.pp-ecard-top { position: relative; display: flex; align-items: center; gap: 8px; min-height: 28px; }
+.pp-ecard-check { display: inline-flex; }
+.pp-ecard-menu { margin-inline-start: auto; }
+
+.pp-ecard-identity {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 2px;
+  margin-top: -6px;
+  padding-bottom: 14px;
+}
+.pp-ecard-avatar { position: relative; display: inline-flex; margin-bottom: 10px; }
+.pp-ecard-avatar .pp-avatar-lg {
+  width: 72px;
+  height: 72px;
+  flex-basis: 72px;
+  font-size: 22px;
+  box-shadow: 0 0 0 3px var(--bg-elev), 0 0 0 4px var(--border);
+}
+.pp-ecard-dot {
+  position: absolute;
+  inset-inline-end: 3px;
+  bottom: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 3px var(--bg-elev);
+}
+.pp-ecard-dot.is-off { background: var(--text-quaternary); }
+.pp-ecard-name {
+  max-width: 100%;
+  font-family: var(--font-display);
+  font-size: 15.5px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pp-ecard-title {
+  max-width: 100%;
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pp-ecard-role { margin-top: 8px; }
+
+.pp-ecard-facts {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+}
+.pp-ecard-fact { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+.pp-ecard-fact dt {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.pp-ecard-fact dt svg { color: var(--text-quaternary); }
+.pp-ecard-fact dd {
+  margin: 0;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text);
+  text-align: end;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pp-ecard-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 -16px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in oklab, var(--bg-sunken) 55%, var(--bg-elev));
+}
+.pp-ecard-foot .pill { gap: 5px; }
+
 /* ---------- Photo tiles (approvals, profile) ---------- */
 .pp-photo-grid {
   display: grid;
@@ -1062,4 +1191,22 @@ a.pp-prof-contact-item:hover { color: var(--accent-text); }
 :is(.pp-emp-form, .pp-modal-host, .dv-modal-host, .fk-drawer) .fk-field.has-error :is(input.input, select.select, textarea.textarea):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]) {
   border-color: var(--danger);
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--danger) 14%, transparent);
+}
+
+/* Employees grid: four cards per row on desktop, three on narrower
+   laptop widths (below 1366px) so the cards never get cramped. */
+.pp-ecard-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 1365px) { .pp-ecard-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+/* Select checkbox + ⋮ menu appear on hover. They stay visible when the
+   card is selected, while any card is selected (multi-select mode), when
+   the menu is open / focused, and for keyboard users (focus-within). */
+.pp-ecard-check, .pp-ecard-menu { opacity: 0; transition: opacity var(--dur-fast) ease; }
+.pp-ecard:hover :is(.pp-ecard-check, .pp-ecard-menu),
+.pp-ecard:focus-within :is(.pp-ecard-check, .pp-ecard-menu),
+.pp-ecard.is-selected :is(.pp-ecard-check, .pp-ecard-menu),
+.pp-ecard-grid.has-selection .pp-ecard-check,
+.pp-ecard-menu:has([aria-expanded="true"]) { opacity: 1; }
+@media (hover: none) {
+  .pp-ecard-check, .pp-ecard-menu { opacity: 1; }
 }

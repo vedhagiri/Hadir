@@ -1750,7 +1750,7 @@
     },
     "col": {
       "employee": "Employee",
-      "id": "ID",
+      "id": "Employee ID",
       "email": "Email",
       "department": "Department",
       "role": "Role",
@@ -2086,6 +2086,10 @@
       "statusHelp": "Inactive employees stay in history but are not matched or tracked.",
       "reasonHelp": "At least 5 characters. Saved to the audit log.",
       "submitAdd": "Add employee"
+    },
+    "card": {
+      "needsPhotos": "Needs photos",
+      "needsPhotosTitle": "No reference photo yet — the cameras can't recognise this person."
     }
   },
   "formerEmployees": {
