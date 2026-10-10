@@ -14,6 +14,7 @@ from sqlalchemy import select
 
 from maugood.db import (
     cameras,
+    clip_processing_results,
     get_engine,
     person_clips,
 )
@@ -130,6 +131,66 @@ class TestPersonClipsAPI:
         body = resp.json()
         for item in body["items"]:
             assert item["camera_id"] == 1
+
+    def test_list_filter_by_match_result(
+        self, client, admin_user, admin_engine
+    ) -> None:
+        """?match_result=matched|unmatched narrows to the column verdict.
+
+        Seeds three completed clips on a dedicated camera:
+          * matched   — ``matched_employees`` holds an id.
+          * unmatched — empty ``matched_employees`` + a completed
+            ``clip_processing_results`` row (recognition ran, found nobody).
+          * pending   — empty ``matched_employees`` + no processing row
+            (must appear in NEITHER filter — it is pending, not unmatched).
+        """
+        from sqlalchemy import insert, update
+
+        _login(client, admin_user)
+        cid = 77
+        matched_id = self._seed_clip(admin_engine, 1, cid)
+        unmatched_id = self._seed_clip(admin_engine, 1, cid)
+        pending_id = self._seed_clip(admin_engine, 1, cid)
+
+        with admin_engine.begin() as conn:
+            # matched clip → aggregate array carries an employee id.
+            conn.execute(
+                update(person_clips)
+                .where(person_clips.c.id == matched_id)
+                .values(matched_employees=[9001], matched_status="processed")
+            )
+            # unmatched clip → a UC completed but matched nobody.
+            conn.execute(
+                insert(clip_processing_results).values(
+                    tenant_id=1,
+                    person_clip_id=unmatched_id,
+                    use_case="uc1",
+                    status="completed",
+                    matched_employees=[],
+                )
+            )
+
+        matched = client.get(f"/api/person-clips?camera_id={cid}&match_result=matched")
+        assert matched.status_code == 200, matched.text
+        matched_ids = [i["id"] for i in matched.json()["items"]]
+        assert matched_id in matched_ids
+        assert unmatched_id not in matched_ids
+        assert pending_id not in matched_ids
+
+        unmatched = client.get(
+            f"/api/person-clips?camera_id={cid}&match_result=unmatched"
+        )
+        assert unmatched.status_code == 200, unmatched.text
+        unmatched_ids = [i["id"] for i in unmatched.json()["items"]]
+        assert unmatched_id in unmatched_ids
+        assert matched_id not in unmatched_ids
+        # Pending (unprocessed) clips are excluded from "unmatched".
+        assert pending_id not in unmatched_ids
+
+    def test_list_match_result_invalid_rejected(self, client, admin_user) -> None:
+        _login(client, admin_user)
+        resp = client.get("/api/person-clips?match_result=bogus")
+        assert resp.status_code == 422, resp.text
 
     def test_stats(self, client, admin_user, admin_engine) -> None:
         _login(client, admin_user)

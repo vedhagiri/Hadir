@@ -561,6 +561,7 @@ function MatchRow({
 // ---------------------------------------------------------------------------
 
 import type { ReconcileTenantSummary } from "../person-clips/hooks";
+import { SkeletonRows } from "../../components/Skeleton";
 
 function ProcessingHealthPanel({
   reconcileStatus,
@@ -863,6 +864,11 @@ export function ClipAnalyticsPage() {
     useState<"all" | "save_clips" | "logs_only">("all");
   const [startDate, setStartDate] = useState<string>(""); // YYYY-MM-DD
   const [endDate, setEndDate] = useState<string>("");
+  // Match-result filter: 'all' | 'matched' | 'unmatched'. Server-side via
+  // the /api/person-clips match_result param so total + pagination stay
+  // correct across the whole result set (not just the current page).
+  const [matchResult, setMatchResult] =
+    useState<"all" | "matched" | "unmatched">("all");
 
   // ---- client-side filters ----
   const [clipIdQ, setClipIdQ] = useState("");
@@ -880,6 +886,7 @@ export function ClipAnalyticsPage() {
     endDate !== "" ||
     clipIdQ !== "" ||
     clipNameQ !== "" ||
+    matchResult !== "all" ||
     processedUcFilter !== "any";
 
   function clearFilters() {
@@ -890,6 +897,7 @@ export function ClipAnalyticsPage() {
     setEndDate("");
     setClipIdQ("");
     setClipNameQ("");
+    setMatchResult("all");
     setProcessedUcFilter("any");
     setPage(1);
   }
@@ -992,11 +1000,19 @@ export function ClipAnalyticsPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // Hiding the Match Result column clears its filter so the list isn't
+  // silently narrowed by a control the operator can no longer see.
+  useEffect(() => {
+    if (!showMatchResult && matchResult !== "all") {
+      setMatchResult("all");
+    }
+  }, [showMatchResult, matchResult]);
+
   // Reset to page 1 whenever any filter changes so the operator
   // doesn't land on an empty page 4.
   useEffect(() => {
     setPage(1);
-  }, [cameraId, processingFilter, startDate, endDate]);
+  }, [cameraId, processingFilter, startDate, endDate, matchResult]);
 
   // Build server query string. Camera + recording_status + start +
   // end are server-side. clip_name + processed-uc + saved-vs-processed
@@ -1026,6 +1042,7 @@ export function ClipAnalyticsPage() {
       p.set("processing_state", processingFilter);
     }
     if (recordingMode !== "all") p.set("recording_mode", recordingMode);
+    if (matchResult !== "all") p.set("match_result", matchResult);
     // Day bounds in the viewer's local timezone (see dayBound). A lone
     // start date filters to ONLY that day; start+end is an inclusive range.
     if (startDate) p.set("start", dayBound(startDate, "00:00:00"));
@@ -1035,7 +1052,7 @@ export function ClipAnalyticsPage() {
       p.set("end", dayBound(endDate, "23:59:59"));
     }
     return p.toString();
-  }, [page, cameraId, processingFilter, recordingMode, startDate, endDate]);
+  }, [page, cameraId, processingFilter, recordingMode, startDate, endDate, matchResult]);
 
   const list = useQuery({
     queryKey: ["clip-analytics", "list", qs],
@@ -1666,7 +1683,28 @@ export function ClipAnalyticsPage() {
                     background: "var(--bg-elev)",
                     boxShadow: "inset 0 -1px 0 var(--border)",
                   }}
-                />
+                >
+                  <select
+                    value={matchResult}
+                    onChange={(e) =>
+                      setMatchResult(
+                        e.target.value as "all" | "matched" | "unmatched",
+                      )
+                    }
+                    style={filterControlStyle}
+                    aria-label={t("clipAnalytics.filters.byMatchResult")}
+                  >
+                    <option value="all">
+                      {t("clipAnalytics.matchResultFilter.all")}
+                    </option>
+                    <option value="matched">
+                      {t("clipAnalytics.matchResultFilter.matched")}
+                    </option>
+                    <option value="unmatched">
+                      {t("clipAnalytics.matchResultFilter.unmatched")}
+                    </option>
+                  </select>
+                </th>
               )}
               <th
                 style={{
@@ -1678,15 +1716,7 @@ export function ClipAnalyticsPage() {
           </thead>
           <tbody>
             {list.isLoading && (
-              <tr>
-                <td
-                  colSpan={showMatchResult ? 12 : 11}
-                  className="text-sm text-dim"
-                  style={{ padding: 16 }}
-                >
-                  {t("clipAnalytics.loading")}
-                </td>
-              </tr>
+              <SkeletonRows cols={showMatchResult ? 12 : 11} />
             )}
             {list.isError && (
               <tr>

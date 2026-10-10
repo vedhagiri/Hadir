@@ -27,6 +27,7 @@ def list_clips(
     matched_status: Optional[str] = None,
     recording_mode: Optional[str] = None,
     processing_state: Optional[str] = None,
+    match_result: Optional[str] = None,
 ) -> tuple[list[Row], int]:
     """Return ``(rows, total_count)`` for the given filters.
 
@@ -162,6 +163,32 @@ def list_clips(
             base = base.where(
                 ~_has("completed"), ~_has("processing"), ~_has("pending")
             )
+
+    # Match-result filter (Clip Analytics "Match Result" dropdown).
+    # Mirrors the visible column verdict, which reads
+    # ``person_clips.matched_employees`` — the canonical aggregate the
+    # reprocess path writes on UC1 completion. Applied SERVER-SIDE so the
+    # total count + page numbers stay correct across the whole result set,
+    # not just the current page.
+    #   * ``matched``   — the aggregate array holds at least one employee.
+    #   * ``unmatched`` — the array is empty AND at least one use case has
+    #     completed for the clip (recognition ran and found nobody). A clip
+    #     that has not been processed yet is "pending", not "unmatched", so
+    #     it is deliberately excluded — matching the column, which shows
+    #     such clips as pending rather than red/unmatched.
+    if match_result in ("matched", "unmatched"):
+        matched_count = func.jsonb_array_length(
+            person_clips.c.matched_employees
+        )
+        if match_result == "matched":
+            base = base.where(matched_count > 0)
+        else:  # "unmatched"
+            completed_exists = exists().where(
+                clip_processing_results.c.tenant_id == scope.tenant_id,
+                clip_processing_results.c.person_clip_id == person_clips.c.id,
+                clip_processing_results.c.status == "completed",
+            )
+            base = base.where(matched_count == 0, completed_exists)
 
     count_q = select(func.count()).select_from(base.subquery())
     total = conn.execute(count_q).scalar_one()

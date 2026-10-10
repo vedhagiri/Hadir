@@ -799,6 +799,18 @@ def list_person_clips(
         ),
         pattern=r"^(processing|queued|processed|saved)$",
     ),
+    match_result: Optional[str] = Query(
+        default=None,
+        description=(
+            "Filter by face-match verdict, mirroring the Match Result "
+            "column. 'matched' = at least one employee matched the clip; "
+            "'unmatched' = a use case completed for the clip but no "
+            "employee matched. Clips that have not been processed yet are "
+            "excluded (they are pending, not unmatched). Omitted = no "
+            "match-result filter."
+        ),
+        pattern=r"^(matched|unmatched)$",
+    ),
 ) -> PersonClipListResponse:
     """List person clips, with optional filters.
 
@@ -869,6 +881,7 @@ def list_person_clips(
                 matched_status=matched_status,
                 recording_mode=recording_mode,
                 processing_state=processing_state,
+                match_result=match_result,
             )
     except Exception:
         logger.exception(
