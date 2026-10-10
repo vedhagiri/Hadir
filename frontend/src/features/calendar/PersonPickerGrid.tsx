@@ -12,7 +12,9 @@ import { Icon } from "../../shell/Icon";
 import { primaryRole } from "../../types";
 import { useDepartments } from "../departments/hooks";
 import { useEmployeeList, useMyTeamList } from "../employees/hooks";
+import { avatarBg, initials } from "./calendarUi";
 import type { Employee } from "../employees/types";
+import { SkeletonGrid } from "../../components/Skeleton";
 
 const PAGE_SIZE = 24;
 const SEARCH_MIN_CHARS = 3;
@@ -164,7 +166,7 @@ export function PersonPickerGrid({
   }, [employees.data, restrictedSet, isManager, managerFilteredCount]);
 
   return (
-    <div className="card" style={{ padding: 14 }}>
+    <div className="card" style={{ padding: 16 }}>
       {/* Restriction banner — shown when the picker was opened by
           drilling into a non-working day from the company calendar.
           The "Show all" pill releases the filter without leaving the
@@ -267,9 +269,7 @@ export function PersonPickerGrid({
 
       {/* Grid */}
       {employees.isLoading && (
-        <div className="text-sm text-dim" style={{ padding: 14 }}>
-          {t("common.loading") as string}…
-        </div>
+        <SkeletonGrid count={12} avatar />
       )}
       {employees.isError && (
         <div
@@ -297,8 +297,8 @@ export function PersonPickerGrid({
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))",
-            gap: 12,
+            gridTemplateColumns: "repeat(auto-fill, minmax(176px, 1fr))",
+            gap: 14,
           }}
         >
           {items.map((e) => (
@@ -338,7 +338,7 @@ export function PersonPickerGrid({
             {t("common.previous") as string}
           </button>
           <button
-            className="btn btn-sm"
+            className="btn btn-sm btn-primary"
             disabled={page >= totalPages}
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
           >
@@ -362,46 +362,40 @@ function EmployeeCard({
     <button
       type="button"
       onClick={onClick}
+      title={employee.full_name}
       style={{
         appearance: "none",
         background: "var(--bg-elev)",
         border: "1px solid var(--border)",
-        borderRadius: 10,
-        padding: 12,
+        borderRadius: 12,
+        padding: "18px 12px 16px",
         textAlign: "center",
         cursor: "pointer",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        gap: 8,
+        gap: 10,
         font: "inherit",
-        transition: "border-color 0.08s, transform 0.08s",
+        boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
+        transition: "border-color 0.1s, transform 0.1s, box-shadow 0.1s",
       }}
       onMouseEnter={(e) => {
         e.currentTarget.style.borderColor = "var(--accent)";
-        e.currentTarget.style.transform = "translateY(-1px)";
+        e.currentTarget.style.transform = "translateY(-2px)";
+        e.currentTarget.style.boxShadow = "0 8px 20px rgba(15, 23, 42, 0.08)";
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.borderColor = "var(--border)";
         e.currentTarget.style.transform = "translateY(0)";
+        e.currentTarget.style.boxShadow = "0 1px 2px rgba(15, 23, 42, 0.04)";
       }}
     >
       <Avatar employee={employee} />
-      <div style={{ minHeight: 32 }}>
-        <div
-          style={{
-            fontSize: 13,
-            fontWeight: 500,
-            color: "var(--text)",
-            lineHeight: 1.25,
-          }}
-        >
+      <div style={{ minHeight: 38 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text)", lineHeight: 1.3 }}>
           {employee.full_name}
         </div>
-        <div
-          className="mono text-xs text-dim"
-          style={{ marginTop: 2, fontSize: 11 }}
-        >
+        <div className="mono" style={{ marginTop: 3, fontSize: 11.5, color: "var(--text-tertiary)" }}>
           {employee.employee_code}
         </div>
       </div>
@@ -410,19 +404,11 @@ function EmployeeCard({
 }
 
 function Avatar({ employee }: { employee: Employee }) {
-  // Initials avatar with a stable per-name tinted background — same
-  // palette as the Employees list page. Surfaces the photo_count as
-  // a small ring color when the employee has at least one reference
-  // photo (cheaper than fetching a thumbnail per card).
+  // Initials on a stable per-name colour. A small green dot marks
+  // employees with at least one reference photo enrolled.
   const enrolled = employee.photo_count > 0;
   return (
-    <div
-      style={{
-        position: "relative",
-        width: 68,
-        height: 68,
-      }}
-    >
+    <div style={{ position: "relative", width: 64, height: 64 }}>
       <div
         style={{
           width: 64,
@@ -432,43 +418,27 @@ function Avatar({ employee }: { employee: Employee }) {
           color: "white",
           display: "grid",
           placeItems: "center",
-          fontSize: 20,
-          fontWeight: 600,
-          margin: 2,
-          boxShadow: enrolled
-            ? "0 0 0 2px var(--success)"
-            : "0 0 0 2px var(--border)",
+          fontSize: 21,
+          fontWeight: 700,
         }}
       >
         {initials(employee.full_name)}
       </div>
+      {enrolled && (
+        <span
+          title="Face enrolled"
+          style={{
+            position: "absolute",
+            right: 2,
+            bottom: 2,
+            width: 14,
+            height: 14,
+            borderRadius: "50%",
+            background: "var(--success)",
+            border: "2px solid var(--bg-elev)",
+          }}
+        />
+      )}
     </div>
   );
-}
-
-function initials(fullName: string): string {
-  const parts = fullName.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "??";
-  if (parts.length === 1) return (parts[0] ?? "").slice(0, 2).toUpperCase();
-  return (
-    (parts[0] ?? "")[0]! + (parts[parts.length - 1] ?? "")[0]!
-  ).toUpperCase();
-}
-
-function avatarBg(fullName: string): string {
-  const palette = [
-    "#7c3aed",
-    "#2563eb",
-    "#10b981",
-    "#f59e0b",
-    "#ef4444",
-    "#06b6d4",
-    "#8b5cf6",
-    "#f97316",
-  ];
-  let hash = 0;
-  for (let i = 0; i < fullName.length; i++) {
-    hash = (hash * 31 + fullName.charCodeAt(i)) >>> 0;
-  }
-  return palette[hash % palette.length] as string;
 }

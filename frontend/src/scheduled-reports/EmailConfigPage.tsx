@@ -51,6 +51,7 @@ import {
   useSendTestEmail,
 } from "./hooks";
 import type { EmailConfigUpdate, EmailProvider } from "./types";
+import { SkeletonRows } from "../components/Skeleton";
 
 type InnerTab = "provider" | "attendance";
 
@@ -1507,11 +1508,7 @@ function AttendanceEmailsPanel({ isAdmin, isHR }: { isAdmin: boolean; isHR: bool
             </thead>
             <tbody>
               {log.isLoading && (
-                <tr>
-                  <td colSpan={6} style={{ padding: 20, textAlign: "center", color: "var(--text-secondary)", fontSize: 13 }}>
-                    Loading…
-                  </td>
-                </tr>
+                <SkeletonRows cols={6} />
               )}
               {!log.isLoading && items.length === 0 && (
                 <tr>

@@ -24,6 +24,7 @@ import { useEmployeeList, useEmployeeDetail } from "../employees/hooks";
 import type { Employee } from "../employees/types";
 import { formatMinutes } from "../attendance/timeFormat";
 import type { AttendanceItem, AttendanceListResponse } from "../attendance/types";
+import { SkeletonRows } from "../../components/Skeleton";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -719,15 +720,7 @@ export function EmployeeReportPage() {
               </thead>
               <tbody>
                 {range.isLoading && (
-                  <tr>
-                    <td
-                      colSpan={9}
-                      className="text-sm text-dim"
-                      style={{ padding: 16 }}
-                    >
-                      {t("employeeReport.loading")}
-                    </td>
-                  </tr>
+                  <SkeletonRows cols={9} />
                 )}
                 {range.isError && (
                   <tr>

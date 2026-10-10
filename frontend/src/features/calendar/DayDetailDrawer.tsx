@@ -27,6 +27,7 @@ import type {
   EscalationRequestSnapshot,
   EvidenceCrop,
 } from "./types";
+import { SkeletonLines } from "../../components/Skeleton";
 
 interface Props {
   employeeId: number;
@@ -82,7 +83,7 @@ export function DayDetailContent({
   return (
     <>
       {detail.isLoading && (
-        <div className="text-sm text-dim">{t("calendar.loading") as string}</div>
+        <SkeletonLines lines={6} />
       )}
       {detail.isError && (
         <div className="text-sm" style={{ color: "var(--danger-text)" }}>

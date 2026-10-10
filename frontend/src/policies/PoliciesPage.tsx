@@ -38,6 +38,7 @@ import type {
   PolicyResponse,
   PolicyType,
 } from "./types";
+import { SkeletonTable } from "../components/Skeleton";
 
 // ---------------------------------------------------------------------------
 // Page
@@ -228,7 +229,7 @@ export function PoliciesPage() {
       </div>
 
       {policies.isLoading && (
-        <p className="text-sm text-dim">{t("policies.loading")}</p>
+        <SkeletonTable rows={5} cols={5} />
       )}
       {policies.isError && (
         <p style={{ color: "var(--danger-text)" }}>

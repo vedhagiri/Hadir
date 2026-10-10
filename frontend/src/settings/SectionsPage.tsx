@@ -26,6 +26,7 @@ import {
 import { Icon } from "../shell/Icon";
 import { toast } from "../shell/Toaster";
 import { SettingsTabs } from "./SettingsTabs";
+import { SkeletonChip, SkeletonLines, SkeletonRows } from "../components/Skeleton";
 
 export function SectionsPage() {
   const { t } = useTranslation();
@@ -111,11 +112,7 @@ export function SectionsPage() {
           </thead>
           <tbody>
             {list.isLoading && (
-              <tr>
-                <td colSpan={6} className="text-sm text-dim" style={{ padding: 16 }}>
-                  {t("common.loading") as string}…
-                </td>
-              </tr>
+              <SkeletonRows cols={6} />
             )}
             {list.data?.items.length === 0 && (
               <tr>
@@ -363,7 +360,7 @@ function SectionFormModal({
 function SectionManagerChips({ sectionId }: { sectionId: number }) {
   const { t } = useTranslation();
   const list = useSectionManagers(sectionId);
-  if (list.isLoading) return <span className="text-xs text-dim">{t("sectionsPage.loading")}</span>;
+  if (list.isLoading) return <SkeletonChip />;
   if (list.isError)
     return (
       <span className="text-xs" style={{ color: "var(--danger-text)" }}>
@@ -534,7 +531,7 @@ function SectionManagersModal({
         </div>
 
         <div style={sectionLabel}>{t("sectionsPage.managers.currentlyAssigned")}</div>
-        {assigned.isLoading && <div className="text-sm text-dim">{t("sectionsPage.loading")}</div>}
+        {assigned.isLoading && <SkeletonLines lines={2} />}
         {!assigned.isLoading && (assigned.data?.items.length ?? 0) === 0 && (
           <div className="text-sm text-dim">{t("sectionsPage.managers.emptyAssigned")}</div>
         )}

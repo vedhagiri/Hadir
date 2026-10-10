@@ -9,6 +9,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import { Icon } from "../../shell/Icon";
 import { Pagination } from "../../components/Pagination";
+import { SkeletonRows } from "../../components/Skeleton";
 
 interface HistoryRow {
   clip_id: number;
@@ -244,7 +245,7 @@ function QueueHistoryModal({ onClose }: { onClose: () => void }) {
             </thead>
             <tbody>
               {q.isLoading && (
-                <tr><td colSpan={9} className="text-dim" style={{ padding: 14 }}>Loading…</td></tr>
+                <SkeletonRows cols={9} />
               )}
               {!q.isLoading && items.length === 0 && (
                 <tr><td colSpan={9} className="text-dim" style={{ padding: 14 }}>No cleared clips — Queue History is empty.</td></tr>

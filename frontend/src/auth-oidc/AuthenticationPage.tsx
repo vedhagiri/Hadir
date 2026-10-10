@@ -30,6 +30,7 @@ import {
   usePutMyOidcConfig,
 } from "./hooks";
 import type { GoogleOidcConfigResponse, OidcConfigResponse } from "./types";
+import { SkeletonLines } from "../components/Skeleton";
 
 export function AuthenticationPage() {
   const { t } = useTranslation();
@@ -620,9 +621,7 @@ function ProviderSummaryCard({
 
       {/* Detail tiles / empty state */}
       {loading ? (
-        <div style={{ padding: "18px 20px", fontSize: 13, color: "var(--text-tertiary)" }}>
-          {t("authPage.loading")}
-        </div>
+        <SkeletonLines lines={4} />
       ) : loadError ? null : configured ? (
         <div
           style={{

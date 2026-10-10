@@ -13,6 +13,7 @@ import { Pagination } from "../../components/Pagination";
 import { useTenantDateTime, type TenantDateTime } from "../../util/datetime";
 import { useCameraOptions, useDetectionEvents } from "./hooks";
 import type { DetectionEvent, DetectionEventFilters } from "./types";
+import { SkeletonRows } from "../../components/Skeleton";
 
 const PAGE_SIZE = 100;
 
@@ -257,11 +258,7 @@ export function CameraLogsPage() {
           </thead>
           <tbody>
             {events.isLoading && (
-              <tr>
-                <td colSpan={7} className="text-sm text-dim" style={{ padding: 16 }}>
-                  {t("cameraLogs.loading")}
-                </td>
-              </tr>
+              <SkeletonRows cols={7} />
             )}
             {events.isError && (
               <tr>

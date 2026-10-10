@@ -15,6 +15,7 @@ import { Icon } from "../../shell/Icon";
 import { dayBound } from "../../util/datetime";
 import { useCameraOptions } from "../person-clips/hooks";
 import type { PersonClipListResponse, PersonClipOut } from "../person-clips/types";
+import { SkeletonRows } from "../../components/Skeleton";
 
 const PAGE_SIZE = 50;
 
@@ -206,11 +207,7 @@ export function ClipLogsPage() {
           </thead>
           <tbody>
             {list.isLoading && (
-              <tr>
-                <td colSpan={colCount} className="text-sm text-dim" style={{ padding: 16 }}>
-                  Loading…
-                </td>
-              </tr>
+              <SkeletonRows cols={colCount} />
             )}
             {list.isError && !list.isLoading && (
               <tr>

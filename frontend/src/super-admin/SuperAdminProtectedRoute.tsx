@@ -4,11 +4,12 @@
 import type { ReactNode } from "react";
 import { Navigate } from "react-router-dom";
 
+import { AppLoader } from "../components/AppLoader";
 import { useSuperMe } from "./SuperAdminProvider";
 
 export function SuperAdminProtectedRoute({ children }: { children: ReactNode }) {
   const { data: me, isLoading } = useSuperMe();
-  if (isLoading) return null;
+  if (isLoading) return <AppLoader />;
   if (me == null) return <Navigate to="/super-admin/login" replace />;
   return <>{children}</>;
 }

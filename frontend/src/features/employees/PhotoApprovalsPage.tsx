@@ -17,6 +17,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import { Icon } from "../../shell/Icon";
 import { toast } from "../../shell/Toaster";
+import { SkeletonGrid } from "../../components/Skeleton";
 
 interface PendingPhoto {
   photo_id: number;
@@ -221,9 +222,7 @@ function PendingPanel({
   const { t } = useTranslation();
   if (isLoading) {
     return (
-      <div className="text-sm text-dim" style={{ padding: 16 }}>
-        {t("common.loading") as string}…
-      </div>
+      <SkeletonGrid count={6} />
     );
   }
   if (isError) {
@@ -280,9 +279,7 @@ function ApprovedPanel({
   const { t } = useTranslation();
   if (isLoading) {
     return (
-      <div className="text-sm text-dim" style={{ padding: 16 }}>
-        {t("common.loading") as string}…
-      </div>
+      <SkeletonGrid count={6} />
     );
   }
   if (isError) {

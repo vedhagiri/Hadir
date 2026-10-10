@@ -1,5 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { BootSplash } from "./components/AppLoader";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 
@@ -51,6 +52,8 @@ createRoot(rootEl).render(
             Mounted alongside the app so it overlays every page +
             persists across route changes. */}
         <Toaster />
+        {/* MaugoodAI loader held for ~4.5 s on every full page load. */}
+        <BootSplash />
       </BrowserRouter>
     </QueryClientProvider>
   </StrictMode>,

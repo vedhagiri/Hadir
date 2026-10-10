@@ -11,6 +11,7 @@ import {
   useStartProcessing,
 } from "./hooks";
 import type { ByClipFilters, ClipGroup, FaceCropInGroup } from "./types";
+import { SkeletonGrid } from "../../components/Skeleton";
 
 const PAGE_SIZE = 20;
 
@@ -188,9 +189,7 @@ export function FaceCropsPage() {
         </div>
 
         {list.isLoading && (
-          <div className="text-sm text-dim" style={{ padding: 16 }}>
-            {t("common.loading")}
-          </div>
+          <SkeletonGrid count={12} />
         )}
         {list.isError && (
           <div

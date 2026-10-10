@@ -26,6 +26,7 @@ import {
 import { Icon } from "../shell/Icon";
 import { toast } from "../shell/Toaster";
 import { SettingsTabs } from "./SettingsTabs";
+import { SkeletonChip, SkeletonLines, SkeletonRows } from "../components/Skeleton";
 
 export function DivisionsPage() {
   const { t } = useTranslation();
@@ -82,11 +83,7 @@ export function DivisionsPage() {
           </thead>
           <tbody>
             {list.isLoading && (
-              <tr>
-                <td colSpan={5} className="text-sm text-dim" style={{ padding: 16 }}>
-                  {t("common.loading") as string}…
-                </td>
-              </tr>
+              <SkeletonRows cols={5} />
             )}
             {list.data?.items.length === 0 && (
               <tr>
@@ -303,7 +300,7 @@ function DivisionManagerChips({ divisionId }: { divisionId: number }) {
   const { t } = useTranslation();
   const list = useDivisionManagers(divisionId);
   if (list.isLoading)
-    return <span className="text-xs text-dim">{t("common.loading") as string}…</span>;
+    return <SkeletonChip />;
   if (list.isError)
     return (
       <span className="text-xs" style={{ color: "var(--danger-text)" }}>
@@ -481,7 +478,7 @@ function DivisionManagersModal({
           {t("divisions.managersModal.currentlyAssigned") as string}
         </div>
         {assigned.isLoading && (
-          <div className="text-sm text-dim">{t("common.loading") as string}…</div>
+          <SkeletonLines lines={2} />
         )}
         {!assigned.isLoading && (assigned.data?.items.length ?? 0) === 0 && (
           <div className="text-sm text-dim">

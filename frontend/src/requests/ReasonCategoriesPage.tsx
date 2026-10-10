@@ -15,6 +15,7 @@ import {
   useReasonCategoriesAll,
 } from "./hooks";
 import type { ReasonCategory, RequestType } from "./types";
+import { SkeletonTable } from "../components/Skeleton";
 
 export function ReasonCategoriesPage() {
   const { t } = useTranslation();
@@ -64,7 +65,7 @@ export function ReasonCategoriesPage() {
       )}
 
       {all.isLoading ? (
-        <p>{t("reasonCategories.loading")}</p>
+        <SkeletonTable rows={6} cols={4} />
       ) : all.error ? (
         <p style={{ color: "var(--danger-text)" }}>
           {t("reasonCategories.loadFailed")}

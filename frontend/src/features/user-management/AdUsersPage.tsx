@@ -16,6 +16,7 @@ import { UserDetailsDrawer } from "./UserDetailsDrawer";
 import { AccessToggle, RoleBadges, avatarInitials, avatarColor } from "./shared";
 import { useAdUsers, usePatchUser, useSyncUsers } from "./hooks";
 import type { AdUser } from "./types";
+import { SkeletonTable } from "../../components/Skeleton";
 
 type Filter = "all" | "enabled" | "disabled";
 
@@ -217,9 +218,7 @@ export function AdUsersView() {
       {/* Table */}
       <div className="card" style={{ overflow: "hidden" }}>
         {list.isLoading ? (
-          <div style={{ padding: 22, color: "var(--text-tertiary)", fontSize: 13 }}>
-            {t("common.loading")}…
-          </div>
+          <SkeletonTable rows={6} cols={6} />
         ) : list.error ? (
           <div style={{ padding: 22, color: "var(--danger-text)", fontSize: 13 }}>
             {t("userManagement.loadFailed")}

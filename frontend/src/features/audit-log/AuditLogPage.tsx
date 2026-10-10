@@ -9,6 +9,7 @@ import { Icon } from "../../shell/Icon";
 import { useTenantDateTime } from "../../util/datetime";
 import { useAuditLog } from "./hooks";
 import type { AuditFilters } from "./types";
+import { SkeletonRows } from "../../components/Skeleton";
 
 const PAGE_SIZE = 100;
 
@@ -127,11 +128,7 @@ export function AuditLogPage() {
           </thead>
           <tbody>
             {audit.isLoading && (
-              <tr>
-                <td colSpan={6} className="text-sm text-dim" style={{ padding: 16 }}>
-                  {t("auditLog.loading")}
-                </td>
-              </tr>
+              <SkeletonRows cols={6} />
             )}
             {audit.data?.items.map((row) => {
               const isOpen = expanded.has(row.id);

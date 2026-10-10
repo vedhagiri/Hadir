@@ -36,6 +36,7 @@ import {
   type EmployeeSortDir,
 } from "./hooks";
 import type { Employee } from "./types";
+import { SkeletonRows } from "../../components/Skeleton";
 
 const PAGE_SIZE = 50;
 const SEARCH_MIN_CHARS = 3;
@@ -480,11 +481,7 @@ export function EmployeesPage() {
           </thead>
           <tbody>
             {list.isLoading && (
-              <tr>
-                <td colSpan={8} className="text-sm text-dim" style={{ padding: 16 }}>
-                  {t("common.loading") as string}
-                </td>
-              </tr>
+              <SkeletonRows cols={8} />
             )}
             {list.isError && (
               <tr>

@@ -22,6 +22,7 @@ import {
   useUploadAttachment,
 } from "./hooks";
 import type { RequestRecord } from "./types";
+import { SkeletonLines } from "../components/Skeleton";
 
 export type DecisionRole = "Manager" | "HR" | "Admin" | null;
 
@@ -144,7 +145,7 @@ export function RequestDetailDrawer({
         </div>
         <div className="drawer-body">
           {!r ? (
-            <div className="text-sm text-dim">Loading…</div>
+            <SkeletonLines lines={6} />
           ) : (
             <>
               {/* Submitter */}

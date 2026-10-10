@@ -18,6 +18,7 @@ import {
   usePatchErpExportConfig,
 } from "./hooks";
 import type { ErpFormat } from "./types";
+import { SkeletonPanel } from "../components/Skeleton";
 
 export function ErpExportPage() {
   const { t } = useTranslation();
@@ -103,7 +104,7 @@ export function ErpExportPage() {
     }
   };
 
-  if (cfg.isLoading) return <p>{t("erpExport.loading")}</p>;
+  if (cfg.isLoading) return <SkeletonPanel lines={6} />;
   if (cfg.error)
     return (
       <p style={{ color: "var(--danger-text)" }}>

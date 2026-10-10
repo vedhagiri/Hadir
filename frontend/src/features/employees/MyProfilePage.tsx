@@ -25,6 +25,7 @@ import { Icon } from "../../shell/Icon";
 import { toast } from "../../shell/Toaster";
 import { validateReferencePhotos } from "../../util/photoValidation";
 import type { Employee, PhotoAngle } from "./types";
+import { SkeletonPanel } from "../../components/Skeleton";
 
 const ANGLES: PhotoAngle[] = ["front", "left", "right", "other"];
 
@@ -78,9 +79,7 @@ export function MyProfilePage() {
       </div>
 
       {profile.isLoading && (
-        <div className="text-sm text-dim">
-          {t("common.loading") as string}…
-        </div>
+        <SkeletonPanel lines={5} />
       )}
 
       {profile.isError && (
@@ -554,9 +553,7 @@ function PhotosCard({
       )}
 
       {loading && (
-        <div className="text-sm text-dim">
-          {t("common.loading") as string}…
-        </div>
+        <SkeletonPanel lines={5} />
       )}
 
       {!loading && photos.length === 0 && (

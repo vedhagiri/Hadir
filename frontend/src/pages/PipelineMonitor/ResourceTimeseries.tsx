@@ -16,6 +16,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
 import { ApiError, api } from "../../api/client";
+import { SkeletonChart } from "../../components/Skeleton";
 
 type RangeKey = "15m" | "1h" | "6h" | "24h";
 type MetricKey = "cpu" | "memory" | "io_speed" | "swap";
@@ -454,18 +455,7 @@ export function ResourceTimeseries({ isAdmin }: { isAdmin: boolean }) {
 
       <div ref={containerRef} style={{ position: "relative" }}>
         {q.isLoading && (
-          <div
-            style={{
-              height: CHART_HEIGHT,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "var(--text-secondary, #6b7280)",
-              fontSize: 13,
-            }}
-          >
-            {t("resources.chart.loading")}
-          </div>
+          <SkeletonChart height={220} />
         )}
         {!q.isLoading && q.data && (
           <>

@@ -11,6 +11,7 @@ import { useAttendance } from "../attendance/hooks";
 import { StatCard } from "./StatCard";
 import { StatusBreakdown } from "./StatusBreakdown";
 import { FlagPills } from "../attendance/DailyAttendancePage";
+import { SkeletonRows } from "../../components/Skeleton";
 
 function todayIso(): string {
   const d = new Date();
@@ -107,11 +108,7 @@ export function ManagerDashboard() {
             </thead>
             <tbody>
               {today.isLoading && (
-                <tr>
-                  <td colSpan={4} className="text-sm text-dim" style={{ padding: 12 }}>
-                    {t("dashboard.common.loading")}
-                  </td>
-                </tr>
+                <SkeletonRows cols={4} />
               )}
               {today.data?.items.map((it) => (
                 <tr key={`${it.employee_id}-${it.date}`}>

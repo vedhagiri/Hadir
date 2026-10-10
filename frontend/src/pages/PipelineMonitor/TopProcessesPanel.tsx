@@ -10,6 +10,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
 import { ApiError, api } from "../../api/client";
+import { SkeletonRows } from "../../components/Skeleton";
 
 const LIMIT = 20;
 
@@ -140,14 +141,7 @@ export function TopProcessesPanel({ isAdmin }: { isAdmin: boolean }) {
           </thead>
           <tbody>
             {q.isLoading && (
-              <tr>
-                <td
-                  style={{ ...cellStyle, textAlign: "center" }}
-                  colSpan={colSpan}
-                >
-                  {t("resources.processes.loading")}
-                </td>
-              </tr>
+              <SkeletonRows cols={colSpan} />
             )}
             {!q.isLoading && rows.length === 0 && (
               <tr>

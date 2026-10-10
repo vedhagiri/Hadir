@@ -17,6 +17,7 @@ import {
   useWorkers,
 } from "./hooks";
 import type { RestartAllAndRecoverResult } from "./types";
+import { SkeletonCards } from "../../components/Skeleton";
 
 export function WorkersPage() {
   const { t } = useTranslation();
@@ -187,9 +188,7 @@ export function WorkersPage() {
 
       {/* Worker list */}
       {list.isLoading && (
-        <div className="text-sm text-dim">
-          {t("common.loading") as string}
-        </div>
+        <SkeletonCards count={3} minWidth={300} />
       )}
       {list.isError && (
         <div className="text-sm" style={{ color: "var(--danger-text)" }}>

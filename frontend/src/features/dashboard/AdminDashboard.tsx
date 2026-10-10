@@ -10,6 +10,7 @@ import { useCamerasHealth, useSystemHealth } from "../system/hooks";
 import type { StorageStats } from "../system/types";
 import { StatCard } from "./StatCard";
 import { StatusBreakdown } from "./StatusBreakdown";
+import { SkeletonRows } from "../../components/Skeleton";
 
 export function AdminDashboard() {
   const { t } = useTranslation();
@@ -109,11 +110,7 @@ export function AdminDashboard() {
             </thead>
             <tbody>
               {recent.isLoading && (
-                <tr>
-                  <td colSpan={4} className="text-sm text-dim" style={{ padding: 12 }}>
-                    {t("dashboard.common.loading")}
-                  </td>
-                </tr>
+                <SkeletonRows cols={4} />
               )}
               {recent.data?.items.map((ev) => (
                 <tr key={ev.id}>

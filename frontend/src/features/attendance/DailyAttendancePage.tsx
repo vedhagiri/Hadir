@@ -31,6 +31,7 @@ import {
 import type { SendTodayResult } from "./hooks";
 import { formatMinutes } from "./timeFormat";
 import type { AttendanceItem } from "./types";
+import { SkeletonRows } from "../../components/Skeleton";
 
 type ScopeMode = "company" | "department" | "team" | "individual";
 
@@ -811,15 +812,7 @@ export function DailyAttendancePage() {
           </thead>
           <tbody>
             {list.isLoading && (
-              <tr>
-                <td
-                  colSpan={8}
-                  className="text-sm text-dim"
-                  style={{ padding: 16 }}
-                >
-                  {t("dailyAttendance.loading")}
-                </td>
-              </tr>
+              <SkeletonRows cols={8} />
             )}
             {list.isError && (
               <tr>

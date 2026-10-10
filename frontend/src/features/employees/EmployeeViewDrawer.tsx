@@ -41,6 +41,7 @@ import {
   useEmployeeTeamMembers,
 } from "./hooks";
 import type { Employee, Photo } from "./types";
+import { SkeletonLines } from "../../components/Skeleton";
 
 type Tab = "details" | "events" | "attendance" | "team" | "clips";
 
@@ -272,9 +273,7 @@ export function EmployeeViewDrawer({
         <div className="drawer-body">
           {tab === "details" &&
             (detail.isLoading ? (
-              <div className="text-sm text-dim">
-                {t("common.loading") as string}…
-              </div>
+              <SkeletonLines lines={5} />
             ) : detail.data ? (
               <DetailsTab
                 employee={detail.data}
@@ -312,7 +311,7 @@ function TeamMembersTab({ employeeId }: { employeeId: number }) {
 
   if (team.isLoading) {
     return (
-      <div className="text-sm text-dim">{t("common.loading") as string}…</div>
+      <SkeletonLines lines={5} />
     );
   }
   if (team.isError || !team.data) {
@@ -873,9 +872,7 @@ function EventsTab({ employeeId }: { employeeId: number }) {
       </div>
 
       {events.isLoading && (
-        <div className="text-sm text-dim">
-          {t("common.loading") as string}…
-        </div>
+        <SkeletonLines lines={5} />
       )}
       {events.isError && (
         <div className="text-sm" style={{ color: "var(--danger-text)" }}>

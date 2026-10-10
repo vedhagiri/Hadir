@@ -6,6 +6,7 @@ import { DrawerShell } from "../../components/DrawerShell";
 
 import { Icon } from "../../shell/Icon";
 import { useWorkerErrors } from "./hooks";
+import { SkeletonLines } from "../../components/Skeleton";
 
 interface Props {
   cameraId: number;
@@ -39,9 +40,7 @@ export function RecentErrorsDrawer({ cameraId, cameraName, onClose }: Props) {
         </div>
         <div className="drawer-body">
           {errors.isLoading && (
-            <div className="text-sm text-dim">
-              {t("common.loading") as string}
-            </div>
+            <SkeletonLines lines={4} />
           )}
           {errors.isError && (
             <div

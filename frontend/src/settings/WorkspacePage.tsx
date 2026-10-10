@@ -20,6 +20,7 @@ import {
   type RegenerateRangeResponse,
 } from "../leave-calendar/hooks";
 import { SettingsTabs } from "./SettingsTabs";
+import { SkeletonPanel } from "../components/Skeleton";
 
 const WEEKDAYS = [
   "Sunday",
@@ -163,7 +164,7 @@ export function WorkspacePage() {
       <SettingsTabs />
 
       {settings.isLoading && (
-        <p className="text-sm text-dim">{t("common.loading")}…</p>
+        <SkeletonPanel lines={6} />
       )}
       {settings.error && (
         <p style={{ color: "var(--danger-text)" }}>

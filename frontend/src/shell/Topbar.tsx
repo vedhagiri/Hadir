@@ -11,12 +11,13 @@
 // scattered through the feature folders.
 
 import type { CSSProperties } from "react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { useNavigate, NavLink } from "react-router-dom";
 
 import { useLogout, useSwitchRole } from "../auth/AuthProvider";
+import { getSidebar, subscribeSidebar, toggleSidebar } from "../sidebar";
 import { SessionCountdown } from "../auth/SessionCountdown";
 import { NotificationBell } from "../notifications/NotificationBell";
 import type { MeResponse, Role } from "../types";
@@ -59,8 +60,31 @@ export function Topbar({ pageId, role, me }: Props) {
     return out === key ? token : out;
   };
 
+  // Hamburger — the only control that collapses / expands the sidebar
+  // rail (the LPA header keeps it at the leading edge; the rail itself
+  // carries no toggle). ``aria-pressed`` reflects the collapsed state.
+  const sidebarState = useSyncExternalStore(
+    subscribeSidebar,
+    getSidebar,
+    getSidebar,
+  );
+  const sidebarCollapsed = sidebarState === "collapsed";
+  const menuLabel = sidebarCollapsed
+    ? t("common.expandSidebar")
+    : t("common.collapseSidebar");
+
   return (
     <div className="topbar">
+      <button
+        type="button"
+        className="topbar-menu-btn"
+        onClick={toggleSidebar}
+        aria-pressed={sidebarCollapsed}
+        aria-label={menuLabel}
+        title={menuLabel}
+      >
+        <Icon name="menu" size={16} />
+      </button>
       <div className="crumbs">
         {crumbs.map((c, i) => {
           const isLast = i === crumbs.length - 1;
@@ -265,22 +289,19 @@ function UserMenu({
       anchor.top + anchor.height + MENU_GAP_PX,
       window.innerHeight - VIEWPORT_MARGIN_PX,
     );
-    // Read the panel's actual width once it's measured, otherwise use the approx.
-    const measuredWidth = panelRef.current?.offsetWidth ?? MENU_APPROX_WIDTH_PX;
-    // Right-align with the trigger's right edge by default.
-    let left = anchor.right - measuredWidth;
-    // Clamp into viewport with the margin.
-    if (left < VIEWPORT_MARGIN_PX) left = VIEWPORT_MARGIN_PX;
-    if (left + measuredWidth > window.innerWidth - VIEWPORT_MARGIN_PX) {
-      left = Math.max(
-        VIEWPORT_MARGIN_PX,
-        window.innerWidth - VIEWPORT_MARGIN_PX - measuredWidth,
-      );
-    }
+    // Anchor the panel by its trailing edge instead of computing ``left``
+    // from a guessed width: on the first paint ``panelRef`` isn't attached
+    // yet, so a width-based ``left`` let the panel run off the right edge
+    // of the viewport. Pinning ``right`` (LTR) / ``left`` (RTL) to the
+    // trigger's edge keeps it inside regardless of the rendered width.
+    const isRtl = document.documentElement.dir === "rtl";
+    const edge: CSSProperties = isRtl
+      ? { left: Math.max(VIEWPORT_MARGIN_PX, anchor.left) }
+      : { right: Math.max(VIEWPORT_MARGIN_PX, window.innerWidth - anchor.right) };
     return {
       position: "fixed",
       top,
-      left,
+      ...edge,
       zIndex: MENU_Z_INDEX,
       background: "var(--bg-elev)",
       border: "1px solid var(--border)",

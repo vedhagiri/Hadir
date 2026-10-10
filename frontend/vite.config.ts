@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
@@ -14,10 +16,41 @@ const backendTarget = process.env.VITE_BACKEND_URL ?? "http://backend:8000";
 // (e.g. ``vitest`` from a sub-process) doesn't print ``undefined``.
 const appVersion = process.env.npm_package_version ?? "1.0.0";
 
+// Release date for the sidebar footer ("Released on …"). Resolved at
+// build time, first match wins:
+//   1. VITE_APP_RELEASED_ON        — explicit (ISO 8601), same contract
+//                                    as the LPA frontend;
+//   2. ../release-history/v<ver>.json — written by scripts/package-release.sh
+//                                    (host builds; the nginx image copies it
+//                                    there, the dev container mounts it at
+//                                    /release-history);
+//   3. ../RELEASE-META.json        — present in an extracted release zip.
+// None found (plain dev container) → empty string and the line is hidden.
+function resolveReleasedOn(): string {
+  const explicit = process.env.VITE_APP_RELEASED_ON?.trim();
+  if (explicit) return explicit;
+  for (const rel of [
+    `../release-history/v${appVersion}.json`,
+    `/release-history/v${appVersion}.json`, // dev container mount (docker-compose.yml)
+    "../RELEASE-META.json",
+  ]) {
+    try {
+      const raw = JSON.parse(readFileSync(resolve(__dirname, rel), "utf8")) as {
+        built_at_utc?: string;
+      };
+      if (raw.built_at_utc) return raw.built_at_utc;
+    } catch {
+      /* not there — try the next source */
+    }
+  }
+  return "";
+}
+
 export default defineConfig({
   plugins: [react()],
   define: {
     __APP_VERSION__: JSON.stringify(appVersion),
+    __APP_RELEASED_ON__: JSON.stringify(resolveReleasedOn()),
   },
   server: {
     host: "0.0.0.0",

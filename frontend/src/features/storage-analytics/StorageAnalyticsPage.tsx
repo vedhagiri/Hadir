@@ -27,6 +27,7 @@ import type {
   DailyStorageRow,
   StorageWindowMode,
 } from "./types";
+import { SkeletonChart, SkeletonChip } from "../../components/Skeleton";
 
 function todayIso(): string {
   const d = new Date();
@@ -386,16 +387,7 @@ function CleanupHistory({
       {open && (
         <>
           {history.isLoading && (
-            <div
-              style={{
-                padding: "32px 24px",
-                textAlign: "center",
-                color: "var(--text-tertiary)",
-                fontSize: 13,
-              }}
-            >
-              {t("storageAnalytics.loading")}
-            </div>
+            <SkeletonChart height={220} />
           )}
           {history.isError && (
             <EmptyState message={t("clipCleanup.history.loadFailed")} />
@@ -696,7 +688,7 @@ export function StorageAnalyticsPage() {
           </span>
         )}
         {analytics.isFetching && !analytics.isError && (
-          <span className="pill pill-neutral">{t("storageAnalytics.loading")}</span>
+          <SkeletonChip />
         )}
         {analytics.data && !analytics.isFetching && (
           <span className="pill pill-neutral" style={{ fontFamily: "var(--font-mono)", fontSize: 10.5 }}>
@@ -1018,16 +1010,7 @@ export function StorageAnalyticsPage() {
       {/* ── Table card ── */}
       <div className="card" style={{ overflow: "hidden" }}>
         {analytics.isLoading && (
-          <div
-            style={{
-              padding: "40px 24px",
-              textAlign: "center",
-              color: "var(--text-tertiary)",
-              fontSize: 13,
-            }}
-          >
-            {t("storageAnalytics.loadingAnalytics")}
-          </div>
+          <SkeletonChart height={220} />
         )}
         {!analytics.isLoading && tab === "by-camera" && (
           <CameraTable rows={analytics.data?.by_camera ?? []} />

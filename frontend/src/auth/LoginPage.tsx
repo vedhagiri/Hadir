@@ -18,8 +18,9 @@ import { z } from "zod";
 
 import { ApiError } from "../api/client";
 import mtsLogo from "../assets/mts_logo.png";
+import productMark from "../assets/mts_mark.png";
+import loginHero from "../assets/login_hero.jpg";
 import { useGoogleStatus, useOidcStatus } from "../auth-oidc/hooks";
-import { APP_VERSION_FULL } from "../config";
 import { Icon } from "../shell/Icon";
 import { useLogin, useMe } from "./AuthProvider";
 
@@ -77,6 +78,11 @@ export function LoginPage() {
 
   const watchedTenant = watch("tenant_slug") ?? "";
   const tenantSlug = watchedTenant.trim().toLowerCase();
+  // Sign in stays disabled until every required field has a value;
+  // the server still validates — this only prevents empty submits.
+  const watchedEmail = (watch("email") ?? "").trim();
+  const watchedPassword = watch("password") ?? "";
+  const canSubmit = tenantSlug.length > 0 && watchedEmail.length > 0 && watchedPassword.length > 0;
   const tenantSlugValid = /^[a-z_][a-z0-9_]{0,62}$/.test(tenantSlug);
 
   const oidcStatus = useOidcStatus(tenantSlugValid ? tenantSlug : null);
@@ -163,7 +169,11 @@ export function LoginPage() {
         // Two-column split on >=900px: form half + brand half. Below
         // that we stack into a single column so the form stays
         // usable on phones and the brand panel slides above it.
-        gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+        // The brand column is sized to the poster's own aspect ratio
+        // (1160 x 1356) at full viewport height, so the artwork fills
+        // it exactly with no letterbox bars; the form takes the rest.
+        // Capped at half the width for very tall / narrow windows.
+        gridTemplateColumns: "minmax(0, 1fr) min(50vw, calc(100vh * 1160 / 1356))",
         background: "var(--bg)",
         color: "var(--text)",
       }}
@@ -181,18 +191,19 @@ export function LoginPage() {
           // Slightly tinted surface to push the white form card off
           // the page background — gives the split a clearer divide
           // without going all the way to the brand-panel darkness.
-          background: "var(--bg-sunken, #eef0f4)",
+          background:
+            "radial-gradient(120% 90% at 0% 0%, #e8f1fb 0%, #f3f7fc 45%, #eef3f8 100%)",
         }}
       >
         <div
           style={{
             width: "100%",
-            maxWidth: 400,
+            maxWidth: 440,
             background: "var(--bg-elev)",
             border: "1px solid var(--border)",
             borderRadius: "var(--radius-lg)",
-            boxShadow: "var(--shadow)",
-            padding: 28,
+            boxShadow: "0 18px 50px rgba(15, 23, 42, 0.10)",
+            padding: "32px 30px",
             display: "flex",
             flexDirection: "column",
             gap: 14,
@@ -205,6 +216,7 @@ export function LoginPage() {
             errors={errors}
             isSubmitting={isSubmitting}
             isPending={login.isPending}
+            canSubmit={canSubmit}
             onSubmit={onSubmit}
             tenantSlug={tenantSlug}
             tenantSlugValid={tenantSlugValid}
@@ -234,177 +246,94 @@ export function LoginPage() {
 }
 
 function BrandPanel() {
-  // Background image: an Unsplash editorial shot of a modern office
-  // hallway. We layer a deep gradient over it so the white headline
-  // copy stays legible regardless of the underlying photo.
-  const bgUrl =
-    "https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=1600&q=80";
+  // Right-hand panel: the "AI-powered attendance" banner (portrait,
+  // 1160x1356, approved login banner), bundled locally — no network fetch, so it works on
+  // air-gapped installs. The poster carries its own headline + feature
+  // copy, so nothing is overlaid.
   return (
     <aside
       className="login-brand-panel"
+      aria-label="AI-powered CCTV attendance"
       style={{
-        position: "relative",
+        // Pinned to the viewport height so the poster never makes the
+        // page taller than the screen (no scrollbar); ``contain`` shows
+        // the whole artwork on a backdrop matching its own edge colour.
+        position: "sticky",
+        top: 0,
+        alignSelf: "start",
+        height: "100vh",
         overflow: "hidden",
-        backgroundImage: `linear-gradient(135deg, rgba(15, 23, 42, 0.78) 0%, rgba(30, 41, 59, 0.62) 60%, rgba(15, 23, 42, 0.85) 100%), url("${bgUrl}")`,
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-        color: "white",
+        background: "#f8fbfd",
         display: "flex",
-        flexDirection: "column",
+        alignItems: "center",
         justifyContent: "center",
-        padding: "64px 56px",
-        gap: 24,
       }}
     >
-      <div style={{ maxWidth: 460, display: "flex", flexDirection: "column", gap: 16 }}>
-        <span
-          style={{
-            fontSize: 11,
-            textTransform: "uppercase",
-            letterSpacing: "0.18em",
-            color: "rgba(255,255,255,0.78)",
-          }}
-        >
-          Maugood · Attendance Platform
-        </span>
-        <h2
-          style={{
-            fontFamily: "var(--font-display)",
-            fontSize: 38,
-            lineHeight: 1.15,
-            margin: 0,
-            fontWeight: 500,
-            letterSpacing: "-0.01em",
-          }}
-        >
-          Camera-driven attendance that thinks like an HR team.
-        </h2>
-        <p style={{ fontSize: 14.5, lineHeight: 1.6, margin: 0, color: "rgba(255,255,255,0.82)" }}>
-          Face-recognition cameras handle clock-in. Policies, leave, holidays
-          and exceptions handle the rest. Spend your days approving requests
-          and reading reports — not chasing biometric devices.
-        </p>
-      </div>
-
-      <ul
+      <img
+        src={loginHero}
+        alt="AI-powered CCTV attendance — real people, real time. MaugoodAI by Muscat Tech Solutions"
         style={{
-          listStyle: "none",
-          margin: 0,
-          padding: 0,
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 14,
-          maxWidth: 460,
+          position: "relative",
+          width: "100%",
+          height: "100%",
+          // The column matches the image ratio, so this is an exact fit;
+          // when the 50vw cap kicks in (tall windows) the crop takes the
+          // right-hand edge and keeps the headline + feature copy.
+          objectFit: "cover",
+          objectPosition: "left center",
+          display: "block",
         }}
-      >
-        {[
-          { title: "Always-on capture", body: "RTSP cameras stream directly into the pipeline." },
-          { title: "Multi-tenant", body: "One platform, isolated workspaces, branded per client." },
-          { title: "PDPL-ready", body: "Encryption at rest, audit trail, retention sweeps." },
-          { title: "Arabic + RTL", body: "Every operator sees their language end-to-end." },
-        ].map((f) => (
-          <li
-            key={f.title}
-            style={{
-              background: "rgba(15, 23, 42, 0.55)",
-              border: "1px solid rgba(255,255,255,0.28)",
-              borderRadius: 12,
-              padding: "14px 16px",
-              backdropFilter: "blur(10px)",
-              WebkitBackdropFilter: "blur(10px)",
-              boxShadow: "0 4px 16px rgba(0,0,0,0.25)",
-            }}
-          >
-            <div
-              style={{
-                fontSize: 14,
-                fontWeight: 700,
-                marginBottom: 6,
-                color: "#ffffff",
-                letterSpacing: "-0.005em",
-              }}
-            >
-              {f.title}
-            </div>
-            <div
-              style={{
-                fontSize: 12.5,
-                lineHeight: 1.55,
-                color: "rgba(255,255,255,0.92)",
-              }}
-            >
-              {f.body}
-            </div>
-          </li>
-        ))}
-      </ul>
-
-      <div
-        style={{
-          marginTop: "auto",
-          fontSize: 11,
-          color: "rgba(255,255,255,0.6)",
-          letterSpacing: "0.04em",
-        }}
-      >
-        Built in Oman by Muscat Tech Solutions
-      </div>
+      />
     </aside>
   );
 }
 
 function LoginFooter() {
-  const year = new Date().getFullYear();
+  const { t } = useTranslation();
+  // Mirrors the sidebar footer: "Powered by <mark> Muscat Tech Solutions"
+  // as a link to the vendor site. Nothing else — version lives in the
+  // sidebar once signed in.
   return (
     <footer
       style={{
-        textAlign: "center",
-        fontSize: 11,
-        lineHeight: 1.5,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        fontSize: 12,
         color: "var(--text-tertiary)",
-        maxWidth: 400,
       }}
     >
-      <div
+      <span>{t("login.footer.poweredBy")}</span>
+      <a
+        href="https://mts-om.com/"
+        target="_blank"
+        rel="noopener noreferrer"
         style={{
-          display: "flex",
+          display: "inline-flex",
           alignItems: "center",
-          justifyContent: "center",
-          gap: 6,
-          marginBottom: 4,
+          gap: 5,
+          fontWeight: 600,
+          color: "var(--text-secondary)",
+          textDecoration: "none",
         }}
       >
-        <span aria-hidden style={{ fontSize: 18, lineHeight: 1 }}>
-          🇴🇲
-        </span>
-        <span>Made with ♥ in Oman</span>
-      </div>
-      <div>
-        Powered by{" "}
-        <span style={{ fontWeight: 600, color: "var(--text-secondary)" }}>
-          Muscat Tech Solutions
-        </span>
-      </div>
-      <div style={{ marginTop: 2, opacity: 0.85 }}>
-        © {year} Muscat Tech Solutions. All rights reserved.
-      </div>
-      {/* Product version — pinned from frontend/package.json via the
-          ``__APP_VERSION__`` Vite define. Lets a customer-support
-          ticket carry the exact build the operator was on without a
-          shell session. Same source as the sidebar version chip so
-          the two never drift. */}
-      <div
-        className="mono"
-        style={{
-          marginTop: 6,
-          fontSize: 10.5,
-          opacity: 0.7,
-          letterSpacing: "0.02em",
-        }}
-      >
-        Maugood v{APP_VERSION_FULL}
-      </div>
+        <img src={productMark} alt="" aria-hidden style={{ height: 14, width: "auto", display: "block" }} />
+        <span>Muscat Tech Solutions</span>
+      </a>
     </footer>
+  );
+}
+
+function RequiredMark() {
+  const { t } = useTranslation();
+  return (
+    <span
+      aria-label={t("login.required")}
+      title={t("login.required")}
+      style={{ color: "var(--danger-text, #c0392b)", marginInlineStart: 3, fontWeight: 700 }}
+    >
+      *
+    </span>
   );
 }
 
@@ -466,6 +395,7 @@ interface CombinedFormProps {
   errors: ReturnType<typeof useForm<LoginValues>>["formState"]["errors"];
   isSubmitting: boolean;
   isPending: boolean;
+  canSubmit: boolean;
   onSubmit: (e?: React.BaseSyntheticEvent) => Promise<void>;
   tenantSlug: string;
   tenantSlugValid: boolean;
@@ -480,6 +410,7 @@ function CombinedLoginForm({
   errors,
   isSubmitting,
   isPending,
+  canSubmit,
   onSubmit,
   tenantSlug,
   tenantSlugValid,
@@ -494,6 +425,7 @@ function CombinedLoginForm({
   // part of the product, not a browser chrome dialog. Seeded from a
   // failed SSO callback's ``?sso_error`` when present.
   const [notice, setNotice] = useState<string | null>(initialNotice);
+  const [showPassword, setShowPassword] = useState(false);
   const oidcUrl = tenantSlugValid
     ? `/api/auth/oidc/login?tenant=${encodeURIComponent(tenantSlug)}`
     : "";
@@ -517,45 +449,67 @@ function CombinedLoginForm({
       </p>
 
       <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        <span style={labelStyle}>{t("login.tenantSlugLabel")}</span>
-        <input
-          type="text"
-          autoComplete="organization"
-          autoFocus={!tenantSlug}
-          placeholder={t("login.tenantSlugPlaceholder")}
-          aria-invalid={!!errors.tenant_slug}
-          {...register("tenant_slug")}
-          style={inputStyle}
-        />
+        <span style={labelStyle}>{t("login.tenantSlugLabel")}<RequiredMark /></span>
+        <div style={fieldWrapStyle}>
+          <span style={fieldIconStyle} aria-hidden="true"><BuildingIcon /></span>
+          <input
+            type="text"
+            autoComplete="organization"
+            autoFocus={!tenantSlug}
+            placeholder={t("login.tenantSlugPlaceholder")}
+            aria-invalid={!!errors.tenant_slug}
+            {...register("tenant_slug")}
+            style={inputStyle}
+          />
+        </div>
         {errors.tenant_slug && (
           <FieldError message={errors.tenant_slug.message ?? ""} />
         )}
       </label>
 
       <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        <span style={labelStyle}>{t("login.emailLabel")}</span>
-        <input
-          type="email"
-          autoComplete="username"
-          autoFocus={!!tenantSlug}
-          placeholder={t("login.emailPlaceholder")}
-          aria-invalid={!!errors.email}
-          {...register("email")}
-          style={inputStyle}
-        />
+        <span style={labelStyle}>{t("login.emailLabel")}<RequiredMark /></span>
+        <div style={fieldWrapStyle}>
+          <span style={fieldIconStyle} aria-hidden="true"><Icon name="mail" size={15} /></span>
+          <input
+            type="email"
+            autoComplete="username"
+            autoFocus={!!tenantSlug}
+            placeholder={t("login.emailPlaceholder")}
+            aria-invalid={!!errors.email}
+            {...register("email")}
+            style={inputStyle}
+          />
+        </div>
         {errors.email && <FieldError message={errors.email.message ?? ""} />}
       </label>
 
       <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        <span style={labelStyle}>{t("login.passwordLabel")}</span>
-        <input
-          type="password"
-          autoComplete="current-password"
-          placeholder={t("login.passwordPlaceholder")}
-          aria-invalid={!!errors.password}
-          {...register("password")}
-          style={inputStyle}
-        />
+        <span style={labelStyle}>{t("login.passwordLabel")}<RequiredMark /></span>
+        <div style={fieldWrapStyle}>
+          <span style={fieldIconStyle} aria-hidden="true"><LockIcon /></span>
+          <input
+            type={showPassword ? "text" : "password"}
+            autoComplete="current-password"
+            placeholder={t("login.passwordPlaceholder")}
+            aria-invalid={!!errors.password}
+            {...register("password")}
+            style={{ ...inputStyle, paddingInlineEnd: 40 }}
+          />
+          {/* Show / hide toggle. type="button" so it never submits the
+              form; aria-pressed + label keep it readable for screen
+              readers. The icon mirrors in RTL via the icon-* class. */}
+          <button
+            type="button"
+            onClick={() => setShowPassword((v) => !v)}
+            aria-label={showPassword ? t("login.hidePassword") : t("login.showPassword")}
+            aria-pressed={showPassword}
+            title={showPassword ? t("login.hidePassword") : t("login.showPassword")}
+            style={eyeButtonStyle}
+          >
+            <Icon name={showPassword ? "eyeOff" : "eye"} size={15} />
+          </button>
+        </div>
         {errors.password && <FieldError message={errors.password.message ?? ""} />}
       </label>
 
@@ -578,10 +532,14 @@ function CombinedLoginForm({
       <button
         type="submit"
         className="btn btn-primary"
-        disabled={isSubmitting || isPending}
-        style={{ justifyContent: "center", marginTop: 4 }}
+        disabled={!canSubmit || isSubmitting || isPending}
+        aria-disabled={!canSubmit || isSubmitting || isPending}
+        style={{
+          ...submitButtonStyle,
+          ...(!canSubmit ? { opacity: 0.55, boxShadow: "none", cursor: "not-allowed" } : {}),
+        }}
       >
-        <Icon name="check" size={13} />
+        <ArrowRightIcon />
         {isSubmitting || isPending ? t("login.submitting") : t("login.submit")}
       </button>
 
@@ -603,9 +561,8 @@ function CombinedLoginForm({
 
       {/* Microsoft + Google buttons render unconditionally so the
           login surface always advertises every supported sign-in
-          method. Icon-only treatment: the provider mark stands in
-          for the label. Accessible names come from aria-label +
-          title (hover tooltip). The buttons short-circuit to a
+          method. Icon-only: the provider mark stands in for the label;
+          accessible names come from aria-label + title (tooltip). The buttons short-circuit to a
           small notice when the active workspace hasn't enabled
           the provider — the backend route only responds when OIDC
           is configured for the tenant, so we surface the gating
@@ -646,7 +603,7 @@ function CombinedLoginForm({
             }
             window.location.assign(oidcUrl);
           }}
-          style={ssoIconButtonStyle}
+          style={ssoButtonStyle}
         >
           <MicrosoftLogo size={22} />
         </button>
@@ -682,7 +639,7 @@ function CombinedLoginForm({
             }
             window.location.assign(googleUrl);
           }}
-          style={ssoIconButtonStyle}
+          style={ssoButtonStyle}
         >
           <GoogleLogo size={22} />
         </button>
@@ -810,11 +767,11 @@ function ProviderNoticeModal({
   );
 }
 
-const ssoIconButtonStyle = {
-  background: "var(--bg)",
+const ssoButtonStyle = {
+  background: "var(--bg-elev)",
   color: "var(--text)",
   border: "1px solid var(--border)",
-  width: 44,
+  width: 48,
   height: 44,
   borderRadius: "var(--radius-sm)",
   cursor: "pointer",
@@ -823,7 +780,64 @@ const ssoIconButtonStyle = {
   justifyContent: "center",
   padding: 0,
   fontFamily: "var(--font-sans)",
+  boxShadow: "0 1px 2px rgba(15, 23, 42, 0.06)",
 };
+
+// Teal gradient primary action with a leading arrow (approved login mock).
+const submitButtonStyle = {
+  justifyContent: "center",
+  marginTop: 4,
+  height: 42,
+  fontSize: 14,
+  fontWeight: 600,
+  background: "linear-gradient(90deg, #0f766e 0%, #14867c 60%, #1f9b8f 100%)",
+  border: "none",
+  color: "#ffffff",
+  boxShadow: "0 8px 20px rgba(15, 118, 110, 0.28)",
+} as const;
+
+// Input with a leading icon: wrapper is relative, the icon sits in the
+// start padding, the eye toggle (password) in the end padding.
+const fieldWrapStyle = { position: "relative", display: "flex" } as const;
+const fieldIconStyle = {
+  position: "absolute",
+  insetInlineStart: 0,
+  top: 0,
+  bottom: 0,
+  width: 40,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  color: "var(--accent)",
+  borderInlineEnd: "1px solid var(--border)",
+  pointerEvents: "none",
+} as const;
+
+function BuildingIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="4" y="3" width="16" height="18" rx="2" />
+      <path d="M9 7h2M13 7h2M9 11h2M13 11h2M9 15h2M13 15h2M10 21v-3h4v3" />
+    </svg>
+  );
+}
+
+function LockIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="4" y="11" width="16" height="10" rx="2" />
+      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+    </svg>
+  );
+}
+
+function ArrowRightIcon() {
+  return (
+    <svg className="icon-arrow-right" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M5 12h14M13 6l6 6-6 6" />
+    </svg>
+  );
+}
 
 function GoogleLogo({ size = 14 }: { size?: number }) {
   // Multi-coloured Google "G" — official mark, public press-kit
@@ -880,8 +894,27 @@ const labelStyle = {
   color: "var(--text-tertiary)",
 };
 
+const eyeButtonStyle = {
+  position: "absolute",
+  insetInlineEnd: 4,
+  top: "50%",
+  transform: "translateY(-50%)",
+  width: 28,
+  height: 28,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  border: "none",
+  background: "transparent",
+  color: "var(--text-secondary)",
+  cursor: "pointer",
+  borderRadius: "var(--radius-sm)",
+} as const;
+
 const inputStyle = {
-  padding: "8px 10px",
+  width: "100%",
+  padding: "10px 12px",
+  paddingInlineStart: 50,
   border: "1px solid var(--border)",
   borderRadius: "var(--radius-sm)",
   fontSize: 13,

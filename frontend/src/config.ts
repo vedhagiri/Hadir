@@ -20,6 +20,13 @@ function truncate(v: string): string {
 export const APP_VERSION_FULL = RAW;
 export const APP_VERSION_SHORT = truncate(RAW);
 
+// Release timestamp (ISO 8601) injected by vite.config.ts — see
+// ``resolveReleasedOn`` there for the lookup order. Empty when the
+// build could not find one; callers hide the line in that case.
+declare const __APP_RELEASED_ON__: string | undefined;
+export const APP_RELEASED_ON: string =
+  typeof __APP_RELEASED_ON__ === "string" ? __APP_RELEASED_ON__ : "";
+
 // ── Feature flags (env-driven) ──────────────────────────────────────────────
 
 function envFlag(name: string): boolean {

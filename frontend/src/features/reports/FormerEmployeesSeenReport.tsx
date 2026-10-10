@@ -14,6 +14,7 @@ import { api } from "../../api/client";
 import { DatePicker, todayIso } from "../../components/DatePicker";
 import { useConfidentialDownload } from "../../components/useConfidentialDownload";
 import { Icon } from "../../shell/Icon";
+import { SkeletonRows } from "../../components/Skeleton";
 
 interface Sighting {
   detection_event_id: number;
@@ -138,11 +139,7 @@ export function FormerEmployeesSeenReport() {
           </thead>
           <tbody>
             {data.isLoading && (
-              <tr>
-                <td colSpan={7} className="text-sm text-dim" style={{ padding: 16 }}>
-                  {t("common.loading") as string}
-                </td>
-              </tr>
+              <SkeletonRows cols={7} />
             )}
             {data.isError && (
               <tr>

@@ -10,6 +10,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { api } from "../api/client";
+import { SkeletonRows } from "../components/Skeleton";
 
 interface HostMetrics {
   cpu_percent: number;
@@ -294,15 +295,7 @@ export function SystemPage() {
               </thead>
               <tbody>
                 {tenants.isLoading && (
-                  <tr>
-                    <td
-                      colSpan={5}
-                      className="text-sm text-dim"
-                      style={{ padding: 16 }}
-                    >
-                      Loading…
-                    </td>
-                  </tr>
+                  <SkeletonRows cols={5} />
                 )}
                 {tenants.data?.tenants.map((t) => (
                   <tr key={t.slug}>

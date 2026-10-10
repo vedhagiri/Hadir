@@ -28,6 +28,7 @@ import { toast } from "../shell/Toaster";
 import { SettingsTabs } from "./SettingsTabs";
 
 import { useQuery } from "@tanstack/react-query";
+import { SkeletonChip, SkeletonLines, SkeletonRows } from "../components/Skeleton";
 
 export function DepartmentsPage() {
   const { t } = useTranslation();
@@ -111,15 +112,7 @@ export function DepartmentsPage() {
           </thead>
           <tbody>
             {list.isLoading && (
-              <tr>
-                <td
-                  colSpan={6}
-                  className="text-sm text-dim"
-                  style={{ padding: 16 }}
-                >
-                  {t("common.loading") as string}…
-                </td>
-              </tr>
+              <SkeletonRows cols={6} />
             )}
             {list.data?.items.length === 0 && (
               <tr>
@@ -250,7 +243,7 @@ function ManagerChips({ departmentId }: { departmentId: number }) {
   const { t } = useTranslation();
   const list = useDepartmentManagers(departmentId);
   if (list.isLoading) {
-    return <span className="text-xs text-dim">{t("departments.chips.loading")}</span>;
+    return <SkeletonChip />;
   }
   if (list.isError) {
     return (
@@ -483,7 +476,7 @@ function DepartmentManagersModal({
           {t("departments.managersModal.assignedSection")}
         </div>
         {assigned.isLoading && (
-          <div className="text-sm text-dim">{t("departments.managersModal.loadingAssigned")}</div>
+          <SkeletonLines lines={2} />
         )}
         {!assigned.isLoading &&
           (assigned.data?.items.length ?? 0) === 0 && (

@@ -23,6 +23,7 @@ import { ApiError, api } from "../../api/client";
 import { Icon } from "../../shell/Icon";
 import { ResourceTimeseries } from "./ResourceTimeseries";
 import { TopProcessesPanel } from "./TopProcessesPanel";
+import { SkeletonCards } from "../../components/Skeleton";
 
 // Per-row health pill — green/yellow/red dot + label. Reused by the
 // per-camera and per-stage tables so the leftmost column tells the
@@ -1106,9 +1107,7 @@ export function ResourcesPanel({ isAdmin }: { isAdmin: boolean }) {
         </button>
       </div>
       {hostQ.isLoading && (
-        <div className="text-sm text-dim" style={{ padding: 16 }}>
-          {t("resources.loading")}
-        </div>
+        <SkeletonCards count={4} />
       )}
       <ResourceTimeseries isAdmin={isAdmin} />
       <TopProcessesPanel isAdmin={isAdmin} />

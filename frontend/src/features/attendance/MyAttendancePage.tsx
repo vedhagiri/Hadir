@@ -24,6 +24,7 @@ import { useMyEmployee } from "../employees/hooks";
 import { useMyRecentAttendance, useRegenerateAttendanceForEmployee } from "./hooks";
 import { formatMinutes } from "./timeFormat";
 import type { AttendanceItem } from "./types";
+import { SkeletonLines } from "../../components/Skeleton";
 
 export function MyAttendancePage() {
   const { t } = useTranslation();
@@ -239,7 +240,7 @@ export function MyAttendancePage() {
         )}
         {employeeId !== null && person.isLoading && (
           <div className="card" style={{ padding: 16 }}>
-            <div className="text-sm text-dim">{t("myAttendance.loadingCalendar")}</div>
+            <SkeletonLines lines={5} />
           </div>
         )}
         {employeeId !== null && person.isError && (
@@ -271,7 +272,7 @@ export function MyAttendancePage() {
         </div>
         <div className="card-body" style={{ paddingTop: 0 }}>
           {recent.isLoading && (
-            <div className="text-sm text-dim">{t("myAttendance.loading")}</div>
+            <SkeletonLines lines={5} />
           )}
           {!recent.isLoading && recentSorted.length === 0 && (
             <div className="text-sm text-dim">{t("myAttendance.rolling.empty")}</div>
@@ -363,7 +364,7 @@ function TodayCard({
         {day && <StatusPill status={day.status} />}
       </div>
       <div className="card-body">
-        {loading && <div className="text-sm text-dim">{t("myAttendance.loading")}</div>}
+        {loading && <SkeletonLines lines={5} />}
         {!loading && (
           <>
             <div

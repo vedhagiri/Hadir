@@ -49,7 +49,8 @@
     "languageArabic": "العربية",
     "collapseSidebar": "Collapse sidebar",
     "expandSidebar": "Expand sidebar",
-    "optional": "optional"
+    "optional": "optional",
+    "buildInfo": "Build information"
   },
   "login": {
     "title": "Sign in to Maugood",
@@ -57,6 +58,15 @@
     "emailLabel": "Email",
     "emailPlaceholder": "you@your-domain.com",
     "passwordLabel": "Password",
+    "showPassword": "Show password",
+    "hidePassword": "Hide password",
+      "required": "Required",
+      "footer": {
+      "poweredBy": "Powered by",
+        "tagline": "CCTV-based AI attendance platform",
+        "rights": "All rights reserved.",
+        "version": "Version {{version}}"
+      },
     "passwordPlaceholder": "Your Maugood password",
     "submit": "Sign in",
     "submitting": "Signing in…",
@@ -276,7 +286,8 @@
       "API Reference": "API reference",
       "Frame Diagnostics": "Frame diagnostics",
       "Live Capture Diagnostics": "Live capture diagnostics"
-    }
+    },
+    "ariaLabel": "Sidebar navigation"
   },
   "approvals": {
     "title": "Approvals",
@@ -794,6 +805,9 @@
     "recordingModeLogsOnly": "Logs Only",
     "recordingModeHint": "Save Clips records full MP4 video. Logs Only logs detection events with no video saved.",
     "page": {
+      "subtitleV2": "Manage and monitor all cameras in your organization",
+      "view": "View",
+      "showing": "Showing {{from}} to {{to}} of {{total}} cameras",
       "title": "Cameras",
       "sub_one": "1 camera",
       "sub_other": "{{count}} cameras",
@@ -880,6 +894,67 @@
       "deleting": "Deleting…",
       "confirm": "Delete camera"
     },
+    "stats": {
+      "total": "Total cameras",
+      "totalSub": "All configured cameras",
+      "online": "Online",
+      "reconnecting": "Reconnecting",
+      "offline": "Offline",
+      "pctSub": "{{pct}}% of cameras",
+      "offlineDisabledSub": "{{pct}}% of cameras · {{n}} disabled"
+    },
+    "filters": {
+      "search": "Search by name, ID, location or IP address…",
+      "status": "Status",
+      "clearSearch": "Clear search",
+      "allStatus": "All status",
+      "disabled": "Disabled",
+      "zone": "Zone",
+      "allZones": "All zones",
+      "type": "Brand",
+      "allTypes": "All types",
+      "reset": "Reset",
+      "noMatch": "No cameras match these filters."
+    },
+    "lastSeen": {
+      "label": "Last seen",
+      "now": "just now",
+      "mins_one": "{{count}} min ago",
+      "mins_other": "{{count}} mins ago",
+      "hours_one": "{{count}} hour ago",
+      "hours_other": "{{count}} hours ago",
+      "days_one": "{{count}} day ago",
+      "days_other": "{{count}} days ago"
+    },
+    "empty": {
+      "noneTitle": "No cameras yet",
+      "noneBody": "Add your first camera, or import a list, to start recording attendance.",
+      "searchTitle": "No results for “{{q}}”",
+      "searchBody": "Check the spelling, or search by camera ID, location or IP address.",
+      "filtersTitle": "No cameras match these filters",
+      "filtersBody": "Try removing one of the filters, or clear them to see every camera.",
+      "clearFilters": "Clear filters",
+      "showAll": "Show all cameras",
+      "status": {
+        "online": {
+          "title": "No cameras are online right now",
+          "body": "None of your cameras are streaming. Check the Reconnecting and Offline cards to see which need attention."
+        },
+        "reconnecting": {
+          "title": "No cameras are reconnecting",
+          "body": "Every camera has a steady connection right now."
+        },
+        "offline": {
+          "title": "No cameras are offline",
+          "body": "Good news: none of your cameras have lost their connection."
+        },
+        "disabled": {
+          "title": "No disabled cameras",
+          "body": "Every camera has its capture worker switched on."
+        }
+      }
+    },
+    "view": {"list": "List view", "grid": "Grid view"},
     "previewModal": {
       "title": "Preview · {{name}}",
       "sub": "on-demand single frame",
@@ -1061,6 +1136,17 @@
   },
   "calendar": {
     "title": "Attendance calendar",
+    "prevMonth": "Previous month",
+    "nextMonth": "Next month",
+    "vsPrevMonth": "Change vs previous month",
+    "personDetailSub": "View daily attendance details for the selected employee",
+    "profile": {
+      "email": "Email",
+      "phone": "Phone",
+      "department": "Department",
+      "active": "Active",
+      "inactive": "Inactive"
+    },
     "companySub": "Company-wide presence by day",
     "personSub": "One employee, one month",
     "tabCompany": "Company",
@@ -3067,6 +3153,7 @@
       "byEndDate": "Filter by end date",
       "byStatus": "Filter by processing status",
       "byProcessedUcs": "Filter by processed use cases",
+      "byMatchResult": "Filter by match result",
       "byRecordingMode": "Filter by recording mode",
       "recordingModeLabel": "Recording mode",
       "clear": "Clear",
@@ -3092,6 +3179,11 @@
     "ucFilter": {
       "any": "Any",
       "notProcessed": "Not Processed"
+    },
+    "matchResultFilter": {
+      "all": "All",
+      "matched": "Matched",
+      "unmatched": "Unmatched"
     },
     "row": {
       "clickDetails": "Click to view full details",
@@ -4678,5 +4770,47 @@
     "filterDays_other": "older than {{count}} days",
     "deleteClips_one": "Delete {{count}} clip",
     "deleteClips_other": "Delete {{count}} clips"
+  },
+  "devices": {
+    "list": {
+      "viewList": "List view",
+    "viewGrid": "Grid view",
+    "model": "Model",
+    "openHint": "Click for events and people",
+    "moreActions": "More actions",
+    "peopleSeen": "people seen",
+    "lastEventHint": "Last successful event",
+    "viewDetails": "View details",
+    "colMethods": "Verification",
+    "methodsPending": "after first scan",
+    "subtitle": "Manage the fingerprint and face terminals that record attendance",
+      "total": "Total devices",
+      "totalSub": "{{seen}} people seen",
+      "totalSubUnmapped": "{{seen}} people seen · {{unmapped}} unmapped",
+      "pctSub": "{{pct}}% of devices",
+      "waiting": "Not reporting yet",
+      "waitingSub": "Waiting for the first event",
+      "search": "Search by name, location, serial or model…",
+      "clearSearch": "Clear search",
+      "status": "Status",
+      "allStatus": "All status",
+      "brand": "Brand",
+      "allBrands": "All brands",
+      "reset": "Reset",
+      "colBrand": "Brand / model",
+      "showing": "Showing {{shown}} of {{total}} devices · click a device to see its events and people",
+      "showAll": "Show all devices",
+      "clearFilters": "Clear filters",
+      "emptyOnlineTitle": "No devices are online right now",
+      "emptyOnlineBody": "None of your terminals has sent an event recently. Check the Unreachable and Not reporting cards.",
+      "emptyWaitingTitle": "Every device is reporting",
+      "emptyWaitingBody": "All terminals have sent at least one event.",
+      "emptyUnreachableTitle": "No devices are unreachable",
+      "emptyUnreachableBody": "Good news: every terminal that has reported is still in touch.",
+      "emptySearchTitle": "No results for “{{q}}”",
+      "emptySearchBody": "Check the spelling, or search by device name, location, serial number or model.",
+      "emptyFiltersTitle": "No devices match these filters",
+      "emptyFiltersBody": "Try removing one of the filters, or clear them to see every device."
+    }
   }
 }

@@ -21,6 +21,7 @@ import {
   useRequests,
 } from "./hooks";
 import type { RequestRecord, RequestStatus } from "./types";
+import { SkeletonPage } from "../components/Skeleton";
 
 type Tab = "pending" | "decided" | "all" | "delete-requests";
 
@@ -65,7 +66,7 @@ export function ApprovalsPage() {
   }, [role]);
 
   // Employees should never see this page; bounce them with a hint.
-  if (me.isLoading) return <p>{t("common.loading")}</p>;
+  if (me.isLoading) return <SkeletonPage />;
   if (role === "Employee") {
     return (
       <p style={{ color: "var(--text-secondary)" }}>

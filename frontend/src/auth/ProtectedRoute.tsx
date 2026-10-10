@@ -1,5 +1,6 @@
 // Wraps authenticated routes. While the ``useMe`` probe is in flight we
-// render nothing — no spinner, no flicker — and once it resolves we
+// show the MaugoodAI loader (same look as the index.html boot screen,
+// so there is no flicker) and once it resolves we
 // either render children (user logged in) or redirect to /login.
 //
 // Session-expiry behaviour: when a user IS logged in (we've seen a real
@@ -12,6 +13,7 @@ import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 
+import { AppLoader } from "../components/AppLoader";
 import { useMe } from "./AuthProvider";
 
 interface Props {
@@ -32,7 +34,7 @@ export function ProtectedRoute({ children }: Props) {
   }, [me]);
 
   if (isLoading) {
-    return null;
+    return <AppLoader />;
   }
   if (me == null) {
     // If we've ever seen them logged in this load, the session

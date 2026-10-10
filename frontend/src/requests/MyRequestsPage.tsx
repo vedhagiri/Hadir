@@ -12,6 +12,7 @@ import { RequestDetailDrawer } from "./RequestDetailDrawer";
 import { StatusPill } from "./StatusPill";
 import { useMyRequests } from "./hooks";
 import type { RequestStatus, RequestType } from "./types";
+import { SkeletonRows } from "../components/Skeleton";
 
 type StatusFilter = "all" | "open" | "approved" | "rejected" | "cancelled";
 type TypeFilter = "all" | RequestType;
@@ -130,11 +131,7 @@ export function MyRequestsPage() {
           </thead>
           <tbody>
             {requests.isLoading ? (
-              <tr>
-                <td colSpan={7} className="text-sm text-dim">
-                  {t("common.loading")}
-                </td>
-              </tr>
+              <SkeletonRows cols={7} />
             ) : filtered.length === 0 ? (
               <tr>
                 <td colSpan={7} className="text-sm text-dim">

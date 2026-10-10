@@ -49,7 +49,8 @@
     "languageArabic": "العربية",
     "collapseSidebar": "طيّ الشريط الجانبي",
     "expandSidebar": "توسيع الشريط الجانبي",
-    "optional": "اختياري"
+    "optional": "اختياري",
+    "buildInfo": "معلومات الإصدار"
   },
   "login": {
     "title": "تسجيل الدخول إلى Maugood",
@@ -57,6 +58,15 @@
     "emailLabel": "البريد الإلكتروني",
     "emailPlaceholder": "you@your-domain.com",
     "passwordLabel": "كلمة المرور",
+    "showPassword": "إظهار كلمة المرور",
+    "hidePassword": "إخفاء كلمة المرور",
+      "required": "إلزامي",
+      "footer": {
+      "poweredBy": "مدعوم من",
+        "tagline": "منصة حضور ذكية تعتمد على كاميرات المراقبة",
+        "rights": "جميع الحقوق محفوظة.",
+        "version": "الإصدار {{version}}"
+      },
     "passwordPlaceholder": "كلمة مرور Maugood الخاصة بك",
     "submit": "تسجيل الدخول",
     "submitting": "جارٍ تسجيل الدخول…",
@@ -276,7 +286,8 @@
       "API Reference": "مرجع واجهة البرمجة",
       "Frame Diagnostics": "تشخيص الإطارات",
       "Live Capture Diagnostics": "تشخيص الالتقاط المباشر"
-    }
+    },
+    "ariaLabel": "التنقل في الشريط الجانبي"
   },
   "approvals": {
     "title": "الموافقات",
@@ -794,6 +805,9 @@
     "recordingModeLogsOnly": "السجلات فقط",
     "recordingModeHint": "حفظ المقاطع: تسجيل فيديو كامل. السجلات فقط: تسجيل أحداث الكشف بدون حفظ فيديو.",
     "page": {
+      "subtitleV2": "إدارة ومراقبة جميع الكاميرات في مؤسستك",
+      "view": "عرض",
+      "showing": "عرض {{from}} إلى {{to}} من {{total}} كاميرا",
       "title": "الكاميرات",
       "sub_one": "كاميرا واحدة",
       "sub_other": "{{count}} كاميرا",
@@ -880,6 +894,67 @@
       "deleting": "جارٍ الحذف…",
       "confirm": "حذف الكاميرا"
     },
+    "stats": {
+      "total": "إجمالي الكاميرات",
+      "totalSub": "جميع الكاميرات المهيأة",
+      "online": "متصلة",
+      "reconnecting": "إعادة الاتصال",
+      "offline": "غير متصلة",
+      "pctSub": "{{pct}}% من الكاميرات",
+      "offlineDisabledSub": "{{pct}}% من الكاميرات · {{n}} معطلة"
+    },
+    "filters": {
+      "search": "ابحث بالاسم أو المعرف أو الموقع أو عنوان IP…",
+      "status": "الحالة",
+      "clearSearch": "مسح البحث",
+      "allStatus": "كل الحالات",
+      "disabled": "معطلة",
+      "zone": "المنطقة",
+      "allZones": "كل المناطق",
+      "type": "العلامة التجارية",
+      "allTypes": "كل الأنواع",
+      "reset": "إعادة تعيين",
+      "noMatch": "لا توجد كاميرات تطابق هذه الفلاتر."
+    },
+    "lastSeen": {
+      "label": "آخر ظهور",
+      "now": "الآن",
+      "mins_one": "منذ {{count}} دقيقة",
+      "mins_other": "منذ {{count}} دقائق",
+      "hours_one": "منذ {{count}} ساعة",
+      "hours_other": "منذ {{count}} ساعات",
+      "days_one": "منذ {{count}} يوم",
+      "days_other": "منذ {{count}} أيام"
+    },
+    "empty": {
+      "noneTitle": "لا توجد كاميرات بعد",
+      "noneBody": "أضف أول كاميرا أو استورد قائمة لبدء تسجيل الحضور.",
+      "searchTitle": "لا نتائج لـ “{{q}}”",
+      "searchBody": "تحقق من الإملاء، أو ابحث بمعرف الكاميرا أو الموقع أو عنوان IP.",
+      "filtersTitle": "لا توجد كاميرات تطابق هذه الفلاتر",
+      "filtersBody": "جرّب إزالة أحد الفلاتر، أو امسحها لعرض جميع الكاميرات.",
+      "clearFilters": "مسح الفلاتر",
+      "showAll": "عرض جميع الكاميرات",
+      "status": {
+        "online": {
+          "title": "لا توجد كاميرات متصلة حاليًا",
+          "body": "لا تبث أي كاميرا الآن. راجع بطاقتي إعادة الاتصال وغير المتصلة لمعرفة ما يحتاج إلى متابعة."
+        },
+        "reconnecting": {
+          "title": "لا توجد كاميرات قيد إعادة الاتصال",
+          "body": "جميع الكاميرات متصلة بثبات الآن."
+        },
+        "offline": {
+          "title": "لا توجد كاميرات غير متصلة",
+          "body": "خبر جيد: لم تفقد أي كاميرا اتصالها."
+        },
+        "disabled": {
+          "title": "لا توجد كاميرات معطلة",
+          "body": "عامل الالتقاط مفعّل لجميع الكاميرات."
+        }
+      }
+    },
+    "view": {"list": "عرض القائمة", "grid": "عرض الشبكة"},
     "previewModal": {
       "title": "معاينة · {{name}}",
       "sub": "إطار واحد عند الطلب",
@@ -1061,6 +1136,17 @@
   },
   "calendar": {
     "title": "تقويم الحضور",
+    "prevMonth": "الشهر السابق",
+    "nextMonth": "الشهر التالي",
+    "vsPrevMonth": "التغير مقارنة بالشهر السابق",
+    "personDetailSub": "عرض تفاصيل الحضور اليومية للموظف المحدد",
+    "profile": {
+      "email": "البريد الإلكتروني",
+      "phone": "الهاتف",
+      "department": "القسم",
+      "active": "نشط",
+      "inactive": "غير نشط"
+    },
     "companySub": "حضور الشركة بحسب اليوم",
     "personSub": "موظف واحد، شهر واحد",
     "tabCompany": "الشركة",
@@ -3097,6 +3183,7 @@
       "byEndDate": "تصفية حسب تاريخ الانتهاء",
       "byStatus": "تصفية حسب حالة المعالجة",
       "byProcessedUcs": "تصفية حسب حالات الاستخدام المُعالجة",
+      "byMatchResult": "تصفية حسب نتيجة المطابقة",
       "byRecordingMode": "تصفية حسب وضع التسجيل",
       "recordingModeLabel": "وضع التسجيل",
       "clear": "مسح",
@@ -3122,6 +3209,11 @@
     "ucFilter": {
       "any": "أي",
       "notProcessed": "غير مُعالَج"
+    },
+    "matchResultFilter": {
+      "all": "الكل",
+      "matched": "مطابَق",
+      "unmatched": "غير مطابَق"
     },
     "row": {
       "clickDetails": "انقر لعرض التفاصيل الكاملة",
@@ -4750,5 +4842,47 @@
     "deleteClips_few": "حذف {{count}} مقاطع",
     "deleteClips_many": "حذف {{count}} مقطعاً",
     "deleteClips_other": "حذف {{count}} مقطع"
+  },
+  "devices": {
+    "list": {
+      "viewList": "عرض القائمة",
+    "viewGrid": "عرض الشبكة",
+    "model": "الطراز",
+    "openHint": "انقر لعرض الأحداث والأشخاص",
+    "moreActions": "إجراءات أخرى",
+    "peopleSeen": "أشخاص تم رصدهم",
+    "lastEventHint": "آخر حدث ناجح",
+    "viewDetails": "عرض التفاصيل",
+    "colMethods": "طرق التحقق",
+    "methodsPending": "بعد أول مسح",
+    "subtitle": "إدارة أجهزة البصمة والتعرف على الوجه التي تسجل الحضور",
+      "total": "إجمالي الأجهزة",
+      "totalSub": "{{seen}} أشخاص تم رصدهم",
+      "totalSubUnmapped": "{{seen}} أشخاص تم رصدهم · {{unmapped}} غير مرتبطين",
+      "pctSub": "{{pct}}% من الأجهزة",
+      "waiting": "لم يبدأ الإرسال بعد",
+      "waitingSub": "بانتظار أول حدث",
+      "search": "ابحث بالاسم أو الموقع أو الرقم التسلسلي أو الطراز…",
+      "clearSearch": "مسح البحث",
+      "status": "الحالة",
+      "allStatus": "كل الحالات",
+      "brand": "العلامة التجارية",
+      "allBrands": "كل العلامات",
+      "reset": "إعادة تعيين",
+      "colBrand": "العلامة / الطراز",
+      "showing": "عرض {{shown}} من {{total}} جهاز · انقر على جهاز لعرض أحداثه والأشخاص",
+      "showAll": "عرض جميع الأجهزة",
+      "clearFilters": "مسح الفلاتر",
+      "emptyOnlineTitle": "لا توجد أجهزة متصلة حاليًا",
+      "emptyOnlineBody": "لم يرسل أي جهاز حدثًا مؤخرًا. راجع بطاقتي غير قابل للوصول ولم يبدأ الإرسال.",
+      "emptyWaitingTitle": "جميع الأجهزة ترسل البيانات",
+      "emptyWaitingBody": "أرسلت جميع الأجهزة حدثًا واحدًا على الأقل.",
+      "emptyUnreachableTitle": "لا توجد أجهزة غير قابلة للوصول",
+      "emptyUnreachableBody": "خبر جيد: كل جهاز أرسل بيانات ما زال متصلًا.",
+      "emptySearchTitle": "لا نتائج لـ “{{q}}”",
+      "emptySearchBody": "تحقق من الإملاء، أو ابحث باسم الجهاز أو الموقع أو الرقم التسلسلي أو الطراز.",
+      "emptyFiltersTitle": "لا توجد أجهزة تطابق هذه الفلاتر",
+      "emptyFiltersBody": "جرّب إزالة أحد الفلاتر، أو امسحها لعرض جميع الأجهزة."
+    }
   }
 }

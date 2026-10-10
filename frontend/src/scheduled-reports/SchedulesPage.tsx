@@ -20,6 +20,7 @@ import type {
   ReportSchedule,
   ReportScheduleCreateInput,
 } from "./types";
+import { SkeletonRows } from "../components/Skeleton";
 
 export function SchedulesPage() {
   const { t } = useTranslation();
@@ -155,11 +156,7 @@ export function SchedulesPage() {
           </thead>
           <tbody>
             {schedules.isLoading ? (
-              <tr>
-                <td colSpan={7} className="text-sm text-dim">
-                  {t("schedules.loading")}
-                </td>
-              </tr>
+              <SkeletonRows cols={7} />
             ) : (schedules.data ?? []).length === 0 ? (
               <tr>
                 <td colSpan={7} className="text-sm text-dim">

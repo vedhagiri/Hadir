@@ -20,6 +20,9 @@ COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 
 COPY frontend/ ./
+# Release records for the footer's "Released on" line — vite.config.ts
+# reads ../release-history/v<version>.json at build time.
+COPY release-history/ /release-history/
 RUN npm run build
 
 # --- 2. nginx ----------------------------------------------------------

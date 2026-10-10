@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 
 import { useTenantDateTime } from "../util/datetime";
 import { useMarkAllRead, useMarkRead, useNotifications } from "./hooks";
+import { SkeletonRows } from "../components/Skeleton";
 
 
 export function NotificationsPage() {
@@ -76,11 +77,7 @@ export function NotificationsPage() {
           </thead>
           <tbody>
             {list.isLoading ? (
-              <tr>
-                <td colSpan={4} className="text-sm text-dim">
-                  {t("common.loading")}
-                </td>
-              </tr>
+              <SkeletonRows cols={4} />
             ) : (list.data?.items ?? []).length === 0 ? (
               <tr>
                 <td colSpan={4} className="text-sm text-dim">

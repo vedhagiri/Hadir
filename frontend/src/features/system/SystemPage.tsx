@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next";
 import { Icon } from "../../shell/Icon";
 import { useCamerasHealth, useSystemHealth } from "./hooks";
 import type { CameraHealthPoint } from "./types";
+import { SkeletonRows } from "../../components/Skeleton";
 
 export function SystemPage() {
   const { t } = useTranslation();
@@ -103,11 +104,7 @@ export function SystemPage() {
             </thead>
             <tbody>
               {cams.isLoading && (
-                <tr>
-                  <td colSpan={6} className="text-sm text-dim" style={{ padding: 16 }}>
-                    {t("systemHealth.loading")}
-                  </td>
-                </tr>
+                <SkeletonRows cols={6} />
               )}
               {cams.data?.items.map((c) => (
                 <tr key={c.camera_id}>

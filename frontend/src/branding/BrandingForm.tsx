@@ -23,6 +23,7 @@ import type {
   BrandingPaletteKey,
   BrandingResponse,
 } from "./types";
+import { SkeletonLines } from "../components/Skeleton";
 
 interface Props {
   branding: BrandingResponse;
@@ -79,7 +80,7 @@ export function BrandingForm({
   }, [branding.primary_color_key, branding.font_key, branding.display_name]);
 
   if (options.isLoading) {
-    return <p style={{ color: "var(--text-tertiary)" }}>{t("branding.loadingOptions")}</p>;
+    return <SkeletonLines lines={3} />;
   }
   if (options.error || !options.data) {
     return (

@@ -21,6 +21,7 @@ import {
   rolePillClass,
 } from "./EmployeesPage";
 import type { EmployeeListResponse } from "./types";
+import { SkeletonRows } from "../../components/Skeleton";
 
 const PAGE_SIZE = 50;
 const SEARCH_MIN_CHARS = 3;
@@ -179,15 +180,7 @@ export function MyTeamPage() {
           </thead>
           <tbody>
             {list.isLoading && (
-              <tr>
-                <td
-                  colSpan={5}
-                  className="text-sm text-dim"
-                  style={{ padding: 14, textAlign: "center" }}
-                >
-                  {t("common.loading") as string}…
-                </td>
-              </tr>
+              <SkeletonRows cols={5} />
             )}
             {list.isError && (
               <tr>

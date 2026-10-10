@@ -34,6 +34,7 @@ import type {
   SystemResourceStats,
   UseCaseStatsRow,
 } from "./types";
+import { SkeletonCards, SkeletonLines, SkeletonTable } from "../../components/Skeleton";
 
 const PAGE_SIZE = 24;
 
@@ -950,9 +951,7 @@ function ClipsTab({
       </div>
 
       {list.isLoading && (
-        <div className="text-sm text-dim" style={{ padding: 16 }}>
-          {t("common.loading")}
-        </div>
+        <SkeletonTable rows={8} cols={7} />
       )}
       {list.isError && (
         <div className="text-sm" style={{ padding: 16, color: "var(--danger-text)" }}>
@@ -1070,7 +1069,7 @@ function PipelineTab({
   loading: boolean;
 }) {
   if (loading && !pipeline) {
-    return <div className="text-sm text-dim" style={{ padding: 16 }}>Loading…</div>;
+    return <SkeletonCards count={4} />;
   }
 
   return (
@@ -1256,9 +1255,7 @@ function SystemTab({
 }) {
   if (loading && !resources) {
     return (
-      <div className="text-sm text-dim" style={{ padding: 16 }}>
-        Loading…
-      </div>
+      <SkeletonCards count={4} />
     );
   }
   if (!resources) {
@@ -6478,16 +6475,7 @@ function UseCaseResultSection({
 
       {/* Empty / loading / grid */}
       {loading && (
-        <div
-          style={{
-            padding: 20,
-            fontSize: 12,
-            color: "var(--text-secondary)",
-            textAlign: "center",
-          }}
-        >
-          {t("personClips.detail.loadingCrops") as string}
-        </div>
+        <SkeletonLines lines={3} />
       )}
       {!loading && result && ordered.length === 0 && (
         <div
@@ -6935,7 +6923,7 @@ export function ClipDetailDrawer({
               {t("personClips.detail.useCaseResults") as string}
             </div>
             {processingResults.isLoading && (
-              <div className="text-sm text-dim">{t("common.loading") as string}</div>
+              <SkeletonLines lines={3} />
             )}
             {enabledUcs.includes("uc1") && (
               <UseCaseResultSection

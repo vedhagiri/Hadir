@@ -22,6 +22,7 @@ import type { IconName } from "../../shell/Icon";
 import { ClearQueuesAction } from "./ClearQueuesAction";
 import { QueueHistoryAction } from "./QueueHistoryAction";
 import { ResourcesPanel } from "./ResourcesPanel";
+import { SkeletonLines } from "../../components/Skeleton";
 
 const POLL_INTERVAL_MS = 3000;
 
@@ -333,9 +334,7 @@ export function PipelineMonitor() {
 
         <div style={{ padding: 16 }}>
           {(query.isLoading || (!isAdmin && me.isLoading)) && (
-            <div className="text-sm text-dim" style={{ padding: 16 }}>
-              {t("pipelineMonitor.loading.main")}
-            </div>
+            <SkeletonLines lines={3} />
           )}
           {!me.isLoading && !isAdmin && (
             <div className="text-sm text-dim" style={{ padding: 16 }}>
@@ -1465,9 +1464,7 @@ function QueuePipelinePanel() {
 
   if (q.isLoading) {
     return (
-      <div className="text-sm text-dim" style={{ padding: 16 }}>
-        {t("pipelineMonitor.loading.queue")}
-      </div>
+      <SkeletonLines lines={3} />
     );
   }
   if (q.isError || !q.data) {
@@ -2139,9 +2136,7 @@ function WorkersTablePanel() {
 
   if (q.isLoading) {
     return (
-      <div className="text-sm text-dim" style={{ padding: 16 }}>
-        {t("pipelineMonitor.loading.workers")}
-      </div>
+      <SkeletonLines lines={3} />
     );
   }
   if (q.isError || !q.data) {

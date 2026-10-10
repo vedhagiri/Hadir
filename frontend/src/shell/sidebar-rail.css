@@ -1,0 +1,336 @@
+/* Sidebar rail — the LPA-style navigation format.
+ *
+ * Ported from the BankStatementIQ rail (ufc-lpa-demo/src/index.css):
+ * the brand row shares the topbar's height so the two meet on one
+ * baseline; section headings fold their links away behind a chevron;
+ * the collapsed state is a 64 px icon column with hairline dividers
+ * between sections, a styled tooltip in place of the native ``title``,
+ * and the footer's build details behind an info icon.
+ *
+ * Shell-level CSS (same precedent as ``shell/transitions.css``) — the
+ * design files under ``styles/`` are untouched. Everything here keys
+ * off ``[data-sidebar="collapsed"]`` on <html>, set by
+ * ``frontend/src/sidebar/index.ts``.
+ */
+
+/* ---- Brand row ------------------------------------------------------- */
+/* The design's .sidebar carries ``padding: 12px 10px``; the brand row
+   breaks out of that so its bottom rule runs wall to wall and lines up
+   with the topbar's own bottom border next door. */
+/* White surface, like the LPA rail — the design's tinted --bg-sunken
+   made the sidebar read as a grey panel. Dark theme keeps its own
+   surface from styles-enhancements3.css. */
+.sidebar {
+  padding-top: 0;
+  background: var(--bg-elev);
+  border-inline-end-color: var(--border);
+}
+[data-theme="dark"] .sidebar {
+  background: #14150f;
+}
+.sidebar .sidebar-brand {
+  height: var(--topbar-h);
+  min-height: var(--topbar-h);
+  box-sizing: border-box;
+  margin-inline: -10px;
+  margin-bottom: 4px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  justify-content: flex-start;
+  gap: 0;
+}
+/* Height-driven so a wide lockup (the MTS mark) and a square tenant
+   upload both fill the row; width follows the image's own aspect. */
+.sidebar .brand-logo {
+  height: 44px !important;
+  width: auto !important;
+  max-width: 190px;
+}
+[data-sidebar="collapsed"] .sidebar .brand-logo {
+  height: 34px !important;
+  max-width: 52px;
+}
+[data-sidebar="collapsed"] .sidebar .sidebar-brand {
+  flex-direction: row;
+  justify-content: center;
+  margin-inline: -6px;
+  padding: 0;
+  gap: 0;
+}
+
+/* ---- Section groups -------------------------------------------------- */
+.sidebar .nav-section {
+  margin-top: 6px;
+}
+.sidebar .nav-section:first-child {
+  margin-top: 4px;
+}
+
+/* The heading doubles as the fold toggle. Same metrics as the design's
+   .nav-label so a foldable section and a plain one share an indent. */
+.sidebar .nav-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px 4px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 120ms ease;
+  text-align: start;
+}
+.sidebar .nav-group-toggle::before,
+.sidebar .nav-label::before {
+  content: none;
+}
+.sidebar .nav-label {
+  color: var(--text-tertiary);
+  padding: 6px 8px 4px;
+}
+.sidebar .nav-group-toggle:hover {
+  color: var(--text);
+}
+[data-theme="dark"] .sidebar .nav-group-toggle {
+  color: var(--text);
+  opacity: 0.85;
+}
+.nav-group-chevron {
+  margin-inline-start: auto;
+  flex: none;
+  transition: transform 220ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.nav-group-toggle[aria-expanded="false"] .nav-group-chevron {
+  transform: rotate(-90deg);
+}
+[dir="rtl"] .nav-group-toggle[aria-expanded="false"] .nav-group-chevron {
+  transform: rotate(90deg);
+}
+
+/* Smooth open/close without a magic max-height: animating
+   grid-template-rows from 0fr to 1fr resolves to the real content
+   height, so a section of any length animates cleanly. */
+.nav-group-panel {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 220ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.nav-group-panel[data-open="false"] {
+  grid-template-rows: 0fr;
+}
+.nav-group-panel > div {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ---- Collapsed rail --------------------------------------------------- */
+[data-sidebar="collapsed"] .sidebar .nav-group-toggle {
+  display: none;
+}
+/* With the headings hidden there is no way to reopen a section, so
+   every section is forced open while collapsed. */
+[data-sidebar="collapsed"] .nav-group-panel {
+  grid-template-rows: 1fr;
+}
+/* A hairline stands in for the missing headings. */
+[data-sidebar="collapsed"] .sidebar .nav-section + .nav-section {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+[data-sidebar="collapsed"] .sidebar .nav-item {
+  padding: 9px 0;
+  border-radius: 8px;
+}
+
+/* Tooltip for the collapsed rail. Fixed, not absolute: .sidebar clips
+   overflow and the nav scrolls, so an in-row element would be cut off
+   at the rail's edge. ``top`` is supplied inline from the hovered row. */
+.sidebar-tip {
+  position: fixed;
+  inset-inline-start: 72px;
+  z-index: 80;
+  transform: translateY(-50%);
+  padding: 5px 10px;
+  border-radius: 6px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: var(--shadow-md, 0 4px 12px rgb(0 0 0 / 0.18));
+}
+
+/* ---- Footer / build info -------------------------------------------- */
+[data-sidebar="collapsed"] .sidebar-footer {
+  display: none;
+}
+
+/* Collapsed rail only: one info icon, details in a hover popover. */
+.sidebar-info {
+  display: none;
+  position: relative;
+  flex: none;
+  place-items: center;
+  margin-inline: -6px;
+  margin-bottom: -12px;
+  padding: 8px;
+  border-top: 1px solid var(--border);
+}
+[data-sidebar="collapsed"] .sidebar-info {
+  display: grid;
+}
+.sidebar-info-btn {
+  display: grid;
+  place-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-tertiary);
+  cursor: default;
+  transition: background 120ms ease, color 120ms ease;
+}
+.sidebar-info-btn:hover,
+.sidebar-info:focus-within .sidebar-info-btn {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.sidebar-info-pop {
+  position: fixed;
+  inset-inline-start: 72px;
+  inset-block-end: 12px;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 220px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-md, 0 12px 32px rgb(0 0 0 / 0.12));
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  opacity: 0;
+  transform: translateX(-4px);
+  pointer-events: none;
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+[dir="rtl"] .sidebar-info-pop {
+  transform: translateX(4px);
+}
+.sidebar-info:hover .sidebar-info-pop,
+.sidebar-info:focus-within .sidebar-info-pop {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+/* ---- Topbar hamburger ------------------------------------------------- */
+/* The one control that collapses and expands the rail. Lives at the
+   leading edge of the topbar, where the LPA header keeps it; the rail
+   itself no longer carries a toggle. */
+.topbar-menu-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  margin-inline-end: 2px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.topbar-menu-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.topbar-menu-btn[aria-pressed="true"] {
+  border-color: var(--accent-border);
+  color: var(--accent-text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-group-panel,
+  .nav-group-chevron,
+  .sidebar-info-pop {
+    transition: none;
+  }
+}
+
+/* ---- Nav scrollbar ---------------------------------------------------- */
+/* The design sets ``scrollbar-width: thin`` on .sidebar-nav. Chrome ≥ 121
+   honours that property and then ignores every ::-webkit-scrollbar rule,
+   which is why the rail showed a native thin bar with arrow buttons.
+   Where the WebKit pseudo-elements exist, switch back to ``auto`` so they
+   apply, and style them like the LPA rail: 8 px, no track, no buttons,
+   a rounded thumb inset by a 2 px surface-coloured border. Firefox fails
+   the @supports test and keeps its thin native bar. */
+@supports selector(::-webkit-scrollbar) {
+  .sidebar-nav {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
+  .sidebar-nav::-webkit-scrollbar {
+    width: 8px;
+  }
+  .sidebar-nav::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .sidebar-nav::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+    border: 2px solid var(--bg-elev);
+  }
+  .sidebar-nav::-webkit-scrollbar-thumb:hover {
+    background: var(--text-tertiary);
+  }
+  .sidebar-nav::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+  [data-theme="dark"] .sidebar-nav::-webkit-scrollbar-thumb {
+    border-color: #14150f;
+  }
+}
+
+/* ---- Spacing: one indent, scrollbar at the edge ---------------------- */
+/* The design indents rows 16 px deeper than their heading. The LPA rail
+   keeps every row on one indent — a folded section changes what is
+   visible, never where things sit. */
+.sidebar .nav-item {
+  margin-inline-start: 0;
+}
+/* The scrolling block breaks out of the sidebar's 10 px side padding so
+   the scrollbar hugs the border; the padding is re-applied on the inside
+   so rows keep a gutter from the thumb. */
+.sidebar .sidebar-nav {
+  margin-inline-end: -10px;
+  padding-inline-end: 6px;
+}
+[data-sidebar="collapsed"] .sidebar .sidebar-nav {
+  margin-inline-end: -6px;
+  padding-inline-end: 0;
+}

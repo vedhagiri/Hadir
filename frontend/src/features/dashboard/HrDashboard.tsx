@@ -36,6 +36,7 @@ import { useDepartments } from "../departments/hooks";
 import { BarChart } from "./charts/BarChart";
 import { Donut } from "./charts/Donut";
 import { LineChart, Sparkline } from "./charts/LineChart";
+import { SkeletonLines, SkeletonRows } from "../../components/Skeleton";
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
@@ -1442,9 +1443,7 @@ function ScheduledReports({
       </div>
       <div className="card-body" style={{ padding: 0 }}>
         {loading && (
-          <div className="text-sm text-dim" style={{ padding: 14 }}>
-            {t("dashboard.hr.schedules.loading")}
-          </div>
+          <SkeletonLines lines={4} />
         )}
         {!loading && rows.length === 0 && (
           <div className="text-sm text-dim" style={{ padding: 14 }}>
@@ -1598,15 +1597,7 @@ function LiveAttendance({
         </thead>
         <tbody>
           {loading && (
-            <tr>
-              <td
-                colSpan={7}
-                className="text-sm text-dim"
-                style={{ padding: 14, textAlign: "center" }}
-              >
-                {t("dashboard.common.loading")}
-              </td>
-            </tr>
+            <SkeletonRows cols={7} />
           )}
           {!loading && rows.length === 0 && (
             <tr>

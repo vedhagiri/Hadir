@@ -15,6 +15,7 @@ import {
   useDeleteRequestList,
 } from "../features/employees/hooks";
 import type { DeleteRequest } from "../features/employees/types";
+import { SkeletonRows } from "../components/Skeleton";
 
 interface Props {
   role: "Admin" | "HR";
@@ -112,11 +113,7 @@ export function DeleteRequestsTab({ role }: Props) {
           </thead>
           <tbody>
             {list.isLoading && (
-              <tr>
-                <td colSpan={5} className="text-sm text-dim" style={{ padding: 16 }}>
-                  {t("common.loading") as string}
-                </td>
-              </tr>
+              <SkeletonRows cols={5} />
             )}
             {!list.isLoading && items.length === 0 && (
               <tr>

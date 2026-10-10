@@ -5,6 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Maugood</title>
 
+    <!-- Favicon + app icons, generated from the MaugoodAI surveillance
+         mark (frontend/public/). Served from the site root by Vite in
+         dev and by nginx from the built bundle in production. -->
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <meta name="theme-color" content="#0b4a7a" />
+
     <!--
       Curated fonts (v1.0 P4). Three families — Inter (default), Lato,
       Plus Jakarta Sans — preloaded so the BrandingProvider can swap
@@ -17,9 +26,71 @@
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Lato:wght@400;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
     />
+
+    <!--
+      MaugoodAI boot loader (approved design, Oct 2026). These styles are
+      shared by the static markup inside #root below — painted before the
+      JS bundle arrives — and by the React <AppLoader/> shown while the
+      session probe runs, so the hand-over between the two is seamless.
+      Class names are prefixed ``mg-loader`` to stay clear of the design
+      system CSS.
+    -->
+    <style>
+      .mg-loader-screen{position:fixed;inset:0;z-index:2000;display:grid;place-items:center;overflow:hidden;
+        background:radial-gradient(ellipse at 50% 45%,rgba(18,184,212,.075),transparent 34%),#F7FAFE;
+        color:#20334C;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+      .mg-loader{width:min(300px,calc(100vw - 40px));display:flex;flex-direction:column;align-items:center;text-align:center}
+      .mg-loader-mark{width:112px;height:112px;position:relative;display:grid;place-items:center;margin-bottom:24px}
+      .mg-loader-ring{position:absolute;inset:0;border:2px solid transparent;border-top-color:#1D6ED5;border-right-color:#12B8D4;border-radius:50%;animation:mg-rotate 2.2s linear infinite}
+      .mg-loader-ring.inner{inset:10px;border:1px dashed rgba(29,110,213,.34);animation:mg-rotate-rev 4.8s linear infinite}
+      .mg-loader-halo{position:absolute;width:72px;height:72px;border:1px solid rgba(18,184,212,.45);border-radius:50%;animation:mg-halo 2.1s ease-out infinite}
+      .mg-loader-logo{position:relative;z-index:1;width:66px;height:66px;display:grid;place-items:center;border-radius:50%;background:#fff;box-shadow:0 5px 22px rgba(8,35,74,.10);animation:mg-breathe 2.4s ease-in-out infinite}
+      .mg-loader-logo img{width:52px;height:52px;object-fit:contain;display:block}
+      .mg-loader-word{color:#08234A;font-size:22px;font-weight:750;letter-spacing:-.65px;line-height:1.2}
+      .mg-loader-word span{color:#12B8D4}
+      .mg-loader-sub{margin-top:7px;color:#718198;font-size:10px;font-weight:650;letter-spacing:1.45px;text-transform:uppercase}
+      .mg-loader-rule{width:34px;height:3px;margin:23px 0 18px;border-radius:8px;background:linear-gradient(90deg,#1D6ED5,#12B8D4)}
+      .mg-loader-status{min-height:20px;color:#354A64;font-size:12px;font-weight:550}
+      .mg-loader-progress{width:220px;max-width:100%;height:4px;overflow:hidden;margin-top:18px;border-radius:10px;background:#E5EDF6}
+      .mg-loader-fill{width:0;height:100%;border-radius:inherit;background:linear-gradient(90deg,#1D6ED5,#12B8D4);transition:width .2s linear;position:relative}
+      .mg-loader-fill::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.85),transparent);animation:mg-sheen 1.25s ease-in-out infinite}
+      .mg-loader-percent{margin-top:8px;color:#91A0B2;font:10px "JetBrains Mono",ui-monospace,monospace}
+      @keyframes mg-rotate{to{transform:rotate(360deg)}}
+      @keyframes mg-rotate-rev{to{transform:rotate(-360deg)}}
+      @keyframes mg-halo{0%{transform:scale(.78);opacity:.55}100%{transform:scale(1.55);opacity:0}}
+      @keyframes mg-breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.045)}}
+      @keyframes mg-sheen{to{transform:translateX(240px)}}
+      @media (prefers-reduced-motion:reduce){.mg-loader-screen *,.mg-loader-screen *::before,.mg-loader-screen *::after{animation-duration:.01ms!important;animation-iteration-count:1!important}.mg-loader-fill{transition:none}}
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><!-- Replaced by React on mount. Same markup as AppLoader. -->
+      <div class="mg-loader-screen"><main class="mg-loader" role="status" aria-live="polite" aria-label="MaugoodAI loading">
+        <div class="mg-loader-mark" aria-hidden="true"><div class="mg-loader-ring"></div><div class="mg-loader-ring inner"></div><div class="mg-loader-halo"></div><div class="mg-loader-logo"><img src="/maugood-loader-mark.png" alt=""></div></div>
+        <div class="mg-loader-word">Maugood<span>AI</span></div>
+        <div class="mg-loader-sub">CCTV-Based AI Attendance System</div>
+        <div class="mg-loader-rule"></div>
+        <div class="mg-loader-status" id="mg-boot-status">Preparing your workspace…</div>
+        <div class="mg-loader-progress"><div class="mg-loader-fill" id="mg-boot-fill"></div></div>
+        <div class="mg-loader-percent" id="mg-boot-percent">0%</div>
+      </main></div>
+    </div>
+    <script>
+      // Boot clock shared with <AppLoader/> so the bar continues where the
+      // static loader left off instead of restarting at 0%.
+      window.__mgBootStart = performance.now();
+      (function tick() {
+        var fill = document.getElementById("mg-boot-fill");
+        if (!fill) return; // React has mounted and replaced #root.
+        var t = performance.now() - window.__mgBootStart;
+        var v = Math.min(100, Math.round((t / 4500) * 100)); // keep in step with BOOT_MS
+        fill.style.width = v + "%";
+        document.getElementById("mg-boot-percent").textContent = v + "%";
+        var label = v >= 97 ? "Almost ready…" : v >= 84 ? "Opening your dashboard…" : v >= 58 ? "Initialising attendance services…" : v >= 28 ? "Loading camera configuration…" : "Preparing your workspace…";
+        document.getElementById("mg-boot-status").textContent = label;
+        requestAnimationFrame(tick);
+      })();
+    </script>
     <!-- Portal target for every drawer + modal. Sibling to #root so
          drawers escape any ancestor that creates a containing block
          (e.g. ``will-change: transform`` on the page-transition

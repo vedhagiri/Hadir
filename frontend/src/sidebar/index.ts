@@ -8,6 +8,11 @@
 // preference doesn't follow them across browsers, the way theme
 // does. If we add server persistence later it slots into
 // ``applyServerPreferences`` like the theme module.
+//
+// The same store also remembers which nav *sections* the user has
+// folded shut on the wide sidebar (``groups``). Absent means open,
+// so a new section ships expanded without a migration; only an
+// explicit collapse is stored.
 
 export type SidebarState = "expanded" | "collapsed";
 
@@ -17,9 +22,13 @@ export const SIDEBAR_STATES: readonly SidebarState[] = [
 ] as const;
 
 const STORAGE_KEY = "maugood-sidebar";
+const GROUPS_KEY = "maugood-sidebar-groups";
 const DEFAULT_STATE: SidebarState = "expanded";
 
+export type SidebarGroups = Readonly<Record<string, boolean>>;
+
 let _state: SidebarState = readStored();
+let _groups: SidebarGroups = readStoredGroups();
 
 function readStored(): SidebarState {
   try {
@@ -29,6 +38,24 @@ function readStored(): SidebarState {
     // SSR or privacy-mode Safari — fall through to default.
   }
   return DEFAULT_STATE;
+}
+
+function readStoredGroups(): SidebarGroups {
+  try {
+    const raw = localStorage.getItem(GROUPS_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const out: Record<string, boolean> = {};
+      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+        if (v === false) out[k] = false;
+      }
+      return out;
+    }
+  } catch {
+    // Corrupt value — treat as "everything open".
+  }
+  return {};
 }
 
 function applyToRoot(state: SidebarState) {
@@ -70,4 +97,26 @@ export function setSidebar(state: SidebarState): void {
 
 export function toggleSidebar(): void {
   setSidebar(_state === "collapsed" ? "expanded" : "collapsed");
+}
+
+/** Which sections are folded shut: ``false`` = closed, absent = open. */
+export function getSidebarGroups(): SidebarGroups {
+  return _groups;
+}
+
+export function isSidebarGroupOpen(id: string): boolean {
+  return _groups[id] !== false;
+}
+
+export function toggleSidebarGroup(id: string): void {
+  const next: Record<string, boolean> = { ..._groups };
+  if (next[id] === false) delete next[id];
+  else next[id] = false;
+  _groups = next;
+  try {
+    localStorage.setItem(GROUPS_KEY, JSON.stringify(_groups));
+  } catch {
+    /* ignored — non-fatal */
+  }
+  emit();
 }

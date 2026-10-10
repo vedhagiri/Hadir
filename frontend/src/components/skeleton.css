@@ -1,0 +1,59 @@
+/* Skeleton loaders — ported from the LPA demo (ufc-lpa-demo/src/index.css).
+   A loading state is shape-matched to the layout it stands in for, never a
+   bare "Loading…" line: the page doesn't jump when data lands, and the
+   reader sees what is coming. One sweeping highlight (not a pulse) so a
+   grid of skeletons reads as a single surface loading. App-owned file —
+   the design CSS under src/styles/ stays untouched. */
+
+.sk {
+  position: relative;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--bg-sunken, #eef1f4);
+}
+
+.sk::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, var(--sk-shine, rgba(255, 255, 255, 0.65)), transparent);
+  animation: sk-shimmer 1.5s infinite;
+}
+
+[data-theme="dark"] .sk {
+  --sk-shine: rgba(255, 255, 255, 0.06);
+}
+
+@keyframes sk-shimmer {
+  100% {
+    transform: translateX(200%);
+  }
+}
+
+.sk-line {
+  height: 11px;
+}
+
+.sk-circle {
+  border-radius: 50%;
+}
+
+/* Real content fades in behind the skeleton it replaces, so the swap is a
+   settle rather than a flash. */
+.content-in {
+  animation: content-in 380ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+@keyframes content-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sk::after,
+  .content-in {
+    animation: none;
+  }
+}

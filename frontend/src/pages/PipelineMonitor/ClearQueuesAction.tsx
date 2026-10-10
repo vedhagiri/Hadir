@@ -18,6 +18,7 @@ import { useTranslation } from "react-i18next";
 
 import { api } from "../../api/client";
 import { Icon } from "../../shell/Icon";
+import { SkeletonLines } from "../../components/Skeleton";
 
 interface QueueRow {
   key: string;
@@ -288,12 +289,7 @@ function ClearQueuesModal({
         </label>
 
         {q.isLoading && (
-          <div
-            className="text-sm text-dim"
-            style={{ padding: 16, textAlign: "center" }}
-          >
-            {t("queueClear.modal.loading")}
-          </div>
+          <SkeletonLines lines={4} />
         )}
 
         {q.data && (

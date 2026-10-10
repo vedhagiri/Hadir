@@ -40,6 +40,7 @@ import type {
   Holiday,
   LeaveType,
 } from "./types";
+import { SkeletonLines } from "../components/Skeleton";
 
 
 type Tab = "types" | "holidays" | "leaves";
@@ -144,7 +145,7 @@ function LeaveTypesTab() {
   const [name, setName] = useState("");
   const [isPaid, setIsPaid] = useState(true);
 
-  if (list.isLoading) return <p>{t("leaveCalendar.loadingTypes")}</p>;
+  if (list.isLoading) return <SkeletonLines lines={3} />;
   if (list.error)
     return (
       <p style={{ color: "var(--danger-text)" }}>{t("leaveCalendar.loadFailedTypes")}</p>
@@ -661,7 +662,7 @@ function HolidaysTab() {
   // whole page.
   const [importSummary, setImportSummary] = useState<string | null>(null);
 
-  if (list.isLoading) return <p>{t("leaveCalendar.loadingHolidays")}</p>;
+  if (list.isLoading) return <SkeletonLines lines={3} />;
   if (list.error)
     return (
       <p style={{ color: "var(--danger-text)" }}>{t("leaveCalendar.loadFailedHolidays")}</p>
@@ -1275,7 +1276,7 @@ function ApprovedLeavesTab() {
   const [notes, setNotes] = useState("");
 
   if (leaves.isLoading || types.isLoading || employees.isLoading)
-    return <p>{t("leaveCalendar.loadingLeaves")}</p>;
+    return <SkeletonLines lines={3} />;
   if (leaves.error)
     return (
       <p style={{ color: "var(--danger-text)" }}>{t("leaveCalendar.loadFailedLeaves")}</p>

@@ -48,6 +48,7 @@ import {
   useAdminOverrideDeleteRequest,
 } from "./hooks";
 import type { Employee, EmployeeWritePayload, PhotoAngle } from "./types";
+import { SkeletonLines } from "../../components/Skeleton";
 
 const ANGLES: PhotoAngle[] = ["front", "left", "right", "other"];
 
@@ -1060,9 +1061,7 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
                 }}
               >
                 {linkedUser.isLoading && (
-                  <div className="text-sm text-dim">
-                    {t("common.loading") as string}…
-                  </div>
+                  <SkeletonLines lines={2} />
                 )}
                 {linkedUser.isError && (
                   // BUG-019 — when an employee has been added without
@@ -1549,12 +1548,7 @@ export function EmployeeDrawer({ employeeId, onClose, onSaved }: Props) {
                   }}
                 />
                 {upload.isPending && (
-                  <div
-                    className="text-xs text-dim"
-                    style={{ marginTop: 6 }}
-                  >
-                    {t("common.uploading") as string}…
-                  </div>
+                  <SkeletonLines lines={2} />
                 )}
               </div>
             </>

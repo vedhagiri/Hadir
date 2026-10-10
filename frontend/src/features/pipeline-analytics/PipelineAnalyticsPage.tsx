@@ -20,6 +20,7 @@ import type {
   PipelineSummaryRow,
   UseCase,
 } from "./types";
+import { SkeletonRows } from "../../components/Skeleton";
 
 const PAGE_SIZE = 50;
 
@@ -266,7 +267,7 @@ export function PipelineAnalyticsPage() {
           </thead>
           <tbody>
             {summary.isLoading && (
-              <tr><td colSpan={3} className="text-dim" style={{ padding: 14 }}>Loading…</td></tr>
+              <SkeletonRows cols={3} />
             )}
             {!summary.isLoading && !uc1 && !uc2 && (
               <tr><td colSpan={3} className="text-dim" style={{ padding: 14 }}>No processed clips for this filter yet.</td></tr>
@@ -315,7 +316,7 @@ export function PipelineAnalyticsPage() {
           </thead>
           <tbody>
             {clips.isLoading && (
-              <tr><td colSpan={17} className="text-dim" style={{ padding: 14 }}>Loading…</td></tr>
+              <SkeletonRows cols={17} />
             )}
             {clips.isError && (
               <tr><td colSpan={17} style={{ padding: 14, color: "var(--danger-text)" }}>Failed to load.</td></tr>

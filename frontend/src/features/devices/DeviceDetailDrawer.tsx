@@ -28,6 +28,7 @@ import {
   useResyncDevice,
 } from "./hooks";
 import type { Device, DeviceEvent, DeviceUser } from "./types";
+import { SkeletonLines } from "../../components/Skeleton";
 
 interface Props {
   device: Device;
@@ -293,9 +294,7 @@ function EventsTab({
 
   if (loading) {
     return (
-      <div className="text-sm text-dim" style={{ padding: 16 }}>
-        {t("devices.detail.loadingEvents", { defaultValue: "Loading events…" })}
-      </div>
+      <SkeletonLines lines={3} />
     );
   }
   if (items.length === 0) {
@@ -644,9 +643,7 @@ function PeopleTab({
 
   if (loading) {
     return (
-      <div className="text-sm text-dim" style={{ padding: 16 }}>
-        {t("devices.detail.loadingPeople", { defaultValue: "Loading people…" })}
-      </div>
+      <SkeletonLines lines={3} />
     );
   }
 

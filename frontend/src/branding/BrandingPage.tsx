@@ -12,6 +12,7 @@ import {
   usePatchMyBranding,
   useUploadMyLogo,
 } from "./hooks";
+import { SkeletonLines } from "../components/Skeleton";
 
 export function BrandingPage() {
   const { t } = useTranslation();
@@ -20,7 +21,7 @@ export function BrandingPage() {
   const upload = useUploadMyLogo();
   const remove = useDeleteMyLogo();
 
-  if (branding.isLoading) return <p>{t("branding.loadingPage")}</p>;
+  if (branding.isLoading) return <SkeletonLines lines={3} />;
   if (branding.error)
     return (
       <p style={{ color: "var(--danger-text)" }}>{t("branding.loadFailedPage")}</p>

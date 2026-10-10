@@ -28,6 +28,7 @@ import type {
   CustomFieldType,
 } from "./types";
 import { CUSTOM_FIELD_TYPES } from "./types";
+import { SkeletonTable } from "../components/Skeleton";
 
 export function CustomFieldsPage() {
   const { t } = useTranslation();
@@ -101,7 +102,7 @@ export function CustomFieldsPage() {
       />
 
       {fields.isLoading ? (
-        <p>{t("customFields.loading")}</p>
+        <SkeletonTable rows={5} cols={5} />
       ) : fields.error ? (
         <p style={{ color: "var(--danger-text)" }}>
           {t("customFields.loadFailed")}

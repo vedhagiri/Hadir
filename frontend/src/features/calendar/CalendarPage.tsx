@@ -13,17 +13,21 @@ import { useMe } from "../../auth/AuthProvider";
 import { primaryRole } from "../../types";
 import { NewRequestDrawer } from "../../requests/NewRequestDrawer";
 import { useAttendance } from "../attendance/hooks";
-import { useMyEmployee } from "../employees/hooks";
+import { useEmployeeDetail, useMyEmployee } from "../employees/hooks";
 import { CompanyView } from "./CompanyView";
 import { DayDetailDrawer } from "./DayDetailDrawer";
 import { PersonPickerGrid } from "./PersonPickerGrid";
 import { PersonView } from "./PersonView";
+import { MonthNav, ProfileHeader, SummaryStrip, shiftMonth } from "./calendarUi";
+import type { SummaryCounts } from "./calendarUi";
+import type { CompanyDay, PersonDay } from "./types";
 import {
   useCompanyCalendar,
   usePersonCalendar,
 } from "./hooks";
 
 import { Icon } from "../../shell/Icon";
+import { SkeletonCalendar } from "../../components/Skeleton";
 
 type Tab = "company" | "person";
 
@@ -103,6 +107,23 @@ export function CalendarPage() {
     effectiveTab === "person" ? employeeId : null,
     month,
   );
+  // Previous month — feeds the "change vs last month" on the summary.
+  const prevMonth = shiftMonth(month, -1);
+  const companyPrev = useCompanyCalendar(
+    prevMonth,
+    effectiveTab === "company" && isCompanyAllowed,
+  );
+  const personPrev = usePersonCalendar(
+    effectiveTab === "person" ? employeeId : null,
+    prevMonth,
+  );
+  // Profile card data. Employees read their own record via /me; other
+  // roles fetch the picked employee (a 403 just leaves the card with
+  // name + code from the calendar payload).
+  const pickedEmployee = useEmployeeDetail(
+    effectiveTab === "person" && role !== "Employee" ? employeeId : null,
+  );
+  const profileEmployee = role === "Employee" ? myEmployee.data : pickedEmployee.data;
 
   const [drawerDate, setDrawerDate] = useState<string | null>(null);
   const [exceptionDate, setExceptionDate] = useState<string | null>(null);
@@ -131,103 +152,110 @@ export function CalendarPage() {
     return `/api/attendance/calendar/export?${params.toString()}`;
   }, [month, effectiveTab, employeeId]);
 
+  const personSelected = effectiveTab === "person" && employeeId !== null;
+
+  const exportButton = (
+    <a className="btn" href={exportHref} target="_blank" rel="noopener noreferrer" style={headerBtn}>
+      <Icon name="download" size={14} />
+      {t("calendar.exportMonth") as string}
+    </a>
+  );
+
   return (
     <>
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">
-            {t("calendar.title") as string}
-          </h1>
-          <p className="page-sub">
-            {effectiveTab === "company"
-              ? (t("calendar.companySub") as string)
-              : (t("calendar.personSub") as string)}
-          </p>
-        </div>
-        <div
-          className="page-actions"
-          style={{ display: "flex", gap: 8, alignItems: "center" }}
-        >
-          <input
-            type="month"
-            value={month}
-            onChange={(e) => setMonth(e.target.value || currentMonth())}
-            style={selectStyle}
-            aria-label={t("calendar.month") as string}
-          />
-          <a
-            className="btn"
-            href={exportHref}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            {t("calendar.exportMonth") as string}
-          </a>
-        </div>
-      </div>
-
-      {/* Tab strip */}
-      {isCompanyAllowed && (
-        <div
-          style={{
-            display: "flex",
-            gap: 4,
-            border: "1px solid var(--border)",
-            borderRadius: "var(--radius-md)",
-            padding: 3,
-            width: "fit-content",
-            background: "var(--bg-elev)",
-            marginBottom: 16,
-          }}
-        >
-          <TabButton
-            active={effectiveTab === "company"}
-            onClick={() => setTab("company")}
-          >
-            {t("calendar.tabCompany") as string}
-          </TabButton>
-          <TabButton
-            active={effectiveTab === "person"}
-            onClick={() => setTab("person")}
-          >
-            {t("calendar.tabPerson") as string}
-          </TabButton>
-        </div>
-      )}
-
-      {/* Per-person tab now opens with a card grid. Operator picks
-          a card → calendar loads. A back-to-list button at the top
-          of the calendar card returns to the picker. */}
-      {effectiveTab === "person" &&
-        employeeId !== null &&
-        role !== "Employee" && (
-          <div style={{ marginBottom: 12 }}>
+      {personSelected ? (
+        <>
+          {role !== "Employee" && (
             <button
               type="button"
-              className="btn btn-sm"
               onClick={() => {
                 setEmployeeId(null);
                 setPickedCompanyDate(null);
                 autoFilledRef.current = true;
               }}
+              style={backLink}
             >
-              <Icon name="chevronLeft" size={11} />
-              {t("calendar.backToList", {
-                defaultValue: "Back to employees",
-              }) as string}
+              <span aria-hidden className="icon-arrow-left">←</span>
+              {t("calendar.backToList", { defaultValue: "Back to employees" }) as string}
             </button>
+          )}
+          <ProfileHeader
+            fullName={person.data?.full_name ?? profileEmployee?.full_name ?? ""}
+            employeeCode={person.data?.employee_code ?? profileEmployee?.employee_code ?? ""}
+            employee={profileEmployee}
+          />
+          <div className="page-header" style={{ marginBottom: 14 }}>
+            <div>
+              <h2 className="page-title" style={{ fontSize: 22 }}>{t("calendar.title") as string}</h2>
+              <p className="page-sub">
+                {t("calendar.personDetailSub", {
+                  defaultValue: "View daily attendance details for the selected employee",
+                }) as string}
+              </p>
+            </div>
+            <div className="page-actions" style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <MonthNav month={month} onChange={setMonth} />
+              {exportButton}
+            </div>
           </div>
-        )}
+        </>
+      ) : (
+        <>
+          <div className="page-header">
+            <div>
+              <h1 className="page-title">{t("calendar.title") as string}</h1>
+              <p className="page-sub">
+                {effectiveTab === "company"
+                  ? (t("calendar.companySub") as string)
+                  : (t("calendar.personSub") as string)}
+              </p>
+            </div>
+            <div className="page-actions" style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <MonthNav month={month} onChange={setMonth} />
+              {exportButton}
+            </div>
+          </div>
+
+          {isCompanyAllowed && (
+            <div
+              role="group"
+              aria-label={t("calendar.title") as string}
+              style={{
+                display: "inline-flex",
+                gap: 4,
+                border: "1px solid var(--border)",
+                borderRadius: 10,
+                padding: 4,
+                background: "var(--bg-elev)",
+                marginBottom: 16,
+              }}
+            >
+              <TabButton active={effectiveTab === "company"} onClick={() => setTab("company")}>
+                {t("calendar.tabCompany") as string}
+              </TabButton>
+              <TabButton active={effectiveTab === "person"} onClick={() => setTab("person")}>
+                {t("calendar.tabPerson") as string}
+              </TabButton>
+            </div>
+          )}
+        </>
+      )}
 
       {effectiveTab === "company" && isCompanyAllowed && (
         <>
           {company.isLoading && (
-            <div className="text-sm text-dim">{t("calendar.loading") as string}</div>
+            <SkeletonCalendar />
           )}
           {company.isError && (
             <div className="text-sm" style={{ color: "var(--danger-text)" }}>
               {t("calendar.loadFailed") as string}
             </div>
+          )}
+          {company.data && (
+            <SummaryStrip
+              counts={companyCounts(company.data.days)}
+              previous={companyPrev.data ? companyCounts(companyPrev.data.days) : null}
+            />
           )}
           {company.data && (
             <CompanyView
@@ -272,7 +300,7 @@ export function CalendarPage() {
             </div>
           )}
           {employeeId !== null && person.isLoading && (
-            <div className="text-sm text-dim">{t("calendar.loading") as string}</div>
+            <SkeletonCalendar />
           )}
           {employeeId !== null && person.isError && (
             <div className="text-sm" style={{ color: "var(--danger-text)" }}>
@@ -280,7 +308,13 @@ export function CalendarPage() {
             </div>
           )}
           {employeeId !== null && person.data && (
-            <PersonView person={person.data} onPickDay={onPickPersonDay} />
+            <>
+              <SummaryStrip
+                counts={personCounts(person.data.days)}
+                previous={personPrev.data ? personCounts(personPrev.data.days) : null}
+              />
+              <PersonView person={person.data} onPickDay={onPickPersonDay} hideHeader />
+            </>
           )}
         </>
       )}
@@ -326,14 +360,15 @@ function TabButton({
       onClick={onClick}
       aria-pressed={active}
       style={{
-        background: active ? "var(--accent-soft)" : "transparent",
-        color: active ? "var(--accent-text)" : "var(--text)",
+        background: active ? "var(--accent)" : "transparent",
+        color: active ? "#fff" : "var(--text)",
         border: "none",
-        borderRadius: "var(--radius-sm)",
-        padding: "6px 14px",
-        fontSize: 12.5,
-        fontWeight: active ? 600 : 500,
+        borderRadius: 8,
+        padding: "8px 26px",
+        fontSize: 13,
+        fontWeight: 600,
         cursor: "pointer",
+        boxShadow: active ? "0 2px 6px color-mix(in oklab, var(--accent) 35%, transparent)" : "none",
       }}
     >
       {children}
@@ -341,16 +376,51 @@ function TabButton({
   );
 }
 
+/** Company summary: employee-day totals for the month; holiday and
+ *  weekend are counts of calendar days. */
+function companyCounts(days: CompanyDay[]): SummaryCounts {
+  return {
+    present: days.reduce((a, d) => a + d.present_count, 0),
+    late: days.reduce((a, d) => a + d.late_count, 0),
+    absent: days.reduce((a, d) => a + d.absent_count, 0),
+    leave: days.reduce((a, d) => a + d.leave_count, 0),
+    holiday: days.filter((d) => d.is_holiday).length,
+    weekend: days.filter((d) => d.is_weekend).length,
+  };
+}
+
+/** Per-person summary: number of days in each state. */
+function personCounts(days: PersonDay[]): SummaryCounts {
+  return {
+    present: days.filter((d) => d.status === "present" || d.status === "escalation_present" || (d.status === "weekend" && !!d.in_time)).length,
+    late: days.filter((d) => d.status === "late").length,
+    absent: days.filter((d) => d.status === "absent").length,
+    leave: days.filter((d) => d.status === "leave").length,
+    holiday: days.filter((d) => d.status === "holiday" || d.is_holiday).length,
+    weekend: days.filter((d) => d.is_weekend || d.status === "weekend").length,
+  };
+}
+
+const headerBtn = { height: 38, borderRadius: 10, gap: 8, fontWeight: 600, display: "inline-flex", alignItems: "center" } as const;
+
+const backLink = {
+  appearance: "none",
+  background: "transparent",
+  border: "none",
+  padding: "4px 0",
+  marginBottom: 12,
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 8,
+  fontSize: 14,
+  fontWeight: 600,
+  color: "var(--text)",
+  cursor: "pointer",
+  font: "inherit",
+} as const;
+
 function currentMonth(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
-const selectStyle: React.CSSProperties = {
-  padding: "6px 10px",
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius-sm)",
-  background: "var(--bg-elev)",
-  color: "var(--text)",
-  fontSize: 12.5,
-};
