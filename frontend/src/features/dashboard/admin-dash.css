@@ -1,0 +1,140 @@
+/* Admin dashboard (prefix adm-). Tokens from theme/modern.css; layout only. */
+
+.adm-section {
+  margin: 0 0 12px; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.adm-gap { margin-bottom: 20px; }
+.adm-of { font-size: 0.55em; font-weight: 600; color: var(--text-tertiary); margin-inline-start: 1px; letter-spacing: 0; }
+
+/* Tile sparkline (today's arrivals) */
+.adm-spark { display: block; }
+.adm-spark rect { fill: color-mix(in oklab, var(--success) 70%, transparent); }
+
+/* Rows */
+.adm-row { display: grid; gap: 16px; margin-bottom: 20px; align-items: stretch; }
+.adm-row-even { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.adm-row-wide { grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); }
+@media (max-width: 1100px) {
+  .adm-row-even, .adm-row-wide { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ---- Needs your attention ----------------------------------------------- */
+.adm-attn { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.adm-attn-row {
+  display: flex; align-items: center; gap: 12px; padding: 10px 10px; border-radius: var(--radius);
+  color: var(--text); text-decoration: none; transition: background var(--dur-fast) ease;
+}
+.adm-attn-row:hover { background: var(--bg-hover); text-decoration: none; }
+.adm-attn-icon {
+  inline-size: 34px; block-size: 34px; flex: none; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center;
+}
+.adm-attn-icon.is-danger { background: var(--danger-soft); color: var(--danger-text); }
+.adm-attn-icon.is-warning { background: var(--warning-soft); color: var(--warning-text); }
+.adm-attn-icon.is-info { background: var(--info-soft); color: var(--info-text); }
+.adm-attn-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.adm-attn-title { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.adm-attn-detail { font-size: 12px; color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.adm-attn-count {
+  font-family: var(--font-display); font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.01em;
+  flex: none;
+}
+.adm-attn-count.is-danger { color: var(--danger-text); }
+.adm-attn-count.is-warning { color: var(--warning-text); }
+.adm-attn-count.is-info { color: var(--info-text); }
+.adm-attn-chev { color: var(--text-quaternary); display: inline-flex; flex: none; }
+[dir="rtl"] .adm-attn-chev { transform: scaleX(-1); }
+.adm-attn-failed {
+  display: flex; align-items: center; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border);
+  font-size: 12px; color: var(--text-tertiary);
+}
+
+/* ---- System health ------------------------------------------------------ */
+.adm-dot { inline-size: 9px; block-size: 9px; border-radius: 50%; flex: none; background: var(--text-quaternary); }
+.adm-dot.is-online { background: var(--success); box-shadow: 0 0 0 3px color-mix(in oklab, var(--success) 18%, transparent); }
+.adm-dot.is-reconnecting { background: var(--warning); }
+.adm-dot.is-offline { background: var(--danger); }
+.adm-dot.is-paused { background: var(--text-quaternary); }
+
+.adm-pipe {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--radius);
+  font-size: 13px; line-height: 1.45; background: var(--bg-sunken); color: var(--text-secondary); margin-bottom: 14px;
+}
+.adm-pipe.is-success { background: color-mix(in oklab, var(--success-soft) 70%, var(--bg-elev)); color: var(--success-text); }
+.adm-pipe.is-success .adm-dot { background: var(--success); }
+.adm-pipe.is-warning { background: color-mix(in oklab, var(--warning-soft) 70%, var(--bg-elev)); color: var(--warning-text); }
+.adm-pipe.is-warning .adm-dot { background: var(--warning); }
+.adm-pipe.is-danger { background: color-mix(in oklab, var(--danger-soft) 70%, var(--bg-elev)); color: var(--danger-text); }
+.adm-pipe.is-danger .adm-dot { background: var(--danger); }
+
+.adm-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+.adm-facts > div, .adm-trend-facts > div { padding: 10px 12px; border-radius: var(--radius); background: var(--bg-sunken); min-width: 0; }
+.adm-fact-value {
+  font-family: var(--font-display); font-size: 20px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
+  color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.adm-fact-label { font-size: 11.5px; color: var(--text-tertiary); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.adm-fact-sub { font-size: 11.5px; color: var(--text-secondary); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.adm-cams { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.adm-cam { display: flex; align-items: center; gap: 10px; padding: 9px 4px; }
+.adm-cam + .adm-cam { border-top: 1px solid var(--border); }
+.adm-cam-text { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.adm-cam-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.adm-cam-loc { font-size: 12px; color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.adm-cam-state { font-size: 12px; font-weight: 600; white-space: nowrap; flex: none; }
+.adm-cam-state.is-online { color: var(--success-text); }
+.adm-cam-state.is-reconnecting { color: var(--warning-text); }
+.adm-cam-state.is-offline { color: var(--danger-text); }
+.adm-cam-state.is-paused { color: var(--text-tertiary); }
+.adm-cam-seen {
+  font-size: 12px; color: var(--text-tertiary); white-space: nowrap; flex: none; inline-size: 92px; text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+.adm-more { margin-top: 6px; }
+
+/* ---- Latest sightings --------------------------------------------------- */
+.adm-sight { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.adm-sight-row {
+  display: flex; align-items: center; gap: 12px; padding: 7px 8px; border-radius: var(--radius); color: var(--text);
+  text-decoration: none; transition: background var(--dur-fast) ease;
+}
+.adm-sight-row:hover { background: var(--bg-hover); text-decoration: none; }
+.adm-thumb {
+  inline-size: 42px; block-size: 42px; flex: none; border-radius: 10px; overflow: hidden; background: var(--bg-sunken);
+  display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border);
+}
+.adm-thumb img { inline-size: 100%; block-size: 100%; object-fit: cover; display: block; }
+.adm-thumb.is-empty { color: var(--text-tertiary); font-size: 12px; font-weight: 700; }
+.adm-thumb.is-empty[style] { color: #fff; border-color: transparent; }
+.adm-sight-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.adm-sight-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 6px; }
+.adm-sight-tag { font-size: 10.5px; padding-block: 0; }
+.adm-sight-meta { font-size: 12px; color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.adm-sight-time { font-size: 12px; color: var(--text-tertiary); white-space: nowrap; flex: none; font-variant-numeric: tabular-nums; }
+
+/* ---- Trend -------------------------------------------------------------- */
+.adm-trend-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+.adm-trend-note { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 10px; font-size: 12px; line-height: 1.5; color: var(--text-tertiary); }
+.adm-trend-note svg { flex: none; margin-top: 2px; }
+
+/* ---- Storage ------------------------------------------------------------ */
+.adm-storage { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); gap: 28px; align-items: center; }
+.adm-storage-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; min-width: 0; }
+.adm-storage-pct { font-family: var(--font-display); font-size: 28px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; flex: none; }
+.adm-storage-pct.is-warning { color: var(--warning-text); }
+.adm-storage-pct.is-danger { color: var(--danger-text); }
+.adm-storage-of { font-size: 12.5px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.adm-storage-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.adm-storage-facts > div { padding-inline-start: 14px; border-inline-start: 1px solid var(--border); min-width: 0; }
+.adm-storage-facts .adm-fact-value { font-size: 17px; }
+@media (max-width: 1400px) {
+  .adm-storage { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+}
+
+/* Glance tiles: always one row of five on desktop. */
+.adm-glance .mg-stat-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
+.adm-glance .mg-stat { padding: 16px 18px; }
+.adm-ref { display: block; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; }
+.adm-glance .mg-stat-sub { line-height: 1.45; }
+.adm-glance .mg-stat-sub.dsh-clip { white-space: normal; }
