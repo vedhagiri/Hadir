@@ -413,6 +413,14 @@ function UserMenu({
 
       {confirmOpen && (
         <SignOutDialog
+          // The workspace's own (client) logo when one is uploaded in
+          // Settings → Branding; the product mark otherwise.
+          logoSrc={
+            me.has_brand_logo
+              ? `/api/branding/logo?v=${encodeURIComponent(me.brand_logo_version ?? "")}`
+              : productMark
+          }
+          logoAlt={me.tenant_name || "Maugood"}
           busy={loggingOut}
           onCancel={() => setConfirmOpen(false)}
           onConfirm={onLogout}
@@ -424,10 +432,14 @@ function UserMenu({
 
 /** "Sign out?" confirmation — shown before the session is ended. */
 function SignOutDialog({
+  logoSrc,
+  logoAlt,
   busy,
   onCancel,
   onConfirm,
 }: {
+  logoSrc: string;
+  logoAlt: string;
   busy: boolean;
   onCancel: () => void;
   onConfirm: () => void;
@@ -449,7 +461,7 @@ function SignOutDialog({
           <button type="button" className="icon-btn um-signout-x" onClick={onCancel} disabled={busy} aria-label={t("common.close", { defaultValue: "Close" })}>
             <Icon name="x" size={15} />
           </button>
-          <img src={productMark} alt="" className="um-signout-mark" />
+          <img src={logoSrc} alt={logoAlt} className="um-signout-mark" />
           <h2 id="um-signout-title" className="um-signout-title">{t("topbar.signOut.title", { defaultValue: "Sign out?" })}</h2>
           <p id="um-signout-body" className="um-signout-body">
             {t("topbar.signOut.body", { defaultValue: "Your session will end on this device. You'll need to sign in again to continue." })}
