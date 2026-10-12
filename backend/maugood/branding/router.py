@@ -281,6 +281,59 @@ def delete_my_logo(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.get("/public/logo")
+def get_public_logo(tenant: str) -> Response:
+    """Workspace logo for the **login page** (anonymous).
+
+    The login page knows the workspace from ``?tenant=`` or from the
+    workspace remembered after the last sign-in, but nobody is signed in
+    yet, so the authenticated ``/logo`` can't be used.
+
+    Read-only (never lazy-creates a branding row). Unknown slug, a
+    suspended workspace and "no logo uploaded" all give the same 404, so
+    the endpoint can't be used to tell which workspaces exist beyond what
+    the existing anonymous SSO status probes already reveal.
+    """
+
+    from maugood.db import tenant_branding  # noqa: PLC0415
+    from maugood.tenants.slug import SLUG_RE  # noqa: PLC0415
+
+    not_found = HTTPException(status_code=404, detail="no logo")
+    slug = (tenant or "").strip().lower()
+    if not SLUG_RE.match(slug):
+        raise not_found
+    engine = get_engine()
+    with tenant_context("public"):
+        with engine.begin() as conn:
+            t = conn.execute(
+                select(tenants.c.id, tenants.c.schema_name, tenants.c.status).where(
+                    tenants.c.slug == slug
+                )
+            ).first()
+    if t is None or str(t.status) != "active":
+        raise not_found
+    with tenant_context(str(t.schema_name)):
+        with engine.begin() as conn:
+            row = conn.execute(
+                select(tenant_branding.c.logo_path).where(
+                    tenant_branding.c.tenant_id == int(t.id)
+                )
+            ).first()
+    if row is None or row.logo_path is None:
+        raise not_found
+    content = logo_io.read_logo(row.logo_path)
+    if content is None:
+        raise not_found
+    ext = row.logo_path.rsplit(".", 1)[-1] if "." in row.logo_path else "png"
+    return Response(
+        content=content,
+        media_type=logo_io.content_type_for(ext),
+        # Short public cache: a new upload shows on the login page within
+        # minutes; the image itself is non-sensitive branding.
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
 @router.get("/logo")
 def get_my_logo(
     user: Annotated[CurrentUser, Depends(current_user)],

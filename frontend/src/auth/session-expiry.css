@@ -1,0 +1,147 @@
+/* Session "about to expire" / "signed out" dialog. Same family as the
+   sign-out confirmation (shell/user-menu.css): centred card, client logo,
+   one clear message, full-width actions. */
+
+.sx-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in oklab, var(--text) 38%, transparent);
+  backdrop-filter: blur(6px);
+  animation: sx-fade 0.18s ease-out;
+}
+/* No app behind the dialog any more (session gone) — a calm solid wash. */
+.sx-backdrop.is-solid {
+  background:
+    radial-gradient(1200px 600px at 50% 0%, color-mix(in oklab, var(--accent) 10%, transparent), transparent),
+    var(--bg-sunken, var(--bg));
+  backdrop-filter: none;
+}
+
+.sx-card {
+  position: relative;
+  width: min(420px, 100%);
+  padding: 30px 30px 26px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  background: var(--bg-elev, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-shadow: 0 30px 80px -20px rgba(15, 23, 42, 0.35), 0 2px 6px rgba(15, 23, 42, 0.06);
+  animation: sx-pop 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+.sx-logo {
+  height: 40px;
+  width: auto;
+  max-width: 170px;
+  object-fit: contain;
+  margin-bottom: 22px;
+}
+
+.sx-badge {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
+  box-shadow: 0 0 0 8px color-mix(in oklab, var(--accent) 6%, transparent);
+  margin-bottom: 18px;
+}
+
+.sx-ring {
+  position: relative;
+  width: 88px;
+  height: 88px;
+  margin-bottom: 14px;
+}
+.sx-ring svg { display: block; }
+.sx-ring-track { fill: none; stroke: var(--border); stroke-width: 6; }
+.sx-ring-fill {
+  fill: none;
+  stroke: var(--warning);
+  stroke-width: 6;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.95s linear;
+}
+.sx-ring-time {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  color: var(--warning-text);
+}
+
+.sx-title {
+  margin: 0 0 8px;
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+.sx-body {
+  margin: 0;
+  max-width: 330px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.sx-note {
+  width: 100%;
+  margin-top: 18px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--success-soft);
+  border: 1px solid color-mix(in oklab, var(--success) 25%, transparent);
+  color: var(--success-text);
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-align: start;
+}
+.sx-note svg { flex: none; margin-top: 2px; }
+
+.sx-error {
+  width: 100%;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--danger-soft);
+  color: var(--danger-text);
+  font-size: 12.5px;
+}
+
+.sx-actions {
+  width: 100%;
+  margin-top: 22px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.sx-actions.is-single { grid-template-columns: 1fr; }
+.sx-actions .btn { height: 44px; font-size: 14px; justify-content: center; gap: 8px; }
+/* "Sign in again" points back into the app — flip the logout arrow. */
+.sx-actions.is-single .btn svg { transform: scaleX(-1); }
+
+@keyframes sx-fade { from { opacity: 0; } }
+@keyframes sx-pop { from { opacity: 0; transform: translateY(8px) scale(0.98); } }
+@media (prefers-reduced-motion: reduce) {
+  .sx-backdrop, .sx-card { animation: none; }
+  .sx-ring-fill { transition: none; }
+}

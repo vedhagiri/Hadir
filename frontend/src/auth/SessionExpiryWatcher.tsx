@@ -8,8 +8,13 @@
 // than auto-redirecting to /login.
 
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
+import productMark from "../assets/mts_mark.png";
+import { Icon } from "../shell/Icon";
 import { serverNow, useLogout, useMe, useRefreshSession } from "./AuthProvider";
+import { rememberReturnTo } from "./returnTo";
+import "./session-expiry.css";
 
 // Show the modal when the session has this many seconds (or fewer)
 // remaining. Last 30 s of the session window — explicit "Stay Signed
@@ -55,8 +60,30 @@ function formatCountdown(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+// The workspace remembered by the login page; the public logo endpoint
+// needs no session, so the client logo still shows after expiry.
+const LAST_WORKSPACE_KEY = "maugood.lastWorkspace";
+
+function workspaceLogo(slug: string | null | undefined): string | null {
+  const s = (slug || localStorage.getItem(LAST_WORKSPACE_KEY) || "").trim().toLowerCase();
+  return /^[a-z][a-z0-9_-]{1,39}$/.test(s) ? `/api/branding/public/logo?tenant=${encodeURIComponent(s)}` : null;
+}
+
 export function SessionExpiryWatcher() {
+  const { t } = useTranslation();
   const { data: me } = useMe();
+  const [logoFailed, setLogoFailed] = useState(false);
+  // Remember the workspace while signed in, so the client logo can still
+  // be shown once the session is gone (``me`` is null by then).
+  useEffect(() => {
+    if (me?.tenant_slug) {
+      try {
+        localStorage.setItem(LAST_WORKSPACE_KEY, me.tenant_slug);
+      } catch {
+        /* storage unavailable — the MTS mark is shown instead */
+      }
+    }
+  }, [me?.tenant_slug]);
   const refresh = useRefreshSession();
   const logout = useLogout();
 
@@ -165,7 +192,10 @@ export function SessionExpiryWatcher() {
   // and immediately returns <Navigate to="/" />, bouncing the user back
   // to the app with the same stale session_started_at — the "expired"
   // popup fires again on remount, creating an infinite loop.
+  // The current page is remembered so the login page brings the user
+  // straight back to it.
   const handleRelogin = () => {
+    rememberReturnTo(window.location.pathname + window.location.search);
     logout.mutate(undefined, {
       onSuccess: () => {
         window.location.href = "/login";
@@ -197,256 +227,105 @@ export function SessionExpiryWatcher() {
 
   if (effectivePhase === "idle") return null;
 
-  const isWarning = effectivePhase === "warning";
   const isExpired = effectivePhase === "expired";
   const busy = refresh.isPending || logout.isPending;
+  const logoSrc = (!logoFailed && workspaceLogo(me?.tenant_slug)) || productMark;
+  const idle = me?.session_idle_minutes;
+  // Countdown ring: full at the start of the warning window, empty at 0.
+  const R = 34;
+  const C = 2 * Math.PI * R;
+  const frac = Math.max(0, Math.min(1, remaining / WARN_BEFORE_EXPIRY_S));
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Session"
-      onClick={(e) => {
-        // Click-outside is intentionally a no-op for warning state —
-        // the user must explicitly choose stay / sign out. In expired
-        // state we only allow re-login so also no-op.
-        e.stopPropagation();
-      }}
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 9999,
-        background: "rgba(2, 6, 23, 0.55)",
-        backdropFilter: "blur(4px)",
-        display: "grid",
-        placeItems: "center",
-        padding: 24,
-        fontFamily: "var(--font-sans)",
-      }}
-    >
+    <div className={`sx-backdrop${me === null ? " is-solid" : ""}`} onClick={(e) => e.stopPropagation()}>
       <div
-        style={{
-          background: "var(--bg)",
-          border: "1px solid var(--border)",
-          borderRadius: 16,
-          boxShadow: "0 24px 64px rgba(0,0,0,0.35)",
-          maxWidth: 460,
-          width: "100%",
-          padding: 0,
-          overflow: "hidden",
-        }}
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="sx-title"
+        aria-describedby="sx-body"
+        className={`sx-card ${isExpired ? "is-expired" : "is-warning"}`}
       >
-        {/* Accent header bar — amber on warning, red on expired */}
-        <div
-          aria-hidden
-          style={{
-            height: 4,
-            background: isExpired ? "#dc2626" : "#f59e0b",
-          }}
-        />
-        <div style={{ padding: "22px 26px 18px" }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              marginBottom: 8,
-            }}
-          >
-            <span
-              aria-hidden
-              style={{
-                width: 36,
-                height: 36,
-                borderRadius: 10,
-                background: isExpired
-                  ? "rgba(220,38,38,0.12)"
-                  : "rgba(245,158,11,0.14)",
-                color: isExpired ? "#dc2626" : "#b45309",
-                display: "grid",
-                placeItems: "center",
-                fontSize: 18,
-                fontWeight: 700,
-                flexShrink: 0,
-              }}
-            >
-              {isExpired ? "!" : "⏱"}
+        <img src={logoSrc} alt="" className="sx-logo" onError={() => setLogoFailed(true)} />
+
+        {isExpired ? (
+          <div className="sx-badge" aria-hidden>
+            <Icon name="clock" size={30} />
+          </div>
+        ) : (
+          <div className="sx-ring" aria-hidden>
+            <svg viewBox="0 0 80 80" width="88" height="88">
+              <circle cx="40" cy="40" r={R} className="sx-ring-track" />
+              <circle
+                cx="40"
+                cy="40"
+                r={R}
+                className="sx-ring-fill"
+                strokeDasharray={C}
+                strokeDashoffset={C * (1 - frac)}
+                transform="rotate(-90 40 40)"
+              />
+            </svg>
+            <span className="sx-ring-time">{formatCountdown(remaining)}</span>
+          </div>
+        )}
+
+        <h2 id="sx-title" className="sx-title">
+          {isExpired
+            ? t("session.expired.title", { defaultValue: "You've been signed out" })
+            : t("session.warning.title", { defaultValue: "Are you still there?" })}
+        </h2>
+        <p id="sx-body" className="sx-body">
+          {isExpired
+            ? idle
+              ? t("session.expired.bodyIdle", {
+                  defaultValue: "For your security, we sign you out after {{minutes}} minutes without activity.",
+                  minutes: idle,
+                })
+              : t("session.expired.body", { defaultValue: "For your security, we sign you out after a period without activity." })
+            : t("session.warning.body", {
+                defaultValue: "For your security, you'll be signed out in {{time}}. Stay signed in to keep working.",
+                time: formatCountdown(remaining),
+              })}
+        </p>
+
+        {isExpired && (
+          <div className="sx-note">
+            <Icon name="check" size={15} />
+            <span>
+              {t("session.expired.note", {
+                defaultValue: "Sign in again and you'll come straight back to this page.",
+              })}
             </span>
-            <div>
-              <div
-                style={{
-                  fontSize: 16,
-                  fontWeight: 700,
-                  color: "var(--text)",
-                  lineHeight: 1.2,
-                }}
-              >
-                {isExpired
-                  ? "Your session has expired"
-                  : "Your session is about to expire"}
-              </div>
-              <div
-                style={{
-                  fontSize: 12,
-                  color: "var(--text-secondary)",
-                  marginTop: 3,
-                }}
-              >
-                {isExpired
-                  ? "Sign in again to continue."
-                  : isWarning
-                    ? "Do you want to stay logged in, or log out?"
-                    : ""}
-              </div>
-            </div>
           </div>
+        )}
 
-          {/* Countdown — only shown while warning */}
-          {isWarning && (
-            <div
-              style={{
-                marginTop: 18,
-                marginBottom: 18,
-                background: "var(--bg-elev)",
-                border: "1px solid var(--border)",
-                borderRadius: 12,
-                padding: "16px 18px",
-                textAlign: "center",
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 10,
-                  color: "var(--text-secondary)",
-                  fontWeight: 700,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.08em",
-                }}
-              >
-                Time remaining
-              </div>
-              <div
-                style={{
-                  fontSize: 38,
-                  fontWeight: 700,
-                  color: remaining <= 30 ? "#dc2626" : "#b45309",
-                  fontVariantNumeric: "tabular-nums",
-                  lineHeight: 1.05,
-                  marginTop: 4,
-                  letterSpacing: "-0.02em",
-                }}
-              >
-                {formatCountdown(remaining)}
-              </div>
-              <div
-                style={{
-                  marginTop: 10,
-                  height: 6,
-                  borderRadius: 3,
-                  background: "var(--border)",
-                  overflow: "hidden",
-                }}
-              >
-                <div
-                  style={{
-                    height: "100%",
-                    width: `${Math.max(2, Math.min(100, (remaining / WARN_BEFORE_EXPIRY_S) * 100))}%`,
-                    background: remaining <= 30 ? "#dc2626" : "#f59e0b",
-                    transition: "width 0.4s ease",
-                  }}
-                />
-              </div>
-            </div>
-          )}
+        {refresh.isError && (
+          <div className="sx-error" role="alert">
+            {t("session.refreshFailed", { defaultValue: "Couldn't keep you signed in. Please sign in again." })}
+          </div>
+        )}
 
-          {/* Helper text on expired */}
-          {isExpired && (
-            <div
-              style={{
-                marginTop: 14,
-                fontSize: 13,
-                color: "var(--text-secondary)",
-                lineHeight: 1.5,
-                background: "var(--bg-elev)",
-                border: "1px solid var(--border)",
-                borderRadius: 10,
-                padding: "12px 14px",
-              }}
-            >
-              Your session ended because of inactivity. None of your
-              work was lost — sign back in and you'll return to the
-              same page.
-            </div>
-          )}
-
-          {/* Actions */}
-          <div
-            style={{
-              display: "flex",
-              gap: 10,
-              marginTop: 18,
-              justifyContent: "flex-end",
-              flexWrap: "wrap",
-            }}
-          >
-            {isWarning && (
-              <>
-                <button
-                  type="button"
-                  className="btn btn-sm"
-                  onClick={handleSignOut}
-                  disabled={busy}
-                  style={{
-                    border: "1px solid var(--border)",
-                    background: "transparent",
-                    color: "var(--text)",
-                  }}
-                >
-                  {logout.isPending ? "Signing out…" : "Sign out now"}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-sm btn-primary"
-                  onClick={handleStay}
-                  disabled={busy}
-                  style={{
-                    background: "#0b6e4f",
-                    color: "#fff",
-                    fontWeight: 600,
-                  }}
-                >
-                  {refresh.isPending ? "Refreshing…" : "Stay signed in"}
-                </button>
-              </>
-            )}
-            {isExpired && (
-              <button
-                type="button"
-                className="btn btn-sm btn-primary"
-                onClick={handleRelogin}
-                disabled={busy}
-                style={{
-                  background: "var(--text)",
-                  color: "var(--bg)",
-                  fontWeight: 600,
-                }}
-              >
-                {logout.isPending ? "Signing out…" : "Sign in again"}
+        <div className={`sx-actions${isExpired ? " is-single" : ""}`}>
+          {isExpired ? (
+            <button type="button" className="btn btn-primary" onClick={handleRelogin} disabled={busy} autoFocus>
+              <Icon name="logout" size={14} />
+              {logout.isPending
+                ? t("session.working", { defaultValue: "One moment…" })
+                : t("session.expired.signIn", { defaultValue: "Sign in again" })}
+            </button>
+          ) : (
+            <>
+              <button type="button" className="btn" onClick={handleSignOut} disabled={busy}>
+                {logout.isPending
+                  ? t("session.signingOut", { defaultValue: "Signing out…" })
+                  : t("session.warning.signOut", { defaultValue: "Sign out" })}
               </button>
-            )}
-          </div>
-
-          {/* Error from refresh */}
-          {refresh.isError && (
-            <div
-              style={{
-                marginTop: 12,
-                fontSize: 12,
-                color: "var(--danger-text)",
-              }}
-            >
-              Could not refresh the session. Please sign in again.
-            </div>
+              <button type="button" className="btn btn-primary" onClick={handleStay} disabled={busy} autoFocus>
+                {refresh.isPending
+                  ? t("session.working", { defaultValue: "One moment…" })
+                  : t("session.warning.stay", { defaultValue: "Stay signed in" })}
+              </button>
+            </>
           )}
         </div>
       </div>

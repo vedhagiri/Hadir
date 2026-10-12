@@ -592,3 +592,19 @@ def test_same_email_in_two_workspaces(
         for schema, _tid, _pw in tenants_info:
             with tenant_context(schema), admin_engine.begin() as conn:
                 conn.execute(delete(users).where(users.c.email == shared))
+
+
+
+def test_public_login_logo_is_anonymous_and_does_not_leak(
+    two_smoke_tenants: dict,
+) -> None:
+    """The login page's anonymous logo: unknown slug, bad slug and "no logo"
+    are the same 404; it never needs or sets a session."""
+
+    with TestClient(app) as client:
+        for slug in (OMRAN_SLUG, "no_such_workspace", "BAD SLUG!"):
+            r = client.get(f"/api/branding/public/logo?tenant={slug}")
+            # Fresh smoke tenants have no logo uploaded → same 404 as unknown.
+            assert r.status_code == 404, (slug, r.status_code)
+            assert r.json()["detail"] == "no logo"
+        assert not client.cookies.get("maugood_session")

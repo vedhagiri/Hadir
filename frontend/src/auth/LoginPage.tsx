@@ -19,6 +19,7 @@ import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { z } from "zod";
 
 import { ApiError } from "../api/client";
+import { takeReturnTo } from "./returnTo";
 import mtsLogo from "../assets/mts_logo.png";
 import productMark from "../assets/mts_mark.png";
 import loginHero from "../assets/login_hero.jpg";
@@ -176,7 +177,8 @@ export function LoginPage() {
       if (pinned) payload.tenant_slug = pinned;
       const me = await login.mutateAsync(payload);
       rememberWorkspace(me.tenant_slug ?? pinned);
-      navigate("/", { replace: true });
+      // Back to the page the session expired on, if any.
+      navigate(takeReturnTo() ?? "/", { replace: true });
     } catch (err) {
       const detail =
         err instanceof ApiError && err.status === 409
@@ -310,10 +312,11 @@ function BrandPanel() {
   // 1160x1356, approved login banner), bundled locally — no network fetch, so it works on
   // air-gapped installs. The poster carries its own headline + feature
   // copy, so nothing is overlaid.
+  const { t } = useTranslation();
   return (
     <aside
       className="login-brand-panel"
-      aria-label="AI-powered CCTV attendance"
+      aria-label={t("login.brandPanel", { defaultValue: "AI-powered CCTV attendance" })}
       style={{
         // Pinned to the viewport height so the poster never makes the
         // page taller than the screen (no scrollbar); ``contain`` shows
@@ -398,6 +401,15 @@ function RequiredMark() {
 }
 
 function Header({ tenantSlug }: { tenantSlug: string | null }) {
+  // With a known workspace (from ?tenant= or the last sign-in here),
+  // show that workspace's own logo; fall back to the MTS logo when it
+  // has none (or it fails to load).
+  const [logoFailed, setLogoFailed] = useState(false);
+  useEffect(() => setLogoFailed(false), [tenantSlug]);
+  const workspaceLogo =
+    tenantSlug && !logoFailed
+      ? `/api/branding/public/logo?tenant=${encodeURIComponent(tenantSlug)}`
+      : null;
   return (
     <>
       <div
@@ -411,11 +423,12 @@ function Header({ tenantSlug }: { tenantSlug: string | null }) {
         }}
       >
         <img
-          src={mtsLogo}
-          alt="Muscat Tech Solutions"
-          style={{ height: 56, width: "auto", objectFit: "contain" }}
+          src={workspaceLogo ?? mtsLogo}
+          alt={workspaceLogo ? tenantSlug ?? "" : "Muscat Tech Solutions"}
+          onError={() => setLogoFailed(true)}
+          style={{ height: 56, maxWidth: 220, width: "auto", objectFit: "contain" }}
         />
-        {tenantSlug && (
+        {tenantSlug && !workspaceLogo && (
           <span
             style={{
               fontSize: 11,
