@@ -505,3 +505,90 @@ def test_super_admin_access_as_both_tenants(
             ).all()
     seen = {row.tenant_id for row in rows}
     assert {omran_id, demo_id}.issubset(seen), seen
+
+
+
+# ---------------------------------------------------------------------------
+# Login without a workspace: the tenant is found from the account
+# ---------------------------------------------------------------------------
+
+
+def test_login_without_workspace_routes_to_the_users_tenant(
+    two_smoke_tenants: dict,
+) -> None:
+    for email, pw, schema in (
+        (OMRAN_ADMIN_EMAIL, OMRAN_ADMIN_PW, OMRAN_SCHEMA),
+        (DEMO_ADMIN_EMAIL, DEMO_ADMIN_PW, DEMO_SCHEMA),
+    ):
+        with TestClient(app) as client:
+            resp = client.post("/api/auth/login", json={"email": email, "password": pw})
+            assert resp.status_code == 200, resp.text
+            assert client.cookies.get("maugood_tenant") == schema
+            # /me says which workspace this is, for the SSO buttons.
+            assert resp.json()["tenant_slug"] in (OMRAN_SLUG, DEMO_SLUG)
+
+    with TestClient(app) as client:
+        # Wrong password → 401, never a different tenant.
+        bad = client.post(
+            "/api/auth/login",
+            json={"email": OMRAN_ADMIN_EMAIL, "password": "nope-nope-nope"},
+        )
+        assert bad.status_code == 401
+        assert not client.cookies.get("maugood_session")
+
+
+def test_same_email_in_two_workspaces(
+    two_smoke_tenants: dict, admin_engine: Engine
+) -> None:
+    """The same email in two tenants: the password decides; if it fits
+    both, the user is asked to choose (409) and nothing is signed in."""
+
+    from maugood.db import users  # noqa: PLC0415
+
+    shared = f"shared-{secrets.token_hex(3)}@smoke.test"
+    pw_a, pw_b = "SharedOmran!42a", "SharedDemo!42a"
+    tenants_info = [
+        (OMRAN_SCHEMA, int(two_smoke_tenants["omran"]["tenant_id"]), pw_a),
+        (DEMO_SCHEMA, int(two_smoke_tenants["demo"]["tenant_id"]), pw_b),
+    ]
+    for schema, tid, pw in tenants_info:
+        with tenant_context(schema), admin_engine.begin() as conn:
+            conn.execute(
+                insert(users).values(
+                    tenant_id=tid, email=shared, full_name="Shared User",
+                    password_hash=hash_password(pw), is_active=True,
+                )
+            )
+    try:
+        # Different passwords → each lands in its own workspace.
+        for pw, schema in ((pw_a, OMRAN_SCHEMA), (pw_b, DEMO_SCHEMA)):
+            with TestClient(app) as client:
+                r = client.post("/api/auth/login", json={"email": shared, "password": pw})
+                assert r.status_code == 200, r.text
+                assert client.cookies.get("maugood_tenant") == schema
+
+        # Same password in both → 409 with both workspaces, no session.
+        with tenant_context(DEMO_SCHEMA), admin_engine.begin() as conn:
+            conn.execute(
+                users.update()
+                .where(users.c.email == shared)
+                .values(password_hash=hash_password(pw_a))
+            )
+        with TestClient(app) as client:
+            r = client.post("/api/auth/login", json={"email": shared, "password": pw_a})
+            assert r.status_code == 409, r.text
+            detail = r.json()["detail"]
+            assert detail["code"] == "multiple_workspaces"
+            assert {w["slug"] for w in detail["workspaces"]} == {OMRAN_SLUG, DEMO_SLUG}
+            assert not client.cookies.get("maugood_session")
+            # Choosing one with tenant_slug works as before.
+            r2 = client.post(
+                "/api/auth/login",
+                json={"email": shared, "password": pw_a, "tenant_slug": DEMO_SLUG},
+            )
+            assert r2.status_code == 200, r2.text
+            assert client.cookies.get("maugood_tenant") == DEMO_SCHEMA
+    finally:
+        for schema, _tid, _pw in tenants_info:
+            with tenant_context(schema), admin_engine.begin() as conn:
+                conn.execute(delete(users).where(users.c.email == shared))

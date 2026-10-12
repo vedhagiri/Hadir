@@ -1,12 +1,14 @@
 // Email + password login (P3) + Entra ID OIDC (P6).
 //
-// Single-screen form: workspace slug, email, and password live on the
-// same card. The "Sign in with Microsoft" button appears below the
-// local-credential submit when the entered workspace has OIDC enabled.
+// Email + password only: the server finds the workspace from the
+// account. If the same account exists in more than one workspace (and
+// the password fits each), the server answers 409 and the card shows a
+// small "choose your workspace" step.
 //
-// Tenant resolution: subdomain-based routing (omran.maugood.example.com)
-// will land here in production. For local dev the tenant slug comes
-// from a ?tenant=… query param or the workspace field on the form.
+// Microsoft / Google sign-in still need a workspace before redirecting.
+// It comes from ?tenant=… or the workspace remembered after the last
+// successful sign-in on this browser; with neither, clicking a provider
+// asks for it inline.
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
@@ -23,6 +25,32 @@ import loginHero from "../assets/login_hero.jpg";
 import { useGoogleStatus, useOidcStatus } from "../auth-oidc/hooks";
 import { Icon } from "../shell/Icon";
 import { useLogin, useMe } from "./AuthProvider";
+
+const LAST_WORKSPACE_KEY = "maugood.lastWorkspace";
+const SLUG_OK = /^[a-z][a-z0-9_-]{1,39}$/;
+
+function readLastWorkspace(): string {
+  try {
+    const v = (localStorage.getItem(LAST_WORKSPACE_KEY) ?? "").trim().toLowerCase();
+    return SLUG_OK.test(v) ? v : "";
+  } catch {
+    return "";
+  }
+}
+
+function rememberWorkspace(slug: string | undefined): void {
+  if (!slug || !SLUG_OK.test(slug)) return;
+  try {
+    localStorage.setItem(LAST_WORKSPACE_KEY, slug);
+  } catch {
+    /* private mode — nothing to remember */
+  }
+}
+
+interface WorkspaceChoice {
+  slug: string;
+  name: string;
+}
 
 const loginSchema = z.object({
   email: z.string().email("Enter a valid email"),
@@ -64,7 +92,14 @@ export function LoginPage() {
   // Tenant slug — pulled from ?tenant=… and kept in form state. Drives
   // the OIDC probe so the Microsoft button renders only when the
   // entered workspace actually has OIDC enabled.
-  const initialTenant = searchParams.get("tenant") ?? "";
+  const initialTenant = (searchParams.get("tenant") ?? "").trim().toLowerCase();
+  // Workspace for SSO + the header chip: the ?tenant link wins, then the
+  // one remembered from the last sign-in here.
+  const [knownWorkspace, setKnownWorkspace] = useState<string>(
+    () => initialTenant || readLastWorkspace(),
+  );
+  // Set when the server says this account exists in several workspaces.
+  const [workspaceChoices, setWorkspaceChoices] = useState<WorkspaceChoice[] | null>(null);
 
   const {
     register,
@@ -73,17 +108,16 @@ export function LoginPage() {
     watch,
   } = useForm<LoginValues>({
     resolver: zodResolver,
-    defaultValues: { email: "", password: "", tenant_slug: initialTenant || "" },
+    defaultValues: { email: "", password: "", tenant_slug: "" },
   });
 
-  const watchedTenant = watch("tenant_slug") ?? "";
-  const tenantSlug = watchedTenant.trim().toLowerCase();
+  const tenantSlug = knownWorkspace;
   // Sign in stays disabled until every required field has a value;
   // the server still validates — this only prevents empty submits.
   const watchedEmail = (watch("email") ?? "").trim();
   const watchedPassword = watch("password") ?? "";
-  const canSubmit = tenantSlug.length > 0 && watchedEmail.length > 0 && watchedPassword.length > 0;
-  const tenantSlugValid = /^[a-z_][a-z0-9_]{0,62}$/.test(tenantSlug);
+  const canSubmit = watchedEmail.length > 0 && watchedPassword.length > 0;
+  const tenantSlugValid = SLUG_OK.test(tenantSlug);
 
   const oidcStatus = useOidcStatus(tenantSlugValid ? tenantSlug : null);
   const oidcEnabled = !!oidcStatus.data?.enabled;
@@ -134,24 +168,43 @@ export function LoginPage() {
   if (meLoading) return null;
   if (me != null) return <Navigate to="/" replace />;
 
-  const onSubmit = handleSubmit(async (values) => {
+  const signIn = async (email: string, password: string, slug?: string) => {
     try {
-      const payload: { email: string; password: string; tenant_slug?: string } = {
-        email: values.email,
-        password: values.password,
-      };
-      if (values.tenant_slug) payload.tenant_slug = values.tenant_slug;
-      await login.mutateAsync(payload);
+      const payload: { email: string; password: string; tenant_slug?: string } = { email, password };
+      // A ?tenant=… link pins the workspace; otherwise the server finds it.
+      const pinned = slug ?? (initialTenant && SLUG_OK.test(initialTenant) ? initialTenant : undefined);
+      if (pinned) payload.tenant_slug = pinned;
+      const me = await login.mutateAsync(payload);
+      rememberWorkspace(me.tenant_slug ?? pinned);
       navigate("/", { replace: true });
-    } catch {
-      // surfaces via login.error
+    } catch (err) {
+      const detail =
+        err instanceof ApiError && err.status === 409
+          ? (err.body as { detail?: { code?: string; workspaces?: WorkspaceChoice[] } } | null)?.detail
+          : undefined;
+      if (detail?.code === "multiple_workspaces" && Array.isArray(detail.workspaces)) {
+        setWorkspaceChoices(detail.workspaces);
+      }
+      // other errors surface via login.error
     }
+  };
+
+  const onSubmit = handleSubmit(async (values) => {
+    setWorkspaceChoices(null);
+    await signIn(values.email, values.password);
   });
+
+  const pickWorkspace = (slug: string) => {
+    setKnownWorkspace(slug);
+    setWorkspaceChoices(null);
+    void signIn(watchedEmail, watchedPassword, slug);
+  };
 
   const serverError = (() => {
     const err = login.error;
     if (!err) return null;
     if (err instanceof ApiError) {
+      if (err.status === 409) return null; // handled by the workspace picker
       if (err.status === 401) return t("login.wrongCredentials");
       if (err.status === 429) return t("login.rateLimited");
       if (err.status === 403)
@@ -224,6 +277,13 @@ export function LoginPage() {
             googleEnabled={googleEnabled}
             serverError={serverError}
             initialNotice={ssoNotice}
+            workspaceChoices={workspaceChoices}
+            onPickWorkspace={pickWorkspace}
+            onCancelPick={() => setWorkspaceChoices(null)}
+            onSetWorkspace={(slug) => {
+              setKnownWorkspace(slug);
+              rememberWorkspace(slug);
+            }}
           />
         </div>
 
@@ -403,6 +463,10 @@ interface CombinedFormProps {
   googleEnabled: boolean;
   serverError: string | null;
   initialNotice: string | null;
+  workspaceChoices: WorkspaceChoice[] | null;
+  onPickWorkspace: (slug: string) => void;
+  onCancelPick: () => void;
+  onSetWorkspace: (slug: string) => void;
 }
 
 function CombinedLoginForm({
@@ -418,6 +482,10 @@ function CombinedLoginForm({
   googleEnabled,
   serverError,
   initialNotice,
+  workspaceChoices,
+  onPickWorkspace,
+  onCancelPick,
+  onSetWorkspace,
 }: CombinedFormProps) {
   const { t } = useTranslation();
   // Provider-not-configured notice. Replaces the jarring native
@@ -426,6 +494,10 @@ function CombinedLoginForm({
   // failed SSO callback's ``?sso_error`` when present.
   const [notice, setNotice] = useState<string | null>(initialNotice);
   const [showPassword, setShowPassword] = useState(false);
+  // Microsoft / Google clicked with no workspace known yet: ask for it
+  // inline, then continue to that provider.
+  const [askWorkspaceFor, setAskWorkspaceFor] = useState<"microsoft" | "google" | null>(null);
+  const [workspaceDraft, setWorkspaceDraft] = useState("");
   const oidcUrl = tenantSlugValid
     ? `/api/auth/oidc/login?tenant=${encodeURIComponent(tenantSlug)}`
     : "";
@@ -448,24 +520,6 @@ function CombinedLoginForm({
         {t("login.subtitle")}
       </p>
 
-      <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        <span style={labelStyle}>{t("login.tenantSlugLabel")}<RequiredMark /></span>
-        <div style={fieldWrapStyle}>
-          <span style={fieldIconStyle} aria-hidden="true"><BuildingIcon /></span>
-          <input
-            type="text"
-            autoComplete="organization"
-            autoFocus={!tenantSlug}
-            placeholder={t("login.tenantSlugPlaceholder")}
-            aria-invalid={!!errors.tenant_slug}
-            {...register("tenant_slug")}
-            style={inputStyle}
-          />
-        </div>
-        {errors.tenant_slug && (
-          <FieldError message={errors.tenant_slug.message ?? ""} />
-        )}
-      </label>
 
       <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         <span style={labelStyle}>{t("login.emailLabel")}<RequiredMark /></span>
@@ -474,7 +528,7 @@ function CombinedLoginForm({
           <input
             type="email"
             autoComplete="username"
-            autoFocus={!!tenantSlug}
+            autoFocus
             placeholder={t("login.emailPlaceholder")}
             aria-invalid={!!errors.email}
             {...register("email")}
@@ -526,6 +580,35 @@ function CombinedLoginForm({
           }}
         >
           {serverError}
+        </div>
+      )}
+
+      {workspaceChoices && workspaceChoices.length > 0 && (
+        <div role="group" aria-label={t("login.chooseWorkspace", { defaultValue: "Choose your workspace" })} style={pickerStyle}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+            {t("login.chooseWorkspace", { defaultValue: "Choose your workspace" })}
+          </div>
+          <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+            {t("login.chooseWorkspaceBody", {
+              defaultValue: "Your account exists in more than one workspace.",
+            })}
+          </div>
+          {workspaceChoices.map((w) => (
+            <button
+              key={w.slug}
+              type="button"
+              className="btn"
+              onClick={() => onPickWorkspace(w.slug)}
+              disabled={isPending}
+              style={{ justifyContent: "space-between", width: "100%" }}
+            >
+              <span>{w.name}</span>
+              <span style={{ fontSize: 11.5, color: "var(--text-tertiary)" }}>{w.slug}</span>
+            </button>
+          ))}
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onCancelPick} style={{ alignSelf: "center" }}>
+            {t("common.cancel", { defaultValue: "Cancel" })}
+          </button>
         </div>
       )}
 
@@ -583,12 +666,7 @@ function CombinedLoginForm({
           onClick={(e) => {
             e.preventDefault();
             if (!tenantSlugValid) {
-              setNotice(
-                t("login.enterWorkspaceFirst", {
-                  defaultValue:
-                    "Enter your workspace name above first, then choose a sign-in provider.",
-                }),
-              );
+              setAskWorkspaceFor("microsoft");
               return;
             }
             if (!oidcEnabled || !oidcUrl) {
@@ -619,12 +697,7 @@ function CombinedLoginForm({
           onClick={(e) => {
             e.preventDefault();
             if (!tenantSlugValid) {
-              setNotice(
-                t("login.enterWorkspaceFirst", {
-                  defaultValue:
-                    "Enter your workspace name above first, then choose a sign-in provider.",
-                }),
-              );
+              setAskWorkspaceFor("google");
               return;
             }
             if (!googleEnabled || !googleUrl) {
@@ -644,6 +717,53 @@ function CombinedLoginForm({
           <GoogleLogo size={22} />
         </button>
       </div>
+
+      {askWorkspaceFor && (
+        <div style={pickerStyle}>
+          <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)" }}>
+              {t("login.workspaceForSso", {
+                defaultValue: "Your workspace name, to continue with {{provider}}",
+                provider: askWorkspaceFor === "google" ? "Google" : "Microsoft",
+              })}
+            </span>
+            <input
+              type="text"
+              autoFocus
+              autoComplete="organization"
+              value={workspaceDraft}
+              onChange={(e) => setWorkspaceDraft(e.target.value)}
+              placeholder={t("login.tenantSlugPlaceholder")}
+              style={{ ...inputStyle, border: "1px solid var(--border-strong)", borderRadius: 10, paddingInline: 12 }}
+            />
+          </label>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAskWorkspaceFor(null)}>
+              {t("common.cancel", { defaultValue: "Cancel" })}
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              disabled={!/^[a-z][a-z0-9_-]{1,39}$/.test(workspaceDraft.trim().toLowerCase())}
+              onClick={() => {
+                const slug = workspaceDraft.trim().toLowerCase();
+                const provider = askWorkspaceFor;
+                onSetWorkspace(slug);
+                setAskWorkspaceFor(null);
+                // The provider status probe needs a moment for the new
+                // workspace; the start URL itself works immediately.
+                window.location.assign(
+                  provider === "google"
+                    ? `/api/auth/google/login?tenant=${encodeURIComponent(slug)}`
+                    : `/api/auth/oidc/login?tenant=${encodeURIComponent(slug)}`,
+                );
+              }}
+            >
+              {t("login.continue", { defaultValue: "Continue" })}
+            </button>
+          </div>
+        </div>
+      )}
 
       {notice !== null && (
         <ProviderNoticeModal
@@ -784,6 +904,16 @@ const ssoButtonStyle = {
 };
 
 // Teal gradient primary action with a leading arrow (approved login mock).
+const pickerStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+  padding: 12,
+  borderRadius: 12,
+  border: "1px solid var(--border)",
+  background: "var(--bg-sunken)",
+};
+
 const submitButtonStyle = {
   justifyContent: "center",
   marginTop: 4,
@@ -812,15 +942,6 @@ const fieldIconStyle = {
   borderInlineEnd: "1px solid var(--border)",
   pointerEvents: "none",
 } as const;
-
-function BuildingIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="4" y="3" width="16" height="18" rx="2" />
-      <path d="M9 7h2M13 7h2M9 11h2M13 11h2M9 15h2M13 15h2M10 21v-3h4v3" />
-    </svg>
-  );
-}
 
 function LockIcon() {
   return (

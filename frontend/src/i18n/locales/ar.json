@@ -61,7 +61,7 @@
   },
   "login": {
     "title": "تسجيل الدخول إلى Maugood",
-    "subtitle": "استخدم حساب Maugood أو تسجيل دخول مايكروسوفت الخاص بمؤسستك.",
+    "subtitle": "سجّل الدخول ببريد العمل وكلمة المرور، أو عبر Microsoft أو Google.",
     "emailLabel": "البريد الإلكتروني",
     "emailPlaceholder": "you@your-domain.com",
     "passwordLabel": "كلمة المرور",
@@ -96,7 +96,11 @@
       "verify_failed": "تعذّر التحقق من تسجيل الدخول عبر {{provider}}. حاول مرة أخرى.",
       "session_expired": "انتهت صلاحية جلسة تسجيل الدخول قبل اكتمالها. حاول مرة أخرى.",
       "failed": "لم يكتمل تسجيل الدخول عبر {{provider}}. حاول مرة أخرى."
-    }
+    },
+    "chooseWorkspace": "اختر مساحة العمل",
+    "chooseWorkspaceBody": "حسابك موجود في أكثر من مساحة عمل.",
+    "workspaceForSso": "اسم مساحة العمل للمتابعة عبر {{provider}}",
+    "continue": "متابعة"
   },
   "userManagement": {
     "title": "مستخدمو Active Directory",
@@ -209,7 +213,11 @@
     "mappingRulesHelp": "يحصل أعضاء المجموعة على دورها في المزامنة التالية. تُتجاهل الصفوف التي لا تحتوي على مجموعة.",
     "mappingGroupCol": "مجموعة Entra",
     "accessApplyNow": "يسري فورًا ويُسجَّل في سجل التدقيق.",
-    "changeRoleHelp": "دور واحد لكل مستخدم. يُطبَّق التغيير فورًا ويُسجَّل في سجل التدقيق."
+    "changeRoleHelp": "دور واحد لكل مستخدم. يُطبَّق التغيير فورًا ويُسجَّل في سجل التدقيق.",
+    "view": {
+      "list": "عرض القائمة",
+      "grid": "عرض الشبكة"
+    }
   },
   "topbar": {
     "logout": "تسجيل الخروج",

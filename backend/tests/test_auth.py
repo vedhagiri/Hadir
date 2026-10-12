@@ -232,21 +232,31 @@ def test_login_with_invalid_tenant_slug_format_returns_400(
     assert resp.status_code == 400, resp.text
 
 
-def test_login_in_multi_mode_requires_tenant_slug(
+def test_login_in_multi_mode_without_slug_finds_the_users_tenant(
     client: TestClient,
     admin_user: dict,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``MAUGOOD_TENANT_MODE=multi`` removes the pilot's ``main`` fallback —
-    a missing ``tenant_slug`` must 400, not silently log into ``main``."""
+    """``MAUGOOD_TENANT_MODE=multi`` with no ``tenant_slug``: the workspace
+    is found from the account (the login page no longer asks for it).
+    An account that exists nowhere is a plain 401 — there is still no
+    silent fallback to ``main``."""
 
     monkeypatch.setenv("MAUGOOD_TENANT_MODE", "multi")
     resp = client.post(
         "/api/auth/login",
         json={"email": admin_user["email"], "password": admin_user["password"]},
     )
-    assert resp.status_code == 400, resp.text
-    assert resp.json()["detail"] == "tenant_slug is required"
+    assert resp.status_code == 200, resp.text
+    assert client.cookies.get("maugood_tenant") == "main"
+
+    client.cookies.clear()
+    unknown = client.post(
+        "/api/auth/login",
+        json={"email": "nobody-anywhere@example.invalid", "password": "whatever-123"},
+    )
+    assert unknown.status_code == 401, unknown.text
+    assert unknown.json()["detail"] == "invalid credentials"
 
 
 # ---------------------------------------------------------------------------

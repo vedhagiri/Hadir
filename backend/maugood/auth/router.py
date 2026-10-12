@@ -152,6 +152,10 @@ class MeResponse(BaseModel):
     # to the product name ("Maugood") in that case so the brand row
     # never renders blank.
     tenant_name: str = ""
+    # Friendly workspace slug of the active tenant (``public.tenants.slug``).
+    # The login page remembers it for "Sign in with Microsoft / Google",
+    # which need to know the workspace before redirecting.
+    tenant_slug: str = ""
     # ``True`` when the tenant has uploaded a brand logo through
     # ``/api/branding/logo``. The sidebar uses it to decide between
     # the tenant logo and the static product-mark fallback.
@@ -368,6 +372,89 @@ def _resolve_login_target(
     return settings.default_tenant_id, "main"
 
 
+# A fixed Argon2 hash verified when no account matches anywhere, so the
+# response time doesn't reveal whether an email exists (timing oracle).
+_DUMMY_HASH: str | None = None
+
+
+def _dummy_verify(password: str) -> None:
+    global _DUMMY_HASH
+    if _DUMMY_HASH is None:
+        from maugood.auth.passwords import hash_password  # noqa: PLC0415
+
+        _DUMMY_HASH = hash_password("maugood-timing-equaliser")
+    verify_password(_DUMMY_HASH, password)
+
+
+def _discover_login_tenant(
+    *, identifier: str, password: str, engine
+) -> tuple[int, str] | None:
+    """Find the workspace for a password login that omitted ``tenant_slug``.
+
+    Looks the identifier (email / employee code / username) up in every
+    **active** tenant. Each lookup runs inside that tenant's own
+    ``tenant_context`` with the usual ``tenant_id`` filter — nothing reads
+    across schemas in one query.
+
+    * exactly one tenant has the user → that tenant;
+    * several tenants have the user → the ones where the password
+      verifies decide: one → that tenant; several → 409 asking the user to
+      pick a workspace (only revealed to someone holding the password for
+      each); none → the first candidate (the normal failure path audits it);
+    * nobody has the user → ``None`` (caller keeps its old behaviour).
+    """
+
+    with tenant_context("public"):
+        with engine.begin() as conn:
+            registry = conn.execute(
+                select(
+                    tenants.c.id,
+                    tenants.c.slug,
+                    tenants.c.name,
+                    tenants.c.schema_name,
+                    tenants.c.status,
+                ).order_by(tenants.c.id)
+            ).all()
+
+    candidates: list[tuple[int, str, str, str, str]] = []
+    for t in registry:
+        if str(t.status) != "active":
+            continue
+        try:
+            with tenant_context(str(t.schema_name)):
+                with engine.begin() as conn:
+                    row = _resolve_user_for_login(
+                        conn, tenant_id=int(t.id), identifier=identifier
+                    )
+        except Exception:  # noqa: BLE001 — a broken tenant must not block login
+            logger.warning("login discovery skipped tenant id=%s", t.id)
+            continue
+        if row is not None and row.is_active:
+            candidates.append(
+                (int(t.id), str(t.schema_name), str(t.slug), str(t.name), str(row.password_hash))
+            )
+
+    if not candidates:
+        _dummy_verify(password)
+        return None
+    if len(candidates) == 1:
+        return candidates[0][0], candidates[0][1]
+
+    verified = [c for c in candidates if verify_password(c[4], password)]
+    if len(verified) == 1:
+        return verified[0][0], verified[0][1]
+    if len(verified) > 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "multiple_workspaces",
+                "message": "This account exists in more than one workspace. Choose one to continue.",
+                "workspaces": [{"slug": c[2], "name": c[3]} for c in verified],
+            },
+        )
+    return candidates[0][0], candidates[0][1]
+
+
 @router.post("/login", status_code=status.HTTP_200_OK)
 def login(
     payload: LoginRequest,
@@ -399,9 +486,33 @@ def login(
         ip,
     )
 
-    target_tenant_id, target_schema = _resolve_login_target(
-        tenant_slug=payload.tenant_slug, settings=settings, engine=engine
-    )
+    # No workspace given (the login page no longer asks for one): find it
+    # from the account itself. Falls through to the old behaviour when the
+    # account isn't found anywhere (single mode → default tenant; multi →
+    # 400), so existing clients that send ``tenant_slug`` are unaffected.
+    discovered: tuple[int, str] | None = None
+    if payload.tenant_slug is None:
+        if limiter.is_blocked(rate_key, ip):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="too many login attempts",
+            )
+        discovered = _discover_login_tenant(
+            identifier=typed_identifier, password=payload.password, engine=engine
+        )
+        if discovered is None and settings.tenant_mode == "multi":
+            limiter.register_failure(rate_key, ip)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="invalid credentials",
+            )
+
+    if discovered is not None:
+        target_tenant_id, target_schema = discovered
+    else:
+        target_tenant_id, target_schema = _resolve_login_target(
+            tenant_slug=payload.tenant_slug, settings=settings, engine=engine
+        )
 
     # All DB ops below run under the resolved tenant's schema. The
     # checkout listener applies SET search_path on every borrowed
@@ -564,8 +675,13 @@ def login(
         path="/",
     )
 
-    has_logo, version = _resolve_brand_logo_meta(target_tenant_id)
-    tz, date_fmt, time_fmt = _resolve_tenant_datetime_settings(target_tenant_id)
+    # Per-tenant reads (branding, tenant settings) must run under the
+    # logged-in tenant's schema. Outside a context, single mode silently
+    # read ``main``'s rows and multi mode refused the query outright.
+    with tenant_context(target_schema):
+        has_logo, version = _resolve_brand_logo_meta(target_tenant_id)
+        tz, date_fmt, time_fmt = _resolve_tenant_datetime_settings(target_tenant_id)
+        tenant_name = _resolve_tenant_name(target_tenant_id)
     return MeResponse(
         id=bundle.id,
         email=bundle.email,
@@ -580,7 +696,8 @@ def login(
         tenant_timezone=tz,
         tenant_date_format=date_fmt,
         tenant_time_format=time_fmt,
-        tenant_name=_resolve_tenant_name(target_tenant_id),
+        tenant_name=tenant_name,
+        tenant_slug=_resolve_tenant_slug(target_tenant_id),
         has_brand_logo=has_logo,
         brand_logo_version=version,
         session_expires_at=session.expires_at,
@@ -679,6 +796,17 @@ def refresh_session(
         session_started_at=new_anchor,
         server_time=datetime.now(tz=timezone.utc),
     )
+
+
+def _resolve_tenant_slug(tenant_id: int) -> str:
+    """``public.tenants.slug`` for the tenant, or "" when the row is missing."""
+
+    with tenant_context("public"):
+        with get_engine().begin() as conn:
+            row = conn.execute(
+                select(tenants.c.slug).where(tenants.c.id == tenant_id)
+            ).first()
+    return str(row.slug) if row and row.slug else ""
 
 
 def _resolve_tenant_name(tenant_id: int) -> str:
@@ -799,6 +927,7 @@ def _to_me_response(
         tenant_date_format=date_fmt,
         tenant_time_format=time_fmt,
         tenant_name=_resolve_tenant_name(user.tenant_id),
+        tenant_slug=_resolve_tenant_slug(user.tenant_id),
         has_brand_logo=has_logo,
         brand_logo_version=version,
         session_expires_at=session_exp,

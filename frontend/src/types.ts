@@ -41,6 +41,8 @@ export interface MeResponse {
   // Empty string on a fresh install before the operator's setup
   // wizard runs; the sidebar falls back to "Maugood" in that case.
   tenant_name?: string;
+  // Friendly workspace slug; the login page remembers it for SSO.
+  tenant_slug?: string;
   // True when an operator-uploaded logo exists in
   // ``tenant_branding.logo_path``. The sidebar uses it to decide
   // between ``/api/branding/logo`` and the static product mark.

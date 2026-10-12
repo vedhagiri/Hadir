@@ -61,7 +61,7 @@
   },
   "login": {
     "title": "Sign in to Maugood",
-    "subtitle": "Use your Maugood account or your organisation's Microsoft sign-in.",
+    "subtitle": "Sign in with your work email and password, or with Microsoft or Google.",
     "emailLabel": "Email",
     "emailPlaceholder": "you@your-domain.com",
     "passwordLabel": "Password",
@@ -96,7 +96,11 @@
       "verify_failed": "We couldn't verify your {{provider}} sign-in. Please try again.",
       "session_expired": "Your sign-in session expired before it completed. Please try again.",
       "failed": "{{provider}} sign-in didn't complete. Please try again."
-    }
+    },
+    "chooseWorkspace": "Choose your workspace",
+    "chooseWorkspaceBody": "Your account exists in more than one workspace.",
+    "workspaceForSso": "Your workspace name, to continue with {{provider}}",
+    "continue": "Continue"
   },
   "userManagement": {
     "title": "AD Users",
@@ -209,7 +213,11 @@
     "mappingRulesHelp": "Members of a group get its role on the next sync. Rows without a group are ignored.",
     "mappingGroupCol": "Entra group",
     "accessApplyNow": "Takes effect immediately and is written to the audit log.",
-    "changeRoleHelp": "One role per user. The change applies immediately and is audited."
+    "changeRoleHelp": "One role per user. The change applies immediately and is audited.",
+    "view": {
+      "list": "List view",
+      "grid": "Grid view"
+    }
   },
   "topbar": {
     "logout": "Log out",
