@@ -69,6 +69,13 @@ const SECTION_KEY: Record<string, string> = {
   Personal: "personal",
   Me: "me",
   Help: "help",
+  Insights: "insights",
+  Reports: "reports",
+  Policies: "policies",
+  "Cameras & Devices": "sources",
+  "Capture review": "review",
+  Monitoring: "monitoring",
+  Administration: "administration",
 };
 
 type NavLeaf = Exclude<NavItem, { section: string }>;
@@ -193,6 +200,7 @@ export function Sidebar({ role }: Props) {
       <NavLink
         key={it.id}
         to={`/${it.id}`}
+        end={it.id === "insights"}
         className={({ isActive }) =>
           `nav-item${isActive ? " active" : ""}`
         }

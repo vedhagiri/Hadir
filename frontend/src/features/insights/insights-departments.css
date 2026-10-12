@@ -1,0 +1,110 @@
+/* Department-wise Insights v2 (prefix ind-). Only what the department
+   pages add on top of the shared ./insights.css (ins-). Calm palette: white
+   cards, one accent, status colours only where a status is shown (green
+   present / amber late / red absent / blue leave / grey off-day). */
+
+.ind-sr { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.ind-flink { color: var(--accent-text); font-weight: 600; text-decoration: none; }
+.ind-flink:hover { text-decoration: underline; }
+.ind-ok { color: var(--success-text); display: inline-flex; opacity: 0.7; }
+.ind-header-actions { display: flex; align-items: center; gap: 10px; }
+.ind-section { margin-bottom: 18px; }
+.ind-h2 { font-size: 15px; font-weight: 650; margin: 0 0 12px; letter-spacing: -0.01em; }
+
+/* ---- Department table ------------------------------------------------- */
+.ind-dtable td { vertical-align: middle; }
+.ind-dname { display: block; color: var(--text); text-decoration: none; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-inline-size: 300px; }
+.ind-dsub { font-size: 11.5px; color: var(--text-tertiary); margin-top: 1px; }
+.ind-col-att { inline-size: 26%; min-inline-size: 200px; }
+.ind-col-chev { inline-size: 28px; color: var(--text-quaternary); text-align: end; }
+[dir="rtl"] .ind-col-chev svg { transform: scaleX(-1); }
+.ins-click-row:hover .ind-col-chev { color: var(--accent-text); }
+.ind-dtable tfoot td { border-top: 1px solid var(--border-strong); background: var(--bg-sunken); }
+
+.ind-attbar { display: flex; align-items: center; gap: 10px; }
+.ind-attbar-track { position: relative; flex: 1; block-size: 8px; border-radius: 999px; background: var(--bg-sunken); min-inline-size: 80px; }
+.ind-attbar-fill { position: absolute; inset-block: 0; inset-inline-start: 0; border-radius: 999px; background: var(--accent); }
+.ind-attbar-ref {
+  position: absolute; inset-block: -4px; inline-size: 2px; margin-inline-start: -1px; border-radius: 1px;
+  background: var(--text-secondary); opacity: 0.55;
+}
+.ind-attbar-val { inline-size: 42px; text-align: end; font-weight: 650; font-variant-numeric: tabular-nums; }
+
+.ind-sort {
+  appearance: none; border: 0; background: transparent; font: inherit; color: inherit; cursor: pointer; padding: 0;
+  display: inline-flex; align-items: center; gap: 4px; text-transform: inherit; letter-spacing: inherit;
+}
+.ind-sort:hover { color: var(--text); }
+.ind-sort-ic { opacity: 0.35; display: inline-flex; }
+.ind-sort[data-active="true"] { color: var(--accent-text); }
+.ind-sort[data-active="true"] .ind-sort-ic { opacity: 1; }
+
+/* ---- Detail header ---------------------------------------------------- */
+.ind-back {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 0; margin-bottom: 10px;
+  font-size: 12.5px; font-weight: 550; color: var(--text-secondary); text-decoration: none;
+}
+.ind-back:hover { color: var(--accent-text); }
+.ind-back-ic { display: inline-flex; }
+[dir="rtl"] .ind-back-ic { transform: scaleX(-1); }
+.ind-head { display: flex; align-items: center; gap: 18px; padding: 18px 22px; margin-bottom: 18px; flex-wrap: wrap; }
+.ind-head-badge {
+  flex: none; inline-size: 52px; block-size: 52px; border-radius: 14px; display: grid; place-items: center;
+  font-family: var(--font-display); font-weight: 700; font-size: 18px; letter-spacing: -0.01em;
+  background: var(--accent-soft); color: var(--accent-text);
+}
+.ind-head-main { flex: 1; min-width: 280px; }
+.ind-head-name { font-family: var(--font-display); font-size: 23px; font-weight: 700; letter-spacing: -0.02em; margin: 0; line-height: 1.25; }
+.ind-head-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; margin-top: 6px; font-size: 12.5px; color: var(--text-secondary); }
+.ind-head-meta > span { display: inline-flex; align-items: center; gap: 6px; }
+.ind-head-code {
+  font-family: var(--font-num); font-size: 11.5px; font-weight: 600; padding: 1px 7px; border-radius: 6px;
+  background: var(--bg-sunken); color: var(--text-secondary);
+}
+.ind-head-period { color: var(--text-tertiary); }
+.ind-head-side { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+.ind-row-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-bottom: 18px; }
+.ind-row-2 > :only-child { grid-column: 1 / -1; }
+@media (max-width: 1180px) { .ind-row-2 { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---- Roster ----------------------------------------------------------- */
+.ind-person { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ind-person-text { display: flex; flex-direction: column; min-width: 0; }
+.ind-person-name {
+  font-weight: 600; color: var(--text); text-decoration: none;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-inline-size: 230px;
+}
+a.ind-person-name:hover { color: var(--accent-text); text-decoration: underline; }
+.ind-person-code {
+  font-size: 11.5px; color: var(--text-tertiary); font-variant-numeric: tabular-nums;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-inline-size: 240px;
+}
+.ind-col-strip { inline-size: 200px; }
+.ind-strip { display: flex; align-items: center; gap: 2px; inline-size: 188px; block-size: 18px; }
+.ind-strip.is-tight { gap: 0; inline-size: 200px; }
+.ind-strip.is-tight .ind-strip-cell { border-radius: 0; }
+.ind-strip-cell { flex: 1; min-inline-size: 1px; block-size: 16px; border-radius: 2px; background: var(--bg-sunken); display: inline-block; }
+.ind-strip-cell.is-present { background: var(--success); }
+.ind-strip-cell.is-late { background: var(--warning); }
+.ind-strip-cell.is-absent { background: var(--danger); opacity: 0.85; }
+.ind-strip-cell.is-leave { background: var(--info); }
+.ind-strip-cell.is-off { background: var(--border); block-size: 6px; }
+.ind-strip-cell.is-none { background: transparent; box-shadow: inset 0 0 0 1px var(--border); }
+.ind-strip-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 10px 16px 12px; font-size: 11.5px; color: var(--text-tertiary); border-top: 1px solid var(--border); }
+.ind-strip-legend > span { display: inline-flex; align-items: center; gap: 6px; }
+.ind-strip-legend .ind-strip-cell { flex: none; inline-size: 10px; block-size: 10px; }
+.ind-strip-legend .ind-strip-cell.is-off { block-size: 5px; }
+
+a.ind-dname:hover { color: var(--accent-text); text-decoration: underline; }
+.ind-dtable tbody td, .ind-roster tbody td { padding-block: 9px; }
+
+/* Laptop widths: give the two wide tables back enough room to fit. */
+@media (max-width: 1439px) {
+  .ind-dtable th, .ind-dtable td, .ind-roster th, .ind-roster td { padding-inline: 9px; }
+  .ind-col-att { inline-size: 20%; min-inline-size: 140px; }
+  .ind-dname { max-inline-size: 210px; }
+  .ind-col-strip { inline-size: 150px; }
+  .ind-strip, .ind-strip.is-tight { inline-size: 140px; }
+  .ind-person-name, .ind-person-code { max-inline-size: 160px; }
+}

@@ -305,6 +305,7 @@ def _policy_facts(
         "required_label": f"{required_hours} h / day",
         "required_hours_label": f"{required_hours:.1f} h",
         "grace_label": None,
+        "grace_minutes": None,
         "late_threshold": None,
         "early_threshold": None,
         "start": start,
@@ -316,6 +317,7 @@ def _policy_facts(
         facts["shift_label"] = f"{ptype} · {s}–{e}"
         facts["window_label"] = f"{s} – {e}"
         facts["grace_label"] = f"{grace} min" if grace else None
+        facts["grace_minutes"] = grace
         late_t = (datetime.combine(date(2000, 1, 1), start) + timedelta(minutes=grace)).time()
         early_t = (datetime.combine(date(2000, 1, 1), end) - timedelta(minutes=grace)).time()
         facts["late_threshold"] = late_t
@@ -475,6 +477,10 @@ _SIGHTINGS_SUMMARY_SQL = text(
                 FILTER (WHERE de.face_crop_path IS NOT NULL))[1] AS first_path,
            (array_agg(de.face_crop_path ORDER BY de.captured_at DESC)
                 FILTER (WHERE de.face_crop_path IS NOT NULL))[1] AS last_path,
+           (array_agg(de.id ORDER BY de.captured_at ASC)
+                FILTER (WHERE de.face_crop_path IS NOT NULL))[1] AS first_id,
+           (array_agg(de.id ORDER BY de.captured_at DESC)
+                FILTER (WHERE de.face_crop_path IS NOT NULL))[1] AS last_id,
            (array_agg(COALESCE(c.name, CASE WHEN de.device_id IS NOT NULL THEN 'Terminal' END)
                 ORDER BY de.captured_at ASC))[1] AS first_cam,
            count(*) AS n,
@@ -564,12 +570,22 @@ def _holidays_between(conn: Connection, scope: TenantScope, start: date, end: da
     return {r.date: str(r.name) for r in rows}
 
 
-def _employee_profile(conn: Connection, scope: TenantScope, employee_id: int) -> Optional[dict]:
+def _employee_profile(
+    conn: Connection, scope: TenantScope, employee_id: int, *, with_photo: bool = True
+) -> Optional[dict]:
+    """Profile facts for the employee layouts (and Insights).
+
+    ``with_photo=False`` skips decrypting the reference photo — the
+    Insights API returns ``primary_photo_id`` instead of a data: URL.
+    """
+
     row = conn.execute(
         select(
             employees.c.id,
             employees.c.employee_code,
             employees.c.full_name,
+            employees.c.email,
+            employees.c.joining_date,
             employees.c.designation,
             employees.c.department_id,
             employees.c.reports_to_user_id,
@@ -603,7 +619,7 @@ def _employee_profile(conn: Connection, scope: TenantScope, employee_id: int) ->
         ).scalar_one()
     )
     photo_row = conn.execute(
-        select(employee_photos.c.file_path)
+        select(employee_photos.c.id, employee_photos.c.file_path)
         .where(
             employee_photos.c.tenant_id == scope.tenant_id,
             employee_photos.c.employee_id == employee_id,
@@ -659,7 +675,10 @@ def _employee_profile(conn: Connection, scope: TenantScope, employee_id: int) ->
         "department_name": str(row.department_name) if row.department_name else "—",
         "department_code": str(row.department_code) if row.department_code else "",
         "photo_count": photo_count,
-        "photo_data_url": _crop_to_data_url(photo_row.file_path) if photo_row else None,
+        "photo_data_url": _crop_to_data_url(photo_row.file_path) if (photo_row and with_photo) else None,
+        "primary_photo_id": int(photo_row.id) if photo_row else None,
+        "email": str(row.email) if row.email else None,
+        "joining_date": row.joining_date,
         "manager_name": str(manager_name) if manager_name else None,
         "initials": _initials(str(row.full_name)),
     }
@@ -682,6 +701,7 @@ def _requests_in_period(
 ) -> list[dict]:
     rows = conn.execute(
         select(
+            requests.c.id,
             requests.c.type,
             requests.c.reason_category,
             requests.c.target_date_start,
@@ -735,6 +755,9 @@ def _requests_in_period(
                 "stage_label": stage,
                 "status_raw": str(r.status),
                 "date": r.target_date_start,
+                "id": int(r.id),
+                "type": rtype,
+                "end": r.target_date_end,
             }
         )
     return out
@@ -763,6 +786,16 @@ def _row_status(r: Any, *, is_weekend: bool, is_holiday: bool) -> str:
     if r.early_out:
         return "early"
     return "present"
+
+
+def _no_row_status(d: date, *, weekend_days: tuple[str, ...], holiday_names: dict[date, str]) -> str:
+    """Status for a calendar day with no attendance row at all."""
+
+    if d in holiday_names:
+        return "holiday"
+    if d.strftime("%A") in weekend_days:
+        return "weekend"
+    return "pending"
 
 
 def _mk_row(
@@ -861,6 +894,8 @@ def _mk_row(
             if (with_crops and sight is not None and sight.last_path != sight.first_path)
             else None
         ),
+        "first_event_id": int(sight.first_id) if sight is not None and sight.first_id is not None else None,
+        "last_event_id": int(sight.last_id) if sight is not None and sight.last_id is not None else None,
         "initials": _initials(str(r.full_name)),
         "avatar_color": _avatar_color(str(r.employee_code)),
         "is_weekend": is_weekend,
@@ -1005,6 +1040,7 @@ def _dept_stats(name: str, rows: list[dict]) -> dict:
     present = [r for r in rows if r["in_min"] is not None]
     return {
         "name": name,
+        "department_id": rows[0]["department_id"] if rows else None,
         "headcount": len(rows),
         "present": len(present),
         "late": sum(1 for r in rows if r["status"] == "late"),
@@ -1128,6 +1164,7 @@ def _daily_context(
         "ot_hours": round(sum(r["ot_minutes"] for r in rows) / 60.0, 2),
         "ot_employees": len(ot_rows),
         "avg_hours": _mean([r["hours"] for r in present_rows if r["hours"] is not None]),
+        "avg_late_minutes": int(round(sum(late_mins) / len(late_mins))) if late_mins else None,
         "late_hint": (
             f"after grace · avg {int(round(sum(late_mins) / len(late_mins)))} min"
             if late_mins
@@ -1325,6 +1362,8 @@ def _range_context(
                 "employee_id": eid,
                 "employee_code": head["employee_code"],
                 "full_name": head["full_name"],
+                "designation": head["designation"],
+                "department_id": head["department_id"],
                 "department_name": head["department_name"],
                 "initials": head["initials"],
                 "avatar_color": head["avatar_color"],
@@ -1334,6 +1373,10 @@ def _range_context(
                 "ot_minutes": ot,
                 "avg_in": fmt.format_time(_time_from_minutes(int(round(sum(ins) / len(ins))))) if ins else "",
                 "avg_out": fmt.format_time(_time_from_minutes(int(round(sum(outs) / len(outs))))) if outs else "",
+                "avg_in_min": int(round(sum(ins) / len(ins))) if ins else None,
+                "avg_out_min": int(round(sum(outs) / len(outs))) if outs else None,
+                "last_status": rs[-1]["status"],
+                "late_minutes": [r["late_minutes"] for r in rs if r["status"] == "late" and r["late_minutes"]],
                 "flags": flags,
                 "source": sources.most_common(1)[0][0] if sources else None,
                 "first_crop": first_crop,
@@ -1352,6 +1395,12 @@ def _range_context(
         "present_pct": _pct(P, slots),
         "late": sum(e["late"] for e in emps),
         "late_employees": sum(1 for e in emps if e["late"]),
+        "early": sum(e["early"] for e in emps),
+        "avg_late_minutes": (
+            int(round(_mean([m for e in emps for m in e["late_minutes"]]) or 0))
+            if any(e["late_minutes"] for e in emps)
+            else None
+        ),
         "absent": sum(e["absent"] for e in emps),
         "absent_employees": sum(1 for e in emps if e["absent"]),
         "leave": sum(e["leave"] for e in emps),
@@ -1370,6 +1419,7 @@ def _range_context(
         dept_stats.append(
             {
                 "name": name,
+                "department_id": es[0]["department_id"],
                 "headcount": len(es),
                 "present": p,
                 "slots": sl,
@@ -1443,7 +1493,7 @@ def _employee_range_context(
         is_we = d.strftime("%A") in weekend_days
         is_hol = d in holiday_names
         if r is None:
-            status = "holiday" if is_hol else ("weekend" if is_we else "pending")
+            status = _no_row_status(d, weekend_days=weekend_days, holiday_names=holiday_names)
             day_rows.append(
                 {
                     "day_label": _short_day(d), "status": status, "in_label": "", "out_label": "",
@@ -1713,6 +1763,23 @@ def _render(template_name: str, ctx: dict) -> bytes:
     return pdf_bytes
 
 
+def _employee_policy_facts(
+    conn: Connection, scope: TenantScope, raw_rows: list, pcache: dict[int, dict], fmt: TenantFormatter
+) -> dict:
+    """Policy facts for the employee layouts: the employee's most
+    recent row, else the tenant's first policy, else generic."""
+
+    if raw_rows:
+        return _facts_for(pcache, raw_rows[-1], fmt)
+    prow = conn.execute(
+        select(shift_policies.c.name, shift_policies.c.type, shift_policies.c.config)
+        .where(shift_policies.c.tenant_id == scope.tenant_id)
+        .order_by(shift_policies.c.id.asc())
+        .limit(1)
+    ).first()
+    return _policy_facts(prow.type if prow else None, prow.config if prow else None, prow.name if prow else None, fmt)
+
+
 def build_pdf(
     conn: Connection,
     scope: TenantScope,
@@ -1780,18 +1847,7 @@ def build_pdf(
         )
 
     if emp is not None:
-        # Policy facts: the employee's most recent row, else the
-        # tenant's first active policy, else generic.
-        if raw_rows:
-            facts = _facts_for(pcache, raw_rows[-1], fmt)
-        else:
-            prow = conn.execute(
-                select(shift_policies.c.name, shift_policies.c.type, shift_policies.c.config)
-                .where(shift_policies.c.tenant_id == scope.tenant_id)
-                .order_by(shift_policies.c.id.asc())
-                .limit(1)
-            ).first()
-            facts = _policy_facts(prow.type if prow else None, prow.config if prow else None, prow.name if prow else None, fmt)
+        facts = _employee_policy_facts(conn, scope, raw_rows, pcache, fmt)
         date_part = f"{start_date:%Y%m%d}" if single_day else f"{start_date:%Y%m%d}-{end_date:%Y%m%d}"
         report_id = f"EMP-{emp['employee_code']}-{date_part}"
         if single_day:

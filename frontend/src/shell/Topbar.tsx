@@ -52,11 +52,16 @@ export function Topbar({ pageId, role, me }: Props) {
   // their trail runs through "My Team" instead of "Employees".
   const profileTrail =
     role === "Manager" ? CRUMBS["my-team"] : CRUMBS.employees;
+  // Insights detail routes (``insights/departments/3``,
+  // ``insights/people/12``) reuse their list page's trail + "Details".
+  const insightsList = pageId.match(/^(insights\/(?:departments|people))\/[^/]+$/)?.[1];
   const crumbs =
     CRUMBS[pageId] ??
-    (pageId.startsWith("employees/") && profileTrail
-      ? [...profileTrail, "Profile"]
-      : ["Maugood", pageId]);
+    (insightsList && CRUMBS[insightsList]
+      ? [...CRUMBS[insightsList], "Details"]
+      : pageId.startsWith("employees/") && profileTrail
+        ? [...profileTrail, "Profile"]
+        : ["Maugood", pageId]);
 
   const onLogout = () => {
     logout.mutate(undefined, {

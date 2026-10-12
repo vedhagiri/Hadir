@@ -54,6 +54,9 @@ import { CalendarPage } from "./features/calendar/CalendarPage";
 import { EmployeeReportPage } from "./features/reports/EmployeeReportPage";
 import { FormerEmployeesSeenReport } from "./features/reports/FormerEmployeesSeenReport";
 import { ReportsPage } from "./features/reports/ReportsPage";
+import { InsightsOverviewPage } from "./features/insights/InsightsOverviewPage";
+import { InsightsDepartmentsPage } from "./features/insights/InsightsDepartmentsPage";
+import { InsightsPeoplePage } from "./features/insights/InsightsPeoplePage";
 import { SystemPage as SuperAdminSystemPage } from "./super-admin/SystemPage";
 import { SystemPage } from "./features/system/SystemPage";
 import { PipelineMonitor } from "./pages/PipelineMonitor/PipelineMonitor";
@@ -164,6 +167,14 @@ export function App() {
         <Route path="my-attendance" element={<MyAttendancePage />} />
         <Route path="attendance/me" element={<MyAttendancePage />} />
         <Route path="reports" element={<ReportsPage />} />
+        {/* Insights: interactive attendance dashboards (same numbers as the
+            Template 1 PDF reports). Admin / HR / Manager — the API scopes
+            Managers to their team. */}
+        <Route path="insights" element={<InsightsOverviewPage />} />
+        <Route path="insights/departments" element={<InsightsDepartmentsPage />} />
+        <Route path="insights/departments/:departmentId" element={<InsightsDepartmentsPage />} />
+        <Route path="insights/people" element={<InsightsPeoplePage />} />
+        <Route path="insights/people/:employeeId" element={<InsightsPeoplePage />} />
         <Route path="employee-report" element={<EmployeeReportPage />} />
         <Route path="former-employees" element={<FormerEmployeesSeenReport />} />
         <Route path="calendar" element={<CalendarPage />} />
