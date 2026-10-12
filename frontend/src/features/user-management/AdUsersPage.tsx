@@ -16,7 +16,7 @@ import { UserDetailsDrawer } from "./UserDetailsDrawer";
 import { AccessToggle, ROLE_ORDER, RoleBadges, avatarInitials, avatarColor } from "./shared";
 import { useAdUsers, usePatchUser, useSyncUsers } from "./hooks";
 import type { AdUser } from "./types";
-import { SkeletonCards, SkeletonRows } from "../../components/Skeleton";
+import { SkeletonCards, SkeletonGrid, SkeletonRows } from "../../components/Skeleton";
 import {
   EmptyPanel,
   FilterSelect,
@@ -25,7 +25,9 @@ import {
   StatCard,
   StatGrid,
   Toolbar,
+  ViewToggle,
   pct,
+  useViewMode,
 } from "../../components/ListPageUi";
 import { Banner, DotPill, LoadErrorPanel, PEOPLE_ICON } from "../employees/peopleUi";
 
@@ -47,6 +49,7 @@ export function AdUsersView() {
   const [mappingOpen, setMappingOpen] = useState(false);
   const [syncOpen, setSyncOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [view, setView] = useViewMode("maugood.adUsers.view", "grid");
   const [error, setError] = useState<string | null>(null);
 
   const items = list.data?.items ?? [];
@@ -121,6 +124,10 @@ export function AdUsersView() {
   };
 
   const selectedUser = items.find((u) => u.id === selected) ?? null;
+  // A user with a linked employee record opens the employee edit drawer;
+  // otherwise the user-details drawer.
+  const openUser = (u: AdUser) =>
+    u.employee_id != null ? setSelectedEmployeeId(u.employee_id) : setSelected(u.id);
 
   // Five-state rendering: loading / error / nothing synced yet / filters
   // match nothing / data. Stats + toolbar only make sense once there is
@@ -246,11 +253,17 @@ export function AdUsersView() {
           label={t("userManagement.reset", { defaultValue: "Reset" })}
           onClick={resetFilters}
         />
+        <ViewToggle
+          value={view}
+          onChange={setView}
+          listLabel={t("userManagement.view.list", { defaultValue: "List view" })}
+          gridLabel={t("userManagement.view.grid", { defaultValue: "Grid view" })}
+        />
       </Toolbar>
       )}
 
-      {/* Table */}
-      <div className="card">
+      {/* Grid (default) or table */}
+      <div className={view === "grid" && !list.error && (list.isLoading || filtered.length > 0) ? "" : "card"}>
         {list.error ? (
           <LoadErrorPanel
             title={t("userManagement.loadFailed")}
@@ -293,6 +306,77 @@ export function AdUsersView() {
               }
             />
           )
+        ) : view === "grid" ? (
+          list.isLoading ? (
+            <SkeletonGrid count={8} avatar minWidth={260} />
+          ) : (
+            <div className="pp-ecard-grid">
+              {filtered.map((u) => (
+                <div
+                  key={u.id}
+                  role="button"
+                  tabIndex={0}
+                  className={`pp-ecard${u.is_active ? "" : " is-inactive"}`}
+                  onClick={() => openUser(u)}
+                  onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget) return;
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      openUser(u);
+                    }
+                  }}
+                >
+                  <div className="pp-ecard-top" />
+                  <div className="pp-ecard-identity">
+                    <span className="pp-ecard-avatar">
+                      <span
+                        className="avatar pp-avatar pp-avatar-lg"
+                        aria-hidden
+                        style={{ background: avatarColor(u.full_name) }}
+                      >
+                        {avatarInitials(u.full_name)}
+                      </span>
+                      <span className={`pp-ecard-dot${u.is_active ? "" : " is-off"}`} aria-hidden />
+                    </span>
+                    <span className="pp-ecard-name" title={u.full_name}>{u.full_name}</span>
+                    <span className="pp-ecard-title" title={u.email}>{u.email}</span>
+                    <span className="pp-ecard-role">
+                      <RoleBadges codes={u.role_codes} />
+                    </span>
+                  </div>
+                  <dl className="pp-ecard-facts">
+                    <div className="pp-ecard-fact">
+                      <dt>
+                        <Icon name="users" size={13} />
+                        {t("userManagement.colDepartment")}
+                      </dt>
+                      <dd title={u.department ?? undefined}>{u.department ?? "—"}</dd>
+                    </div>
+                    <div className="pp-ecard-fact">
+                      <dt>
+                        <Icon name="clock" size={13} />
+                        {t("userManagement.colLastLogin")}
+                      </dt>
+                      <dd>
+                        {u.last_login_at ? <RelativeTime iso={u.last_login_at} /> : t("userManagement.never")}
+                      </dd>
+                    </div>
+                  </dl>
+                  <div className="pp-ecard-foot" onClick={(e) => e.stopPropagation()}>
+                    <DotPill tone={u.is_active ? "success" : "neutral"}>
+                      {u.is_active ? t("userManagement.filter_enabled") : t("userManagement.filter_disabled")}
+                    </DotPill>
+                    <AccessToggle
+                      checked={u.is_active}
+                      onChange={() => void onToggleAccess(u)}
+                      disabled={patch.isPending}
+                      label={t("userManagement.colAccess")}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
         ) : (
           <table className="table">
             <thead>
@@ -310,11 +394,7 @@ export function AdUsersView() {
                 <tr
                   key={u.id}
                   className="pp-row-link"
-                  onClick={() =>
-                    u.employee_id != null
-                      ? setSelectedEmployeeId(u.employee_id)
-                      : setSelected(u.id)
-                  }
+                  onClick={() => openUser(u)}
                 >
                   <td>
                     <div className="pp-person">

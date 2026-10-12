@@ -57,7 +57,7 @@ export function DevicesPage() {
   const [q, setQ] = useState("");
   const [statusF, setStatusF] = useState<Liveness | "">("");
   const [brandF, setBrandF] = useState("");
-  const [view, setView] = useViewMode("maugood.devices.view");
+  const [view, setView] = useViewMode("maugood.devices.view.v2", "grid");
   const needle = q.trim().toLowerCase();
   const filtered = items.filter((d) => {
     if (statusF && livenessOf(d) !== statusF) return false;

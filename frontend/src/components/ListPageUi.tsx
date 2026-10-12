@@ -255,12 +255,16 @@ export function EmptyPanel({
 
 export type ViewMode = "list" | "grid";
 
-export function useViewMode(storageKey: string): [ViewMode, (v: ViewMode) => void] {
+export function useViewMode(
+  storageKey: string,
+  defaultMode: ViewMode = "list",
+): [ViewMode, (v: ViewMode) => void] {
   const [mode, setMode] = useState<ViewMode>(() => {
     try {
-      return localStorage.getItem(storageKey) === "grid" ? "grid" : "list";
+      const saved = localStorage.getItem(storageKey);
+      return saved === "grid" || saved === "list" ? saved : defaultMode;
     } catch {
-      return "list";
+      return defaultMode;
     }
   });
   const set = (v: ViewMode) => {

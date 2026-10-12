@@ -73,7 +73,7 @@ export function EmployeesPage() {
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
   const [sortBy, setSortBy] = useState<EmployeeSortBy>("created_at");
   const [sortDir, setSortDir] = useState<EmployeeSortDir>("desc");
-  const [view, setView] = useViewMode("maugood.employees.view");
+  const [view, setView] = useViewMode("maugood.employees.view.v2", "grid");
 
   // The profile now lives on its own route (/employees/:id), so the
   // legacy ``?employee=ID`` deep link simply redirects there.

@@ -72,7 +72,7 @@ export function CamerasPage() {
   const [zoneF, setZoneF] = useState("");
   const [typeF, setTypeF] = useState("");
   const [page, setPage] = useState(1);
-  const [view, setView] = useViewMode("maugood.cameras.view");
+  const [view, setView] = useViewMode("maugood.cameras.view.v2", "grid");
   const health = (c: Camera) => cameraHealth(c, workerByCamera[c.id]);
   const counts = { total: items.length, online: 0, reconnecting: 0, offline: 0, disabled: 0 };
   items.forEach((c) => {
