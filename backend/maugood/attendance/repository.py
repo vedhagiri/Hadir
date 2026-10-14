@@ -98,6 +98,14 @@ def policy_shift_end_times(
     Returns ``{policy_id: time | None}`` — None when the config is
     missing the relevant key. Callers should treat ``None`` as
     "shift over / unknown — don't mark waiting".
+
+    **Overnight shifts** (end before start, e.g. 16:00 → 02:03):
+    the shift that belongs to *today* ends tomorrow, so it is still open
+    for the whole of today. We return ``time.max`` so every caller's
+    ``now < shift_end`` check reads "still open" until midnight, instead
+    of comparing against 02:03 and calling the day absent before the
+    shift has even started. (Absences for those days are then settled by
+    the next-day sweeps.)
     """
 
     if not policy_ids:
@@ -122,7 +130,17 @@ def policy_shift_end_times(
             or inner.get("end")
             or inner.get("out_window_end")
         )
-        result[int(r.id)] = _parse_hhmm(end_str)
+        start_str = (
+            cfg.get("start")
+            or cfg.get("in_window_start")
+            or inner.get("start")
+            or inner.get("in_window_start")
+        )
+        end_t = _parse_hhmm(end_str)
+        start_t = _parse_hhmm(start_str)
+        if end_t is not None and start_t is not None and end_t < start_t:
+            end_t = time.max  # overnight: today's shift runs past midnight
+        result[int(r.id)] = end_t
     # Cover policies referenced by the caller but missing from the
     # tenant scope (deleted / cross-tenant) so callers don't KeyError.
     for pid in policy_ids:
