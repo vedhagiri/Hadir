@@ -223,14 +223,10 @@ export function EmployeeProfilePage() {
             </div>
           ))}
         {tab === "attendance" && employeeId !== null && (
-          <div className="card pp-prof-panel">
-            <AttendanceTab employeeId={employeeId} />
-          </div>
+          <AttendanceTab employeeId={employeeId} syncUrl />
         )}
         {tab === "events" && employeeId !== null && (
-          <div className="card pp-prof-panel">
-            <EventsTab employeeId={employeeId} />
-          </div>
+          <EventsTab employeeId={employeeId} syncUrl />
         )}
         {tab === "clips" && employeeId !== null && (
           <div className="card pp-prof-panel">

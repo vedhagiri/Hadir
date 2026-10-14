@@ -5,20 +5,17 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
 import { ApiError, api } from "../../api/client";
 import { AnomalyInfoBanner } from "../../components/AnomalyNote";
 import { DatePicker, todayIso } from "../../components/DatePicker";
-import { RelativeTime } from "../../components/RelativeTime";
 import { useTenantDateTime } from "../../util/datetime";
 import { Icon } from "../../shell/Icon";
 import { LoadErrorPanel } from "./peopleUi";
 import { EmptyPanel, SearchField } from "../../components/ListPageUi";
-import { DayDetailContent } from "../calendar/DayDetailDrawer";
-import { useDetectionEvents } from "../camera-logs/hooks";
-import type { DetectionEvent } from "../camera-logs/types";
+import { EmployeeEventsTab } from "./EmployeeEventsTab";
+import { EmployeeAttendanceTab } from "./EmployeeAttendanceTab";
 import { ClipDetailDrawer } from "../person-clips/PersonClipsPage";
 import type {
   PersonClipListResponse,
@@ -26,7 +23,7 @@ import type {
 } from "../person-clips/types";
 import { useEmployeeTeamMembers } from "./hooks";
 import type { Employee, Photo } from "./types";
-import { SkeletonLines, SkeletonGrid, SkeletonRows } from "../../components/Skeleton";
+import { SkeletonLines, SkeletonGrid } from "../../components/Skeleton";
 
 // ---------------------------------------------------------------------------
 // Team Members tab
@@ -336,216 +333,8 @@ export function DetailsTab({
   );
 }
 
-export function EventsTab({ employeeId }: { employeeId: number }) {
-  const { t } = useTranslation();
-  const [page, setPage] = useState(1);
-  // Defaults to today's local date in YYYY-MM-DD; operator can flip
-  // to any past date or clear the filter (use "All dates" toggle).
-  const [date, setDate] = useState<string>(todayLocalIso());
-  const [allDates, setAllDates] = useState<boolean>(false);
-  const [lightboxEventId, setLightboxEventId] = useState<number | null>(null);
-  const PAGE_SIZE = 25;
-
-  // Day-bounded range — captured_at is stored in UTC so we convert
-  // the operator's local picked date to a UTC ISO range covering the
-  // full local day. Null when "All dates" is on.
-  const { start, end } = computeDayRange(allDates ? null : date);
-
-  // Reset to page 1 when the date filter changes.
-  // (Don't memoise the start/end recompute — it's a few string ops
-  // per render, cheap.)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useDateChangeReset(date, allDates, () => setPage(1));
-
-  const events = useDetectionEvents({
-    camera_id: null,
-    employee_id: employeeId,
-    identified: null,
-    start,
-    end,
-    page,
-    page_size: PAGE_SIZE,
-  });
-
-  const totalPages = events.data
-    ? Math.max(1, Math.ceil(events.data.total / events.data.page_size))
-    : 1;
-
-  return (
-    <div>
-      {/* Date filter row — default = today, "All dates" reverts to
-          the unbounded query. */}
-      <div className="pp-head-actions" style={{ marginBottom: 12 }}>
-        <span className="field-label" style={{ marginBottom: 0 }}>
-          {t("employees.events.dateLabel") as string}
-        </span>
-        <DatePicker
-          value={date}
-          disabled={allDates}
-          onChange={(next) => setDate(next || todayLocalIso())}
-          max={todayIso()}
-          ariaLabel={t("employees.events.dateLabel") as string}
-        />
-        <label className="pp-check-row" style={{ fontSize: 12.5, fontWeight: 500, color: "var(--text-secondary)" }}>
-          <input
-            type="checkbox"
-            checked={allDates}
-            onChange={(e) => setAllDates(e.target.checked)}
-          />
-          {t("employees.events.allDates") as string}
-        </label>
-        {!allDates && (
-          <button
-            type="button"
-            className="btn btn-sm"
-            onClick={() => setDate(todayLocalIso())}
-            disabled={date === todayLocalIso()}
-            title={t("employees.events.resetToToday") as string}
-          >
-            {t("employees.events.today") as string}
-          </button>
-        )}
-      </div>
-
-      {events.isLoading && (
-        <table className="table">
-          <tbody>
-            <SkeletonRows cols={4} rows={5} />
-          </tbody>
-        </table>
-      )}
-      {events.isError && (
-        <LoadErrorPanel
-          title={t("employees.events.loadFailed") as string}
-          onRetry={() => void events.refetch()}
-        />
-      )}
-      {events.data && events.data.items.length === 0 && (
-        <EmptyPanel
-          icon={<Icon name="camera" size={28} />}
-          title={
-            allDates
-              ? (t("employees.events.empty") as string)
-              : (t("employees.events.emptyForDate") as string)
-          }
-          body={t("employees.events.emptyBody", {
-            defaultValue: "Camera detections matched to this person will appear here.",
-          }) as string}
-          actions={
-            !allDates ? (
-              <button type="button" className="btn btn-sm" onClick={() => setAllDates(true)}>
-                {t("employees.events.allDates") as string}
-              </button>
-            ) : undefined
-          }
-        />
-      )}
-
-      {events.data && events.data.items.length > 0 && (
-        <>
-      <div
-        style={{
-          fontSize: 12,
-          color: "var(--text-secondary)",
-          marginBottom: 8,
-        }}
-      >
-        {t("employees.events.totalLabel", {
-          count: events.data?.total ?? 0,
-        }) as string}
-      </div>
-      <AnomalyInfoBanner message="If the camera misses certain events due to camera positioning, capture limitations, lighting, or brightness conditions, those cases should be treated as possible anomalies." />
-
-      <table className="table">
-        <thead>
-          <tr>
-            <th style={{ width: 64 }}>{t("liveCapture.col.face") as string}</th>
-            <th>{t("liveCapture.col.time") as string}</th>
-            <th>{t("liveCapture.col.camera") as string}</th>
-            <th>{t("liveCapture.col.confidence") as string}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {(events.data?.items ?? []).map((ev: DetectionEvent) => (
-            <tr key={ev.id}>
-              <td>
-                {ev.has_crop ? (
-                  <button
-                    type="button"
-                    className="pp-crop-btn"
-                    onClick={() => setLightboxEventId(ev.id)}
-                    aria-label={`Preview face crop for event ${ev.id}`}
-                  >
-                    <img
-                      src={`/api/detection-events/${ev.id}/crop`}
-                      alt={`event ${ev.id}`}
-                      loading="lazy"
-                    />
-                  </button>
-                ) : (
-                  <div className="pp-crop-empty" title="No crop" />
-                )}
-              </td>
-              <td className="text-sm">
-                <RelativeTime iso={ev.captured_at} />
-              </td>
-              <td className="text-sm">{ev.camera_name}</td>
-              <td className="mono text-sm">
-                {ev.confidence !== null
-                  ? `${(ev.confidence * 100).toFixed(0)}%`
-                  : "—"}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      {/* Pagination */}
-      <div className="pp-profile-head" style={{ marginTop: 10, fontSize: 12 }}>
-        <span className="text-dim">
-          {t("employees.events.pageNumber", {
-            page,
-            totalPages,
-          }) as string}
-        </span>
-        <div className="pp-head-actions">
-          <button
-            className="btn btn-sm"
-            disabled={page <= 1}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-          >
-            <Icon name="chevronLeft" size={11} />
-            {t("common.previous") as string}
-          </button>
-          <button
-            className="btn btn-sm"
-            disabled={page >= totalPages}
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-          >
-            {t("common.next") as string}
-            <Icon name="chevronRight" size={11} />
-          </button>
-        </div>
-      </div>
-        </>
-      )}
-
-      {/* Face crop lightbox — opens when a thumbnail is clicked */}
-      {lightboxEventId !== null && (() => {
-        const allEvents = events.data?.items ?? [];
-        const croppedEvents = allEvents.filter((e) => e.has_crop);
-        const idx = croppedEvents.findIndex((e) => e.id === lightboxEventId);
-        if (idx === -1) return null;
-        return (
-          <DetectionEventLightbox
-            events={croppedEvents}
-            initialIndex={idx}
-            onClose={() => setLightboxEventId(null)}
-          />
-        );
-      })()}
-    </div>
-  );
+export function EventsTab({ employeeId, syncUrl = false }: { employeeId: number; syncUrl?: boolean }) {
+  return <EmployeeEventsTab employeeId={employeeId} syncUrl={syncUrl} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -1022,42 +811,11 @@ function ucAccentBorder(uc: string): string {
   }
 }
 
-/**
- * Attendance tab — renders the exact same DayDetailContent used by the
- * Attendance Calendar → Per Person → Day Detail view. Date picker on top
- * lets the user navigate days; the body is 100 % identical to the calendar.
- */
-export function AttendanceTab({ employeeId }: { employeeId: number }) {
-  const { t } = useTranslation();
-  const [date, setDate] = useState<string>(todayLocalIso());
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {/* Date picker */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <label className="text-xs text-dim" style={{ fontWeight: 500 }}>
-          {t("employees.events.dateLabel") as string}
-        </label>
-        <DatePicker
-          value={date}
-          onChange={(next) => setDate(next || todayLocalIso())}
-          max={todayIso()}
-          ariaLabel={t("employees.events.dateLabel") as string}
-        />
-        <button
-          type="button"
-          className="btn btn-sm"
-          onClick={() => setDate(todayLocalIso())}
-          disabled={date === todayLocalIso()}
-        >
-          {t("employees.events.today") as string}
-        </button>
-      </div>
-
-      {/* Exact same content as Calendar → Day Detail — shared component */}
-      <DayDetailContent employeeId={employeeId} isoDate={date} />
-    </div>
-  );
+/** Attendance tab — range summary + calendar + selected-day detail +
+ *  day-by-day list. See EmployeeAttendanceTab.tsx. ``syncUrl`` keeps the
+ *  range / selected day in the URL on the full profile page. */
+export function AttendanceTab({ employeeId, syncUrl = false }: { employeeId: number; syncUrl?: boolean }) {
+  return <EmployeeAttendanceTab employeeId={employeeId} syncUrl={syncUrl} />;
 }
 
 function Section({
@@ -1123,9 +881,7 @@ export function todayLocalIso(): string {
 }
 
 /** Convert a YYYY-MM-DD local date to a UTC ISO range covering the
- *  full local day. captured_at is stored in UTC, so the range needs
- *  to span the operator's local day in UTC terms. Null date ⇒ no
- *  bound (used by the "All dates" toggle). */
+ *  full local day. Null date ⇒ no bound. */
 function computeDayRange(date: string | null): {
   start: string | null;
   end: string | null;
@@ -1142,8 +898,7 @@ function computeDayRange(date: string | null): {
 }
 
 /** Reset paging to 1 whenever the date filter (or all-dates flag)
- *  changes. Wrapped in a hook so the events tab body stays
- *  declarative and the dep array is correct. */
+ *  changes. */
 function useDateChangeReset(
   date: string,
   allDates: boolean,
@@ -1153,200 +908,6 @@ function useDateChangeReset(
     reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date, allDates]);
-}
-
-// ---------------------------------------------------------------------------
-// Detection Event lightbox — split panel (image left, metadata right).
-// Same visual design as the Clip Analytics FaceCropLightbox.
-// ---------------------------------------------------------------------------
-
-function DetectionEventLightbox({
-  events,
-  initialIndex,
-  onClose,
-}: {
-  events: DetectionEvent[];
-  initialIndex: number;
-  onClose: () => void;
-}) {
-  const dt = useTenantDateTime();
-  const [index, setIndex] = useState(initialIndex);
-  const total = events.length;
-  const ev = events[index]!;
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-      if (e.key === "ArrowLeft") setIndex((i) => (i - 1 + total) % total);
-      if (e.key === "ArrowRight") setIndex((i) => (i + 1) % total);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, total]);
-
-  // Migration 0068 — tenant tz + format.
-  const detTime = dt.formatTimeWithSeconds(ev.captured_at) || ev.captured_at;
-  const detDate = dt.formatDate(ev.captured_at) || "";
-
-  const confidencePct =
-    ev.confidence != null
-      ? `${(ev.confidence * 100).toFixed(1)}%`
-      : "—";
-
-  const detectorMode =
-    ev.detection_metadata?.detector_mode ?? "—";
-
-  // Portal out of `.drawer` (which has position:fixed and therefore acts
-  // as a containing block for fixed-position children).  Without the
-  // portal `inset:0` resolves to the 540 px drawer, not the viewport.
-  const portalTarget =
-    typeof document !== "undefined"
-      ? (document.getElementById("drawer-root") ?? document.body)
-      : null;
-
-  const modal = (
-    /* Translucent overlay — clicking outside closes */
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Face crop preview"
-      style={{
-        position: "fixed", inset: 0, zIndex: 100000,
-        background: "rgba(0,0,0,0.72)",
-        display: "grid", placeItems: "center",
-        padding: 24,
-      }}
-      onClick={onClose}
-    >
-      {/* Centred popup card */}
-      <div
-        style={{
-          display: "flex",
-          width: "min(820px, 95vw)",
-          maxHeight: "88vh",
-          borderRadius: 16,
-          overflow: "hidden",
-          boxShadow: "0 32px 80px rgba(0,0,0,0.55)",
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Left: dark image pane */}
-        <div
-          style={{
-            flex: 1, minWidth: 0, background: "#0d0d0d",
-            display: "flex", flexDirection: "column",
-            alignItems: "center", justifyContent: "center",
-            position: "relative", padding: "40px 36px",
-          }}
-        >
-          <img
-            key={ev.id}
-            src={`/api/detection-events/${ev.id}/crop`}
-            alt={ev.employee_name ?? `Event ${ev.id}`}
-            style={{
-              maxWidth: "100%", maxHeight: "46vh",
-              width: "auto", height: "auto",
-              objectFit: "contain", borderRadius: 10,
-              boxShadow: "0 8px 32px rgba(0,0,0,0.6)", display: "block",
-            }}
-          />
-          {total > 1 && (
-            <>
-              <button type="button" onClick={() => setIndex((i) => (i - 1 + total) % total)} aria-label="Previous"
-                style={{ position: "absolute", insetInlineStart: 12, top: "50%", transform: "translateY(-50%)", width: 36, height: 36, borderRadius: "50%", border: "1.5px solid rgba(255,255,255,0.25)", background: "rgba(0,0,0,0.5)", color: "#fff", cursor: "pointer", display: "grid", placeItems: "center", fontSize: 16 }}>‹</button>
-              <button type="button" onClick={() => setIndex((i) => (i + 1) % total)} aria-label="Next"
-                style={{ position: "absolute", insetInlineEnd: 12, top: "50%", transform: "translateY(-50%)", width: 36, height: 36, borderRadius: "50%", border: "1.5px solid rgba(255,255,255,0.25)", background: "rgba(0,0,0,0.5)", color: "#fff", cursor: "pointer", display: "grid", placeItems: "center", fontSize: 16 }}>›</button>
-            </>
-          )}
-          <div className="mono" style={{ position: "absolute", bottom: 14, left: "50%", transform: "translateX(-50%)", background: "rgba(0,0,0,0.5)", color: "rgba(255,255,255,0.8)", padding: "3px 12px", borderRadius: 999, fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}>
-            {index + 1} / {total}
-          </div>
-        </div>
-
-        {/* Right: metadata pane */}
-        <div style={{ width: 300, flexShrink: 0, background: "var(--bg)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          {/* Header */}
-          <div style={{ padding: "12px 14px 10px", display: "flex", alignItems: "center", gap: 6, borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-            <span className="pill pill-neutral" style={{ fontSize: 10.5, fontWeight: 700 }}>{ev.camera_name}</span>
-            <div style={{ flex: 1 }} />
-            <button type="button" onClick={onClose} aria-label="Close preview" style={{ width: 26, height: 26, borderRadius: "50%", border: "1px solid var(--border)", background: "transparent", cursor: "pointer", display: "grid", placeItems: "center", color: "var(--text)" }}>
-              <Icon name="x" size={12} />
-            </button>
-          </div>
-
-          {/* Identity + confidence */}
-          <div style={{ padding: "12px 14px 0", flexShrink: 0 }}>
-            <div style={{ fontSize: 17, fontWeight: 700, color: "var(--text)", lineHeight: 1.2, marginBottom: 3 }}>
-              {ev.employee_name ?? ev.former_match_employee_name ?? "Unknown"}
-            </div>
-            <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: ev.confidence != null ? 12 : 4, color: ev.employee_id ? "var(--success-text)" : ev.former_employee_match ? "var(--warning-text)" : "var(--text-secondary)" }}>
-              {ev.employee_id ? "● Matched" : ev.former_employee_match ? "⚠ Former employee" : "○ Unmatched"}
-            </div>
-            {ev.confidence != null && (
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text-tertiary)", marginBottom: 4 }}>
-                  <span>Match confidence</span>
-                  <span className="mono" style={{ fontWeight: 600 }}>{confidencePct}</span>
-                </div>
-                <div style={{ height: 4, borderRadius: 2, background: "var(--border)", overflow: "hidden" }}>
-                  <div style={{ height: "100%", width: `${Math.min(100, ev.confidence * 100)}%`, background: "var(--accent)", borderRadius: 2 }} />
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Metadata grid */}
-          <div style={{ padding: "0 14px 14px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7, overflowY: "auto", flex: 1 }}>
-            <DetEventMetaCard label="DETECTION TIME" value={detTime} />
-            <DetEventMetaCard label="DETECTION DATE" value={detDate} />
-            <DetEventMetaCard label="CAMERA" value={ev.camera_name} />
-            <DetEventMetaCard label="MATCH CONFIDENCE" value={confidencePct} />
-            <DetEventMetaCard label="DETECTOR" value={detectorMode} />
-            <DetEventMetaCard label="EVENT ID" value={`#${ev.id}`} />
-          </div>
-
-          {/* Navigation hint */}
-          <div style={{ padding: "8px 14px", borderTop: "1px solid var(--border)", fontSize: 11, color: "var(--text-tertiary)", flexShrink: 0 }}>
-            ← → to navigate · Esc to close
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  return portalTarget ? createPortal(modal, portalTarget) : modal;
-}
-
-function DetEventMetaCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div
-      style={{
-        border: "1px solid var(--border)",
-        borderRadius: 8,
-        padding: "8px 10px",
-        background: "var(--bg-elev)",
-      }}
-    >
-      <div
-        style={{
-          fontSize: 9,
-          fontWeight: 700,
-          textTransform: "uppercase",
-          letterSpacing: "0.06em",
-          color: "var(--text-tertiary)",
-          marginBottom: 4,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        className="mono"
-        style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)" }}
-      >
-        {value}
-      </div>
-    </div>
-  );
 }
 
 /** Full-screen reference-photo viewer. X button or Esc dismisses. The
