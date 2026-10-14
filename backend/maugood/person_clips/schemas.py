@@ -71,6 +71,15 @@ class PersonClipOut(BaseModel):
     # 'save_clips' = full MP4 on disk; 'logs_only' = presence log only
     # (file_path is NULL, no video to play).  NULL for legacy rows.
     recording_mode: Optional[str] = None
+    # Migration 0069 / 0097 — set when the video file was deleted to
+    # save space (auto-delete after processing or Storage Analytics
+    # clean-up). The row, face crops and results stay; ``file_path`` is
+    # gone and ``filesize_bytes`` is 0, so these carry what the file was.
+    file_deleted_at: Optional[datetime] = None
+    deleted_file_name: Optional[str] = None
+    deleted_filesize_bytes: Optional[int] = None
+    # 'auto_after_processing' | 'cleanup' | 'daily_cleanup' | None
+    file_deleted_reason: Optional[str] = None
     created_at: datetime
 
 
@@ -99,6 +108,9 @@ class BulkDeleteClipRequest(BaseModel):
 class BulkDeleteClipResponse(BaseModel):
     deleted_count: int
     deleted_ids: list[int]
+    # Requested ids that were not deleted: still recording / being
+    # saved, or not found in this tenant.
+    skipped_ids: list[int] = []
 
 
 class ReprocessFaceMatchRequest(BaseModel):

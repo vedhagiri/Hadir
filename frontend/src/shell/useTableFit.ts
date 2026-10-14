@@ -30,7 +30,13 @@ export function useTableFit(rootRef: RefObject<HTMLElement | null>): void {
         const box = table.parentElement;
         if (!box) return;
         // Compare against the space the table is laid out in.
-        const overflowing = table.offsetWidth > box.clientWidth + 1;
+        // Compare against the box's CONTENT width — clientWidth includes
+        // padding, so a table in a padded card could spill over the
+        // card edge while still looking "fits".
+        const cs = getComputedStyle(box);
+        const inner =
+          box.clientWidth - parseFloat(cs.paddingLeft || "0") - parseFloat(cs.paddingRight || "0");
+        const overflowing = table.offsetWidth > inner + 1;
         if (!overflowing) return;
         for (let el: Element | null = box; el && el !== root; el = el.parentElement) {
           marked.add(el);

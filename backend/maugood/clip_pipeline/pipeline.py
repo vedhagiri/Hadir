@@ -1338,6 +1338,12 @@ class ClipPipeline:
                         )
                         .values(
                             clip_file_deleted_at=now_utc,
+                            # Migration 0097 — remember what was removed.
+                            deleted_file_name=fp.name,
+                            deleted_filesize_bytes=int(
+                                clip_row.filesize_bytes or 0
+                            ),
+                            file_deleted_reason="auto_after_processing",
                             file_path=None,
                             filesize_bytes=0,
                         )

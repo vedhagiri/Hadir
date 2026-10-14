@@ -329,6 +329,14 @@ def _unlink_file(file_path_str: str) -> tuple[bool, bool]:
         return (True, True)
 
 
+def _reason_for_action(audit_action: str) -> str:
+    """Map the batch's audit action to ``person_clips.file_deleted_reason``."""
+
+    if audit_action == "clip_cleanup.daily_auto_executed":
+        return "daily_cleanup"
+    return "cleanup"
+
+
 def _execute_cleanup_batch(
     conn: Connection,
     scope: TenantScope,
@@ -407,6 +415,15 @@ def _execute_cleanup_batch(
         )
         .values(
             clip_file_deleted_at=now_utc,
+            # Migration 0097 — keep what the file was so the UI can still
+            # show its name + size. SET expressions read the pre-UPDATE
+            # row, so these capture the old file_path / filesize_bytes.
+            deleted_file_name=func.coalesce(
+                func.regexp_replace(person_clips.c.file_path, "^.*/", ""),
+                person_clips.c.deleted_file_name,
+            ),
+            deleted_filesize_bytes=person_clips.c.filesize_bytes,
+            file_deleted_reason=_reason_for_action(audit_action),
             file_path=None,
             filesize_bytes=0,
         )

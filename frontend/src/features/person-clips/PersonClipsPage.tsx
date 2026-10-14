@@ -38,6 +38,13 @@ import type {
 import { SkeletonCards, SkeletonGrid, SkeletonLines } from "../../components/Skeleton";
 import { EmptyPanel, FIELD_H, FilterSelect, ResetButton, StatCard, StatGrid, Toolbar } from "../../components/ListPageUi";
 import { StatTile, TILE_ICON } from "./StatTile";
+import {
+  DeletedVideoNotice,
+  DeletedVideoPill,
+  displaySizeBytes,
+  isVideoDeleted,
+  useDeletedVideoExplanation,
+} from "./deletedVideo";
 
 const PAGE_SIZE = 24;
 
@@ -276,7 +283,15 @@ export function PersonClipsPage() {
 
   const selectAll = () => {
     if (!list.data) return;
-    setSelectedIds(new Set(list.data.items.map((c) => c.id)));
+    // Clips still recording / finalizing have no video yet and can't be
+    // deleted — never include them in a select-all.
+    setSelectedIds(
+      new Set(
+        list.data.items
+          .filter((c) => c.recording_status !== "recording" && c.recording_status !== "finalizing")
+          .map((c) => c.id),
+      ),
+    );
   };
 
   const deselectAll = () => setSelectedIds(new Set());
@@ -689,7 +704,10 @@ function ClipsTab({
 }) {
   const { t } = useTranslation();
   const items = list.data?.items ?? [];
-  const allSelected = items.length > 0 && selectedIds.size === items.length;
+  const selectableCount = items.filter(
+    (c) => c.recording_status !== "recording" && c.recording_status !== "finalizing",
+  ).length;
+  const allSelected = selectableCount > 0 && selectedIds.size === selectableCount;
   const filtersActive =
     filters.camera_id !== null ||
     filters.start !== null ||
@@ -4176,11 +4194,15 @@ function ClipCard({
   // 410s (no MP4, no thumb) — but the <img> would catch that as an
   // error and set ``thumbError`` sticky, so when the clip later
   // transitions to 'completed' the thumbnail still wouldn't render.
+  // Migration 0097 — a clip whose video was deleted to save space has
+  // no MP4 and no thumbnail; the card shows a muted placeholder.
+  const videoDeleted = isVideoDeleted(clip);
   const thumbUrl =
-    clip.recording_status === "completed"
+    clip.recording_status === "completed" && !videoDeleted
       ? `/api/person-clips/${clip.id}/thumbnail`
       : null;
   const { t } = useTranslation();
+  const deletedExplain = useDeletedVideoExplanation();
 
   // In-flight states have no playable MP4 yet, so the tile renders a
   // static placeholder (no live preview). ``recording`` = reader is
@@ -4190,6 +4212,8 @@ function ClipCard({
   const isRecording = clip.recording_status === "recording";
   const isFinalizing = clip.recording_status === "finalizing";
   const isInFlight = isRecording || isFinalizing;
+  // Nothing to play: still being written, or the file was deleted.
+  const noPlay = isInFlight || videoDeleted;
 
   const personCount = clip.person_count ?? 0;
   const matchedCount = clip.matched_employee_names?.length ?? 0;
@@ -4248,8 +4272,9 @@ function ClipCard({
     // In-flight clips (recording / finalizing) have no playable
     // artifact yet: the reader may still be writing frames or
     // ClipWorker is still encoding the MP4. The tile renders a static
-    // placeholder instead of an action; clicks are no-ops.
-    if (isInFlight) {
+    // placeholder instead of an action; clicks are no-ops. Same for a
+    // clip whose video was deleted to save space.
+    if (noPlay) {
       return;
     }
     if (videoUrl) {
@@ -4323,13 +4348,14 @@ function ClipCard({
       {/* Thumbnail / Video */}
       <div
         className="cl-media-thumb"
-        style={{ cursor: isInFlight ? "default" : "pointer" }}
-        onClick={isInFlight ? undefined : handlePlay}
-        role={isInFlight ? undefined : "button"}
-        aria-label={isInFlight ? undefined : t("personClips.card.playAria", { defaultValue: "Play clip" })}
-        tabIndex={isInFlight ? -1 : 0}
+        style={{ cursor: noPlay ? "default" : "pointer" }}
+        onClick={noPlay ? undefined : handlePlay}
+        role={noPlay ? undefined : "button"}
+        aria-label={noPlay ? undefined : t("personClips.card.playAria", { defaultValue: "Play clip" })}
+        title={videoDeleted ? deletedExplain : undefined}
+        tabIndex={noPlay ? -1 : 0}
         onKeyDown={
-          isInFlight
+          noPlay
             ? undefined
             : (e) => {
                 if (e.key === "Enter" || e.key === " ") {
@@ -4364,7 +4390,9 @@ function ClipCard({
         {!showVideo && (
           <div className="cl-media-overlay">
             <div className="cl-media-overlay-inner">
-              {isFinalizing ? (
+              {videoDeleted ? (
+                <Icon name="trash" size={26} strokeWidth={1.25} />
+              ) : isFinalizing ? (
                 <span className="cl-spin" aria-label={t("personClips.live.finalizing") as string}>
                   <Icon name="refresh" size={32} strokeWidth={1.5} />
                 </span>
@@ -4376,7 +4404,9 @@ function ClipCard({
                 </span>
               )}
               <span>
-                {isFinalizing
+                {videoDeleted
+                  ? t("clipVideo.deleted.pill", { defaultValue: "Video deleted" })
+                  : isFinalizing
                   ? t("personClips.live.encodingProgress")
                   : isRecording
                     ? t("personClips.live.recording")
@@ -4492,7 +4522,18 @@ function ClipCard({
       {/* Footer metadata */}
       <div className="cl-media-foot">
         <div className="cl-media-meta">
-          <span>{fmtFileSize(clip.filesize_bytes)}</span>
+          {videoDeleted ? (
+            <>
+              <DeletedVideoPill clip={clip} />
+              {displaySizeBytes(clip) > 0 && (
+                <span style={{ color: "var(--text-tertiary)" }}>
+                  {fmtFileSize(displaySizeBytes(clip))}
+                </span>
+              )}
+            </>
+          ) : (
+            <span>{fmtFileSize(clip.filesize_bytes)}</span>
+          )}
           {res && (
             <>
               <span className="sep">·</span>
@@ -6307,6 +6348,8 @@ export function ClipDetailDrawer({
   // the form opens (see ``openReprocessForm`` below).
   const [selectedUcs, setSelectedUcs] = useState<Set<string>>(new Set());
   const [thumbError, setThumbError] = useState(false);
+  const videoDeleted = isVideoDeleted(clip);
+  const deletedExplain = useDeletedVideoExplanation();
 
   const qc = useQueryClient();
   const processingResults = useClipProcessingResults(clip.id, true);
@@ -6459,8 +6502,15 @@ export function ClipDetailDrawer({
         </div>
 
         <div className="drawer-body">
+          {/* Migration 0097 — video deleted to save space: explain in
+              place of the thumbnail; crops + results below still load. */}
+          {videoDeleted && (
+            <div style={{ marginBottom: 14 }}>
+              <DeletedVideoNotice clip={clip} />
+            </div>
+          )}
           {/* Thumbnail */}
-          {!thumbError && (
+          {!thumbError && !videoDeleted && (
             <img
               src={`/api/person-clips/${clip.id}/thumbnail`}
               alt=""
@@ -6490,7 +6540,14 @@ export function ClipDetailDrawer({
           >
             {[
               fmtDuration(clip.duration_seconds),
-              fmtFileSize(clip.filesize_bytes),
+              videoDeleted
+                ? displaySizeBytes(clip) > 0
+                  ? t("clipVideo.deleted.sizeWas", {
+                      defaultValue: "{{size}} (deleted)",
+                      size: fmtFileSize(displaySizeBytes(clip)),
+                    })
+                  : null
+                : fmtFileSize(clip.filesize_bytes),
               res,
               fps !== null ? `${fps.toFixed(1)} ${t("personClips.detail.fps")}` : null,
               `${clip.frame_count} ${t("personClips.detail.frames")}`,
@@ -6648,6 +6705,9 @@ export function ClipDetailDrawer({
               className="btn btn-primary"
               style={{ display: "flex", alignItems: "center", gap: 6 }}
               onClick={openReprocessForm}
+              // Reprocessing needs the video; it is gone for this clip.
+              disabled={videoDeleted}
+              title={videoDeleted ? deletedExplain : undefined}
             >
               <Icon name="refresh" size={12} /> {t("personClips.detail.reprocessClip") as string}
             </button>

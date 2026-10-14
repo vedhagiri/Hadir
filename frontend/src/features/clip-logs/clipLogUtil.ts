@@ -91,6 +91,11 @@ export function hasVideo(c: PersonClipOut): boolean {
   return c.recording_mode !== "logs_only";
 }
 
+/** True when the clip's video was deleted to save space (migration 0097). */
+export function isVideoDeleted(c: PersonClipOut): boolean {
+  return !!c.file_deleted_at;
+}
+
 export function isPlayable(c: PersonClipOut): boolean {
-  return hasVideo(c) && c.recording_status === "completed";
+  return hasVideo(c) && c.recording_status === "completed" && !isVideoDeleted(c);
 }

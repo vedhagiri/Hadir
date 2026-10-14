@@ -15,7 +15,8 @@ import { Icon } from "../../shell/Icon";
 import { useClipProcessingResults } from "../person-clips/hooks";
 import type { PersonClipOut } from "../person-clips/types";
 import { Chips, ModeIcon, useClipChips, useClipTimeFmt } from "./ClipLogUi";
-import { fmtDuration, fmtFileSize, hasVideo, isPlayable } from "./clipLogUtil";
+import { DeletedVideoNotice, displaySizeBytes } from "../person-clips/deletedVideo";
+import { fmtDuration, fmtFileSize, hasVideo, isPlayable, isVideoDeleted } from "./clipLogUtil";
 
 export function ClipLogDrawer({
   clip,
@@ -32,6 +33,7 @@ export function ClipLogDrawer({
   const fmtTime = useClipTimeFmt();
   const chipsFor = useClipChips();
   const video = hasVideo(clip);
+  const deleted = isVideoDeleted(clip);
   const start = new Date(clip.clip_start);
   const end = new Date(clip.clip_end);
   const dateLabel = start.toLocaleDateString(undefined, {
@@ -88,7 +90,9 @@ export function ClipLogDrawer({
         />
 
         <div className="drawer-body clg-drawer-body">
-          {video ? (
+          {video && deleted ? (
+            <DeletedVideoNotice clip={clip} />
+          ) : video ? (
             <ClipPlayer key={clip.id} clip={clip} />
           ) : (
             <div className="clg-notice">
@@ -118,9 +122,18 @@ export function ClipLogDrawer({
               <Fact label={t("clipLogs.colDuration", { defaultValue: "Duration" })} mono>
                 {fmtDuration(clip.duration_seconds)}
               </Fact>
-              {video && clip.filesize_bytes > 0 && (
+              {video && displaySizeBytes(clip) > 0 && (
                 <Fact label={t("clipLogs.colSize", { defaultValue: "Size" })} mono>
-                  {fmtFileSize(clip.filesize_bytes)}
+                  {deleted ? (
+                    <span className="cl-deleted-size">
+                      {t("clipVideo.deleted.sizeWas", {
+                        defaultValue: "{{size}} (deleted)",
+                        size: fmtFileSize(displaySizeBytes(clip)),
+                      })}
+                    </span>
+                  ) : (
+                    fmtFileSize(clip.filesize_bytes)
+                  )}
                 </Fact>
               )}
               <Fact label={t("clipLogs.colPersons", { defaultValue: "Persons" })} mono>
@@ -148,7 +161,7 @@ export function ClipLogDrawer({
               )}
               {video && clip.clip_name && (
                 <Fact label={t("clipLogs.drawer.file", { defaultValue: "Clip name" })} mono wide>
-                  {clip.clip_name}
+                  {deleted ? <span className="cl-deleted-size">{clip.clip_name}</span> : clip.clip_name}
                 </Fact>
               )}
             </dl>

@@ -28,6 +28,7 @@ def list_clips(
     recording_mode: Optional[str] = None,
     processing_state: Optional[str] = None,
     match_result: Optional[str] = None,
+    video: Optional[str] = None,
 ) -> tuple[list[Row], int]:
     """Return ``(rows, total_count)`` for the given filters.
 
@@ -143,7 +144,7 @@ def list_clips(
     # numbers correct (client-side narrowing only filtered the current
     # page, leaving a stale "34 pages / 1698 total"). Mirrors the
     # frontend processingStatusKey priority exactly.
-    if processing_state in ("processing", "queued", "saved", "processed"):
+    if processing_state in ("processing", "queued", "saved", "processed", "waiting"):
 
         def _has(status: str):
             return exists().where(
@@ -159,6 +160,16 @@ def list_clips(
             base = base.where(_has("pending"), ~_has("processing"))
         elif processing_state == "processed":
             base = base.where(_has("completed"))
+        elif processing_state == "waiting":
+            # Not processed yet: saved, queued or processing (no use case
+            # has completed). Logs-only rows have no video to process.
+            base = base.where(
+                ~_has("completed"),
+                or_(
+                    person_clips.c.recording_mode.is_(None),
+                    person_clips.c.recording_mode != "logs_only",
+                ),
+            )
         else:  # "saved" — completed recording, nothing run / queued / in-flight
             base = base.where(
                 ~_has("completed"), ~_has("processing"), ~_has("pending")
@@ -189,6 +200,48 @@ def list_clips(
                 clip_processing_results.c.status == "completed",
             )
             base = base.where(matched_count == 0, completed_exists)
+
+    # ``unknown`` — processed, nobody matched, and at least one completed
+    # use case left faces it could not identify. ``no_faces`` —
+    # processed, nobody matched, and no completed use case found a face.
+    if match_result in ("unknown", "no_faces"):
+        matched_count = func.jsonb_array_length(
+            person_clips.c.matched_employees
+        )
+
+        def _completed_where(*extra):
+            return exists().where(
+                clip_processing_results.c.tenant_id == scope.tenant_id,
+                clip_processing_results.c.person_clip_id == person_clips.c.id,
+                clip_processing_results.c.status == "completed",
+                *extra,
+            )
+
+        if match_result == "unknown":
+            base = base.where(
+                matched_count == 0,
+                _completed_where(clip_processing_results.c.unknown_count > 0),
+            )
+        else:  # "no_faces"
+            base = base.where(
+                matched_count == 0,
+                _completed_where(),
+                ~_completed_where(clip_processing_results.c.face_crop_count > 0),
+                ~_completed_where(clip_processing_results.c.unknown_count > 0),
+            )
+
+    # Video file state (Clip Analytics "Video" filter + summary tile).
+    if video == "deleted":
+        base = base.where(person_clips.c.clip_file_deleted_at.is_not(None))
+    elif video == "on_disk":
+        base = base.where(
+            person_clips.c.clip_file_deleted_at.is_(None),
+            person_clips.c.recording_status == "completed",
+            or_(
+                person_clips.c.recording_mode.is_(None),
+                person_clips.c.recording_mode != "logs_only",
+            ),
+        )
 
     count_q = select(func.count()).select_from(base.subquery())
     total = conn.execute(count_q).scalar_one()

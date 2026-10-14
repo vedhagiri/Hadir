@@ -1,0 +1,38 @@
+/* Clip Analytics page — prefix ``ca-``. Uses modern.css tokens only. */
+
+.ca-dim { color: var(--text-tertiary); }
+
+/* Transient note (row "Retry failed") */
+.ca-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--success-soft);
+  color: var(--success-text);
+  font-size: 13px;
+}
+.ca-note span { flex: 1; }
+.ca-note-x {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+}
+.ca-note-x:hover { background: color-mix(in oklab, currentColor 12%, transparent); }
+
+/* ── Toolbar ─────────────────────────────────────────────────────── */
+.ca-search-slot { flex: 1 1 180px; min-width: 170px; display: flex; }
+.ca-search-slot .mg-search { flex: 1 1 auto; min-width: 0; }
+.ca-seg { display: inline-flex; align-items: center; height: var(--control-h); }
+.ca-seg .seg-btn { white-space: nowrap; }
+.ca-custom { display: inline-flex; align-items: center; gap: 8px; }

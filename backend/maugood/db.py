@@ -39,6 +39,7 @@ from contextlib import contextmanager
 from typing import Iterator, Optional
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     Column,
@@ -2748,6 +2749,15 @@ person_clips = Table(
         DateTime(timezone=True),
         nullable=True,
     ),
+    # Migration 0097 — what the soft-cleared file used to be, so the UI
+    # can keep showing the original name + size after the video is
+    # removed. ``file_path`` / ``filesize_bytes`` keep their NULL / 0
+    # semantics (storage totals rely on them). ``file_deleted_reason``
+    # is 'auto_after_processing' | 'cleanup' | 'daily_cleanup' (NULL for
+    # legacy rows whose reason cannot be recovered).
+    Column("deleted_file_name", Text, nullable=True),
+    Column("deleted_filesize_bytes", BigInteger, nullable=True),
+    Column("file_deleted_reason", Text, nullable=True),
     # Migration 0075 — per-clip recording mode. NULL means a legacy or
     # 'save_clips' clip (backward-compat; the application treats NULL as
     # 'save_clips'). 'logs_only' marks a presence-log row inserted without

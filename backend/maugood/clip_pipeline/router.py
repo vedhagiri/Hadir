@@ -53,6 +53,11 @@ class SubmitResponse(BaseModel):
     total_jobs: int
     queued_jobs: int
     skipped_jobs: int
+    # Requested clips that were NOT queued because they have no video to
+    # process: still recording / finalizing, failed / abandoned, or the
+    # video was deleted. The UI excludes these from selection; this is
+    # the server-side guard.
+    skipped_clip_ids: list[int] = []
 
 
 # ---- routes ----------------------------------------------------------------
@@ -97,9 +102,43 @@ def submit(
             detail="clip_pipeline not running",
         )
 
+    # Server-side guard: only completed clips that still have their
+    # video can be processed. Anything else (still recording, being
+    # saved, failed, video deleted) is skipped and reported back.
+    from maugood.db import person_clips as _pc  # noqa: PLC0415
+    from maugood.db import tenant_context as _tc  # noqa: PLC0415
+    from sqlalchemy import select as _select  # noqa: PLC0415
+
+    requested = list(dict.fromkeys(int(c) for c in body.clip_ids))
+    with _tc(scope.tenant_schema):
+        with engine.begin() as conn:
+            eligible_set = {
+                int(r.id)
+                for r in conn.execute(
+                    _select(_pc.c.id).where(
+                        _pc.c.tenant_id == scope.tenant_id,
+                        _pc.c.id.in_(requested),
+                        _pc.c.recording_status == "completed",
+                        _pc.c.file_path.is_not(None),
+                        _pc.c.clip_file_deleted_at.is_(None),
+                    )
+                )
+            }
+    eligible = [c for c in requested if c in eligible_set]
+    skipped_clip_ids = [c for c in requested if c not in eligible_set]
+    if not eligible:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "none of the selected clips can be processed "
+                "(still recording, not saved, or video deleted)",
+                "skipped_clip_ids": skipped_clip_ids,
+            },
+        )
+
     batch = clip_pipeline.submit_batch(
         scope=scope,
-        clip_ids=body.clip_ids,
+        clip_ids=eligible,
         use_cases=use_cases,
         skip_existing=body.skip_existing,
         submitted_by_user_id=user.id,
@@ -121,7 +160,8 @@ def submit(
                 entity_type="clip_pipeline_batch",
                 entity_id=batch.batch_id,
                 after={
-                    "clip_count": len(body.clip_ids),
+                    "clip_count": len(eligible),
+                    "skipped_clip_ids": skipped_clip_ids,
                     "use_cases": use_cases,
                     "skip_existing": body.skip_existing,
                     "queued_jobs": batch.queued_jobs,
@@ -134,6 +174,7 @@ def submit(
         total_jobs=batch.total_jobs,
         queued_jobs=batch.queued_jobs,
         skipped_jobs=batch.skipped_jobs,
+        skipped_clip_ids=skipped_clip_ids,
     )
 
 

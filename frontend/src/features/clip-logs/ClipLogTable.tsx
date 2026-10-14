@@ -31,6 +31,7 @@ import {
 } from "../../components/ListPageUi";
 import { ClipLogDrawer } from "./ClipLogDrawer";
 import { Chips, ClipThumb, ModeIcon, StaticStat, useClipChips, useClipTimeFmt } from "./ClipLogUi";
+import { displaySizeBytes, isVideoDeleted, useDeletedSizeTitle } from "../person-clips/deletedVideo";
 import {
   detectPreset,
   fmtDuration,
@@ -186,7 +187,7 @@ export function ClipLogsPage() {
   const pagePeople = items.reduce((s, c) => s + Math.max(0, c.person_count || 0), 0);
   const camCount = new Set(items.map((c) => c.camera_id)).size;
   const avgSeconds = items.length ? pageSeconds / items.length : 0;
-  const showSize = isSaveClips && items.some((c) => c.filesize_bytes > 0);
+  const showSize = isSaveClips && items.some((c) => displaySizeBytes(c) > 0);
   const maxDur = items.reduce((m, c) => Math.max(m, c.duration_seconds || 0), 0);
   const scopeSub = isPartial
     ? t("clipLogs.stats.onPage", { defaultValue: "Latest {{n}} of {{total}} on this page", n: items.length, total: total.toLocaleString() })
@@ -611,6 +612,7 @@ function ClipRow({
   const { t } = useTranslation();
   const fmtTime = useClipTimeFmt();
   const chipsFor = useClipChips();
+  const deletedSizeTitle = useDeletedSizeTitle();
   const dur = clip.duration_seconds || 0;
   const barPct = maxDur > 0 ? Math.max(3, (dur / maxDur) * 100) : 0;
   const s = fmtTime(clip.clip_start);
@@ -647,7 +649,13 @@ function ClipRow({
         </span>
       </span>
       {showSize && (
-        <span className="clg-row-size mono">{clip.filesize_bytes > 0 ? fmtFileSize(clip.filesize_bytes) : "—"}</span>
+        isVideoDeleted(clip) ? (
+          <span className="clg-row-size mono cl-deleted-size" title={deletedSizeTitle(clip)}>
+            {displaySizeBytes(clip) > 0 ? fmtFileSize(displaySizeBytes(clip)) : "—"}
+          </span>
+        ) : (
+          <span className="clg-row-size mono">{clip.filesize_bytes > 0 ? fmtFileSize(clip.filesize_bytes) : "—"}</span>
+        )
       )}
       <span className="clg-row-chips">
         <Chips chips={chipsFor(clip)} />

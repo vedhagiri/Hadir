@@ -55,6 +55,14 @@ export interface PersonClipOut {
   // id, so the Employee drawer's Matched Clips card can render that
   // person's face instead of the multi-person clip thumbnail.
   matched_face_crop_id?: number | null;
+  // Migration 0069 / 0097 — set when the video file was deleted to save
+  // space. ``filesize_bytes`` is then 0; the ``deleted_*`` fields carry
+  // what the file was so the UI can keep showing its name + size.
+  file_deleted_at?: string | null;
+  deleted_file_name?: string | null;
+  deleted_filesize_bytes?: number | null;
+  // 'auto_after_processing' | 'cleanup' | 'daily_cleanup' | null (legacy)
+  file_deleted_reason?: string | null;
   created_at: string;
 }
 

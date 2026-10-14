@@ -225,10 +225,21 @@ def _derive_clip_name(row) -> str:
             return Path(str(fp)).name
         except Exception:  # noqa: BLE001
             pass
+    # Migration 0097 — the video was deleted to save space; keep showing
+    # the name the file had.
+    deleted_name = getattr(row, "deleted_file_name", None)
+    if deleted_name:
+        return str(deleted_name)
     start = getattr(row, "clip_start", None)
     if start is not None:
         try:
-            return f"recording-{start.strftime('%Y%m%dT%H%M%S')}"
+            stamp = start.strftime("%Y%m%dT%H%M%S")
+            status_ = str(getattr(row, "recording_status", "") or "")
+            # Only a clip that is genuinely still being written is a
+            # "recording-…"; anything else without a file is just a clip.
+            if status_ in ("recording", "finalizing"):
+                return f"recording-{stamp}"
+            return f"clip-{stamp}"
         except Exception:  # noqa: BLE001
             pass
     return f"clip-{row.id}"
@@ -299,6 +310,14 @@ def _row_to_out(
             else None
         ),
         recording_mode=str(getattr(row, "recording_mode", None) or "") or None,
+        file_deleted_at=getattr(row, "clip_file_deleted_at", None),
+        deleted_file_name=getattr(row, "deleted_file_name", None),
+        deleted_filesize_bytes=(
+            int(row.deleted_filesize_bytes)
+            if getattr(row, "deleted_filesize_bytes", None) is not None
+            else None
+        ),
+        file_deleted_reason=getattr(row, "file_deleted_reason", None),
         created_at=row.created_at,
     )
 
@@ -797,7 +816,7 @@ def list_person_clips(
             "completed), 'saved' (nothing run/queued/in-flight). Omitted = "
             "no processing-state filter."
         ),
-        pattern=r"^(processing|queued|processed|saved)$",
+        pattern=r"^(processing|queued|processed|saved|waiting)$",
     ),
     match_result: Optional[str] = Query(
         default=None,
@@ -809,7 +828,16 @@ def list_person_clips(
             "excluded (they are pending, not unmatched). Omitted = no "
             "match-result filter."
         ),
-        pattern=r"^(matched|unmatched)$",
+        pattern=r"^(matched|unmatched|unknown|no_faces)$",
+    ),
+    video: Optional[str] = Query(
+        default=None,
+        description=(
+            "Filter by video file state. 'on_disk' = a finished, non "
+            "logs-only clip whose video is still stored; 'deleted' = the "
+            "video was deleted to save space. Omitted = no filter."
+        ),
+        pattern=r"^(on_disk|deleted)$",
     ),
 ) -> PersonClipListResponse:
     """List person clips, with optional filters.
@@ -882,6 +910,7 @@ def list_person_clips(
                 recording_mode=recording_mode,
                 processing_state=processing_state,
                 match_result=match_result,
+                video=video,
             )
     except Exception:
         logger.exception(
@@ -1581,6 +1610,11 @@ def reprocess_single_clip(
         row = get_clip(conn, scope, clip_id)
     if row is None:
         raise HTTPException(status_code=404, detail="person clip not found")
+    if getattr(row, "clip_file_deleted_at", None) is not None:
+        # Migration 0097 — reprocessing needs the video, which was
+        # deleted to save space. Refuse before the existing results +
+        # face crops get overwritten by a run that cannot succeed.
+        raise HTTPException(status_code=409, detail="clip video deleted")
 
     if is_single_clip_running(scope.tenant_id, clip_id):
         return SingleClipReprocessResponse(
@@ -1756,6 +1790,10 @@ def person_clip_thumbnail(
             raise HTTPException(status_code=404, detail="person clip not found")
         _assert_clip_visible_to_manager(conn, scope, user, clip_id)
 
+    if getattr(row, "clip_file_deleted_at", None) is not None:
+        # Migration 0069 / 0097 — the video was deliberately deleted to
+        # save space (auto-delete after processing or clean-up).
+        raise HTTPException(status_code=410, detail="clip video deleted")
     if not row.file_path:
         raise HTTPException(status_code=410, detail="clip file missing")
 
@@ -1801,6 +1839,10 @@ def stream_person_clip(
             raise HTTPException(status_code=404, detail="person clip not found")
         _assert_clip_visible_to_manager(conn, scope, user, clip_id)
 
+    if getattr(row, "clip_file_deleted_at", None) is not None:
+        # Migration 0069 / 0097 — the video was deliberately deleted to
+        # save space (auto-delete after processing or clean-up).
+        raise HTTPException(status_code=410, detail="clip video deleted")
     if not row.file_path:
         raise HTTPException(status_code=410, detail="clip file missing")
 
@@ -1904,8 +1946,14 @@ def bulk_delete_person_clips(
     with engine.begin() as conn:
         rows = bulk_delete_clips(conn, scope, body.clip_ids)
 
+    requested = list(dict.fromkeys(int(c) for c in body.clip_ids))
+    deleted_set = {int(r.id) for r in rows}
+    skipped_ids = [c for c in requested if c not in deleted_set]
+
     if not rows:
-        return BulkDeleteClipResponse(deleted_count=0, deleted_ids=[])
+        return BulkDeleteClipResponse(
+            deleted_count=0, deleted_ids=[], skipped_ids=skipped_ids
+        )
 
     for row in rows:
         if row.file_path:
@@ -1929,7 +1977,67 @@ def bulk_delete_person_clips(
             )
 
     deleted_ids = [r.id for r in rows]
-    return BulkDeleteClipResponse(deleted_count=len(deleted_ids), deleted_ids=deleted_ids)
+    return BulkDeleteClipResponse(
+        deleted_count=len(deleted_ids),
+        deleted_ids=deleted_ids,
+        skipped_ids=skipped_ids,
+    )
+
+
+@router.get("/{clip_id}", response_model=PersonClipOut)
+def get_person_clip(
+    clip_id: int,
+    user: Annotated[CurrentUser, HR_ADMIN_OR_MANAGER],
+) -> PersonClipOut:
+    """Single clip, same shape as a list item.
+
+    Polled by the Clip Analytics live-processing modal so its status
+    pill tracks the real ``recording_status``. Tenant-scoped: a clip id
+    from another tenant 404s (never 403).
+    """
+
+    scope = TenantScope(tenant_id=user.tenant_id)
+    with get_engine().begin() as conn:
+        row = get_clip(conn, scope, clip_id)
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="clip not found"
+            )
+        _assert_clip_visible_to_manager(conn, scope, user, clip_id)
+        matched_ids: set[int] = set()
+        raw = getattr(row, "matched_employees", None)
+        if isinstance(raw, list):
+            matched_ids = {int(x) for x in raw if isinstance(x, (int, float))}
+        name_map = _resolve_employee_names(conn, scope, matched_ids)
+        buckets: dict[str, list[str]] = {
+            "completed": [], "processing": [], "pending": []
+        }
+        for cpr in conn.execute(
+            select(
+                clip_processing_results.c.use_case,
+                clip_processing_results.c.status,
+            ).where(
+                clip_processing_results.c.tenant_id == scope.tenant_id,
+                clip_processing_results.c.person_clip_id == clip_id,
+                clip_processing_results.c.status.in_(
+                    ("completed", "processing", "pending")
+                ),
+            )
+        ).all():
+            uc = str(cpr.use_case).lower()
+            bucket = buckets[str(cpr.status).lower()]
+            if uc not in bucket:
+                bucket.append(uc)
+
+    cid = int(row.id)
+    return _row_to_out(
+        row,
+        name_map,
+        {cid: sorted(buckets["completed"])},
+        None,
+        {cid: sorted(buckets["processing"])},
+        {cid: sorted(buckets["pending"])},
+    )
 
 
 @router.delete("/{clip_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -10,7 +10,8 @@ import { Icon } from "../../shell/Icon";
 import type { IconName } from "../../shell/Icon";
 import { useTenantDateTime } from "../../util/datetime";
 import type { PersonClipOut } from "../person-clips/types";
-import { hasVideo, isPlayable } from "./clipLogUtil";
+import { useDeletedVideoTitle } from "../person-clips/deletedVideo";
+import { hasVideo, isPlayable, isVideoDeleted } from "./clipLogUtil";
 import type { Mode } from "./clipLogUtil";
 
 /** Clip times render in the viewer's local zone (the date filters use
@@ -91,6 +92,7 @@ export interface Chip {
 /** Status chips derived only from fields the list API returns. */
 export function useClipChips(): (clip: PersonClipOut) => Chip[] {
   const { t } = useTranslation();
+  const deletedTitle = useDeletedVideoTitle();
   return (clip) => {
     const chips: Chip[] = [];
     const video = hasVideo(clip);
@@ -98,6 +100,25 @@ export function useClipChips(): (clip: PersonClipOut) => Chip[] {
       chips.push({ key: "rec", tone: "danger", label: t("clipLogs.chip.recording", { defaultValue: "Recording" }) });
     } else if (clip.recording_status === "finalizing") {
       chips.push({ key: "enc", tone: "warning", label: t("clipLogs.chip.encoding", { defaultValue: "Encoding" }) });
+    } else if (clip.recording_status === "abandoned") {
+      chips.push({
+        key: "stopped",
+        tone: "warning",
+        label: t("clipLogs.chip.stoppedEarly", { defaultValue: "Stopped early" }),
+        title: t("clipLogs.chip.stoppedEarlyTitle", {
+          defaultValue: "The recording ended before the video could be saved.",
+        }),
+      });
+    } else if (clip.recording_status === "failed") {
+      chips.push({ key: "failed", tone: "danger", label: t("clipLogs.chip.failed", { defaultValue: "Failed" }) });
+    }
+    if (video && isVideoDeleted(clip)) {
+      chips.push({
+        key: "deleted",
+        tone: "neutral",
+        label: t("clipVideo.deleted.pill", { defaultValue: "Video deleted" }),
+        title: deletedTitle(clip),
+      });
     }
     const processed = clip.processed_use_cases ?? [];
     const processing = clip.processing_use_cases ?? [];
